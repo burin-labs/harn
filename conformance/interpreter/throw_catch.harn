@@ -1,0 +1,7 @@
+pipeline test(task) {
+  try {
+    throw "something went wrong"
+  } catch (e) {
+    log(e)
+  }
+}

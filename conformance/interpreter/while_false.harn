@@ -1,0 +1,7 @@
+pipeline test(task) {
+  var ran = false
+  while false {
+    ran = true
+  }
+  log(ran)
+}

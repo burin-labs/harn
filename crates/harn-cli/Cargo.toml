@@ -1,0 +1,14 @@
+[package]
+name = "harn-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "harn"
+path = "src/main.rs"
+
+[dependencies]
+harn-lexer = { path = "../harn-lexer" }
+harn-parser = { path = "../harn-parser" }
+harn-runtime = { path = "../harn-runtime" }
+harn-stdlib = { path = "../harn-stdlib" }

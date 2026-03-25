@@ -1,0 +1,5 @@
+pipeline test(task) {
+  let nums = [1, 2, 3, 4]
+  let sum = nums.reduce(0, { acc, x -> acc + x })
+  log(sum)
+}

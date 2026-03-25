@@ -1,0 +1,9 @@
+pipeline test(task) {
+  let name = "world"
+  log("hello ${name}!")
+  let x = 5
+  log("result: ${x + 1}")
+  let a = "foo"
+  let b = "bar"
+  log("${a}-${b}")
+}

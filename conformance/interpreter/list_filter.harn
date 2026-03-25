@@ -1,0 +1,5 @@
+pipeline test(task) {
+  let nums = [1, 2, 3, 4, 5]
+  let big = nums.filter({ x -> x > 3 })
+  log(big)
+}

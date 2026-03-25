@@ -1,0 +1,8 @@
+pipeline test(task) {
+  let x = "outer"
+  if true {
+    let y = "inner"
+    log(y)
+  }
+  log(x)
+}

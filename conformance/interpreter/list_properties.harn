@@ -1,0 +1,7 @@
+pipeline test(task) {
+  let list = [1, 2, 3]
+  log(list.count)
+  log(list.empty)
+  log(list.first)
+  log(list.last)
+}

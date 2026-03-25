@@ -1,0 +1,5 @@
+pipeline test(task) {
+  let d = {name: "test", value: 42}
+  log(d.name)
+  log(d.value)
+}

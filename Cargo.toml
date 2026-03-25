@@ -1,0 +1,14 @@
+[workspace]
+members = [
+    "crates/harn-lexer",
+    "crates/harn-parser",
+    "crates/harn-runtime",
+    "crates/harn-stdlib",
+    "crates/harn-cli",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"

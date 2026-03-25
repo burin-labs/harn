@@ -1,0 +1,6 @@
+pipeline test(task) {
+  let d = {a: 1, b: 2}
+  for entry in d {
+    log(entry.key)
+  }
+}

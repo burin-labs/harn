@@ -1,0 +1,4 @@
+pipeline test(task) {
+  let a = "hello" + " " + "world"
+  log(a)
+}

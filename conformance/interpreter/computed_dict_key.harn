@@ -1,0 +1,6 @@
+pipeline test(task) {
+  let key = "dynamic"
+  let d = {[key]: 42, fixed: 1}
+  log(d.dynamic)
+  log(d.fixed)
+}

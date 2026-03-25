@@ -1,0 +1,10 @@
+pipeline test(task) {
+  log("hello world".replace("world", "harn"))
+  log("a,b,c".split(","))
+  log("  hello  ".trim())
+  log("hello".starts_with("hel"))
+  log("hello".starts_with("xyz"))
+  log("hello".ends_with("lo"))
+  log("hello".ends_with("xy"))
+  log("hello".substring(1, 3))
+}

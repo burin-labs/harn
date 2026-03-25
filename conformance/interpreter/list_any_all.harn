@@ -1,0 +1,6 @@
+pipeline test(task) {
+  let nums = [2, 4, 6]
+  log(nums.any({ x -> x > 5 }))
+  log(nums.all({ x -> x > 0 }))
+  log(nums.all({ x -> x > 3 }))
+}

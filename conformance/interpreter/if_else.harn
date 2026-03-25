@@ -1,0 +1,10 @@
+pipeline test(task) {
+  if true {
+    log("yes")
+  }
+  if false {
+    log("wrong")
+  } else {
+    log("no")
+  }
+}

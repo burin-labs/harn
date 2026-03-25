@@ -1,0 +1,7 @@
+pipeline test(task) {
+  let x = 42
+  log(x)
+  var y = 1
+  y = 2
+  log(y)
+}

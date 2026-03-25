@@ -1,0 +1,7 @@
+[package]
+name = "harn-stdlib"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+harn-runtime = { path = "../harn-runtime" }

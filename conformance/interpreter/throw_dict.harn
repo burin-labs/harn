@@ -1,0 +1,8 @@
+pipeline test(task) {
+  try {
+    throw {code: 404, msg: "not found"}
+  } catch (e) {
+    log(e.code)
+    log(e.msg)
+  }
+}

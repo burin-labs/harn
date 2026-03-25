@@ -1,0 +1,5 @@
+pipeline test(task) {
+  log("before")
+  return
+  log("after")
+}

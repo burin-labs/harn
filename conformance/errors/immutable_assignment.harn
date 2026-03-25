@@ -1,0 +1,4 @@
+pipeline test(task) {
+  let x = 1
+  x = 2
+}

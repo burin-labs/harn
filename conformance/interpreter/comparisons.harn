@@ -1,0 +1,6 @@
+pipeline test(task) {
+  log(1 < 2)
+  log(2 > 3)
+  log(1 == 1)
+  log(1 != 2)
+}

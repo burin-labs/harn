@@ -1,0 +1,5 @@
+pipeline test(task) {
+  log(true && false)
+  log(true || false)
+  log(!true)
+}

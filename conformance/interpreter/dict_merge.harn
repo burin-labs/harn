@@ -1,0 +1,7 @@
+pipeline test(task) {
+  let a = {x: 1}
+  let b = {y: 2}
+  let c = a.merge(b)
+  log(c.has("x"))
+  log(c.has("y"))
+}

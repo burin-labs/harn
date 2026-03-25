@@ -1,0 +1,7 @@
+[package]
+name = "harn-parser"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+harn-lexer = { path = "../harn-lexer" }

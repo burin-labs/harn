@@ -1,0 +1,7 @@
+pipeline test(task) {
+  let base = 10
+  fn offset(x) {
+    return x + base
+  }
+  log(offset(5))
+}

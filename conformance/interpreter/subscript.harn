@@ -1,0 +1,4 @@
+pipeline test(task) {
+  let arr = [10, 20, 30]
+  log(arr[1])
+}

@@ -1,0 +1,4 @@
+pipeline test(task) {
+  let double = { x -> x * 2 }
+  log(double(5))
+}

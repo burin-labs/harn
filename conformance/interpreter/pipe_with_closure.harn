@@ -1,0 +1,4 @@
+pipeline test(task) {
+  let result = "hello world" |> { s -> s.split(" ") }
+  log(result)
+}

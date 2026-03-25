@@ -1,0 +1,6 @@
+pipeline test(task) {
+  fn add(a, b) {
+    return a + b
+  }
+  log(add(3, 4))
+}

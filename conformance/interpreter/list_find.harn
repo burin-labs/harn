@@ -1,0 +1,5 @@
+pipeline test(task) {
+  let items = ["foo", "bar", "baz"]
+  let found = items.find({ x -> x.starts_with("ba") })
+  log(found)
+}
