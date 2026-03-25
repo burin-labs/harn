@@ -756,7 +756,6 @@ impl Parser {
 
                 if next == Some(&TokenKind::Comma) {
                     // Try multi-param closure: { a, b -> body }
-                    let param_saved = self.pos;
                     let mut params = vec![name];
                     self.advance(); // skip first identifier
                     while self.check(&TokenKind::Comma) {
@@ -783,7 +782,6 @@ impl Parser {
                         return Ok(Node::Closure { params, body });
                     }
                     // Not a closure — restore
-                    let _ = param_saved;
                     self.pos = saved;
                     return self.parse_dict_literal();
                 }

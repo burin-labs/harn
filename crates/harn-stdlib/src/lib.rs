@@ -45,7 +45,13 @@ pub fn register_stdlib(interp: &mut Interpreter) {
         let val = args.first().unwrap_or(&Value::Nil);
         match val {
             Value::Int(n) => Ok(Value::Int(*n)),
-            Value::Float(n) => Ok(Value::Int(*n as i64)),
+            Value::Float(n) => {
+                if n.is_finite() && *n >= i64::MIN as f64 && *n <= i64::MAX as f64 {
+                    Ok(Value::Int(*n as i64))
+                } else {
+                    Ok(Value::Nil)
+                }
+            }
             Value::String(s) => Ok(s.parse::<i64>().map(Value::Int).unwrap_or(Value::Nil)),
             Value::Bool(b) => Ok(Value::Int(if *b { 1 } else { 0 })),
             _ => Ok(Value::Nil),
@@ -67,7 +73,10 @@ pub fn register_stdlib(interp: &mut Interpreter) {
         Ok(Value::String(value_to_json(val)))
     });
 
-    interp.register_builtin("json_parse", |_args, _out| Ok(Value::Nil));
+    interp.register_builtin("json_parse", |_args, _out| {
+        // Stub — requires a full JSON parser for production use
+        Ok(Value::Nil)
+    });
 
     interp.register_builtin("env", |args, _out| {
         let name = args.first().map(|a| a.as_string()).unwrap_or_default();
@@ -86,7 +95,10 @@ pub fn register_stdlib(interp: &mut Interpreter) {
         Ok(Value::Float(secs))
     });
 
-    interp.register_builtin("sleep", |_args, _out| Ok(Value::Nil));
+    interp.register_builtin("sleep", |_args, _out| {
+        // No-op in sync interpreter — async runtime needed for real sleep
+        Ok(Value::Nil)
+    });
 
     interp.register_builtin("read_file", |args, _out| {
         let path = args.first().map(|a| a.as_string()).unwrap_or_default();
@@ -116,8 +128,13 @@ pub fn register_stdlib(interp: &mut Interpreter) {
         std::process::exit(code as i32);
     });
 
-    interp.register_builtin("regex_match", |_args, _out| Ok(Value::Nil));
+    interp.register_builtin("regex_match", |_args, _out| {
+        // Stub — requires regex crate for production use
+        Ok(Value::Nil)
+    });
+
     interp.register_builtin("regex_replace", |args, _out| {
+        // Stub — returns text unchanged
         if args.len() >= 3 {
             return Ok(Value::String(args[2].as_string()));
         }
@@ -125,9 +142,29 @@ pub fn register_stdlib(interp: &mut Interpreter) {
     });
 }
 
+fn escape_json_string(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for ch in s.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() => {
+                out.push_str(&format!("\\u{:04x}", c as u32));
+            }
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
 fn value_to_json(val: &Value) -> String {
     match val {
-        Value::String(s) => format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")),
+        Value::String(s) => escape_json_string(s),
         Value::Int(n) => n.to_string(),
         Value::Float(n) => n.to_string(),
         Value::Bool(b) => b.to_string(),
@@ -139,7 +176,7 @@ fn value_to_json(val: &Value) -> String {
         Value::Dict(map) => {
             let inner: Vec<String> = map
                 .iter()
-                .map(|(k, v)| format!("\"{}\":{}", k, value_to_json(v)))
+                .map(|(k, v)| format!("{}:{}", escape_json_string(k), value_to_json(v)))
                 .collect();
             format!("{{{}}}", inner.join(","))
         }

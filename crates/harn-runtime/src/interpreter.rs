@@ -1,5 +1,3 @@
-#![allow(clippy::cloned_ref_to_slice_refs)]
-
 use std::collections::BTreeMap;
 
 use harn_lexer::{Lexer, StringSegment};
@@ -64,39 +62,38 @@ impl Interpreter {
         }
 
         // Find entry pipeline: "default" or first pipeline
-        let main = if self.pipelines.contains_key("default") {
-            self.pipelines.get("default").cloned()
-        } else {
+        let main = self.pipelines.get("default").cloned().or_else(|| {
             program
                 .iter()
                 .find(|n| matches!(n, Node::Pipeline { .. }))
                 .cloned()
-        };
+        });
 
         let Some(main) = main else { return Ok(()) };
 
         if let Node::Pipeline {
-            name: _,
             params,
             body,
             extends,
+            ..
         } = &main
         {
             let pipeline_env = self.env.child();
 
             // Bind pipeline parameters
-            if params.contains(&"task".to_string()) {
+            if params.iter().any(|p| p == "task") {
                 pipeline_env.define("task", Value::String(String::new()), false);
             }
-            if params.contains(&"project".to_string()) {
+            if params.iter().any(|p| p == "project") {
                 pipeline_env.define("project", Value::String(String::new()), false);
             }
 
             // Inject context dict
-            let mut ctx = BTreeMap::new();
-            ctx.insert("task".to_string(), Value::String(String::new()));
-            ctx.insert("project_root".to_string(), Value::String(String::new()));
-            ctx.insert("task_type".to_string(), Value::String(String::new()));
+            let ctx = BTreeMap::from([
+                ("task".to_string(), Value::String(String::new())),
+                ("project_root".to_string(), Value::String(String::new())),
+                ("task_type".to_string(), Value::String(String::new())),
+            ]);
             pipeline_env.define("context", Value::Dict(ctx), false);
 
             // Handle extends
@@ -110,15 +107,12 @@ impl Interpreter {
                 body.clone()
             };
 
-            let saved = self.env.clone();
-            self.env = pipeline_env;
-
-            let result = self.exec_statements(&resolved_body);
-            self.env = saved;
+            let result = self.with_env(pipeline_env, |interp| {
+                interp.exec_statements(&resolved_body)
+            });
 
             match result {
-                Ok(_) => Ok(()),
-                Err(RuntimeError::ReturnValue(_)) => Ok(()),
+                Ok(_) | Err(RuntimeError::ReturnValue(_)) => Ok(()),
                 Err(e) => Err(e),
             }
         } else {
@@ -132,6 +126,18 @@ impl Interpreter {
             result = self.eval(stmt)?;
         }
         Ok(result)
+    }
+
+    /// Execute a closure with a temporary environment, restoring the original afterward.
+    fn with_env<F, R>(&mut self, new_env: Environment, f: F) -> R
+    where
+        F: FnOnce(&mut Self) -> R,
+    {
+        let saved = self.env.clone();
+        self.env = new_env;
+        let result = f(self);
+        self.env = saved;
+        result
     }
 
     fn eval(&mut self, node: &Node) -> Result<Value, RuntimeError> {
@@ -197,11 +203,7 @@ impl Interpreter {
                     if let Some(var) = variable {
                         task_env.define(var, Value::Int(i), false);
                     }
-                    let saved = self.env.clone();
-                    self.env = task_env;
-                    let result = self.exec_statements(body);
-                    self.env = saved;
-                    results.push(result?);
+                    results.push(self.with_env(task_env, |interp| interp.exec_statements(body))?);
                 }
                 Ok(Value::List(results))
             }
@@ -220,21 +222,13 @@ impl Interpreter {
                 for item in items {
                     let task_env = self.env.child();
                     task_env.define(variable, item, false);
-                    let saved = self.env.clone();
-                    self.env = task_env;
-                    let result = self.exec_statements(body);
-                    self.env = saved;
-                    results.push(result?);
+                    results.push(self.with_env(task_env, |interp| interp.exec_statements(body))?);
                 }
                 Ok(Value::List(results))
             }
 
             Node::ReturnStmt { value } => {
-                let val = if let Some(v) = value {
-                    Some(self.eval(v)?)
-                } else {
-                    None
-                };
+                let val = value.as_ref().map(|v| self.eval(v)).transpose()?;
                 Err(RuntimeError::ReturnValue(val))
             }
 
@@ -255,8 +249,10 @@ impl Interpreter {
                 let idx = self.eval(index)?;
                 match (&obj, &idx) {
                     (Value::List(items), Value::Int(i)) => {
-                        let i = *i as usize;
-                        Ok(items.get(i).cloned().unwrap_or(Value::Nil))
+                        if *i < 0 {
+                            return Ok(Value::Nil);
+                        }
+                        Ok(items.get(*i as usize).cloned().unwrap_or(Value::Nil))
                     }
                     (Value::Dict(map), _) => {
                         Ok(map.get(&idx.as_string()).cloned().unwrap_or(Value::Nil))
@@ -309,11 +305,8 @@ impl Interpreter {
             Node::Identifier(name) => Ok(self.env.get(name).unwrap_or(Value::Nil)),
 
             Node::ListLiteral(elements) => {
-                let mut values = Vec::new();
-                for el in elements {
-                    values.push(self.eval(el)?);
-                }
-                Ok(Value::List(values))
+                let values: Result<Vec<_>, _> = elements.iter().map(|el| self.eval(el)).collect();
+                Ok(Value::List(values?))
             }
 
             Node::DictLiteral(entries) => {
@@ -328,11 +321,7 @@ impl Interpreter {
 
             Node::Block(stmts) => {
                 let block_env = self.env.child();
-                let saved = self.env.clone();
-                self.env = block_env;
-                let result = self.exec_statements(stmts);
-                self.env = saved;
-                result
+                self.with_env(block_env, |interp| interp.exec_statements(stmts))
             }
 
             Node::Closure { params, body } => Ok(Value::Closure {
@@ -383,10 +372,10 @@ impl Interpreter {
             Value::Dict(map) => map
                 .into_iter()
                 .map(|(k, v)| {
-                    let mut entry = BTreeMap::new();
-                    entry.insert("key".to_string(), Value::String(k));
-                    entry.insert("value".to_string(), v);
-                    Value::Dict(entry)
+                    Value::Dict(BTreeMap::from([
+                        ("key".to_string(), Value::String(k)),
+                        ("value".to_string(), v),
+                    ]))
                 })
                 .collect(),
             _ => return Ok(Value::Nil),
@@ -427,11 +416,7 @@ impl Interpreter {
                 break;
             }
             let loop_env = self.env.child();
-            let saved = self.env.clone();
-            self.env = loop_env;
-            let r = self.exec_statements(body);
-            self.env = saved;
-            result = r?;
+            result = self.with_env(loop_env, |interp| interp.exec_statements(body))?;
             iteration += 1;
         }
         Ok(result)
@@ -448,7 +433,7 @@ impl Interpreter {
                     return Err(RuntimeError::ReturnValue(val));
                 }
                 Err(_) => {
-                    // Retry on error
+                    // Retry on error (spec: does not re-throw, returns nil after exhaustion)
                 }
             }
         }
@@ -464,27 +449,16 @@ impl Interpreter {
         match self.exec_statements(body) {
             Ok(val) => Ok(val),
             Err(RuntimeError::ReturnValue(val)) => Err(RuntimeError::ReturnValue(val)),
-            Err(RuntimeError::ThrownError(thrown_value)) => {
-                let catch_env = self.env.child();
-                if let Some(var) = error_var {
-                    catch_env.define(var, thrown_value, false);
-                }
-                let saved = self.env.clone();
-                self.env = catch_env;
-                let result = self.exec_statements(catch_body);
-                self.env = saved;
-                result
-            }
             Err(err) => {
+                let error_value = match err {
+                    RuntimeError::ThrownError(v) => v,
+                    other => Value::String(other.to_string()),
+                };
                 let catch_env = self.env.child();
                 if let Some(var) = error_var {
-                    catch_env.define(var, Value::String(err.to_string()), false);
+                    catch_env.define(var, error_value, false);
                 }
-                let saved = self.env.clone();
-                self.env = catch_env;
-                let result = self.exec_statements(catch_body);
-                self.env = saved;
-                result
+                self.with_env(catch_env, |interp| interp.exec_statements(catch_body))
             }
         }
     }
@@ -494,26 +468,23 @@ impl Interpreter {
     fn eval_function_call(&mut self, name: &str, args: &[Node]) -> Result<Value, RuntimeError> {
         // Check for user-defined function (closure) first
         if let Some(Value::Closure { params, body, env }) = self.env.get(name) {
-            let mut arg_values = Vec::new();
-            for arg in args {
-                arg_values.push(self.eval(arg)?);
-            }
+            let arg_values = self.eval_args(args)?;
             return self.invoke_closure(&params, &body, &env, &arg_values);
         }
 
-        // Check builtins
+        // Check builtins — test membership first, eval args, then call
         if self.builtins.contains_key(name) {
-            let mut arg_values = Vec::new();
-            for arg in args {
-                arg_values.push(self.eval(arg)?);
-            }
-            // Need to temporarily take output to pass it
-            let builtin = self.builtins.get(name).unwrap();
-            let result = builtin(&arg_values, &mut self.output)?;
-            return Ok(result);
+            let arg_values = self.eval_args(args)?;
+            let builtin = &self.builtins[name];
+            return builtin(&arg_values, &mut self.output);
         }
 
         Err(RuntimeError::UndefinedBuiltin(name.to_string()))
+    }
+
+    /// Evaluate a list of argument nodes into values.
+    fn eval_args(&mut self, args: &[Node]) -> Result<Vec<Value>, RuntimeError> {
+        args.iter().map(|arg| self.eval(arg)).collect()
     }
 
     fn invoke_closure(
@@ -528,10 +499,7 @@ impl Interpreter {
             let val = args.get(i).cloned().unwrap_or(Value::Nil);
             call_env.define(param, val, false);
         }
-        let saved = self.env.clone();
-        self.env = call_env;
-        let result = self.exec_statements(body);
-        self.env = saved;
+        let result = self.with_env(call_env, |interp| interp.exec_statements(body));
         match result {
             Ok(val) => Ok(val),
             Err(RuntimeError::ReturnValue(val)) => Ok(val.unwrap_or(Value::Nil)),
@@ -548,16 +516,13 @@ impl Interpreter {
         args: &[Node],
     ) -> Result<Value, RuntimeError> {
         let obj = self.eval(object)?;
-        let mut arg_values = Vec::new();
-        for arg in args {
-            arg_values.push(self.eval(arg)?);
-        }
+        let arg_values = self.eval_args(args)?;
 
         // Check for method-style builtins: obj.method(args) → builtin "obj.method"
         if let Node::Identifier(obj_name) = object {
             let qualified = format!("{obj_name}.{method}");
             if self.builtins.contains_key(&qualified) {
-                let builtin = self.builtins.get(&qualified).unwrap();
+                let builtin = &self.builtins[&qualified];
                 return builtin(&arg_values, &mut self.output);
             }
         }
@@ -581,21 +546,22 @@ impl Interpreter {
         match method {
             "count" => Ok(Value::Int(s.chars().count() as i64)),
             "empty" => Ok(Value::Bool(s.is_empty())),
-            "contains" => {
-                let sub = args.first().map(|a| a.as_string()).unwrap_or_default();
-                Ok(Value::Bool(s.contains(&sub)))
-            }
+            "contains" => Ok(Value::Bool(s.contains(&arg_string(args, 0)))),
             "replace" => {
                 if args.len() >= 2 {
-                    let old = args[0].as_string();
-                    let new = args[1].as_string();
-                    Ok(Value::String(s.replace(&old, &new)))
+                    Ok(Value::String(
+                        s.replace(&args[0].as_string(), &args[1].as_string()),
+                    ))
                 } else {
                     Ok(Value::String(s.to_string()))
                 }
             }
             "split" => {
-                let sep = args.first().map(|a| a.as_string()).unwrap_or(",".into());
+                let sep = if args.is_empty() {
+                    ",".to_string()
+                } else {
+                    args[0].as_string()
+                };
                 let parts: Vec<Value> = s
                     .split(&sep)
                     .map(|p| Value::String(p.to_string()))
@@ -603,14 +569,8 @@ impl Interpreter {
                 Ok(Value::List(parts))
             }
             "trim" => Ok(Value::String(s.trim().to_string())),
-            "starts_with" => {
-                let prefix = args.first().map(|a| a.as_string()).unwrap_or_default();
-                Ok(Value::Bool(s.starts_with(&prefix)))
-            }
-            "ends_with" => {
-                let suffix = args.first().map(|a| a.as_string()).unwrap_or_default();
-                Ok(Value::Bool(s.ends_with(&suffix)))
-            }
+            "starts_with" => Ok(Value::Bool(s.starts_with(&arg_string(args, 0)))),
+            "ends_with" => Ok(Value::Bool(s.ends_with(&arg_string(args, 0)))),
             "lowercase" => Ok(Value::String(s.to_lowercase())),
             "uppercase" => Ok(Value::String(s.to_uppercase())),
             "substring" => {
@@ -641,30 +601,19 @@ impl Interpreter {
         match method {
             "count" => Ok(Value::Int(items.len() as i64)),
             "empty" => Ok(Value::Bool(items.is_empty())),
-            "map" => {
-                if let Some(Value::Closure { params, body, env }) = args.first() {
-                    let mut results = Vec::new();
-                    for item in items {
-                        results.push(self.invoke_closure(params, body, env, &[item.clone()])?);
-                    }
-                    Ok(Value::List(results))
-                } else {
-                    Ok(Value::Nil)
-                }
-            }
+            "map" => self.list_apply(items, args, |results, item, _truthy| {
+                results.push(item);
+            }),
             "filter" => {
-                if let Some(Value::Closure { params, body, env }) = args.first() {
-                    let mut results = Vec::new();
-                    for item in items {
-                        let result = self.invoke_closure(params, body, env, &[item.clone()])?;
-                        if result.is_truthy() {
-                            results.push(item.clone());
-                        }
+                let closure = require_closure(args)?;
+                let mut results = Vec::new();
+                for item in items {
+                    let result = self.invoke_closure_item(closure, item)?;
+                    if result.is_truthy() {
+                        results.push(item.clone());
                     }
-                    Ok(Value::List(results))
-                } else {
-                    Ok(Value::Nil)
                 }
+                Ok(Value::List(results))
             }
             "reduce" => {
                 if args.len() >= 2 {
@@ -679,60 +628,81 @@ impl Interpreter {
                 Ok(Value::Nil)
             }
             "find" => {
-                if let Some(Value::Closure { params, body, env }) = args.first() {
-                    for item in items {
-                        let result = self.invoke_closure(params, body, env, &[item.clone()])?;
-                        if result.is_truthy() {
-                            return Ok(item.clone());
-                        }
+                let closure = require_closure(args)?;
+                for item in items {
+                    let result = self.invoke_closure_item(closure, item)?;
+                    if result.is_truthy() {
+                        return Ok(item.clone());
                     }
                 }
                 Ok(Value::Nil)
             }
             "any" => {
-                if let Some(Value::Closure { params, body, env }) = args.first() {
-                    for item in items {
-                        let result = self.invoke_closure(params, body, env, &[item.clone()])?;
-                        if result.is_truthy() {
-                            return Ok(Value::Bool(true));
-                        }
+                let closure = require_closure(args)?;
+                for item in items {
+                    let result = self.invoke_closure_item(closure, item)?;
+                    if result.is_truthy() {
+                        return Ok(Value::Bool(true));
                     }
-                    Ok(Value::Bool(false))
-                } else {
-                    Ok(Value::Bool(false))
                 }
+                Ok(Value::Bool(false))
             }
             "all" => {
-                if let Some(Value::Closure { params, body, env }) = args.first() {
-                    for item in items {
-                        let result = self.invoke_closure(params, body, env, &[item.clone()])?;
-                        if !result.is_truthy() {
-                            return Ok(Value::Bool(false));
-                        }
+                let closure = require_closure(args)?;
+                for item in items {
+                    let result = self.invoke_closure_item(closure, item)?;
+                    if !result.is_truthy() {
+                        return Ok(Value::Bool(false));
                     }
-                    Ok(Value::Bool(true))
-                } else {
-                    Ok(Value::Bool(true))
                 }
+                Ok(Value::Bool(true))
             }
             "flat_map" => {
-                if let Some(Value::Closure { params, body, env }) = args.first() {
-                    let mut results = Vec::new();
-                    for item in items {
-                        let result = self.invoke_closure(params, body, env, &[item.clone()])?;
-                        if let Value::List(inner) = result {
-                            results.extend(inner);
-                        } else {
-                            results.push(result);
-                        }
+                let closure = require_closure(args)?;
+                let mut results = Vec::new();
+                for item in items {
+                    let result = self.invoke_closure_item(closure, item)?;
+                    if let Value::List(inner) = result {
+                        results.extend(inner);
+                    } else {
+                        results.push(result);
                     }
-                    Ok(Value::List(results))
-                } else {
-                    Ok(Value::Nil)
                 }
+                Ok(Value::List(results))
             }
             _ => Ok(Value::Nil),
         }
+    }
+
+    /// Helper: invoke a closure with a single item argument.
+    #[allow(clippy::cloned_ref_to_slice_refs)]
+    fn invoke_closure_item(
+        &mut self,
+        closure: (&[String], &[Node], &Environment),
+        item: &Value,
+    ) -> Result<Value, RuntimeError> {
+        let (params, body, env) = closure;
+        self.invoke_closure(params, body, env, &[item.clone()])
+    }
+
+    /// Helper: map over items with a closure, collecting results.
+    fn list_apply<F>(
+        &mut self,
+        items: &[Value],
+        args: &[Value],
+        mut collect: F,
+    ) -> Result<Value, RuntimeError>
+    where
+        F: FnMut(&mut Vec<Value>, Value, bool),
+    {
+        let closure = require_closure(args)?;
+        let mut results = Vec::new();
+        for item in items {
+            let result = self.invoke_closure_item(closure, item)?;
+            let truthy = result.is_truthy();
+            collect(&mut results, result, truthy);
+        }
+        Ok(Value::List(results))
     }
 
     // --- Dict methods ---
@@ -751,56 +721,42 @@ impl Interpreter {
             "entries" => Ok(Value::List(
                 map.iter()
                     .map(|(k, v)| {
-                        let mut entry = BTreeMap::new();
-                        entry.insert("key".to_string(), Value::String(k.clone()));
-                        entry.insert("value".to_string(), v.clone());
-                        Value::Dict(entry)
+                        Value::Dict(BTreeMap::from([
+                            ("key".to_string(), Value::String(k.clone())),
+                            ("value".to_string(), v.clone()),
+                        ]))
                     })
                     .collect(),
             )),
             "count" => Ok(Value::Int(map.len() as i64)),
-            "has" => {
-                let key = args.first().map(|a| a.as_string()).unwrap_or_default();
-                Ok(Value::Bool(map.contains_key(&key)))
-            }
+            "has" => Ok(Value::Bool(map.contains_key(&arg_string(args, 0)))),
             "merge" => {
                 if let Some(Value::Dict(other)) = args.first() {
                     let mut result = map.clone();
-                    for (k, v) in other {
-                        result.insert(k.clone(), v.clone());
-                    }
+                    result.extend(other.iter().map(|(k, v)| (k.clone(), v.clone())));
                     Ok(Value::Dict(result))
                 } else {
                     Ok(Value::Dict(map.clone()))
                 }
             }
             "map_values" => {
-                if let Some(Value::Closure { params, body, env }) = args.first() {
-                    let mut result = BTreeMap::new();
-                    for (k, v) in map {
-                        result.insert(
-                            k.clone(),
-                            self.invoke_closure(params, body, env, &[v.clone()])?,
-                        );
-                    }
-                    Ok(Value::Dict(result))
-                } else {
-                    Ok(Value::Nil)
+                let closure = require_closure(args)?;
+                let mut result = BTreeMap::new();
+                for (k, v) in map {
+                    result.insert(k.clone(), self.invoke_closure_item(closure, v)?);
                 }
+                Ok(Value::Dict(result))
             }
             "filter" => {
-                if let Some(Value::Closure { params, body, env }) = args.first() {
-                    let mut result = BTreeMap::new();
-                    for (k, v) in map {
-                        let keep = self.invoke_closure(params, body, env, &[v.clone()])?;
-                        if keep.is_truthy() {
-                            result.insert(k.clone(), v.clone());
-                        }
+                let closure = require_closure(args)?;
+                let mut result = BTreeMap::new();
+                for (k, v) in map {
+                    let keep = self.invoke_closure_item(closure, v)?;
+                    if keep.is_truthy() {
+                        result.insert(k.clone(), v.clone());
                     }
-                    Ok(Value::Dict(result))
-                } else {
-                    Ok(Value::Dict(map.clone()))
                 }
+                Ok(Value::Dict(result))
             }
             _ => Ok(Value::Nil),
         }
@@ -851,7 +807,7 @@ impl Interpreter {
             // If right is an identifier, check for builtin or closure variable
             if let Node::Identifier(name) = right {
                 if self.builtins.contains_key(name.as_str()) {
-                    let builtin = self.builtins.get(name.as_str()).unwrap();
+                    let builtin = &self.builtins[name.as_str()];
                     return builtin(&[left_val], &mut self.output);
                 }
                 if let Some(Value::Closure { params, body, env }) = self.env.get(name) {
@@ -876,8 +832,7 @@ impl Interpreter {
             if !left_val.is_truthy() {
                 return Ok(Value::Bool(false));
             }
-            let right_val = self.eval(right)?;
-            return Ok(Value::Bool(right_val.is_truthy()));
+            return Ok(Value::Bool(self.eval(right)?.is_truthy()));
         }
 
         // Logical OR (short-circuit)
@@ -886,8 +841,7 @@ impl Interpreter {
             if left_val.is_truthy() {
                 return Ok(Value::Bool(true));
             }
-            let right_val = self.eval(right)?;
-            return Ok(Value::Bool(right_val.is_truthy()));
+            return Ok(Value::Bool(self.eval(right)?.is_truthy()));
         }
 
         let left_val = self.eval(left)?;
@@ -901,12 +855,12 @@ impl Interpreter {
             "<=" => Ok(Value::Bool(compare_values(&left_val, &right_val) <= 0)),
             ">=" => Ok(Value::Bool(compare_values(&left_val, &right_val) >= 0)),
             "+" => match (&left_val, &right_val) {
-                (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a + b)),
+                (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a.wrapping_add(*b))),
                 (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a + b)),
                 (Value::String(a), _) => Ok(Value::String(format!("{a}{}", right_val.as_string()))),
                 (Value::List(a), Value::List(b)) => {
                     let mut result = a.clone();
-                    result.extend(b.clone());
+                    result.extend(b.iter().cloned());
                     Ok(Value::List(result))
                 }
                 _ => Ok(Value::String(format!(
@@ -916,19 +870,19 @@ impl Interpreter {
                 ))),
             },
             "-" => match (&left_val, &right_val) {
-                (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a - b)),
+                (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a.wrapping_sub(*b))),
                 (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a - b)),
                 _ => Ok(Value::Nil),
             },
             "*" => match (&left_val, &right_val) {
-                (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a * b)),
+                (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a.wrapping_mul(*b))),
                 (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a * b)),
                 _ => Ok(Value::Nil),
             },
             "/" => match (&left_val, &right_val) {
                 (Value::Int(a), Value::Int(b)) if *b != 0 => Ok(Value::Int(a / b)),
                 (Value::Float(a), Value::Float(b)) if *b != 0.0 => Ok(Value::Float(a / b)),
-                _ => Ok(Value::Nil),
+                _ => Ok(Value::Nil), // spec: division by zero returns nil
             },
             _ => Ok(Value::Nil),
         }
@@ -985,5 +939,21 @@ impl Interpreter {
         let mut result = parent_body.clone();
         result.extend(non_overrides);
         result
+    }
+}
+
+/// Extract a string argument at the given index, defaulting to empty string.
+fn arg_string(args: &[Value], index: usize) -> String {
+    args.get(index).map(|a| a.as_string()).unwrap_or_default()
+}
+
+/// Extract closure components from the first argument, returning Nil if not a closure.
+fn require_closure(args: &[Value]) -> Result<(&[String], &[Node], &Environment), RuntimeError> {
+    match args.first() {
+        Some(Value::Closure { params, body, env }) => Ok((params, body, env)),
+        _ => Err(RuntimeError::TypeMismatch {
+            expected: "closure".to_string(),
+            got: args.first().cloned().unwrap_or(Value::Nil),
+        }),
     }
 }
