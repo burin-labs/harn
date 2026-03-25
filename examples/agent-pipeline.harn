@@ -1,0 +1,34 @@
+// Example: what an AI agent pipeline looks like in Harn
+// (uses builtins that would be registered by the host application)
+
+pipeline default(task, project) {
+  log("Starting agent pipeline")
+  log("Task: ${task}")
+  log("Project: ${project}")
+
+  // Simulate a multi-step agent workflow
+  let steps = ["analyze", "plan", "execute", "verify"]
+
+  for step in steps {
+    log("Step: ${step}")
+
+    retry 3 {
+      match step {
+        "analyze" -> {
+          log("  Analyzing task requirements...")
+        }
+        "plan" -> {
+          log("  Creating execution plan...")
+        }
+        "execute" -> {
+          log("  Executing changes...")
+        }
+        "verify" -> {
+          log("  Verifying results...")
+        }
+      }
+    }
+  }
+
+  log("Pipeline complete!")
+}

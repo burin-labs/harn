@@ -1,3 +1,5 @@
+#![allow(clippy::cloned_ref_to_slice_refs)]
+
 use std::collections::BTreeMap;
 
 use harn_lexer::{Lexer, StringSegment};
@@ -16,6 +18,12 @@ pub struct Interpreter {
     pipelines: BTreeMap<String, Node>,
     builtins: BTreeMap<String, BuiltinFn>,
     output: Vec<u8>,
+}
+
+impl Default for Interpreter {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Interpreter {

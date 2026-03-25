@@ -463,10 +463,7 @@ fn strip_common_indent(text: &str) -> String {
         .unwrap_or(0);
 
     if min_indent == 0 {
-        if text.ends_with('\n') {
-            return text[..text.len() - 1].to_string();
-        }
-        return text.to_string();
+        return text.strip_suffix('\n').unwrap_or(text).to_string();
     }
 
     let stripped: String = lines
@@ -482,11 +479,7 @@ fn strip_common_indent(text: &str) -> String {
         .collect::<Vec<&str>>()
         .join("\n");
 
-    if stripped.ends_with('\n') {
-        stripped[..stripped.len() - 1].to_string()
-    } else {
-        stripped
-    }
+    stripped.strip_suffix('\n').unwrap_or(&stripped).to_string()
 }
 
 #[cfg(test)]

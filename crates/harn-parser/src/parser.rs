@@ -404,15 +404,13 @@ impl Parser {
         let expr = self.parse_expression()?;
 
         // Check for assignment: identifier = value
-        if self.check(&TokenKind::Assign) {
-            if matches!(expr, Node::Identifier(_)) {
-                self.advance();
-                let value = self.parse_expression()?;
-                return Ok(Node::Assignment {
-                    target: Box::new(expr),
-                    value: Box::new(value),
-                });
-            }
+        if self.check(&TokenKind::Assign) && matches!(expr, Node::Identifier(_)) {
+            self.advance();
+            let value = self.parse_expression()?;
+            return Ok(Node::Assignment {
+                target: Box::new(expr),
+                value: Box::new(value),
+            });
         }
 
         Ok(expr)
