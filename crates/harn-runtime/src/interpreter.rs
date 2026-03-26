@@ -573,6 +573,7 @@ impl Interpreter {
                 Err(RuntimeError::UndefinedBuiltin {
                     name: "llm_call".to_string(),
                     span: Some(node.span),
+                    suggestion: None,
                 })
             }
 
@@ -991,6 +992,7 @@ impl Interpreter {
         Err(RuntimeError::UndefinedBuiltin {
             name: name.to_string(),
             span: Some(*call_span),
+            suggestion: None,
         })
     }
 

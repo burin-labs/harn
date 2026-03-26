@@ -121,10 +121,7 @@ impl Linter {
                 self.references.insert(name.clone());
                 self.push_scope();
                 for p in params {
-                    if let Some(scope) = self.scopes.last_mut() {
-                        scope.insert(p.name.clone());
-                    }
-                    self.references.insert(p.name.clone());
+                    self.declare_variable(&p.name, snode.span, false);
                 }
                 self.lint_block(body);
                 self.pop_scope();
@@ -325,10 +322,7 @@ impl Linter {
             Node::Closure { params, body } => {
                 self.push_scope();
                 for p in params {
-                    if let Some(scope) = self.scopes.last_mut() {
-                        scope.insert(p.name.clone());
-                    }
-                    self.references.insert(p.name.clone());
+                    self.declare_variable(&p.name, snode.span, false);
                 }
                 self.lint_block(body);
                 self.pop_scope();
@@ -716,6 +710,33 @@ pipeline default(task) {
         assert!(
             !has_rule(&diags, "shadow-variable"),
             "same-scope should not trigger shadow-variable: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_unreachable_after_throw() {
+        let diags = lint_source("pipeline t(task) { throw \"err\"\nlog(\"unreachable\") }");
+        assert!(
+            diags.iter().any(|d| d.rule == "unreachable-code"),
+            "expected unreachable-code after throw, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_unused_fn_param() {
+        let diags = lint_source(
+            r#"
+pipeline default(task) {
+    fn greet(name, unused) {
+        log(name)
+    }
+    greet("hi", "there")
+}
+"#,
+        );
+        assert!(
+            has_rule(&diags, "unused-variable"),
+            "expected unused-variable for unused fn param, got: {diags:?}"
         );
     }
 

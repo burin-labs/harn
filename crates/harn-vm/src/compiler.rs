@@ -717,15 +717,23 @@ impl Compiler {
 
     /// Check if a node produces a value on the stack that needs to be popped.
     fn produces_value(node: &Node) -> bool {
-        !matches!(
-            node,
+        match node {
+            // These nodes do NOT produce a value on the stack
             Node::LetBinding { .. }
-                | Node::VarBinding { .. }
-                | Node::Assignment { .. }
-                | Node::ReturnStmt { .. }
-                | Node::FnDecl { .. }
-                | Node::ThrowStmt { .. }
-        )
+            | Node::VarBinding { .. }
+            | Node::Assignment { .. }
+            | Node::ReturnStmt { .. }
+            | Node::FnDecl { .. }
+            | Node::ThrowStmt { .. } => false,
+            // These compound nodes explicitly produce a value
+            Node::TryCatch { .. }
+            | Node::Retry { .. }
+            | Node::GuardStmt { .. }
+            | Node::DeadlineBlock { .. }
+            | Node::MutexBlock { .. } => true,
+            // All other expressions produce values
+            _ => true,
+        }
     }
 }
 

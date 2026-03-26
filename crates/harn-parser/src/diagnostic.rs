@@ -54,14 +54,14 @@ pub fn render_diagnostic(
 
         // Caret line
         if let Some(label_text) = label {
-            // Calculate span length on this line
+            // Calculate span display width using character counts, not byte offsets
             let span_len = if span.end > span.start {
-                let line_end_offset = span.start + (source_line.len() - (col_num - 1));
-                let end = span.end.min(line_end_offset);
-                (end - span.start).max(1)
+                let span_text = &source[span.start..span.end.min(source.len())];
+                span_text.chars().count().max(1)
             } else {
                 1
             };
+            let col_num = col_num.max(1); // ensure at least 1
             let padding = " ".repeat(col_num - 1);
             let carets = "^".repeat(span_len);
             out.push_str(&format!(
@@ -131,5 +131,56 @@ mod tests {
             Some("did you mean `x`?"),
         );
         assert!(output.contains("help: did you mean `x`?"));
+    }
+
+    #[test]
+    fn test_multiline_source() {
+        let source = "line1\nline2\nline3";
+        let span = Span::with_offsets(6, 11, 2, 1); // "line2"
+        let result = render_diagnostic(
+            source,
+            "test.harn",
+            &span,
+            "error",
+            "bad line",
+            Some("here"),
+            None,
+        );
+        assert!(result.contains("line2"));
+        assert!(result.contains("^^^^^"));
+    }
+
+    #[test]
+    fn test_single_char_span() {
+        let source = "let x = 42";
+        let span = Span::with_offsets(4, 5, 1, 5); // "x"
+        let result = render_diagnostic(
+            source,
+            "test.harn",
+            &span,
+            "warning",
+            "unused",
+            Some("never used"),
+            None,
+        );
+        assert!(result.contains("^"));
+        assert!(result.contains("never used"));
+    }
+
+    #[test]
+    fn test_with_help() {
+        let source = "let y = reponse";
+        let span = Span::with_offsets(8, 15, 1, 9);
+        let result = render_diagnostic(
+            source,
+            "test.harn",
+            &span,
+            "error",
+            "undefined",
+            None,
+            Some("did you mean `response`?"),
+        );
+        assert!(result.contains("help:"));
+        assert!(result.contains("response"));
     }
 }

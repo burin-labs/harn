@@ -93,10 +93,12 @@ impl VmEnv {
 #[derive(Debug, Clone)]
 pub enum VmError {
     StackUnderflow,
+    StackOverflow,
     UndefinedVariable(String),
     UndefinedBuiltin(String),
     ImmutableAssignment(String),
     TypeError(String),
+    Runtime(String),
     DivisionByZero,
     Thrown(VmValue),
     Return(VmValue),
@@ -107,12 +109,14 @@ impl std::fmt::Display for VmError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             VmError::StackUnderflow => write!(f, "Stack underflow"),
+            VmError::StackOverflow => write!(f, "Stack overflow: too many nested calls"),
             VmError::UndefinedVariable(n) => write!(f, "Undefined variable: {n}"),
             VmError::UndefinedBuiltin(n) => write!(f, "Undefined builtin: {n}"),
             VmError::ImmutableAssignment(n) => {
                 write!(f, "Cannot assign to immutable binding: {n}")
             }
             VmError::TypeError(msg) => write!(f, "Type error: {msg}"),
+            VmError::Runtime(msg) => write!(f, "Runtime error: {msg}"),
             VmError::DivisionByZero => write!(f, "Division by zero"),
             VmError::Thrown(v) => write!(f, "Thrown: {}", v.display()),
             VmError::Return(_) => write!(f, "Return from function"),
@@ -414,6 +418,11 @@ impl Vm {
                 Err(VmError::Return(val)) => {
                     // Pop the current frame
                     if let Some(popped_frame) = self.frames.pop() {
+                        // Clean up exception handlers from the returned frame
+                        let current_depth = self.frames.len();
+                        self.exception_handlers
+                            .retain(|h| h.frame_depth <= current_depth);
+
                         if self.frames.is_empty() {
                             return Ok(val);
                         }
@@ -507,13 +516,18 @@ impl Vm {
         } else if op == Op::Div as u8 {
             let b = self.pop()?;
             let a = self.pop()?;
-            self.stack.push(self.div(a, b));
+            self.stack.push(self.div(a, b)?);
         } else if op == Op::Negate as u8 {
             let v = self.pop()?;
             self.stack.push(match v {
                 VmValue::Int(n) => VmValue::Int(-n),
                 VmValue::Float(n) => VmValue::Float(-n),
-                _ => VmValue::Nil,
+                _ => {
+                    return Err(VmError::Runtime(format!(
+                        "Cannot negate value of type {}",
+                        v.type_name()
+                    )))
+                }
             });
         } else if op == Op::Equal as u8 {
             let b = self.pop()?;
@@ -770,6 +784,8 @@ impl Vm {
         Ok(None)
     }
 
+    const MAX_FRAMES: usize = 512;
+
     /// Push a new call frame for a closure invocation.
     fn push_closure_frame(
         &mut self,
@@ -777,6 +793,9 @@ impl Vm {
         args: &[VmValue],
         _parent_functions: &[CompiledFunction],
     ) -> Result<(), VmError> {
+        if self.frames.len() >= Self::MAX_FRAMES {
+            return Err(VmError::StackOverflow);
+        }
         let saved_env = self.env.clone();
 
         // Start with the closure's captured env, but also include
@@ -1087,15 +1106,21 @@ impl Vm {
         }
     }
 
-    fn div(&self, a: VmValue, b: VmValue) -> VmValue {
+    fn div(&self, a: VmValue, b: VmValue) -> Result<VmValue, VmError> {
         match (&a, &b) {
-            (VmValue::Int(_), VmValue::Int(y)) if *y == 0 => VmValue::Nil,
-            (VmValue::Int(x), VmValue::Int(y)) => VmValue::Int(x / y),
-            (VmValue::Float(_), VmValue::Float(y)) if *y == 0.0 => VmValue::Nil,
-            (VmValue::Float(x), VmValue::Float(y)) => VmValue::Float(x / y),
-            (VmValue::Int(x), VmValue::Float(y)) if *y != 0.0 => VmValue::Float(*x as f64 / y),
-            (VmValue::Float(x), VmValue::Int(y)) if *y != 0 => VmValue::Float(x / *y as f64),
-            _ => VmValue::Nil,
+            (VmValue::Int(_), VmValue::Int(y)) if *y == 0 => Err(VmError::DivisionByZero),
+            (VmValue::Int(x), VmValue::Int(y)) => Ok(VmValue::Int(x / y)),
+            (VmValue::Float(_), VmValue::Float(y)) if *y == 0.0 => Err(VmError::DivisionByZero),
+            (VmValue::Float(x), VmValue::Float(y)) => Ok(VmValue::Float(x / y)),
+            (VmValue::Int(_), VmValue::Float(y)) if *y == 0.0 => Err(VmError::DivisionByZero),
+            (VmValue::Int(x), VmValue::Float(y)) => Ok(VmValue::Float(*x as f64 / y)),
+            (VmValue::Float(_), VmValue::Int(y)) if *y == 0 => Err(VmError::DivisionByZero),
+            (VmValue::Float(x), VmValue::Int(y)) => Ok(VmValue::Float(x / *y as f64)),
+            _ => Err(VmError::Runtime(format!(
+                "Cannot divide {} by {}",
+                a.type_name(),
+                b.type_name()
+            ))),
         }
     }
 }
@@ -1643,6 +1668,169 @@ log(result)
     fn test_throw_uncaught() {
         let result = run_harn_result(r#"pipeline t(task) { throw "boom" }"#);
         assert!(result.is_err());
+    }
+
+    // --- Additional test coverage ---
+
+    fn run_vm(source: &str) -> String {
+        let mut lexer = Lexer::new(source);
+        let tokens = lexer.tokenize().unwrap();
+        let mut parser = Parser::new(tokens);
+        let program = parser.parse().unwrap();
+        let chunk = Compiler::new().compile(&program).unwrap();
+        let mut vm = Vm::new();
+        register_vm_stdlib(&mut vm);
+        vm.execute(&chunk).unwrap();
+        vm.output().to_string()
+    }
+
+    fn run_vm_err(source: &str) -> String {
+        let mut lexer = Lexer::new(source);
+        let tokens = lexer.tokenize().unwrap();
+        let mut parser = Parser::new(tokens);
+        let program = parser.parse().unwrap();
+        let chunk = Compiler::new().compile(&program).unwrap();
+        let mut vm = Vm::new();
+        register_vm_stdlib(&mut vm);
+        match vm.execute(&chunk) {
+            Err(e) => format!("{}", e),
+            Ok(_) => panic!("Expected error"),
+        }
+    }
+
+    #[test]
+    fn test_hello_world() {
+        let out = run_vm(r#"pipeline default(task) { log("hello") }"#);
+        assert_eq!(out, "[harn] hello\n");
+    }
+
+    #[test]
+    fn test_arithmetic_new() {
+        let out = run_vm("pipeline default(task) { log(2 + 3) }");
+        assert_eq!(out, "[harn] 5\n");
+    }
+
+    #[test]
+    fn test_string_concat_new() {
+        let out = run_vm(r#"pipeline default(task) { log("a" + "b") }"#);
+        assert_eq!(out, "[harn] ab\n");
+    }
+
+    #[test]
+    fn test_if_else_new() {
+        let out = run_vm("pipeline default(task) { if true { log(1) } else { log(2) } }");
+        assert_eq!(out, "[harn] 1\n");
+    }
+
+    #[test]
+    fn test_for_loop_new() {
+        let out = run_vm("pipeline default(task) { for i in [1, 2, 3] { log(i) } }");
+        assert_eq!(out, "[harn] 1\n[harn] 2\n[harn] 3\n");
+    }
+
+    #[test]
+    fn test_while_loop_new() {
+        let out = run_vm("pipeline default(task) { var i = 0\nwhile i < 3 { log(i)\ni = i + 1 } }");
+        assert_eq!(out, "[harn] 0\n[harn] 1\n[harn] 2\n");
+    }
+
+    #[test]
+    fn test_function_call_new() {
+        let out =
+            run_vm("pipeline default(task) { fn add(a, b) { return a + b }\nlog(add(2, 3)) }");
+        assert_eq!(out, "[harn] 5\n");
+    }
+
+    #[test]
+    fn test_closure_new() {
+        let out = run_vm("pipeline default(task) { let f = { x -> x * 2 }\nlog(f(5)) }");
+        assert_eq!(out, "[harn] 10\n");
+    }
+
+    #[test]
+    fn test_recursion() {
+        let out = run_vm("pipeline default(task) { fn fact(n) { if n <= 1 { return 1 }\nreturn n * fact(n - 1) }\nlog(fact(5)) }");
+        assert_eq!(out, "[harn] 120\n");
+    }
+
+    #[test]
+    fn test_try_catch_new() {
+        let out = run_vm(r#"pipeline default(task) { try { throw "err" } catch (e) { log(e) } }"#);
+        assert_eq!(out, "[harn] err\n");
+    }
+
+    #[test]
+    fn test_try_no_error_new() {
+        let out = run_vm("pipeline default(task) { try { log(1) } catch (e) { log(2) } }");
+        assert_eq!(out, "[harn] 1\n");
+    }
+
+    #[test]
+    fn test_list_map_new() {
+        let out =
+            run_vm("pipeline default(task) { let r = [1, 2, 3].map({ x -> x * 2 })\nlog(r) }");
+        assert_eq!(out, "[harn] [2, 4, 6]\n");
+    }
+
+    #[test]
+    fn test_list_filter_new() {
+        let out = run_vm(
+            "pipeline default(task) { let r = [1, 2, 3, 4].filter({ x -> x > 2 })\nlog(r) }",
+        );
+        assert_eq!(out, "[harn] [3, 4]\n");
+    }
+
+    #[test]
+    fn test_dict_access_new() {
+        let out = run_vm("pipeline default(task) { let d = {name: \"Alice\"}\nlog(d.name) }");
+        assert_eq!(out, "[harn] Alice\n");
+    }
+
+    #[test]
+    fn test_string_interpolation() {
+        let out = run_vm("pipeline default(task) { let x = 42\nlog(\"val=${x}\") }");
+        assert_eq!(out, "[harn] val=42\n");
+    }
+
+    #[test]
+    fn test_match_new() {
+        let out = run_vm(
+            "pipeline default(task) { let x = \"b\"\nmatch x { \"a\" -> { log(1) } \"b\" -> { log(2) } } }",
+        );
+        assert_eq!(out, "[harn] 2\n");
+    }
+
+    #[test]
+    fn test_json_roundtrip() {
+        let out = run_vm("pipeline default(task) { let s = json_stringify({a: 1})\nlog(s) }");
+        assert!(out.contains("\"a\""));
+        assert!(out.contains("1"));
+    }
+
+    #[test]
+    fn test_type_of() {
+        let out = run_vm("pipeline default(task) { log(type_of(42))\nlog(type_of(\"hi\")) }");
+        assert_eq!(out, "[harn] int\n[harn] string\n");
+    }
+
+    #[test]
+    fn test_stack_overflow() {
+        let err = run_vm_err("pipeline default(task) { fn f() { f() }\nf() }");
+        assert!(
+            err.contains("stack") || err.contains("overflow") || err.contains("recursion"),
+            "Expected stack overflow error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_division_by_zero() {
+        let err = run_vm_err("pipeline default(task) { log(1 / 0) }");
+        assert!(
+            err.contains("Division by zero") || err.contains("division"),
+            "Expected division by zero error, got: {}",
+            err
+        );
     }
 
     #[test]

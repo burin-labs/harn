@@ -1,6 +1,14 @@
 use harn_lexer::{Lexer, StringSegment};
 use harn_parser::{Node, Parser, SNode, TypeExpr, TypedParam};
 
+/// Escape a string for embedding in double-quoted output.
+fn escape_string(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\t', "\\t")
+}
+
 /// Format Harn source code to canonical style.
 ///
 /// Note: comments are not preserved (the lexer discards them).
@@ -385,11 +393,7 @@ impl Formatter {
     fn format_expr(&self, node: &SNode) -> String {
         match &node.node {
             Node::StringLiteral(s) => {
-                let escaped = s
-                    .replace('\\', "\\\\")
-                    .replace('"', "\\\"")
-                    .replace('\n', "\\n")
-                    .replace('\t', "\\t");
+                let escaped = escape_string(s);
                 format!("\"{escaped}\"")
             }
             Node::InterpolatedString(segments) => {
@@ -397,12 +401,7 @@ impl Formatter {
                 for seg in segments {
                     match seg {
                         StringSegment::Literal(s) => {
-                            let escaped = s
-                                .replace('\\', "\\\\")
-                                .replace('"', "\\\"")
-                                .replace('\n', "\\n")
-                                .replace('\t', "\\t");
-                            result.push_str(&escaped);
+                            result.push_str(&escape_string(s));
                         }
                         StringSegment::Expression(e) => {
                             result.push_str(&format!("${{{e}}}"));
@@ -629,8 +628,276 @@ impl Formatter {
                 result.push('}');
                 result
             }
-            // Fallback
-            _ => format!("{:?}", node.node),
+            Node::GuardStmt {
+                condition,
+                else_body,
+            } => {
+                let cond = self.format_expr(condition);
+                let mut result = format!("guard {cond} else {{\n");
+                let current_indent = self.indent + 1;
+                for n in else_body {
+                    let indent_str = "  ".repeat(current_indent);
+                    let expr = self.format_expr_or_stmt(n, current_indent);
+                    result.push_str(&indent_str);
+                    result.push_str(&expr);
+                    result.push('\n');
+                }
+                let close_indent = "  ".repeat(self.indent);
+                result.push_str(&close_indent);
+                result.push('}');
+                result
+            }
+            Node::DeadlineBlock { duration, body } => {
+                let dur = self.format_expr(duration);
+                let mut result = format!("deadline {dur} {{\n");
+                let current_indent = self.indent + 1;
+                for n in body {
+                    let indent_str = "  ".repeat(current_indent);
+                    let expr = self.format_expr_or_stmt(n, current_indent);
+                    result.push_str(&indent_str);
+                    result.push_str(&expr);
+                    result.push('\n');
+                }
+                let close_indent = "  ".repeat(self.indent);
+                result.push_str(&close_indent);
+                result.push('}');
+                result
+            }
+            Node::MutexBlock { body } => {
+                let mut result = String::from("mutex {\n");
+                let current_indent = self.indent + 1;
+                for n in body {
+                    let indent_str = "  ".repeat(current_indent);
+                    let expr = self.format_expr_or_stmt(n, current_indent);
+                    result.push_str(&indent_str);
+                    result.push_str(&expr);
+                    result.push('\n');
+                }
+                let close_indent = "  ".repeat(self.indent);
+                result.push_str(&close_indent);
+                result.push('}');
+                result
+            }
+            Node::IfElse {
+                condition,
+                then_body,
+                else_body,
+            } => {
+                let cond = self.format_expr(condition);
+                let mut result = format!("if {cond} {{\n");
+                let current_indent = self.indent + 1;
+                for n in then_body {
+                    let indent_str = "  ".repeat(current_indent);
+                    let expr = self.format_expr_or_stmt(n, current_indent);
+                    result.push_str(&indent_str);
+                    result.push_str(&expr);
+                    result.push('\n');
+                }
+                let close = "  ".repeat(self.indent);
+                if let Some(eb) = else_body {
+                    result.push_str(&close);
+                    result.push_str("} else {\n");
+                    for n in eb {
+                        let indent_str = "  ".repeat(current_indent);
+                        let expr = self.format_expr_or_stmt(n, current_indent);
+                        result.push_str(&indent_str);
+                        result.push_str(&expr);
+                        result.push('\n');
+                    }
+                    result.push_str(&close);
+                    result.push('}');
+                } else {
+                    result.push_str(&close);
+                    result.push('}');
+                }
+                result
+            }
+            Node::ForIn {
+                variable,
+                iterable,
+                body,
+            } => {
+                let iter_str = self.format_expr(iterable);
+                let mut result = format!("for {variable} in {iter_str} {{\n");
+                let current_indent = self.indent + 1;
+                for n in body {
+                    let indent_str = "  ".repeat(current_indent);
+                    let expr = self.format_expr_or_stmt(n, current_indent);
+                    result.push_str(&indent_str);
+                    result.push_str(&expr);
+                    result.push('\n');
+                }
+                let close = "  ".repeat(self.indent);
+                result.push_str(&close);
+                result.push('}');
+                result
+            }
+            Node::WhileLoop { condition, body } => {
+                let cond = self.format_expr(condition);
+                let mut result = format!("while {cond} {{\n");
+                let current_indent = self.indent + 1;
+                for n in body {
+                    let indent_str = "  ".repeat(current_indent);
+                    let expr = self.format_expr_or_stmt(n, current_indent);
+                    result.push_str(&indent_str);
+                    result.push_str(&expr);
+                    result.push('\n');
+                }
+                let close = "  ".repeat(self.indent);
+                result.push_str(&close);
+                result.push('}');
+                result
+            }
+            Node::Retry { count, body } => {
+                let cnt = self.format_expr(count);
+                let mut result = format!("retry {cnt} {{\n");
+                let current_indent = self.indent + 1;
+                for n in body {
+                    let indent_str = "  ".repeat(current_indent);
+                    let expr = self.format_expr_or_stmt(n, current_indent);
+                    result.push_str(&indent_str);
+                    result.push_str(&expr);
+                    result.push('\n');
+                }
+                let close = "  ".repeat(self.indent);
+                result.push_str(&close);
+                result.push('}');
+                result
+            }
+            Node::TryCatch {
+                body,
+                error_var,
+                error_type,
+                catch_body,
+            } => {
+                let mut result = String::from("try {\n");
+                let current_indent = self.indent + 1;
+                for n in body {
+                    let indent_str = "  ".repeat(current_indent);
+                    let expr = self.format_expr_or_stmt(n, current_indent);
+                    result.push_str(&indent_str);
+                    result.push_str(&expr);
+                    result.push('\n');
+                }
+                let close = "  ".repeat(self.indent);
+                let catch_param = match (error_var, error_type) {
+                    (Some(var), Some(ty)) => {
+                        format!(" ({var}: {})", format_type_expr(ty))
+                    }
+                    (Some(var), None) => format!(" ({var})"),
+                    _ => String::new(),
+                };
+                result.push_str(&close);
+                result.push_str(&format!("}} catch{catch_param} {{\n"));
+                for n in catch_body {
+                    let indent_str = "  ".repeat(current_indent);
+                    let expr = self.format_expr_or_stmt(n, current_indent);
+                    result.push_str(&indent_str);
+                    result.push_str(&expr);
+                    result.push('\n');
+                }
+                result.push_str(&close);
+                result.push('}');
+                result
+            }
+            Node::Parallel {
+                count,
+                variable,
+                body,
+            } => {
+                let cnt = self.format_expr(count);
+                let current_indent = self.indent + 1;
+                let mut result = if let Some(var) = variable {
+                    format!("parallel({cnt}) {{ {var} ->\n")
+                } else {
+                    format!("parallel({cnt}) {{\n")
+                };
+                for n in body {
+                    let indent_str = "  ".repeat(current_indent);
+                    let expr = self.format_expr_or_stmt(n, current_indent);
+                    result.push_str(&indent_str);
+                    result.push_str(&expr);
+                    result.push('\n');
+                }
+                let close = "  ".repeat(self.indent);
+                result.push_str(&close);
+                result.push('}');
+                result
+            }
+            Node::ParallelMap {
+                list,
+                variable,
+                body,
+            } => {
+                let lst = self.format_expr(list);
+                let current_indent = self.indent + 1;
+                let mut result = format!("parallel_map({lst}) {{ {variable} ->\n");
+                for n in body {
+                    let indent_str = "  ".repeat(current_indent);
+                    let expr = self.format_expr_or_stmt(n, current_indent);
+                    result.push_str(&indent_str);
+                    result.push_str(&expr);
+                    result.push('\n');
+                }
+                let close = "  ".repeat(self.indent);
+                result.push_str(&close);
+                result.push('}');
+                result
+            }
+            // Declaration nodes that cannot appear as expressions
+            Node::Pipeline { name, .. } => format!("/* pipeline {name} */"),
+            Node::FnDecl {
+                name,
+                params,
+                return_type,
+                body,
+            } => {
+                let params_str = format_typed_params(params);
+                let ret = if let Some(rt) = return_type {
+                    format!(" -> {}", format_type_expr(rt))
+                } else {
+                    String::new()
+                };
+                let mut result = format!("fn {name}({params_str}){ret} {{\n");
+                let current_indent = self.indent + 1;
+                for n in body {
+                    let indent_str = "  ".repeat(current_indent);
+                    let expr = self.format_expr_or_stmt(n, current_indent);
+                    result.push_str(&indent_str);
+                    result.push_str(&expr);
+                    result.push('\n');
+                }
+                let close = "  ".repeat(self.indent);
+                result.push_str(&close);
+                result.push('}');
+                result
+            }
+            Node::LetBinding {
+                name,
+                type_ann,
+                value,
+            } => {
+                let type_str = format_type_ann(type_ann);
+                let val = self.format_expr(value);
+                format!("let {name}{type_str} = {val}")
+            }
+            Node::VarBinding {
+                name,
+                type_ann,
+                value,
+            } => {
+                let type_str = format_type_ann(type_ann);
+                let val = self.format_expr(value);
+                format!("var {name}{type_str} = {val}")
+            }
+            Node::ImportDecl { path } => format!("import \"{path}\""),
+            Node::EnumDecl { name, .. } => format!("/* enum {name} */"),
+            Node::StructDecl { name, .. } => format!("/* struct {name} */"),
+            Node::OverrideDecl { name, .. } => format!("/* override {name} */"),
+            Node::TypeDecl { name, type_expr } => {
+                let te = format_type_expr(type_expr);
+                format!("type {name} = {te}")
+            }
         }
     }
 
@@ -956,6 +1223,67 @@ fn is_simple_expr(node: &SNode) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn assert_roundtrip(source: &str) {
+        let formatted = format_source(source).unwrap();
+        let mut lexer = Lexer::new(&formatted);
+        let tokens = lexer
+            .tokenize()
+            .unwrap_or_else(|e| panic!("Formatted output failed to lex:\n{formatted}\nError: {e}"));
+        let mut parser = Parser::new(tokens);
+        parser.parse().unwrap_or_else(|e| {
+            panic!("Formatted output failed to parse:\n{formatted}\nError: {e}")
+        });
+        // Format again and verify idempotence
+        let formatted2 = format_source(&formatted).unwrap();
+        assert_eq!(formatted, formatted2, "Formatter is not idempotent");
+    }
+
+    #[test]
+    fn test_roundtrip_basic() {
+        assert_roundtrip("pipeline default(task) { let x = 42\nlog(x) }");
+    }
+
+    #[test]
+    fn test_roundtrip_fn_decl() {
+        assert_roundtrip(
+            "pipeline default(task) { fn add(a, b) { return a + b }\nlog(add(1, 2)) }",
+        );
+    }
+
+    #[test]
+    fn test_roundtrip_closure() {
+        assert_roundtrip("pipeline default(task) { let f = { x -> x * 2 }\nlog(f(3)) }");
+    }
+
+    #[test]
+    fn test_roundtrip_if_else() {
+        assert_roundtrip("pipeline default(task) { if true { log(1) } else { log(2) } }");
+    }
+
+    #[test]
+    fn test_roundtrip_try_catch() {
+        assert_roundtrip(r#"pipeline default(task) { try { throw "e" } catch (e) { log(e) } }"#);
+    }
+
+    #[test]
+    fn test_roundtrip_for_in() {
+        assert_roundtrip("pipeline default(task) { for i in [1, 2, 3] { log(i) } }");
+    }
+
+    #[test]
+    fn test_roundtrip_match() {
+        assert_roundtrip(
+            r#"pipeline default(task) { match x { "a" -> { log(1) } "b" -> { log(2) } } }"#,
+        );
+    }
+
+    #[test]
+    fn test_roundtrip_enum() {
+        assert_roundtrip(
+            "enum Color {\n  Red\n  Green\n  Blue\n}\npipeline default(task) { log(1) }",
+        );
+    }
 
     #[test]
     fn test_format_hello() {

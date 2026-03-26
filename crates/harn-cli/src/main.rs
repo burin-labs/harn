@@ -38,41 +38,51 @@ async fn main() {
             );
         }
         "run" => {
-            if args.len() < 3 {
-                eprintln!("Usage: harn run <file.harn> [--vm]");
-                process::exit(1);
-            }
             let use_vm = args.iter().any(|a| a == "--vm");
             let file = args
                 .iter()
                 .skip(2)
-                .find(|a| a.ends_with(".harn"))
-                .unwrap_or(&args[2]);
-            if use_vm {
-                run_file_vm(file);
-            } else {
-                run_file(file).await;
+                .find(|a| a.ends_with(".harn") || !a.starts_with("--"));
+            match file {
+                Some(f) => {
+                    if use_vm {
+                        run_file_vm(f);
+                    } else {
+                        run_file(f).await;
+                    }
+                }
+                None => {
+                    eprintln!("Usage: harn run [--vm] <file.harn>");
+                    process::exit(1);
+                }
             }
         }
         "lint" => {
-            if args.len() < 3 {
-                eprintln!("Usage: harn lint <file.harn>");
-                process::exit(1);
+            let file = args
+                .iter()
+                .skip(2)
+                .find(|a| a.ends_with(".harn") || !a.starts_with("--"));
+            match file {
+                Some(f) => lint_file(f),
+                None => {
+                    eprintln!("Usage: harn lint <file.harn>");
+                    process::exit(1);
+                }
             }
-            lint_file(&args[2]);
         }
         "fmt" => {
-            if args.len() < 3 {
-                eprintln!("Usage: harn fmt <file.harn> [--check]");
-                process::exit(1);
-            }
             let check_mode = args.iter().any(|a| a == "--check");
             let file = args
                 .iter()
                 .skip(2)
-                .find(|a| a.ends_with(".harn"))
-                .unwrap_or(&args[2]);
-            fmt_file(file, check_mode);
+                .find(|a| a.ends_with(".harn") || !a.starts_with("--"));
+            match file {
+                Some(f) => fmt_file(f, check_mode),
+                None => {
+                    eprintln!("Usage: harn fmt [--check] <file.harn>");
+                    process::exit(1);
+                }
+            }
         }
         "test" => {
             let dir = if args.len() >= 3 {
@@ -273,16 +283,21 @@ fn render_error(err: &HarnError, source: &str, filename: &str) {
             HarnError::Runtime(harn_runtime::RuntimeError::ImmutableAssignment { .. }) => {
                 (Some("cannot assign to immutable binding"), None)
             }
-            HarnError::Runtime(harn_runtime::RuntimeError::UndefinedBuiltin { .. }) => {
-                (Some("not found"), None)
-            }
+            HarnError::Runtime(harn_runtime::RuntimeError::UndefinedBuiltin {
+                suggestion, ..
+            }) => (
+                Some("not found"),
+                suggestion.as_ref().map(|s| format!("did you mean `{s}`?")),
+            ),
+            HarnError::Lexer(_) => (Some("here"), None),
+            HarnError::Parser(_) => (Some("unexpected token"), None),
             _ => (None, None),
         };
 
         let diagnostic = harn_parser::diagnostic::render_diagnostic(
             source,
             filename,
-            span,
+            &span,
             "error",
             &err.to_string(),
             label,

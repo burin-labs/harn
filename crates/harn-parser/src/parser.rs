@@ -8,8 +8,7 @@ pub enum ParserError {
     Unexpected {
         got: String,
         expected: String,
-        line: usize,
-        column: usize,
+        span: Span,
     },
     UnexpectedEof {
         expected: String,
@@ -22,9 +21,12 @@ impl fmt::Display for ParserError {
             ParserError::Unexpected {
                 got,
                 expected,
-                line,
-                column,
-            } => write!(f, "Expected {expected}, got {got} at {line}:{column}"),
+                span,
+            } => write!(
+                f,
+                "Expected {expected}, got {got} at {}:{}",
+                span.line, span.column
+            ),
             ParserError::UnexpectedEof { expected } => {
                 write!(f, "Unexpected end of file, expected {expected}")
             }
@@ -1421,21 +1423,9 @@ impl Parser {
 
     fn consume(&mut self, kind: &TokenKind, expected: &str) -> Result<Token, ParserError> {
         self.skip_newlines();
-        let tok = self.current().ok_or_else(|| ParserError::UnexpectedEof {
-            expected: expected.into(),
-        })?;
+        let tok = self.current().ok_or_else(|| self.make_error(expected))?;
         if std::mem::discriminant(&tok.kind) != std::mem::discriminant(kind) {
-            if tok.kind == TokenKind::Eof {
-                return Err(ParserError::UnexpectedEof {
-                    expected: expected.into(),
-                });
-            }
-            return Err(ParserError::Unexpected {
-                got: tok.kind.to_string(),
-                expected: expected.into(),
-                line: tok.span.line,
-                column: tok.span.column,
-            });
+            return Err(self.make_error(expected));
         }
         let tok = tok.clone();
         self.advance();
@@ -1444,24 +1434,13 @@ impl Parser {
 
     fn consume_identifier(&mut self, expected: &str) -> Result<String, ParserError> {
         self.skip_newlines();
-        let tok = self.current().ok_or_else(|| ParserError::UnexpectedEof {
-            expected: expected.into(),
-        })?;
+        let tok = self.current().ok_or_else(|| self.make_error(expected))?;
         if let TokenKind::Identifier(name) = &tok.kind {
             let name = name.clone();
             self.advance();
             Ok(name)
-        } else if tok.kind == TokenKind::Eof {
-            Err(ParserError::UnexpectedEof {
-                expected: expected.into(),
-            })
         } else {
-            Err(ParserError::Unexpected {
-                got: tok.kind.to_string(),
-                expected: expected.into(),
-                line: tok.span.line,
-                column: tok.span.column,
-            })
+            Err(self.make_error(expected))
         }
     }
 
@@ -1471,8 +1450,8 @@ impl Parser {
         }
     }
 
-    fn error(&self, expected: &str) -> ParserError {
-        if let Some(tok) = self.current() {
+    fn make_error(&self, expected: &str) -> ParserError {
+        if let Some(tok) = self.tokens.get(self.pos) {
             if tok.kind == TokenKind::Eof {
                 return ParserError::UnexpectedEof {
                     expected: expected.into(),
@@ -1481,13 +1460,16 @@ impl Parser {
             ParserError::Unexpected {
                 got: tok.kind.to_string(),
                 expected: expected.into(),
-                line: tok.span.line,
-                column: tok.span.column,
+                span: tok.span,
             }
         } else {
             ParserError::UnexpectedEof {
                 expected: expected.into(),
             }
         }
+    }
+
+    fn error(&self, expected: &str) -> ParserError {
+        self.make_error(expected)
     }
 }

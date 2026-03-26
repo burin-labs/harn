@@ -19,6 +19,7 @@ pub enum RuntimeError {
     UndefinedBuiltin {
         name: String,
         span: Option<harn_lexer::Span>,
+        suggestion: Option<String>,
     },
     /// Attempted assignment to a `let` binding.
     ImmutableAssignment {
@@ -102,8 +103,10 @@ impl RuntimeError {
 
     /// Attach a "did you mean?" suggestion.
     pub fn with_suggestion(mut self, s: String) -> Self {
-        if let RuntimeError::UndefinedVariable { suggestion, .. } = &mut self {
-            *suggestion = Some(s);
+        match &mut self {
+            RuntimeError::UndefinedVariable { suggestion, .. } => *suggestion = Some(s),
+            RuntimeError::UndefinedBuiltin { suggestion, .. } => *suggestion = Some(s),
+            _ => {}
         }
         self
     }
@@ -150,10 +153,18 @@ pub enum HarnError {
 
 impl HarnError {
     /// Get the span associated with this error, if it has one.
-    pub fn span(&self) -> Option<&harn_lexer::Span> {
+    pub fn span(&self) -> Option<harn_lexer::Span> {
         match self {
-            HarnError::Runtime(e) => e.span(),
-            _ => None,
+            HarnError::Runtime(e) => e.span().copied(),
+            HarnError::Lexer(e) => match e {
+                harn_lexer::LexerError::UnexpectedCharacter(_, span) => Some(*span),
+                harn_lexer::LexerError::UnterminatedString(span) => Some(*span),
+                harn_lexer::LexerError::UnterminatedBlockComment(span) => Some(*span),
+            },
+            HarnError::Parser(e) => match e {
+                harn_parser::ParserError::Unexpected { span, .. } => Some(*span),
+                harn_parser::ParserError::UnexpectedEof { .. } => None,
+            },
         }
     }
 }

@@ -442,12 +442,11 @@ fn parser_error_to_diagnostic(err: &ParserError) -> Diagnostic {
         ParserError::Unexpected {
             got,
             expected,
-            line,
-            column,
+            span,
         } => Diagnostic {
             range: Range {
-                start: Position::new((*line - 1) as u32, (*column - 1) as u32),
-                end: Position::new((*line - 1) as u32, *column as u32),
+                start: Position::new((span.line - 1) as u32, (span.column - 1) as u32),
+                end: Position::new((span.line - 1) as u32, span.column as u32),
             },
             severity: Some(DiagnosticSeverity::ERROR),
             source: Some("harn".to_string()),
