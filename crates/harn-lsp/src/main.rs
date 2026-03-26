@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use harn_lexer::{Lexer, LexerError};
-use harn_parser::{Node, Parser, ParserError, TypeChecker};
+use harn_parser::{Node, Parser, ParserError, SNode, TypeChecker};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
@@ -107,11 +107,22 @@ impl HarnLsp {
                 harn_parser::DiagnosticSeverity::Error => DiagnosticSeverity::ERROR,
                 harn_parser::DiagnosticSeverity::Warning => DiagnosticSeverity::WARNING,
             };
-            diagnostics.push(Diagnostic {
-                range: Range {
+            let range = if let Some(span) = &diag.span {
+                Range {
+                    start: Position::new(
+                        (span.line.saturating_sub(1)) as u32,
+                        (span.column.saturating_sub(1)) as u32,
+                    ),
+                    end: Position::new((span.line.saturating_sub(1)) as u32, span.column as u32),
+                }
+            } else {
+                Range {
                     start: Position::new(0, 0),
                     end: Position::new(0, 1),
-                },
+                }
+            };
+            diagnostics.push(Diagnostic {
+                range,
                 severity: Some(severity),
                 source: Some("harn-typecheck".to_string()),
                 message: diag.message,
@@ -457,11 +468,11 @@ fn parser_error_to_diagnostic(err: &ParserError) -> Diagnostic {
 }
 
 #[allow(deprecated)]
-fn extract_symbols_from_nodes(nodes: &[Node], source: &str, symbols: &mut Vec<DocumentSymbol>) {
+fn extract_symbols_from_nodes(nodes: &[SNode], source: &str, symbols: &mut Vec<DocumentSymbol>) {
     let lines: Vec<&str> = source.lines().collect();
 
-    for node in nodes {
-        match node {
+    for snode in nodes {
+        match &snode.node {
             Node::Pipeline { name, .. } => {
                 if let Some(range) = find_name_in_source(&lines, &format!("pipeline {name}"), name)
                 {
@@ -509,9 +520,9 @@ fn find_name_in_source(lines: &[&str], pattern: &str, name: &str) -> Option<Rang
     None
 }
 
-fn collect_user_symbols(nodes: &[Node], items: &mut Vec<CompletionItem>) {
-    for node in nodes {
-        match node {
+fn collect_user_symbols(nodes: &[SNode], items: &mut Vec<CompletionItem>) {
+    for snode in nodes {
+        match &snode.node {
             Node::Pipeline { name, body, .. } => {
                 items.push(CompletionItem {
                     label: name.clone(),

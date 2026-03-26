@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::environment::Environment;
-use harn_parser::{Node, TypeExpr};
+use harn_parser::{SNode, TypeExpr};
 
 /// Runtime values in the Harn interpreter.
 #[derive(Debug, Clone)]
@@ -18,7 +18,7 @@ pub enum Value {
         params: Vec<String>,
         param_types: Vec<Option<TypeExpr>>,
         return_type: Option<TypeExpr>,
-        body: Vec<Node>,
+        body: Vec<SNode>,
         env: Environment,
     },
     TaskHandle {

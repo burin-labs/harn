@@ -1,12 +1,14 @@
 use std::collections::BTreeMap;
 
 use crate::ast::*;
+use harn_lexer::Span;
 
 /// A diagnostic produced by the type checker.
 #[derive(Debug, Clone)]
 pub struct TypeDiagnostic {
     pub message: String,
     pub severity: DiagnosticSeverity,
+    pub span: Option<Span>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -146,10 +148,10 @@ impl TypeChecker {
     }
 
     /// Check a program and return diagnostics.
-    pub fn check(mut self, program: &[Node]) -> Vec<TypeDiagnostic> {
+    pub fn check(mut self, program: &[SNode]) -> Vec<TypeDiagnostic> {
         // First pass: register type declarations and function signatures
-        for node in program {
-            if let Node::TypeDecl { name, type_expr } = node {
+        for snode in program {
+            if let Node::TypeDecl { name, type_expr } = &snode.node {
                 self.scope
                     .type_aliases
                     .insert(name.clone(), type_expr.clone());
@@ -157,8 +159,8 @@ impl TypeChecker {
         }
 
         // Check each top-level node
-        for node in program {
-            match node {
+        for snode in program {
+            match &snode.node {
                 Node::Pipeline { body, .. } => {
                     let mut child = self.scope.child();
                     self.check_block(body, &mut child);
@@ -180,7 +182,7 @@ impl TypeChecker {
                     self.check_fn_body(params, return_type, body);
                 }
                 _ => {
-                    self.check_node(node, &mut self.scope.clone());
+                    self.check_node(snode, &mut self.scope.clone());
                 }
             }
         }
@@ -188,14 +190,15 @@ impl TypeChecker {
         self.diagnostics
     }
 
-    fn check_block(&mut self, stmts: &[Node], scope: &mut TypeScope) {
+    fn check_block(&mut self, stmts: &[SNode], scope: &mut TypeScope) {
         for stmt in stmts {
             self.check_node(stmt, scope);
         }
     }
 
-    fn check_node(&mut self, node: &Node, scope: &mut TypeScope) {
-        match node {
+    fn check_node(&mut self, snode: &SNode, scope: &mut TypeScope) {
+        let span = snode.span;
+        match &snode.node {
             Node::LetBinding {
                 name,
                 type_ann,
@@ -205,12 +208,15 @@ impl TypeChecker {
                 if let Some(expected) = type_ann {
                     if let Some(actual) = &inferred {
                         if !self.types_compatible(expected, actual, scope) {
-                            self.error(format!(
-                                "Type mismatch: '{}' declared as {}, but assigned {}",
-                                name,
-                                format_type(expected),
-                                format_type(actual)
-                            ));
+                            self.error_at(
+                                format!(
+                                    "Type mismatch: '{}' declared as {}, but assigned {}",
+                                    name,
+                                    format_type(expected),
+                                    format_type(actual)
+                                ),
+                                span,
+                            );
                         }
                     }
                 }
@@ -227,12 +233,15 @@ impl TypeChecker {
                 if let Some(expected) = type_ann {
                     if let Some(actual) = &inferred {
                         if !self.types_compatible(expected, actual, scope) {
-                            self.error(format!(
-                                "Type mismatch: '{}' declared as {}, but assigned {}",
-                                name,
-                                format_type(expected),
-                                format_type(actual)
-                            ));
+                            self.error_at(
+                                format!(
+                                    "Type mismatch: '{}' declared as {}, but assigned {}",
+                                    name,
+                                    format_type(expected),
+                                    format_type(actual)
+                                ),
+                                span,
+                            );
                         }
                     }
                 }
@@ -254,12 +263,12 @@ impl TypeChecker {
                     return_type: return_type.clone(),
                 };
                 scope.define_fn(name, sig.clone());
-                scope.define_var(name, None); // functions are also variables
+                scope.define_var(name, None);
                 self.check_fn_body(params, return_type, body);
             }
 
             Node::FunctionCall { name, args } => {
-                self.check_call(name, args, scope);
+                self.check_call(name, args, scope, span);
             }
 
             Node::IfElse {
@@ -316,18 +325,20 @@ impl TypeChecker {
 
             Node::Assignment { target, value } => {
                 self.check_node(value, scope);
-                // Could check that assignment type matches variable type
-                if let Node::Identifier(name) = target.as_ref() {
+                if let Node::Identifier(name) = &target.node {
                     if let Some(Some(var_type)) = scope.get_var(name) {
                         let assigned = self.infer_type(value, scope);
                         if let Some(actual) = &assigned {
                             if !self.types_compatible(var_type, actual, scope) {
-                                self.error(format!(
-                                    "Type mismatch: cannot assign {} to '{}' (declared as {})",
-                                    format_type(actual),
-                                    name,
-                                    format_type(var_type)
-                                ));
+                                self.error_at(
+                                    format!(
+                                        "Type mismatch: cannot assign {} to '{}' (declared as {})",
+                                        format_type(actual),
+                                        name,
+                                        format_type(var_type)
+                                    ),
+                                    span,
+                                );
                             }
                         }
                     }
@@ -369,7 +380,7 @@ impl TypeChecker {
         &mut self,
         params: &[TypedParam],
         return_type: &Option<TypeExpr>,
-        body: &[Node],
+        body: &[SNode],
     ) {
         let mut fn_scope = self.scope.child();
         for param in params {
@@ -385,17 +396,21 @@ impl TypeChecker {
         }
     }
 
-    fn check_return_type(&mut self, node: &Node, expected: &TypeExpr, scope: &TypeScope) {
-        match node {
+    fn check_return_type(&mut self, snode: &SNode, expected: &TypeExpr, scope: &TypeScope) {
+        let span = snode.span;
+        match &snode.node {
             Node::ReturnStmt { value: Some(val) } => {
                 let inferred = self.infer_type(val, scope);
                 if let Some(actual) = &inferred {
                     if !self.types_compatible(expected, actual, scope) {
-                        self.error(format!(
-                            "Return type mismatch: expected {}, got {}",
-                            format_type(expected),
-                            format_type(actual)
-                        ));
+                        self.error_at(
+                            format!(
+                                "Return type mismatch: expected {}, got {}",
+                                format_type(expected),
+                                format_type(actual)
+                            ),
+                            span,
+                        );
                     }
                 }
             }
@@ -417,16 +432,19 @@ impl TypeChecker {
         }
     }
 
-    fn check_call(&mut self, name: &str, args: &[Node], scope: &mut TypeScope) {
+    fn check_call(&mut self, name: &str, args: &[SNode], scope: &mut TypeScope, span: Span) {
         // Check against known function signatures
         if let Some(sig) = scope.get_fn(name).cloned() {
             if args.len() != sig.params.len() && !is_builtin(name) {
-                self.warning(format!(
-                    "Function '{}' expects {} arguments, got {}",
-                    name,
-                    sig.params.len(),
-                    args.len()
-                ));
+                self.warning_at(
+                    format!(
+                        "Function '{}' expects {} arguments, got {}",
+                        name,
+                        sig.params.len(),
+                        args.len()
+                    ),
+                    span,
+                );
             }
             for (i, (arg, (param_name, param_type))) in
                 args.iter().zip(sig.params.iter()).enumerate()
@@ -435,13 +453,16 @@ impl TypeChecker {
                     let actual = self.infer_type(arg, scope);
                     if let Some(actual) = &actual {
                         if !self.types_compatible(expected, actual, scope) {
-                            self.error(format!(
-                                "Argument {} ('{}'): expected {}, got {}",
-                                i + 1,
-                                param_name,
-                                format_type(expected),
-                                format_type(actual)
-                            ));
+                            self.error_at(
+                                format!(
+                                    "Argument {} ('{}'): expected {}, got {}",
+                                    i + 1,
+                                    param_name,
+                                    format_type(expected),
+                                    format_type(actual)
+                                ),
+                                arg.span,
+                            );
                         }
                     }
                 }
@@ -454,8 +475,8 @@ impl TypeChecker {
     }
 
     /// Infer the type of an expression.
-    fn infer_type(&self, node: &Node, scope: &TypeScope) -> InferredType {
-        match node {
+    fn infer_type(&self, snode: &SNode, scope: &TypeScope) -> InferredType {
+        match &snode.node {
             Node::IntLiteral(_) => Some(TypeExpr::Named("int".into())),
             Node::FloatLiteral(_) => Some(TypeExpr::Named("float".into())),
             Node::StringLiteral(_) | Node::InterpolatedString(_) => {
@@ -500,7 +521,6 @@ impl TypeChecker {
             } => {
                 let tt = self.infer_type(true_expr, scope);
                 let ft = self.infer_type(false_expr, scope);
-                // If both branches have the same type, use it
                 match (&tt, &ft) {
                     (Some(a), Some(b)) if a == b => tt,
                     (Some(a), Some(b)) => Some(TypeExpr::Union(vec![a.clone(), b.clone()])),
@@ -519,52 +539,36 @@ impl TypeChecker {
 
     /// Check if two types are compatible (actual can be assigned to expected).
     fn types_compatible(&self, expected: &TypeExpr, actual: &TypeExpr, scope: &TypeScope) -> bool {
-        // Resolve type aliases
         let expected = self.resolve_alias(expected, scope);
         let actual = self.resolve_alias(actual, scope);
 
         match (&expected, &actual) {
-            // Same named type, or int→float promotion
             (TypeExpr::Named(a), TypeExpr::Named(b)) => a == b || (a == "float" && b == "int"),
-
-            // Union: actual must match at least one member
             (TypeExpr::Union(members), actual_type) => members
                 .iter()
                 .any(|m| self.types_compatible(m, actual_type, scope)),
-
-            // Actual is a union: all members must be compatible with expected
             (expected_type, TypeExpr::Union(members)) => members
                 .iter()
                 .all(|m| self.types_compatible(expected_type, m, scope)),
-
-            // Shape types: dict is structurally compatible with any shape
-            // (field presence/types are verified at runtime)
             (TypeExpr::Shape(_), TypeExpr::Named(n)) if n == "dict" => true,
-            (TypeExpr::Shape(ef), TypeExpr::Shape(af)) => {
-                // All required expected fields must exist in actual
-                ef.iter().all(|expected_field| {
-                    if expected_field.optional {
-                        return true;
-                    }
-                    af.iter().any(|actual_field| {
-                        actual_field.name == expected_field.name
-                            && self.types_compatible(
-                                &expected_field.type_expr,
-                                &actual_field.type_expr,
-                                scope,
-                            )
-                    })
+            (TypeExpr::Shape(ef), TypeExpr::Shape(af)) => ef.iter().all(|expected_field| {
+                if expected_field.optional {
+                    return true;
+                }
+                af.iter().any(|actual_field| {
+                    actual_field.name == expected_field.name
+                        && self.types_compatible(
+                            &expected_field.type_expr,
+                            &actual_field.type_expr,
+                            scope,
+                        )
                 })
-            }
-
-            // List covariance: list[int] is compatible with list[float]
+            }),
             (TypeExpr::List(expected_inner), TypeExpr::List(actual_inner)) => {
                 self.types_compatible(expected_inner, actual_inner, scope)
             }
-            // A bare "list" is compatible with any list[T]
             (TypeExpr::Named(n), TypeExpr::List(_)) if n == "list" => true,
             (TypeExpr::List(_), TypeExpr::Named(n)) if n == "list" => true,
-
             _ => false,
         }
     }
@@ -578,17 +582,19 @@ impl TypeChecker {
         ty.clone()
     }
 
-    fn error(&mut self, message: String) {
+    fn error_at(&mut self, message: String, span: Span) {
         self.diagnostics.push(TypeDiagnostic {
             message,
             severity: DiagnosticSeverity::Error,
+            span: Some(span),
         });
     }
 
-    fn warning(&mut self, message: String) {
+    fn warning_at(&mut self, message: String, span: Span) {
         self.diagnostics.push(TypeDiagnostic {
             message,
             severity: DiagnosticSeverity::Warning,
+            span: Some(span),
         });
     }
 }
@@ -602,9 +608,7 @@ impl Default for TypeChecker {
 /// Infer the result type of a binary operation.
 fn infer_binary_op_type(op: &str, left: &InferredType, right: &InferredType) -> InferredType {
     match op {
-        // Comparison and logical ops always return bool
         "==" | "!=" | "<" | ">" | "<=" | ">=" | "&&" | "||" => Some(TypeExpr::Named("bool".into())),
-        // Arithmetic: depends on operand types
         "+" => match (left, right) {
             (Some(TypeExpr::Named(l)), Some(TypeExpr::Named(r))) => {
                 match (l.as_str(), r.as_str()) {
@@ -612,7 +616,7 @@ fn infer_binary_op_type(op: &str, left: &InferredType, right: &InferredType) -> 
                     ("float", _) | (_, "float") => Some(TypeExpr::Named("float".into())),
                     ("string", _) => Some(TypeExpr::Named("string".into())),
                     ("list", "list") => Some(TypeExpr::Named("list".into())),
-                    _ => Some(TypeExpr::Named("string".into())), // fallback concat
+                    _ => Some(TypeExpr::Named("string".into())),
                 }
             }
             _ => None,
@@ -637,7 +641,6 @@ fn infer_binary_op_type(op: &str, left: &InferredType, right: &InferredType) -> 
             }
             _ => None,
         },
-        // Nil coalescing: result is the non-nil type
         "??" => match (left, right) {
             (Some(TypeExpr::Union(members)), _) => {
                 let non_nil: Vec<_> = members
@@ -655,7 +658,6 @@ fn infer_binary_op_type(op: &str, left: &InferredType, right: &InferredType) -> 
             }
             _ => right.clone(),
         },
-        // Pipe: result depends on the callable
         "|>" => None,
         _ => None,
     }
@@ -768,7 +770,6 @@ add("hello", 2) }"#,
 
     #[test]
     fn test_type_inference_propagation() {
-        // add returns int, so assigning to string should error
         let errs = errors(
             r#"pipeline t(task) {
   fn add(a: int, b: int) -> int { return a + b }
@@ -783,7 +784,6 @@ add("hello", 2) }"#,
 
     #[test]
     fn test_builtin_return_type_inference() {
-        // to_int returns int
         let errs = errors(r#"pipeline t(task) { let x: string = to_int("42") }"#);
         assert_eq!(errs.len(), 1);
         assert!(errs[0].contains("string"));
@@ -792,7 +792,6 @@ add("hello", 2) }"#,
 
     #[test]
     fn test_binary_op_type_inference() {
-        // int + int = int, not string
         let errs = errors("pipeline t(task) { let x: string = 1 + 2 }");
         assert_eq!(errs.len(), 1);
     }
@@ -805,7 +804,6 @@ add("hello", 2) }"#,
 
     #[test]
     fn test_int_float_promotion() {
-        // int is compatible with float
         let errs = errors("pipeline t(task) { let x: float = 42 }");
         assert!(errs.is_empty());
     }
@@ -860,7 +858,6 @@ add("hello", 2) }"#,
 
     #[test]
     fn test_covariance_int_to_float_in_fn() {
-        // int arg passed to float param should be accepted (promotion)
         let errs = errors(
             "pipeline t(task) { fn scale(x: float) -> float { return x * 2.0 }\nscale(42) }",
         );
@@ -869,14 +866,12 @@ add("hello", 2) }"#,
 
     #[test]
     fn test_covariance_return_type() {
-        // fn returning int satisfies -> float
         let errs = errors("pipeline t(task) { fn get() -> float { return 42 } }");
         assert!(errs.is_empty());
     }
 
     #[test]
     fn test_no_contravariance_float_to_int() {
-        // float arg to int param should fail (lossy)
         let errs = errors("pipeline t(task) { fn add(a: int) -> int { return a + 1 }\nadd(3.14) }");
         assert_eq!(errs.len(), 1);
     }

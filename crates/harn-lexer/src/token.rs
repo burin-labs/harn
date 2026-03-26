@@ -19,13 +19,53 @@ impl fmt::Display for StringSegment {
 /// Source location for error reporting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Span {
+    /// Byte offset from start of source (inclusive).
+    pub start: usize,
+    /// Byte offset from start of source (exclusive).
+    pub end: usize,
+    /// 1-based line number of start position.
     pub line: usize,
+    /// 1-based column number of start position.
     pub column: usize,
 }
 
 impl Span {
     pub fn new(line: usize, column: usize) -> Self {
-        Self { line, column }
+        Self {
+            start: 0,
+            end: 0,
+            line,
+            column,
+        }
+    }
+
+    pub fn with_offsets(start: usize, end: usize, line: usize, column: usize) -> Self {
+        Self {
+            start,
+            end,
+            line,
+            column,
+        }
+    }
+
+    /// Create a span covering two spans (from start of `a` to end of `b`).
+    pub fn merge(a: Span, b: Span) -> Span {
+        Span {
+            start: a.start,
+            end: b.end,
+            line: a.line,
+            column: a.column,
+        }
+    }
+
+    /// A dummy span for synthetic/generated nodes.
+    pub fn dummy() -> Self {
+        Self {
+            start: 0,
+            end: 0,
+            line: 0,
+            column: 0,
+        }
     }
 }
 
@@ -214,5 +254,9 @@ impl Token {
             kind,
             span: Span::new(line, column),
         }
+    }
+
+    pub fn with_span(kind: TokenKind, span: Span) -> Self {
+        Self { kind, span }
     }
 }

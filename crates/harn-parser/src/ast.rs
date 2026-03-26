@@ -1,4 +1,32 @@
-use harn_lexer::StringSegment;
+use harn_lexer::{Span, StringSegment};
+
+/// A node wrapped with source location information.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Spanned<T> {
+    pub node: T,
+    pub span: Span,
+}
+
+impl<T> Spanned<T> {
+    pub fn new(node: T, span: Span) -> Self {
+        Self { node, span }
+    }
+
+    pub fn dummy(node: T) -> Self {
+        Self {
+            node,
+            span: Span::dummy(),
+        }
+    }
+}
+
+/// A spanned AST node — the primary unit throughout the compiler.
+pub type SNode = Spanned<Node>;
+
+/// Helper to wrap a node with a span.
+pub fn spanned(node: Node, span: Span) -> SNode {
+    SNode::new(node, span)
+}
 
 /// AST nodes for the Harn language.
 #[derive(Debug, Clone, PartialEq)]
@@ -7,23 +35,23 @@ pub enum Node {
     Pipeline {
         name: String,
         params: Vec<String>,
-        body: Vec<Node>,
+        body: Vec<SNode>,
         extends: Option<String>,
     },
     LetBinding {
         name: String,
         type_ann: Option<TypeExpr>,
-        value: Box<Node>,
+        value: Box<SNode>,
     },
     VarBinding {
         name: String,
         type_ann: Option<TypeExpr>,
-        value: Box<Node>,
+        value: Box<SNode>,
     },
     OverrideDecl {
         name: String,
         params: Vec<String>,
-        body: Vec<Node>,
+        body: Vec<SNode>,
     },
     ImportDecl {
         path: String,
@@ -39,61 +67,61 @@ pub enum Node {
 
     // Control flow
     IfElse {
-        condition: Box<Node>,
-        then_body: Vec<Node>,
-        else_body: Option<Vec<Node>>,
+        condition: Box<SNode>,
+        then_body: Vec<SNode>,
+        else_body: Option<Vec<SNode>>,
     },
     ForIn {
         variable: String,
-        iterable: Box<Node>,
-        body: Vec<Node>,
+        iterable: Box<SNode>,
+        body: Vec<SNode>,
     },
     MatchExpr {
-        value: Box<Node>,
+        value: Box<SNode>,
         arms: Vec<MatchArm>,
     },
     WhileLoop {
-        condition: Box<Node>,
-        body: Vec<Node>,
+        condition: Box<SNode>,
+        body: Vec<SNode>,
     },
     Retry {
-        count: Box<Node>,
-        body: Vec<Node>,
+        count: Box<SNode>,
+        body: Vec<SNode>,
     },
     ReturnStmt {
-        value: Option<Box<Node>>,
+        value: Option<Box<SNode>>,
     },
     TryCatch {
-        body: Vec<Node>,
+        body: Vec<SNode>,
         error_var: Option<String>,
         error_type: Option<TypeExpr>,
-        catch_body: Vec<Node>,
+        catch_body: Vec<SNode>,
     },
     FnDecl {
         name: String,
         params: Vec<TypedParam>,
         return_type: Option<TypeExpr>,
-        body: Vec<Node>,
+        body: Vec<SNode>,
     },
     TypeDecl {
         name: String,
         type_expr: TypeExpr,
     },
     SpawnExpr {
-        body: Vec<Node>,
+        body: Vec<SNode>,
     },
     /// Duration literal: 500ms, 5s, 30m, 2h
     DurationLiteral(u64),
     /// Range expression: start upto end (exclusive) or start thru end (inclusive)
     RangeExpr {
-        start: Box<Node>,
-        end: Box<Node>,
+        start: Box<SNode>,
+        end: Box<SNode>,
         inclusive: bool,
     },
     /// Guard clause: guard condition else { body }
     GuardStmt {
-        condition: Box<Node>,
-        else_body: Vec<Node>,
+        condition: Box<SNode>,
+        else_body: Vec<SNode>,
     },
     /// Ask expression: ask { system: "...", user: "...", ... }
     AskExpr {
@@ -101,75 +129,75 @@ pub enum Node {
     },
     /// Deadline block: deadline DURATION { body }
     DeadlineBlock {
-        duration: Box<Node>,
-        body: Vec<Node>,
+        duration: Box<SNode>,
+        body: Vec<SNode>,
     },
     /// Yield expression: yields control to host, optionally with a value.
     YieldExpr {
-        value: Option<Box<Node>>,
+        value: Option<Box<SNode>>,
     },
     /// Mutex block: mutual exclusion for concurrent access.
     MutexBlock {
-        body: Vec<Node>,
+        body: Vec<SNode>,
     },
 
     // Concurrency
     Parallel {
-        count: Box<Node>,
+        count: Box<SNode>,
         variable: Option<String>,
-        body: Vec<Node>,
+        body: Vec<SNode>,
     },
     ParallelMap {
-        list: Box<Node>,
+        list: Box<SNode>,
         variable: String,
-        body: Vec<Node>,
+        body: Vec<SNode>,
     },
 
     // Expressions
     FunctionCall {
         name: String,
-        args: Vec<Node>,
+        args: Vec<SNode>,
     },
     MethodCall {
-        object: Box<Node>,
+        object: Box<SNode>,
         method: String,
-        args: Vec<Node>,
+        args: Vec<SNode>,
     },
     PropertyAccess {
-        object: Box<Node>,
+        object: Box<SNode>,
         property: String,
     },
     SubscriptAccess {
-        object: Box<Node>,
-        index: Box<Node>,
+        object: Box<SNode>,
+        index: Box<SNode>,
     },
     BinaryOp {
         op: String,
-        left: Box<Node>,
-        right: Box<Node>,
+        left: Box<SNode>,
+        right: Box<SNode>,
     },
     UnaryOp {
         op: String,
-        operand: Box<Node>,
+        operand: Box<SNode>,
     },
     Ternary {
-        condition: Box<Node>,
-        true_expr: Box<Node>,
-        false_expr: Box<Node>,
+        condition: Box<SNode>,
+        true_expr: Box<SNode>,
+        false_expr: Box<SNode>,
     },
     Assignment {
-        target: Box<Node>,
-        value: Box<Node>,
+        target: Box<SNode>,
+        value: Box<SNode>,
     },
     ThrowStmt {
-        value: Box<Node>,
+        value: Box<SNode>,
     },
 
     /// Enum variant construction: EnumName.Variant(args)
     EnumConstruct {
         enum_name: String,
         variant: String,
-        args: Vec<Node>,
+        args: Vec<SNode>,
     },
     /// Struct construction: StructName { field: value, ... }
     StructConstruct {
@@ -185,27 +213,27 @@ pub enum Node {
     BoolLiteral(bool),
     NilLiteral,
     Identifier(String),
-    ListLiteral(Vec<Node>),
+    ListLiteral(Vec<SNode>),
     DictLiteral(Vec<DictEntry>),
 
     // Blocks
-    Block(Vec<Node>),
+    Block(Vec<SNode>),
     Closure {
         params: Vec<TypedParam>,
-        body: Vec<Node>,
+        body: Vec<SNode>,
     },
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MatchArm {
-    pub pattern: Node,
-    pub body: Vec<Node>,
+    pub pattern: SNode,
+    pub body: Vec<SNode>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DictEntry {
-    pub key: Node,
-    pub value: Node,
+    pub key: SNode,
+    pub value: SNode,
 }
 
 /// An enum variant declaration.
@@ -226,7 +254,8 @@ pub struct StructField {
 /// A type annotation (optional, for runtime checking).
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeExpr {
-    /// A named type: int, string, float, bool, nil, list, dict, closure, or a user-defined type name.
+    /// A named type: int, string, float, bool, nil, list, dict, closure,
+    /// or a user-defined type name.
     Named(String),
     /// A union type: `string | nil`, `int | float`.
     Union(Vec<TypeExpr>),

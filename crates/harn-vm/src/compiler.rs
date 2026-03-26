@@ -1,5 +1,5 @@
 use harn_lexer::StringSegment;
-use harn_parser::{Node, TypedParam};
+use harn_parser::{Node, SNode, TypedParam};
 
 use crate::chunk::{Chunk, CompiledFunction, Constant, Op};
 
@@ -34,15 +34,21 @@ impl Compiler {
 
     /// Compile a program (list of top-level nodes) into a Chunk.
     /// Finds the entry pipeline and compiles its body.
-    pub fn compile(mut self, program: &[Node]) -> Result<Chunk, CompileError> {
+    pub fn compile(mut self, program: &[SNode]) -> Result<Chunk, CompileError> {
         // Find entry pipeline
         let main = program
             .iter()
-            .find(|n| matches!(n, Node::Pipeline { name, .. } if name == "default"))
-            .or_else(|| program.iter().find(|n| matches!(n, Node::Pipeline { .. })));
+            .find(|sn| matches!(&sn.node, Node::Pipeline { name, .. } if name == "default"))
+            .or_else(|| {
+                program
+                    .iter()
+                    .find(|sn| matches!(&sn.node, Node::Pipeline { .. }))
+            });
 
-        if let Some(Node::Pipeline { body, .. }) = main {
-            self.compile_block(body)?;
+        if let Some(sn) = main {
+            if let Node::Pipeline { body, .. } = &sn.node {
+                self.compile_block(body)?;
+            }
         }
 
         self.chunk.emit(Op::Nil, self.line);
@@ -50,13 +56,13 @@ impl Compiler {
         Ok(self.chunk)
     }
 
-    fn compile_block(&mut self, stmts: &[Node]) -> Result<(), CompileError> {
-        for (i, stmt) in stmts.iter().enumerate() {
-            self.compile_node(stmt)?;
+    fn compile_block(&mut self, stmts: &[SNode]) -> Result<(), CompileError> {
+        for (i, snode) in stmts.iter().enumerate() {
+            self.compile_node(snode)?;
             // Pop intermediate expression results (keep last)
             if i < stmts.len() - 1 {
                 // Only pop if the statement leaves a value on the stack
-                if Self::produces_value(stmt) {
+                if Self::produces_value(&snode.node) {
                     self.chunk.emit(Op::Pop, self.line);
                 }
             }
@@ -64,8 +70,9 @@ impl Compiler {
         Ok(())
     }
 
-    fn compile_node(&mut self, node: &Node) -> Result<(), CompileError> {
-        match node {
+    fn compile_node(&mut self, snode: &SNode) -> Result<(), CompileError> {
+        self.line = snode.span.line as u32;
+        match &snode.node {
             Node::IntLiteral(n) => {
                 let idx = self.chunk.add_constant(Constant::Int(*n));
                 self.chunk.emit_u16(Op::Constant, idx, self.line);
@@ -101,7 +108,7 @@ impl Compiler {
 
             Node::Assignment { target, value } => {
                 self.compile_node(value)?;
-                if let Node::Identifier(name) = target.as_ref() {
+                if let Node::Identifier(name) = &target.node {
                     let idx = self.chunk.add_constant(Constant::String(name.clone()));
                     self.chunk.emit_u16(Op::SetVar, idx, self.line);
                 }
@@ -268,9 +275,9 @@ impl Compiler {
                 let exit_jump = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
                 self.chunk.emit(Op::Pop, self.line); // pop condition
                                                      // Compile body statements, popping all results
-                for stmt in body {
-                    self.compile_node(stmt)?;
-                    if Self::produces_value(stmt) {
+                for sn in body {
+                    self.compile_node(sn)?;
+                    if Self::produces_value(&sn.node) {
                         self.chunk.emit(Op::Pop, self.line);
                     }
                 }
@@ -347,8 +354,8 @@ impl Compiler {
                             let mut lexer = harn_lexer::Lexer::new(expr_str);
                             if let Ok(tokens) = lexer.tokenize() {
                                 let mut parser = harn_parser::Parser::new(tokens);
-                                if let Ok(node) = parser.parse_single_expression() {
-                                    self.compile_node(&node)?;
+                                if let Ok(snode) = parser.parse_single_expression() {
+                                    self.compile_node(&snode)?;
                                     // Convert result to string for concatenation
                                     let to_str = self
                                         .chunk

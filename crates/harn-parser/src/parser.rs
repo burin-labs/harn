@@ -1,5 +1,5 @@
 use crate::ast::*;
-use harn_lexer::{Token, TokenKind};
+use harn_lexer::{Span, Token, TokenKind};
 use std::fmt;
 
 /// Parser errors.
@@ -45,8 +45,23 @@ impl Parser {
         Self { tokens, pos: 0 }
     }
 
+    fn current_span(&self) -> Span {
+        self.tokens
+            .get(self.pos)
+            .map(|t| t.span)
+            .unwrap_or(Span::dummy())
+    }
+
+    fn prev_span(&self) -> Span {
+        if self.pos > 0 {
+            self.tokens[self.pos - 1].span
+        } else {
+            Span::dummy()
+        }
+    }
+
     /// Parse a complete .harn file.
-    pub fn parse(&mut self) -> Result<Vec<Node>, ParserError> {
+    pub fn parse(&mut self) -> Result<Vec<SNode>, ParserError> {
         let mut nodes = Vec::new();
         self.skip_newlines();
 
@@ -65,14 +80,15 @@ impl Parser {
     }
 
     /// Parse a single expression (for string interpolation).
-    pub fn parse_single_expression(&mut self) -> Result<Node, ParserError> {
+    pub fn parse_single_expression(&mut self) -> Result<SNode, ParserError> {
         self.skip_newlines();
         self.parse_expression()
     }
 
     // --- Declarations ---
 
-    fn parse_pipeline(&mut self) -> Result<Node, ParserError> {
+    fn parse_pipeline(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
         self.consume(&TokenKind::Pipeline, "pipeline")?;
         let name = self.consume_identifier("pipeline name")?;
 
@@ -91,21 +107,28 @@ impl Parser {
         let body = self.parse_block()?;
         self.consume(&TokenKind::RBrace, "}")?;
 
-        Ok(Node::Pipeline {
-            name,
-            params,
-            body,
-            extends,
-        })
+        Ok(spanned(
+            Node::Pipeline {
+                name,
+                params,
+                body,
+                extends,
+            },
+            Span::merge(start, self.prev_span()),
+        ))
     }
 
-    fn parse_import(&mut self) -> Result<Node, ParserError> {
+    fn parse_import(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
         self.consume(&TokenKind::Import, "import")?;
         if let Some(tok) = self.current() {
             if let TokenKind::StringLiteral(path) = &tok.kind {
                 let path = path.clone();
                 self.advance();
-                return Ok(Node::ImportDecl { path });
+                return Ok(spanned(
+                    Node::ImportDecl { path },
+                    Span::merge(start, self.prev_span()),
+                ));
             }
         }
         Err(self.error("import path string"))
@@ -113,7 +136,7 @@ impl Parser {
 
     // --- Statements ---
 
-    fn parse_block(&mut self) -> Result<Vec<Node>, ParserError> {
+    fn parse_block(&mut self) -> Result<Vec<SNode>, ParserError> {
         let mut stmts = Vec::new();
         self.skip_newlines();
 
@@ -124,7 +147,7 @@ impl Parser {
         Ok(stmts)
     }
 
-    fn parse_statement(&mut self) -> Result<Node, ParserError> {
+    fn parse_statement(&mut self) -> Result<SNode, ParserError> {
         self.skip_newlines();
 
         let tok = self.current().ok_or_else(|| ParserError::UnexpectedEof {
@@ -157,33 +180,42 @@ impl Parser {
         }
     }
 
-    fn parse_let_binding(&mut self) -> Result<Node, ParserError> {
+    fn parse_let_binding(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
         self.consume(&TokenKind::Let, "let")?;
         let name = self.consume_identifier("variable name")?;
         let type_ann = self.try_parse_type_annotation()?;
         self.consume(&TokenKind::Assign, "=")?;
         let value = self.parse_expression()?;
-        Ok(Node::LetBinding {
-            name,
-            type_ann,
-            value: Box::new(value),
-        })
+        Ok(spanned(
+            Node::LetBinding {
+                name,
+                type_ann,
+                value: Box::new(value),
+            },
+            Span::merge(start, self.prev_span()),
+        ))
     }
 
-    fn parse_var_binding(&mut self) -> Result<Node, ParserError> {
+    fn parse_var_binding(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
         self.consume(&TokenKind::Var, "var")?;
         let name = self.consume_identifier("variable name")?;
         let type_ann = self.try_parse_type_annotation()?;
         self.consume(&TokenKind::Assign, "=")?;
         let value = self.parse_expression()?;
-        Ok(Node::VarBinding {
-            name,
-            type_ann,
-            value: Box::new(value),
-        })
+        Ok(spanned(
+            Node::VarBinding {
+                name,
+                type_ann,
+                value: Box::new(value),
+            },
+            Span::merge(start, self.prev_span()),
+        ))
     }
 
-    fn parse_if_else(&mut self) -> Result<Node, ParserError> {
+    fn parse_if_else(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
         self.consume(&TokenKind::If, "if")?;
         let condition = self.parse_expression()?;
         self.consume(&TokenKind::LBrace, "{")?;
@@ -205,14 +237,18 @@ impl Parser {
             None
         };
 
-        Ok(Node::IfElse {
-            condition: Box::new(condition),
-            then_body,
-            else_body,
-        })
+        Ok(spanned(
+            Node::IfElse {
+                condition: Box::new(condition),
+                then_body,
+                else_body,
+            },
+            Span::merge(start, self.prev_span()),
+        ))
     }
 
-    fn parse_for_in(&mut self) -> Result<Node, ParserError> {
+    fn parse_for_in(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
         self.consume(&TokenKind::For, "for")?;
         let variable = self.consume_identifier("loop variable")?;
         self.consume(&TokenKind::In, "in")?;
@@ -220,14 +256,18 @@ impl Parser {
         self.consume(&TokenKind::LBrace, "{")?;
         let body = self.parse_block()?;
         self.consume(&TokenKind::RBrace, "}")?;
-        Ok(Node::ForIn {
-            variable,
-            iterable: Box::new(iterable),
-            body,
-        })
+        Ok(spanned(
+            Node::ForIn {
+                variable,
+                iterable: Box::new(iterable),
+                body,
+            },
+            Span::merge(start, self.prev_span()),
+        ))
     }
 
-    fn parse_match(&mut self) -> Result<Node, ParserError> {
+    fn parse_match(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
         self.consume(&TokenKind::Match, "match")?;
         let value = self.parse_expression()?;
         self.consume(&TokenKind::LBrace, "{")?;
@@ -245,13 +285,17 @@ impl Parser {
         }
 
         self.consume(&TokenKind::RBrace, "}")?;
-        Ok(Node::MatchExpr {
-            value: Box::new(value),
-            arms,
-        })
+        Ok(spanned(
+            Node::MatchExpr {
+                value: Box::new(value),
+                arms,
+            },
+            Span::merge(start, self.prev_span()),
+        ))
     }
 
-    fn parse_while_loop(&mut self) -> Result<Node, ParserError> {
+    fn parse_while_loop(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
         self.consume(&TokenKind::While, "while")?;
         let condition = if self.check(&TokenKind::LParen) {
             self.advance();
@@ -264,13 +308,17 @@ impl Parser {
         self.consume(&TokenKind::LBrace, "{")?;
         let body = self.parse_block()?;
         self.consume(&TokenKind::RBrace, "}")?;
-        Ok(Node::WhileLoop {
-            condition: Box::new(condition),
-            body,
-        })
+        Ok(spanned(
+            Node::WhileLoop {
+                condition: Box::new(condition),
+                body,
+            },
+            Span::merge(start, self.prev_span()),
+        ))
     }
 
-    fn parse_retry(&mut self) -> Result<Node, ParserError> {
+    fn parse_retry(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
         self.consume(&TokenKind::Retry, "retry")?;
         let count = if self.check(&TokenKind::LParen) {
             self.advance();
@@ -283,13 +331,17 @@ impl Parser {
         self.consume(&TokenKind::LBrace, "{")?;
         let body = self.parse_block()?;
         self.consume(&TokenKind::RBrace, "}")?;
-        Ok(Node::Retry {
-            count: Box::new(count),
-            body,
-        })
+        Ok(spanned(
+            Node::Retry {
+                count: Box::new(count),
+                body,
+            },
+            Span::merge(start, self.prev_span()),
+        ))
     }
 
-    fn parse_parallel(&mut self) -> Result<Node, ParserError> {
+    fn parse_parallel(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
         self.consume(&TokenKind::Parallel, "parallel")?;
         self.consume(&TokenKind::LParen, "(")?;
         let count = self.parse_expression()?;
@@ -312,14 +364,18 @@ impl Parser {
 
         let body = self.parse_block()?;
         self.consume(&TokenKind::RBrace, "}")?;
-        Ok(Node::Parallel {
-            count: Box::new(count),
-            variable,
-            body,
-        })
+        Ok(spanned(
+            Node::Parallel {
+                count: Box::new(count),
+                variable,
+                body,
+            },
+            Span::merge(start, self.prev_span()),
+        ))
     }
 
-    fn parse_parallel_map(&mut self) -> Result<Node, ParserError> {
+    fn parse_parallel_map(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
         self.consume(&TokenKind::ParallelMap, "parallel_map")?;
         self.consume(&TokenKind::LParen, "(")?;
         let list = self.parse_expression()?;
@@ -332,33 +388,48 @@ impl Parser {
 
         let body = self.parse_block()?;
         self.consume(&TokenKind::RBrace, "}")?;
-        Ok(Node::ParallelMap {
-            list: Box::new(list),
-            variable,
-            body,
-        })
+        Ok(spanned(
+            Node::ParallelMap {
+                list: Box::new(list),
+                variable,
+                body,
+            },
+            Span::merge(start, self.prev_span()),
+        ))
     }
 
-    fn parse_return(&mut self) -> Result<Node, ParserError> {
+    fn parse_return(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
         self.consume(&TokenKind::Return, "return")?;
         if self.is_at_end() || self.check(&TokenKind::Newline) || self.check(&TokenKind::RBrace) {
-            return Ok(Node::ReturnStmt { value: None });
+            return Ok(spanned(
+                Node::ReturnStmt { value: None },
+                Span::merge(start, self.prev_span()),
+            ));
         }
         let value = self.parse_expression()?;
-        Ok(Node::ReturnStmt {
-            value: Some(Box::new(value)),
-        })
+        Ok(spanned(
+            Node::ReturnStmt {
+                value: Some(Box::new(value)),
+            },
+            Span::merge(start, self.prev_span()),
+        ))
     }
 
-    fn parse_throw(&mut self) -> Result<Node, ParserError> {
+    fn parse_throw(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
         self.consume(&TokenKind::Throw, "throw")?;
         let value = self.parse_expression()?;
-        Ok(Node::ThrowStmt {
-            value: Box::new(value),
-        })
+        Ok(spanned(
+            Node::ThrowStmt {
+                value: Box::new(value),
+            },
+            Span::merge(start, self.prev_span()),
+        ))
     }
 
-    fn parse_override(&mut self) -> Result<Node, ParserError> {
+    fn parse_override(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
         self.consume(&TokenKind::Override, "override")?;
         let name = self.consume_identifier("override name")?;
         self.consume(&TokenKind::LParen, "(")?;
@@ -367,10 +438,14 @@ impl Parser {
         self.consume(&TokenKind::LBrace, "{")?;
         let body = self.parse_block()?;
         self.consume(&TokenKind::RBrace, "}")?;
-        Ok(Node::OverrideDecl { name, params, body })
+        Ok(spanned(
+            Node::OverrideDecl { name, params, body },
+            Span::merge(start, self.prev_span()),
+        ))
     }
 
-    fn parse_try_catch(&mut self) -> Result<Node, ParserError> {
+    fn parse_try_catch(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
         self.consume(&TokenKind::Try, "try")?;
         self.consume(&TokenKind::LBrace, "{")?;
         let body = self.parse_block()?;
@@ -391,15 +466,19 @@ impl Parser {
         self.consume(&TokenKind::LBrace, "{")?;
         let catch_body = self.parse_block()?;
         self.consume(&TokenKind::RBrace, "}")?;
-        Ok(Node::TryCatch {
-            body,
-            error_var,
-            error_type,
-            catch_body,
-        })
+        Ok(spanned(
+            Node::TryCatch {
+                body,
+                error_var,
+                error_type,
+                catch_body,
+            },
+            Span::merge(start, self.prev_span()),
+        ))
     }
 
-    fn parse_fn_decl(&mut self) -> Result<Node, ParserError> {
+    fn parse_fn_decl(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
         self.consume(&TokenKind::Fn, "fn")?;
         let name = self.consume_identifier("function name")?;
         self.consume(&TokenKind::LParen, "(")?;
@@ -415,23 +494,31 @@ impl Parser {
         self.consume(&TokenKind::LBrace, "{")?;
         let body = self.parse_block()?;
         self.consume(&TokenKind::RBrace, "}")?;
-        Ok(Node::FnDecl {
-            name,
-            params,
-            return_type,
-            body,
-        })
+        Ok(spanned(
+            Node::FnDecl {
+                name,
+                params,
+                return_type,
+                body,
+            },
+            Span::merge(start, self.prev_span()),
+        ))
     }
 
-    fn parse_type_decl(&mut self) -> Result<Node, ParserError> {
+    fn parse_type_decl(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
         self.consume(&TokenKind::TypeKw, "type")?;
         let name = self.consume_identifier("type name")?;
         self.consume(&TokenKind::Assign, "=")?;
         let type_expr = self.parse_type_expr()?;
-        Ok(Node::TypeDecl { name, type_expr })
+        Ok(spanned(
+            Node::TypeDecl { name, type_expr },
+            Span::merge(start, self.prev_span()),
+        ))
     }
 
-    fn parse_enum_decl(&mut self) -> Result<Node, ParserError> {
+    fn parse_enum_decl(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
         self.consume(&TokenKind::Enum, "enum")?;
         let name = self.consume_identifier("enum name")?;
         self.consume(&TokenKind::LBrace, "{")?;
@@ -460,10 +547,14 @@ impl Parser {
         }
 
         self.consume(&TokenKind::RBrace, "}")?;
-        Ok(Node::EnumDecl { name, variants })
+        Ok(spanned(
+            Node::EnumDecl { name, variants },
+            Span::merge(start, self.prev_span()),
+        ))
     }
 
-    fn parse_struct_decl(&mut self) -> Result<Node, ParserError> {
+    fn parse_struct_decl(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
         self.consume(&TokenKind::Struct, "struct")?;
         let name = self.consume_identifier("struct name")?;
         self.consume(&TokenKind::LBrace, "{")?;
@@ -492,10 +583,14 @@ impl Parser {
         }
 
         self.consume(&TokenKind::RBrace, "}")?;
-        Ok(Node::StructDecl { name, fields })
+        Ok(spanned(
+            Node::StructDecl { name, fields },
+            Span::merge(start, self.prev_span()),
+        ))
     }
 
-    fn parse_guard(&mut self) -> Result<Node, ParserError> {
+    fn parse_guard(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
         self.consume(&TokenKind::Guard, "guard")?;
         let condition = self.parse_expression()?;
         // Consume "else" — we reuse the Else keyword
@@ -503,52 +598,72 @@ impl Parser {
         self.consume(&TokenKind::LBrace, "{")?;
         let else_body = self.parse_block()?;
         self.consume(&TokenKind::RBrace, "}")?;
-        Ok(Node::GuardStmt {
-            condition: Box::new(condition),
-            else_body,
-        })
+        Ok(spanned(
+            Node::GuardStmt {
+                condition: Box::new(condition),
+                else_body,
+            },
+            Span::merge(start, self.prev_span()),
+        ))
     }
 
-    fn parse_deadline(&mut self) -> Result<Node, ParserError> {
+    fn parse_deadline(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
         self.consume(&TokenKind::Deadline, "deadline")?;
         let duration = self.parse_primary()?;
         self.consume(&TokenKind::LBrace, "{")?;
         let body = self.parse_block()?;
         self.consume(&TokenKind::RBrace, "}")?;
-        Ok(Node::DeadlineBlock {
-            duration: Box::new(duration),
-            body,
-        })
+        Ok(spanned(
+            Node::DeadlineBlock {
+                duration: Box::new(duration),
+                body,
+            },
+            Span::merge(start, self.prev_span()),
+        ))
     }
 
-    fn parse_yield(&mut self) -> Result<Node, ParserError> {
+    fn parse_yield(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
         self.consume(&TokenKind::Yield, "yield")?;
         if self.is_at_end() || self.check(&TokenKind::Newline) || self.check(&TokenKind::RBrace) {
-            return Ok(Node::YieldExpr { value: None });
+            return Ok(spanned(
+                Node::YieldExpr { value: None },
+                Span::merge(start, self.prev_span()),
+            ));
         }
         let value = self.parse_expression()?;
-        Ok(Node::YieldExpr {
-            value: Some(Box::new(value)),
-        })
+        Ok(spanned(
+            Node::YieldExpr {
+                value: Some(Box::new(value)),
+            },
+            Span::merge(start, self.prev_span()),
+        ))
     }
 
-    fn parse_mutex(&mut self) -> Result<Node, ParserError> {
+    fn parse_mutex(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
         self.consume(&TokenKind::Mutex, "mutex")?;
         self.consume(&TokenKind::LBrace, "{")?;
         let body = self.parse_block()?;
         self.consume(&TokenKind::RBrace, "}")?;
-        Ok(Node::MutexBlock { body })
+        Ok(spanned(
+            Node::MutexBlock { body },
+            Span::merge(start, self.prev_span()),
+        ))
     }
 
-    fn parse_ask_expr(&mut self) -> Result<Node, ParserError> {
+    fn parse_ask_expr(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
         self.consume(&TokenKind::Ask, "ask")?;
         self.consume(&TokenKind::LBrace, "{")?;
         // Parse as dict entries
         let mut entries = Vec::new();
         self.skip_newlines();
         while !self.is_at_end() && !self.check(&TokenKind::RBrace) {
+            let key_span = self.current_span();
             let name = self.consume_identifier("ask field")?;
-            let key = Node::StringLiteral(name);
+            let key = spanned(Node::StringLiteral(name), key_span);
             self.consume(&TokenKind::Colon, ":")?;
             let value = self.parse_expression()?;
             entries.push(DictEntry { key, value });
@@ -559,130 +674,166 @@ impl Parser {
             }
         }
         self.consume(&TokenKind::RBrace, "}")?;
-        Ok(Node::AskExpr { fields: entries })
+        Ok(spanned(
+            Node::AskExpr { fields: entries },
+            Span::merge(start, self.prev_span()),
+        ))
     }
 
     // --- Expressions (precedence climbing) ---
 
-    fn parse_expression_statement(&mut self) -> Result<Node, ParserError> {
+    fn parse_expression_statement(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
         let expr = self.parse_expression()?;
 
         // Check for assignment: identifier = value
-        if self.check(&TokenKind::Assign) && matches!(expr, Node::Identifier(_)) {
+        if self.check(&TokenKind::Assign) && matches!(expr.node, Node::Identifier(_)) {
             self.advance();
             let value = self.parse_expression()?;
-            return Ok(Node::Assignment {
-                target: Box::new(expr),
-                value: Box::new(value),
-            });
+            return Ok(spanned(
+                Node::Assignment {
+                    target: Box::new(expr),
+                    value: Box::new(value),
+                },
+                Span::merge(start, self.prev_span()),
+            ));
         }
 
         Ok(expr)
     }
 
-    fn parse_expression(&mut self) -> Result<Node, ParserError> {
+    fn parse_expression(&mut self) -> Result<SNode, ParserError> {
         self.skip_newlines();
         self.parse_pipe()
     }
 
-    fn parse_pipe(&mut self) -> Result<Node, ParserError> {
+    fn parse_pipe(&mut self) -> Result<SNode, ParserError> {
         let mut left = self.parse_range()?;
         while self.check(&TokenKind::Pipe) {
+            let start = left.span;
             self.advance();
             let right = self.parse_range()?;
-            left = Node::BinaryOp {
-                op: "|>".into(),
-                left: Box::new(left),
-                right: Box::new(right),
-            };
+            left = spanned(
+                Node::BinaryOp {
+                    op: "|>".into(),
+                    left: Box::new(left),
+                    right: Box::new(right),
+                },
+                Span::merge(start, self.prev_span()),
+            );
         }
         Ok(left)
     }
 
-    fn parse_range(&mut self) -> Result<Node, ParserError> {
+    fn parse_range(&mut self) -> Result<SNode, ParserError> {
         let left = self.parse_ternary()?;
         if self.check(&TokenKind::Thru) {
+            let start = left.span;
             self.advance();
             let right = self.parse_ternary()?;
-            return Ok(Node::RangeExpr {
-                start: Box::new(left),
-                end: Box::new(right),
-                inclusive: true,
-            });
+            return Ok(spanned(
+                Node::RangeExpr {
+                    start: Box::new(left),
+                    end: Box::new(right),
+                    inclusive: true,
+                },
+                Span::merge(start, self.prev_span()),
+            ));
         }
         if self.check(&TokenKind::Upto) {
+            let start = left.span;
             self.advance();
             let right = self.parse_ternary()?;
-            return Ok(Node::RangeExpr {
-                start: Box::new(left),
-                end: Box::new(right),
-                inclusive: false,
-            });
+            return Ok(spanned(
+                Node::RangeExpr {
+                    start: Box::new(left),
+                    end: Box::new(right),
+                    inclusive: false,
+                },
+                Span::merge(start, self.prev_span()),
+            ));
         }
         Ok(left)
     }
 
-    fn parse_ternary(&mut self) -> Result<Node, ParserError> {
+    fn parse_ternary(&mut self) -> Result<SNode, ParserError> {
         let condition = self.parse_nil_coalescing()?;
         if !self.check(&TokenKind::Question) {
             return Ok(condition);
         }
+        let start = condition.span;
         self.advance(); // skip ?
         let true_val = self.parse_nil_coalescing()?;
         self.consume(&TokenKind::Colon, ":")?;
         let false_val = self.parse_nil_coalescing()?;
-        Ok(Node::Ternary {
-            condition: Box::new(condition),
-            true_expr: Box::new(true_val),
-            false_expr: Box::new(false_val),
-        })
+        Ok(spanned(
+            Node::Ternary {
+                condition: Box::new(condition),
+                true_expr: Box::new(true_val),
+                false_expr: Box::new(false_val),
+            },
+            Span::merge(start, self.prev_span()),
+        ))
     }
 
-    fn parse_nil_coalescing(&mut self) -> Result<Node, ParserError> {
+    fn parse_nil_coalescing(&mut self) -> Result<SNode, ParserError> {
         let mut left = self.parse_logical_or()?;
         while self.check(&TokenKind::NilCoal) {
+            let start = left.span;
             self.advance();
             let right = self.parse_logical_or()?;
-            left = Node::BinaryOp {
-                op: "??".into(),
-                left: Box::new(left),
-                right: Box::new(right),
-            };
+            left = spanned(
+                Node::BinaryOp {
+                    op: "??".into(),
+                    left: Box::new(left),
+                    right: Box::new(right),
+                },
+                Span::merge(start, self.prev_span()),
+            );
         }
         Ok(left)
     }
 
-    fn parse_logical_or(&mut self) -> Result<Node, ParserError> {
+    fn parse_logical_or(&mut self) -> Result<SNode, ParserError> {
         let mut left = self.parse_logical_and()?;
         while self.check(&TokenKind::Or) {
+            let start = left.span;
             self.advance();
             let right = self.parse_logical_and()?;
-            left = Node::BinaryOp {
-                op: "||".into(),
-                left: Box::new(left),
-                right: Box::new(right),
-            };
+            left = spanned(
+                Node::BinaryOp {
+                    op: "||".into(),
+                    left: Box::new(left),
+                    right: Box::new(right),
+                },
+                Span::merge(start, self.prev_span()),
+            );
         }
         Ok(left)
     }
 
-    fn parse_logical_and(&mut self) -> Result<Node, ParserError> {
+    fn parse_logical_and(&mut self) -> Result<SNode, ParserError> {
         let mut left = self.parse_equality()?;
         while self.check(&TokenKind::And) {
+            let start = left.span;
             self.advance();
             let right = self.parse_equality()?;
-            left = Node::BinaryOp {
-                op: "&&".into(),
-                left: Box::new(left),
-                right: Box::new(right),
-            };
+            left = spanned(
+                Node::BinaryOp {
+                    op: "&&".into(),
+                    left: Box::new(left),
+                    right: Box::new(right),
+                },
+                Span::merge(start, self.prev_span()),
+            );
         }
         Ok(left)
     }
 
-    fn parse_equality(&mut self) -> Result<Node, ParserError> {
+    fn parse_equality(&mut self) -> Result<SNode, ParserError> {
         let mut left = self.parse_comparison()?;
         while self.check(&TokenKind::Eq) || self.check(&TokenKind::Neq) {
+            let start = left.span;
             let op = if self.check(&TokenKind::Eq) {
                 "=="
             } else {
@@ -690,22 +841,26 @@ impl Parser {
             };
             self.advance();
             let right = self.parse_comparison()?;
-            left = Node::BinaryOp {
-                op: op.into(),
-                left: Box::new(left),
-                right: Box::new(right),
-            };
+            left = spanned(
+                Node::BinaryOp {
+                    op: op.into(),
+                    left: Box::new(left),
+                    right: Box::new(right),
+                },
+                Span::merge(start, self.prev_span()),
+            );
         }
         Ok(left)
     }
 
-    fn parse_comparison(&mut self) -> Result<Node, ParserError> {
+    fn parse_comparison(&mut self) -> Result<SNode, ParserError> {
         let mut left = self.parse_additive()?;
         while self.check(&TokenKind::Lt)
             || self.check(&TokenKind::Gt)
             || self.check(&TokenKind::Lte)
             || self.check(&TokenKind::Gte)
         {
+            let start = left.span;
             let op = match self.current().map(|t| &t.kind) {
                 Some(TokenKind::Lt) => "<",
                 Some(TokenKind::Gt) => ">",
@@ -715,18 +870,22 @@ impl Parser {
             };
             self.advance();
             let right = self.parse_additive()?;
-            left = Node::BinaryOp {
-                op: op.into(),
-                left: Box::new(left),
-                right: Box::new(right),
-            };
+            left = spanned(
+                Node::BinaryOp {
+                    op: op.into(),
+                    left: Box::new(left),
+                    right: Box::new(right),
+                },
+                Span::merge(start, self.prev_span()),
+            );
         }
         Ok(left)
     }
 
-    fn parse_additive(&mut self) -> Result<Node, ParserError> {
+    fn parse_additive(&mut self) -> Result<SNode, ParserError> {
         let mut left = self.parse_multiplicative()?;
         while self.check(&TokenKind::Plus) || self.check(&TokenKind::Minus) {
+            let start = left.span;
             let op = if self.check(&TokenKind::Plus) {
                 "+"
             } else {
@@ -734,18 +893,22 @@ impl Parser {
             };
             self.advance();
             let right = self.parse_multiplicative()?;
-            left = Node::BinaryOp {
-                op: op.into(),
-                left: Box::new(left),
-                right: Box::new(right),
-            };
+            left = spanned(
+                Node::BinaryOp {
+                    op: op.into(),
+                    left: Box::new(left),
+                    right: Box::new(right),
+                },
+                Span::merge(start, self.prev_span()),
+            );
         }
         Ok(left)
     }
 
-    fn parse_multiplicative(&mut self) -> Result<Node, ParserError> {
+    fn parse_multiplicative(&mut self) -> Result<SNode, ParserError> {
         let mut left = self.parse_unary()?;
         while self.check(&TokenKind::Star) || self.check(&TokenKind::Slash) {
+            let start = left.span;
             let op = if self.check(&TokenKind::Star) {
                 "*"
             } else {
@@ -753,71 +916,97 @@ impl Parser {
             };
             self.advance();
             let right = self.parse_unary()?;
-            left = Node::BinaryOp {
-                op: op.into(),
-                left: Box::new(left),
-                right: Box::new(right),
-            };
+            left = spanned(
+                Node::BinaryOp {
+                    op: op.into(),
+                    left: Box::new(left),
+                    right: Box::new(right),
+                },
+                Span::merge(start, self.prev_span()),
+            );
         }
         Ok(left)
     }
 
-    fn parse_unary(&mut self) -> Result<Node, ParserError> {
+    fn parse_unary(&mut self) -> Result<SNode, ParserError> {
         if self.check(&TokenKind::Not) {
+            let start = self.current_span();
             self.advance();
             let operand = self.parse_unary()?;
-            return Ok(Node::UnaryOp {
-                op: "!".into(),
-                operand: Box::new(operand),
-            });
+            return Ok(spanned(
+                Node::UnaryOp {
+                    op: "!".into(),
+                    operand: Box::new(operand),
+                },
+                Span::merge(start, self.prev_span()),
+            ));
         }
         if self.check(&TokenKind::Minus) {
+            let start = self.current_span();
             self.advance();
             let operand = self.parse_unary()?;
-            return Ok(Node::UnaryOp {
-                op: "-".into(),
-                operand: Box::new(operand),
-            });
+            return Ok(spanned(
+                Node::UnaryOp {
+                    op: "-".into(),
+                    operand: Box::new(operand),
+                },
+                Span::merge(start, self.prev_span()),
+            ));
         }
         self.parse_postfix()
     }
 
-    fn parse_postfix(&mut self) -> Result<Node, ParserError> {
+    fn parse_postfix(&mut self) -> Result<SNode, ParserError> {
         let mut expr = self.parse_primary()?;
 
         loop {
             if self.check(&TokenKind::Dot) {
+                let start = expr.span;
                 self.advance();
                 let member = self.consume_identifier("member name")?;
                 if self.check(&TokenKind::LParen) {
                     self.advance();
                     let args = self.parse_arg_list()?;
                     self.consume(&TokenKind::RParen, ")")?;
-                    expr = Node::MethodCall {
-                        object: Box::new(expr),
-                        method: member,
-                        args,
-                    };
+                    expr = spanned(
+                        Node::MethodCall {
+                            object: Box::new(expr),
+                            method: member,
+                            args,
+                        },
+                        Span::merge(start, self.prev_span()),
+                    );
                 } else {
-                    expr = Node::PropertyAccess {
-                        object: Box::new(expr),
-                        property: member,
-                    };
+                    expr = spanned(
+                        Node::PropertyAccess {
+                            object: Box::new(expr),
+                            property: member,
+                        },
+                        Span::merge(start, self.prev_span()),
+                    );
                 }
             } else if self.check(&TokenKind::LBracket) {
+                let start = expr.span;
                 self.advance();
                 let index = self.parse_expression()?;
                 self.consume(&TokenKind::RBracket, "]")?;
-                expr = Node::SubscriptAccess {
-                    object: Box::new(expr),
-                    index: Box::new(index),
-                };
-            } else if self.check(&TokenKind::LParen) && matches!(expr, Node::Identifier(_)) {
+                expr = spanned(
+                    Node::SubscriptAccess {
+                        object: Box::new(expr),
+                        index: Box::new(index),
+                    },
+                    Span::merge(start, self.prev_span()),
+                );
+            } else if self.check(&TokenKind::LParen) && matches!(expr.node, Node::Identifier(_)) {
+                let start = expr.span;
                 self.advance();
                 let args = self.parse_arg_list()?;
                 self.consume(&TokenKind::RParen, ")")?;
-                if let Node::Identifier(name) = expr {
-                    expr = Node::FunctionCall { name, args };
+                if let Node::Identifier(name) = expr.node {
+                    expr = spanned(
+                        Node::FunctionCall { name, args },
+                        Span::merge(start, self.prev_span()),
+                    );
                 }
             } else {
                 break;
@@ -827,48 +1016,73 @@ impl Parser {
         Ok(expr)
     }
 
-    fn parse_primary(&mut self) -> Result<Node, ParserError> {
+    fn parse_primary(&mut self) -> Result<SNode, ParserError> {
         let tok = self.current().ok_or_else(|| ParserError::UnexpectedEof {
             expected: "expression".into(),
         })?;
+        let start = self.current_span();
 
         match &tok.kind {
             TokenKind::StringLiteral(s) => {
                 let s = s.clone();
                 self.advance();
-                Ok(Node::StringLiteral(s))
+                Ok(spanned(
+                    Node::StringLiteral(s),
+                    Span::merge(start, self.prev_span()),
+                ))
             }
             TokenKind::InterpolatedString(segments) => {
                 let segments = segments.clone();
                 self.advance();
-                Ok(Node::InterpolatedString(segments))
+                Ok(spanned(
+                    Node::InterpolatedString(segments),
+                    Span::merge(start, self.prev_span()),
+                ))
             }
             TokenKind::IntLiteral(n) => {
                 let n = *n;
                 self.advance();
-                Ok(Node::IntLiteral(n))
+                Ok(spanned(
+                    Node::IntLiteral(n),
+                    Span::merge(start, self.prev_span()),
+                ))
             }
             TokenKind::FloatLiteral(n) => {
                 let n = *n;
                 self.advance();
-                Ok(Node::FloatLiteral(n))
+                Ok(spanned(
+                    Node::FloatLiteral(n),
+                    Span::merge(start, self.prev_span()),
+                ))
             }
             TokenKind::True => {
                 self.advance();
-                Ok(Node::BoolLiteral(true))
+                Ok(spanned(
+                    Node::BoolLiteral(true),
+                    Span::merge(start, self.prev_span()),
+                ))
             }
             TokenKind::False => {
                 self.advance();
-                Ok(Node::BoolLiteral(false))
+                Ok(spanned(
+                    Node::BoolLiteral(false),
+                    Span::merge(start, self.prev_span()),
+                ))
             }
             TokenKind::Nil => {
                 self.advance();
-                Ok(Node::NilLiteral)
+                Ok(spanned(
+                    Node::NilLiteral,
+                    Span::merge(start, self.prev_span()),
+                ))
             }
             TokenKind::Identifier(name) => {
                 let name = name.clone();
                 self.advance();
-                Ok(Node::Identifier(name))
+                Ok(spanned(
+                    Node::Identifier(name),
+                    Span::merge(start, self.prev_span()),
+                ))
             }
             TokenKind::LParen => {
                 self.advance();
@@ -886,7 +1100,10 @@ impl Parser {
             TokenKind::DurationLiteral(ms) => {
                 let ms = *ms;
                 self.advance();
-                Ok(Node::DurationLiteral(ms))
+                Ok(spanned(
+                    Node::DurationLiteral(ms),
+                    Span::merge(start, self.prev_span()),
+                ))
             }
             TokenKind::Ask => self.parse_ask_expr(),
             TokenKind::Deadline => self.parse_deadline(),
@@ -894,15 +1111,20 @@ impl Parser {
         }
     }
 
-    fn parse_spawn_expr(&mut self) -> Result<Node, ParserError> {
+    fn parse_spawn_expr(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
         self.consume(&TokenKind::Spawn, "spawn")?;
         self.consume(&TokenKind::LBrace, "{")?;
         let body = self.parse_block()?;
         self.consume(&TokenKind::RBrace, "}")?;
-        Ok(Node::SpawnExpr { body })
+        Ok(spanned(
+            Node::SpawnExpr { body },
+            Span::merge(start, self.prev_span()),
+        ))
     }
 
-    fn parse_list_literal(&mut self) -> Result<Node, ParserError> {
+    fn parse_list_literal(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
         self.consume(&TokenKind::LBracket, "[")?;
         let mut elements = Vec::new();
         self.skip_newlines();
@@ -917,29 +1139,34 @@ impl Parser {
         }
 
         self.consume(&TokenKind::RBracket, "]")?;
-        Ok(Node::ListLiteral(elements))
+        Ok(spanned(
+            Node::ListLiteral(elements),
+            Span::merge(start, self.prev_span()),
+        ))
     }
 
-    fn parse_dict_or_closure(&mut self) -> Result<Node, ParserError> {
+    fn parse_dict_or_closure(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
         self.consume(&TokenKind::LBrace, "{")?;
         self.skip_newlines();
 
         // Empty dict
         if self.check(&TokenKind::RBrace) {
             self.advance();
-            return Ok(Node::DictLiteral(Vec::new()));
+            return Ok(spanned(
+                Node::DictLiteral(Vec::new()),
+                Span::merge(start, self.prev_span()),
+            ));
         }
 
         // Lookahead: scan for -> before } to disambiguate closure from dict.
-        // { ident -> ...} or { ident, ident -> ... } or { ident: type -> ... } = closure
-        // { ident: expr, ... } = dict
         let saved = self.pos;
         if self.is_closure_lookahead() {
             self.pos = saved;
-            return self.parse_closure_body();
+            return self.parse_closure_body(start);
         }
         self.pos = saved;
-        self.parse_dict_literal()
+        self.parse_dict_literal(start)
     }
 
     /// Scan forward to determine if this is a closure (has -> before matching }).
@@ -969,12 +1196,15 @@ impl Parser {
     }
 
     /// Parse closure params and body (after opening { has been consumed).
-    fn parse_closure_body(&mut self) -> Result<Node, ParserError> {
+    fn parse_closure_body(&mut self, start: Span) -> Result<SNode, ParserError> {
         let params = self.parse_typed_param_list_until_arrow()?;
         self.consume(&TokenKind::Arrow, "->")?;
         let body = self.parse_block()?;
         self.consume(&TokenKind::RBrace, "}")?;
-        Ok(Node::Closure { params, body })
+        Ok(spanned(
+            Node::Closure { params, body },
+            Span::merge(start, self.prev_span()),
+        ))
     }
 
     /// Parse typed params until we see ->. Handles: `x`, `x: int`, `x, y`, `x: int, y: string`.
@@ -993,7 +1223,7 @@ impl Parser {
         Ok(params)
     }
 
-    fn parse_dict_literal(&mut self) -> Result<Node, ParserError> {
+    fn parse_dict_literal(&mut self, start: Span) -> Result<SNode, ParserError> {
         let mut entries = Vec::new();
         self.skip_newlines();
 
@@ -1005,9 +1235,10 @@ impl Parser {
                 self.consume(&TokenKind::RBracket, "]")?;
                 k
             } else {
-                // Static key: identifier → string literal
+                // Static key: identifier -> string literal
+                let key_span = self.current_span();
                 let name = self.consume_identifier("dict key")?;
-                Node::StringLiteral(name)
+                spanned(Node::StringLiteral(name), key_span)
             };
             self.consume(&TokenKind::Colon, ":")?;
             let value = self.parse_expression()?;
@@ -1020,7 +1251,10 @@ impl Parser {
         }
 
         self.consume(&TokenKind::RBrace, "}")?;
-        Ok(Node::DictLiteral(entries))
+        Ok(spanned(
+            Node::DictLiteral(entries),
+            Span::merge(start, self.prev_span()),
+        ))
     }
 
     // --- Helpers ---
@@ -1145,7 +1379,7 @@ impl Parser {
         Ok(TypeExpr::Shape(fields))
     }
 
-    fn parse_arg_list(&mut self) -> Result<Vec<Node>, ParserError> {
+    fn parse_arg_list(&mut self) -> Result<Vec<SNode>, ParserError> {
         let mut args = Vec::new();
         self.skip_newlines();
 

@@ -31,6 +31,7 @@ impl std::error::Error for LexerError {}
 pub struct Lexer {
     source: Vec<char>,
     pos: usize,
+    byte_pos: usize,
     line: usize,
     column: usize,
 }
@@ -40,6 +41,7 @@ impl Lexer {
         Self {
             source: source.chars().collect(),
             pos: 0,
+            byte_pos: 0,
             line: 1,
             column: 1,
         }
@@ -59,7 +61,11 @@ impl Lexer {
 
             // Newlines
             if ch == '\n' {
-                tokens.push(self.token(TokenKind::Newline));
+                let start = self.byte_pos;
+                tokens.push(Token::with_span(
+                    TokenKind::Newline,
+                    Span::with_offsets(start, start + 1, self.line, self.column),
+                ));
                 self.advance();
                 self.line += 1;
                 self.column = 1;
@@ -104,14 +110,24 @@ impl Lexer {
 
             // Single-character operators and delimiters
             if let Some(kind) = self.single_char_token(ch) {
-                tokens.push(self.token(kind));
+                let start = self.byte_pos;
+                let col = self.column;
                 self.advance();
+                tokens.push(Token::with_span(
+                    kind,
+                    Span::with_offsets(start, self.byte_pos, self.line, col),
+                ));
                 continue;
             }
 
             return Err(LexerError::UnexpectedCharacter(
                 ch,
-                Span::new(self.line, self.column),
+                Span::with_offsets(
+                    self.byte_pos,
+                    self.byte_pos + ch.len_utf8(),
+                    self.line,
+                    self.column,
+                ),
             ));
         }
 
@@ -124,12 +140,18 @@ impl Lexer {
     }
 
     fn advance(&mut self) {
+        if self.pos < self.source.len() {
+            self.byte_pos += self.source[self.pos].len_utf8();
+        }
         self.pos += 1;
         self.column += 1;
     }
 
     fn token(&self, kind: TokenKind) -> Token {
-        Token::new(kind, self.line, self.column)
+        Token::with_span(
+            kind,
+            Span::with_offsets(self.byte_pos, self.byte_pos, self.line, self.column),
+        )
     }
 
     fn skip_line_comment(&mut self) {
@@ -139,7 +161,7 @@ impl Lexer {
     }
 
     fn skip_block_comment(&mut self) -> Result<(), LexerError> {
-        let start = Span::new(self.line, self.column);
+        let start = Span::with_offsets(self.byte_pos, self.byte_pos, self.line, self.column);
         self.advance(); // skip /
         self.advance(); // skip *
         let mut depth = 1;
@@ -153,6 +175,7 @@ impl Lexer {
                 self.advance();
                 self.advance();
             } else if self.source[self.pos] == '\n' {
+                self.byte_pos += self.source[self.pos].len_utf8();
                 self.line += 1;
                 self.column = 1;
                 self.pos += 1;
@@ -167,14 +190,15 @@ impl Lexer {
     }
 
     fn read_string(&mut self) -> Result<Token, LexerError> {
-        let start = Span::new(self.line, self.column);
+        let start_byte = self.byte_pos;
+        let start = Span::with_offsets(start_byte, start_byte, self.line, self.column);
 
         // Check for triple-quote
         if self.pos + 2 < self.source.len()
             && self.source[self.pos + 1] == '"'
             && self.source[self.pos + 2] == '"'
         {
-            return self.read_multi_line_string(start);
+            return self.read_multi_line_string(start_byte, start);
         }
 
         self.advance(); // skip opening "
@@ -191,16 +215,14 @@ impl Lexer {
                     if !value.is_empty() {
                         segments.push(StringSegment::Literal(value));
                     }
-                    return Ok(Token::new(
+                    return Ok(Token::with_span(
                         TokenKind::InterpolatedString(segments),
-                        start.line,
-                        start.column,
+                        Span::with_offsets(start_byte, self.byte_pos, start.line, start.column),
                     ));
                 }
-                return Ok(Token::new(
+                return Ok(Token::with_span(
                     TokenKind::StringLiteral(value),
-                    start.line,
-                    start.column,
+                    Span::with_offsets(start_byte, self.byte_pos, start.line, start.column),
                 ));
             }
 
@@ -235,7 +257,12 @@ impl Lexer {
                 if expr.trim().is_empty() {
                     return Err(LexerError::UnexpectedCharacter(
                         '}',
-                        Span::new(self.line, self.column),
+                        Span::with_offsets(
+                            self.byte_pos,
+                            self.byte_pos + 1,
+                            self.line,
+                            self.column,
+                        ),
                     ));
                 }
                 segments.push(StringSegment::Expression(expr));
@@ -273,7 +300,11 @@ impl Lexer {
         Err(LexerError::UnterminatedString(start))
     }
 
-    fn read_multi_line_string(&mut self, start: Span) -> Result<Token, LexerError> {
+    fn read_multi_line_string(
+        &mut self,
+        start_byte: usize,
+        start: Span,
+    ) -> Result<Token, LexerError> {
         self.advance(); // skip first "
         self.advance(); // skip second "
         self.advance(); // skip third "
@@ -296,10 +327,9 @@ impl Lexer {
                 self.advance(); // skip second "
                 self.advance(); // skip third "
                 let stripped = strip_common_indent(&value);
-                return Ok(Token::new(
+                return Ok(Token::with_span(
                     TokenKind::StringLiteral(stripped),
-                    start.line,
-                    start.column,
+                    Span::with_offsets(start_byte, self.byte_pos, start.line, start.column),
                 ));
             }
             if self.source[self.pos] == '\n' {
@@ -316,6 +346,7 @@ impl Lexer {
     }
 
     fn read_number(&mut self) -> Token {
+        let start_byte = self.byte_pos;
         let start_col = self.column;
         let mut num_str = String::new();
         let mut is_float = false;
@@ -344,16 +375,25 @@ impl Lexer {
         // Check for duration suffix: ms, s, m, h
         if !is_float {
             if let Some(ms) = self.try_duration_suffix(&num_str) {
-                return Token::new(TokenKind::DurationLiteral(ms), self.line, start_col);
+                return Token::with_span(
+                    TokenKind::DurationLiteral(ms),
+                    Span::with_offsets(start_byte, self.byte_pos, self.line, start_col),
+                );
             }
         }
 
         if is_float {
             let n: f64 = num_str.parse().unwrap_or(0.0);
-            Token::new(TokenKind::FloatLiteral(n), self.line, start_col)
+            Token::with_span(
+                TokenKind::FloatLiteral(n),
+                Span::with_offsets(start_byte, self.byte_pos, self.line, start_col),
+            )
         } else {
             let n: i64 = num_str.parse().unwrap_or(0);
-            Token::new(TokenKind::IntLiteral(n), self.line, start_col)
+            Token::with_span(
+                TokenKind::IntLiteral(n),
+                Span::with_offsets(start_byte, self.byte_pos, self.line, start_col),
+            )
         }
     }
 
@@ -400,6 +440,7 @@ impl Lexer {
     }
 
     fn read_identifier(&mut self) -> Token {
+        let start_byte = self.byte_pos;
         let start_col = self.column;
         let mut ident = String::new();
 
@@ -451,7 +492,10 @@ impl Lexer {
             _ => TokenKind::Identifier(ident),
         };
 
-        Token::new(kind, self.line, start_col)
+        Token::with_span(
+            kind,
+            Span::with_offsets(start_byte, self.byte_pos, self.line, start_col),
+        )
     }
 
     fn try_two_char_op(&mut self) -> Option<Token> {
@@ -474,10 +518,14 @@ impl Lexer {
             _ => return None,
         };
 
-        let tok = self.token(kind);
+        let start_byte = self.byte_pos;
+        let col = self.column;
         self.advance();
         self.advance();
-        Some(tok)
+        Some(Token::with_span(
+            kind,
+            Span::with_offsets(start_byte, self.byte_pos, self.line, col),
+        ))
     }
 
     fn single_char_token(&self, ch: char) -> Option<TokenKind> {

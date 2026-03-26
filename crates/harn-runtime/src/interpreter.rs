@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use harn_lexer::{Lexer, StringSegment};
-use harn_parser::{MatchArm, Node, Parser, TypedParam};
+use harn_parser::{MatchArm, Node, Parser, SNode, TypedParam};
 
 use crate::environment::Environment;
 use crate::error::RuntimeError;
@@ -32,7 +32,7 @@ static TASK_COUNTER: AtomicU64 = AtomicU64::new(0);
 /// The Harn tree-walking async interpreter.
 pub struct Interpreter {
     env: Environment,
-    pipelines: BTreeMap<String, Node>,
+    pipelines: BTreeMap<String, SNode>,
     builtins: Arc<BTreeMap<String, BuiltinFn>>,
     async_builtins: Arc<BTreeMap<String, AsyncBuiltinFn>>,
     output: Vec<u8>,
@@ -138,12 +138,12 @@ impl Interpreter {
     }
 
     /// Run a parsed program.
-    pub async fn run(&mut self, program: &[Node]) -> Result<(), RuntimeError> {
+    pub async fn run(&mut self, program: &[SNode]) -> Result<(), RuntimeError> {
         // Register all pipelines and process imports
         for node in program {
-            if let Node::Pipeline { name, .. } = node {
+            if let Node::Pipeline { name, .. } = &node.node {
                 self.pipelines.insert(name.clone(), node.clone());
-            } else if let Node::ImportDecl { path } = node {
+            } else if let Node::ImportDecl { path } = &node.node {
                 self.eval_import(path).await?;
             }
         }
@@ -152,7 +152,7 @@ impl Interpreter {
         let main = self.pipelines.get("default").cloned().or_else(|| {
             program
                 .iter()
-                .find(|n| matches!(n, Node::Pipeline { .. }))
+                .find(|n| matches!(n.node, Node::Pipeline { .. }))
                 .cloned()
         });
 
@@ -163,7 +163,7 @@ impl Interpreter {
             body,
             extends,
             ..
-        } = &main
+        } = &main.node
         {
             let pipeline_env = self.env.child();
 
@@ -202,7 +202,7 @@ impl Interpreter {
         }
     }
 
-    async fn exec_statements(&mut self, stmts: &[Node]) -> Result<Value, RuntimeError> {
+    async fn exec_statements(&mut self, stmts: &[SNode]) -> Result<Value, RuntimeError> {
         let mut result = Value::Nil;
         for stmt in stmts {
             result = self.eval(stmt).await?;
@@ -214,7 +214,7 @@ impl Interpreter {
     async fn exec_in_env(
         &mut self,
         env: Environment,
-        stmts: &[Node],
+        stmts: &[SNode],
     ) -> Result<Value, RuntimeError> {
         let saved = self.env.clone();
         self.env = env;
@@ -225,14 +225,14 @@ impl Interpreter {
 
     fn eval<'a>(
         &'a mut self,
-        node: &'a Node,
+        node: &'a SNode,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, RuntimeError>> + 'a>>
     {
         Box::pin(self.eval_inner(node))
     }
 
-    async fn eval_inner(&mut self, node: &Node) -> Result<Value, RuntimeError> {
-        match node {
+    async fn eval_inner(&mut self, node: &SNode) -> Result<Value, RuntimeError> {
+        match &node.node {
             Node::LetBinding {
                 name,
                 type_ann,
@@ -273,7 +273,7 @@ impl Interpreter {
 
             Node::Assignment { target, value } => {
                 let val = self.eval(value).await?;
-                if let Node::Identifier(name) = target.as_ref() {
+                if let Node::Identifier(name) = &target.node {
                     self.env.assign(name, val)?;
                 }
                 Ok(Value::Nil)
@@ -613,8 +613,8 @@ impl Interpreter {
     async fn eval_for_in(
         &mut self,
         variable: &str,
-        iterable: &Node,
-        body: &[Node],
+        iterable: &SNode,
+        body: &[SNode],
     ) -> Result<Value, RuntimeError> {
         let iter_val = self.eval(iterable).await?;
 
@@ -646,7 +646,11 @@ impl Interpreter {
         Ok(result)
     }
 
-    async fn eval_match(&mut self, value: &Node, arms: &[MatchArm]) -> Result<Value, RuntimeError> {
+    async fn eval_match(
+        &mut self,
+        value: &SNode,
+        arms: &[MatchArm],
+    ) -> Result<Value, RuntimeError> {
         let val = self.eval(value).await?;
         for arm in arms {
             let pattern_val = self.eval(&arm.pattern).await?;
@@ -657,7 +661,11 @@ impl Interpreter {
         Ok(Value::Nil)
     }
 
-    async fn eval_while(&mut self, condition: &Node, body: &[Node]) -> Result<Value, RuntimeError> {
+    async fn eval_while(
+        &mut self,
+        condition: &SNode,
+        body: &[SNode],
+    ) -> Result<Value, RuntimeError> {
         let mut result = Value::Nil;
         let max_iterations = 10_000;
         let mut iteration = 0;
@@ -675,8 +683,8 @@ impl Interpreter {
 
     async fn eval_retry(
         &mut self,
-        count_node: &Node,
-        body: &[Node],
+        count_node: &SNode,
+        body: &[SNode],
     ) -> Result<Value, RuntimeError> {
         let count_val = self.eval(count_node).await?;
         let count = count_val.as_int().unwrap_or(3) as usize;
@@ -695,10 +703,10 @@ impl Interpreter {
 
     async fn eval_try_catch(
         &mut self,
-        body: &[Node],
+        body: &[SNode],
         error_var: &Option<String>,
         error_type: &Option<harn_parser::TypeExpr>,
-        catch_body: &[Node],
+        catch_body: &[SNode],
     ) -> Result<Value, RuntimeError> {
         match self.exec_statements(body).await {
             Ok(val) => Ok(val),
@@ -748,9 +756,9 @@ impl Interpreter {
 
     async fn eval_parallel(
         &mut self,
-        count_node: &Node,
+        count_node: &SNode,
         variable: Option<&str>,
-        body: &[Node],
+        body: &[SNode],
     ) -> Result<Value, RuntimeError> {
         let count_val = self.eval(count_node).await?;
         let n = count_val.as_int().unwrap_or(1) as usize;
@@ -782,9 +790,9 @@ impl Interpreter {
 
     async fn eval_parallel_map(
         &mut self,
-        list_node: &Node,
+        list_node: &SNode,
         variable: &str,
-        body: &[Node],
+        body: &[SNode],
     ) -> Result<Value, RuntimeError> {
         let list_val = self.eval(list_node).await?;
         let items = match list_val {
@@ -816,7 +824,7 @@ impl Interpreter {
         Ok(Value::List(results))
     }
 
-    fn eval_spawn(&mut self, body: &[Node]) -> Result<Value, RuntimeError> {
+    fn eval_spawn(&mut self, body: &[SNode]) -> Result<Value, RuntimeError> {
         let task_id = format!("task_{}", TASK_COUNTER.fetch_add(1, Ordering::Relaxed));
 
         let spawn_env = self.env.child();
@@ -886,13 +894,13 @@ impl Interpreter {
         }
 
         for node in &nodes {
-            if let Node::Pipeline { name, .. } = node {
+            if let Node::Pipeline { name, .. } = &node.node {
                 self.pipelines.insert(name.clone(), node.clone());
             }
         }
 
         for node in &nodes {
-            if !matches!(node, Node::Pipeline { .. }) {
+            if !matches!(node.node, Node::Pipeline { .. }) {
                 self.eval(node).await?;
             }
         }
@@ -906,7 +914,7 @@ impl Interpreter {
     async fn eval_function_call(
         &mut self,
         name: &str,
-        args: &[Node],
+        args: &[SNode],
     ) -> Result<Value, RuntimeError> {
         // Check for user-defined function (closure) first
         if let Some(Value::Closure {
@@ -978,7 +986,7 @@ impl Interpreter {
         Err(RuntimeError::UndefinedBuiltin(name.to_string()))
     }
 
-    async fn eval_args(&mut self, args: &[Node]) -> Result<Vec<Value>, RuntimeError> {
+    async fn eval_args(&mut self, args: &[SNode]) -> Result<Vec<Value>, RuntimeError> {
         let mut values = Vec::with_capacity(args.len());
         for arg in args {
             values.push(self.eval(arg).await?);
@@ -989,7 +997,7 @@ impl Interpreter {
     async fn invoke_closure(
         &mut self,
         params: &[String],
-        body: &[Node],
+        body: &[SNode],
         captured_env: &Environment,
         args: &[Value],
     ) -> Result<Value, RuntimeError> {
@@ -1010,7 +1018,7 @@ impl Interpreter {
     #[allow(clippy::cloned_ref_to_slice_refs)]
     async fn invoke_closure_item(
         &mut self,
-        closure: (&[String], &[Node], &Environment),
+        closure: (&[String], &[SNode], &Environment),
         item: &Value,
     ) -> Result<Value, RuntimeError> {
         let (params, body, env) = closure;
@@ -1022,14 +1030,14 @@ impl Interpreter {
 
     async fn eval_method_call(
         &mut self,
-        object: &Node,
+        object: &SNode,
         method: &str,
-        args: &[Node],
+        args: &[SNode],
     ) -> Result<Value, RuntimeError> {
         let obj = self.eval(object).await?;
         let arg_values = self.eval_args(args).await?;
 
-        if let Node::Identifier(obj_name) = object {
+        if let Node::Identifier(obj_name) = &object.node {
             // Enum variant construction: EnumName.Variant(args)
             if self.enum_registry.contains_key(obj_name) {
                 return Ok(Value::EnumVariant {
@@ -1275,11 +1283,11 @@ impl Interpreter {
 
     async fn eval_property_access(
         &mut self,
-        object: &Node,
+        object: &SNode,
         property: &str,
     ) -> Result<Value, RuntimeError> {
         // Check for enum variant construction without args: EnumName.Variant
-        if let Node::Identifier(name) = object {
+        if let Node::Identifier(name) = &object.node {
             if self.enum_registry.contains_key(name) {
                 return Ok(Value::EnumVariant {
                     enum_name: name.clone(),
@@ -1325,8 +1333,8 @@ impl Interpreter {
     async fn eval_binary_op(
         &mut self,
         op: &str,
-        left: &Node,
-        right: &Node,
+        left: &SNode,
+        right: &SNode,
     ) -> Result<Value, RuntimeError> {
         if op == "|>" {
             let left_val = self.eval(left).await?;
@@ -1337,7 +1345,7 @@ impl Interpreter {
             {
                 return self.invoke_closure(params, body, env, &[left_val]).await;
             }
-            if let Node::Identifier(name) = right {
+            if let Node::Identifier(name) = &right.node {
                 if let Some(builtin) = self.builtins.get(name.as_str()).cloned() {
                     return builtin(&[left_val], &mut self.output);
                 }
@@ -1459,22 +1467,24 @@ impl Interpreter {
 
     // --- Pipeline inheritance ---
 
-    fn resolve_inheritance(&self, child: &[Node], parent: &Node) -> Vec<Node> {
-        let parent_body = if let Node::Pipeline { body, .. } = parent {
+    fn resolve_inheritance(&self, child: &[SNode], parent: &SNode) -> Vec<SNode> {
+        let parent_body = if let Node::Pipeline { body, .. } = &parent.node {
             body
         } else {
             return child.to_vec();
         };
 
-        let has_overrides = child.iter().any(|n| matches!(n, Node::OverrideDecl { .. }));
+        let has_overrides = child
+            .iter()
+            .any(|n| matches!(n.node, Node::OverrideDecl { .. }));
 
         if !has_overrides {
             return child.to_vec();
         }
 
-        let non_overrides: Vec<Node> = child
+        let non_overrides: Vec<SNode> = child
             .iter()
-            .filter(|n| !matches!(n, Node::OverrideDecl { .. }))
+            .filter(|n| !matches!(n.node, Node::OverrideDecl { .. }))
             .cloned()
             .collect();
 
@@ -1488,7 +1498,7 @@ fn arg_string(args: &[Value], index: usize) -> String {
     args.get(index).map(|a| a.as_string()).unwrap_or_default()
 }
 
-fn require_closure(args: &[Value]) -> Result<(&[String], &[Node], &Environment), RuntimeError> {
+fn require_closure(args: &[Value]) -> Result<(&[String], &[SNode], &Environment), RuntimeError> {
     match args.first() {
         Some(Value::Closure {
             params, body, env, ..
