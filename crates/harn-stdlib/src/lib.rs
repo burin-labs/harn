@@ -1,6 +1,11 @@
+mod async_builtins;
 mod json;
+mod llm;
 
 use harn_runtime::{Interpreter, RuntimeError, Value};
+
+pub use async_builtins::register_async_builtins;
+pub use llm::register_llm_builtins;
 
 /// Register all standard library builtins on an interpreter.
 pub fn register_stdlib(interp: &mut Interpreter) {
@@ -97,10 +102,7 @@ pub fn register_stdlib(interp: &mut Interpreter) {
         Ok(Value::Float(secs))
     });
 
-    interp.register_builtin("sleep", |_args, _out| {
-        // No-op in sync interpreter — async runtime needed for real sleep
-        Ok(Value::Nil)
-    });
+    // sleep is registered as an async builtin in register_async_builtins()
 
     interp.register_builtin("read_file", |args, _out| {
         let path = args.first().map(|a| a.as_string()).unwrap_or_default();

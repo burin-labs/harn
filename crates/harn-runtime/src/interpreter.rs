@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -10,9 +12,14 @@ use crate::environment::Environment;
 use crate::error::RuntimeError;
 use crate::value::{compare_values, values_equal, Value};
 
-/// Builtin function signature. Sync — runs within async context but doesn't await.
+/// Sync builtin function signature.
 pub type BuiltinFn =
     Arc<dyn Fn(&[Value], &mut Vec<u8>) -> Result<Value, RuntimeError> + Send + Sync>;
+
+/// Async builtin function signature.
+pub type AsyncBuiltinFn = Arc<
+    dyn Fn(Vec<Value>) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>>>> + Send + Sync,
+>;
 
 /// Result of a spawned task: value + captured output.
 type TaskResult = Result<(Value, Vec<u8>), RuntimeError>;
@@ -27,6 +34,7 @@ pub struct Interpreter {
     env: Environment,
     pipelines: BTreeMap<String, Node>,
     builtins: Arc<BTreeMap<String, BuiltinFn>>,
+    async_builtins: Arc<BTreeMap<String, AsyncBuiltinFn>>,
     output: Vec<u8>,
     /// Base directory for resolving relative imports.
     source_dir: PathBuf,
@@ -48,6 +56,7 @@ impl Interpreter {
             env: Environment::new(),
             pipelines: BTreeMap::new(),
             builtins: Arc::new(BTreeMap::new()),
+            async_builtins: Arc::new(BTreeMap::new()),
             output: Vec::new(),
             source_dir: PathBuf::from("."),
             imported: Vec::new(),
@@ -62,6 +71,7 @@ impl Interpreter {
             env: child_env,
             pipelines: self.pipelines.clone(),
             builtins: Arc::clone(&self.builtins),
+            async_builtins: Arc::clone(&self.async_builtins),
             output: Vec::new(),
             source_dir: self.source_dir.clone(),
             imported: self.imported.clone(),
@@ -69,7 +79,7 @@ impl Interpreter {
         }
     }
 
-    /// Register a builtin function.
+    /// Register a sync builtin function.
     pub fn register_builtin<F>(&mut self, name: &str, f: F)
     where
         F: Fn(&[Value], &mut Vec<u8>) -> Result<Value, RuntimeError> + Send + Sync + 'static,
@@ -77,6 +87,28 @@ impl Interpreter {
         Arc::get_mut(&mut self.builtins)
             .expect("cannot register builtins after spawning tasks")
             .insert(name.to_string(), Arc::new(f));
+    }
+
+    /// Register an async builtin function.
+    pub fn register_async_builtin<F, Fut>(&mut self, name: &str, f: F)
+    where
+        F: Fn(Vec<Value>) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<Value, RuntimeError>> + 'static,
+    {
+        Arc::get_mut(&mut self.async_builtins)
+            .expect("cannot register builtins after spawning tasks")
+            .insert(
+                name.to_string(),
+                Arc::new(move |args: Vec<Value>| -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>>>> {
+                    Box::pin(f(args))
+                }),
+            );
+    }
+
+    /// Check if a builtin exists (sync or async).
+    #[allow(dead_code)]
+    pub fn has_builtin(&self, name: &str) -> bool {
+        self.builtins.contains_key(name) || self.async_builtins.contains_key(name)
     }
 
     /// Set the base directory for resolving relative imports.
@@ -670,10 +702,16 @@ impl Interpreter {
             return Ok(Value::Nil);
         }
 
-        // Check builtins
+        // Check sync builtins
         if let Some(builtin) = self.builtins.get(name).cloned() {
             let arg_values = self.eval_args(args).await?;
             return builtin(&arg_values, &mut self.output);
+        }
+
+        // Check async builtins
+        if let Some(builtin) = self.async_builtins.get(name).cloned() {
+            let arg_values = self.eval_args(args).await?;
+            return builtin(arg_values).await;
         }
 
         Err(RuntimeError::UndefinedBuiltin(name.to_string()))
@@ -734,6 +772,9 @@ impl Interpreter {
             let qualified = format!("{obj_name}.{method}");
             if let Some(builtin) = self.builtins.get(&qualified).cloned() {
                 return builtin(&arg_values, &mut self.output);
+            }
+            if let Some(builtin) = self.async_builtins.get(&qualified).cloned() {
+                return builtin(arg_values).await;
             }
         }
 
@@ -991,6 +1032,9 @@ impl Interpreter {
             if let Node::Identifier(name) = right {
                 if let Some(builtin) = self.builtins.get(name.as_str()).cloned() {
                     return builtin(&[left_val], &mut self.output);
+                }
+                if let Some(builtin) = self.async_builtins.get(name.as_str()).cloned() {
+                    return builtin(vec![left_val]).await;
                 }
                 if let Some(Value::Closure { params, body, env }) = self.env.get(name) {
                     return self.invoke_closure(&params, &body, &env, &[left_val]).await;

@@ -5,7 +5,7 @@ use std::{env, fs, process};
 use harn_lexer::Lexer;
 use harn_parser::Parser;
 use harn_runtime::{HarnError, Interpreter};
-use harn_stdlib::register_stdlib;
+use harn_stdlib::{register_async_builtins, register_llm_builtins, register_stdlib};
 
 #[tokio::main]
 async fn main() {
@@ -77,6 +77,8 @@ async fn execute(source: &str, source_path: Option<&Path>) -> Result<Vec<u8>, Ha
 
     let mut interp = Interpreter::new();
     register_stdlib(&mut interp);
+    register_async_builtins(&mut interp);
+    register_llm_builtins(&mut interp);
 
     if let Some(path) = source_path {
         if let Some(parent) = path.parent() {

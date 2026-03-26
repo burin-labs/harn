@@ -1,0 +1,10 @@
+// Example: using llm_call to call an LLM
+// Requires ANTHROPIC_API_KEY environment variable
+
+pipeline default(task) {
+  let response = llm_call(
+    "What is 2 + 2? Answer with just the number.",
+    "You are a helpful assistant. Be concise."
+  )
+  log("LLM says: ${response}")
+}

@@ -1,0 +1,15 @@
+[package]
+name = "harn-lsp"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "harn-lsp"
+path = "src/main.rs"
+
+[dependencies]
+harn-lexer = { path = "../harn-lexer" }
+harn-parser = { path = "../harn-parser" }
+tower-lsp = "0.20"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std"] }
+serde_json = "1"
