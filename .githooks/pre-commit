@@ -1,0 +1,12 @@
+#!/bin/sh
+set -e
+
+echo "=== Pre-commit: checking formatting ==="
+cargo fmt --all -- --check
+echo "    Formatting OK."
+
+echo "=== Pre-commit: running clippy ==="
+cargo clippy --workspace -- -D warnings
+echo "    Clippy OK."
+
+echo "=== All pre-commit checks passed. ==="
