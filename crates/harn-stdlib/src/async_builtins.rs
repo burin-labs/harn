@@ -105,4 +105,21 @@ pub fn register_async_builtins(interp: &mut Interpreter) {
         // Placeholder for receive — would block on a shared queue.
         Ok(Value::Nil)
     });
+
+    // atomic(initial) — creates a shared atomic counter
+    interp.register_builtin("atomic", |args, _out| {
+        let initial = args.first().cloned().unwrap_or(Value::Int(0));
+        let mut a = std::collections::BTreeMap::new();
+        a.insert("value".to_string(), initial);
+        a.insert("type".to_string(), Value::String("atomic".to_string()));
+        Ok(Value::Dict(a))
+    });
+
+    // atomic_get(a) — read the current value
+    interp.register_builtin("atomic_get", |args, _out| {
+        if let Some(Value::Dict(map)) = args.first() {
+            return Ok(map.get("value").cloned().unwrap_or(Value::Nil));
+        }
+        Ok(Value::Nil)
+    });
 }

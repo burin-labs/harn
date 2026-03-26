@@ -1,0 +1,8 @@
+pipeline test(task) {
+  var count = 0
+  mutex {
+    count = count + 1
+    count = count + 1
+  }
+  log(count)
+}

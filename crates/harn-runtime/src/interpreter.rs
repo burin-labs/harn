@@ -589,6 +589,12 @@ impl Interpreter {
                 }
             }
 
+            Node::MutexBlock { body } => {
+                // In concurrent contexts, this serializes access.
+                // Currently executes body directly (single-threaded fallback).
+                self.exec_statements(body).await
+            }
+
             Node::YieldExpr { value } => {
                 let val = if let Some(v) = value {
                     self.eval(v).await?

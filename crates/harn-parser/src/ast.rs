@@ -108,6 +108,10 @@ pub enum Node {
     YieldExpr {
         value: Option<Box<Node>>,
     },
+    /// Mutex block: mutual exclusion for concurrent access.
+    MutexBlock {
+        body: Vec<Node>,
+    },
 
     // Concurrency
     Parallel {

@@ -152,6 +152,7 @@ impl Parser {
             TokenKind::Guard => self.parse_guard(),
             TokenKind::Deadline => self.parse_deadline(),
             TokenKind::Yield => self.parse_yield(),
+            TokenKind::Mutex => self.parse_mutex(),
             _ => self.parse_expression_statement(),
         }
     }
@@ -529,6 +530,14 @@ impl Parser {
         Ok(Node::YieldExpr {
             value: Some(Box::new(value)),
         })
+    }
+
+    fn parse_mutex(&mut self) -> Result<Node, ParserError> {
+        self.consume(&TokenKind::Mutex, "mutex")?;
+        self.consume(&TokenKind::LBrace, "{")?;
+        let body = self.parse_block()?;
+        self.consume(&TokenKind::RBrace, "}")?;
+        Ok(Node::MutexBlock { body })
     }
 
     fn parse_ask_expr(&mut self) -> Result<Node, ParserError> {

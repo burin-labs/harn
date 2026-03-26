@@ -447,6 +447,7 @@ impl Lexer {
             "ask" => TokenKind::Ask,
             "deadline" => TokenKind::Deadline,
             "yield" => TokenKind::Yield,
+            "mutex" => TokenKind::Mutex,
             _ => TokenKind::Identifier(ident),
         };
 

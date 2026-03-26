@@ -448,6 +448,7 @@ impl Compiler {
             | Node::AskExpr { .. }
             | Node::DeadlineBlock { .. }
             | Node::YieldExpr { .. }
+            | Node::MutexBlock { .. }
             | Node::Block(_) => {
                 self.chunk.emit(Op::Nil, self.line);
             }
