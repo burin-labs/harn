@@ -1,0 +1,6 @@
+pipeline test(task) {
+  let results = parallel(3) { i ->
+    i * 10
+  }
+  log(results)
+}

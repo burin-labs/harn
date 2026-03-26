@@ -1,0 +1,7 @@
+pipeline test(task) {
+  let handle = spawn {
+    log("spawned")
+  }
+  let result = await(handle)
+  log("done")
+}

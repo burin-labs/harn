@@ -1,4 +1,7 @@
 use std::collections::BTreeMap;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use harn_lexer::{Lexer, StringSegment};
 use harn_parser::{MatchArm, Node, Parser};
@@ -7,15 +10,30 @@ use crate::environment::Environment;
 use crate::error::RuntimeError;
 use crate::value::{compare_values, values_equal, Value};
 
-/// Builtin function signature. Takes args and output buffer, returns a value.
-pub type BuiltinFn = Box<dyn Fn(&[Value], &mut Vec<u8>) -> Result<Value, RuntimeError>>;
+/// Builtin function signature. Sync — runs within async context but doesn't await.
+pub type BuiltinFn =
+    Arc<dyn Fn(&[Value], &mut Vec<u8>) -> Result<Value, RuntimeError> + Send + Sync>;
 
-/// The Harn tree-walking interpreter.
+/// Result of a spawned task: value + captured output.
+type TaskResult = Result<(Value, Vec<u8>), RuntimeError>;
+
+/// Shared state for spawned tasks.
+type SpawnedTasks = Arc<Mutex<BTreeMap<String, tokio::task::JoinHandle<TaskResult>>>>;
+
+static TASK_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// The Harn tree-walking async interpreter.
 pub struct Interpreter {
     env: Environment,
     pipelines: BTreeMap<String, Node>,
-    builtins: BTreeMap<String, BuiltinFn>,
+    builtins: Arc<BTreeMap<String, BuiltinFn>>,
     output: Vec<u8>,
+    /// Base directory for resolving relative imports.
+    source_dir: PathBuf,
+    /// Track imported files to prevent cycles.
+    imported: Vec<PathBuf>,
+    /// Spawned task handles.
+    spawned: SpawnedTasks,
 }
 
 impl Default for Interpreter {
@@ -29,17 +47,41 @@ impl Interpreter {
         Self {
             env: Environment::new(),
             pipelines: BTreeMap::new(),
-            builtins: BTreeMap::new(),
+            builtins: Arc::new(BTreeMap::new()),
             output: Vec::new(),
+            source_dir: PathBuf::from("."),
+            imported: Vec::new(),
+            spawned: Arc::new(Mutex::new(BTreeMap::new())),
+        }
+    }
+
+    /// Create a child interpreter for parallel/spawn tasks.
+    /// Shares builtins and spawned-task registry, gets an isolated env and output.
+    fn child_interpreter(&self, child_env: Environment) -> Self {
+        Self {
+            env: child_env,
+            pipelines: self.pipelines.clone(),
+            builtins: Arc::clone(&self.builtins),
+            output: Vec::new(),
+            source_dir: self.source_dir.clone(),
+            imported: self.imported.clone(),
+            spawned: Arc::clone(&self.spawned),
         }
     }
 
     /// Register a builtin function.
     pub fn register_builtin<F>(&mut self, name: &str, f: F)
     where
-        F: Fn(&[Value], &mut Vec<u8>) -> Result<Value, RuntimeError> + 'static,
+        F: Fn(&[Value], &mut Vec<u8>) -> Result<Value, RuntimeError> + Send + Sync + 'static,
     {
-        self.builtins.insert(name.to_string(), Box::new(f));
+        Arc::get_mut(&mut self.builtins)
+            .expect("cannot register builtins after spawning tasks")
+            .insert(name.to_string(), Arc::new(f));
+    }
+
+    /// Set the base directory for resolving relative imports.
+    pub fn set_source_dir(&mut self, dir: impl Into<PathBuf>) {
+        self.source_dir = dir.into();
     }
 
     /// Get captured output.
@@ -53,11 +95,13 @@ impl Interpreter {
     }
 
     /// Run a parsed program.
-    pub fn run(&mut self, program: &[Node]) -> Result<(), RuntimeError> {
-        // Register all pipelines
+    pub async fn run(&mut self, program: &[Node]) -> Result<(), RuntimeError> {
+        // Register all pipelines and process imports
         for node in program {
             if let Node::Pipeline { name, .. } = node {
                 self.pipelines.insert(name.clone(), node.clone());
+            } else if let Node::ImportDecl { path } = node {
+                self.eval_import(path).await?;
             }
         }
 
@@ -80,7 +124,6 @@ impl Interpreter {
         {
             let pipeline_env = self.env.child();
 
-            // Bind pipeline parameters
             if params.iter().any(|p| p == "task") {
                 pipeline_env.define("task", Value::String(String::new()), false);
             }
@@ -88,7 +131,6 @@ impl Interpreter {
                 pipeline_env.define("project", Value::String(String::new()), false);
             }
 
-            // Inject context dict
             let ctx = BTreeMap::from([
                 ("task".to_string(), Value::String(String::new())),
                 ("project_root".to_string(), Value::String(String::new())),
@@ -96,7 +138,6 @@ impl Interpreter {
             ]);
             pipeline_env.define("context", Value::Dict(ctx), false);
 
-            // Handle extends
             let resolved_body = if let Some(parent_name) = extends {
                 if let Some(parent) = self.pipelines.get(parent_name).cloned() {
                     self.resolve_inheritance(body, &parent)
@@ -107,9 +148,7 @@ impl Interpreter {
                 body.clone()
             };
 
-            let result = self.with_env(pipeline_env, |interp| {
-                interp.exec_statements(&resolved_body)
-            });
+            let result = self.exec_in_env(pipeline_env, &resolved_body).await;
 
             match result {
                 Ok(_) | Err(RuntimeError::ReturnValue(_)) => Ok(()),
@@ -120,42 +159,51 @@ impl Interpreter {
         }
     }
 
-    fn exec_statements(&mut self, stmts: &[Node]) -> Result<Value, RuntimeError> {
+    async fn exec_statements(&mut self, stmts: &[Node]) -> Result<Value, RuntimeError> {
         let mut result = Value::Nil;
         for stmt in stmts {
-            result = self.eval(stmt)?;
+            result = self.eval(stmt).await?;
         }
         Ok(result)
     }
 
-    /// Execute a closure with a temporary environment, restoring the original afterward.
-    fn with_env<F, R>(&mut self, new_env: Environment, f: F) -> R
-    where
-        F: FnOnce(&mut Self) -> R,
-    {
+    /// Execute statements in a child environment, restoring afterward.
+    async fn exec_in_env(
+        &mut self,
+        env: Environment,
+        stmts: &[Node],
+    ) -> Result<Value, RuntimeError> {
         let saved = self.env.clone();
-        self.env = new_env;
-        let result = f(self);
+        self.env = env;
+        let result = self.exec_statements(stmts).await;
         self.env = saved;
         result
     }
 
-    fn eval(&mut self, node: &Node) -> Result<Value, RuntimeError> {
+    fn eval<'a>(
+        &'a mut self,
+        node: &'a Node,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, RuntimeError>> + 'a>>
+    {
+        Box::pin(self.eval_inner(node))
+    }
+
+    async fn eval_inner(&mut self, node: &Node) -> Result<Value, RuntimeError> {
         match node {
             Node::LetBinding { name, value } => {
-                let val = self.eval(value)?;
+                let val = self.eval(value).await?;
                 self.env.define(name, val, false);
                 Ok(Value::Nil)
             }
 
             Node::VarBinding { name, value } => {
-                let val = self.eval(value)?;
+                let val = self.eval(value).await?;
                 self.env.define(name, val, true);
                 Ok(Value::Nil)
             }
 
             Node::Assignment { target, value } => {
-                let val = self.eval(value)?;
+                let val = self.eval(value).await?;
                 if let Node::Identifier(name) = target.as_ref() {
                     self.env.assign(name, val)?;
                 }
@@ -167,11 +215,11 @@ impl Interpreter {
                 then_body,
                 else_body,
             } => {
-                let cond = self.eval(condition)?;
+                let cond = self.eval(condition).await?;
                 if cond.is_truthy() {
-                    self.exec_statements(then_body)
+                    self.exec_statements(then_body).await
                 } else if let Some(else_body) = else_body {
-                    self.exec_statements(else_body)
+                    self.exec_statements(else_body).await
                 } else {
                     Ok(Value::Nil)
                 }
@@ -181,72 +229,48 @@ impl Interpreter {
                 variable,
                 iterable,
                 body,
-            } => self.eval_for_in(variable, iterable, body),
+            } => self.eval_for_in(variable, iterable, body).await,
 
-            Node::MatchExpr { value, arms } => self.eval_match(value, arms),
-
-            Node::WhileLoop { condition, body } => self.eval_while(condition, body),
-
-            Node::Retry { count, body } => self.eval_retry(count, body),
+            Node::MatchExpr { value, arms } => self.eval_match(value, arms).await,
+            Node::WhileLoop { condition, body } => self.eval_while(condition, body).await,
+            Node::Retry { count, body } => self.eval_retry(count, body).await,
 
             Node::Parallel {
                 count,
                 variable,
                 body,
-            } => {
-                // Sequential fallback (no async runtime)
-                let count_val = self.eval(count)?;
-                let n = count_val.as_int().unwrap_or(1);
-                let mut results = Vec::new();
-                for i in 0..n {
-                    let task_env = self.env.child();
-                    if let Some(var) = variable {
-                        task_env.define(var, Value::Int(i), false);
-                    }
-                    results.push(self.with_env(task_env, |interp| interp.exec_statements(body))?);
-                }
-                Ok(Value::List(results))
-            }
+            } => self.eval_parallel(count, variable.as_deref(), body).await,
 
             Node::ParallelMap {
                 list,
                 variable,
                 body,
-            } => {
-                let list_val = self.eval(list)?;
-                let items = match list_val {
-                    Value::List(items) => items,
-                    _ => return Ok(Value::Nil),
-                };
-                let mut results = Vec::new();
-                for item in items {
-                    let task_env = self.env.child();
-                    task_env.define(variable, item, false);
-                    results.push(self.with_env(task_env, |interp| interp.exec_statements(body))?);
-                }
-                Ok(Value::List(results))
-            }
+            } => self.eval_parallel_map(list, variable, body).await,
 
             Node::ReturnStmt { value } => {
-                let val = value.as_ref().map(|v| self.eval(v)).transpose()?;
+                let val = if let Some(v) = value {
+                    Some(self.eval(v).await?)
+                } else {
+                    None
+                };
                 Err(RuntimeError::ReturnValue(val))
             }
 
-            Node::FunctionCall { name, args } => self.eval_function_call(name, args),
+            Node::FunctionCall { name, args } => self.eval_function_call(name, args).await,
 
             Node::MethodCall {
                 object,
                 method,
                 args,
-            } => self.eval_method_call(object, method, args),
+            } => self.eval_method_call(object, method, args).await,
 
             Node::PropertyAccess { object, property } => {
-                self.eval_property_access(object, property)
+                self.eval_property_access(object, property).await
             }
 
             Node::SubscriptAccess { object, index } => {
-                let obj = self.eval(object)?;
-                let idx = self.eval(index)?;
+                let obj = self.eval(object).await?;
+                let idx = self.eval(index).await?;
                 match (&obj, &idx) {
                     (Value::List(items), Value::Int(i)) => {
                         if *i < 0 {
@@ -261,23 +285,23 @@ impl Interpreter {
                 }
             }
 
-            Node::BinaryOp { op, left, right } => self.eval_binary_op(op, left, right),
+            Node::BinaryOp { op, left, right } => self.eval_binary_op(op, left, right).await,
 
             Node::Ternary {
                 condition,
                 true_expr,
                 false_expr,
             } => {
-                let cond = self.eval(condition)?;
+                let cond = self.eval(condition).await?;
                 if cond.is_truthy() {
-                    self.eval(true_expr)
+                    self.eval(true_expr).await
                 } else {
-                    self.eval(false_expr)
+                    self.eval(false_expr).await
                 }
             }
 
             Node::UnaryOp { op, operand } => {
-                let val = self.eval(operand)?;
+                let val = self.eval(operand).await?;
                 match op.as_str() {
                     "!" => Ok(Value::Bool(!val.is_truthy())),
                     "-" => match val {
@@ -290,30 +314,32 @@ impl Interpreter {
             }
 
             Node::ThrowStmt { value } => {
-                let val = self.eval(value)?;
+                let val = self.eval(value).await?;
                 Err(RuntimeError::ThrownError(val))
             }
 
-            Node::InterpolatedString(segments) => self.eval_interpolated_string(segments),
+            Node::InterpolatedString(segments) => self.eval_interpolated_string(segments).await,
 
             Node::StringLiteral(s) => Ok(Value::String(s.clone())),
             Node::IntLiteral(n) => Ok(Value::Int(*n)),
             Node::FloatLiteral(n) => Ok(Value::Float(*n)),
             Node::BoolLiteral(b) => Ok(Value::Bool(*b)),
             Node::NilLiteral => Ok(Value::Nil),
-
             Node::Identifier(name) => Ok(self.env.get(name).unwrap_or(Value::Nil)),
 
             Node::ListLiteral(elements) => {
-                let values: Result<Vec<_>, _> = elements.iter().map(|el| self.eval(el)).collect();
-                Ok(Value::List(values?))
+                let mut values = Vec::new();
+                for el in elements {
+                    values.push(self.eval(el).await?);
+                }
+                Ok(Value::List(values))
             }
 
             Node::DictLiteral(entries) => {
                 let mut map = BTreeMap::new();
                 for entry in entries {
-                    let key = self.eval(&entry.key)?;
-                    let val = self.eval(&entry.value)?;
+                    let key = self.eval(&entry.key).await?;
+                    let val = self.eval(&entry.value).await?;
                     map.insert(key.as_string(), val);
                 }
                 Ok(Value::Dict(map))
@@ -321,7 +347,7 @@ impl Interpreter {
 
             Node::Block(stmts) => {
                 let block_env = self.env.child();
-                self.with_env(block_env, |interp| interp.exec_statements(stmts))
+                self.exec_in_env(block_env, stmts).await
             }
 
             Node::Closure { params, body } => Ok(Value::Closure {
@@ -334,7 +360,7 @@ impl Interpreter {
                 body,
                 error_var,
                 catch_body,
-            } => self.eval_try_catch(body, error_var, catch_body),
+            } => self.eval_try_catch(body, error_var, catch_body).await,
 
             Node::FnDecl { name, params, body } => {
                 let fn_value = Value::Closure {
@@ -346,26 +372,23 @@ impl Interpreter {
                 Ok(Value::Nil)
             }
 
-            Node::SpawnExpr { .. } => {
-                // No async runtime — return nil for now
-                Ok(Value::Nil)
-            }
+            Node::SpawnExpr { body } => self.eval_spawn(body),
 
-            Node::ImportDecl { .. } | Node::Pipeline { .. } | Node::OverrideDecl { .. } => {
-                Ok(Value::Nil)
-            }
+            Node::ImportDecl { path } => self.eval_import(path).await,
+
+            Node::Pipeline { .. } | Node::OverrideDecl { .. } => Ok(Value::Nil),
         }
     }
 
     // --- Control flow ---
 
-    fn eval_for_in(
+    async fn eval_for_in(
         &mut self,
         variable: &str,
         iterable: &Node,
         body: &[Node],
     ) -> Result<Value, RuntimeError> {
-        let iter_val = self.eval(iterable)?;
+        let iter_val = self.eval(iterable).await?;
 
         let items: Vec<Value> = match iter_val {
             Value::List(items) => items,
@@ -388,65 +411,67 @@ impl Interpreter {
         let mut result = Value::Nil;
         for item in items {
             self.env.define(variable, item, true);
-            result = self.exec_statements(body)?;
+            result = self.exec_statements(body).await?;
         }
 
         self.env = saved;
         Ok(result)
     }
 
-    fn eval_match(&mut self, value: &Node, arms: &[MatchArm]) -> Result<Value, RuntimeError> {
-        let val = self.eval(value)?;
+    async fn eval_match(&mut self, value: &Node, arms: &[MatchArm]) -> Result<Value, RuntimeError> {
+        let val = self.eval(value).await?;
         for arm in arms {
-            let pattern_val = self.eval(&arm.pattern)?;
+            let pattern_val = self.eval(&arm.pattern).await?;
             if values_equal(&val, &pattern_val) {
-                return self.exec_statements(&arm.body);
+                return self.exec_statements(&arm.body).await;
             }
         }
         Ok(Value::Nil)
     }
 
-    fn eval_while(&mut self, condition: &Node, body: &[Node]) -> Result<Value, RuntimeError> {
+    async fn eval_while(&mut self, condition: &Node, body: &[Node]) -> Result<Value, RuntimeError> {
         let mut result = Value::Nil;
         let max_iterations = 10_000;
         let mut iteration = 0;
         while iteration < max_iterations {
-            let cond = self.eval(condition)?;
+            let cond = self.eval(condition).await?;
             if !cond.is_truthy() {
                 break;
             }
             let loop_env = self.env.child();
-            result = self.with_env(loop_env, |interp| interp.exec_statements(body))?;
+            result = self.exec_in_env(loop_env, body).await?;
             iteration += 1;
         }
         Ok(result)
     }
 
-    fn eval_retry(&mut self, count_node: &Node, body: &[Node]) -> Result<Value, RuntimeError> {
-        let count_val = self.eval(count_node)?;
+    async fn eval_retry(
+        &mut self,
+        count_node: &Node,
+        body: &[Node],
+    ) -> Result<Value, RuntimeError> {
+        let count_val = self.eval(count_node).await?;
         let count = count_val.as_int().unwrap_or(3) as usize;
 
         for _attempt in 0..count {
-            match self.exec_statements(body) {
+            match self.exec_statements(body).await {
                 Ok(result) => return Ok(result),
                 Err(RuntimeError::ReturnValue(val)) => {
                     return Err(RuntimeError::ReturnValue(val));
                 }
-                Err(_) => {
-                    // Retry on error (spec: does not re-throw, returns nil after exhaustion)
-                }
+                Err(_) => {}
             }
         }
         Ok(Value::Nil)
     }
 
-    fn eval_try_catch(
+    async fn eval_try_catch(
         &mut self,
         body: &[Node],
         error_var: &Option<String>,
         catch_body: &[Node],
     ) -> Result<Value, RuntimeError> {
-        match self.exec_statements(body) {
+        match self.exec_statements(body).await {
             Ok(val) => Ok(val),
             Err(RuntimeError::ReturnValue(val)) => Err(RuntimeError::ReturnValue(val)),
             Err(err) => {
@@ -458,36 +483,211 @@ impl Interpreter {
                 if let Some(var) = error_var {
                     catch_env.define(var, error_value, false);
                 }
-                self.with_env(catch_env, |interp| interp.exec_statements(catch_body))
+                self.exec_in_env(catch_env, catch_body).await
             }
         }
     }
 
-    // --- Function calls ---
+    // --- Concurrency ---
 
-    fn eval_function_call(&mut self, name: &str, args: &[Node]) -> Result<Value, RuntimeError> {
-        // Check for user-defined function (closure) first
-        if let Some(Value::Closure { params, body, env }) = self.env.get(name) {
-            let arg_values = self.eval_args(args)?;
-            return self.invoke_closure(&params, &body, &env, &arg_values);
+    async fn eval_parallel(
+        &mut self,
+        count_node: &Node,
+        variable: Option<&str>,
+        body: &[Node],
+    ) -> Result<Value, RuntimeError> {
+        let count_val = self.eval(count_node).await?;
+        let n = count_val.as_int().unwrap_or(1) as usize;
+
+        let mut handles = Vec::with_capacity(n);
+        for i in 0..n {
+            let task_env = self.env.child();
+            if let Some(var) = variable {
+                task_env.define(var, Value::Int(i as i64), false);
+            }
+            let mut child = self.child_interpreter(task_env);
+            let body = body.to_vec();
+            handles.push(tokio::task::spawn_local(async move {
+                let result = child.exec_statements(&body).await?;
+                Ok((result, child.output))
+            }));
         }
 
-        // Check builtins — test membership first, eval args, then call
-        if self.builtins.contains_key(name) {
-            let arg_values = self.eval_args(args)?;
-            let builtin = &self.builtins[name];
+        let mut results = vec![Value::Nil; n];
+        for (i, handle) in handles.into_iter().enumerate() {
+            let (value, task_output) = handle
+                .await
+                .map_err(|e| RuntimeError::thrown(e.to_string()))??;
+            results[i] = value;
+            self.output.extend(task_output);
+        }
+        Ok(Value::List(results))
+    }
+
+    async fn eval_parallel_map(
+        &mut self,
+        list_node: &Node,
+        variable: &str,
+        body: &[Node],
+    ) -> Result<Value, RuntimeError> {
+        let list_val = self.eval(list_node).await?;
+        let items = match list_val {
+            Value::List(items) => items,
+            _ => return Ok(Value::Nil),
+        };
+
+        let n = items.len();
+        let mut handles = Vec::with_capacity(n);
+        for item in items {
+            let task_env = self.env.child();
+            task_env.define(variable, item, false);
+            let mut child = self.child_interpreter(task_env);
+            let body = body.to_vec();
+            handles.push(tokio::task::spawn_local(async move {
+                let result = child.exec_statements(&body).await?;
+                Ok((result, child.output))
+            }));
+        }
+
+        let mut results = vec![Value::Nil; n];
+        for (i, handle) in handles.into_iter().enumerate() {
+            let (value, task_output) = handle
+                .await
+                .map_err(|e| RuntimeError::thrown(e.to_string()))??;
+            results[i] = value;
+            self.output.extend(task_output);
+        }
+        Ok(Value::List(results))
+    }
+
+    fn eval_spawn(&mut self, body: &[Node]) -> Result<Value, RuntimeError> {
+        let task_id = format!("task_{}", TASK_COUNTER.fetch_add(1, Ordering::Relaxed));
+
+        let spawn_env = self.env.child();
+        let mut child = self.child_interpreter(spawn_env);
+        let body = body.to_vec();
+
+        let handle = tokio::task::spawn_local(async move {
+            let result = child.exec_statements(&body).await?;
+            Ok((result, child.output))
+        });
+
+        self.spawned.lock().unwrap().insert(task_id.clone(), handle);
+        Ok(Value::TaskHandle { id: task_id })
+    }
+
+    async fn await_task(&mut self, task_id: &str) -> Result<Value, RuntimeError> {
+        let handle = self.spawned.lock().unwrap().remove(task_id);
+        match handle {
+            Some(h) => {
+                let (value, task_output) =
+                    h.await.map_err(|e| RuntimeError::thrown(e.to_string()))??;
+                self.output.extend(task_output);
+                Ok(value)
+            }
+            None => Ok(Value::Nil),
+        }
+    }
+
+    fn cancel_task(&mut self, task_id: &str) {
+        if let Some(h) = self.spawned.lock().unwrap().remove(task_id) {
+            h.abort();
+        }
+    }
+
+    // --- Imports ---
+
+    async fn eval_import(&mut self, path: &str) -> Result<Value, RuntimeError> {
+        let resolved = self.source_dir.join(path);
+        let resolved = resolved.canonicalize().unwrap_or_else(|_| resolved.clone());
+
+        if self.imported.contains(&resolved) {
+            return Ok(Value::Nil);
+        }
+        self.imported.push(resolved.clone());
+
+        let source = std::fs::read_to_string(&resolved).map_err(|e| RuntimeError::ImportError {
+            path: path.to_string(),
+            reason: e.to_string(),
+        })?;
+
+        let mut lexer = Lexer::new(&source);
+        let tokens = lexer
+            .tokenize()
+            .map_err(|e| RuntimeError::thrown(e.to_string()))?;
+        let mut parser = Parser::new(tokens);
+        let nodes = parser
+            .parse()
+            .map_err(|e| RuntimeError::thrown(e.to_string()))?;
+
+        let prev_dir = self.source_dir.clone();
+        if let Some(parent) = resolved.parent() {
+            self.source_dir = parent.to_path_buf();
+        }
+
+        for node in &nodes {
+            if let Node::Pipeline { name, .. } = node {
+                self.pipelines.insert(name.clone(), node.clone());
+            }
+        }
+
+        for node in &nodes {
+            if !matches!(node, Node::Pipeline { .. }) {
+                self.eval(node).await?;
+            }
+        }
+
+        self.source_dir = prev_dir;
+        Ok(Value::Nil)
+    }
+
+    // --- Function calls ---
+
+    async fn eval_function_call(
+        &mut self,
+        name: &str,
+        args: &[Node],
+    ) -> Result<Value, RuntimeError> {
+        // Check for user-defined function (closure) first
+        if let Some(Value::Closure { params, body, env }) = self.env.get(name) {
+            let arg_values = self.eval_args(args).await?;
+            return self.invoke_closure(&params, &body, &env, &arg_values).await;
+        }
+
+        // Built-in interpreter functions: await, cancel
+        if name == "await" {
+            let arg_values = self.eval_args(args).await?;
+            if let Some(Value::TaskHandle { id }) = arg_values.first() {
+                return self.await_task(id).await;
+            }
+            return Ok(Value::Nil);
+        }
+        if name == "cancel" {
+            let arg_values = self.eval_args(args).await?;
+            if let Some(Value::TaskHandle { id }) = arg_values.first() {
+                self.cancel_task(id);
+            }
+            return Ok(Value::Nil);
+        }
+
+        // Check builtins
+        if let Some(builtin) = self.builtins.get(name).cloned() {
+            let arg_values = self.eval_args(args).await?;
             return builtin(&arg_values, &mut self.output);
         }
 
         Err(RuntimeError::UndefinedBuiltin(name.to_string()))
     }
 
-    /// Evaluate a list of argument nodes into values.
-    fn eval_args(&mut self, args: &[Node]) -> Result<Vec<Value>, RuntimeError> {
-        args.iter().map(|arg| self.eval(arg)).collect()
+    async fn eval_args(&mut self, args: &[Node]) -> Result<Vec<Value>, RuntimeError> {
+        let mut values = Vec::with_capacity(args.len());
+        for arg in args {
+            values.push(self.eval(arg).await?);
+        }
+        Ok(values)
     }
 
-    fn invoke_closure(
+    async fn invoke_closure(
         &mut self,
         params: &[String],
         body: &[Node],
@@ -499,7 +699,7 @@ impl Interpreter {
             let val = args.get(i).cloned().unwrap_or(Value::Nil);
             call_env.define(param, val, false);
         }
-        let result = self.with_env(call_env, |interp| interp.exec_statements(body));
+        let result = self.exec_in_env(call_env, body).await;
         match result {
             Ok(val) => Ok(val),
             Err(RuntimeError::ReturnValue(val)) => Ok(val.unwrap_or(Value::Nil)),
@@ -507,30 +707,40 @@ impl Interpreter {
         }
     }
 
+    /// Helper: invoke a closure with a single item argument.
+    #[allow(clippy::cloned_ref_to_slice_refs)]
+    async fn invoke_closure_item(
+        &mut self,
+        closure: (&[String], &[Node], &Environment),
+        item: &Value,
+    ) -> Result<Value, RuntimeError> {
+        let (params, body, env) = closure;
+        self.invoke_closure(params, body, env, &[item.clone()])
+            .await
+    }
+
     // --- Method calls ---
 
-    fn eval_method_call(
+    async fn eval_method_call(
         &mut self,
         object: &Node,
         method: &str,
         args: &[Node],
     ) -> Result<Value, RuntimeError> {
-        let obj = self.eval(object)?;
-        let arg_values = self.eval_args(args)?;
+        let obj = self.eval(object).await?;
+        let arg_values = self.eval_args(args).await?;
 
-        // Check for method-style builtins: obj.method(args) → builtin "obj.method"
         if let Node::Identifier(obj_name) = object {
             let qualified = format!("{obj_name}.{method}");
-            if self.builtins.contains_key(&qualified) {
-                let builtin = &self.builtins[&qualified];
+            if let Some(builtin) = self.builtins.get(&qualified).cloned() {
                 return builtin(&arg_values, &mut self.output);
             }
         }
 
         match obj {
             Value::String(s) => self.eval_string_method(&s, method, &arg_values),
-            Value::List(items) => self.eval_list_method(&items, method, &arg_values),
-            Value::Dict(map) => self.eval_dict_method(&map, method, &arg_values),
+            Value::List(items) => self.eval_list_method(&items, method, &arg_values).await,
+            Value::Dict(map) => self.eval_dict_method(&map, method, &arg_values).await,
             _ => Ok(Value::Nil),
         }
     }
@@ -592,7 +802,7 @@ impl Interpreter {
 
     // --- List methods ---
 
-    fn eval_list_method(
+    async fn eval_list_method(
         &mut self,
         items: &[Value],
         method: &str,
@@ -601,14 +811,19 @@ impl Interpreter {
         match method {
             "count" => Ok(Value::Int(items.len() as i64)),
             "empty" => Ok(Value::Bool(items.is_empty())),
-            "map" => self.list_apply(items, args, |results, item, _truthy| {
-                results.push(item);
-            }),
+            "map" => {
+                let closure = require_closure(args)?;
+                let mut results = Vec::new();
+                for item in items {
+                    results.push(self.invoke_closure_item(closure, item).await?);
+                }
+                Ok(Value::List(results))
+            }
             "filter" => {
                 let closure = require_closure(args)?;
                 let mut results = Vec::new();
                 for item in items {
-                    let result = self.invoke_closure_item(closure, item)?;
+                    let result = self.invoke_closure_item(closure, item).await?;
                     if result.is_truthy() {
                         results.push(item.clone());
                     }
@@ -620,7 +835,9 @@ impl Interpreter {
                     if let Value::Closure { params, body, env } = &args[1] {
                         let mut acc = args[0].clone();
                         for item in items {
-                            acc = self.invoke_closure(params, body, env, &[acc, item.clone()])?;
+                            acc = self
+                                .invoke_closure(params, body, env, &[acc, item.clone()])
+                                .await?;
                         }
                         return Ok(acc);
                     }
@@ -630,7 +847,7 @@ impl Interpreter {
             "find" => {
                 let closure = require_closure(args)?;
                 for item in items {
-                    let result = self.invoke_closure_item(closure, item)?;
+                    let result = self.invoke_closure_item(closure, item).await?;
                     if result.is_truthy() {
                         return Ok(item.clone());
                     }
@@ -640,7 +857,7 @@ impl Interpreter {
             "any" => {
                 let closure = require_closure(args)?;
                 for item in items {
-                    let result = self.invoke_closure_item(closure, item)?;
+                    let result = self.invoke_closure_item(closure, item).await?;
                     if result.is_truthy() {
                         return Ok(Value::Bool(true));
                     }
@@ -650,7 +867,7 @@ impl Interpreter {
             "all" => {
                 let closure = require_closure(args)?;
                 for item in items {
-                    let result = self.invoke_closure_item(closure, item)?;
+                    let result = self.invoke_closure_item(closure, item).await?;
                     if !result.is_truthy() {
                         return Ok(Value::Bool(false));
                     }
@@ -661,7 +878,7 @@ impl Interpreter {
                 let closure = require_closure(args)?;
                 let mut results = Vec::new();
                 for item in items {
-                    let result = self.invoke_closure_item(closure, item)?;
+                    let result = self.invoke_closure_item(closure, item).await?;
                     if let Value::List(inner) = result {
                         results.extend(inner);
                     } else {
@@ -674,40 +891,9 @@ impl Interpreter {
         }
     }
 
-    /// Helper: invoke a closure with a single item argument.
-    #[allow(clippy::cloned_ref_to_slice_refs)]
-    fn invoke_closure_item(
-        &mut self,
-        closure: (&[String], &[Node], &Environment),
-        item: &Value,
-    ) -> Result<Value, RuntimeError> {
-        let (params, body, env) = closure;
-        self.invoke_closure(params, body, env, &[item.clone()])
-    }
-
-    /// Helper: map over items with a closure, collecting results.
-    fn list_apply<F>(
-        &mut self,
-        items: &[Value],
-        args: &[Value],
-        mut collect: F,
-    ) -> Result<Value, RuntimeError>
-    where
-        F: FnMut(&mut Vec<Value>, Value, bool),
-    {
-        let closure = require_closure(args)?;
-        let mut results = Vec::new();
-        for item in items {
-            let result = self.invoke_closure_item(closure, item)?;
-            let truthy = result.is_truthy();
-            collect(&mut results, result, truthy);
-        }
-        Ok(Value::List(results))
-    }
-
     // --- Dict methods ---
 
-    fn eval_dict_method(
+    async fn eval_dict_method(
         &mut self,
         map: &BTreeMap<String, Value>,
         method: &str,
@@ -743,7 +929,7 @@ impl Interpreter {
                 let closure = require_closure(args)?;
                 let mut result = BTreeMap::new();
                 for (k, v) in map {
-                    result.insert(k.clone(), self.invoke_closure_item(closure, v)?);
+                    result.insert(k.clone(), self.invoke_closure_item(closure, v).await?);
                 }
                 Ok(Value::Dict(result))
             }
@@ -751,7 +937,7 @@ impl Interpreter {
                 let closure = require_closure(args)?;
                 let mut result = BTreeMap::new();
                 for (k, v) in map {
-                    let keep = self.invoke_closure_item(closure, v)?;
+                    let keep = self.invoke_closure_item(closure, v).await?;
                     if keep.is_truthy() {
                         result.insert(k.clone(), v.clone());
                     }
@@ -764,12 +950,12 @@ impl Interpreter {
 
     // --- Property access ---
 
-    fn eval_property_access(
+    async fn eval_property_access(
         &mut self,
         object: &Node,
         property: &str,
     ) -> Result<Value, RuntimeError> {
-        let obj = self.eval(object)?;
+        let obj = self.eval(object).await?;
         match &obj {
             Value::Dict(map) => Ok(map.get(property).cloned().unwrap_or(Value::Nil)),
             Value::List(items) => match property {
@@ -790,62 +976,55 @@ impl Interpreter {
 
     // --- Binary ops ---
 
-    fn eval_binary_op(
+    async fn eval_binary_op(
         &mut self,
         op: &str,
         left: &Node,
         right: &Node,
     ) -> Result<Value, RuntimeError> {
-        // Pipe operator
         if op == "|>" {
-            let left_val = self.eval(left)?;
-            let right_val = self.eval(right)?;
-            // If right is a closure, invoke it
+            let left_val = self.eval(left).await?;
+            let right_val = self.eval(right).await?;
             if let Value::Closure { params, body, env } = &right_val {
-                return self.invoke_closure(params, body, env, &[left_val]);
+                return self.invoke_closure(params, body, env, &[left_val]).await;
             }
-            // If right is an identifier, check for builtin or closure variable
             if let Node::Identifier(name) = right {
-                if self.builtins.contains_key(name.as_str()) {
-                    let builtin = &self.builtins[name.as_str()];
+                if let Some(builtin) = self.builtins.get(name.as_str()).cloned() {
                     return builtin(&[left_val], &mut self.output);
                 }
                 if let Some(Value::Closure { params, body, env }) = self.env.get(name) {
-                    return self.invoke_closure(&params, &body, &env, &[left_val]);
+                    return self.invoke_closure(&params, &body, &env, &[left_val]).await;
                 }
             }
             return Ok(Value::Nil);
         }
 
-        // Nil coalescing (short-circuit)
         if op == "??" {
-            let left_val = self.eval(left)?;
+            let left_val = self.eval(left).await?;
             if matches!(left_val, Value::Nil) {
-                return self.eval(right);
+                return self.eval(right).await;
             }
             return Ok(left_val);
         }
 
-        // Logical AND (short-circuit)
         if op == "&&" {
-            let left_val = self.eval(left)?;
+            let left_val = self.eval(left).await?;
             if !left_val.is_truthy() {
                 return Ok(Value::Bool(false));
             }
-            return Ok(Value::Bool(self.eval(right)?.is_truthy()));
+            return Ok(Value::Bool(self.eval(right).await?.is_truthy()));
         }
 
-        // Logical OR (short-circuit)
         if op == "||" {
-            let left_val = self.eval(left)?;
+            let left_val = self.eval(left).await?;
             if left_val.is_truthy() {
                 return Ok(Value::Bool(true));
             }
-            return Ok(Value::Bool(self.eval(right)?.is_truthy()));
+            return Ok(Value::Bool(self.eval(right).await?.is_truthy()));
         }
 
-        let left_val = self.eval(left)?;
-        let right_val = self.eval(right)?;
+        let left_val = self.eval(left).await?;
+        let right_val = self.eval(right).await?;
 
         match op {
             "==" => Ok(Value::Bool(values_equal(&left_val, &right_val))),
@@ -857,6 +1036,8 @@ impl Interpreter {
             "+" => match (&left_val, &right_val) {
                 (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a.wrapping_add(*b))),
                 (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a + b)),
+                (Value::Int(a), Value::Float(b)) => Ok(Value::Float(*a as f64 + b)),
+                (Value::Float(a), Value::Int(b)) => Ok(Value::Float(a + *b as f64)),
                 (Value::String(a), _) => Ok(Value::String(format!("{a}{}", right_val.as_string()))),
                 (Value::List(a), Value::List(b)) => {
                     let mut result = a.clone();
@@ -872,17 +1053,23 @@ impl Interpreter {
             "-" => match (&left_val, &right_val) {
                 (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a.wrapping_sub(*b))),
                 (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a - b)),
+                (Value::Int(a), Value::Float(b)) => Ok(Value::Float(*a as f64 - b)),
+                (Value::Float(a), Value::Int(b)) => Ok(Value::Float(a - *b as f64)),
                 _ => Ok(Value::Nil),
             },
             "*" => match (&left_val, &right_val) {
                 (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a.wrapping_mul(*b))),
                 (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a * b)),
+                (Value::Int(a), Value::Float(b)) => Ok(Value::Float(*a as f64 * b)),
+                (Value::Float(a), Value::Int(b)) => Ok(Value::Float(a * *b as f64)),
                 _ => Ok(Value::Nil),
             },
             "/" => match (&left_val, &right_val) {
                 (Value::Int(a), Value::Int(b)) if *b != 0 => Ok(Value::Int(a / b)),
                 (Value::Float(a), Value::Float(b)) if *b != 0.0 => Ok(Value::Float(a / b)),
-                _ => Ok(Value::Nil), // spec: division by zero returns nil
+                (Value::Int(a), Value::Float(b)) if *b != 0.0 => Ok(Value::Float(*a as f64 / b)),
+                (Value::Float(a), Value::Int(b)) if *b != 0 => Ok(Value::Float(a / *b as f64)),
+                _ => Ok(Value::Nil),
             },
             _ => Ok(Value::Nil),
         }
@@ -890,7 +1077,7 @@ impl Interpreter {
 
     // --- Interpolated strings ---
 
-    fn eval_interpolated_string(
+    async fn eval_interpolated_string(
         &mut self,
         segments: &[StringSegment],
     ) -> Result<Value, RuntimeError> {
@@ -902,12 +1089,12 @@ impl Interpreter {
                     let mut lexer = Lexer::new(expr_str);
                     let tokens = lexer
                         .tokenize()
-                        .map_err(|e| RuntimeError::ThrownError(Value::String(e.to_string())))?;
+                        .map_err(|e| RuntimeError::thrown(e.to_string()))?;
                     let mut parser = Parser::new(tokens);
                     let node = parser
                         .parse_single_expression()
-                        .map_err(|e| RuntimeError::ThrownError(Value::String(e.to_string())))?;
-                    let value = self.eval(&node)?;
+                        .map_err(|e| RuntimeError::thrown(e.to_string()))?;
+                    let value = self.eval(&node).await?;
                     result.push_str(&value.as_string());
                 }
             }
@@ -942,12 +1129,10 @@ impl Interpreter {
     }
 }
 
-/// Extract a string argument at the given index, defaulting to empty string.
 fn arg_string(args: &[Value], index: usize) -> String {
     args.get(index).map(|a| a.as_string()).unwrap_or_default()
 }
 
-/// Extract closure components from the first argument, returning Nil if not a closure.
 fn require_closure(args: &[Value]) -> Result<(&[String], &[Node], &Environment), RuntimeError> {
     match args.first() {
         Some(Value::Closure { params, body, env }) => Ok((params, body, env)),

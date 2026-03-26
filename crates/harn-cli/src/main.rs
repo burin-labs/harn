@@ -1,13 +1,14 @@
 use std::io::{self, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::{env, fs, process};
 
 use harn_lexer::Lexer;
 use harn_parser::Parser;
-use harn_runtime::Interpreter;
+use harn_runtime::{HarnError, Interpreter};
 use harn_stdlib::register_stdlib;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 2 {
@@ -25,7 +26,7 @@ fn main() {
                 eprintln!("Usage: harn run <file.harn>");
                 process::exit(1);
             }
-            run_file(&args[2]);
+            run_file(&args[2]).await;
         }
         "test" => {
             let dir = if args.len() >= 3 {
@@ -33,12 +34,12 @@ fn main() {
             } else {
                 "conformance"
             };
-            run_conformance_tests(dir);
+            run_conformance_tests(dir).await;
         }
-        "repl" => run_repl(),
+        "repl" => run_repl().await,
         _ => {
             if args[1].ends_with(".harn") {
-                run_file(&args[1]);
+                run_file(&args[1]).await;
             } else {
                 eprintln!("Unknown command: {}", args[1]);
                 process::exit(1);
@@ -47,7 +48,7 @@ fn main() {
     }
 }
 
-fn run_file(path: &str) {
+async fn run_file(path: &str) {
     let source = match fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) => {
@@ -56,7 +57,7 @@ fn run_file(path: &str) {
         }
     };
 
-    match execute(&source) {
+    match execute(&source, Some(Path::new(path))).await {
         Ok(output) => {
             io::stdout().write_all(&output).ok();
         }
@@ -67,21 +68,35 @@ fn run_file(path: &str) {
     }
 }
 
-fn execute(source: &str) -> Result<Vec<u8>, String> {
+async fn execute(source: &str, source_path: Option<&Path>) -> Result<Vec<u8>, HarnError> {
     let mut lexer = Lexer::new(source);
-    let tokens = lexer.tokenize().map_err(|e| e.to_string())?;
+    let tokens = lexer.tokenize()?;
 
     let mut parser = Parser::new(tokens);
-    let program = parser.parse().map_err(|e| e.to_string())?;
+    let program = parser.parse()?;
 
     let mut interp = Interpreter::new();
     register_stdlib(&mut interp);
 
-    interp.run(&program).map_err(|e| e.to_string())?;
-    Ok(interp.take_output())
+    if let Some(path) = source_path {
+        if let Some(parent) = path.parent() {
+            if !parent.as_os_str().is_empty() {
+                interp.set_source_dir(parent);
+            }
+        }
+    }
+
+    // Use a LocalSet because Interpreter is not Send (contains non-Send futures)
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            interp.run(&program).await?;
+            Ok(interp.take_output())
+        })
+        .await
 }
 
-fn run_conformance_tests(dir: &str) {
+async fn run_conformance_tests(dir: &str) {
     let dir_path = PathBuf::from(dir);
     if !dir_path.exists() {
         eprintln!("Directory not found: {dir}");
@@ -131,7 +146,7 @@ fn run_conformance_tests(dir: &str) {
                     .trim_end()
                     .to_string();
 
-                match execute(&source) {
+                match execute(&source, Some(harn_file.as_path())).await {
                     Ok(output) => {
                         let actual = String::from_utf8_lossy(&output).trim_end().to_string();
                         if actual == expected {
@@ -158,15 +173,15 @@ fn run_conformance_tests(dir: &str) {
                     .trim_end()
                     .to_string();
 
-                match execute(&source) {
-                    Err(err_msg) if err_msg.contains(&expected_error) => {
+                match execute(&source, Some(harn_file.as_path())).await {
+                    Err(ref err) if err.to_string().contains(&expected_error) => {
                         println!("  PASS  {rel_path}");
                         passed += 1;
                     }
-                    Err(err_msg) => {
+                    Err(err) => {
                         println!("  FAIL  {rel_path}");
                         errors.push(format!(
-                            "{rel_path}:\n  expected error containing: {expected_error}\n  actual error: {err_msg}"
+                            "{rel_path}:\n  expected error containing: {expected_error}\n  actual error: {err}"
                         ));
                         failed += 1;
                     }
@@ -198,7 +213,7 @@ fn run_conformance_tests(dir: &str) {
     }
 }
 
-fn run_repl() {
+async fn run_repl() {
     println!("Harn REPL v0.1.0");
     println!("Type expressions or statements. Ctrl+D to exit.");
 
@@ -222,7 +237,7 @@ fn run_repl() {
                 }
 
                 let source = format!("pipeline repl(task) {{\n{line}\n}}");
-                match execute(&source) {
+                match execute(&source, None).await {
                     Ok(output) => {
                         stdout.write_all(&output).ok();
                     }

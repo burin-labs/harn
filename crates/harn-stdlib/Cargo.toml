@@ -5,3 +5,4 @@ edition.workspace = true
 
 [dependencies]
 harn-runtime = { path = "../harn-runtime" }
+regex = "1"

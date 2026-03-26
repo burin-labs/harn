@@ -1,0 +1,6 @@
+pipeline test(task) {
+  let results = parallel_map([1, 2, 3]) { x ->
+    x * x
+  }
+  log(results)
+}

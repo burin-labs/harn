@@ -1,0 +1,5 @@
+import "lib/math_pipeline.harn"
+
+pipeline default(task) {
+  log("before")
+}

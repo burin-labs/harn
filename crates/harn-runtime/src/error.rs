@@ -1,16 +1,56 @@
 use crate::value::Value;
 use std::fmt;
 
-/// Runtime errors.
+/// Runtime errors with descriptive messages.
+///
+/// Error messages follow a consistent format:
+/// - Variable/name errors: "Cannot <action>: <name>" or "Undefined <kind>: <name>"
+/// - Type errors: "Type mismatch: expected <type>, got <value>"
+/// - User errors: "Thrown: <message>"
 #[derive(Debug, Clone)]
 pub enum RuntimeError {
+    /// Variable not found in any scope.
     UndefinedVariable(String),
+    /// No registered builtin or user function with this name.
     UndefinedBuiltin(String),
+    /// Attempted assignment to a `let` binding.
     ImmutableAssignment(String),
+    /// Type assertion failed (e.g., calling a non-closure as a function).
     TypeMismatch { expected: String, got: Value },
+    /// Internal: used to implement `return` (not a user-facing error).
     ReturnValue(Option<Value>),
+    /// All retry attempts failed.
     RetryExhausted,
+    /// User-thrown error via `throw`.
     ThrownError(Value),
+    /// Import failed.
+    ImportError { path: String, reason: String },
+}
+
+impl RuntimeError {
+    /// Create a thrown error from a string message.
+    pub fn thrown(msg: impl Into<String>) -> Self {
+        RuntimeError::ThrownError(Value::String(msg.into()))
+    }
+
+    /// Returns true if this is an internal control-flow error (not user-facing).
+    pub fn is_internal(&self) -> bool {
+        matches!(self, RuntimeError::ReturnValue(_))
+    }
+
+    /// Get a short error category label for display.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            RuntimeError::UndefinedVariable(_) => "NameError",
+            RuntimeError::UndefinedBuiltin(_) => "NameError",
+            RuntimeError::ImmutableAssignment(_) => "AssignmentError",
+            RuntimeError::TypeMismatch { .. } => "TypeError",
+            RuntimeError::ReturnValue(_) => "InternalError",
+            RuntimeError::RetryExhausted => "RetryError",
+            RuntimeError::ThrownError(_) => "Error",
+            RuntimeError::ImportError { .. } => "ImportError",
+        }
+    }
 }
 
 impl fmt::Display for RuntimeError {
@@ -31,8 +71,50 @@ impl fmt::Display for RuntimeError {
             RuntimeError::ReturnValue(_) => write!(f, "Return from pipeline"),
             RuntimeError::RetryExhausted => write!(f, "All retry attempts exhausted"),
             RuntimeError::ThrownError(value) => write!(f, "Thrown: {}", value.as_string()),
+            RuntimeError::ImportError { path, reason } => {
+                write!(f, "Failed to import '{path}': {reason}")
+            }
         }
     }
 }
 
 impl std::error::Error for RuntimeError {}
+
+/// Unified error type for all Harn phases (lex, parse, runtime).
+/// Used by the CLI to present errors consistently.
+#[derive(Debug)]
+pub enum HarnError {
+    Lexer(harn_lexer::LexerError),
+    Parser(harn_parser::ParserError),
+    Runtime(RuntimeError),
+}
+
+impl fmt::Display for HarnError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            HarnError::Lexer(e) => write!(f, "{e}"),
+            HarnError::Parser(e) => write!(f, "{e}"),
+            HarnError::Runtime(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl std::error::Error for HarnError {}
+
+impl From<harn_lexer::LexerError> for HarnError {
+    fn from(e: harn_lexer::LexerError) -> Self {
+        HarnError::Lexer(e)
+    }
+}
+
+impl From<harn_parser::ParserError> for HarnError {
+    fn from(e: harn_parser::ParserError) -> Self {
+        HarnError::Parser(e)
+    }
+}
+
+impl From<RuntimeError> for HarnError {
+    fn from(e: RuntimeError) -> Self {
+        HarnError::Runtime(e)
+    }
+}

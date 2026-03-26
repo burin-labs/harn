@@ -1,0 +1,7 @@
+fn double(x) {
+  return x * 2
+}
+
+fn greet(name) {
+  return "hello " + name
+}

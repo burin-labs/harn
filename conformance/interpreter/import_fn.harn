@@ -1,0 +1,6 @@
+import "lib/helpers.harn"
+
+pipeline test(task) {
+  log(double(5))
+  log(greet("world"))
+}

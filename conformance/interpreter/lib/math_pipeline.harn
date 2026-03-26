@@ -1,0 +1,4 @@
+pipeline square(task) {
+  let x = 7
+  log(x * x)
+}

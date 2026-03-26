@@ -1,0 +1,7 @@
+pipeline test(task) {
+  let handle = spawn {
+    log("should be cancelled")
+  }
+  cancel(handle)
+  log("cancelled")
+}

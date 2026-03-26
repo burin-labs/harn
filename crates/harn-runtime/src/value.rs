@@ -147,35 +147,24 @@ pub fn values_equal(a: &Value, b: &Value) -> bool {
 }
 
 /// Compare values for ordering. Returns -1, 0, or 1.
+/// Supports cross-type int/float comparison by promoting int to float.
 pub fn compare_values(a: &Value, b: &Value) -> i32 {
     match (a, b) {
-        (Value::Int(x), Value::Int(y)) => {
-            if x < y {
-                -1
-            } else if x > y {
-                1
-            } else {
-                0
-            }
-        }
-        (Value::Float(x), Value::Float(y)) => {
-            if x < y {
-                -1
-            } else if x > y {
-                1
-            } else {
-                0
-            }
-        }
-        (Value::String(x), Value::String(y)) => {
-            if x < y {
-                -1
-            } else if x > y {
-                1
-            } else {
-                0
-            }
-        }
+        (Value::Int(x), Value::Int(y)) => x.cmp(y) as i32,
+        (Value::Float(x), Value::Float(y)) => cmp_f64(*x, *y),
+        (Value::Int(x), Value::Float(y)) => cmp_f64(*x as f64, *y),
+        (Value::Float(x), Value::Int(y)) => cmp_f64(*x, *y as f64),
+        (Value::String(x), Value::String(y)) => x.cmp(y) as i32,
         _ => 0,
+    }
+}
+
+fn cmp_f64(a: f64, b: f64) -> i32 {
+    if a < b {
+        -1
+    } else if a > b {
+        1
+    } else {
+        0
     }
 }

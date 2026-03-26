@@ -1,0 +1,11 @@
+pipeline test(task) {
+  // int vs float comparison
+  log(3 < 3.5)
+  log(3.5 > 3)
+  log(3 <= 3.0)
+  log(3.0 >= 3)
+  log(3 == 3.0)
+  log(3 != 3.1)
+  log(2.0 < 3)
+  log(5 > 4.9)
+}

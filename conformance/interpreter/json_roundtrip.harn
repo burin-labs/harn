@@ -1,0 +1,24 @@
+pipeline test(task) {
+  // Parse JSON object
+  let obj = json_parse("{\"name\": \"alice\", \"age\": 30}")
+  log(obj.name)
+  log(obj.age)
+
+  // Parse JSON array
+  let arr = json_parse("[1, 2, 3]")
+  log(arr[0])
+  log(arr.count)
+
+  // Parse primitives
+  log(json_parse("true"))
+  log(json_parse("null"))
+  log(json_parse("42"))
+  log(json_parse("\"hello\""))
+
+  // Roundtrip
+  let data = {x: 1, y: [2, 3]}
+  let json = json_stringify(data)
+  let parsed = json_parse(json)
+  log(parsed.x)
+  log(parsed.y)
+}

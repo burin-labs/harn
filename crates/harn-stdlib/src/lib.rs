@@ -1,3 +1,5 @@
+mod json;
+
 use harn_runtime::{Interpreter, RuntimeError, Value};
 
 /// Register all standard library builtins on an interpreter.
@@ -73,9 +75,9 @@ pub fn register_stdlib(interp: &mut Interpreter) {
         Ok(Value::String(value_to_json(val)))
     });
 
-    interp.register_builtin("json_parse", |_args, _out| {
-        // Stub — requires a full JSON parser for production use
-        Ok(Value::Nil)
+    interp.register_builtin("json_parse", |args, _out| {
+        let text = args.first().map(|a| a.as_string()).unwrap_or_default();
+        json::json_parse(&text).map_err(|e| RuntimeError::thrown(format!("JSON parse error: {e}")))
     });
 
     interp.register_builtin("env", |args, _out| {
@@ -104,9 +106,9 @@ pub fn register_stdlib(interp: &mut Interpreter) {
         let path = args.first().map(|a| a.as_string()).unwrap_or_default();
         match std::fs::read_to_string(&path) {
             Ok(content) => Ok(Value::String(content)),
-            Err(e) => Err(RuntimeError::ThrownError(Value::String(format!(
+            Err(e) => Err(RuntimeError::thrown(format!(
                 "Failed to read file {path}: {e}"
-            )))),
+            ))),
         }
     });
 
@@ -114,11 +116,8 @@ pub fn register_stdlib(interp: &mut Interpreter) {
         if args.len() >= 2 {
             let path = args[0].as_string();
             let content = args[1].as_string();
-            std::fs::write(&path, &content).map_err(|e| {
-                RuntimeError::ThrownError(Value::String(format!(
-                    "Failed to write file {path}: {e}"
-                )))
-            })?;
+            std::fs::write(&path, &content)
+                .map_err(|e| RuntimeError::thrown(format!("Failed to write file {path}: {e}")))?;
         }
         Ok(Value::Nil)
     });
@@ -128,15 +127,34 @@ pub fn register_stdlib(interp: &mut Interpreter) {
         std::process::exit(code as i32);
     });
 
-    interp.register_builtin("regex_match", |_args, _out| {
-        // Stub — requires regex crate for production use
+    interp.register_builtin("regex_match", |args, _out| {
+        if args.len() >= 2 {
+            let pattern = args[0].as_string();
+            let text = args[1].as_string();
+            let re = regex::Regex::new(&pattern)
+                .map_err(|e| RuntimeError::thrown(format!("Invalid regex: {e}")))?;
+            let matches: Vec<Value> = re
+                .find_iter(&text)
+                .map(|m| Value::String(m.as_str().to_string()))
+                .collect();
+            if matches.is_empty() {
+                return Ok(Value::Nil);
+            }
+            return Ok(Value::List(matches));
+        }
         Ok(Value::Nil)
     });
 
     interp.register_builtin("regex_replace", |args, _out| {
-        // Stub — returns text unchanged
         if args.len() >= 3 {
-            return Ok(Value::String(args[2].as_string()));
+            let pattern = args[0].as_string();
+            let replacement = args[1].as_string();
+            let text = args[2].as_string();
+            let re = regex::Regex::new(&pattern)
+                .map_err(|e| RuntimeError::thrown(format!("Invalid regex: {e}")))?;
+            return Ok(Value::String(
+                re.replace_all(&text, replacement.as_str()).into_owned(),
+            ));
         }
         Ok(Value::Nil)
     });

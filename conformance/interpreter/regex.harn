@@ -1,0 +1,17 @@
+pipeline test(task) {
+  // regex_match returns list of matches
+  let matches = regex_match("[0-9]+", "abc 123 def 456")
+  log(matches)
+
+  // regex_match returns nil when no match
+  let no_match = regex_match("[0-9]+", "hello")
+  log(no_match)
+
+  // regex_replace
+  let result = regex_replace("[0-9]+", "NUM", "abc 123 def 456")
+  log(result)
+
+  // regex_replace with capture groups
+  let swapped = regex_replace("(\\w+)-(\\w+)", "$2-$1", "hello-world")
+  log(swapped)
+}
