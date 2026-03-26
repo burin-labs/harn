@@ -1,0 +1,18 @@
+pipeline test(task) {
+  enum AppError {
+    NotFound(msg)
+    Forbidden(msg)
+  }
+
+  // Typed catch only catches matching enum errors
+  fn may_fail() {
+    throw AppError.NotFound("page not found")
+  }
+
+  try {
+    may_fail()
+  } catch (e: AppError) {
+    log("caught: ${e.variant}")
+    log(e.fields[0])
+  }
+}

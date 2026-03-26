@@ -430,8 +430,12 @@ impl Interpreter {
             Node::TryCatch {
                 body,
                 error_var,
+                error_type,
                 catch_body,
-            } => self.eval_try_catch(body, error_var, catch_body).await,
+            } => {
+                self.eval_try_catch(body, error_var, error_type, catch_body)
+                    .await
+            }
 
             Node::FnDecl {
                 name,
@@ -594,22 +598,50 @@ impl Interpreter {
         &mut self,
         body: &[Node],
         error_var: &Option<String>,
+        error_type: &Option<harn_parser::TypeExpr>,
         catch_body: &[Node],
     ) -> Result<Value, RuntimeError> {
         match self.exec_statements(body).await {
             Ok(val) => Ok(val),
             Err(RuntimeError::ReturnValue(val)) => Err(RuntimeError::ReturnValue(val)),
             Err(err) => {
-                let error_value = match err {
-                    RuntimeError::ThrownError(v) => v,
+                let error_value = match &err {
+                    RuntimeError::ThrownError(v) => v.clone(),
                     other => Value::String(other.to_string()),
                 };
+
+                // Typed catch: only catch if error matches the declared type
+                if let Some(type_expr) = error_type {
+                    if !self.error_matches_type(&error_value, type_expr) {
+                        // Error doesn't match — re-throw
+                        return Err(err);
+                    }
+                }
+
                 let catch_env = self.env.child();
                 if let Some(var) = error_var {
                     catch_env.define(var, error_value, false);
                 }
                 self.exec_in_env(catch_env, catch_body).await
             }
+        }
+    }
+
+    /// Check if an error value matches a type annotation for typed catch.
+    fn error_matches_type(&self, value: &Value, type_expr: &harn_parser::TypeExpr) -> bool {
+        match type_expr {
+            harn_parser::TypeExpr::Named(name) => {
+                // Match by enum name
+                if let Value::EnumVariant { enum_name, .. } = value {
+                    return enum_name == name;
+                }
+                // Match by value type name
+                crate::value::value_type_name(value) == name.as_str()
+            }
+            harn_parser::TypeExpr::Union(types) => {
+                types.iter().any(|t| self.error_matches_type(value, t))
+            }
+            _ => true, // Shape types or unknown — accept
         }
     }
 

@@ -297,6 +297,7 @@ impl TypeChecker {
                 body,
                 error_var,
                 catch_body,
+                ..
             } => {
                 let mut try_scope = scope.child();
                 self.check_block(body, &mut try_scope);

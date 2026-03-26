@@ -374,13 +374,14 @@ impl Parser {
         self.skip_newlines();
         self.consume(&TokenKind::Catch, "catch")?;
 
-        let error_var = if self.check(&TokenKind::LParen) {
+        let (error_var, error_type) = if self.check(&TokenKind::LParen) {
             self.advance();
             let name = self.consume_identifier("error variable")?;
+            let ty = self.try_parse_type_annotation()?;
             self.consume(&TokenKind::RParen, ")")?;
-            Some(name)
+            (Some(name), ty)
         } else {
-            None
+            (None, None)
         };
 
         self.consume(&TokenKind::LBrace, "{")?;
@@ -389,6 +390,7 @@ impl Parser {
         Ok(Node::TryCatch {
             body,
             error_var,
+            error_type,
             catch_body,
         })
     }
