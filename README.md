@@ -24,32 +24,59 @@ pipeline default(task) {
 
 ## Getting started
 
-### Install and build
+### Install
+
+From a [GitHub release](https://github.com/burin-labs/harn/releases)
+(macOS and Linux):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/burin-labs/harn/main/install.sh | sh
+```
+
+Or build from source:
 
 ```bash
 git clone https://github.com/burin-labs/harn.git
-cd harn
-cargo build
+cd harn && cargo build --release
+cp target/release/harn /usr/local/bin/
 ```
 
-### Run your first program
-
-Create `hello.harn`:
-
-```javascript
-pipeline default(task) {
-  log("Hello, Harn!")
-}
-```
+### Create a project
 
 ```bash
-cargo run --bin harn -- run hello.harn
+harn init my-project
+cd my-project
+```
+
+This scaffolds `main.harn`, `lib/helpers.harn`, and `tests/test_main.harn`.
+
+### Run it
+
+```bash
+harn run main.harn
+```
+
+### Run the tests
+
+```bash
+harn test tests/
+```
+
+Any pipeline named `test_*` is discovered and executed automatically.
+Use `assert`, `assert_eq`, and `assert_ne` for assertions:
+
+```javascript
+pipeline test_math(task) {
+  assert_eq(2 + 2, 4)
+  assert(10 > 5)
+  assert_ne("hello", "world")
+}
 ```
 
 ### Try the REPL
 
 ```bash
-cargo run --bin harn -- repl
+harn repl
 ```
 
 ### Make an LLM call
@@ -58,7 +85,7 @@ Set your API key and call a model directly from the language:
 
 ```bash
 export ANTHROPIC_API_KEY="sk-..."
-cargo run --bin harn -- run examples/llm-call.harn
+harn run examples/llm-call.harn
 ```
 
 ```javascript
@@ -176,15 +203,22 @@ pipeline default(task) {
 
 ## Tooling
 
-Harn ships with built-in formatting and linting:
+Harn ships with built-in formatting, linting, and testing:
 
 ```bash
-# Format a file (opinionated, 2-space indent)
+# Scaffold a new project
+harn init my-project
+
+# Format code (opinionated, 2-space indent)
 harn fmt myfile.harn
 harn fmt --check myfile.harn  # check without modifying
 
-# Lint a file
+# Lint code
 harn lint myfile.harn
+
+# Run tests (discovers test_* pipelines)
+harn test tests/
+harn test myfile_test.harn
 ```
 
 The linter catches: unused variables, unreachable code, `var` that should
@@ -222,7 +256,7 @@ The codebase is organized as a Cargo workspace:
 | `harn-vm` | Bytecode compiler and VM with call frames and exception handling |
 | `harn-fmt` | Opinionated code formatter |
 | `harn-lint` | Linter with 5 rules |
-| `harn-cli` | CLI: `run`, `test`, `repl`, `version`, `fmt`, `lint` |
+| `harn-cli` | CLI: `run`, `test`, `repl`, `init`, `fmt`, `lint`, `version` |
 | `harn-lsp` | Language Server Protocol |
 | `harn-dap` | Debug Adapter Protocol |
 | `harn-wasm` | WASM target (built separately with wasm-pack) |
@@ -240,7 +274,7 @@ make all
 make fmt          # auto-format
 make lint         # clippy (warnings are errors)
 make test         # Rust unit tests
-make conformance  # 76 language conformance tests
+make conformance  # 80 language conformance tests
 ```
 
 Conformance tests in `conformance/` are the primary way to verify language
