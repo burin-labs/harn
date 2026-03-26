@@ -9,4 +9,12 @@ echo "=== Pre-commit: running clippy ==="
 cargo clippy --workspace -- -D warnings
 echo "    Clippy OK."
 
+if command -v npx >/dev/null 2>&1; then
+  echo "=== Pre-commit: checking markdown ==="
+  npx markdownlint-cli2 "**/*.md"
+  echo "    Markdown OK."
+else
+  echo "=== Pre-commit: skipping markdown lint (npx not found) ==="
+fi
+
 echo "=== All pre-commit checks passed. ==="

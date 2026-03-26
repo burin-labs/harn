@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What is Harn?
 
-Harn is a pipeline-oriented programming language for orchestrating AI coding agents. It features pipelines, first-class functions, pattern matching, enums, async/concurrency primitives (channels, mutexes, atomics), and LLM builtins.
+Harn is a pipeline-oriented programming language for orchestrating AI coding agents.
+It features pipelines, first-class functions, pattern matching, enums,
+async/concurrency primitives (channels, mutexes, atomics), and LLM builtins.
 
 ## Build & Run Commands
 
@@ -56,10 +58,17 @@ The execution pipeline is: **source → Lexer → Parser → TypeChecker → Int
 
 ### Workspace Crates
 
-- **harn-lexer** — Tokenizer. `Lexer::new(source).tokenize()` produces a token stream. Token types in `token.rs`, scanning logic in `lexer.rs`.
-- **harn-parser** — AST definition (`ast.rs`), recursive-descent parser (`parser.rs`), and static type checker (`typechecker.rs`).
-- **harn-runtime** — Tree-walking async interpreter (`interpreter.rs`), value types (`value.rs`), scoped environments (`environment.rs`), error types (`error.rs`). The interpreter is `!Send` — must run inside `tokio::task::LocalSet`.
-- **harn-stdlib** — Builtin functions registered on the interpreter: core I/O (`lib.rs`), JSON (`json.rs`), LLM calls (`llm.rs`), async builtins like `sleep`/`spawn`/channels (`async_builtins.rs`).
+- **harn-lexer** — Tokenizer. `Lexer::new(source).tokenize()` produces a token stream.
+  Token types in `token.rs`, scanning logic in `lexer.rs`.
+- **harn-parser** — AST definition (`ast.rs`), recursive-descent parser (`parser.rs`),
+  and static type checker (`typechecker.rs`).
+- **harn-runtime** — Tree-walking async interpreter (`interpreter.rs`),
+  value types (`value.rs`), scoped environments (`environment.rs`),
+  error types (`error.rs`). The interpreter is `!Send` — must run inside
+  `tokio::task::LocalSet`.
+- **harn-stdlib** — Builtin functions registered on the interpreter: core I/O (`lib.rs`),
+  JSON (`json.rs`), LLM calls (`llm.rs`),
+  async builtins like `sleep`/`spawn`/channels (`async_builtins.rs`).
 - **harn-vm** — Bytecode compiler and VM (alternative execution backend). Chunk format, compiler, and VM.
 - **harn-cli** — CLI entry point. Subcommands: `run`, `test`, `repl`, `version`.
 - **harn-lsp** — Language Server Protocol implementation.
@@ -68,11 +77,17 @@ The execution pipeline is: **source → Lexer → Parser → TypeChecker → Int
 
 ### Conformance Tests
 
-Tests live in `conformance/interpreter/` and `conformance/errors/`. Each test is a `.harn` file paired with a `.expected` (for interpreter tests) or `.error` (for error tests) file. The CLI `test` command runs these by executing each `.harn` file and comparing output against the expected file. This is the primary way to verify language behavior.
+Tests live in `conformance/interpreter/` and `conformance/errors/`. Each test is a
+`.harn` file paired with a `.expected` (for interpreter tests) or `.error`
+(for error tests) file. The CLI `test` command runs these by executing each
+`.harn` file and comparing output against the expected file. This is the
+primary way to verify language behavior.
 
 ### Language Spec
 
-`spec/HARN_SPEC.md` is the authoritative language specification. `spec/AST.md` documents the AST node types. Consult these when making parser or interpreter changes.
+`spec/HARN_SPEC.md` is the authoritative language specification.
+`spec/AST.md` documents the AST node types. Consult these when making
+parser or interpreter changes.
 
 ### Tree-sitter Grammar
 

@@ -41,7 +41,8 @@ try {
 
 ### return inside try
 
-A `return` statement inside a `try` block is **not** caught. It propagates out of the enclosing pipeline or function as expected.
+A `return` statement inside a `try` block is **not** caught. It propagates
+out of the enclosing pipeline or function as expected.
 
 ```javascript
 fn find_user(id) {

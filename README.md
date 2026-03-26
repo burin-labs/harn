@@ -4,7 +4,9 @@
 
 A programming language for orchestrating AI agents.
 
-Harn gives you pipelines, concurrency, LLM calls, and error recovery as language primitives — not library abstractions. Instead of wiring together agents in Python with callbacks and retry decorators, you write this:
+Harn gives you pipelines, concurrency, LLM calls, and error recovery as
+language primitives — not library abstractions. Instead of wiring together
+agents in Python with callbacks and retry decorators, you write this:
 
 ```javascript
 pipeline default(task) {
@@ -94,7 +96,8 @@ pipeline default(task) {
 
 ### Persistent agent loops
 
-The `agent_loop` builtin maintains conversation history across turns and keeps the agent working until it emits a `##DONE##` sentinel:
+The `agent_loop` builtin maintains conversation history across turns and
+keeps the agent working until it emits a `##DONE##` sentinel:
 
 ```javascript
 pipeline default(task) {
@@ -175,7 +178,7 @@ pipeline default(task) {
 
 Harn is a tree-walking async interpreter written in Rust. The execution pipeline is:
 
-```
+```text
 source → Lexer → Parser → TypeChecker → Interpreter
 ```
 
@@ -193,7 +196,8 @@ The codebase is organized as a Cargo workspace:
 | `harn-dap` | Debug Adapter Protocol |
 | `harn-wasm` | WASM target (built separately with wasm-pack) |
 
-The [language specification](spec/HARN_SPEC.md) is the authoritative reference. The tree-sitter grammar for editor support is in `tree-sitter-harn/`.
+The [language specification](spec/HARN_SPEC.md) is the authoritative reference.
+The tree-sitter grammar for editor support is in `tree-sitter-harn/`.
 
 ## For contributors
 
@@ -208,7 +212,9 @@ make test         # Rust unit tests
 make conformance  # 76 language conformance tests
 ```
 
-Conformance tests in `conformance/` are the primary way to verify language behavior. Each test is a `.harn` file paired with a `.expected` or `.error` file. Add one whenever you change the parser or interpreter.
+Conformance tests in `conformance/` are the primary way to verify language
+behavior. Each test is a `.harn` file paired with a `.expected` or `.error`
+file. Add one whenever you change the parser or interpreter.
 
 Pre-commit hooks run `fmt` and `clippy` automatically. After cloning, set them up:
 

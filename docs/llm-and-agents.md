@@ -64,7 +64,9 @@ let response = llm_call(
 
 ## agent_loop
 
-Run an agent that keeps working until it's done. The agent maintains conversation history across turns and loops until it outputs the `##DONE##` sentinel.
+Run an agent that keeps working until it's done. The agent maintains
+conversation history across turns and loops until it outputs the
+`##DONE##` sentinel.
 
 ```javascript
 let result = agent_loop(
@@ -85,7 +87,7 @@ let result = agent_loop(
    - Repeats until done or limits are hit
 4. If `persistent: false` (default): returns after the first response
 
-### Parameters
+### agent_loop options
 
 Same as `llm_call`, plus additional options:
 
@@ -98,11 +100,15 @@ Same as `llm_call`, plus additional options:
 
 Default nudge message:
 
-> You have not output ##DONE## yet — the task is not complete. Use your tools to continue working. Only output ##DONE## when the task is fully complete and verified.
+> You have not output ##DONE## yet — the task is not complete.
+> Use your tools to continue working. Only output ##DONE## when
+> the task is fully complete and verified.
 
 When `persistent: true`, the system prompt is automatically extended with:
 
-> IMPORTANT: You MUST keep working until the task is complete. Do NOT stop to explain or summarize — take action. Output ##DONE## only when the task is fully complete and verified.
+> IMPORTANT: You MUST keep working until the task is complete.
+> Do NOT stop to explain or summarize — take action. Output ##DONE##
+> only when the task is fully complete and verified.
 
 ### Example with retry
 

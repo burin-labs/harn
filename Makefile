@@ -1,7 +1,7 @@
-.PHONY: check fmt lint test conformance all
+.PHONY: check fmt lint lint-md test conformance all
 
 # Full quality check: format, lint, test, conformance
-all: fmt lint test conformance
+all: fmt lint lint-md test conformance
 
 # Format all code
 fmt:
@@ -18,6 +18,10 @@ test:
 # Run Harn conformance test suite
 conformance:
 	cargo run --bin harn -- test conformance
+
+# Lint markdown files
+lint-md:
+	npx markdownlint-cli2 "**/*.md"
 
 # Format check (no changes, for CI)
 fmt-check:

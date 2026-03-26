@@ -1,16 +1,19 @@
 # Harn AST node catalog
 
-All AST nodes are cases of the `HarnNode` enum, defined in `Sources/BurinCore/Harn/HarnNode.swift`. The enum is `indirect` (nodes can contain other nodes) and `Equatable`.
+All AST nodes are cases of the `HarnNode` enum,
+defined in `Sources/BurinCore/Harn/HarnNode.swift`.
+The enum is `indirect` (nodes can contain other nodes) and `Equatable`.
 
 ## Declarations
 
 ### `pipeline`
 
-```
+```javascript
 pipeline(name: String, params: [String], body: [HarnNode], extends: String?)
 ```
 
-A named pipeline declaration. `params` are the formal parameter names. `body` is the list of statements. `extends` is the optional parent pipeline name.
+A named pipeline declaration. `params` are the formal parameter names.
+`body` is the list of statements. `extends` is the optional parent pipeline name.
 
 ```harn
 pipeline default(task, project) {
@@ -20,7 +23,7 @@ pipeline default(task, project) {
 
 ### `letBinding`
 
-```
+```javascript
 letBinding(name: String, value: HarnNode)
 ```
 
@@ -32,7 +35,7 @@ let result = compute()
 
 ### `varBinding`
 
-```
+```javascript
 varBinding(name: String, value: HarnNode)
 ```
 
@@ -44,7 +47,7 @@ var count = 0
 
 ### `overrideDecl`
 
-```
+```javascript
 overrideDecl(name: String, params: [String], body: [HarnNode])
 ```
 
@@ -60,7 +63,7 @@ pipeline child(task) extends parent {
 
 ### `importDecl`
 
-```
+```javascript
 importDecl(path: String)
 ```
 
@@ -74,11 +77,12 @@ import "shared/common.harn"
 
 ### `ifElse`
 
-```
+```javascript
 ifElse(condition: HarnNode, then: [HarnNode], elseBlock: [HarnNode]?)
 ```
 
-Conditional execution. `elseBlock` is `nil` when there is no `else` branch. An `else if` chain produces a nested `ifElse` inside the `elseBlock` array.
+Conditional execution. `elseBlock` is `nil` when there is no `else` branch.
+An `else if` chain produces a nested `ifElse` inside the `elseBlock` array.
 
 ```harn
 if x > 0 {
@@ -90,7 +94,7 @@ if x > 0 {
 
 ### `forIn`
 
-```
+```javascript
 forIn(variable: String, iterable: HarnNode, body: [HarnNode])
 ```
 
@@ -104,11 +108,12 @@ for item in [1, 2, 3] {
 
 ### `matchExpr`
 
-```
+```javascript
 matchExpr(value: HarnNode, arms: [(pattern: HarnNode, body: [HarnNode])])
 ```
 
-Pattern matching. Each arm has a pattern expression and a body. The first arm whose pattern equals the match value executes.
+Pattern matching. Each arm has a pattern expression and a body.
+The first arm whose pattern equals the match value executes.
 
 ```harn
 match status {
@@ -119,7 +124,7 @@ match status {
 
 ### `whileLoop`
 
-```
+```javascript
 whileLoop(condition: HarnNode, body: [HarnNode])
 ```
 
@@ -133,7 +138,7 @@ while i < 10 {
 
 ### `retry`
 
-```
+```javascript
 retry(count: HarnNode, body: [HarnNode])
 ```
 
@@ -147,7 +152,7 @@ retry 3 {
 
 ### `returnStmt`
 
-```
+```javascript
 returnStmt(HarnNode?)
 ```
 
@@ -159,7 +164,7 @@ return result
 
 ### `tryCatch`
 
-```
+```javascript
 tryCatch(body: [HarnNode], errorVar: String?, catchBody: [HarnNode])
 ```
 
@@ -175,7 +180,7 @@ try {
 
 ### `fnDecl`
 
-```
+```javascript
 fnDecl(name: String, params: [String], body: [HarnNode])
 ```
 
@@ -189,7 +194,7 @@ fn add(a, b) {
 
 ### `spawnExpr`
 
-```
+```javascript
 spawnExpr(body: [HarnNode])
 ```
 
@@ -205,7 +210,7 @@ let handle = spawn {
 
 ### `parallel`
 
-```
+```javascript
 parallel(count: HarnNode, variable: String?, body: [HarnNode])
 ```
 
@@ -219,7 +224,7 @@ parallel(3) { i ->
 
 ### `parallelMap`
 
-```
+```javascript
 parallelMap(list: HarnNode, variable: String, body: [HarnNode])
 ```
 
@@ -235,7 +240,7 @@ parallel_map(items) { item ->
 
 ### `functionCall`
 
-```
+```javascript
 functionCall(name: String, args: [HarnNode])
 ```
 
@@ -247,7 +252,7 @@ read_file("config.json")
 
 ### `methodCall`
 
-```
+```javascript
 methodCall(object: HarnNode, method: String, args: [HarnNode])
 ```
 
@@ -259,7 +264,7 @@ list.map({ x -> x * 2 })
 
 ### `propertyAccess`
 
-```
+```javascript
 propertyAccess(object: HarnNode, property: String)
 ```
 
@@ -271,7 +276,7 @@ result.name
 
 ### `subscriptAccess`
 
-```
+```javascript
 subscriptAccess(object: HarnNode, index: HarnNode)
 ```
 
@@ -284,11 +289,12 @@ config["key"]
 
 ### `binaryOp`
 
-```
+```javascript
 binaryOp(op: String, left: HarnNode, right: HarnNode)
 ```
 
-A binary operation. `op` is the operator string: `+`, `-`, `*`, `/`, `==`, `!=`, `<`, `>`, `<=`, `>=`, `&&`, `||`, `??`, `|>`.
+A binary operation. `op` is the operator string:
+`+`, `-`, `*`, `/`, `==`, `!=`, `<`, `>`, `<=`, `>=`, `&&`, `||`, `??`, `|>`.
 
 ```harn
 1 + 2
@@ -298,7 +304,7 @@ a |> transform
 
 ### `unaryOp`
 
-```
+```javascript
 unaryOp(op: String, operand: HarnNode)
 ```
 
@@ -311,7 +317,7 @@ A unary prefix operation. `op` is `!` (logical not) or `-` (negation).
 
 ### `ternary`
 
-```
+```javascript
 ternary(condition: HarnNode, trueExpr: HarnNode, falseExpr: HarnNode)
 ```
 
@@ -323,7 +329,7 @@ x > 0 ? "positive" : "non-positive"
 
 ### `assignment`
 
-```
+```javascript
 assignment(target: HarnNode, value: HarnNode)
 ```
 
@@ -335,7 +341,7 @@ count = count + 1
 
 ### `throwStmt`
 
-```
+```javascript
 throwStmt(HarnNode)
 ```
 
@@ -350,7 +356,7 @@ throw {code: 404, msg: "not found"}
 
 ### `interpolatedString`
 
-```
+```javascript
 interpolatedString([StringSegment])
 ```
 
@@ -362,7 +368,7 @@ A string with embedded expressions. Each `StringSegment` is either `.literal(Str
 
 ### `stringLiteral`
 
-```
+```javascript
 stringLiteral(String)
 ```
 
@@ -374,7 +380,7 @@ A plain string constant.
 
 ### `intLiteral`
 
-```
+```javascript
 intLiteral(Int)
 ```
 
@@ -386,7 +392,7 @@ An integer constant.
 
 ### `floatLiteral`
 
-```
+```javascript
 floatLiteral(Double)
 ```
 
@@ -398,7 +404,7 @@ A floating-point constant.
 
 ### `boolLiteral`
 
-```
+```javascript
 boolLiteral(Bool)
 ```
 
@@ -411,7 +417,7 @@ false
 
 ### `nilLiteral`
 
-```
+```javascript
 nilLiteral
 ```
 
@@ -423,7 +429,7 @@ nil
 
 ### `identifier`
 
-```
+```javascript
 identifier(String)
 ```
 
@@ -436,7 +442,7 @@ my_variable
 
 ### `listLiteral`
 
-```
+```javascript
 listLiteral([HarnNode])
 ```
 
@@ -448,11 +454,12 @@ A list literal with zero or more element expressions.
 
 ### `dictLiteral`
 
-```
+```javascript
 dictLiteral([(key: HarnNode, value: HarnNode)])
 ```
 
-A dictionary literal with key-value pairs. Bare-identifier keys are converted to `stringLiteral` nodes during parsing. Computed keys use bracket syntax.
+A dictionary literal with key-value pairs. Bare-identifier keys are
+converted to `stringLiteral` nodes during parsing. Computed keys use bracket syntax.
 
 ```harn
 {name: "test", count: 42}
@@ -463,7 +470,7 @@ A dictionary literal with key-value pairs. Bare-identifier keys are converted to
 
 ### `block`
 
-```
+```javascript
 block([HarnNode])
 ```
 
@@ -471,7 +478,7 @@ A sequence of statements evaluated in a child scope. Not directly produced by th
 
 ### `closure`
 
-```
+```javascript
 closure(params: [String], body: [HarnNode])
 ```
 

@@ -36,7 +36,8 @@ let results = parallel(5) { i ->
 // [0, 10, 20, 30, 40]
 ```
 
-The variable `i` is the zero-based task index. Results are always returned in index order regardless of completion order.
+The variable `i` is the zero-based task index. Results are always returned
+in index order regardless of completion order.
 
 ## parallel_map
 
@@ -62,7 +63,9 @@ retry 3 {
 }
 ```
 
-Executes the body up to N times. If the body succeeds, returns immediately. If all attempts fail, returns `nil`. Note that `return` statements inside `retry` propagate out (they are not retried).
+Executes the body up to N times. If the body succeeds, returns immediately.
+If all attempts fail, returns `nil`. Note that `return` statements inside
+`retry` propagate out (they are not retried).
 
 ## Channels
 

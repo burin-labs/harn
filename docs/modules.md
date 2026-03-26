@@ -15,7 +15,9 @@ import "lib/helpers.harn"
 import "lib/helpers"
 ```
 
-Import paths are resolved relative to the current file's directory. If `main.harn` imports `"lib/helpers"`, it looks for `lib/helpers.harn` next to `main.harn`.
+Import paths are resolved relative to the current file's directory.
+If `main.harn` imports `"lib/helpers"`, it looks for `lib/helpers.harn`
+next to `main.harn`.
 
 ## Writing a library file
 
@@ -93,13 +95,15 @@ pipeline custom(task) extends base {
 }
 ```
 
-If the child pipeline has `override` declarations, the parent's body runs with the overrides applied. If the child has no overrides, the child's body replaces the parent's entirely.
+If the child pipeline has `override` declarations, the parent's body runs
+with the overrides applied. If the child has no overrides, the child's body
+replaces the parent's entirely.
 
 ## Organizing a project
 
 A typical project structure:
 
-```
+```text
 my-project/
   main.harn
   lib/

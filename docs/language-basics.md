@@ -4,7 +4,9 @@ This guide covers the core syntax and semantics of Harn.
 
 ## Pipelines
 
-Pipelines are the top-level organizational unit. A Harn program is one or more pipelines. The runtime executes the pipeline named `default`, or the first one declared.
+Pipelines are the top-level organizational unit. A Harn program is one or more
+pipelines. The runtime executes the pipeline named `default`, or the first
+one declared.
 
 ```javascript
 pipeline default(task) {
@@ -16,7 +18,9 @@ pipeline other(task) {
 }
 ```
 
-Pipeline parameters `task` and `project` are injected by the host runtime. A `context` dict with keys `task`, `project_root`, and `task_type` is always available.
+Pipeline parameters `task` and `project` are injected by the host runtime.
+A `context` dict with keys `task`, `project_root`, and `task_type` is
+always available.
 
 ## Variables
 
@@ -60,7 +64,9 @@ fn add(a: int, b: int) -> int {
 }
 ```
 
-Supported type expressions: `int`, `float`, `string`, `bool`, `nil`, `list`, `list[T]`, `dict`, union types (`string | nil`), and shape types (`{x: int, y: int}`).
+Supported type expressions: `int`, `float`, `string`, `bool`, `nil`, `list`,
+`list[T]`, `dict`, union types (`string | nil`), and shape types
+(`{x: int, y: int}`).
 
 ### Truthiness
 

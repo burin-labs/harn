@@ -2,17 +2,22 @@
 
 Version: 1.0 (derived from implementation, 2026-03-25)
 
-Harn is a pipeline-oriented programming language for orchestrating AI coding agents. It is implemented as a tree-walking interpreter in Swift. Programs consist of named pipelines containing imperative statements, expressions, and calls to registered builtins that perform I/O, LLM calls, and tool execution.
+Harn is a pipeline-oriented programming language for orchestrating AI coding agents.
+It is implemented as a tree-walking interpreter in Swift. Programs consist of named pipelines
+containing imperative statements, expressions, and calls to registered builtins
+that perform I/O, LLM calls, and tool execution.
 
 ## Lexical rules
 
 ### Whitespace
 
-Spaces (`' '`), tabs (`'\t'`), and carriage returns (`'\r'`) are insignificant and skipped between tokens. Newlines (`'\n'`) are significant tokens used as statement separators. The parser skips newlines between statements but they are preserved in the token stream.
+Spaces (`' '`), tabs (`'\t'`), and carriage returns (`'\r'`) are insignificant and skipped
+between tokens. Newlines (`'\n'`) are significant tokens used as statement separators.
+The parser skips newlines between statements but they are preserved in the token stream.
 
 ### Comments
 
-```
+```javascript
 // Line comment: everything until the next newline is ignored.
 
 /* Block comment: can span multiple lines.
@@ -57,7 +62,7 @@ The following identifiers are reserved:
 
 An identifier starts with a letter or underscore, followed by zero or more letters, digits, or underscores:
 
-```
+```javascript
 identifier ::= [a-zA-Z_][a-zA-Z0-9_]*
 ```
 
@@ -65,18 +70,19 @@ Note: `parallel_map` is lexed as a single keyword, not an identifier followed by
 
 ### Number literals
 
-```
+```javascript
 int_literal   ::= digit+
 float_literal ::= digit+ '.' digit+
 ```
 
-A number followed by `.` where the next character is not a digit is lexed as an integer followed by the `.` operator (enabling `42.method`).
+A number followed by `.` where the next character is not a digit is lexed as an integer
+followed by the `.` operator (enabling `42.method`).
 
 ### String literals
 
 #### Single-line strings
 
-```
+```javascript
 string_literal ::= '"' (char | escape | interpolation)* '"'
 escape         ::= '\' ('n' | 't' | '\\' | '"' | '$')
 interpolation  ::= '${' expression '}'
@@ -84,17 +90,23 @@ interpolation  ::= '${' expression '}'
 
 A string cannot span multiple lines. An unescaped newline inside a string is a lexer error.
 
-If the string contains at least one `${...}` interpolation, it produces an `interpolatedString` token containing a list of segments (literal text and expression source strings). Otherwise it produces a plain `stringLiteral` token.
+If the string contains at least one `${...}` interpolation, it produces an
+`interpolatedString` token containing a list of segments (literal text and expression
+source strings). Otherwise it produces a plain `stringLiteral` token.
 
-Escape sequences: `\n` (newline), `\t` (tab), `\\` (backslash), `\"` (double quote), `\$` (dollar sign). Any other character after `\` produces a literal backslash followed by that character.
+Escape sequences: `\n` (newline), `\t` (tab), `\\` (backslash), `\"` (double quote),
+`\$` (dollar sign). Any other character after `\` produces a literal backslash
+followed by that character.
 
 #### Multi-line strings
 
-```
+```javascript
 multi_line_string ::= '"""' newline? content '"""'
 ```
 
-Triple-quoted strings can span multiple lines. The optional newline immediately after the opening `"""` is consumed. Common leading whitespace is stripped from all non-empty lines. A trailing newline before the closing `"""` is removed.
+Triple-quoted strings can span multiple lines. The optional newline immediately after the
+opening `"""` is consumed. Common leading whitespace is stripped from all non-empty lines.
+A trailing newline before the closing `"""` is removed.
 
 Multi-line strings do not support interpolation.
 
@@ -152,7 +164,9 @@ Multi-line strings do not support interpolation.
 
 ## Grammar
 
-The grammar is expressed in EBNF. Newlines between statements are implicit separators (the parser skips them with `skipNewlines()`). The `consume()` helper also skips newlines before checking the expected token.
+The grammar is expressed in EBNF. Newlines between statements are implicit separators
+(the parser skips them with `skipNewlines()`). The `consume()` helper also skips newlines
+before checking the expected token.
 
 ### Top-level
 
@@ -201,7 +215,9 @@ fn_decl        ::= 'fn' IDENTIFIER '(' param_list ')' '{' block '}'
 expression_statement ::= expression ('=' expression)?
 ```
 
-The `expression_statement` rule handles both bare expressions (function calls, method calls) and assignments. An assignment is recognized when the left-hand side is an identifier followed by `=`.
+The `expression_statement` rule handles both bare expressions (function calls, method calls)
+and assignments. An assignment is recognized when the left-hand side is an identifier
+followed by `=`.
 
 ### Expressions (by precedence, lowest to highest)
 
@@ -252,7 +268,9 @@ dict_entry   ::= (IDENTIFIER | '[' expression ']') ':' expression
 arg_list     ::= (expression (',' expression)*)?
 ```
 
-Dict keys written as bare identifiers are converted to string literals (e.g., `{name: "x"}` becomes `{"name": "x"}`). Computed keys use bracket syntax: `{[expr]: value}`.
+Dict keys written as bare identifiers are converted to string literals
+(e.g., `{name: "x"}` becomes `{"name": "x"}`).
+Computed keys use bracket syntax: `{[expr]: value}`.
 
 ## Operator precedence table
 
@@ -279,13 +297,15 @@ Harn uses lexical scoping with a parent-chain environment model.
 ### Environment
 
 Each `HarnEnvironment` has:
+
 - A `values` dictionary mapping names to `HarnValue`
 - A `mutable` set tracking which names were declared with `var`
 - An optional `parent` reference
 
 ### Variable lookup
 
-`env.get(name)` checks the current scope's `values` first, then walks up the `parent` chain. Returns `nil` (which becomes `.nilValue`) if not found anywhere.
+`env.get(name)` checks the current scope's `values` first, then walks up the `parent` chain.
+Returns `nil` (which becomes `.nilValue`) if not found anywhere.
 
 ### Variable definition
 
@@ -294,11 +314,14 @@ Each `HarnEnvironment` has:
 
 ### Variable assignment
 
-`name = value` walks up the scope chain to find the binding. If the binding is found but was declared with `let`, throws `HarnRuntimeError.immutableAssignment`. If not found in any scope, throws `HarnRuntimeError.undefinedVariable`.
+`name = value` walks up the scope chain to find the binding. If the binding is found but was
+declared with `let`, throws `HarnRuntimeError.immutableAssignment`. If not found in any scope,
+throws `HarnRuntimeError.undefinedVariable`.
 
 ### Scope creation
 
 New child scopes are created for:
+
 - Pipeline bodies
 - `for` loop bodies (loop variable is mutable)
 - `while` loop iterations
@@ -313,31 +336,41 @@ Control flow statements (`if`/`else`, `match`) execute in the current scope with
 
 ### Program entry
 
-1. All top-level nodes are scanned. Pipeline declarations are registered by name. Import declarations are processed (loaded and evaluated).
-2. The entry pipeline is selected: the pipeline named `"default"` if it exists, otherwise the first pipeline in the file.
+1. All top-level nodes are scanned. Pipeline declarations are registered by name.
+   Import declarations are processed (loaded and evaluated).
+2. The entry pipeline is selected: the pipeline named `"default"` if it exists,
+   otherwise the first pipeline in the file.
 3. The entry pipeline's body is executed.
 
 ### Pipeline parameters
 
-If the pipeline parameter list includes `task`, it is bound to `context.task`. If it includes `project`, it is bound to `context.projectRoot`. A `context` dict is always injected with keys `task`, `project_root`, and `task_type`.
+If the pipeline parameter list includes `task`, it is bound to `context.task`.
+If it includes `project`, it is bound to `context.projectRoot`.
+A `context` dict is always injected with keys `task`, `project_root`, and `task_type`.
 
 ### Pipeline inheritance
 
 `pipeline child(x) extends parent { ... }`:
-- If the child body contains `override` declarations, the resolved body is the parent's body plus any non-override statements from the child. Override declarations are available for lookup by name.
+
+- If the child body contains `override` declarations, the resolved body is the parent's
+  body plus any non-override statements from the child.
+  Override declarations are available for lookup by name.
 - If the child body contains no `override` declarations, the child body entirely replaces the parent body.
 
 ### Statement execution
 
-Statements execute sequentially. The last expression value in a block is the block's result, though this is mostly relevant for closures and parallel bodies.
+Statements execute sequentially. The last expression value in a block is the block's result,
+though this is mostly relevant for closures and parallel bodies.
 
 ### Import resolution
 
 `import "path.harn"` loads and parses the file via `HarnLoader`, which searches:
+
 1. `<projectRoot>/.burin/pipelines/<name>.harn`
 2. Bundle resources
 
-Imported pipelines are registered for later invocation. Non-pipeline top-level statements (fn declarations, let bindings) are executed immediately.
+Imported pipelines are registered for later invocation.
+Non-pipeline top-level statements (fn declarations, let bindings) are executed immediately.
 
 ## Runtime values
 
@@ -369,13 +402,15 @@ Imported pipelines are registered for later invocation. Non-pipeline top-level s
 ### Equality
 
 Values are equal if they have the same type and same contents, with these exceptions:
+
 - `int` and `float` are compared by converting `int` to `float`
 - Two closures are never equal
 - Two task handles are equal if their IDs match
 
 ### Comparison
 
-Only `int`, `float`, and `string` support ordering (`<`, `>`, `<=`, `>=`). Comparison between other types returns 0 (equal).
+Only `int`, `float`, and `string` support ordering (`<`, `>`, `<=`, `>=`).
+Comparison between other types returns 0 (equal).
 
 ## Binary operator semantics
 
@@ -394,6 +429,7 @@ Division by zero returns `nil`.
 ### Logical (`&&`, `||`)
 
 Short-circuit evaluation:
+
 - `&&`: if left is falsy, returns `false` without evaluating right.
 - `||`: if left is truthy, returns `true` without evaluating right.
 
@@ -404,6 +440,7 @@ Short-circuit: if left is not `nil`, returns left without evaluating right.
 ### Pipe (`|>`)
 
 `a |> f` evaluates `a`, then:
+
 1. If `f` evaluates to a closure, invokes it with `a` as the single argument.
 2. If `f` is an identifier resolving to a builtin, calls the builtin with `[a]`.
 3. If `f` is an identifier resolving to a closure variable, invokes it with `a`.
@@ -411,7 +448,8 @@ Short-circuit: if left is not `nil`, returns left without evaluating right.
 
 ### Ternary (`? :`)
 
-`condition ? trueExpr : falseExpr` evaluates `condition`, then evaluates and returns either `trueExpr` (if truthy) or `falseExpr`.
+`condition ? trueExpr : falseExpr` evaluates `condition`, then evaluates and returns
+either `trueExpr` (if truthy) or `falseExpr`.
 
 ## Control flow
 
@@ -437,7 +475,9 @@ for item in iterable {
 }
 ```
 
-If `iterable` is a list, iterates over elements. If `iterable` is a dict, iterates over entries sorted by key, where each entry is `{key: "...", value: ...}`. The loop variable is mutable within the loop body.
+If `iterable` is a list, iterates over elements. If `iterable` is a dict, iterates over
+entries sorted by key, where each entry is `{key: "...", value: ...}`.
+The loop variable is mutable within the loop body.
 
 ### while
 
@@ -458,7 +498,8 @@ match value {
 }
 ```
 
-Patterns are expressions. Each pattern is evaluated and compared to the match value using `valuesEqual`. The first matching arm executes. If no arm matches, the result is `nil`.
+Patterns are expressions. Each pattern is evaluated and compared to the match value
+using `valuesEqual`. The first matching arm executes. If no arm matches, the result is `nil`.
 
 ### retry
 
@@ -468,7 +509,10 @@ retry 3 {
 }
 ```
 
-Executes the body up to N times. If the body succeeds (no error), returns immediately. If the body throws, catches the error and retries. `return` statements inside retry propagate out (are not retried). After all attempts are exhausted, returns `nil` (does not re-throw the last error).
+Executes the body up to N times. If the body succeeds (no error), returns immediately.
+If the body throws, catches the error and retries. `return` statements inside retry
+propagate out (are not retried). After all attempts are exhausted, returns `nil`
+(does not re-throw the last error).
 
 ## Concurrency
 
@@ -480,7 +524,9 @@ parallel(count) { i ->
 }
 ```
 
-Creates `count` concurrent tasks. Each task gets an isolated interpreter with a child environment. The optional variable `i` is bound to the task index (0-based). Returns a list of results in index order.
+Creates `count` concurrent tasks. Each task gets an isolated interpreter with a child
+environment. The optional variable `i` is bound to the task index (0-based).
+Returns a list of results in index order.
 
 ### parallel_map
 
@@ -490,7 +536,9 @@ parallel_map(list) { item ->
 }
 ```
 
-Maps over a list concurrently. Each task gets an isolated interpreter. The variable is bound to the current list element. Returns a list of results in the original order.
+Maps over a list concurrently. Each task gets an isolated interpreter.
+The variable is bound to the current list element.
+Returns a list of results in the original order.
 
 ### spawn/await/cancel
 
@@ -502,7 +550,9 @@ let result = await(handle)
 cancel(handle)
 ```
 
-`spawn` launches an async task and returns a `taskHandle`. `await` (a built-in interpreter function, not a keyword) blocks until the task completes and returns its result. `cancel` cancels the task.
+`spawn` launches an async task and returns a `taskHandle`.
+`await` (a built-in interpreter function, not a keyword) blocks until the task completes
+and returns its result. `cancel` cancels the task.
 
 ## Error model
 
@@ -512,7 +562,8 @@ cancel(handle)
 throw expression
 ```
 
-Evaluates the expression and throws it as `HarnRuntimeError.thrownError(value)`. Any value can be thrown (strings, dicts, etc.).
+Evaluates the expression and throws it as `HarnRuntimeError.thrownError(value)`.
+Any value can be thrown (strings, dicts, etc.).
 
 ### try/catch
 
@@ -525,6 +576,7 @@ try {
 ```
 
 If the body throws:
+
 - A `thrownError(value)`: `e` is bound to the thrown value directly.
 - Any other runtime error: `e` is bound to the error's `localizedDescription` string.
 
@@ -542,7 +594,8 @@ fn name(param1, param2) {
 }
 ```
 
-Declares a named function. Equivalent to `let name = { param1, param2 -> ... }`. The function captures the lexical scope at definition time.
+Declares a named function. Equivalent to `let name = { param1, param2 -> ... }`.
+The function captures the lexical scope at definition time.
 
 ### Closures
 
@@ -551,11 +604,14 @@ let f = { x -> x * 2 }
 let g = { a, b -> a + b }
 ```
 
-First-class values. When invoked, a child environment is created from the *captured* environment (not the call-site environment), and parameters are bound as immutable bindings.
+First-class values. When invoked, a child environment is created from the *captured*
+environment (not the call-site environment), and parameters are bound as immutable bindings.
 
 ### Return
 
-`return value` inside a function/closure unwinds execution via `HarnRuntimeError.returnValue`. The closure invocation catches this and returns the value. `return` inside a pipeline terminates the pipeline.
+`return value` inside a function/closure unwinds execution via
+`HarnRuntimeError.returnValue`. The closure invocation catches this and returns the value.
+`return` inside a pipeline terminates the pipeline.
 
 ## Built-in methods
 
@@ -610,7 +666,10 @@ First-class values. When invoked, a child environment is created from the *captu
 
 ## Method-style builtins
 
-If `obj.method(args)` is called and `obj` is an identifier, the interpreter first checks for a registered builtin named `"obj.method"`. If found, it is called with just `args` (not `obj`). This enables namespaced builtins like `experience_bank.save(...)` and `negative_knowledge.record(...)`.
+If `obj.method(args)` is called and `obj` is an identifier, the interpreter first checks
+for a registered builtin named `"obj.method"`. If found, it is called with just `args`
+(not `obj`). This enables namespaced builtins like `experience_bank.save(...)`
+and `negative_knowledge.record(...)`.
 
 ## Runtime errors
 

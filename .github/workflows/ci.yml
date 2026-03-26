@@ -19,6 +19,13 @@ jobs:
           components: rustfmt
       - run: make fmt-check
 
+  lint-md:
+    name: Markdown lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DavidAnson/markdownlint-cli2-action@v19
+
   lint:
     name: Clippy lint
     runs-on: ubuntu-latest
