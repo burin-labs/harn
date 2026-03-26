@@ -6,3 +6,5 @@ edition.workspace = true
 [dependencies]
 harn-lexer = { path = "../harn-lexer" }
 harn-parser = { path = "../harn-parser" }
+regex = "1"
+serde_json = "1"

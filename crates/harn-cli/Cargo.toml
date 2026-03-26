@@ -12,6 +12,7 @@ harn-lexer = { path = "../harn-lexer" }
 harn-parser = { path = "../harn-parser" }
 harn-runtime = { path = "../harn-runtime" }
 harn-stdlib = { path = "../harn-stdlib" }
+harn-vm = { path = "../harn-vm" }
 harn-lint = { path = "../harn-lint" }
 harn-fmt = { path = "../harn-fmt" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

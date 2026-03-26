@@ -39,10 +39,20 @@ async fn main() {
         }
         "run" => {
             if args.len() < 3 {
-                eprintln!("Usage: harn run <file.harn>");
+                eprintln!("Usage: harn run <file.harn> [--vm]");
                 process::exit(1);
             }
-            run_file(&args[2]).await;
+            let use_vm = args.iter().any(|a| a == "--vm");
+            let file = args
+                .iter()
+                .skip(2)
+                .find(|a| a.ends_with(".harn"))
+                .unwrap_or(&args[2]);
+            if use_vm {
+                run_file_vm(file);
+            } else {
+                run_file(file).await;
+            }
         }
         "lint" => {
             if args.len() < 3 {
@@ -192,6 +202,58 @@ async fn run_file(path: &str) {
         }
         Err(e) => {
             render_error(&e, &source, path);
+            process::exit(1);
+        }
+    }
+}
+
+fn run_file_vm(path: &str) {
+    let source = match fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error reading {path}: {e}");
+            process::exit(1);
+        }
+    };
+
+    let mut lexer = Lexer::new(&source);
+    let tokens = match lexer.tokenize() {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("{path}: lex error: {e}");
+            process::exit(1);
+        }
+    };
+
+    let mut parser = Parser::new(tokens);
+    let program = match parser.parse() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("{path}: parse error: {e}");
+            process::exit(1);
+        }
+    };
+
+    let chunk = match harn_vm::Compiler::new().compile(&program) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("{path}: compile error: {e}");
+            process::exit(1);
+        }
+    };
+
+    let mut vm = harn_vm::Vm::new();
+    harn_vm::register_vm_stdlib(&mut vm);
+
+    match vm.execute(&chunk) {
+        Ok(_) => {
+            let output = vm.output();
+            if !output.is_empty() {
+                io::stdout().write_all(output.as_bytes()).ok();
+            }
+        }
+        Err(e) => {
+            eprintln!("VM error: {e}");
             process::exit(1);
         }
     }

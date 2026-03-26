@@ -343,6 +343,7 @@ dependencies = [
  "harn-parser",
  "harn-runtime",
  "harn-stdlib",
+ "harn-vm",
  "tokio",
 ]
 
@@ -421,6 +422,8 @@ version = "0.1.0"
 dependencies = [
  "harn-lexer",
  "harn-parser",
+ "regex",
+ "serde_json",
 ]
 
 [[package]]

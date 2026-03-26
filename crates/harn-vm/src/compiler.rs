@@ -447,23 +447,159 @@ impl Compiler {
                 }
             }
 
-            // Statements that don't produce values
+            Node::DurationLiteral(ms) => {
+                // Durations are just integers in milliseconds
+                let idx = self.chunk.add_constant(Constant::Int(*ms as i64));
+                self.chunk.emit_u16(Op::Constant, idx, self.line);
+            }
+
+            Node::RangeExpr {
+                start,
+                end,
+                inclusive,
+            } => {
+                // Compile as __range__(start, end, inclusive_bool) builtin call
+                let name_idx = self
+                    .chunk
+                    .add_constant(Constant::String("__range__".to_string()));
+                self.chunk.emit_u16(Op::Constant, name_idx, self.line);
+                self.compile_node(start)?;
+                self.compile_node(end)?;
+                if *inclusive {
+                    self.chunk.emit(Op::True, self.line);
+                } else {
+                    self.chunk.emit(Op::False, self.line);
+                }
+                self.chunk.emit_u8(Op::Call, 3, self.line);
+            }
+
+            Node::GuardStmt {
+                condition,
+                else_body,
+            } => {
+                // guard condition else { body }
+                // Compile condition; if truthy, skip else_body
+                self.compile_node(condition)?;
+                let skip_jump = self.chunk.emit_jump(Op::JumpIfTrue, self.line);
+                self.chunk.emit(Op::Pop, self.line); // pop condition
+                                                     // Compile else_body
+                self.compile_block(else_body)?;
+                // Pop result of else_body (guard is a statement, not expression)
+                if !else_body.is_empty() && Self::produces_value(&else_body.last().unwrap().node) {
+                    self.chunk.emit(Op::Pop, self.line);
+                }
+                let end_jump = self.chunk.emit_jump(Op::Jump, self.line);
+                self.chunk.patch_jump(skip_jump);
+                self.chunk.emit(Op::Pop, self.line); // pop condition
+                self.chunk.patch_jump(end_jump);
+                self.chunk.emit(Op::Nil, self.line);
+            }
+
+            Node::Block(stmts) => {
+                if stmts.is_empty() {
+                    self.chunk.emit(Op::Nil, self.line);
+                } else {
+                    self.compile_block(stmts)?;
+                }
+            }
+
+            Node::DeadlineBlock { body, .. } => {
+                // v1: just compile the body, skip timeout enforcement
+                if body.is_empty() {
+                    self.chunk.emit(Op::Nil, self.line);
+                } else {
+                    self.compile_block(body)?;
+                }
+            }
+
+            Node::MutexBlock { body } => {
+                // v1: single-threaded, just compile the body
+                if body.is_empty() {
+                    self.chunk.emit(Op::Nil, self.line);
+                } else {
+                    self.compile_block(body)?;
+                }
+            }
+
+            Node::YieldExpr { .. } => {
+                // v1: yield is host-integration only, emit nil
+                self.chunk.emit(Op::Nil, self.line);
+            }
+
+            Node::AskExpr { fields } => {
+                // Compile as a dict literal and call llm_call builtin
+                // For v1, just build the dict (llm_call requires async)
+                for entry in fields {
+                    self.compile_node(&entry.key)?;
+                    self.compile_node(&entry.value)?;
+                }
+                self.chunk
+                    .emit_u16(Op::BuildDict, fields.len() as u16, self.line);
+            }
+
+            Node::EnumConstruct {
+                enum_name,
+                variant,
+                args,
+            } => {
+                // Build args list, then build a dict representing the enum variant
+                // Store as a dict with __enum__, __variant__, and __fields__ keys
+                let enum_key = self
+                    .chunk
+                    .add_constant(Constant::String("__enum__".to_string()));
+                let enum_val = self.chunk.add_constant(Constant::String(enum_name.clone()));
+                self.chunk.emit_u16(Op::Constant, enum_key, self.line);
+                self.chunk.emit_u16(Op::Constant, enum_val, self.line);
+
+                let var_key = self
+                    .chunk
+                    .add_constant(Constant::String("__variant__".to_string()));
+                let var_val = self.chunk.add_constant(Constant::String(variant.clone()));
+                self.chunk.emit_u16(Op::Constant, var_key, self.line);
+                self.chunk.emit_u16(Op::Constant, var_val, self.line);
+
+                let fields_key = self
+                    .chunk
+                    .add_constant(Constant::String("__fields__".to_string()));
+                self.chunk.emit_u16(Op::Constant, fields_key, self.line);
+                for arg in args {
+                    self.compile_node(arg)?;
+                }
+                self.chunk
+                    .emit_u16(Op::BuildList, args.len() as u16, self.line);
+
+                self.chunk.emit_u16(Op::BuildDict, 3, self.line);
+            }
+
+            Node::StructConstruct {
+                struct_name,
+                fields,
+            } => {
+                // Build as a dict with a __struct__ key for metadata
+                let struct_key = self
+                    .chunk
+                    .add_constant(Constant::String("__struct__".to_string()));
+                let struct_val = self
+                    .chunk
+                    .add_constant(Constant::String(struct_name.clone()));
+                self.chunk.emit_u16(Op::Constant, struct_key, self.line);
+                self.chunk.emit_u16(Op::Constant, struct_val, self.line);
+
+                for entry in fields {
+                    self.compile_node(&entry.key)?;
+                    self.compile_node(&entry.value)?;
+                }
+                self.chunk
+                    .emit_u16(Op::BuildDict, (fields.len() + 1) as u16, self.line);
+            }
+
+            // Declarations that only register metadata (no runtime effect needed for v1)
             Node::Pipeline { .. }
             | Node::ImportDecl { .. }
             | Node::OverrideDecl { .. }
             | Node::TypeDecl { .. }
             | Node::EnumDecl { .. }
-            | Node::StructDecl { .. }
-            | Node::EnumConstruct { .. }
-            | Node::StructConstruct { .. }
-            | Node::DurationLiteral(_)
-            | Node::RangeExpr { .. }
-            | Node::GuardStmt { .. }
-            | Node::AskExpr { .. }
-            | Node::DeadlineBlock { .. }
-            | Node::YieldExpr { .. }
-            | Node::MutexBlock { .. }
-            | Node::Block(_) => {
+            | Node::StructDecl { .. } => {
                 self.chunk.emit(Op::Nil, self.line);
             }
 

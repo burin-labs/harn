@@ -375,16 +375,7 @@ impl Debugger {
 }
 
 fn vm_type_name(val: &VmValue) -> &'static str {
-    match val {
-        VmValue::String(_) => "string",
-        VmValue::Int(_) => "int",
-        VmValue::Float(_) => "float",
-        VmValue::Bool(_) => "bool",
-        VmValue::Nil => "nil",
-        VmValue::List(_) => "list",
-        VmValue::Dict(_) => "dict",
-        VmValue::Closure(_) => "closure",
-    }
+    val.type_name()
 }
 
 #[cfg(test)]

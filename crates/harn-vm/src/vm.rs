@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::io::BufRead;
 
 use crate::chunk::{Chunk, CompiledFunction, Constant, Op};
 
@@ -13,6 +14,16 @@ pub enum VmValue {
     List(Vec<VmValue>),
     Dict(BTreeMap<String, VmValue>),
     Closure(VmClosure),
+    Duration(u64),
+    EnumVariant {
+        enum_name: String,
+        variant: String,
+        fields: Vec<VmValue>,
+    },
+    StructInstance {
+        struct_name: String,
+        fields: BTreeMap<String, VmValue>,
+    },
 }
 
 /// A compiled closure value.
@@ -129,6 +140,25 @@ impl VmValue {
             VmValue::List(l) => !l.is_empty(),
             VmValue::Dict(d) => !d.is_empty(),
             VmValue::Closure(_) => true,
+            VmValue::Duration(ms) => *ms > 0,
+            VmValue::EnumVariant { .. } => true,
+            VmValue::StructInstance { fields, .. } => !fields.is_empty(),
+        }
+    }
+
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            VmValue::String(_) => "string",
+            VmValue::Int(_) => "int",
+            VmValue::Float(_) => "float",
+            VmValue::Bool(_) => "bool",
+            VmValue::Nil => "nil",
+            VmValue::List(_) => "list",
+            VmValue::Dict(_) => "dict",
+            VmValue::Closure(_) => "closure",
+            VmValue::Duration(_) => "duration",
+            VmValue::EnumVariant { .. } => "enum",
+            VmValue::StructInstance { .. } => "struct",
         }
     }
 
@@ -157,6 +187,39 @@ impl VmValue {
                 format!("{{{}}}", inner.join(", "))
             }
             VmValue::Closure(c) => format!("<fn({})>", c.func.params.join(", ")),
+            VmValue::Duration(ms) => {
+                if *ms >= 3_600_000 && ms % 3_600_000 == 0 {
+                    format!("{}h", ms / 3_600_000)
+                } else if *ms >= 60_000 && ms % 60_000 == 0 {
+                    format!("{}m", ms / 60_000)
+                } else if *ms >= 1000 && ms % 1000 == 0 {
+                    format!("{}s", ms / 1000)
+                } else {
+                    format!("{}ms", ms)
+                }
+            }
+            VmValue::EnumVariant {
+                enum_name,
+                variant,
+                fields,
+            } => {
+                if fields.is_empty() {
+                    format!("{enum_name}.{variant}")
+                } else {
+                    let inner: Vec<String> = fields.iter().map(|v| v.display()).collect();
+                    format!("{enum_name}.{variant}({})", inner.join(", "))
+                }
+            }
+            VmValue::StructInstance {
+                struct_name,
+                fields,
+            } => {
+                let inner: Vec<String> = fields
+                    .iter()
+                    .map(|(k, v)| format!("{k}: {}", v.display()))
+                    .collect();
+                format!("{struct_name} {{{}}}", inner.join(", "))
+            }
         }
     }
 
@@ -1067,17 +1130,7 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
     });
     vm.register_builtin("type_of", |args, _out| {
         let val = args.first().unwrap_or(&VmValue::Nil);
-        let t = match val {
-            VmValue::String(_) => "string",
-            VmValue::Int(_) => "int",
-            VmValue::Float(_) => "float",
-            VmValue::Bool(_) => "bool",
-            VmValue::Nil => "nil",
-            VmValue::List(_) => "list",
-            VmValue::Dict(_) => "dict",
-            VmValue::Closure(_) => "closure",
-        };
-        Ok(VmValue::String(t.to_string()))
+        Ok(VmValue::String(val.type_name().to_string()))
     });
     vm.register_builtin("to_string", |args, _out| {
         let val = args.first().unwrap_or(&VmValue::Nil);
@@ -1101,6 +1154,184 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
             _ => Ok(VmValue::Nil),
         }
     });
+
+    vm.register_builtin("json_stringify", |args, _out| {
+        let val = args.first().unwrap_or(&VmValue::Nil);
+        Ok(VmValue::String(vm_value_to_json(val)))
+    });
+
+    vm.register_builtin("json_parse", |args, _out| {
+        let text = args.first().map(|a| a.display()).unwrap_or_default();
+        match serde_json::from_str::<serde_json::Value>(&text) {
+            Ok(jv) => Ok(json_to_vm_value(&jv)),
+            Err(e) => Err(VmError::Thrown(VmValue::String(format!(
+                "JSON parse error: {e}"
+            )))),
+        }
+    });
+
+    vm.register_builtin("env", |args, _out| {
+        let name = args.first().map(|a| a.display()).unwrap_or_default();
+        match std::env::var(&name) {
+            Ok(val) => Ok(VmValue::String(val)),
+            Err(_) => Ok(VmValue::Nil),
+        }
+    });
+
+    vm.register_builtin("timestamp", |_args, _out| {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let secs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs_f64())
+            .unwrap_or(0.0);
+        Ok(VmValue::Float(secs))
+    });
+
+    vm.register_builtin("read_file", |args, _out| {
+        let path = args.first().map(|a| a.display()).unwrap_or_default();
+        match std::fs::read_to_string(&path) {
+            Ok(content) => Ok(VmValue::String(content)),
+            Err(e) => Err(VmError::Thrown(VmValue::String(format!(
+                "Failed to read file {path}: {e}"
+            )))),
+        }
+    });
+
+    vm.register_builtin("write_file", |args, _out| {
+        if args.len() >= 2 {
+            let path = args[0].display();
+            let content = args[1].display();
+            std::fs::write(&path, &content).map_err(|e| {
+                VmError::Thrown(VmValue::String(format!("Failed to write file {path}: {e}")))
+            })?;
+        }
+        Ok(VmValue::Nil)
+    });
+
+    vm.register_builtin("exit", |args, _out| {
+        let code = args.first().and_then(|a| a.as_int()).unwrap_or(0);
+        std::process::exit(code as i32);
+    });
+
+    vm.register_builtin("regex_match", |args, _out| {
+        if args.len() >= 2 {
+            let pattern = args[0].display();
+            let text = args[1].display();
+            let re = regex::Regex::new(&pattern)
+                .map_err(|e| VmError::Thrown(VmValue::String(format!("Invalid regex: {e}"))))?;
+            let matches: Vec<VmValue> = re
+                .find_iter(&text)
+                .map(|m| VmValue::String(m.as_str().to_string()))
+                .collect();
+            if matches.is_empty() {
+                return Ok(VmValue::Nil);
+            }
+            return Ok(VmValue::List(matches));
+        }
+        Ok(VmValue::Nil)
+    });
+
+    vm.register_builtin("regex_replace", |args, _out| {
+        if args.len() >= 3 {
+            let pattern = args[0].display();
+            let replacement = args[1].display();
+            let text = args[2].display();
+            let re = regex::Regex::new(&pattern)
+                .map_err(|e| VmError::Thrown(VmValue::String(format!("Invalid regex: {e}"))))?;
+            return Ok(VmValue::String(
+                re.replace_all(&text, replacement.as_str()).into_owned(),
+            ));
+        }
+        Ok(VmValue::Nil)
+    });
+
+    vm.register_builtin("prompt_user", |args, out| {
+        let msg = args.first().map(|a| a.display()).unwrap_or_default();
+        out.push_str(&msg);
+        let mut input = String::new();
+        if std::io::stdin().lock().read_line(&mut input).is_ok() {
+            Ok(VmValue::String(input.trim_end().to_string()))
+        } else {
+            Ok(VmValue::Nil)
+        }
+    });
+
+    vm.register_builtin("__range__", |args, _out| {
+        let start = args.first().and_then(|a| a.as_int()).unwrap_or(0);
+        let end = args.get(1).and_then(|a| a.as_int()).unwrap_or(0);
+        let inclusive = args.get(2).map(|a| a.is_truthy()).unwrap_or(false);
+        let items: Vec<VmValue> = if inclusive {
+            (start..=end).map(VmValue::Int).collect()
+        } else {
+            (start..end).map(VmValue::Int).collect()
+        };
+        Ok(VmValue::List(items))
+    });
+}
+
+fn escape_json_string_vm(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for ch in s.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() => {
+                out.push_str(&format!("\\u{:04x}", c as u32));
+            }
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+fn vm_value_to_json(val: &VmValue) -> String {
+    match val {
+        VmValue::String(s) => escape_json_string_vm(s),
+        VmValue::Int(n) => n.to_string(),
+        VmValue::Float(n) => n.to_string(),
+        VmValue::Bool(b) => b.to_string(),
+        VmValue::Nil => "null".to_string(),
+        VmValue::List(items) => {
+            let inner: Vec<String> = items.iter().map(vm_value_to_json).collect();
+            format!("[{}]", inner.join(","))
+        }
+        VmValue::Dict(map) => {
+            let inner: Vec<String> = map
+                .iter()
+                .map(|(k, v)| format!("{}:{}", escape_json_string_vm(k), vm_value_to_json(v)))
+                .collect();
+            format!("{{{}}}", inner.join(","))
+        }
+        _ => "null".to_string(),
+    }
+}
+
+fn json_to_vm_value(jv: &serde_json::Value) -> VmValue {
+    match jv {
+        serde_json::Value::Null => VmValue::Nil,
+        serde_json::Value::Bool(b) => VmValue::Bool(*b),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                VmValue::Int(i)
+            } else {
+                VmValue::Float(n.as_f64().unwrap_or(0.0))
+            }
+        }
+        serde_json::Value::String(s) => VmValue::String(s.clone()),
+        serde_json::Value::Array(arr) => VmValue::List(arr.iter().map(json_to_vm_value).collect()),
+        serde_json::Value::Object(map) => {
+            let mut m = BTreeMap::new();
+            for (k, v) in map {
+                m.insert(k.clone(), json_to_vm_value(v));
+            }
+            VmValue::Dict(m)
+        }
+    }
 }
 
 #[cfg(test)]
