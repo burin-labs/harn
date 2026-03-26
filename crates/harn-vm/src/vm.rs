@@ -922,6 +922,56 @@ impl Vm {
                     let substr: String = s.chars().skip(start).take(end - start).collect();
                     Ok(VmValue::String(Rc::from(substr)))
                 }
+                "index_of" => {
+                    let needle = args.first().map(|a| a.display()).unwrap_or_default();
+                    Ok(VmValue::Int(
+                        s.find(&needle).map(|i| i as i64).unwrap_or(-1),
+                    ))
+                }
+                "chars" => Ok(VmValue::List(Rc::new(
+                    s.chars()
+                        .map(|c| VmValue::String(Rc::from(c.to_string())))
+                        .collect(),
+                ))),
+                "repeat" => {
+                    let n = args.first().and_then(|a| a.as_int()).unwrap_or(1);
+                    Ok(VmValue::String(Rc::from(s.repeat(n.max(0) as usize))))
+                }
+                "reverse" => Ok(VmValue::String(Rc::from(
+                    s.chars().rev().collect::<String>(),
+                ))),
+                "pad_left" => {
+                    let width = args.first().and_then(|a| a.as_int()).unwrap_or(0) as usize;
+                    let pad_char = args
+                        .get(1)
+                        .map(|a| a.display())
+                        .and_then(|s| s.chars().next())
+                        .unwrap_or(' ');
+                    let current_len = s.chars().count();
+                    if current_len >= width {
+                        Ok(VmValue::String(Rc::clone(s)))
+                    } else {
+                        let padding: String =
+                            std::iter::repeat_n(pad_char, width - current_len).collect();
+                        Ok(VmValue::String(Rc::from(format!("{padding}{s}"))))
+                    }
+                }
+                "pad_right" => {
+                    let width = args.first().and_then(|a| a.as_int()).unwrap_or(0) as usize;
+                    let pad_char = args
+                        .get(1)
+                        .map(|a| a.display())
+                        .and_then(|s| s.chars().next())
+                        .unwrap_or(' ');
+                    let current_len = s.chars().count();
+                    if current_len >= width {
+                        Ok(VmValue::String(Rc::clone(s)))
+                    } else {
+                        let padding: String =
+                            std::iter::repeat_n(pad_char, width - current_len).collect();
+                        Ok(VmValue::String(Rc::from(format!("{s}{padding}"))))
+                    }
+                }
                 _ => Ok(VmValue::Nil),
             },
             VmValue::List(items) => match method {
@@ -1030,6 +1080,193 @@ impl Vm {
                         Ok(VmValue::Nil)
                     }
                 }
+                "sort" => {
+                    let mut sorted: Vec<VmValue> = items.iter().cloned().collect();
+                    sorted.sort_by(|a, b| compare_values(a, b).cmp(&0));
+                    Ok(VmValue::List(Rc::new(sorted)))
+                }
+                "sort_by" => {
+                    if let Some(VmValue::Closure(closure)) = args.first() {
+                        let mut keyed: Vec<(VmValue, VmValue)> = Vec::new();
+                        for item in items.iter() {
+                            let key =
+                                self.call_closure_sync(closure, &[item.clone()], functions)?;
+                            keyed.push((item.clone(), key));
+                        }
+                        keyed.sort_by(|(_, ka), (_, kb)| compare_values(ka, kb).cmp(&0));
+                        Ok(VmValue::List(Rc::new(
+                            keyed.into_iter().map(|(v, _)| v).collect(),
+                        )))
+                    } else {
+                        Ok(VmValue::Nil)
+                    }
+                }
+                "reverse" => {
+                    let mut rev: Vec<VmValue> = items.iter().cloned().collect();
+                    rev.reverse();
+                    Ok(VmValue::List(Rc::new(rev)))
+                }
+                "join" => {
+                    let sep = if args.is_empty() {
+                        String::new()
+                    } else {
+                        args[0].display()
+                    };
+                    let joined: String = items
+                        .iter()
+                        .map(|v| v.display())
+                        .collect::<Vec<_>>()
+                        .join(&sep);
+                    Ok(VmValue::String(Rc::from(joined)))
+                }
+                "contains" => {
+                    let needle = args.first().unwrap_or(&VmValue::Nil);
+                    Ok(VmValue::Bool(items.iter().any(|v| values_equal(v, needle))))
+                }
+                "index_of" => {
+                    let needle = args.first().unwrap_or(&VmValue::Nil);
+                    let idx = items.iter().position(|v| values_equal(v, needle));
+                    Ok(VmValue::Int(idx.map(|i| i as i64).unwrap_or(-1)))
+                }
+                "enumerate" => {
+                    let result: Vec<VmValue> = items
+                        .iter()
+                        .enumerate()
+                        .map(|(i, v)| {
+                            VmValue::Dict(Rc::new(BTreeMap::from([
+                                ("index".to_string(), VmValue::Int(i as i64)),
+                                ("value".to_string(), v.clone()),
+                            ])))
+                        })
+                        .collect();
+                    Ok(VmValue::List(Rc::new(result)))
+                }
+                "zip" => {
+                    if let Some(VmValue::List(other)) = args.first() {
+                        let result: Vec<VmValue> = items
+                            .iter()
+                            .zip(other.iter())
+                            .map(|(a, b)| VmValue::List(Rc::new(vec![a.clone(), b.clone()])))
+                            .collect();
+                        Ok(VmValue::List(Rc::new(result)))
+                    } else {
+                        Ok(VmValue::List(Rc::new(Vec::new())))
+                    }
+                }
+                "slice" => {
+                    let len = items.len() as i64;
+                    let start_raw = args.first().and_then(|a| a.as_int()).unwrap_or(0);
+                    let start = if start_raw < 0 {
+                        (len + start_raw).max(0) as usize
+                    } else {
+                        (start_raw.min(len)) as usize
+                    };
+                    let end = if args.len() > 1 {
+                        let end_raw = args[1].as_int().unwrap_or(len);
+                        if end_raw < 0 {
+                            (len + end_raw).max(0) as usize
+                        } else {
+                            (end_raw.min(len)) as usize
+                        }
+                    } else {
+                        len as usize
+                    };
+                    let end = end.max(start);
+                    Ok(VmValue::List(Rc::new(items[start..end].to_vec())))
+                }
+                "unique" => {
+                    let mut seen: Vec<VmValue> = Vec::new();
+                    let mut result = Vec::new();
+                    for item in items.iter() {
+                        if !seen.iter().any(|s| values_equal(s, item)) {
+                            seen.push(item.clone());
+                            result.push(item.clone());
+                        }
+                    }
+                    Ok(VmValue::List(Rc::new(result)))
+                }
+                "take" => {
+                    let n = args.first().and_then(|a| a.as_int()).unwrap_or(0).max(0) as usize;
+                    Ok(VmValue::List(Rc::new(
+                        items.iter().take(n).cloned().collect(),
+                    )))
+                }
+                "skip" => {
+                    let n = args.first().and_then(|a| a.as_int()).unwrap_or(0).max(0) as usize;
+                    Ok(VmValue::List(Rc::new(
+                        items.iter().skip(n).cloned().collect(),
+                    )))
+                }
+                "sum" => {
+                    let mut int_sum: i64 = 0;
+                    let mut has_float = false;
+                    let mut float_sum: f64 = 0.0;
+                    for item in items.iter() {
+                        match item {
+                            VmValue::Int(n) => {
+                                int_sum = int_sum.wrapping_add(*n);
+                                float_sum += *n as f64;
+                            }
+                            VmValue::Float(n) => {
+                                has_float = true;
+                                float_sum += n;
+                            }
+                            _ => {}
+                        }
+                    }
+                    if has_float {
+                        Ok(VmValue::Float(float_sum))
+                    } else {
+                        Ok(VmValue::Int(int_sum))
+                    }
+                }
+                "min" => {
+                    if items.is_empty() {
+                        return Ok(VmValue::Nil);
+                    }
+                    let mut min_val = items[0].clone();
+                    for item in &items[1..] {
+                        if compare_values(item, &min_val) < 0 {
+                            min_val = item.clone();
+                        }
+                    }
+                    Ok(min_val)
+                }
+                "max" => {
+                    if items.is_empty() {
+                        return Ok(VmValue::Nil);
+                    }
+                    let mut max_val = items[0].clone();
+                    for item in &items[1..] {
+                        if compare_values(item, &max_val) > 0 {
+                            max_val = item.clone();
+                        }
+                    }
+                    Ok(max_val)
+                }
+                "flatten" => {
+                    let mut result = Vec::new();
+                    for item in items.iter() {
+                        if let VmValue::List(inner) = item {
+                            result.extend(inner.iter().cloned());
+                        } else {
+                            result.push(item.clone());
+                        }
+                    }
+                    Ok(VmValue::List(Rc::new(result)))
+                }
+                "push" => {
+                    let mut new_list: Vec<VmValue> = items.iter().cloned().collect();
+                    if let Some(item) = args.first() {
+                        new_list.push(item.clone());
+                    }
+                    Ok(VmValue::List(Rc::new(new_list)))
+                }
+                "pop" => {
+                    let mut new_list: Vec<VmValue> = items.iter().cloned().collect();
+                    new_list.pop();
+                    Ok(VmValue::List(Rc::new(new_list)))
+                }
                 _ => Ok(VmValue::Nil),
             },
             VmValue::Dict(map) => match method {
@@ -1061,6 +1298,44 @@ impl Vm {
                     } else {
                         Ok(VmValue::Dict(Rc::clone(map)))
                     }
+                }
+                "map_values" => {
+                    if let Some(VmValue::Closure(closure)) = args.first() {
+                        let mut result = BTreeMap::new();
+                        for (k, v) in map.iter() {
+                            let mapped =
+                                self.call_closure_sync(closure, &[v.clone()], functions)?;
+                            result.insert(k.clone(), mapped);
+                        }
+                        Ok(VmValue::Dict(Rc::new(result)))
+                    } else {
+                        Ok(VmValue::Nil)
+                    }
+                }
+                "filter" => {
+                    if let Some(VmValue::Closure(closure)) = args.first() {
+                        let mut result = BTreeMap::new();
+                        for (k, v) in map.iter() {
+                            let keep = self.call_closure_sync(closure, &[v.clone()], functions)?;
+                            if keep.is_truthy() {
+                                result.insert(k.clone(), v.clone());
+                            }
+                        }
+                        Ok(VmValue::Dict(Rc::new(result)))
+                    } else {
+                        Ok(VmValue::Nil)
+                    }
+                }
+                "remove" => {
+                    let key = args.first().map(|a| a.display()).unwrap_or_default();
+                    let mut result = (**map).clone();
+                    result.remove(&key);
+                    Ok(VmValue::Dict(Rc::new(result)))
+                }
+                "get" => {
+                    let key = args.first().map(|a| a.display()).unwrap_or_default();
+                    let default = args.get(1).cloned().unwrap_or(VmValue::Nil);
+                    Ok(map.get(&key).cloned().unwrap_or(default))
                 }
                 _ => Ok(VmValue::Nil),
             },
@@ -1277,6 +1552,168 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
             Ok(VmValue::String(Rc::from(input.trim_end())))
         } else {
             Ok(VmValue::Nil)
+        }
+    });
+
+    // --- Math builtins ---
+
+    vm.register_builtin("abs", |args, _out| {
+        match args.first().unwrap_or(&VmValue::Nil) {
+            VmValue::Int(n) => Ok(VmValue::Int(n.abs())),
+            VmValue::Float(n) => Ok(VmValue::Float(n.abs())),
+            _ => Ok(VmValue::Nil),
+        }
+    });
+
+    vm.register_builtin("min", |args, _out| {
+        if args.len() >= 2 {
+            match (&args[0], &args[1]) {
+                (VmValue::Int(x), VmValue::Int(y)) => Ok(VmValue::Int(*x.min(y))),
+                (VmValue::Float(x), VmValue::Float(y)) => Ok(VmValue::Float(x.min(*y))),
+                (VmValue::Int(x), VmValue::Float(y)) => Ok(VmValue::Float((*x as f64).min(*y))),
+                (VmValue::Float(x), VmValue::Int(y)) => Ok(VmValue::Float(x.min(*y as f64))),
+                _ => Ok(VmValue::Nil),
+            }
+        } else {
+            Ok(VmValue::Nil)
+        }
+    });
+
+    vm.register_builtin("max", |args, _out| {
+        if args.len() >= 2 {
+            match (&args[0], &args[1]) {
+                (VmValue::Int(x), VmValue::Int(y)) => Ok(VmValue::Int(*x.max(y))),
+                (VmValue::Float(x), VmValue::Float(y)) => Ok(VmValue::Float(x.max(*y))),
+                (VmValue::Int(x), VmValue::Float(y)) => Ok(VmValue::Float((*x as f64).max(*y))),
+                (VmValue::Float(x), VmValue::Int(y)) => Ok(VmValue::Float(x.max(*y as f64))),
+                _ => Ok(VmValue::Nil),
+            }
+        } else {
+            Ok(VmValue::Nil)
+        }
+    });
+
+    vm.register_builtin("floor", |args, _out| {
+        match args.first().unwrap_or(&VmValue::Nil) {
+            VmValue::Float(n) => Ok(VmValue::Int(n.floor() as i64)),
+            VmValue::Int(n) => Ok(VmValue::Int(*n)),
+            _ => Ok(VmValue::Nil),
+        }
+    });
+
+    vm.register_builtin("ceil", |args, _out| {
+        match args.first().unwrap_or(&VmValue::Nil) {
+            VmValue::Float(n) => Ok(VmValue::Int(n.ceil() as i64)),
+            VmValue::Int(n) => Ok(VmValue::Int(*n)),
+            _ => Ok(VmValue::Nil),
+        }
+    });
+
+    vm.register_builtin("round", |args, _out| {
+        match args.first().unwrap_or(&VmValue::Nil) {
+            VmValue::Float(n) => Ok(VmValue::Int(n.round() as i64)),
+            VmValue::Int(n) => Ok(VmValue::Int(*n)),
+            _ => Ok(VmValue::Nil),
+        }
+    });
+
+    vm.register_builtin("sqrt", |args, _out| {
+        match args.first().unwrap_or(&VmValue::Nil) {
+            VmValue::Float(n) => Ok(VmValue::Float(n.sqrt())),
+            VmValue::Int(n) => Ok(VmValue::Float((*n as f64).sqrt())),
+            _ => Ok(VmValue::Nil),
+        }
+    });
+
+    vm.register_builtin("pow", |args, _out| {
+        if args.len() >= 2 {
+            match (&args[0], &args[1]) {
+                (VmValue::Int(base), VmValue::Int(exp)) => {
+                    Ok(VmValue::Int((*base as f64).powi(*exp as i32) as i64))
+                }
+                (VmValue::Float(base), VmValue::Int(exp)) => {
+                    Ok(VmValue::Float(base.powi(*exp as i32)))
+                }
+                (VmValue::Int(base), VmValue::Float(exp)) => {
+                    Ok(VmValue::Float((*base as f64).powf(*exp)))
+                }
+                (VmValue::Float(base), VmValue::Float(exp)) => Ok(VmValue::Float(base.powf(*exp))),
+                _ => Ok(VmValue::Nil),
+            }
+        } else {
+            Ok(VmValue::Nil)
+        }
+    });
+
+    vm.register_builtin("random", |_args, _out| {
+        use rand::Rng;
+        let val: f64 = rand::thread_rng().gen();
+        Ok(VmValue::Float(val))
+    });
+
+    vm.register_builtin("random_int", |args, _out| {
+        use rand::Rng;
+        if args.len() >= 2 {
+            let min = args[0].as_int().unwrap_or(0);
+            let max = args[1].as_int().unwrap_or(0);
+            if min <= max {
+                let val = rand::thread_rng().gen_range(min..=max);
+                return Ok(VmValue::Int(val));
+            }
+        }
+        Ok(VmValue::Nil)
+    });
+
+    // --- Assert builtins ---
+
+    vm.register_builtin("assert", |args, _out| {
+        let condition = args.first().unwrap_or(&VmValue::Nil);
+        if !condition.is_truthy() {
+            let msg = args
+                .get(1)
+                .map(|a| a.display())
+                .unwrap_or_else(|| "Assertion failed".to_string());
+            return Err(VmError::Thrown(VmValue::String(Rc::from(msg))));
+        }
+        Ok(VmValue::Nil)
+    });
+
+    vm.register_builtin("assert_eq", |args, _out| {
+        if args.len() >= 2 {
+            if !values_equal(&args[0], &args[1]) {
+                let msg = args.get(2).map(|a| a.display()).unwrap_or_else(|| {
+                    format!(
+                        "Assertion failed: expected {}, got {}",
+                        args[1].display(),
+                        args[0].display()
+                    )
+                });
+                return Err(VmError::Thrown(VmValue::String(Rc::from(msg))));
+            }
+            Ok(VmValue::Nil)
+        } else {
+            Err(VmError::Thrown(VmValue::String(Rc::from(
+                "assert_eq requires at least 2 arguments",
+            ))))
+        }
+    });
+
+    vm.register_builtin("assert_ne", |args, _out| {
+        if args.len() >= 2 {
+            if values_equal(&args[0], &args[1]) {
+                let msg = args.get(2).map(|a| a.display()).unwrap_or_else(|| {
+                    format!(
+                        "Assertion failed: values should not be equal: {}",
+                        args[0].display()
+                    )
+                });
+                return Err(VmError::Thrown(VmValue::String(Rc::from(msg))));
+            }
+            Ok(VmValue::Nil)
+        } else {
+            Err(VmError::Thrown(VmValue::String(Rc::from(
+                "assert_ne requires at least 2 arguments",
+            ))))
         }
     });
 

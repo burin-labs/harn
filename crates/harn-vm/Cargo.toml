@@ -8,3 +8,4 @@ harn-lexer = { path = "../harn-lexer" }
 harn-parser = { path = "../harn-parser" }
 regex = "1"
 serde_json = "1"
+rand = "0.8"

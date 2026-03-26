@@ -131,6 +131,77 @@ impl Interpreter {
         std::mem::take(&mut self.output)
     }
 
+    /// Run a specific named pipeline from a program (for test runner).
+    pub async fn run_test(
+        &mut self,
+        program: &[SNode],
+        test_name: &str,
+    ) -> Result<(), RuntimeError> {
+        // Register all pipelines and process imports
+        for node in program {
+            if let Node::Pipeline { name, .. } = &node.node {
+                self.pipelines.insert(name.clone(), node.clone());
+            } else if let Node::ImportDecl { path } = &node.node {
+                self.eval_import(path).await?;
+            }
+        }
+
+        // Execute non-pipeline, non-import top-level statements (fn, type, enum, struct decls)
+        for node in program {
+            if !matches!(&node.node, Node::Pipeline { .. } | Node::ImportDecl { .. }) {
+                self.eval(node).await?;
+            }
+        }
+
+        // Find and execute the test pipeline
+        let pipeline = self.pipelines.get(test_name).cloned().ok_or_else(|| {
+            RuntimeError::thrown(format!("Test pipeline '{}' not found", test_name))
+        })?;
+
+        if let Node::Pipeline {
+            params,
+            body,
+            extends,
+            ..
+        } = &pipeline.node
+        {
+            let pipeline_env = self.env.child();
+
+            if params.iter().any(|p| p == "task") {
+                pipeline_env.define("task", Value::String(String::new()), false);
+            }
+            if params.iter().any(|p| p == "project") {
+                pipeline_env.define("project", Value::String(String::new()), false);
+            }
+
+            let ctx = BTreeMap::from([
+                ("task".to_string(), Value::String(String::new())),
+                ("project_root".to_string(), Value::String(String::new())),
+                ("task_type".to_string(), Value::String(String::new())),
+            ]);
+            pipeline_env.define("context", Value::Dict(ctx), false);
+
+            let resolved_body = if let Some(parent_name) = extends {
+                if let Some(parent) = self.pipelines.get(parent_name).cloned() {
+                    self.resolve_inheritance(body, &parent)
+                } else {
+                    body.clone()
+                }
+            } else {
+                body.clone()
+            };
+
+            let result = self.exec_in_env(pipeline_env, &resolved_body).await;
+
+            match result {
+                Ok(_) | Err(RuntimeError::ReturnValue(_)) => Ok(()),
+                Err(e) => Err(e),
+            }
+        } else {
+            Ok(())
+        }
+    }
+
     /// Run a parsed program.
     pub async fn run(&mut self, program: &[SNode]) -> Result<(), RuntimeError> {
         // Register all pipelines and process imports
@@ -1134,6 +1205,50 @@ impl Interpreter {
                 let result: String = s.chars().skip(start).take(end - start).collect();
                 Ok(Value::String(result))
             }
+            "index_of" => {
+                let needle = arg_string(args, 0);
+                Ok(Value::Int(s.find(&needle).map(|i| i as i64).unwrap_or(-1)))
+            }
+            "chars" => Ok(Value::List(
+                s.chars().map(|c| Value::String(c.to_string())).collect(),
+            )),
+            "repeat" => {
+                let n = args.first().and_then(|a| a.as_int()).unwrap_or(1);
+                Ok(Value::String(s.repeat(n.max(0) as usize)))
+            }
+            "reverse" => Ok(Value::String(s.chars().rev().collect())),
+            "pad_left" => {
+                let width = args.first().and_then(|a| a.as_int()).unwrap_or(0) as usize;
+                let pad_char = args
+                    .get(1)
+                    .map(|a| a.as_string())
+                    .and_then(|s| s.chars().next())
+                    .unwrap_or(' ');
+                let current_len = s.chars().count();
+                if current_len >= width {
+                    Ok(Value::String(s.to_string()))
+                } else {
+                    let padding: String =
+                        std::iter::repeat_n(pad_char, width - current_len).collect();
+                    Ok(Value::String(format!("{padding}{s}")))
+                }
+            }
+            "pad_right" => {
+                let width = args.first().and_then(|a| a.as_int()).unwrap_or(0) as usize;
+                let pad_char = args
+                    .get(1)
+                    .map(|a| a.as_string())
+                    .and_then(|s| s.chars().next())
+                    .unwrap_or(' ');
+                let current_len = s.chars().count();
+                if current_len >= width {
+                    Ok(Value::String(s.to_string()))
+                } else {
+                    let padding: String =
+                        std::iter::repeat_n(pad_char, width - current_len).collect();
+                    Ok(Value::String(format!("{s}{padding}")))
+                }
+            }
             _ => Ok(Value::Nil),
         }
     }
@@ -1228,6 +1343,183 @@ impl Interpreter {
                 }
                 Ok(Value::List(results))
             }
+            "sort" => {
+                let mut sorted = items.to_vec();
+                sorted.sort_by(|a, b| compare_values(a, b).cmp(&0));
+                Ok(Value::List(sorted))
+            }
+            "sort_by" => {
+                let closure = require_closure(args)?;
+                let mut keyed: Vec<(Value, Value)> = Vec::new();
+                for item in items {
+                    let key = self.invoke_closure_item(closure, item).await?;
+                    keyed.push((item.clone(), key));
+                }
+                keyed.sort_by(|(_, ka), (_, kb)| compare_values(ka, kb).cmp(&0));
+                Ok(Value::List(keyed.into_iter().map(|(v, _)| v).collect()))
+            }
+            "reverse" => {
+                let mut rev = items.to_vec();
+                rev.reverse();
+                Ok(Value::List(rev))
+            }
+            "join" => {
+                let sep = if args.is_empty() {
+                    String::new()
+                } else {
+                    args[0].as_string()
+                };
+                let joined: String = items
+                    .iter()
+                    .map(|v| v.as_string())
+                    .collect::<Vec<_>>()
+                    .join(&sep);
+                Ok(Value::String(joined))
+            }
+            "contains" => {
+                let needle = args.first().unwrap_or(&Value::Nil);
+                Ok(Value::Bool(items.iter().any(|v| values_equal(v, needle))))
+            }
+            "index_of" => {
+                let needle = args.first().unwrap_or(&Value::Nil);
+                let idx = items.iter().position(|v| values_equal(v, needle));
+                Ok(Value::Int(idx.map(|i| i as i64).unwrap_or(-1)))
+            }
+            "enumerate" => {
+                let result: Vec<Value> = items
+                    .iter()
+                    .enumerate()
+                    .map(|(i, v)| {
+                        Value::Dict(BTreeMap::from([
+                            ("index".to_string(), Value::Int(i as i64)),
+                            ("value".to_string(), v.clone()),
+                        ]))
+                    })
+                    .collect();
+                Ok(Value::List(result))
+            }
+            "zip" => {
+                if let Some(Value::List(other)) = args.first() {
+                    let result: Vec<Value> = items
+                        .iter()
+                        .zip(other.iter())
+                        .map(|(a, b)| Value::List(vec![a.clone(), b.clone()]))
+                        .collect();
+                    Ok(Value::List(result))
+                } else {
+                    Ok(Value::List(Vec::new()))
+                }
+            }
+            "slice" => {
+                let len = items.len() as i64;
+                let start_raw = args.first().and_then(|a| a.as_int()).unwrap_or(0);
+                let start = if start_raw < 0 {
+                    (len + start_raw).max(0) as usize
+                } else {
+                    (start_raw.min(len)) as usize
+                };
+                let end = if args.len() > 1 {
+                    let end_raw = args[1].as_int().unwrap_or(len);
+                    if end_raw < 0 {
+                        (len + end_raw).max(0) as usize
+                    } else {
+                        (end_raw.min(len)) as usize
+                    }
+                } else {
+                    len as usize
+                };
+                let end = end.max(start);
+                Ok(Value::List(items[start..end].to_vec()))
+            }
+            "unique" => {
+                let mut seen = Vec::new();
+                let mut result = Vec::new();
+                for item in items {
+                    if !seen.iter().any(|s| values_equal(s, item)) {
+                        seen.push(item.clone());
+                        result.push(item.clone());
+                    }
+                }
+                Ok(Value::List(result))
+            }
+            "take" => {
+                let n = args.first().and_then(|a| a.as_int()).unwrap_or(0).max(0) as usize;
+                Ok(Value::List(items.iter().take(n).cloned().collect()))
+            }
+            "skip" => {
+                let n = args.first().and_then(|a| a.as_int()).unwrap_or(0).max(0) as usize;
+                Ok(Value::List(items.iter().skip(n).cloned().collect()))
+            }
+            "sum" => {
+                let mut int_sum: i64 = 0;
+                let mut has_float = false;
+                let mut float_sum: f64 = 0.0;
+                for item in items {
+                    match item {
+                        Value::Int(n) => {
+                            int_sum = int_sum.wrapping_add(*n);
+                            float_sum += *n as f64;
+                        }
+                        Value::Float(n) => {
+                            has_float = true;
+                            float_sum += n;
+                        }
+                        _ => {}
+                    }
+                }
+                if has_float {
+                    Ok(Value::Float(float_sum))
+                } else {
+                    Ok(Value::Int(int_sum))
+                }
+            }
+            "min" => {
+                if items.is_empty() {
+                    return Ok(Value::Nil);
+                }
+                let mut min_val = items[0].clone();
+                for item in &items[1..] {
+                    if compare_values(item, &min_val) < 0 {
+                        min_val = item.clone();
+                    }
+                }
+                Ok(min_val)
+            }
+            "max" => {
+                if items.is_empty() {
+                    return Ok(Value::Nil);
+                }
+                let mut max_val = items[0].clone();
+                for item in &items[1..] {
+                    if compare_values(item, &max_val) > 0 {
+                        max_val = item.clone();
+                    }
+                }
+                Ok(max_val)
+            }
+            "flatten" => {
+                let mut result = Vec::new();
+                for item in items {
+                    if let Value::List(inner) = item {
+                        result.extend(inner.iter().cloned());
+                    } else {
+                        result.push(item.clone());
+                    }
+                }
+                Ok(Value::List(result))
+            }
+            "push" => {
+                let mut new_list = items.to_vec();
+                if let Some(item) = args.first() {
+                    new_list.push(item.clone());
+                }
+                Ok(Value::List(new_list))
+            }
+            "pop" => {
+                let mut new_list = items.to_vec();
+                new_list.pop();
+                Ok(Value::List(new_list))
+            }
             _ => Ok(Value::Nil),
         }
     }
@@ -1284,6 +1576,17 @@ impl Interpreter {
                     }
                 }
                 Ok(Value::Dict(result))
+            }
+            "remove" => {
+                let key = arg_string(args, 0);
+                let mut result = map.clone();
+                result.remove(&key);
+                Ok(Value::Dict(result))
+            }
+            "get" => {
+                let key = arg_string(args, 0);
+                let default = args.get(1).cloned().unwrap_or(Value::Nil);
+                Ok(map.get(&key).cloned().unwrap_or(default))
             }
             _ => Ok(Value::Nil),
         }

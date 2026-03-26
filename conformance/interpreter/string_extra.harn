@@ -1,0 +1,8 @@
+pipeline test(task) {
+  log("hello world".index_of("world"))
+  log("abc".chars())
+  log("ha".repeat(3))
+  log("hello".reverse())
+  log("hi".pad_left(5))
+  log("hi".pad_right(5, "."))
+}

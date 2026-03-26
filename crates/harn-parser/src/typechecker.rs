@@ -664,7 +664,7 @@ fn infer_binary_op_type(op: &str, left: &InferredType, right: &InferredType) -> 
 }
 
 /// Format a type expression for display in error messages.
-fn format_type(ty: &TypeExpr) -> String {
+pub fn format_type(ty: &TypeExpr) -> String {
     match ty {
         TypeExpr::Named(n) => n.clone(),
         TypeExpr::Union(types) => types

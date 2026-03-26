@@ -1,11 +1,17 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use harn_lexer::{Lexer, LexerError};
-use harn_parser::{Node, Parser, ParserError, SNode, TypeChecker};
+use harn_lexer::{Lexer, LexerError, Span};
+use harn_parser::{
+    format_type, DictEntry, Node, Parser, ParserError, SNode, TypeChecker, TypeExpr,
+};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
 
 /// Known builtin names for completion.
 const BUILTINS: &[&str] = &[
@@ -63,30 +69,782 @@ const KEYWORDS: &[&str] = &[
     "while",
 ];
 
-struct HarnLsp {
-    client: Client,
-    documents: Mutex<HashMap<Url, String>>,
+/// String methods offered after `.` on a string value.
+const STRING_METHODS: &[&str] = &[
+    "len",
+    "trim",
+    "split",
+    "contains",
+    "starts_with",
+    "ends_with",
+    "replace",
+    "to_upper",
+    "to_lower",
+    "chars",
+    "slice",
+];
+
+/// List methods offered after `.` on a list value.
+const LIST_METHODS: &[&str] = &[
+    "len", "push", "pop", "map", "filter", "reduce", "find", "contains", "join", "sort", "reverse",
+    "flat_map", "slice",
+];
+
+/// Dict methods offered after `.` on a dict value.
+const DICT_METHODS: &[&str] = &[
+    "keys",
+    "values",
+    "entries",
+    "contains_key",
+    "remove",
+    "len",
+    "merge",
+];
+
+// ---------------------------------------------------------------------------
+// Symbol table (AST-based)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HarnSymbolKind {
+    Pipeline,
+    Function,
+    Variable,
+    Parameter,
+    Enum,
+    Struct,
 }
 
-impl HarnLsp {
-    fn new(client: Client) -> Self {
-        Self {
-            client,
-            documents: Mutex::new(HashMap::new()),
+#[derive(Debug, Clone)]
+struct SymbolInfo {
+    name: String,
+    kind: HarnSymbolKind,
+    def_span: Span,
+    /// Type annotation or inferred type, when available.
+    type_info: Option<TypeExpr>,
+    /// For functions/pipelines: formatted signature for hover.
+    signature: Option<String>,
+    /// Span of the whole containing scope (for scope-aware completion).
+    scope_span: Option<Span>,
+}
+
+/// Walk the parsed AST and collect all definitions.
+fn build_symbol_table(program: &[SNode]) -> Vec<SymbolInfo> {
+    let mut symbols = Vec::new();
+    for snode in program {
+        collect_symbols(snode, &mut symbols, None);
+    }
+    symbols
+}
+
+fn collect_symbols(snode: &SNode, symbols: &mut Vec<SymbolInfo>, scope_span: Option<Span>) {
+    match &snode.node {
+        Node::Pipeline {
+            name, params, body, ..
+        } => {
+            let sig = if params.is_empty() {
+                format!("pipeline {name}")
+            } else {
+                format!("pipeline {name}({})", params.join(", "))
+            };
+            symbols.push(SymbolInfo {
+                name: name.clone(),
+                kind: HarnSymbolKind::Pipeline,
+                def_span: snode.span,
+                type_info: None,
+                signature: Some(sig),
+                scope_span,
+            });
+            // Params are plain strings (no individual spans), register them scoped to body.
+            for p in params {
+                symbols.push(SymbolInfo {
+                    name: p.clone(),
+                    kind: HarnSymbolKind::Parameter,
+                    def_span: snode.span,
+                    type_info: None,
+                    signature: None,
+                    scope_span: Some(snode.span),
+                });
+            }
+            for s in body {
+                collect_symbols(s, symbols, Some(snode.span));
+            }
         }
+        Node::FnDecl {
+            name,
+            params,
+            return_type,
+            body,
+        } => {
+            let params_str = params
+                .iter()
+                .map(|p| match &p.type_expr {
+                    Some(t) => format!("{}: {}", p.name, format_type(t)),
+                    None => p.name.clone(),
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            let ret_str = match return_type {
+                Some(t) => format!(" -> {}", format_type(t)),
+                None => String::new(),
+            };
+            let sig = format!("fn {name}({params_str}){ret_str}");
+            symbols.push(SymbolInfo {
+                name: name.clone(),
+                kind: HarnSymbolKind::Function,
+                def_span: snode.span,
+                type_info: return_type.clone(),
+                signature: Some(sig),
+                scope_span,
+            });
+            for p in params {
+                symbols.push(SymbolInfo {
+                    name: p.name.clone(),
+                    kind: HarnSymbolKind::Parameter,
+                    def_span: snode.span,
+                    type_info: p.type_expr.clone(),
+                    signature: None,
+                    scope_span: Some(snode.span),
+                });
+            }
+            for s in body {
+                collect_symbols(s, symbols, Some(snode.span));
+            }
+        }
+        Node::LetBinding {
+            name,
+            type_ann,
+            value,
+        } => {
+            symbols.push(SymbolInfo {
+                name: name.clone(),
+                kind: HarnSymbolKind::Variable,
+                def_span: snode.span,
+                type_info: type_ann.clone().or_else(|| infer_literal_type(value)),
+                signature: None,
+                scope_span,
+            });
+            collect_symbols(value, symbols, scope_span);
+        }
+        Node::VarBinding {
+            name,
+            type_ann,
+            value,
+        } => {
+            symbols.push(SymbolInfo {
+                name: name.clone(),
+                kind: HarnSymbolKind::Variable,
+                def_span: snode.span,
+                type_info: type_ann.clone().or_else(|| infer_literal_type(value)),
+                signature: None,
+                scope_span,
+            });
+            collect_symbols(value, symbols, scope_span);
+        }
+        Node::EnumDecl { name, .. } => {
+            symbols.push(SymbolInfo {
+                name: name.clone(),
+                kind: HarnSymbolKind::Enum,
+                def_span: snode.span,
+                type_info: None,
+                signature: Some(format!("enum {name}")),
+                scope_span,
+            });
+        }
+        Node::StructDecl { name, fields } => {
+            let fields_str = fields
+                .iter()
+                .map(|f| {
+                    let opt = if f.optional { "?" } else { "" };
+                    match &f.type_expr {
+                        Some(t) => format!("{}{opt}: {}", f.name, format_type(t)),
+                        None => format!("{}{opt}", f.name),
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            symbols.push(SymbolInfo {
+                name: name.clone(),
+                kind: HarnSymbolKind::Struct,
+                def_span: snode.span,
+                type_info: None,
+                signature: Some(format!("struct {name} {{ {fields_str} }}")),
+                scope_span,
+            });
+        }
+        Node::ForIn {
+            variable,
+            iterable,
+            body,
+        } => {
+            symbols.push(SymbolInfo {
+                name: variable.clone(),
+                kind: HarnSymbolKind::Variable,
+                def_span: snode.span,
+                type_info: None,
+                signature: None,
+                scope_span: Some(snode.span),
+            });
+            collect_symbols(iterable, symbols, scope_span);
+            for s in body {
+                collect_symbols(s, symbols, Some(snode.span));
+            }
+        }
+        Node::TryCatch {
+            body,
+            error_var,
+            catch_body,
+            ..
+        } => {
+            for s in body {
+                collect_symbols(s, symbols, Some(snode.span));
+            }
+            if let Some(var) = error_var {
+                symbols.push(SymbolInfo {
+                    name: var.clone(),
+                    kind: HarnSymbolKind::Variable,
+                    def_span: snode.span,
+                    type_info: None,
+                    signature: None,
+                    scope_span: Some(snode.span),
+                });
+            }
+            for s in catch_body {
+                collect_symbols(s, symbols, Some(snode.span));
+            }
+        }
+        Node::Closure { params, body } => {
+            for p in params {
+                symbols.push(SymbolInfo {
+                    name: p.name.clone(),
+                    kind: HarnSymbolKind::Parameter,
+                    def_span: snode.span,
+                    type_info: p.type_expr.clone(),
+                    signature: None,
+                    scope_span: Some(snode.span),
+                });
+            }
+            for s in body {
+                collect_symbols(s, symbols, Some(snode.span));
+            }
+        }
+        // Recurse into all child-bearing nodes
+        Node::IfElse {
+            condition,
+            then_body,
+            else_body,
+        } => {
+            collect_symbols(condition, symbols, scope_span);
+            for s in then_body {
+                collect_symbols(s, symbols, scope_span);
+            }
+            if let Some(eb) = else_body {
+                for s in eb {
+                    collect_symbols(s, symbols, scope_span);
+                }
+            }
+        }
+        Node::WhileLoop { condition, body } => {
+            collect_symbols(condition, symbols, scope_span);
+            for s in body {
+                collect_symbols(s, symbols, scope_span);
+            }
+        }
+        Node::Retry { count, body } => {
+            collect_symbols(count, symbols, scope_span);
+            for s in body {
+                collect_symbols(s, symbols, scope_span);
+            }
+        }
+        Node::Parallel { count, body, .. } => {
+            collect_symbols(count, symbols, scope_span);
+            for s in body {
+                collect_symbols(s, symbols, scope_span);
+            }
+        }
+        Node::ParallelMap {
+            list,
+            variable,
+            body,
+        } => {
+            collect_symbols(list, symbols, scope_span);
+            symbols.push(SymbolInfo {
+                name: variable.clone(),
+                kind: HarnSymbolKind::Variable,
+                def_span: snode.span,
+                type_info: None,
+                signature: None,
+                scope_span: Some(snode.span),
+            });
+            for s in body {
+                collect_symbols(s, symbols, Some(snode.span));
+            }
+        }
+        Node::MatchExpr { value, arms } => {
+            collect_symbols(value, symbols, scope_span);
+            for arm in arms {
+                collect_symbols(&arm.pattern, symbols, scope_span);
+                for s in &arm.body {
+                    collect_symbols(s, symbols, scope_span);
+                }
+            }
+        }
+        Node::Block(stmts) => {
+            for s in stmts {
+                collect_symbols(s, symbols, scope_span);
+            }
+        }
+        Node::BinaryOp { left, right, .. } => {
+            collect_symbols(left, symbols, scope_span);
+            collect_symbols(right, symbols, scope_span);
+        }
+        Node::UnaryOp { operand, .. } => {
+            collect_symbols(operand, symbols, scope_span);
+        }
+        Node::FunctionCall { args, .. } => {
+            for a in args {
+                collect_symbols(a, symbols, scope_span);
+            }
+        }
+        Node::MethodCall { object, args, .. } => {
+            collect_symbols(object, symbols, scope_span);
+            for a in args {
+                collect_symbols(a, symbols, scope_span);
+            }
+        }
+        Node::PropertyAccess { object, .. } => {
+            collect_symbols(object, symbols, scope_span);
+        }
+        Node::SubscriptAccess { object, index } => {
+            collect_symbols(object, symbols, scope_span);
+            collect_symbols(index, symbols, scope_span);
+        }
+        Node::Assignment { target, value } => {
+            collect_symbols(target, symbols, scope_span);
+            collect_symbols(value, symbols, scope_span);
+        }
+        Node::ReturnStmt { value: Some(v) } => {
+            collect_symbols(v, symbols, scope_span);
+        }
+        Node::ThrowStmt { value } => {
+            collect_symbols(value, symbols, scope_span);
+        }
+        Node::Ternary {
+            condition,
+            true_expr,
+            false_expr,
+        } => {
+            collect_symbols(condition, symbols, scope_span);
+            collect_symbols(true_expr, symbols, scope_span);
+            collect_symbols(false_expr, symbols, scope_span);
+        }
+        Node::SpawnExpr { body } | Node::MutexBlock { body } => {
+            for s in body {
+                collect_symbols(s, symbols, scope_span);
+            }
+        }
+        Node::DeadlineBlock { duration, body } => {
+            collect_symbols(duration, symbols, scope_span);
+            for s in body {
+                collect_symbols(s, symbols, scope_span);
+            }
+        }
+        Node::GuardStmt {
+            condition,
+            else_body,
+        } => {
+            collect_symbols(condition, symbols, scope_span);
+            for s in else_body {
+                collect_symbols(s, symbols, scope_span);
+            }
+        }
+        Node::RangeExpr { start, end, .. } => {
+            collect_symbols(start, symbols, scope_span);
+            collect_symbols(end, symbols, scope_span);
+        }
+        Node::ListLiteral(items) => {
+            for item in items {
+                collect_symbols(item, symbols, scope_span);
+            }
+        }
+        Node::DictLiteral(entries) | Node::AskExpr { fields: entries } => {
+            collect_dict_entries(entries, symbols, scope_span);
+        }
+        Node::StructConstruct { fields, .. } => {
+            collect_dict_entries(fields, symbols, scope_span);
+        }
+        Node::EnumConstruct { args, .. } => {
+            for a in args {
+                collect_symbols(a, symbols, scope_span);
+            }
+        }
+        Node::OverrideDecl {
+            name, params, body, ..
+        } => {
+            let sig = format!("override {name}({})", params.join(", "));
+            symbols.push(SymbolInfo {
+                name: name.clone(),
+                kind: HarnSymbolKind::Function,
+                def_span: snode.span,
+                type_info: None,
+                signature: Some(sig),
+                scope_span,
+            });
+            for s in body {
+                collect_symbols(s, symbols, Some(snode.span));
+            }
+        }
+        Node::YieldExpr { value: Some(v) } => {
+            collect_symbols(v, symbols, scope_span);
+        }
+        Node::InterpolatedString(_)
+        | Node::StringLiteral(_)
+        | Node::IntLiteral(_)
+        | Node::FloatLiteral(_)
+        | Node::BoolLiteral(_)
+        | Node::NilLiteral
+        | Node::Identifier(_)
+        | Node::DurationLiteral(_)
+        | Node::ImportDecl { .. }
+        | Node::TypeDecl { .. }
+        | Node::ReturnStmt { value: None }
+        | Node::YieldExpr { value: None } => {}
+    }
+}
+
+fn collect_dict_entries(
+    entries: &[DictEntry],
+    symbols: &mut Vec<SymbolInfo>,
+    scope_span: Option<Span>,
+) {
+    for entry in entries {
+        collect_symbols(&entry.key, symbols, scope_span);
+        collect_symbols(&entry.value, symbols, scope_span);
+    }
+}
+
+/// Simple literal type inference for hover/completion.
+fn infer_literal_type(snode: &SNode) -> Option<TypeExpr> {
+    match &snode.node {
+        Node::IntLiteral(_) => Some(TypeExpr::Named("int".into())),
+        Node::FloatLiteral(_) => Some(TypeExpr::Named("float".into())),
+        Node::StringLiteral(_) | Node::InterpolatedString(_) => {
+            Some(TypeExpr::Named("string".into()))
+        }
+        Node::BoolLiteral(_) => Some(TypeExpr::Named("bool".into())),
+        Node::NilLiteral => Some(TypeExpr::Named("nil".into())),
+        Node::ListLiteral(_) => Some(TypeExpr::Named("list".into())),
+        Node::DictLiteral(_) => Some(TypeExpr::Named("dict".into())),
+        Node::Closure { .. } => Some(TypeExpr::Named("closure".into())),
+        _ => None,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Reference collection (AST-based)
+// ---------------------------------------------------------------------------
+
+/// Find all identifier references matching `target_name` in the AST.
+fn find_references(program: &[SNode], target_name: &str) -> Vec<Span> {
+    let mut refs = Vec::new();
+    for snode in program {
+        collect_references(snode, target_name, &mut refs);
+    }
+    refs
+}
+
+fn collect_references(snode: &SNode, target_name: &str, refs: &mut Vec<Span>) {
+    match &snode.node {
+        Node::Identifier(name) if name == target_name => {
+            refs.push(snode.span);
+        }
+        Node::FunctionCall { name, args } => {
+            if name == target_name {
+                refs.push(snode.span);
+            }
+            for a in args {
+                collect_references(a, target_name, refs);
+            }
+        }
+        // For definitions, the name itself is a "reference" too
+        Node::Pipeline {
+            name, body, params, ..
+        } => {
+            if name == target_name {
+                refs.push(snode.span);
+            }
+            for p in params {
+                if p == target_name {
+                    refs.push(snode.span);
+                }
+            }
+            for s in body {
+                collect_references(s, target_name, refs);
+            }
+        }
+        Node::FnDecl {
+            name, params, body, ..
+        } => {
+            if name == target_name {
+                refs.push(snode.span);
+            }
+            for p in params {
+                if p.name == target_name {
+                    refs.push(snode.span);
+                }
+            }
+            for s in body {
+                collect_references(s, target_name, refs);
+            }
+        }
+        Node::LetBinding { name, value, .. } | Node::VarBinding { name, value, .. } => {
+            if name == target_name {
+                refs.push(snode.span);
+            }
+            collect_references(value, target_name, refs);
+        }
+        Node::ForIn {
+            variable,
+            iterable,
+            body,
+        } => {
+            if variable == target_name {
+                refs.push(snode.span);
+            }
+            collect_references(iterable, target_name, refs);
+            for s in body {
+                collect_references(s, target_name, refs);
+            }
+        }
+        Node::IfElse {
+            condition,
+            then_body,
+            else_body,
+        } => {
+            collect_references(condition, target_name, refs);
+            for s in then_body {
+                collect_references(s, target_name, refs);
+            }
+            if let Some(eb) = else_body {
+                for s in eb {
+                    collect_references(s, target_name, refs);
+                }
+            }
+        }
+        Node::WhileLoop { condition, body } => {
+            collect_references(condition, target_name, refs);
+            for s in body {
+                collect_references(s, target_name, refs);
+            }
+        }
+        Node::Retry { count, body } => {
+            collect_references(count, target_name, refs);
+            for s in body {
+                collect_references(s, target_name, refs);
+            }
+        }
+        Node::TryCatch {
+            body,
+            error_var,
+            catch_body,
+            ..
+        } => {
+            for s in body {
+                collect_references(s, target_name, refs);
+            }
+            if let Some(var) = error_var {
+                if var == target_name {
+                    refs.push(snode.span);
+                }
+            }
+            for s in catch_body {
+                collect_references(s, target_name, refs);
+            }
+        }
+        Node::MatchExpr { value, arms } => {
+            collect_references(value, target_name, refs);
+            for arm in arms {
+                collect_references(&arm.pattern, target_name, refs);
+                for s in &arm.body {
+                    collect_references(s, target_name, refs);
+                }
+            }
+        }
+        Node::BinaryOp { left, right, .. } => {
+            collect_references(left, target_name, refs);
+            collect_references(right, target_name, refs);
+        }
+        Node::UnaryOp { operand, .. } => {
+            collect_references(operand, target_name, refs);
+        }
+        Node::MethodCall { object, args, .. } => {
+            collect_references(object, target_name, refs);
+            for a in args {
+                collect_references(a, target_name, refs);
+            }
+        }
+        Node::PropertyAccess { object, .. } => {
+            collect_references(object, target_name, refs);
+        }
+        Node::SubscriptAccess { object, index } => {
+            collect_references(object, target_name, refs);
+            collect_references(index, target_name, refs);
+        }
+        Node::Assignment { target, value } => {
+            collect_references(target, target_name, refs);
+            collect_references(value, target_name, refs);
+        }
+        Node::ReturnStmt { value: Some(v) } => {
+            collect_references(v, target_name, refs);
+        }
+        Node::ThrowStmt { value } => {
+            collect_references(value, target_name, refs);
+        }
+        Node::Ternary {
+            condition,
+            true_expr,
+            false_expr,
+        } => {
+            collect_references(condition, target_name, refs);
+            collect_references(true_expr, target_name, refs);
+            collect_references(false_expr, target_name, refs);
+        }
+        Node::Block(stmts) | Node::SpawnExpr { body: stmts } | Node::MutexBlock { body: stmts } => {
+            for s in stmts {
+                collect_references(s, target_name, refs);
+            }
+        }
+        Node::Parallel { count, body, .. } => {
+            collect_references(count, target_name, refs);
+            for s in body {
+                collect_references(s, target_name, refs);
+            }
+        }
+        Node::ParallelMap {
+            list,
+            body,
+            variable,
+        } => {
+            collect_references(list, target_name, refs);
+            if variable == target_name {
+                refs.push(snode.span);
+            }
+            for s in body {
+                collect_references(s, target_name, refs);
+            }
+        }
+        Node::Closure { body, params } => {
+            for p in params {
+                if p.name == target_name {
+                    refs.push(snode.span);
+                }
+            }
+            for s in body {
+                collect_references(s, target_name, refs);
+            }
+        }
+        Node::DeadlineBlock { duration, body } => {
+            collect_references(duration, target_name, refs);
+            for s in body {
+                collect_references(s, target_name, refs);
+            }
+        }
+        Node::GuardStmt {
+            condition,
+            else_body,
+        } => {
+            collect_references(condition, target_name, refs);
+            for s in else_body {
+                collect_references(s, target_name, refs);
+            }
+        }
+        Node::RangeExpr { start, end, .. } => {
+            collect_references(start, target_name, refs);
+            collect_references(end, target_name, refs);
+        }
+        Node::ListLiteral(items) => {
+            for item in items {
+                collect_references(item, target_name, refs);
+            }
+        }
+        Node::DictLiteral(entries) | Node::AskExpr { fields: entries } => {
+            for entry in entries {
+                collect_references(&entry.key, target_name, refs);
+                collect_references(&entry.value, target_name, refs);
+            }
+        }
+        Node::StructConstruct { fields, .. } => {
+            for entry in fields {
+                collect_references(&entry.key, target_name, refs);
+                collect_references(&entry.value, target_name, refs);
+            }
+        }
+        Node::EnumConstruct { args, .. } => {
+            for a in args {
+                collect_references(a, target_name, refs);
+            }
+        }
+        Node::OverrideDecl { name, body, .. } => {
+            if name == target_name {
+                refs.push(snode.span);
+            }
+            for s in body {
+                collect_references(s, target_name, refs);
+            }
+        }
+        Node::YieldExpr { value: Some(v) } => {
+            collect_references(v, target_name, refs);
+        }
+        Node::EnumDecl { name, .. } | Node::StructDecl { name, .. } => {
+            if name == target_name {
+                refs.push(snode.span);
+            }
+        }
+        // Terminals
+        _ => {}
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Document state: caches parse results per file
+// ---------------------------------------------------------------------------
+
+struct DocumentState {
+    source: String,
+    ast: Option<Vec<SNode>>,
+    symbols: Vec<SymbolInfo>,
+    diagnostics: Vec<Diagnostic>,
+}
+
+impl DocumentState {
+    fn new(source: String) -> Self {
+        let mut state = Self {
+            source,
+            ast: None,
+            symbols: Vec::new(),
+            diagnostics: Vec::new(),
+        };
+        state.reparse();
+        state
     }
 
-    /// Parse a document and return diagnostics.
-    fn diagnose(&self, source: &str) -> Vec<Diagnostic> {
-        let mut diagnostics = Vec::new();
+    fn update(&mut self, source: String) {
+        self.source = source;
+        self.reparse();
+    }
+
+    fn reparse(&mut self) {
+        self.diagnostics.clear();
+        self.symbols.clear();
+        self.ast = None;
 
         // Lex
-        let mut lexer = Lexer::new(source);
+        let mut lexer = Lexer::new(&self.source);
         let tokens = match lexer.tokenize() {
             Ok(t) => t,
             Err(e) => {
-                diagnostics.push(lexer_error_to_diagnostic(&e));
-                return diagnostics;
+                self.diagnostics.push(lexer_error_to_diagnostic(&e));
+                return;
             }
         };
 
@@ -95,8 +853,8 @@ impl HarnLsp {
         let program = match parser.parse() {
             Ok(p) => p,
             Err(e) => {
-                diagnostics.push(parser_error_to_diagnostic(&e));
-                return diagnostics;
+                self.diagnostics.push(parser_error_to_diagnostic(&e));
+                return;
             }
         };
 
@@ -108,20 +866,14 @@ impl HarnLsp {
                 harn_parser::DiagnosticSeverity::Warning => DiagnosticSeverity::WARNING,
             };
             let range = if let Some(span) = &diag.span {
-                Range {
-                    start: Position::new(
-                        (span.line.saturating_sub(1)) as u32,
-                        (span.column.saturating_sub(1)) as u32,
-                    ),
-                    end: Position::new((span.line.saturating_sub(1)) as u32, span.column as u32),
-                }
+                span_to_range(span)
             } else {
                 Range {
                     start: Position::new(0, 0),
                     end: Position::new(0, 1),
                 }
             };
-            diagnostics.push(Diagnostic {
+            self.diagnostics.push(Diagnostic {
                 range,
                 severity: Some(severity),
                 source: Some("harn-typecheck".to_string()),
@@ -130,63 +882,93 @@ impl HarnLsp {
             });
         }
 
-        diagnostics
+        // Build symbol table
+        self.symbols = build_symbol_table(&program);
+        self.ast = Some(program);
     }
+}
 
-    /// Extract symbols (pipelines, functions, variables) from a document.
-    fn extract_symbols(&self, source: &str) -> Vec<DocumentSymbol> {
-        let mut lexer = Lexer::new(source);
-        let tokens = match lexer.tokenize() {
-            Ok(t) => t,
-            Err(_) => return Vec::new(),
-        };
-        let mut parser = Parser::new(tokens);
-        let nodes = match parser.parse() {
-            Ok(n) => n,
-            Err(_) => return Vec::new(),
-        };
+// ---------------------------------------------------------------------------
+// Position / span utilities
+// ---------------------------------------------------------------------------
 
-        let mut symbols = Vec::new();
-        extract_symbols_from_nodes(&nodes, source, &mut symbols);
-        symbols
+/// Convert a 1-based Span to a 0-based LSP Range.
+fn span_to_range(span: &Span) -> Range {
+    Range {
+        start: Position::new(
+            span.line.saturating_sub(1) as u32,
+            span.column.saturating_sub(1) as u32,
+        ),
+        end: Position::new(span.line.saturating_sub(1) as u32, span.column as u32),
     }
+}
 
-    /// Find the definition location of a symbol.
-    fn find_definition(&self, source: &str, name: &str) -> Option<Range> {
-        let lines: Vec<&str> = source.lines().collect();
-        for (line_idx, line) in lines.iter().enumerate() {
-            // Check for pipeline declaration
-            if let Some(pos) = line.find(&format!("pipeline {name}")) {
-                let col = pos + "pipeline ".len();
-                return Some(Range {
-                    start: Position::new(line_idx as u32, col as u32),
-                    end: Position::new(line_idx as u32, (col + name.len()) as u32),
-                });
-            }
-            // Check for fn declaration
-            if let Some(pos) = line.find(&format!("fn {name}")) {
-                let col = pos + "fn ".len();
-                return Some(Range {
-                    start: Position::new(line_idx as u32, col as u32),
-                    end: Position::new(line_idx as u32, (col + name.len()) as u32),
-                });
-            }
-            // Check for let/var binding
-            for prefix in ["let ", "var "] {
-                if let Some(pos) = line.find(&format!("{prefix}{name}")) {
-                    let col = pos + prefix.len();
-                    return Some(Range {
-                        start: Position::new(line_idx as u32, col as u32),
-                        end: Position::new(line_idx as u32, (col + name.len()) as u32),
-                    });
-                }
+/// Convert a Span to an LSP Range using byte offsets for accurate end position.
+fn span_to_full_range(span: &Span, source: &str) -> Range {
+    let start_line = span.line.saturating_sub(1) as u32;
+    let start_col = span.column.saturating_sub(1) as u32;
+
+    // Calculate end position from byte offset
+    let mut end_line = start_line;
+    let mut end_col = start_col;
+    if span.end > span.start && span.end <= source.len() {
+        let segment = &source[span.start..span.end];
+        for ch in segment.chars() {
+            if ch == '\n' {
+                end_line += 1;
+                end_col = 0;
+            } else {
+                end_col += 1;
             }
         }
-        None
+        // If we only advanced columns (single line), set end_col relative to start
+        if end_line == start_line {
+            end_col = start_col + segment.chars().count() as u32;
+        }
+    } else {
+        end_col = start_col + 1;
+    }
+
+    Range {
+        start: Position::new(start_line, start_col),
+        end: Position::new(end_line, end_col),
+    }
+}
+
+/// Check whether a 0-based LSP Position falls within a 1-based Span.
+fn position_in_span(pos: &Position, span: &Span, source: &str) -> bool {
+    let r = span_to_full_range(span, source);
+    if pos.line < r.start.line || pos.line > r.end.line {
+        return false;
+    }
+    if pos.line == r.start.line && pos.character < r.start.character {
+        return false;
+    }
+    if pos.line == r.end.line && pos.character > r.end.character {
+        return false;
+    }
+    true
+}
+
+// ---------------------------------------------------------------------------
+// LSP backend
+// ---------------------------------------------------------------------------
+
+struct HarnLsp {
+    client: Client,
+    documents: Mutex<HashMap<Url, DocumentState>>,
+}
+
+impl HarnLsp {
+    fn new(client: Client) -> Self {
+        Self {
+            client,
+            documents: Mutex::new(HashMap::new()),
+        }
     }
 
     /// Get the word at a given position.
-    fn word_at_position(&self, source: &str, position: Position) -> Option<String> {
+    fn word_at_position(source: &str, position: Position) -> Option<String> {
         let lines: Vec<&str> = source.lines().collect();
         let line = lines.get(position.line as usize)?;
         let col = position.character as usize;
@@ -209,6 +991,80 @@ impl HarnLsp {
         }
         Some(chars[start..end].iter().collect())
     }
+
+    /// Check if cursor is right after a `.` (for method completion).
+    fn char_before_position(source: &str, position: Position) -> Option<char> {
+        let lines: Vec<&str> = source.lines().collect();
+        let line = lines.get(position.line as usize)?;
+        let col = position.character as usize;
+        if col == 0 {
+            return None;
+        }
+        line.chars().nth(col - 1)
+    }
+
+    /// Try to figure out what type the expression before `.` is.
+    fn infer_dot_receiver_type(
+        source: &str,
+        position: Position,
+        symbols: &[SymbolInfo],
+    ) -> Option<String> {
+        // Walk backwards from the dot to find the identifier
+        let lines: Vec<&str> = source.lines().collect();
+        let line = lines.get(position.line as usize)?;
+        let col = position.character as usize;
+        if col < 2 {
+            return None;
+        }
+
+        let chars: Vec<char> = line.chars().collect();
+        // Position is after the `.`, so chars[col-1] is `.`. Walk back from col-2.
+        let mut end = col - 1; // the dot
+        if end == 0 {
+            return None;
+        }
+        end -= 1; // char before dot
+
+        // Skip trailing whitespace (unusual but handle it)
+        while end > 0 && chars[end] == ' ' {
+            end -= 1;
+        }
+
+        // Check for string literal ending in "
+        if chars[end] == '"' {
+            return Some("string".to_string());
+        }
+        // Check for ] (list subscript or literal)
+        if chars[end] == ']' {
+            return Some("list".to_string());
+        }
+        // Check for } (dict literal)
+        if chars[end] == '}' {
+            return Some("dict".to_string());
+        }
+
+        // Otherwise try to extract an identifier
+        if !chars[end].is_alphanumeric() && chars[end] != '_' {
+            return None;
+        }
+        let id_end = end + 1;
+        let mut id_start = end;
+        while id_start > 0 && (chars[id_start - 1].is_alphanumeric() || chars[id_start - 1] == '_')
+        {
+            id_start -= 1;
+        }
+        let name: String = chars[id_start..id_end].iter().collect();
+
+        // Look up the variable's type in the symbol table
+        for sym in symbols.iter().rev() {
+            if sym.name == name {
+                if let Some(ref ty) = sym.type_info {
+                    return Some(format_type(ty));
+                }
+            }
+        }
+        None
+    }
 }
 
 #[tower_lsp::async_trait]
@@ -224,6 +1080,7 @@ impl LanguageServer for HarnLsp {
                     ..Default::default()
                 }),
                 definition_provider: Some(OneOf::Left(true)),
+                references_provider: Some(OneOf::Left(true)),
                 document_symbol_provider: Some(OneOf::Left(true)),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 ..Default::default()
@@ -245,12 +1102,11 @@ impl LanguageServer for HarnLsp {
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let uri = params.text_document.uri.clone();
         let source = params.text_document.text.clone();
-        self.documents
-            .lock()
-            .unwrap()
-            .insert(uri.clone(), source.clone());
 
-        let diagnostics = self.diagnose(&source);
+        let state = DocumentState::new(source);
+        let diagnostics = state.diagnostics.clone();
+        self.documents.lock().unwrap().insert(uri.clone(), state);
+
         self.client
             .publish_diagnostics(uri, diagnostics, None)
             .await;
@@ -260,12 +1116,15 @@ impl LanguageServer for HarnLsp {
         let uri = params.text_document.uri.clone();
         if let Some(change) = params.content_changes.into_iter().last() {
             let source = change.text;
-            self.documents
-                .lock()
-                .unwrap()
-                .insert(uri.clone(), source.clone());
-
-            let diagnostics = self.diagnose(&source);
+            let diagnostics;
+            {
+                let mut docs = self.documents.lock().unwrap();
+                let entry = docs
+                    .entry(uri.clone())
+                    .or_insert_with(|| DocumentState::new(String::new()));
+                entry.update(source);
+                diagnostics = entry.diagnostics.clone();
+            }
             self.client
                 .publish_diagnostics(uri, diagnostics, None)
                 .await;
@@ -279,16 +1138,88 @@ impl LanguageServer for HarnLsp {
             .remove(&params.text_document.uri);
     }
 
+    // -----------------------------------------------------------------------
+    // Completion (scope-aware + method completion)
+    // -----------------------------------------------------------------------
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         let uri = &params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+
         let docs = self.documents.lock().unwrap();
-        let source = match docs.get(uri) {
-            Some(s) => s.clone(),
+        let state = match docs.get(uri) {
+            Some(s) => s,
             None => return Ok(None),
         };
+
+        let source = state.source.clone();
+        let symbols = state.symbols.clone();
         drop(docs);
 
         let mut items = Vec::new();
+
+        // Check if this is a dot-completion
+        if Self::char_before_position(&source, position) == Some('.') {
+            let type_name = Self::infer_dot_receiver_type(&source, position, &symbols);
+            let methods = match type_name.as_deref() {
+                Some("string") => STRING_METHODS,
+                Some("list") => LIST_METHODS,
+                Some("dict") => DICT_METHODS,
+                _ => {
+                    // Unknown type — offer all methods
+                    for m in STRING_METHODS
+                        .iter()
+                        .chain(LIST_METHODS.iter())
+                        .chain(DICT_METHODS.iter())
+                    {
+                        items.push(CompletionItem {
+                            label: m.to_string(),
+                            kind: Some(CompletionItemKind::METHOD),
+                            ..Default::default()
+                        });
+                    }
+                    // Deduplicate by label
+                    items.sort_by(|a, b| a.label.cmp(&b.label));
+                    items.dedup_by(|a, b| a.label == b.label);
+                    return Ok(Some(CompletionResponse::Array(items)));
+                }
+            };
+            for m in methods {
+                items.push(CompletionItem {
+                    label: m.to_string(),
+                    kind: Some(CompletionItemKind::METHOD),
+                    ..Default::default()
+                });
+            }
+            return Ok(Some(CompletionResponse::Array(items)));
+        }
+
+        // Scope-aware: find symbols visible at cursor position
+        for sym in &symbols {
+            // A symbol is visible if:
+            // 1. It has no scope_span (top-level), or
+            // 2. The cursor is inside its scope_span
+            let visible = match sym.scope_span {
+                None => true,
+                Some(ref scope) => position_in_span(&position, scope, &source),
+            };
+            if !visible {
+                continue;
+            }
+            let (kind, detail) = match sym.kind {
+                HarnSymbolKind::Pipeline => (CompletionItemKind::FUNCTION, "pipeline"),
+                HarnSymbolKind::Function => (CompletionItemKind::FUNCTION, "function"),
+                HarnSymbolKind::Variable => (CompletionItemKind::VARIABLE, "variable"),
+                HarnSymbolKind::Parameter => (CompletionItemKind::VARIABLE, "parameter"),
+                HarnSymbolKind::Enum => (CompletionItemKind::ENUM, "enum"),
+                HarnSymbolKind::Struct => (CompletionItemKind::STRUCT, "struct"),
+            };
+            items.push(CompletionItem {
+                label: sym.name.clone(),
+                kind: Some(kind),
+                detail: Some(sym.signature.as_deref().unwrap_or(detail).to_string()),
+                ..Default::default()
+            });
+        }
 
         // Add builtins
         for name in BUILTINS {
@@ -309,18 +1240,12 @@ impl LanguageServer for HarnLsp {
             });
         }
 
-        // Add user-defined symbols
-        let mut lexer = Lexer::new(&source);
-        if let Ok(tokens) = lexer.tokenize() {
-            let mut parser = Parser::new(tokens);
-            if let Ok(nodes) = parser.parse() {
-                collect_user_symbols(&nodes, &mut items);
-            }
-        }
-
         Ok(Some(CompletionResponse::Array(items)))
     }
 
+    // -----------------------------------------------------------------------
+    // Go-to-definition (AST-based symbol table)
+    // -----------------------------------------------------------------------
     async fn goto_definition(
         &self,
         params: GotoDefinitionParams,
@@ -329,60 +1254,169 @@ impl LanguageServer for HarnLsp {
         let position = params.text_document_position_params.position;
 
         let docs = self.documents.lock().unwrap();
-        let source = match docs.get(uri) {
-            Some(s) => s.clone(),
+        let state = match docs.get(uri) {
+            Some(s) => s,
             None => return Ok(None),
         };
+        let source = state.source.clone();
+        let symbols = state.symbols.clone();
         drop(docs);
 
-        let word = match self.word_at_position(&source, position) {
+        let word = match Self::word_at_position(&source, position) {
             Some(w) => w,
             None => return Ok(None),
         };
 
-        if let Some(range) = self.find_definition(&source, &word) {
-            Ok(Some(GotoDefinitionResponse::Scalar(Location {
-                uri: uri.clone(),
-                range,
-            })))
-        } else {
-            Ok(None)
+        // Look up the name in the symbol table — find the first definition-like symbol
+        for sym in &symbols {
+            if sym.name == word
+                && matches!(
+                    sym.kind,
+                    HarnSymbolKind::Pipeline
+                        | HarnSymbolKind::Function
+                        | HarnSymbolKind::Variable
+                        | HarnSymbolKind::Parameter
+                        | HarnSymbolKind::Enum
+                        | HarnSymbolKind::Struct
+                )
+            {
+                let range = span_to_full_range(&sym.def_span, &source);
+                return Ok(Some(GotoDefinitionResponse::Scalar(Location {
+                    uri: uri.clone(),
+                    range,
+                })));
+            }
         }
+
+        Ok(None)
     }
 
+    // -----------------------------------------------------------------------
+    // Find references (AST-based)
+    // -----------------------------------------------------------------------
+    async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
+        let uri = &params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+
+        let docs = self.documents.lock().unwrap();
+        let state = match docs.get(uri) {
+            Some(s) => s,
+            None => return Ok(None),
+        };
+        let source = state.source.clone();
+        let ast = state.ast.clone();
+        drop(docs);
+
+        let word = match Self::word_at_position(&source, position) {
+            Some(w) => w,
+            None => return Ok(None),
+        };
+
+        let program = match ast {
+            Some(p) => p,
+            None => return Ok(None),
+        };
+
+        let ref_spans = find_references(&program, &word);
+        if ref_spans.is_empty() {
+            return Ok(None);
+        }
+
+        let locations: Vec<Location> = ref_spans
+            .iter()
+            .map(|span| Location {
+                uri: uri.clone(),
+                range: span_to_full_range(span, &source),
+            })
+            .collect();
+
+        Ok(Some(locations))
+    }
+
+    // -----------------------------------------------------------------------
+    // Document symbols (AST-based with proper spans)
+    // -----------------------------------------------------------------------
+    #[allow(deprecated)]
     async fn document_symbol(
         &self,
         params: DocumentSymbolParams,
     ) -> Result<Option<DocumentSymbolResponse>> {
         let uri = &params.text_document.uri;
         let docs = self.documents.lock().unwrap();
-        let source = match docs.get(uri) {
-            Some(s) => s.clone(),
+        let state = match docs.get(uri) {
+            Some(s) => s,
             None => return Ok(None),
         };
+        let source = state.source.clone();
+        let symbols = state.symbols.clone();
         drop(docs);
 
-        let symbols = self.extract_symbols(&source);
-        Ok(Some(DocumentSymbolResponse::Nested(symbols)))
+        let mut doc_symbols = Vec::new();
+        for sym in &symbols {
+            // Only include top-level definitions for document symbols
+            let kind = match sym.kind {
+                HarnSymbolKind::Pipeline => SymbolKind::FUNCTION,
+                HarnSymbolKind::Function => SymbolKind::FUNCTION,
+                HarnSymbolKind::Variable => SymbolKind::VARIABLE,
+                HarnSymbolKind::Enum => SymbolKind::ENUM,
+                HarnSymbolKind::Struct => SymbolKind::STRUCT,
+                HarnSymbolKind::Parameter => continue, // skip params from outline
+            };
+            // Only show top-level and direct-child symbols
+            if sym.scope_span.is_some()
+                && !matches!(
+                    sym.kind,
+                    HarnSymbolKind::Function | HarnSymbolKind::Variable
+                )
+            {
+                continue;
+            }
+            let range = span_to_full_range(&sym.def_span, &source);
+            let detail = match sym.kind {
+                HarnSymbolKind::Pipeline => "pipeline",
+                HarnSymbolKind::Function => "function",
+                HarnSymbolKind::Variable => "variable",
+                HarnSymbolKind::Enum => "enum",
+                HarnSymbolKind::Struct => "struct",
+                HarnSymbolKind::Parameter => "parameter",
+            };
+            doc_symbols.push(DocumentSymbol {
+                name: sym.name.clone(),
+                detail: Some(detail.to_string()),
+                kind,
+                range,
+                selection_range: range,
+                tags: None,
+                deprecated: None,
+                children: None,
+            });
+        }
+
+        Ok(Some(DocumentSymbolResponse::Nested(doc_symbols)))
     }
 
+    // -----------------------------------------------------------------------
+    // Hover (with type information)
+    // -----------------------------------------------------------------------
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
         let docs = self.documents.lock().unwrap();
-        let source = match docs.get(uri) {
-            Some(s) => s.clone(),
+        let state = match docs.get(uri) {
+            Some(s) => s,
             None => return Ok(None),
         };
+        let source = state.source.clone();
+        let symbols = state.symbols.clone();
         drop(docs);
 
-        let word = match self.word_at_position(&source, position) {
+        let word = match Self::word_at_position(&source, position) {
             Some(w) => w,
             None => return Ok(None),
         };
 
-        // Check if it's a builtin
+        // Check builtins first
         if let Some(doc) = builtin_doc(&word) {
             return Ok(Some(Hover {
                 contents: HoverContents::Markup(MarkupContent {
@@ -393,20 +1427,60 @@ impl LanguageServer for HarnLsp {
             }));
         }
 
-        // Check if it's a keyword
-        if KEYWORDS.contains(&word.as_str()) {
+        // Check keywords
+        if let Some(doc) = keyword_doc(&word) {
             return Ok(Some(Hover {
                 contents: HoverContents::Markup(MarkupContent {
                     kind: MarkupKind::Markdown,
-                    value: format!("**{word}** — Harn keyword"),
+                    value: doc,
                 }),
                 range: None,
             }));
         }
 
+        // Check user-defined symbols
+        for sym in &symbols {
+            if sym.name == word {
+                let mut hover_text = String::new();
+
+                // Show signature if available
+                if let Some(ref sig) = sym.signature {
+                    hover_text.push_str(&format!("```harn\n{sig}\n```\n"));
+                } else {
+                    // Show kind + name
+                    let kind_str = match sym.kind {
+                        HarnSymbolKind::Pipeline => "pipeline",
+                        HarnSymbolKind::Function => "function",
+                        HarnSymbolKind::Variable => "variable",
+                        HarnSymbolKind::Parameter => "parameter",
+                        HarnSymbolKind::Enum => "enum",
+                        HarnSymbolKind::Struct => "struct",
+                    };
+                    hover_text.push_str(&format!("**{kind_str}** `{}`", sym.name));
+                }
+
+                // Show type if known
+                if let Some(ref ty) = sym.type_info {
+                    hover_text.push_str(&format!("\n\nType: `{}`", format_type(ty)));
+                }
+
+                return Ok(Some(Hover {
+                    contents: HoverContents::Markup(MarkupContent {
+                        kind: MarkupKind::Markdown,
+                        value: hover_text,
+                    }),
+                    range: None,
+                }));
+            }
+        }
+
         Ok(None)
     }
 }
+
+// ---------------------------------------------------------------------------
+// Error conversion helpers
+// ---------------------------------------------------------------------------
 
 fn lexer_error_to_diagnostic(err: &LexerError) -> Diagnostic {
     let (message, line, col) = match err {
@@ -466,91 +1540,9 @@ fn parser_error_to_diagnostic(err: &ParserError) -> Diagnostic {
     }
 }
 
-#[allow(deprecated)]
-fn extract_symbols_from_nodes(nodes: &[SNode], source: &str, symbols: &mut Vec<DocumentSymbol>) {
-    let lines: Vec<&str> = source.lines().collect();
-
-    for snode in nodes {
-        match &snode.node {
-            Node::Pipeline { name, .. } => {
-                if let Some(range) = find_name_in_source(&lines, &format!("pipeline {name}"), name)
-                {
-                    symbols.push(DocumentSymbol {
-                        name: name.clone(),
-                        detail: Some("pipeline".to_string()),
-                        kind: SymbolKind::FUNCTION,
-                        range,
-                        selection_range: range,
-                        tags: None,
-                        deprecated: None,
-                        children: None,
-                    });
-                }
-            }
-            Node::FnDecl { name, .. } => {
-                if let Some(range) = find_name_in_source(&lines, &format!("fn {name}"), name) {
-                    symbols.push(DocumentSymbol {
-                        name: name.clone(),
-                        detail: Some("function".to_string()),
-                        kind: SymbolKind::FUNCTION,
-                        range,
-                        selection_range: range,
-                        tags: None,
-                        deprecated: None,
-                        children: None,
-                    });
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
-fn find_name_in_source(lines: &[&str], pattern: &str, name: &str) -> Option<Range> {
-    for (line_idx, line) in lines.iter().enumerate() {
-        if let Some(pos) = line.find(pattern) {
-            let col = pos + pattern.len() - name.len();
-            return Some(Range {
-                start: Position::new(line_idx as u32, col as u32),
-                end: Position::new(line_idx as u32, (col + name.len()) as u32),
-            });
-        }
-    }
-    None
-}
-
-fn collect_user_symbols(nodes: &[SNode], items: &mut Vec<CompletionItem>) {
-    for snode in nodes {
-        match &snode.node {
-            Node::Pipeline { name, body, .. } => {
-                items.push(CompletionItem {
-                    label: name.clone(),
-                    kind: Some(CompletionItemKind::FUNCTION),
-                    detail: Some("pipeline".to_string()),
-                    ..Default::default()
-                });
-                collect_user_symbols(body, items);
-            }
-            Node::FnDecl { name, body, .. } => {
-                items.push(CompletionItem {
-                    label: name.clone(),
-                    kind: Some(CompletionItemKind::FUNCTION),
-                    detail: Some("function".to_string()),
-                    ..Default::default()
-                });
-                collect_user_symbols(body, items);
-            }
-            Node::LetBinding { name, .. } | Node::VarBinding { name, .. } => {
-                items.push(CompletionItem {
-                    label: name.clone(),
-                    kind: Some(CompletionItemKind::VARIABLE),
-                    ..Default::default()
-                });
-            }
-            _ => {}
-        }
-    }
-}
+// ---------------------------------------------------------------------------
+// Hover documentation
+// ---------------------------------------------------------------------------
 
 fn builtin_doc(name: &str) -> Option<String> {
     let doc = match name {
@@ -583,6 +1575,40 @@ fn builtin_doc(name: &str) -> Option<String> {
     };
     Some(doc.to_string())
 }
+
+fn keyword_doc(name: &str) -> Option<String> {
+    let doc = match name {
+        "pipeline" => "**pipeline** — Declare a named pipeline\n\n```harn\npipeline name(params) {\n  // body\n}\n```",
+        "fn" => "**fn** — Declare a function\n\n```harn\nfn name(params) -> return_type {\n  // body\n}\n```",
+        "let" => "**let** — Immutable variable binding\n\n```harn\nlet x: type = value\n```",
+        "var" => "**var** — Mutable variable binding\n\n```harn\nvar x: type = value\n```",
+        "if" => "**if** — Conditional expression\n\n```harn\nif condition {\n  // then\n} else {\n  // else\n}\n```",
+        "else" => "**else** — Else branch of an if expression",
+        "for" => "**for** — For-in loop\n\n```harn\nfor item in iterable {\n  // body\n}\n```",
+        "while" => "**while** — While loop\n\n```harn\nwhile condition {\n  // body\n}\n```",
+        "match" => "**match** — Pattern matching expression\n\n```harn\nmatch value {\n  pattern => body\n}\n```",
+        "return" => "**return** — Return a value from a function",
+        "try" => "**try** — Try-catch error handling\n\n```harn\ntry {\n  // body\n} catch e {\n  // handle\n}\n```",
+        "catch" => "**catch** — Catch block for error handling",
+        "throw" => "**throw** — Throw an error value",
+        "import" => "**import** — Import a module\n\n```harn\nimport \"path/to/module\"\n```",
+        "spawn" => "**spawn** — Spawn an async task\n\n```harn\nlet handle = spawn {\n  // async body\n}\n```",
+        "parallel" => "**parallel** — Execute N parallel tasks\n\n```harn\nparallel N {\n  // body\n}\n```",
+        "parallel_map" => "**parallel_map** — Map over a list in parallel\n\n```harn\nparallel_map list as item {\n  // body\n}\n```",
+        "retry" => "**retry** — Retry a block N times\n\n```harn\nretry N {\n  // body\n}\n```",
+        "extends" => "**extends** — Inherit from another pipeline",
+        "override" => "**override** — Override an inherited pipeline step",
+        "true" | "false" => "**bool** — Boolean literal",
+        "nil" => "**nil** — Nil value (absence of a value)",
+        "in" => "**in** — Used in `for x in collection`",
+        _ => return None,
+    };
+    Some(doc.to_string())
+}
+
+// ---------------------------------------------------------------------------
+// main
+// ---------------------------------------------------------------------------
 
 #[tokio::main]
 async fn main() {

@@ -1,0 +1,10 @@
+pipeline test(task) {
+  log(abs(-5))
+  log(min(3, 7))
+  log(max(3, 7))
+  log(floor(3.7))
+  log(ceil(3.2))
+  log(round(3.5))
+  log(sqrt(16.0))
+  log(pow(2, 10))
+}

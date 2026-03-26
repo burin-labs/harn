@@ -1,3 +1,5 @@
+mod test_runner;
+
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::{env, fs, process};
@@ -19,7 +21,8 @@ async fn main() {
         eprintln!("  run <file.harn>        Execute a Harn file");
         eprintln!("  lint <file.harn>       Lint a Harn file");
         eprintln!("  fmt <file.harn>        Format a Harn file");
-        eprintln!("  test <directory>       Run conformance test suite");
+        eprintln!("  test <file|dir>        Run test_* pipelines in file or directory");
+        eprintln!("  test conformance       Run conformance test suite");
         eprintln!("  repl                   Interactive REPL");
         process::exit(1);
     }
@@ -85,12 +88,15 @@ async fn main() {
             }
         }
         "test" => {
-            let dir = if args.len() >= 3 {
-                &args[2]
+            if args.len() < 3 {
+                eprintln!("Usage: harn test <file.harn|directory|conformance>");
+                process::exit(1);
+            }
+            if args[2] == "conformance" {
+                run_conformance_tests(&args[2]).await;
             } else {
-                "conformance"
-            };
-            run_conformance_tests(dir).await;
+                run_user_tests(&args[2]).await;
+            }
         }
         "repl" => run_repl().await,
         _ => {
@@ -463,6 +469,45 @@ async fn run_conformance_tests(dir: &str) {
             println!("  {err}");
         }
         process::exit(1);
+    }
+}
+
+async fn run_user_tests(path_str: &str) {
+    let path = PathBuf::from(path_str);
+    if !path.exists() {
+        eprintln!("Path not found: {path_str}");
+        process::exit(1);
+    }
+    let summary = test_runner::run_tests(&path).await;
+
+    for result in &summary.results {
+        if result.passed {
+            println!(
+                "  \x1b[32mPASS\x1b[0m  {} [{}] ({} ms)",
+                result.name, result.file, result.duration_ms
+            );
+        } else {
+            println!("  \x1b[31mFAIL\x1b[0m  {} [{}]", result.name, result.file);
+            if let Some(err) = &result.error {
+                println!("        {err}");
+            }
+        }
+    }
+
+    println!();
+    if summary.failed > 0 {
+        println!(
+            "{} passed, {} failed, {} total ({} ms)",
+            summary.passed, summary.failed, summary.total, summary.duration_ms
+        );
+        process::exit(1);
+    } else if summary.total == 0 {
+        println!("No test pipelines found");
+    } else {
+        println!(
+            "{} passed, {} total ({} ms)",
+            summary.passed, summary.total, summary.duration_ms
+        );
     }
 }
 

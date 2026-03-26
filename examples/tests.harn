@@ -1,0 +1,69 @@
+// Example test file — run with: harn test examples/tests.harn
+
+fn add(a, b) {
+  return a + b
+}
+
+fn greet(name) {
+  return "hello " + name
+}
+
+pipeline test_addition(task) {
+  assert_eq(add(2, 3), 5)
+  assert_eq(add(-1, 1), 0)
+  assert_eq(add(0, 0), 0)
+}
+
+pipeline test_string_operations(task) {
+  assert_eq(greet("world"), "hello world")
+  assert("hello".contains("ell"))
+  assert(!"hello".contains("xyz"))
+  assert_eq("hello".count, 5)
+}
+
+pipeline test_list_operations(task) {
+  let nums = [3, 1, 4, 1, 5]
+  assert_eq(nums.count, 5)
+  assert_eq(nums.first, 3)
+  assert_eq(nums.last, 5)
+  assert(nums.any({ n -> n > 4 }))
+  assert(nums.all({ n -> n > 0 }))
+}
+
+pipeline test_dict_operations(task) {
+  let user = {name: "Alice", age: 30}
+  assert_eq(user.name, "Alice")
+  assert(user.has("name"))
+  assert(!user.has("email"))
+}
+
+pipeline test_control_flow(task) {
+  var sum = 0
+  for i in [1, 2, 3, 4, 5] {
+    sum = sum + i
+  }
+  assert_eq(sum, 15)
+}
+
+pipeline test_error_handling(task) {
+  var caught = false
+  try {
+    throw "test error"
+  } catch (e) {
+    caught = true
+    assert_eq(e, "test error")
+  }
+  assert(caught)
+}
+
+pipeline test_closures(task) {
+  let double = { x -> x * 2 }
+  let add_fn = { a, b -> a + b }
+  assert_eq(double(5), 10)
+  assert_eq(add_fn(3, 4), 7)
+}
+
+// This pipeline is NOT a test (no test_ prefix) — should be ignored
+pipeline helper(task) {
+  log("I should not run during tests")
+}

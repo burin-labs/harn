@@ -152,6 +152,174 @@ pub fn register_stdlib(interp: &mut Interpreter) {
         Ok(Value::Nil)
     });
 
+    // --- Math builtins ---
+
+    interp.register_builtin("abs", |args, _out| {
+        match args.first().unwrap_or(&Value::Nil) {
+            Value::Int(n) => Ok(Value::Int(n.abs())),
+            Value::Float(n) => Ok(Value::Float(n.abs())),
+            _ => Ok(Value::Nil),
+        }
+    });
+
+    interp.register_builtin("min", |args, _out| {
+        if args.len() >= 2 {
+            let a = &args[0];
+            let b = &args[1];
+            match (a, b) {
+                (Value::Int(x), Value::Int(y)) => Ok(Value::Int(*x.min(y))),
+                (Value::Float(x), Value::Float(y)) => Ok(Value::Float(x.min(*y))),
+                (Value::Int(x), Value::Float(y)) => Ok(Value::Float((*x as f64).min(*y))),
+                (Value::Float(x), Value::Int(y)) => Ok(Value::Float(x.min(*y as f64))),
+                _ => Ok(Value::Nil),
+            }
+        } else {
+            Ok(Value::Nil)
+        }
+    });
+
+    interp.register_builtin("max", |args, _out| {
+        if args.len() >= 2 {
+            let a = &args[0];
+            let b = &args[1];
+            match (a, b) {
+                (Value::Int(x), Value::Int(y)) => Ok(Value::Int(*x.max(y))),
+                (Value::Float(x), Value::Float(y)) => Ok(Value::Float(x.max(*y))),
+                (Value::Int(x), Value::Float(y)) => Ok(Value::Float((*x as f64).max(*y))),
+                (Value::Float(x), Value::Int(y)) => Ok(Value::Float(x.max(*y as f64))),
+                _ => Ok(Value::Nil),
+            }
+        } else {
+            Ok(Value::Nil)
+        }
+    });
+
+    interp.register_builtin("floor", |args, _out| {
+        match args.first().unwrap_or(&Value::Nil) {
+            Value::Float(n) => Ok(Value::Int(n.floor() as i64)),
+            Value::Int(n) => Ok(Value::Int(*n)),
+            _ => Ok(Value::Nil),
+        }
+    });
+
+    interp.register_builtin("ceil", |args, _out| {
+        match args.first().unwrap_or(&Value::Nil) {
+            Value::Float(n) => Ok(Value::Int(n.ceil() as i64)),
+            Value::Int(n) => Ok(Value::Int(*n)),
+            _ => Ok(Value::Nil),
+        }
+    });
+
+    interp.register_builtin("round", |args, _out| {
+        match args.first().unwrap_or(&Value::Nil) {
+            Value::Float(n) => Ok(Value::Int(n.round() as i64)),
+            Value::Int(n) => Ok(Value::Int(*n)),
+            _ => Ok(Value::Nil),
+        }
+    });
+
+    interp.register_builtin("sqrt", |args, _out| {
+        match args.first().unwrap_or(&Value::Nil) {
+            Value::Float(n) => Ok(Value::Float(n.sqrt())),
+            Value::Int(n) => Ok(Value::Float((*n as f64).sqrt())),
+            _ => Ok(Value::Nil),
+        }
+    });
+
+    interp.register_builtin("pow", |args, _out| {
+        if args.len() >= 2 {
+            match (&args[0], &args[1]) {
+                (Value::Int(base), Value::Int(exp)) => {
+                    Ok(Value::Int((*base as f64).powi(*exp as i32) as i64))
+                }
+                (Value::Float(base), Value::Int(exp)) => Ok(Value::Float(base.powi(*exp as i32))),
+                (Value::Int(base), Value::Float(exp)) => {
+                    Ok(Value::Float((*base as f64).powf(*exp)))
+                }
+                (Value::Float(base), Value::Float(exp)) => Ok(Value::Float(base.powf(*exp))),
+                _ => Ok(Value::Nil),
+            }
+        } else {
+            Ok(Value::Nil)
+        }
+    });
+
+    interp.register_builtin("random", |_args, _out| {
+        use rand::Rng;
+        let val: f64 = rand::thread_rng().gen();
+        Ok(Value::Float(val))
+    });
+
+    interp.register_builtin("random_int", |args, _out| {
+        use rand::Rng;
+        if args.len() >= 2 {
+            let min = args[0].as_int().unwrap_or(0);
+            let max = args[1].as_int().unwrap_or(0);
+            if min <= max {
+                let val = rand::thread_rng().gen_range(min..=max);
+                return Ok(Value::Int(val));
+            }
+        }
+        Ok(Value::Nil)
+    });
+
+    // --- Assert builtins ---
+
+    interp.register_builtin("assert", |args, _out| {
+        let condition = args.first().unwrap_or(&Value::Nil);
+        if !condition.is_truthy() {
+            let msg = args
+                .get(1)
+                .map(|a| a.as_string())
+                .unwrap_or_else(|| "Assertion failed".to_string());
+            return Err(RuntimeError::thrown(msg));
+        }
+        Ok(Value::Nil)
+    });
+
+    interp.register_builtin("assert_eq", |args, _out| {
+        if args.len() >= 2 {
+            let actual = &args[0];
+            let expected = &args[1];
+            if actual != expected {
+                let msg = args.get(2).map(|a| a.as_string()).unwrap_or_else(|| {
+                    format!(
+                        "Assertion failed: expected {}, got {}",
+                        expected.as_string(),
+                        actual.as_string()
+                    )
+                });
+                return Err(RuntimeError::thrown(msg));
+            }
+            Ok(Value::Nil)
+        } else {
+            Err(RuntimeError::thrown(
+                "assert_eq requires at least 2 arguments".to_string(),
+            ))
+        }
+    });
+
+    interp.register_builtin("assert_ne", |args, _out| {
+        if args.len() >= 2 {
+            let actual = &args[0];
+            let expected = &args[1];
+            if actual == expected {
+                let msg = args.get(2).map(|a| a.as_string()).unwrap_or_else(|| {
+                    format!(
+                        "Assertion failed: values should not be equal: {}",
+                        actual.as_string()
+                    )
+                });
+                return Err(RuntimeError::thrown(msg));
+            }
+            Ok(Value::Nil)
+        } else {
+            Err(RuntimeError::thrown(
+                "assert_ne requires at least 2 arguments".to_string(),
+            ))
+        }
+    });
+
     interp.register_builtin("regex_replace", |args, _out| {
         if args.len() >= 3 {
             let pattern = args[0].as_string();
