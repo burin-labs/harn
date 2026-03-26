@@ -854,8 +854,12 @@ impl Interpreter {
     // --- Imports ---
 
     async fn eval_import(&mut self, path: &str) -> Result<Value, RuntimeError> {
-        let resolved = self.source_dir.join(path);
-        let resolved = resolved.canonicalize().unwrap_or_else(|_| resolved.clone());
+        let mut resolved = self.source_dir.join(path);
+        // Auto-append .harn extension if missing (supports `import "lib/context"`)
+        if resolved.extension().is_none() {
+            resolved.set_extension("harn");
+        }
+        let resolved = resolved.canonicalize().unwrap_or_else(|_| resolved);
 
         if self.imported.contains(&resolved) {
             return Ok(Value::Nil);

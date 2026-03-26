@@ -1,0 +1,6 @@
+import "lib/helpers"
+
+pipeline test(task) {
+  log(double(3))
+  log(greet("harn"))
+}
