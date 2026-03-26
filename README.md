@@ -1,4 +1,4 @@
-<![CDATA[# Harn
+# Harn
 
 [![CI](https://github.com/burin-labs/harn/actions/workflows/ci.yml/badge.svg)](https://github.com/burin-labs/harn/actions/workflows/ci.yml)
 
@@ -6,7 +6,7 @@ A programming language for orchestrating AI agents.
 
 Harn gives you pipelines, concurrency, LLM calls, and error recovery as language primitives — not library abstractions. Instead of wiring together agents in Python with callbacks and retry decorators, you write this:
 
-```harn
+```javascript
 pipeline default(task) {
   let plan = llm_call(task, "Break this into steps")
 
@@ -34,7 +34,7 @@ cargo build
 
 Create `hello.harn`:
 
-```harn
+```javascript
 pipeline default(task) {
   log("Hello, Harn!")
 }
@@ -59,7 +59,7 @@ export ANTHROPIC_API_KEY="sk-..."
 cargo run --bin harn -- run examples/llm-call.harn
 ```
 
-```harn
+```javascript
 pipeline default(task) {
   let response = llm_call(
     "What is 2 + 2? Answer with just the number.",
@@ -75,7 +75,7 @@ Harn supports Anthropic, OpenAI, Ollama, and OpenRouter out of the box.
 
 ### Data transformation with pipes
 
-```harn
+```javascript
 pipeline default(task) {
   let users = [
     {name: "Alice", age: 30, role: "engineer"},
@@ -96,7 +96,7 @@ pipeline default(task) {
 
 The `agent_loop` builtin maintains conversation history across turns and keeps the agent working until it emits a `##DONE##` sentinel:
 
-```harn
+```javascript
 pipeline default(task) {
   let result = agent_loop(
     task,
@@ -111,7 +111,7 @@ pipeline default(task) {
 
 Run work concurrently without callbacks or async/await noise:
 
-```harn
+```javascript
 pipeline default(task) {
   let files = ["src/main.rs", "src/lib.rs", "src/utils.rs"]
 
@@ -129,7 +129,7 @@ pipeline default(task) {
 
 Pipelines can extend and override each other:
 
-```harn
+```javascript
 pipeline base(task) {
   let context = read_file("README.md")
   log("Context loaded")
@@ -145,13 +145,13 @@ pipeline deploy(task) extends base {
 
 Factor common logic into library files and import them:
 
-```harn
+```javascript
 // lib/helpers.harn
 fn double(x) { return x * 2 }
 fn greet(name) { return "hello " + name }
 ```
 
-```harn
+```javascript
 import "lib/helpers"
 
 pipeline default(task) {
@@ -222,4 +222,3 @@ git config core.hooksPath .githooks
 **I/O & data:** `read_file`, `write_file`, `http_get`, `http_post`, `json_parse`, `json_stringify`, `regex_match`, `regex_replace`, string interpolation (`${expr}`), pipe operator (`|>`)
 
 **Modules:** `import` with subdirectory support, top-level `fn` declarations, pipeline inheritance with `extends`/`override`
-]]>
