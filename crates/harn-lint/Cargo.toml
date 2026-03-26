@@ -1,0 +1,9 @@
+[package]
+name = "harn-lint"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+harn-lexer = { path = "../harn-lexer" }
+harn-parser = { path = "../harn-parser" }

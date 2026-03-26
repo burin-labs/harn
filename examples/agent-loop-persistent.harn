@@ -1,13 +1,5 @@
-// Example: agent_loop with persistent mode and ##DONE## sentinel
-// The agent keeps working until it outputs ##DONE##
-// Requires ANTHROPIC_API_KEY environment variable
-
 pipeline default(task) {
-  let result = agent_loop(
-    "Count from 1 to 5, one number per line. Then output ##DONE##.",
-    "You are a helpful assistant.",
-    {persistent: true, max_nudges: 2}
-  )
+  let result = agent_loop("Count from 1 to 5, one number per line. Then output ##DONE##.", "You are a helpful assistant.", {persistent: true, max_nudges: 2})
   log("Agent output:")
   log(result)
 }

@@ -222,12 +222,19 @@ fn compare_values(a: &VmValue, b: &VmValue) -> i32 {
 /// Sync builtin function for the VM.
 pub type VmBuiltinFn = Box<dyn Fn(&[VmValue], &mut String) -> Result<VmValue, VmError>>;
 
-/// Call frame for function execution (future use with call stack).
-#[allow(dead_code)]
+/// Call frame for function execution.
 struct CallFrame {
     chunk: Chunk,
     ip: usize,
     stack_base: usize,
+    saved_env: VmEnv,
+}
+
+/// Exception handler for try/catch.
+struct ExceptionHandler {
+    catch_ip: usize,
+    stack_depth: usize,
+    frame_depth: usize,
 }
 
 /// The Harn bytecode virtual machine.
@@ -238,6 +245,10 @@ pub struct Vm {
     builtins: BTreeMap<String, VmBuiltinFn>,
     /// Iterator state for for-in loops.
     iterators: Vec<(Vec<VmValue>, usize)>,
+    /// Call frame stack.
+    frames: Vec<CallFrame>,
+    /// Exception handler stack.
+    exception_handlers: Vec<ExceptionHandler>,
 }
 
 impl Vm {
@@ -248,6 +259,8 @@ impl Vm {
             output: String::new(),
             builtins: BTreeMap::new(),
             iterators: Vec::new(),
+            frames: Vec::new(),
+            exception_handlers: Vec::new(),
         }
     }
 
@@ -269,367 +282,473 @@ impl Vm {
         self.run_chunk(chunk)
     }
 
+    /// Convert a VmError into either a handled exception (returning Ok) or a propagated error.
+    fn handle_error(&mut self, error: VmError) -> Result<Option<VmValue>, VmError> {
+        // Extract the thrown value from the error
+        let thrown_value = match &error {
+            VmError::Thrown(v) => v.clone(),
+            other => VmValue::String(other.to_string()),
+        };
+
+        if let Some(handler) = self.exception_handlers.pop() {
+            // Unwind call frames back to the handler's frame depth
+            while self.frames.len() > handler.frame_depth {
+                if let Some(frame) = self.frames.pop() {
+                    self.env = frame.saved_env;
+                }
+            }
+
+            // Restore stack to handler's depth
+            self.stack.truncate(handler.stack_depth);
+
+            // Push the error value onto the stack (catch body can access it)
+            self.stack.push(thrown_value);
+
+            // Set the IP in the current frame to the catch handler
+            if let Some(frame) = self.frames.last_mut() {
+                frame.ip = handler.catch_ip;
+            }
+
+            Ok(None) // Continue execution
+        } else {
+            Err(error) // No handler, propagate
+        }
+    }
+
     fn run_chunk(&mut self, chunk: &Chunk) -> Result<VmValue, VmError> {
-        let mut ip = 0;
+        // Push initial frame
+        self.frames.push(CallFrame {
+            chunk: chunk.clone(),
+            ip: 0,
+            stack_base: self.stack.len(),
+            saved_env: self.env.clone(),
+        });
 
-        while ip < chunk.code.len() {
-            let op = chunk.code[ip];
-            ip += 1;
+        loop {
+            // Get current frame
+            let frame = match self.frames.last_mut() {
+                Some(f) => f,
+                None => return Ok(self.stack.pop().unwrap_or(VmValue::Nil)),
+            };
 
-            match op {
-                x if x == Op::Constant as u8 => {
-                    let idx = chunk.read_u16(ip) as usize;
-                    ip += 2;
-                    let val = match &chunk.constants[idx] {
-                        Constant::Int(n) => VmValue::Int(*n),
-                        Constant::Float(n) => VmValue::Float(*n),
-                        Constant::String(s) => VmValue::String(s.clone()),
-                        Constant::Bool(b) => VmValue::Bool(*b),
-                        Constant::Nil => VmValue::Nil,
-                    };
-                    self.stack.push(val);
-                }
-                x if x == Op::Nil as u8 => self.stack.push(VmValue::Nil),
-                x if x == Op::True as u8 => self.stack.push(VmValue::Bool(true)),
-                x if x == Op::False as u8 => self.stack.push(VmValue::Bool(false)),
+            // Check if we've reached end of chunk
+            if frame.ip >= frame.chunk.code.len() {
+                let val = self.stack.pop().unwrap_or(VmValue::Nil);
+                let popped_frame = self.frames.pop().unwrap();
 
-                x if x == Op::GetVar as u8 => {
-                    let idx = chunk.read_u16(ip) as usize;
-                    ip += 2;
-                    let name = match &chunk.constants[idx] {
-                        Constant::String(s) => s.clone(),
-                        _ => return Err(VmError::TypeError("expected string constant".into())),
-                    };
-                    let val = self.env.get(&name).unwrap_or(VmValue::Nil);
-                    self.stack.push(val);
-                }
-                x if x == Op::DefLet as u8 => {
-                    let idx = chunk.read_u16(ip) as usize;
-                    ip += 2;
-                    let name = Self::const_string(&chunk.constants[idx])?;
-                    let val = self.pop()?;
-                    self.env.define(&name, val, false);
-                }
-                x if x == Op::DefVar as u8 => {
-                    let idx = chunk.read_u16(ip) as usize;
-                    ip += 2;
-                    let name = Self::const_string(&chunk.constants[idx])?;
-                    let val = self.pop()?;
-                    self.env.define(&name, val, true);
-                }
-                x if x == Op::SetVar as u8 => {
-                    let idx = chunk.read_u16(ip) as usize;
-                    ip += 2;
-                    let name = Self::const_string(&chunk.constants[idx])?;
-                    let val = self.pop()?;
-                    self.env.assign(&name, val)?;
-                }
-
-                // Arithmetic
-                x if x == Op::Add as u8 => {
-                    let b = self.pop()?;
-                    let a = self.pop()?;
-                    self.stack.push(self.add(a, b));
-                }
-                x if x == Op::Sub as u8 => {
-                    let b = self.pop()?;
-                    let a = self.pop()?;
-                    self.stack.push(self.sub(a, b));
-                }
-                x if x == Op::Mul as u8 => {
-                    let b = self.pop()?;
-                    let a = self.pop()?;
-                    self.stack.push(self.mul(a, b));
-                }
-                x if x == Op::Div as u8 => {
-                    let b = self.pop()?;
-                    let a = self.pop()?;
-                    self.stack.push(self.div(a, b));
-                }
-                x if x == Op::Negate as u8 => {
-                    let v = self.pop()?;
-                    self.stack.push(match v {
-                        VmValue::Int(n) => VmValue::Int(-n),
-                        VmValue::Float(n) => VmValue::Float(-n),
-                        _ => VmValue::Nil,
-                    });
-                }
-
-                // Comparison
-                x if x == Op::Equal as u8 => {
-                    let b = self.pop()?;
-                    let a = self.pop()?;
-                    self.stack.push(VmValue::Bool(values_equal(&a, &b)));
-                }
-                x if x == Op::NotEqual as u8 => {
-                    let b = self.pop()?;
-                    let a = self.pop()?;
-                    self.stack.push(VmValue::Bool(!values_equal(&a, &b)));
-                }
-                x if x == Op::Less as u8 => {
-                    let b = self.pop()?;
-                    let a = self.pop()?;
-                    self.stack.push(VmValue::Bool(compare_values(&a, &b) < 0));
-                }
-                x if x == Op::Greater as u8 => {
-                    let b = self.pop()?;
-                    let a = self.pop()?;
-                    self.stack.push(VmValue::Bool(compare_values(&a, &b) > 0));
-                }
-                x if x == Op::LessEqual as u8 => {
-                    let b = self.pop()?;
-                    let a = self.pop()?;
-                    self.stack.push(VmValue::Bool(compare_values(&a, &b) <= 0));
-                }
-                x if x == Op::GreaterEqual as u8 => {
-                    let b = self.pop()?;
-                    let a = self.pop()?;
-                    self.stack.push(VmValue::Bool(compare_values(&a, &b) >= 0));
-                }
-
-                // Logical
-                x if x == Op::Not as u8 => {
-                    let v = self.pop()?;
-                    self.stack.push(VmValue::Bool(!v.is_truthy()));
-                }
-
-                // Control flow
-                x if x == Op::Jump as u8 => {
-                    let target = chunk.read_u16(ip) as usize;
-                    ip = target;
-                }
-                x if x == Op::JumpIfFalse as u8 => {
-                    let target = chunk.read_u16(ip) as usize;
-                    ip += 2;
-                    let val = self.peek()?;
-                    if !val.is_truthy() {
-                        ip = target;
-                    }
-                }
-                x if x == Op::JumpIfTrue as u8 => {
-                    let target = chunk.read_u16(ip) as usize;
-                    ip += 2;
-                    let val = self.peek()?;
-                    if val.is_truthy() {
-                        ip = target;
-                    }
-                }
-                x if x == Op::Pop as u8 => {
-                    self.pop()?;
-                }
-
-                // Functions
-                x if x == Op::Call as u8 => {
-                    let argc = chunk.code[ip] as usize;
-                    ip += 1;
-
-                    // Arguments are on stack above the function name/value
-                    let args: Vec<VmValue> =
-                        self.stack.split_off(self.stack.len().saturating_sub(argc));
-                    let callee = self.pop()?;
-
-                    match callee {
-                        VmValue::String(name) => {
-                            // Check closures in env
-                            if let Some(VmValue::Closure(closure)) = self.env.get(&name) {
-                                let result =
-                                    self.call_closure(&closure, &args, &chunk.functions)?;
-                                self.stack.push(result);
-                            } else if let Some(builtin) = self.builtins.get(&name) {
-                                let result = builtin(&args, &mut self.output)?;
-                                self.stack.push(result);
-                            } else {
-                                return Err(VmError::UndefinedBuiltin(name));
-                            }
-                        }
-                        VmValue::Closure(closure) => {
-                            let result = self.call_closure(&closure, &args, &chunk.functions)?;
-                            self.stack.push(result);
-                        }
-                        _ => {
-                            return Err(VmError::TypeError(format!(
-                                "Cannot call {}",
-                                callee.display()
-                            )));
-                        }
-                    }
-                }
-
-                x if x == Op::Return as u8 => {
-                    let val = self.pop().unwrap_or(VmValue::Nil);
+                if self.frames.is_empty() {
+                    // We're done with the top-level chunk
                     return Ok(val);
-                }
-
-                x if x == Op::Closure as u8 => {
-                    let fn_idx = chunk.read_u16(ip) as usize;
-                    ip += 2;
-                    let func = chunk.functions[fn_idx].clone();
-                    let closure = VmClosure {
-                        func,
-                        env: self.env.clone(),
-                    };
-                    self.stack.push(VmValue::Closure(closure));
-                }
-
-                // Collections
-                x if x == Op::BuildList as u8 => {
-                    let count = chunk.read_u16(ip) as usize;
-                    ip += 2;
-                    let items = self.stack.split_off(self.stack.len().saturating_sub(count));
-                    self.stack.push(VmValue::List(items));
-                }
-
-                x if x == Op::BuildDict as u8 => {
-                    let count = chunk.read_u16(ip) as usize;
-                    ip += 2;
-                    let pairs = self
-                        .stack
-                        .split_off(self.stack.len().saturating_sub(count * 2));
-                    let mut map = BTreeMap::new();
-                    for pair in pairs.chunks(2) {
-                        if pair.len() == 2 {
-                            let key = pair[0].display();
-                            map.insert(key, pair[1].clone());
-                        }
-                    }
-                    self.stack.push(VmValue::Dict(map));
-                }
-
-                x if x == Op::Subscript as u8 => {
-                    let idx = self.pop()?;
-                    let obj = self.pop()?;
-                    let result = match (&obj, &idx) {
-                        (VmValue::List(items), VmValue::Int(i)) if *i >= 0 => {
-                            items.get(*i as usize).cloned().unwrap_or(VmValue::Nil)
-                        }
-                        (VmValue::Dict(map), _) => {
-                            map.get(&idx.display()).cloned().unwrap_or(VmValue::Nil)
-                        }
-                        _ => VmValue::Nil,
-                    };
-                    self.stack.push(result);
-                }
-
-                x if x == Op::GetProperty as u8 => {
-                    let idx = chunk.read_u16(ip) as usize;
-                    ip += 2;
-                    let name = Self::const_string(&chunk.constants[idx])?;
-                    let obj = self.pop()?;
-                    let result = match &obj {
-                        VmValue::Dict(map) => map.get(&name).cloned().unwrap_or(VmValue::Nil),
-                        VmValue::List(items) => match name.as_str() {
-                            "count" => VmValue::Int(items.len() as i64),
-                            "empty" => VmValue::Bool(items.is_empty()),
-                            "first" => items.first().cloned().unwrap_or(VmValue::Nil),
-                            "last" => items.last().cloned().unwrap_or(VmValue::Nil),
-                            _ => VmValue::Nil,
-                        },
-                        VmValue::String(s) => match name.as_str() {
-                            "count" => VmValue::Int(s.chars().count() as i64),
-                            "empty" => VmValue::Bool(s.is_empty()),
-                            _ => VmValue::Nil,
-                        },
-                        _ => VmValue::Nil,
-                    };
-                    self.stack.push(result);
-                }
-
-                x if x == Op::MethodCall as u8 => {
-                    let name_idx = chunk.read_u16(ip) as usize;
-                    ip += 2;
-                    let argc = chunk.code[ip] as usize;
-                    ip += 1;
-                    let method = Self::const_string(&chunk.constants[name_idx])?;
-                    let args: Vec<VmValue> =
-                        self.stack.split_off(self.stack.len().saturating_sub(argc));
-                    let obj = self.pop()?;
-                    let result = self.call_method(obj, &method, &args, &chunk.functions)?;
-                    self.stack.push(result);
-                }
-
-                x if x == Op::Concat as u8 => {
-                    let count = chunk.read_u16(ip) as usize;
-                    ip += 2;
-                    let parts = self.stack.split_off(self.stack.len().saturating_sub(count));
-                    let result: String = parts.iter().map(|p| p.display()).collect();
-                    self.stack.push(VmValue::String(result));
-                }
-
-                x if x == Op::Pipe as u8 => {
-                    let callable = self.pop()?;
-                    let value = self.pop()?;
-                    match callable {
-                        VmValue::Closure(closure) => {
-                            let result = self.call_closure(&closure, &[value], &chunk.functions)?;
-                            self.stack.push(result);
-                        }
-                        VmValue::String(name) => {
-                            if let Some(VmValue::Closure(closure)) = self.env.get(&name) {
-                                let result =
-                                    self.call_closure(&closure, &[value], &chunk.functions)?;
-                                self.stack.push(result);
-                            } else if let Some(builtin) = self.builtins.get(&name) {
-                                let result = builtin(&[value], &mut self.output)?;
-                                self.stack.push(result);
-                            } else {
-                                self.stack.push(VmValue::Nil);
-                            }
-                        }
-                        _ => self.stack.push(VmValue::Nil),
-                    }
-                }
-
-                x if x == Op::Dup as u8 => {
-                    let val = self.peek()?.clone();
+                } else {
+                    // Returning from a function call
+                    self.env = popped_frame.saved_env;
+                    self.stack.truncate(popped_frame.stack_base);
                     self.stack.push(val);
+                    continue;
                 }
-                x if x == Op::Swap as u8 => {
-                    let len = self.stack.len();
-                    if len >= 2 {
-                        self.stack.swap(len - 1, len - 2);
-                    }
-                }
+            }
 
-                x if x == Op::IterInit as u8 => {
-                    let iterable = self.pop()?;
-                    let items = match iterable {
-                        VmValue::List(items) => items,
-                        VmValue::Dict(map) => map
-                            .into_iter()
-                            .map(|(k, v)| {
-                                VmValue::Dict(BTreeMap::from([
-                                    ("key".to_string(), VmValue::String(k)),
-                                    ("value".to_string(), v),
-                                ]))
-                            })
-                            .collect(),
-                        _ => Vec::new(),
-                    };
-                    self.iterators.push((items, 0));
-                }
-                x if x == Op::IterNext as u8 => {
-                    let target = chunk.read_u16(ip) as usize;
-                    ip += 2;
-                    if let Some((items, idx)) = self.iterators.last_mut() {
-                        if *idx < items.len() {
-                            let item = items[*idx].clone();
-                            *idx += 1;
-                            self.stack.push(item);
-                        } else {
-                            self.iterators.pop();
-                            ip = target;
+            let op = frame.chunk.code[frame.ip];
+            frame.ip += 1;
+
+            match self.execute_op(op) {
+                Ok(Some(val)) => return Ok(val),
+                Ok(None) => continue,
+                Err(VmError::Return(val)) => {
+                    // Pop the current frame
+                    if let Some(popped_frame) = self.frames.pop() {
+                        if self.frames.is_empty() {
+                            return Ok(val);
                         }
+                        self.env = popped_frame.saved_env;
+                        self.stack.truncate(popped_frame.stack_base);
+                        self.stack.push(val);
                     } else {
-                        ip = target;
+                        return Ok(val);
                     }
                 }
-
-                _ => return Err(VmError::InvalidInstruction(op)),
+                Err(e) => {
+                    match self.handle_error(e) {
+                        Ok(None) => continue, // Handler found, continue
+                        Ok(Some(val)) => return Ok(val),
+                        Err(e) => return Err(e), // No handler, propagate
+                    }
+                }
             }
         }
+    }
 
-        // Return the top of stack or nil
-        Ok(self.stack.pop().unwrap_or(VmValue::Nil))
+    /// Execute a single opcode. Returns:
+    /// - Ok(None): continue execution
+    /// - Ok(Some(val)): return this value (top-level exit)
+    /// - Err(e): error occurred
+    fn execute_op(&mut self, op: u8) -> Result<Option<VmValue>, VmError> {
+        // We need to borrow frame fields, but we also need &mut self for other ops.
+        // Strategy: read what we need from the frame first, then do the work.
+
+        if op == Op::Constant as u8 {
+            let frame = self.frames.last_mut().unwrap();
+            let idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            let val = match &frame.chunk.constants[idx] {
+                Constant::Int(n) => VmValue::Int(*n),
+                Constant::Float(n) => VmValue::Float(*n),
+                Constant::String(s) => VmValue::String(s.clone()),
+                Constant::Bool(b) => VmValue::Bool(*b),
+                Constant::Nil => VmValue::Nil,
+            };
+            self.stack.push(val);
+        } else if op == Op::Nil as u8 {
+            self.stack.push(VmValue::Nil);
+        } else if op == Op::True as u8 {
+            self.stack.push(VmValue::Bool(true));
+        } else if op == Op::False as u8 {
+            self.stack.push(VmValue::Bool(false));
+        } else if op == Op::GetVar as u8 {
+            let frame = self.frames.last_mut().unwrap();
+            let idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            let name = match &frame.chunk.constants[idx] {
+                Constant::String(s) => s.clone(),
+                _ => return Err(VmError::TypeError("expected string constant".into())),
+            };
+            let val = self.env.get(&name).unwrap_or(VmValue::Nil);
+            self.stack.push(val);
+        } else if op == Op::DefLet as u8 {
+            let frame = self.frames.last_mut().unwrap();
+            let idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            let name = Self::const_string(&frame.chunk.constants[idx])?;
+            let val = self.pop()?;
+            self.env.define(&name, val, false);
+        } else if op == Op::DefVar as u8 {
+            let frame = self.frames.last_mut().unwrap();
+            let idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            let name = Self::const_string(&frame.chunk.constants[idx])?;
+            let val = self.pop()?;
+            self.env.define(&name, val, true);
+        } else if op == Op::SetVar as u8 {
+            let frame = self.frames.last_mut().unwrap();
+            let idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            let name = Self::const_string(&frame.chunk.constants[idx])?;
+            let val = self.pop()?;
+            self.env.assign(&name, val)?;
+        } else if op == Op::Add as u8 {
+            let b = self.pop()?;
+            let a = self.pop()?;
+            self.stack.push(self.add(a, b));
+        } else if op == Op::Sub as u8 {
+            let b = self.pop()?;
+            let a = self.pop()?;
+            self.stack.push(self.sub(a, b));
+        } else if op == Op::Mul as u8 {
+            let b = self.pop()?;
+            let a = self.pop()?;
+            self.stack.push(self.mul(a, b));
+        } else if op == Op::Div as u8 {
+            let b = self.pop()?;
+            let a = self.pop()?;
+            self.stack.push(self.div(a, b));
+        } else if op == Op::Negate as u8 {
+            let v = self.pop()?;
+            self.stack.push(match v {
+                VmValue::Int(n) => VmValue::Int(-n),
+                VmValue::Float(n) => VmValue::Float(-n),
+                _ => VmValue::Nil,
+            });
+        } else if op == Op::Equal as u8 {
+            let b = self.pop()?;
+            let a = self.pop()?;
+            self.stack.push(VmValue::Bool(values_equal(&a, &b)));
+        } else if op == Op::NotEqual as u8 {
+            let b = self.pop()?;
+            let a = self.pop()?;
+            self.stack.push(VmValue::Bool(!values_equal(&a, &b)));
+        } else if op == Op::Less as u8 {
+            let b = self.pop()?;
+            let a = self.pop()?;
+            self.stack.push(VmValue::Bool(compare_values(&a, &b) < 0));
+        } else if op == Op::Greater as u8 {
+            let b = self.pop()?;
+            let a = self.pop()?;
+            self.stack.push(VmValue::Bool(compare_values(&a, &b) > 0));
+        } else if op == Op::LessEqual as u8 {
+            let b = self.pop()?;
+            let a = self.pop()?;
+            self.stack.push(VmValue::Bool(compare_values(&a, &b) <= 0));
+        } else if op == Op::GreaterEqual as u8 {
+            let b = self.pop()?;
+            let a = self.pop()?;
+            self.stack.push(VmValue::Bool(compare_values(&a, &b) >= 0));
+        } else if op == Op::Not as u8 {
+            let v = self.pop()?;
+            self.stack.push(VmValue::Bool(!v.is_truthy()));
+        } else if op == Op::Jump as u8 {
+            let frame = self.frames.last_mut().unwrap();
+            let target = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip = target;
+        } else if op == Op::JumpIfFalse as u8 {
+            let frame = self.frames.last_mut().unwrap();
+            let target = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            let val = self.peek()?;
+            if !val.is_truthy() {
+                let frame = self.frames.last_mut().unwrap();
+                frame.ip = target;
+            }
+        } else if op == Op::JumpIfTrue as u8 {
+            let frame = self.frames.last_mut().unwrap();
+            let target = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            let val = self.peek()?;
+            if val.is_truthy() {
+                let frame = self.frames.last_mut().unwrap();
+                frame.ip = target;
+            }
+        } else if op == Op::Pop as u8 {
+            self.pop()?;
+        } else if op == Op::Call as u8 {
+            let frame = self.frames.last_mut().unwrap();
+            let argc = frame.chunk.code[frame.ip] as usize;
+            frame.ip += 1;
+            // Clone the functions list so we don't borrow frame across call
+            let functions = frame.chunk.functions.clone();
+
+            // Arguments are on stack above the function name/value
+            let args: Vec<VmValue> = self.stack.split_off(self.stack.len().saturating_sub(argc));
+            let callee = self.pop()?;
+
+            match callee {
+                VmValue::String(name) => {
+                    // Check closures in env
+                    if let Some(VmValue::Closure(closure)) = self.env.get(&name) {
+                        self.push_closure_frame(&closure, &args, &functions)?;
+                        // Don't push result - frame will handle it on return
+                    } else if let Some(builtin) = self.builtins.get(&name) {
+                        let result = builtin(&args, &mut self.output)?;
+                        self.stack.push(result);
+                    } else {
+                        return Err(VmError::UndefinedBuiltin(name));
+                    }
+                }
+                VmValue::Closure(closure) => {
+                    self.push_closure_frame(&closure, &args, &functions)?;
+                }
+                _ => {
+                    return Err(VmError::TypeError(format!(
+                        "Cannot call {}",
+                        callee.display()
+                    )));
+                }
+            }
+        } else if op == Op::Return as u8 {
+            let val = self.pop().unwrap_or(VmValue::Nil);
+            return Err(VmError::Return(val));
+        } else if op == Op::Closure as u8 {
+            let frame = self.frames.last_mut().unwrap();
+            let fn_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            let func = frame.chunk.functions[fn_idx].clone();
+            let closure = VmClosure {
+                func,
+                env: self.env.clone(),
+            };
+            self.stack.push(VmValue::Closure(closure));
+        } else if op == Op::BuildList as u8 {
+            let frame = self.frames.last_mut().unwrap();
+            let count = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            let items = self.stack.split_off(self.stack.len().saturating_sub(count));
+            self.stack.push(VmValue::List(items));
+        } else if op == Op::BuildDict as u8 {
+            let frame = self.frames.last_mut().unwrap();
+            let count = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            let pairs = self
+                .stack
+                .split_off(self.stack.len().saturating_sub(count * 2));
+            let mut map = BTreeMap::new();
+            for pair in pairs.chunks(2) {
+                if pair.len() == 2 {
+                    let key = pair[0].display();
+                    map.insert(key, pair[1].clone());
+                }
+            }
+            self.stack.push(VmValue::Dict(map));
+        } else if op == Op::Subscript as u8 {
+            let idx = self.pop()?;
+            let obj = self.pop()?;
+            let result = match (&obj, &idx) {
+                (VmValue::List(items), VmValue::Int(i)) if *i >= 0 => {
+                    items.get(*i as usize).cloned().unwrap_or(VmValue::Nil)
+                }
+                (VmValue::Dict(map), _) => map.get(&idx.display()).cloned().unwrap_or(VmValue::Nil),
+                _ => VmValue::Nil,
+            };
+            self.stack.push(result);
+        } else if op == Op::GetProperty as u8 {
+            let frame = self.frames.last_mut().unwrap();
+            let idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            let name = Self::const_string(&frame.chunk.constants[idx])?;
+            let obj = self.pop()?;
+            let result = match &obj {
+                VmValue::Dict(map) => map.get(&name).cloned().unwrap_or(VmValue::Nil),
+                VmValue::List(items) => match name.as_str() {
+                    "count" => VmValue::Int(items.len() as i64),
+                    "empty" => VmValue::Bool(items.is_empty()),
+                    "first" => items.first().cloned().unwrap_or(VmValue::Nil),
+                    "last" => items.last().cloned().unwrap_or(VmValue::Nil),
+                    _ => VmValue::Nil,
+                },
+                VmValue::String(s) => match name.as_str() {
+                    "count" => VmValue::Int(s.chars().count() as i64),
+                    "empty" => VmValue::Bool(s.is_empty()),
+                    _ => VmValue::Nil,
+                },
+                _ => VmValue::Nil,
+            };
+            self.stack.push(result);
+        } else if op == Op::MethodCall as u8 {
+            let frame = self.frames.last_mut().unwrap();
+            let name_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            let argc = frame.chunk.code[frame.ip] as usize;
+            frame.ip += 1;
+            let method = Self::const_string(&frame.chunk.constants[name_idx])?;
+            let functions = frame.chunk.functions.clone();
+            let args: Vec<VmValue> = self.stack.split_off(self.stack.len().saturating_sub(argc));
+            let obj = self.pop()?;
+            let result = self.call_method(obj, &method, &args, &functions)?;
+            self.stack.push(result);
+        } else if op == Op::Concat as u8 {
+            let frame = self.frames.last_mut().unwrap();
+            let count = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            let parts = self.stack.split_off(self.stack.len().saturating_sub(count));
+            let result: String = parts.iter().map(|p| p.display()).collect();
+            self.stack.push(VmValue::String(result));
+        } else if op == Op::Pipe as u8 {
+            let callable = self.pop()?;
+            let value = self.pop()?;
+            let functions = self.frames.last().unwrap().chunk.functions.clone();
+            match callable {
+                VmValue::Closure(closure) => {
+                    self.push_closure_frame(&closure, &[value], &functions)?;
+                }
+                VmValue::String(name) => {
+                    if let Some(VmValue::Closure(closure)) = self.env.get(&name) {
+                        self.push_closure_frame(&closure, &[value], &functions)?;
+                    } else if let Some(builtin) = self.builtins.get(&name) {
+                        let result = builtin(&[value], &mut self.output)?;
+                        self.stack.push(result);
+                    } else {
+                        self.stack.push(VmValue::Nil);
+                    }
+                }
+                _ => self.stack.push(VmValue::Nil),
+            }
+        } else if op == Op::Dup as u8 {
+            let val = self.peek()?.clone();
+            self.stack.push(val);
+        } else if op == Op::Swap as u8 {
+            let len = self.stack.len();
+            if len >= 2 {
+                self.stack.swap(len - 1, len - 2);
+            }
+        } else if op == Op::IterInit as u8 {
+            let iterable = self.pop()?;
+            let items = match iterable {
+                VmValue::List(items) => items,
+                VmValue::Dict(map) => map
+                    .into_iter()
+                    .map(|(k, v)| {
+                        VmValue::Dict(BTreeMap::from([
+                            ("key".to_string(), VmValue::String(k)),
+                            ("value".to_string(), v),
+                        ]))
+                    })
+                    .collect(),
+                _ => Vec::new(),
+            };
+            self.iterators.push((items, 0));
+        } else if op == Op::IterNext as u8 {
+            let frame = self.frames.last_mut().unwrap();
+            let target = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            if let Some((items, idx)) = self.iterators.last_mut() {
+                if *idx < items.len() {
+                    let item = items[*idx].clone();
+                    *idx += 1;
+                    self.stack.push(item);
+                } else {
+                    self.iterators.pop();
+                    let frame = self.frames.last_mut().unwrap();
+                    frame.ip = target;
+                }
+            } else {
+                let frame = self.frames.last_mut().unwrap();
+                frame.ip = target;
+            }
+        } else if op == Op::Throw as u8 {
+            let val = self.pop()?;
+            return Err(VmError::Thrown(val));
+        } else if op == Op::TryCatchSetup as u8 {
+            let frame = self.frames.last_mut().unwrap();
+            let catch_offset = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            self.exception_handlers.push(ExceptionHandler {
+                catch_ip: catch_offset,
+                stack_depth: self.stack.len(),
+                frame_depth: self.frames.len(),
+            });
+        } else if op == Op::PopHandler as u8 {
+            self.exception_handlers.pop();
+        } else {
+            return Err(VmError::InvalidInstruction(op));
+        }
+
+        Ok(None)
+    }
+
+    /// Push a new call frame for a closure invocation.
+    fn push_closure_frame(
+        &mut self,
+        closure: &VmClosure,
+        args: &[VmValue],
+        _parent_functions: &[CompiledFunction],
+    ) -> Result<(), VmError> {
+        let saved_env = self.env.clone();
+
+        // Start with the closure's captured env, but also include
+        // the caller's definitions (for recursion and outer scope access).
+        let mut call_env = closure.env.clone();
+        for scope in &saved_env.scopes {
+            for (name, (val, mutable)) in &scope.vars {
+                if call_env.get(name).is_none() {
+                    call_env.define(name, val.clone(), *mutable);
+                }
+            }
+        }
+        call_env.push_scope();
+
+        for (i, param) in closure.func.params.iter().enumerate() {
+            let val = args.get(i).cloned().unwrap_or(VmValue::Nil);
+            call_env.define(param, val, false);
+        }
+
+        self.env = call_env;
+
+        self.frames.push(CallFrame {
+            chunk: closure.func.chunk.clone(),
+            ip: 0,
+            stack_base: self.stack.len(),
+            saved_env,
+        });
+
+        Ok(())
     }
 
     fn pop(&mut self) -> Result<VmValue, VmError> {
@@ -647,23 +766,21 @@ impl Vm {
         }
     }
 
-    fn call_closure(
+    /// Call a closure synchronously (used by method calls like .map/.filter etc.)
+    /// This still uses recursive execution for simplicity in method dispatch.
+    fn call_closure_sync(
         &mut self,
         closure: &VmClosure,
         args: &[VmValue],
         _parent_functions: &[CompiledFunction],
     ) -> Result<VmValue, VmError> {
         let saved_env = self.env.clone();
+        let saved_frames = std::mem::take(&mut self.frames);
+        let saved_handlers = std::mem::take(&mut self.exception_handlers);
 
-        // Start with the closure's captured env, but also include
-        // the caller's definitions (for recursion and outer scope access).
         let mut call_env = closure.env.clone();
-        // Copy caller's variables into the base scope so recursive calls work.
-        // This is needed because fn definitions capture the env before themselves
-        // are defined — the calling env has the definition.
         for scope in &saved_env.scopes {
             for (name, (val, mutable)) in &scope.vars {
-                // Don't overwrite params or captured vars
                 if call_env.get(name).is_none() {
                     call_env.define(name, val.clone(), *mutable);
                 }
@@ -678,13 +795,12 @@ impl Vm {
 
         self.env = call_env;
         let result = self.run_chunk(&closure.func.chunk);
-        self.env = saved_env;
 
-        match result {
-            Ok(val) => Ok(val),
-            Err(VmError::Return(val)) => Ok(val),
-            Err(e) => Err(e),
-        }
+        self.env = saved_env;
+        self.frames = saved_frames;
+        self.exception_handlers = saved_handlers;
+
+        result
     }
 
     fn call_method(
@@ -740,7 +856,11 @@ impl Vm {
                     if let Some(VmValue::Closure(closure)) = args.first() {
                         let mut results = Vec::new();
                         for item in items {
-                            results.push(self.call_closure(closure, &[item.clone()], functions)?);
+                            results.push(self.call_closure_sync(
+                                closure,
+                                &[item.clone()],
+                                functions,
+                            )?);
                         }
                         Ok(VmValue::List(results))
                     } else {
@@ -751,7 +871,8 @@ impl Vm {
                     if let Some(VmValue::Closure(closure)) = args.first() {
                         let mut results = Vec::new();
                         for item in items {
-                            let result = self.call_closure(closure, &[item.clone()], functions)?;
+                            let result =
+                                self.call_closure_sync(closure, &[item.clone()], functions)?;
                             if result.is_truthy() {
                                 results.push(item.clone());
                             }
@@ -766,8 +887,11 @@ impl Vm {
                         if let VmValue::Closure(closure) = &args[1] {
                             let mut acc = args[0].clone();
                             for item in items {
-                                acc =
-                                    self.call_closure(closure, &[acc, item.clone()], functions)?;
+                                acc = self.call_closure_sync(
+                                    closure,
+                                    &[acc, item.clone()],
+                                    functions,
+                                )?;
                             }
                             return Ok(acc);
                         }
@@ -777,7 +901,8 @@ impl Vm {
                 "find" => {
                     if let Some(VmValue::Closure(closure)) = args.first() {
                         for item in items {
-                            let result = self.call_closure(closure, &[item.clone()], functions)?;
+                            let result =
+                                self.call_closure_sync(closure, &[item.clone()], functions)?;
                             if result.is_truthy() {
                                 return Ok(item.clone());
                             }
@@ -788,7 +913,8 @@ impl Vm {
                 "any" => {
                     if let Some(VmValue::Closure(closure)) = args.first() {
                         for item in items {
-                            let result = self.call_closure(closure, &[item.clone()], functions)?;
+                            let result =
+                                self.call_closure_sync(closure, &[item.clone()], functions)?;
                             if result.is_truthy() {
                                 return Ok(VmValue::Bool(true));
                             }
@@ -801,7 +927,8 @@ impl Vm {
                 "all" => {
                     if let Some(VmValue::Closure(closure)) = args.first() {
                         for item in items {
-                            let result = self.call_closure(closure, &[item.clone()], functions)?;
+                            let result =
+                                self.call_closure_sync(closure, &[item.clone()], functions)?;
                             if !result.is_truthy() {
                                 return Ok(VmValue::Bool(false));
                             }
@@ -815,7 +942,8 @@ impl Vm {
                     if let Some(VmValue::Closure(closure)) = args.first() {
                         let mut results = Vec::new();
                         for item in items {
-                            let result = self.call_closure(closure, &[item.clone()], functions)?;
+                            let result =
+                                self.call_closure_sync(closure, &[item.clone()], functions)?;
                             if let VmValue::List(inner) = result {
                                 results.extend(inner);
                             } else {
@@ -997,6 +1125,19 @@ mod tests {
 
     fn run_output(source: &str) -> String {
         run_harn(source).0.trim_end().to_string()
+    }
+
+    fn run_harn_result(source: &str) -> Result<(String, VmValue), VmError> {
+        let mut lexer = Lexer::new(source);
+        let tokens = lexer.tokenize().unwrap();
+        let mut parser = Parser::new(tokens);
+        let program = parser.parse().unwrap();
+        let chunk = Compiler::new().compile(&program).unwrap();
+
+        let mut vm = Vm::new();
+        register_vm_stdlib(&mut vm);
+        let result = vm.execute(&chunk)?;
+        Ok((vm.output().to_string(), result))
     }
 
     #[test]
@@ -1242,5 +1383,55 @@ log(r) }"#,
         assert!(disasm.contains("CONSTANT"));
         assert!(disasm.contains("ADD"));
         assert!(disasm.contains("CALL"));
+    }
+
+    // --- Error handling tests ---
+
+    #[test]
+    fn test_try_catch_basic() {
+        let out = run_output(
+            r#"pipeline t(task) { try { throw "oops" } catch(e) { log("caught: " + e) } }"#,
+        );
+        assert_eq!(out, "[harn] caught: oops");
+    }
+
+    #[test]
+    fn test_try_no_error() {
+        let out = run_output(
+            r#"pipeline t(task) {
+var result = 0
+try { result = 42 } catch(e) { result = 0 }
+log(result)
+}"#,
+        );
+        assert_eq!(out, "[harn] 42");
+    }
+
+    #[test]
+    fn test_throw_uncaught() {
+        let result = run_harn_result(r#"pipeline t(task) { throw "boom" }"#);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_try_catch_nested() {
+        let out = run_output(
+            r#"pipeline t(task) {
+try {
+    try {
+        throw "inner"
+    } catch(e) {
+        log("inner caught: " + e)
+        throw "outer"
+    }
+} catch(e) {
+    log("outer caught: " + e)
+}
+}"#,
+        );
+        assert_eq!(
+            out,
+            "[harn] inner caught: inner\n[harn] outer caught: outer"
+        );
     }
 }

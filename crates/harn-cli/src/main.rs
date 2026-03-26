@@ -2,7 +2,9 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::{env, fs, process};
 
+use harn_fmt::format_source;
 use harn_lexer::Lexer;
+use harn_lint::{lint, LintSeverity};
 use harn_parser::{DiagnosticSeverity, Parser, TypeChecker};
 use harn_runtime::{HarnError, Interpreter};
 use harn_stdlib::{register_async_builtins, register_llm_builtins, register_stdlib};
@@ -15,6 +17,8 @@ async fn main() {
         eprintln!("Usage: harn <command> [args]");
         eprintln!("Commands:");
         eprintln!("  run <file.harn>        Execute a Harn file");
+        eprintln!("  lint <file.harn>       Lint a Harn file");
+        eprintln!("  fmt <file.harn>        Format a Harn file");
         eprintln!("  test <directory>       Run conformance test suite");
         eprintln!("  repl                   Interactive REPL");
         process::exit(1);
@@ -40,6 +44,26 @@ async fn main() {
             }
             run_file(&args[2]).await;
         }
+        "lint" => {
+            if args.len() < 3 {
+                eprintln!("Usage: harn lint <file.harn>");
+                process::exit(1);
+            }
+            lint_file(&args[2]);
+        }
+        "fmt" => {
+            if args.len() < 3 {
+                eprintln!("Usage: harn fmt <file.harn> [--check]");
+                process::exit(1);
+            }
+            let check_mode = args.iter().any(|a| a == "--check");
+            let file = args
+                .iter()
+                .skip(2)
+                .find(|a| a.ends_with(".harn"))
+                .unwrap_or(&args[2]);
+            fmt_file(file, check_mode);
+        }
         "test" => {
             let dir = if args.len() >= 3 {
                 &args[2]
@@ -60,6 +84,99 @@ async fn main() {
     }
 }
 
+fn lint_file(path: &str) {
+    let source = match fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error reading {path}: {e}");
+            process::exit(1);
+        }
+    };
+
+    let mut lexer = Lexer::new(&source);
+    let tokens = match lexer.tokenize() {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("{path}: lex error: {e}");
+            process::exit(1);
+        }
+    };
+
+    let mut parser = Parser::new(tokens);
+    let program = match parser.parse() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("{path}: parse error: {e}");
+            process::exit(1);
+        }
+    };
+
+    let diagnostics = lint(&program);
+
+    if diagnostics.is_empty() {
+        println!("{path}: no issues found");
+        return;
+    }
+
+    let mut has_error = false;
+    for diag in &diagnostics {
+        let severity = match diag.severity {
+            LintSeverity::Warning => "warning",
+            LintSeverity::Error => {
+                has_error = true;
+                "error"
+            }
+        };
+        println!(
+            "{path}:{}:{}: {severity}[{}]: {}",
+            diag.span.line, diag.span.column, diag.rule, diag.message
+        );
+        if let Some(ref suggestion) = diag.suggestion {
+            println!("  suggestion: {suggestion}");
+        }
+    }
+
+    if has_error {
+        process::exit(1);
+    }
+}
+
+fn fmt_file(path: &str, check_mode: bool) {
+    let source = match fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error reading {path}: {e}");
+            process::exit(1);
+        }
+    };
+
+    let formatted = match format_source(&source) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("{path}: {e}");
+            process::exit(1);
+        }
+    };
+
+    if check_mode {
+        if source != formatted {
+            eprintln!("{path}: would be reformatted");
+            process::exit(1);
+        }
+        println!("{path}: ok");
+    } else if source != formatted {
+        match fs::write(path, &formatted) {
+            Ok(()) => println!("formatted {path}"),
+            Err(e) => {
+                eprintln!("Error writing {path}: {e}");
+                process::exit(1);
+            }
+        }
+    } else {
+        println!("{path}: already formatted");
+    }
+}
+
 async fn run_file(path: &str) {
     let source = match fs::read_to_string(path) {
         Ok(s) => s,
@@ -74,9 +191,44 @@ async fn run_file(path: &str) {
             io::stdout().write_all(&output).ok();
         }
         Err(e) => {
-            eprintln!("{e}");
+            render_error(&e, &source, path);
             process::exit(1);
         }
+    }
+}
+
+fn render_error(err: &HarnError, source: &str, filename: &str) {
+    if let Some(span) = err.span() {
+        // Build label and help from the error details
+        let (label, help) = match err {
+            HarnError::Runtime(harn_runtime::RuntimeError::UndefinedVariable {
+                suggestion,
+                ..
+            }) => (
+                Some("not found in this scope"),
+                suggestion.as_ref().map(|s| format!("did you mean `{s}`?")),
+            ),
+            HarnError::Runtime(harn_runtime::RuntimeError::ImmutableAssignment { .. }) => {
+                (Some("cannot assign to immutable binding"), None)
+            }
+            HarnError::Runtime(harn_runtime::RuntimeError::UndefinedBuiltin { .. }) => {
+                (Some("not found"), None)
+            }
+            _ => (None, None),
+        };
+
+        let diagnostic = harn_parser::diagnostic::render_diagnostic(
+            source,
+            filename,
+            span,
+            "error",
+            &err.to_string(),
+            label,
+            help.as_deref(),
+        );
+        eprint!("{diagnostic}");
+    } else {
+        eprintln!("{err}");
     }
 }
 

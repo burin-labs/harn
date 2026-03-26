@@ -1,13 +1,10 @@
 pipeline default(task) {
-  // 1. Nested closures with capture
   fn make_adder(n) {
     return { x -> x + n }
   }
   let add5 = make_adder(5)
   let add10 = make_adder(10)
   log("Closures: ${add5(3)} ${add10(3)}")
-
-  // 2. Higher-order: compose two functions
   fn compose(f, g) {
     return { x -> f(g(x)) }
   }
@@ -15,14 +12,7 @@ pipeline default(task) {
   let inc = { x -> x + 1 }
   let double_then_inc = compose(inc, double)
   log("Compose: ${double_then_inc(5)}")
-
-  // 3. Complex data pipeline
-  let people = [
-    {name: "Alice", scores: [90, 85, 92]},
-    {name: "Bob", scores: [70, 75, 80]},
-    {name: "Charlie", scores: [95, 98, 100]}
-  ]
-
+  let people = [{name: "Alice", scores: [90, 85, 92]}, {name: "Bob", scores: [70, 75, 80]}, {name: "Charlie", scores: [95, 98, 100]}]
   let summaries = people.map({ p ->
     let total = p.scores.reduce(0, { acc, s -> acc + s })
     {name: p.name, total: total, avg: total / p.scores.count}
@@ -30,8 +20,6 @@ pipeline default(task) {
   for s in summaries {
     log("${s.name}: total=${s.total}, avg=${s.avg}")
   }
-
-  // 4. Nested try/catch
   try {
     try {
       throw {code: 42, msg: "inner error"}
@@ -42,8 +30,6 @@ pipeline default(task) {
   } catch (e) {
     log("Caught outer: ${e}")
   }
-
-  // 5. While + early return from fn
   fn find_first_over(list, threshold) {
     var i = 0
     while i < list.count {
@@ -56,32 +42,21 @@ pipeline default(task) {
   }
   log("First > 50: ${find_first_over([10, 20, 60, 30], 50)}")
   log("First > 100: ${find_first_over([10, 20, 60, 30], 100)}")
-
-  // 6. Dict iteration + merge + filter
   let config = {debug: true, verbose: false, level: 3}
   let overrides = {verbose: true, timeout: 30}
   let merged = config.merge(overrides)
   log("Merged keys: ${merged.keys()}")
   log("Verbose: ${merged.verbose}")
-
-  // 7. Flat map
   let nested = [[1, 2], [3], [4, 5, 6]]
   let flat = nested.flat_map({ x -> x })
   log("Flat: ${flat}")
-
-  // 8. Mixed int/float in complex expr
-  let result = (3 + 1.5) * 2 - 0.5
+  let result = 3 + 1.5 * 2 - 0.5
   log("Mixed: ${result}")
-
-  // 9. Nil coalescing chain
   let a = nil
   let b = nil
   let c = "found"
   log("Coalesce: ${a ?? b ?? c}")
-
-  // 10. String method chaining via pipe
   let processed = "  Hello, World!  " |> { s -> s.trim() } |> { s -> s.lowercase() } |> { s -> s.replace("world", "harn") }
   log("Processed: ${processed}")
-
   log("All stress tests passed!")
 }

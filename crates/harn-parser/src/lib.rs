@@ -1,4 +1,5 @@
 mod ast;
+pub mod diagnostic;
 mod parser;
 pub mod typechecker;
 

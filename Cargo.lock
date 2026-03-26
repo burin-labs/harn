@@ -337,7 +337,9 @@ dependencies = [
 name = "harn-cli"
 version = "0.1.0"
 dependencies = [
+ "harn-fmt",
  "harn-lexer",
+ "harn-lint",
  "harn-parser",
  "harn-runtime",
  "harn-stdlib",
@@ -356,8 +358,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "harn-fmt"
+version = "0.1.0"
+dependencies = [
+ "harn-lexer",
+ "harn-parser",
+]
+
+[[package]]
 name = "harn-lexer"
 version = "0.1.0"
+
+[[package]]
+name = "harn-lint"
+version = "0.1.0"
+dependencies = [
+ "harn-lexer",
+ "harn-parser",
+]
 
 [[package]]
 name = "harn-lsp"

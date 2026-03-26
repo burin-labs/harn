@@ -88,6 +88,14 @@ pub enum Op {
     /// Pipe: pops [value, callable], invokes callable(value).
     Pipe,
 
+    // --- Error handling ---
+    /// Pop value, raise as error.
+    Throw,
+    /// Push exception handler. arg: u16 = offset to catch handler.
+    TryCatchSetup,
+    /// Remove top exception handler (end of try body).
+    PopHandler,
+
     // --- Misc ---
     /// Duplicate top of stack.
     Dup,
@@ -351,6 +359,13 @@ impl Chunk {
                     ip += 2;
                     out.push_str(&format!("CONCAT {:>4}\n", count));
                 }
+                x if x == Op::Throw as u8 => out.push_str("THROW\n"),
+                x if x == Op::TryCatchSetup as u8 => {
+                    let target = self.read_u16(ip);
+                    ip += 2;
+                    out.push_str(&format!("TRY_CATCH_SETUP {:>4}\n", target));
+                }
+                x if x == Op::PopHandler as u8 => out.push_str("POP_HANDLER\n"),
                 x if x == Op::Pipe as u8 => out.push_str("PIPE\n"),
                 x if x == Op::Dup as u8 => out.push_str("DUP\n"),
                 x if x == Op::Swap as u8 => out.push_str("SWAP\n"),

@@ -274,7 +274,9 @@ impl Interpreter {
             Node::Assignment { target, value } => {
                 let val = self.eval(value).await?;
                 if let Node::Identifier(name) = &target.node {
-                    self.env.assign(name, val)?;
+                    self.env
+                        .assign(name, val)
+                        .map_err(|e| e.with_span(target.span))?;
                 }
                 Ok(Value::Nil)
             }
@@ -325,7 +327,9 @@ impl Interpreter {
                 Err(RuntimeError::ReturnValue(val))
             }
 
-            Node::FunctionCall { name, args } => self.eval_function_call(name, args).await,
+            Node::FunctionCall { name, args } => {
+                self.eval_function_call(name, args, &node.span).await
+            }
 
             Node::MethodCall {
                 object,
@@ -384,7 +388,10 @@ impl Interpreter {
 
             Node::ThrowStmt { value } => {
                 let val = self.eval(value).await?;
-                Err(RuntimeError::ThrownError(val))
+                Err(RuntimeError::ThrownError {
+                    value: val,
+                    span: Some(node.span),
+                })
             }
 
             Node::InterpolatedString(segments) => self.eval_interpolated_string(segments).await,
@@ -569,7 +576,10 @@ impl Interpreter {
                 if let Some(builtin) = self.async_builtins.get("llm_call").cloned() {
                     return builtin(args).await;
                 }
-                Err(RuntimeError::UndefinedBuiltin("llm_call".to_string()))
+                Err(RuntimeError::UndefinedBuiltin {
+                    name: "llm_call".to_string(),
+                    span: Some(node.span),
+                })
             }
 
             Node::DeadlineBlock { duration, body } => {
@@ -713,7 +723,7 @@ impl Interpreter {
             Err(RuntimeError::ReturnValue(val)) => Err(RuntimeError::ReturnValue(val)),
             Err(err) => {
                 let error_value = match &err {
-                    RuntimeError::ThrownError(v) => v.clone(),
+                    RuntimeError::ThrownError { value: v, .. } => v.clone(),
                     other => Value::String(other.to_string()),
                 };
 
@@ -915,6 +925,7 @@ impl Interpreter {
         &mut self,
         name: &str,
         args: &[SNode],
+        call_span: &harn_lexer::Span,
     ) -> Result<Value, RuntimeError> {
         // Check for user-defined function (closure) first
         if let Some(Value::Closure {
@@ -983,7 +994,10 @@ impl Interpreter {
             return builtin(arg_values).await;
         }
 
-        Err(RuntimeError::UndefinedBuiltin(name.to_string()))
+        Err(RuntimeError::UndefinedBuiltin {
+            name: name.to_string(),
+            span: Some(*call_span),
+        })
     }
 
     async fn eval_args(&mut self, args: &[SNode]) -> Result<Vec<Value>, RuntimeError> {
@@ -1506,6 +1520,7 @@ fn require_closure(args: &[Value]) -> Result<(&[String], &[SNode], &Environment)
         _ => Err(RuntimeError::TypeMismatch {
             expected: "closure".to_string(),
             got: args.first().cloned().unwrap_or(Value::Nil),
+            span: None,
         }),
     }
 }

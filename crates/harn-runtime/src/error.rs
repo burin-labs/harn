@@ -10,19 +10,36 @@ use std::fmt;
 #[derive(Debug, Clone)]
 pub enum RuntimeError {
     /// Variable not found in any scope.
-    UndefinedVariable(String),
+    UndefinedVariable {
+        name: String,
+        span: Option<harn_lexer::Span>,
+        suggestion: Option<String>,
+    },
     /// No registered builtin or user function with this name.
-    UndefinedBuiltin(String),
+    UndefinedBuiltin {
+        name: String,
+        span: Option<harn_lexer::Span>,
+    },
     /// Attempted assignment to a `let` binding.
-    ImmutableAssignment(String),
+    ImmutableAssignment {
+        name: String,
+        span: Option<harn_lexer::Span>,
+    },
     /// Type assertion failed (e.g., calling a non-closure as a function).
-    TypeMismatch { expected: String, got: Value },
+    TypeMismatch {
+        expected: String,
+        got: Value,
+        span: Option<harn_lexer::Span>,
+    },
     /// Internal: used to implement `return` (not a user-facing error).
     ReturnValue(Option<Value>),
     /// All retry attempts failed.
     RetryExhausted,
     /// User-thrown error via `throw`.
-    ThrownError(Value),
+    ThrownError {
+        value: Value,
+        span: Option<harn_lexer::Span>,
+    },
     /// Import failed.
     ImportError { path: String, reason: String },
     /// Yield: pipeline paused, waiting for host to resume with a value.
@@ -32,7 +49,10 @@ pub enum RuntimeError {
 impl RuntimeError {
     /// Create a thrown error from a string message.
     pub fn thrown(msg: impl Into<String>) -> Self {
-        RuntimeError::ThrownError(Value::String(msg.into()))
+        RuntimeError::ThrownError {
+            value: Value::String(msg.into()),
+            span: None,
+        }
     }
 
     /// Returns true if this is an internal control-flow error (not user-facing).
@@ -43,37 +63,72 @@ impl RuntimeError {
     /// Get a short error category label for display.
     pub fn kind(&self) -> &'static str {
         match self {
-            RuntimeError::UndefinedVariable(_) => "NameError",
-            RuntimeError::UndefinedBuiltin(_) => "NameError",
-            RuntimeError::ImmutableAssignment(_) => "AssignmentError",
+            RuntimeError::UndefinedVariable { .. } => "NameError",
+            RuntimeError::UndefinedBuiltin { .. } => "NameError",
+            RuntimeError::ImmutableAssignment { .. } => "AssignmentError",
             RuntimeError::TypeMismatch { .. } => "TypeError",
             RuntimeError::ReturnValue(_) => "InternalError",
             RuntimeError::RetryExhausted => "RetryError",
-            RuntimeError::ThrownError(_) => "Error",
+            RuntimeError::ThrownError { .. } => "Error",
             RuntimeError::ImportError { .. } => "ImportError",
             RuntimeError::YieldValue(_) => "Yield",
         }
+    }
+
+    /// Get the span associated with this error, if any.
+    pub fn span(&self) -> Option<&harn_lexer::Span> {
+        match self {
+            RuntimeError::UndefinedVariable { span, .. } => span.as_ref(),
+            RuntimeError::UndefinedBuiltin { span, .. } => span.as_ref(),
+            RuntimeError::ImmutableAssignment { span, .. } => span.as_ref(),
+            RuntimeError::TypeMismatch { span, .. } => span.as_ref(),
+            RuntimeError::ThrownError { span, .. } => span.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// Attach a span to this error (builder pattern).
+    pub fn with_span(mut self, s: harn_lexer::Span) -> Self {
+        match &mut self {
+            RuntimeError::UndefinedVariable { span, .. } => *span = Some(s),
+            RuntimeError::UndefinedBuiltin { span, .. } => *span = Some(s),
+            RuntimeError::ImmutableAssignment { span, .. } => *span = Some(s),
+            RuntimeError::TypeMismatch { span, .. } => *span = Some(s),
+            RuntimeError::ThrownError { span, .. } => *span = Some(s),
+            _ => {}
+        }
+        self
+    }
+
+    /// Attach a "did you mean?" suggestion.
+    pub fn with_suggestion(mut self, s: String) -> Self {
+        if let RuntimeError::UndefinedVariable { suggestion, .. } = &mut self {
+            *suggestion = Some(s);
+        }
+        self
     }
 }
 
 impl fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            RuntimeError::UndefinedVariable(name) => {
+            RuntimeError::UndefinedVariable { name, .. } => {
                 write!(f, "Undefined variable: {name}")
             }
-            RuntimeError::UndefinedBuiltin(name) => {
+            RuntimeError::UndefinedBuiltin { name, .. } => {
                 write!(f, "Undefined builtin: {name}")
             }
-            RuntimeError::ImmutableAssignment(name) => {
+            RuntimeError::ImmutableAssignment { name, .. } => {
                 write!(f, "Cannot assign to immutable binding: {name}")
             }
-            RuntimeError::TypeMismatch { expected, got } => {
+            RuntimeError::TypeMismatch { expected, got, .. } => {
                 write!(f, "Type mismatch: expected {expected}, got {got}")
             }
             RuntimeError::ReturnValue(_) => write!(f, "Return from pipeline"),
             RuntimeError::RetryExhausted => write!(f, "All retry attempts exhausted"),
-            RuntimeError::ThrownError(value) => write!(f, "Thrown: {}", value.as_string()),
+            RuntimeError::ThrownError { value, .. } => {
+                write!(f, "Thrown: {}", value.as_string())
+            }
             RuntimeError::ImportError { path, reason } => {
                 write!(f, "Failed to import '{path}': {reason}")
             }
@@ -91,6 +146,16 @@ pub enum HarnError {
     Lexer(harn_lexer::LexerError),
     Parser(harn_parser::ParserError),
     Runtime(RuntimeError),
+}
+
+impl HarnError {
+    /// Get the span associated with this error, if it has one.
+    pub fn span(&self) -> Option<&harn_lexer::Span> {
+        match self {
+            HarnError::Runtime(e) => e.span(),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for HarnError {

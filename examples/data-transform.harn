@@ -1,31 +1,16 @@
 pipeline default(task) {
-  let users = [
-    {name: "Alice", age: 30, role: "engineer"},
-    {name: "Bob", age: 25, role: "designer"},
-    {name: "Charlie", age: 35, role: "engineer"},
-    {name: "Diana", age: 28, role: "manager"}
-  ]
-
-  // Filter engineers
+  let users = [{name: "Alice", age: 30, role: "engineer"}, {name: "Bob", age: 25, role: "designer"}, {name: "Charlie", age: 35, role: "engineer"}, {name: "Diana", age: 28, role: "manager"}]
   let engineers = users.filter({ u -> u.role == "engineer" })
   log("Engineers:")
   for eng in engineers {
     log("  ${eng.name} (age ${eng.age})")
   }
-
-  // Get all names
   let names = users.map({ u -> u.name })
   log("All names: ${names}")
-
-  // Calculate average age
   let total_age = users.reduce(0, { acc, u -> acc + u.age })
   log("Total age: ${total_age}")
-
-  // Check if any user is over 30
   let has_senior = users.any({ u -> u.age > 30 })
   log("Has someone over 30: ${has_senior}")
-
-  // Pipe chain
   let result = users |> { list -> list.filter({ u -> u.age >= 28 }) } |> { list -> list.map({ u -> u.name }) }
   log("28+ names: ${result}")
 }

@@ -8,6 +8,8 @@ members = [
     "crates/harn-lsp",
     "crates/harn-vm",
     "crates/harn-dap",
+    "crates/harn-fmt",
+    "crates/harn-lint",
 ]
 # Build harn-wasm separately: cd crates/harn-wasm && wasm-pack build
 exclude = ["crates/harn-wasm"]

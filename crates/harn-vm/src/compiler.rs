@@ -421,13 +421,7 @@ impl Compiler {
 
             Node::ThrowStmt { value } => {
                 self.compile_node(value)?;
-                // For now, throw is handled by the VM as an error
-                // We use a special constant to signal throw
-                let idx = self
-                    .chunk
-                    .add_constant(Constant::String("__throw__".to_string()));
-                self.chunk.emit_u16(Op::Constant, idx, self.line);
-                self.chunk.emit_u8(Op::Call, 1, self.line);
+                self.chunk.emit(Op::Throw, self.line);
             }
 
             Node::MatchExpr { value, arms } => {
@@ -473,12 +467,111 @@ impl Compiler {
                 self.chunk.emit(Op::Nil, self.line);
             }
 
+            Node::TryCatch {
+                body,
+                error_var,
+                catch_body,
+                ..
+            } => {
+                // 1. Emit TryCatchSetup with placeholder offset to catch handler
+                let catch_jump = self.chunk.emit_jump(Op::TryCatchSetup, self.line);
+
+                // 2. Compile try body
+                if body.is_empty() {
+                    self.chunk.emit(Op::Nil, self.line);
+                } else {
+                    self.compile_block(body)?;
+                    // If last statement doesn't produce a value, push nil
+                    if !Self::produces_value(&body.last().unwrap().node) {
+                        self.chunk.emit(Op::Nil, self.line);
+                    }
+                }
+
+                // 3. Emit PopHandler (successful try body completion)
+                self.chunk.emit(Op::PopHandler, self.line);
+
+                // 4. Emit Jump past catch body
+                let end_jump = self.chunk.emit_jump(Op::Jump, self.line);
+
+                // 5. Patch the catch offset to point here
+                self.chunk.patch_jump(catch_jump);
+
+                // 6. Error value is on the stack from the handler.
+                //    If error_var exists, bind it; otherwise pop the error value.
+                if let Some(var_name) = error_var {
+                    let idx = self.chunk.add_constant(Constant::String(var_name.clone()));
+                    self.chunk.emit_u16(Op::DefLet, idx, self.line);
+                } else {
+                    self.chunk.emit(Op::Pop, self.line);
+                }
+
+                // 7. Compile catch body
+                if catch_body.is_empty() {
+                    self.chunk.emit(Op::Nil, self.line);
+                } else {
+                    self.compile_block(catch_body)?;
+                    if !Self::produces_value(&catch_body.last().unwrap().node) {
+                        self.chunk.emit(Op::Nil, self.line);
+                    }
+                }
+
+                // 8. Patch the end jump
+                self.chunk.patch_jump(end_jump);
+            }
+
+            Node::Retry { count, body } => {
+                // Compile count expression into a mutable counter variable
+                self.compile_node(count)?;
+                let counter_name = "__retry_counter__";
+                let counter_idx = self
+                    .chunk
+                    .add_constant(Constant::String(counter_name.to_string()));
+                self.chunk.emit_u16(Op::DefVar, counter_idx, self.line);
+
+                // Loop start
+                let loop_start = self.chunk.current_offset();
+
+                // Set up try/catch
+                let catch_jump = self.chunk.emit_jump(Op::TryCatchSetup, self.line);
+
+                // Compile body
+                self.compile_block(body)?;
+
+                // Success: pop handler, jump to end
+                self.chunk.emit(Op::PopHandler, self.line);
+                let end_jump = self.chunk.emit_jump(Op::Jump, self.line);
+
+                // Catch handler
+                self.chunk.patch_jump(catch_jump);
+                // Pop the error value (we don't use it)
+                self.chunk.emit(Op::Pop, self.line);
+
+                // Decrement counter
+                self.chunk.emit_u16(Op::GetVar, counter_idx, self.line);
+                let one_idx = self.chunk.add_constant(Constant::Int(1));
+                self.chunk.emit_u16(Op::Constant, one_idx, self.line);
+                self.chunk.emit(Op::Sub, self.line);
+                self.chunk.emit(Op::Dup, self.line);
+                self.chunk.emit_u16(Op::SetVar, counter_idx, self.line);
+
+                // If counter > 0, jump to loop start
+                let zero_idx = self.chunk.add_constant(Constant::Int(0));
+                self.chunk.emit_u16(Op::Constant, zero_idx, self.line);
+                self.chunk.emit(Op::Greater, self.line);
+                let retry_jump = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
+                self.chunk.emit(Op::Pop, self.line); // pop condition
+                self.chunk.emit_u16(Op::Jump, loop_start as u16, self.line);
+
+                // No more retries — push nil
+                self.chunk.patch_jump(retry_jump);
+                self.chunk.emit(Op::Pop, self.line); // pop condition
+                self.chunk.emit(Op::Nil, self.line);
+
+                self.chunk.patch_jump(end_jump);
+            }
+
             // Features that fall back to tree-walker (not compiled)
-            Node::TryCatch { .. }
-            | Node::Retry { .. }
-            | Node::Parallel { .. }
-            | Node::ParallelMap { .. }
-            | Node::SpawnExpr { .. } => {
+            Node::Parallel { .. } | Node::ParallelMap { .. } | Node::SpawnExpr { .. } => {
                 // These are complex control flow that the VM delegates to the tree-walker
                 self.chunk.emit(Op::Nil, self.line);
             }
@@ -495,6 +588,7 @@ impl Compiler {
                 | Node::Assignment { .. }
                 | Node::ReturnStmt { .. }
                 | Node::FnDecl { .. }
+                | Node::ThrowStmt { .. }
         )
     }
 }
