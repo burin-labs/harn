@@ -1,0 +1,1246 @@
+use std::collections::BTreeMap;
+
+use crate::chunk::{Chunk, CompiledFunction, Constant, Op};
+
+/// VM runtime value.
+#[derive(Debug, Clone)]
+pub enum VmValue {
+    Int(i64),
+    Float(f64),
+    String(String),
+    Bool(bool),
+    Nil,
+    List(Vec<VmValue>),
+    Dict(BTreeMap<String, VmValue>),
+    Closure(VmClosure),
+}
+
+/// A compiled closure value.
+#[derive(Debug, Clone)]
+pub struct VmClosure {
+    pub func: CompiledFunction,
+    pub env: VmEnv,
+}
+
+/// VM environment for variable storage.
+#[derive(Debug, Clone)]
+pub struct VmEnv {
+    scopes: Vec<Scope>,
+}
+
+#[derive(Debug, Clone)]
+struct Scope {
+    vars: BTreeMap<String, (VmValue, bool)>, // (value, mutable)
+}
+
+impl VmEnv {
+    fn new() -> Self {
+        Self {
+            scopes: vec![Scope {
+                vars: BTreeMap::new(),
+            }],
+        }
+    }
+
+    fn push_scope(&mut self) {
+        self.scopes.push(Scope {
+            vars: BTreeMap::new(),
+        });
+    }
+
+    #[allow(dead_code)]
+    fn pop_scope(&mut self) {
+        if self.scopes.len() > 1 {
+            self.scopes.pop();
+        }
+    }
+
+    fn get(&self, name: &str) -> Option<VmValue> {
+        for scope in self.scopes.iter().rev() {
+            if let Some((val, _)) = scope.vars.get(name) {
+                return Some(val.clone());
+            }
+        }
+        None
+    }
+
+    fn define(&mut self, name: &str, value: VmValue, mutable: bool) {
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.vars.insert(name.to_string(), (value, mutable));
+        }
+    }
+
+    fn assign(&mut self, name: &str, value: VmValue) -> Result<(), VmError> {
+        for scope in self.scopes.iter_mut().rev() {
+            if let Some((_, mutable)) = scope.vars.get(name) {
+                if !mutable {
+                    return Err(VmError::ImmutableAssignment(name.to_string()));
+                }
+                scope.vars.insert(name.to_string(), (value, true));
+                return Ok(());
+            }
+        }
+        Err(VmError::UndefinedVariable(name.to_string()))
+    }
+}
+
+/// VM runtime errors.
+#[derive(Debug, Clone)]
+pub enum VmError {
+    StackUnderflow,
+    UndefinedVariable(String),
+    UndefinedBuiltin(String),
+    ImmutableAssignment(String),
+    TypeError(String),
+    DivisionByZero,
+    Thrown(VmValue),
+    Return(VmValue),
+    InvalidInstruction(u8),
+}
+
+impl std::fmt::Display for VmError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VmError::StackUnderflow => write!(f, "Stack underflow"),
+            VmError::UndefinedVariable(n) => write!(f, "Undefined variable: {n}"),
+            VmError::UndefinedBuiltin(n) => write!(f, "Undefined builtin: {n}"),
+            VmError::ImmutableAssignment(n) => {
+                write!(f, "Cannot assign to immutable binding: {n}")
+            }
+            VmError::TypeError(msg) => write!(f, "Type error: {msg}"),
+            VmError::DivisionByZero => write!(f, "Division by zero"),
+            VmError::Thrown(v) => write!(f, "Thrown: {}", v.display()),
+            VmError::Return(_) => write!(f, "Return from function"),
+            VmError::InvalidInstruction(op) => write!(f, "Invalid instruction: 0x{op:02x}"),
+        }
+    }
+}
+
+impl std::error::Error for VmError {}
+
+impl VmValue {
+    pub fn is_truthy(&self) -> bool {
+        match self {
+            VmValue::Bool(b) => *b,
+            VmValue::Nil => false,
+            VmValue::Int(n) => *n != 0,
+            VmValue::Float(n) => *n != 0.0,
+            VmValue::String(s) => !s.is_empty(),
+            VmValue::List(l) => !l.is_empty(),
+            VmValue::Dict(d) => !d.is_empty(),
+            VmValue::Closure(_) => true,
+        }
+    }
+
+    pub fn display(&self) -> String {
+        match self {
+            VmValue::Int(n) => n.to_string(),
+            VmValue::Float(n) => {
+                if *n == (*n as i64) as f64 && n.abs() < 1e15 {
+                    format!("{:.1}", n)
+                } else {
+                    n.to_string()
+                }
+            }
+            VmValue::String(s) => s.clone(),
+            VmValue::Bool(b) => (if *b { "true" } else { "false" }).to_string(),
+            VmValue::Nil => "nil".to_string(),
+            VmValue::List(items) => {
+                let inner: Vec<String> = items.iter().map(|i| i.display()).collect();
+                format!("[{}]", inner.join(", "))
+            }
+            VmValue::Dict(map) => {
+                let inner: Vec<String> = map
+                    .iter()
+                    .map(|(k, v)| format!("{k}: {}", v.display()))
+                    .collect();
+                format!("{{{}}}", inner.join(", "))
+            }
+            VmValue::Closure(c) => format!("<fn({})>", c.func.params.join(", ")),
+        }
+    }
+
+    fn as_int(&self) -> Option<i64> {
+        if let VmValue::Int(n) = self {
+            Some(*n)
+        } else {
+            None
+        }
+    }
+}
+
+fn values_equal(a: &VmValue, b: &VmValue) -> bool {
+    match (a, b) {
+        (VmValue::Int(x), VmValue::Int(y)) => x == y,
+        (VmValue::Float(x), VmValue::Float(y)) => x == y,
+        (VmValue::String(x), VmValue::String(y)) => x == y,
+        (VmValue::Bool(x), VmValue::Bool(y)) => x == y,
+        (VmValue::Nil, VmValue::Nil) => true,
+        (VmValue::Int(x), VmValue::Float(y)) => (*x as f64) == *y,
+        (VmValue::Float(x), VmValue::Int(y)) => *x == (*y as f64),
+        _ => false,
+    }
+}
+
+fn compare_values(a: &VmValue, b: &VmValue) -> i32 {
+    match (a, b) {
+        (VmValue::Int(x), VmValue::Int(y)) => x.cmp(y) as i32,
+        (VmValue::Float(x), VmValue::Float(y)) => {
+            if x < y {
+                -1
+            } else if x > y {
+                1
+            } else {
+                0
+            }
+        }
+        (VmValue::Int(x), VmValue::Float(y)) => {
+            let x = *x as f64;
+            if x < *y {
+                -1
+            } else if x > *y {
+                1
+            } else {
+                0
+            }
+        }
+        (VmValue::Float(x), VmValue::Int(y)) => {
+            let y = *y as f64;
+            if *x < y {
+                -1
+            } else if *x > y {
+                1
+            } else {
+                0
+            }
+        }
+        (VmValue::String(x), VmValue::String(y)) => x.cmp(y) as i32,
+        _ => 0,
+    }
+}
+
+/// Sync builtin function for the VM.
+pub type VmBuiltinFn = Box<dyn Fn(&[VmValue], &mut String) -> Result<VmValue, VmError>>;
+
+/// Call frame for function execution (future use with call stack).
+#[allow(dead_code)]
+struct CallFrame {
+    chunk: Chunk,
+    ip: usize,
+    stack_base: usize,
+}
+
+/// The Harn bytecode virtual machine.
+pub struct Vm {
+    stack: Vec<VmValue>,
+    env: VmEnv,
+    output: String,
+    builtins: BTreeMap<String, VmBuiltinFn>,
+    /// Iterator state for for-in loops.
+    iterators: Vec<(Vec<VmValue>, usize)>,
+}
+
+impl Vm {
+    pub fn new() -> Self {
+        Self {
+            stack: Vec::with_capacity(256),
+            env: VmEnv::new(),
+            output: String::new(),
+            builtins: BTreeMap::new(),
+            iterators: Vec::new(),
+        }
+    }
+
+    /// Register a builtin function.
+    pub fn register_builtin<F>(&mut self, name: &str, f: F)
+    where
+        F: Fn(&[VmValue], &mut String) -> Result<VmValue, VmError> + 'static,
+    {
+        self.builtins.insert(name.to_string(), Box::new(f));
+    }
+
+    /// Get the captured output.
+    pub fn output(&self) -> &str {
+        &self.output
+    }
+
+    /// Execute a compiled chunk.
+    pub fn execute(&mut self, chunk: &Chunk) -> Result<VmValue, VmError> {
+        self.run_chunk(chunk)
+    }
+
+    fn run_chunk(&mut self, chunk: &Chunk) -> Result<VmValue, VmError> {
+        let mut ip = 0;
+
+        while ip < chunk.code.len() {
+            let op = chunk.code[ip];
+            ip += 1;
+
+            match op {
+                x if x == Op::Constant as u8 => {
+                    let idx = chunk.read_u16(ip) as usize;
+                    ip += 2;
+                    let val = match &chunk.constants[idx] {
+                        Constant::Int(n) => VmValue::Int(*n),
+                        Constant::Float(n) => VmValue::Float(*n),
+                        Constant::String(s) => VmValue::String(s.clone()),
+                        Constant::Bool(b) => VmValue::Bool(*b),
+                        Constant::Nil => VmValue::Nil,
+                    };
+                    self.stack.push(val);
+                }
+                x if x == Op::Nil as u8 => self.stack.push(VmValue::Nil),
+                x if x == Op::True as u8 => self.stack.push(VmValue::Bool(true)),
+                x if x == Op::False as u8 => self.stack.push(VmValue::Bool(false)),
+
+                x if x == Op::GetVar as u8 => {
+                    let idx = chunk.read_u16(ip) as usize;
+                    ip += 2;
+                    let name = match &chunk.constants[idx] {
+                        Constant::String(s) => s.clone(),
+                        _ => return Err(VmError::TypeError("expected string constant".into())),
+                    };
+                    let val = self.env.get(&name).unwrap_or(VmValue::Nil);
+                    self.stack.push(val);
+                }
+                x if x == Op::DefLet as u8 => {
+                    let idx = chunk.read_u16(ip) as usize;
+                    ip += 2;
+                    let name = Self::const_string(&chunk.constants[idx])?;
+                    let val = self.pop()?;
+                    self.env.define(&name, val, false);
+                }
+                x if x == Op::DefVar as u8 => {
+                    let idx = chunk.read_u16(ip) as usize;
+                    ip += 2;
+                    let name = Self::const_string(&chunk.constants[idx])?;
+                    let val = self.pop()?;
+                    self.env.define(&name, val, true);
+                }
+                x if x == Op::SetVar as u8 => {
+                    let idx = chunk.read_u16(ip) as usize;
+                    ip += 2;
+                    let name = Self::const_string(&chunk.constants[idx])?;
+                    let val = self.pop()?;
+                    self.env.assign(&name, val)?;
+                }
+
+                // Arithmetic
+                x if x == Op::Add as u8 => {
+                    let b = self.pop()?;
+                    let a = self.pop()?;
+                    self.stack.push(self.add(a, b));
+                }
+                x if x == Op::Sub as u8 => {
+                    let b = self.pop()?;
+                    let a = self.pop()?;
+                    self.stack.push(self.sub(a, b));
+                }
+                x if x == Op::Mul as u8 => {
+                    let b = self.pop()?;
+                    let a = self.pop()?;
+                    self.stack.push(self.mul(a, b));
+                }
+                x if x == Op::Div as u8 => {
+                    let b = self.pop()?;
+                    let a = self.pop()?;
+                    self.stack.push(self.div(a, b));
+                }
+                x if x == Op::Negate as u8 => {
+                    let v = self.pop()?;
+                    self.stack.push(match v {
+                        VmValue::Int(n) => VmValue::Int(-n),
+                        VmValue::Float(n) => VmValue::Float(-n),
+                        _ => VmValue::Nil,
+                    });
+                }
+
+                // Comparison
+                x if x == Op::Equal as u8 => {
+                    let b = self.pop()?;
+                    let a = self.pop()?;
+                    self.stack.push(VmValue::Bool(values_equal(&a, &b)));
+                }
+                x if x == Op::NotEqual as u8 => {
+                    let b = self.pop()?;
+                    let a = self.pop()?;
+                    self.stack.push(VmValue::Bool(!values_equal(&a, &b)));
+                }
+                x if x == Op::Less as u8 => {
+                    let b = self.pop()?;
+                    let a = self.pop()?;
+                    self.stack.push(VmValue::Bool(compare_values(&a, &b) < 0));
+                }
+                x if x == Op::Greater as u8 => {
+                    let b = self.pop()?;
+                    let a = self.pop()?;
+                    self.stack.push(VmValue::Bool(compare_values(&a, &b) > 0));
+                }
+                x if x == Op::LessEqual as u8 => {
+                    let b = self.pop()?;
+                    let a = self.pop()?;
+                    self.stack.push(VmValue::Bool(compare_values(&a, &b) <= 0));
+                }
+                x if x == Op::GreaterEqual as u8 => {
+                    let b = self.pop()?;
+                    let a = self.pop()?;
+                    self.stack.push(VmValue::Bool(compare_values(&a, &b) >= 0));
+                }
+
+                // Logical
+                x if x == Op::Not as u8 => {
+                    let v = self.pop()?;
+                    self.stack.push(VmValue::Bool(!v.is_truthy()));
+                }
+
+                // Control flow
+                x if x == Op::Jump as u8 => {
+                    let target = chunk.read_u16(ip) as usize;
+                    ip = target;
+                }
+                x if x == Op::JumpIfFalse as u8 => {
+                    let target = chunk.read_u16(ip) as usize;
+                    ip += 2;
+                    let val = self.peek()?;
+                    if !val.is_truthy() {
+                        ip = target;
+                    }
+                }
+                x if x == Op::JumpIfTrue as u8 => {
+                    let target = chunk.read_u16(ip) as usize;
+                    ip += 2;
+                    let val = self.peek()?;
+                    if val.is_truthy() {
+                        ip = target;
+                    }
+                }
+                x if x == Op::Pop as u8 => {
+                    self.pop()?;
+                }
+
+                // Functions
+                x if x == Op::Call as u8 => {
+                    let argc = chunk.code[ip] as usize;
+                    ip += 1;
+
+                    // Arguments are on stack above the function name/value
+                    let args: Vec<VmValue> =
+                        self.stack.split_off(self.stack.len().saturating_sub(argc));
+                    let callee = self.pop()?;
+
+                    match callee {
+                        VmValue::String(name) => {
+                            // Check closures in env
+                            if let Some(VmValue::Closure(closure)) = self.env.get(&name) {
+                                let result =
+                                    self.call_closure(&closure, &args, &chunk.functions)?;
+                                self.stack.push(result);
+                            } else if let Some(builtin) = self.builtins.get(&name) {
+                                let result = builtin(&args, &mut self.output)?;
+                                self.stack.push(result);
+                            } else {
+                                return Err(VmError::UndefinedBuiltin(name));
+                            }
+                        }
+                        VmValue::Closure(closure) => {
+                            let result = self.call_closure(&closure, &args, &chunk.functions)?;
+                            self.stack.push(result);
+                        }
+                        _ => {
+                            return Err(VmError::TypeError(format!(
+                                "Cannot call {}",
+                                callee.display()
+                            )));
+                        }
+                    }
+                }
+
+                x if x == Op::Return as u8 => {
+                    let val = self.pop().unwrap_or(VmValue::Nil);
+                    return Ok(val);
+                }
+
+                x if x == Op::Closure as u8 => {
+                    let fn_idx = chunk.read_u16(ip) as usize;
+                    ip += 2;
+                    let func = chunk.functions[fn_idx].clone();
+                    let closure = VmClosure {
+                        func,
+                        env: self.env.clone(),
+                    };
+                    self.stack.push(VmValue::Closure(closure));
+                }
+
+                // Collections
+                x if x == Op::BuildList as u8 => {
+                    let count = chunk.read_u16(ip) as usize;
+                    ip += 2;
+                    let items = self.stack.split_off(self.stack.len().saturating_sub(count));
+                    self.stack.push(VmValue::List(items));
+                }
+
+                x if x == Op::BuildDict as u8 => {
+                    let count = chunk.read_u16(ip) as usize;
+                    ip += 2;
+                    let pairs = self
+                        .stack
+                        .split_off(self.stack.len().saturating_sub(count * 2));
+                    let mut map = BTreeMap::new();
+                    for pair in pairs.chunks(2) {
+                        if pair.len() == 2 {
+                            let key = pair[0].display();
+                            map.insert(key, pair[1].clone());
+                        }
+                    }
+                    self.stack.push(VmValue::Dict(map));
+                }
+
+                x if x == Op::Subscript as u8 => {
+                    let idx = self.pop()?;
+                    let obj = self.pop()?;
+                    let result = match (&obj, &idx) {
+                        (VmValue::List(items), VmValue::Int(i)) if *i >= 0 => {
+                            items.get(*i as usize).cloned().unwrap_or(VmValue::Nil)
+                        }
+                        (VmValue::Dict(map), _) => {
+                            map.get(&idx.display()).cloned().unwrap_or(VmValue::Nil)
+                        }
+                        _ => VmValue::Nil,
+                    };
+                    self.stack.push(result);
+                }
+
+                x if x == Op::GetProperty as u8 => {
+                    let idx = chunk.read_u16(ip) as usize;
+                    ip += 2;
+                    let name = Self::const_string(&chunk.constants[idx])?;
+                    let obj = self.pop()?;
+                    let result = match &obj {
+                        VmValue::Dict(map) => map.get(&name).cloned().unwrap_or(VmValue::Nil),
+                        VmValue::List(items) => match name.as_str() {
+                            "count" => VmValue::Int(items.len() as i64),
+                            "empty" => VmValue::Bool(items.is_empty()),
+                            "first" => items.first().cloned().unwrap_or(VmValue::Nil),
+                            "last" => items.last().cloned().unwrap_or(VmValue::Nil),
+                            _ => VmValue::Nil,
+                        },
+                        VmValue::String(s) => match name.as_str() {
+                            "count" => VmValue::Int(s.chars().count() as i64),
+                            "empty" => VmValue::Bool(s.is_empty()),
+                            _ => VmValue::Nil,
+                        },
+                        _ => VmValue::Nil,
+                    };
+                    self.stack.push(result);
+                }
+
+                x if x == Op::MethodCall as u8 => {
+                    let name_idx = chunk.read_u16(ip) as usize;
+                    ip += 2;
+                    let argc = chunk.code[ip] as usize;
+                    ip += 1;
+                    let method = Self::const_string(&chunk.constants[name_idx])?;
+                    let args: Vec<VmValue> =
+                        self.stack.split_off(self.stack.len().saturating_sub(argc));
+                    let obj = self.pop()?;
+                    let result = self.call_method(obj, &method, &args, &chunk.functions)?;
+                    self.stack.push(result);
+                }
+
+                x if x == Op::Concat as u8 => {
+                    let count = chunk.read_u16(ip) as usize;
+                    ip += 2;
+                    let parts = self.stack.split_off(self.stack.len().saturating_sub(count));
+                    let result: String = parts.iter().map(|p| p.display()).collect();
+                    self.stack.push(VmValue::String(result));
+                }
+
+                x if x == Op::Pipe as u8 => {
+                    let callable = self.pop()?;
+                    let value = self.pop()?;
+                    match callable {
+                        VmValue::Closure(closure) => {
+                            let result = self.call_closure(&closure, &[value], &chunk.functions)?;
+                            self.stack.push(result);
+                        }
+                        VmValue::String(name) => {
+                            if let Some(VmValue::Closure(closure)) = self.env.get(&name) {
+                                let result =
+                                    self.call_closure(&closure, &[value], &chunk.functions)?;
+                                self.stack.push(result);
+                            } else if let Some(builtin) = self.builtins.get(&name) {
+                                let result = builtin(&[value], &mut self.output)?;
+                                self.stack.push(result);
+                            } else {
+                                self.stack.push(VmValue::Nil);
+                            }
+                        }
+                        _ => self.stack.push(VmValue::Nil),
+                    }
+                }
+
+                x if x == Op::Dup as u8 => {
+                    let val = self.peek()?.clone();
+                    self.stack.push(val);
+                }
+                x if x == Op::Swap as u8 => {
+                    let len = self.stack.len();
+                    if len >= 2 {
+                        self.stack.swap(len - 1, len - 2);
+                    }
+                }
+
+                x if x == Op::IterInit as u8 => {
+                    let iterable = self.pop()?;
+                    let items = match iterable {
+                        VmValue::List(items) => items,
+                        VmValue::Dict(map) => map
+                            .into_iter()
+                            .map(|(k, v)| {
+                                VmValue::Dict(BTreeMap::from([
+                                    ("key".to_string(), VmValue::String(k)),
+                                    ("value".to_string(), v),
+                                ]))
+                            })
+                            .collect(),
+                        _ => Vec::new(),
+                    };
+                    self.iterators.push((items, 0));
+                }
+                x if x == Op::IterNext as u8 => {
+                    let target = chunk.read_u16(ip) as usize;
+                    ip += 2;
+                    if let Some((items, idx)) = self.iterators.last_mut() {
+                        if *idx < items.len() {
+                            let item = items[*idx].clone();
+                            *idx += 1;
+                            self.stack.push(item);
+                        } else {
+                            self.iterators.pop();
+                            ip = target;
+                        }
+                    } else {
+                        ip = target;
+                    }
+                }
+
+                _ => return Err(VmError::InvalidInstruction(op)),
+            }
+        }
+
+        // Return the top of stack or nil
+        Ok(self.stack.pop().unwrap_or(VmValue::Nil))
+    }
+
+    fn pop(&mut self) -> Result<VmValue, VmError> {
+        self.stack.pop().ok_or(VmError::StackUnderflow)
+    }
+
+    fn peek(&self) -> Result<&VmValue, VmError> {
+        self.stack.last().ok_or(VmError::StackUnderflow)
+    }
+
+    fn const_string(c: &Constant) -> Result<String, VmError> {
+        match c {
+            Constant::String(s) => Ok(s.clone()),
+            _ => Err(VmError::TypeError("expected string constant".into())),
+        }
+    }
+
+    fn call_closure(
+        &mut self,
+        closure: &VmClosure,
+        args: &[VmValue],
+        _parent_functions: &[CompiledFunction],
+    ) -> Result<VmValue, VmError> {
+        let saved_env = self.env.clone();
+
+        // Start with the closure's captured env, but also include
+        // the caller's definitions (for recursion and outer scope access).
+        let mut call_env = closure.env.clone();
+        // Copy caller's variables into the base scope so recursive calls work.
+        // This is needed because fn definitions capture the env before themselves
+        // are defined — the calling env has the definition.
+        for scope in &saved_env.scopes {
+            for (name, (val, mutable)) in &scope.vars {
+                // Don't overwrite params or captured vars
+                if call_env.get(name).is_none() {
+                    call_env.define(name, val.clone(), *mutable);
+                }
+            }
+        }
+        call_env.push_scope();
+
+        for (i, param) in closure.func.params.iter().enumerate() {
+            let val = args.get(i).cloned().unwrap_or(VmValue::Nil);
+            call_env.define(param, val, false);
+        }
+
+        self.env = call_env;
+        let result = self.run_chunk(&closure.func.chunk);
+        self.env = saved_env;
+
+        match result {
+            Ok(val) => Ok(val),
+            Err(VmError::Return(val)) => Ok(val),
+            Err(e) => Err(e),
+        }
+    }
+
+    fn call_method(
+        &mut self,
+        obj: VmValue,
+        method: &str,
+        args: &[VmValue],
+        functions: &[CompiledFunction],
+    ) -> Result<VmValue, VmError> {
+        match &obj {
+            VmValue::String(s) => match method {
+                "count" => Ok(VmValue::Int(s.chars().count() as i64)),
+                "empty" => Ok(VmValue::Bool(s.is_empty())),
+                "contains" => Ok(VmValue::Bool(
+                    s.contains(&args.first().map(|a| a.display()).unwrap_or_default()),
+                )),
+                "replace" if args.len() >= 2 => Ok(VmValue::String(
+                    s.replace(&args[0].display(), &args[1].display()),
+                )),
+                "split" => {
+                    let sep = args.first().map(|a| a.display()).unwrap_or(",".into());
+                    Ok(VmValue::List(
+                        s.split(&sep)
+                            .map(|p| VmValue::String(p.to_string()))
+                            .collect(),
+                    ))
+                }
+                "trim" => Ok(VmValue::String(s.trim().to_string())),
+                "starts_with" => Ok(VmValue::Bool(
+                    s.starts_with(&args.first().map(|a| a.display()).unwrap_or_default()),
+                )),
+                "ends_with" => Ok(VmValue::Bool(
+                    s.ends_with(&args.first().map(|a| a.display()).unwrap_or_default()),
+                )),
+                "lowercase" => Ok(VmValue::String(s.to_lowercase())),
+                "uppercase" => Ok(VmValue::String(s.to_uppercase())),
+                "substring" => {
+                    let start = args.first().and_then(|a| a.as_int()).unwrap_or(0);
+                    let len = s.chars().count() as i64;
+                    let start = start.max(0).min(len) as usize;
+                    let end = args.get(1).and_then(|a| a.as_int()).unwrap_or(len).min(len) as usize;
+                    let end = end.max(start);
+                    Ok(VmValue::String(
+                        s.chars().skip(start).take(end - start).collect(),
+                    ))
+                }
+                _ => Ok(VmValue::Nil),
+            },
+            VmValue::List(items) => match method {
+                "count" => Ok(VmValue::Int(items.len() as i64)),
+                "empty" => Ok(VmValue::Bool(items.is_empty())),
+                "map" => {
+                    if let Some(VmValue::Closure(closure)) = args.first() {
+                        let mut results = Vec::new();
+                        for item in items {
+                            results.push(self.call_closure(closure, &[item.clone()], functions)?);
+                        }
+                        Ok(VmValue::List(results))
+                    } else {
+                        Ok(VmValue::Nil)
+                    }
+                }
+                "filter" => {
+                    if let Some(VmValue::Closure(closure)) = args.first() {
+                        let mut results = Vec::new();
+                        for item in items {
+                            let result = self.call_closure(closure, &[item.clone()], functions)?;
+                            if result.is_truthy() {
+                                results.push(item.clone());
+                            }
+                        }
+                        Ok(VmValue::List(results))
+                    } else {
+                        Ok(VmValue::Nil)
+                    }
+                }
+                "reduce" => {
+                    if args.len() >= 2 {
+                        if let VmValue::Closure(closure) = &args[1] {
+                            let mut acc = args[0].clone();
+                            for item in items {
+                                acc =
+                                    self.call_closure(closure, &[acc, item.clone()], functions)?;
+                            }
+                            return Ok(acc);
+                        }
+                    }
+                    Ok(VmValue::Nil)
+                }
+                "find" => {
+                    if let Some(VmValue::Closure(closure)) = args.first() {
+                        for item in items {
+                            let result = self.call_closure(closure, &[item.clone()], functions)?;
+                            if result.is_truthy() {
+                                return Ok(item.clone());
+                            }
+                        }
+                    }
+                    Ok(VmValue::Nil)
+                }
+                "any" => {
+                    if let Some(VmValue::Closure(closure)) = args.first() {
+                        for item in items {
+                            let result = self.call_closure(closure, &[item.clone()], functions)?;
+                            if result.is_truthy() {
+                                return Ok(VmValue::Bool(true));
+                            }
+                        }
+                        Ok(VmValue::Bool(false))
+                    } else {
+                        Ok(VmValue::Bool(false))
+                    }
+                }
+                "all" => {
+                    if let Some(VmValue::Closure(closure)) = args.first() {
+                        for item in items {
+                            let result = self.call_closure(closure, &[item.clone()], functions)?;
+                            if !result.is_truthy() {
+                                return Ok(VmValue::Bool(false));
+                            }
+                        }
+                        Ok(VmValue::Bool(true))
+                    } else {
+                        Ok(VmValue::Bool(true))
+                    }
+                }
+                "flat_map" => {
+                    if let Some(VmValue::Closure(closure)) = args.first() {
+                        let mut results = Vec::new();
+                        for item in items {
+                            let result = self.call_closure(closure, &[item.clone()], functions)?;
+                            if let VmValue::List(inner) = result {
+                                results.extend(inner);
+                            } else {
+                                results.push(result);
+                            }
+                        }
+                        Ok(VmValue::List(results))
+                    } else {
+                        Ok(VmValue::Nil)
+                    }
+                }
+                _ => Ok(VmValue::Nil),
+            },
+            VmValue::Dict(map) => match method {
+                "keys" => Ok(VmValue::List(
+                    map.keys().map(|k| VmValue::String(k.clone())).collect(),
+                )),
+                "values" => Ok(VmValue::List(map.values().cloned().collect())),
+                "entries" => Ok(VmValue::List(
+                    map.iter()
+                        .map(|(k, v)| {
+                            VmValue::Dict(BTreeMap::from([
+                                ("key".to_string(), VmValue::String(k.clone())),
+                                ("value".to_string(), v.clone()),
+                            ]))
+                        })
+                        .collect(),
+                )),
+                "count" => Ok(VmValue::Int(map.len() as i64)),
+                "has" => Ok(VmValue::Bool(map.contains_key(
+                    &args.first().map(|a| a.display()).unwrap_or_default(),
+                ))),
+                "merge" => {
+                    if let Some(VmValue::Dict(other)) = args.first() {
+                        let mut result = map.clone();
+                        result.extend(other.iter().map(|(k, v)| (k.clone(), v.clone())));
+                        Ok(VmValue::Dict(result))
+                    } else {
+                        Ok(VmValue::Dict(map.clone()))
+                    }
+                }
+                _ => Ok(VmValue::Nil),
+            },
+            _ => Ok(VmValue::Nil),
+        }
+    }
+
+    // --- Arithmetic helpers ---
+
+    fn add(&self, a: VmValue, b: VmValue) -> VmValue {
+        match (&a, &b) {
+            (VmValue::Int(x), VmValue::Int(y)) => VmValue::Int(x.wrapping_add(*y)),
+            (VmValue::Float(x), VmValue::Float(y)) => VmValue::Float(x + y),
+            (VmValue::Int(x), VmValue::Float(y)) => VmValue::Float(*x as f64 + y),
+            (VmValue::Float(x), VmValue::Int(y)) => VmValue::Float(x + *y as f64),
+            (VmValue::String(x), _) => VmValue::String(format!("{x}{}", b.display())),
+            (VmValue::List(x), VmValue::List(y)) => {
+                let mut result = x.clone();
+                result.extend(y.iter().cloned());
+                VmValue::List(result)
+            }
+            _ => VmValue::String(format!("{}{}", a.display(), b.display())),
+        }
+    }
+
+    fn sub(&self, a: VmValue, b: VmValue) -> VmValue {
+        match (&a, &b) {
+            (VmValue::Int(x), VmValue::Int(y)) => VmValue::Int(x.wrapping_sub(*y)),
+            (VmValue::Float(x), VmValue::Float(y)) => VmValue::Float(x - y),
+            (VmValue::Int(x), VmValue::Float(y)) => VmValue::Float(*x as f64 - y),
+            (VmValue::Float(x), VmValue::Int(y)) => VmValue::Float(x - *y as f64),
+            _ => VmValue::Nil,
+        }
+    }
+
+    fn mul(&self, a: VmValue, b: VmValue) -> VmValue {
+        match (&a, &b) {
+            (VmValue::Int(x), VmValue::Int(y)) => VmValue::Int(x.wrapping_mul(*y)),
+            (VmValue::Float(x), VmValue::Float(y)) => VmValue::Float(x * y),
+            (VmValue::Int(x), VmValue::Float(y)) => VmValue::Float(*x as f64 * y),
+            (VmValue::Float(x), VmValue::Int(y)) => VmValue::Float(x * *y as f64),
+            _ => VmValue::Nil,
+        }
+    }
+
+    fn div(&self, a: VmValue, b: VmValue) -> VmValue {
+        match (&a, &b) {
+            (VmValue::Int(_), VmValue::Int(y)) if *y == 0 => VmValue::Nil,
+            (VmValue::Int(x), VmValue::Int(y)) => VmValue::Int(x / y),
+            (VmValue::Float(_), VmValue::Float(y)) if *y == 0.0 => VmValue::Nil,
+            (VmValue::Float(x), VmValue::Float(y)) => VmValue::Float(x / y),
+            (VmValue::Int(x), VmValue::Float(y)) if *y != 0.0 => VmValue::Float(*x as f64 / y),
+            (VmValue::Float(x), VmValue::Int(y)) if *y != 0 => VmValue::Float(x / *y as f64),
+            _ => VmValue::Nil,
+        }
+    }
+}
+
+impl Default for Vm {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Register standard builtins on a VM.
+pub fn register_vm_stdlib(vm: &mut Vm) {
+    vm.register_builtin("log", |args, out| {
+        let msg = args.first().map(|a| a.display()).unwrap_or_default();
+        out.push_str(&format!("[harn] {msg}\n"));
+        Ok(VmValue::Nil)
+    });
+    vm.register_builtin("print", |args, out| {
+        let msg = args.first().map(|a| a.display()).unwrap_or_default();
+        out.push_str(&msg);
+        Ok(VmValue::Nil)
+    });
+    vm.register_builtin("println", |args, out| {
+        let msg = args.first().map(|a| a.display()).unwrap_or_default();
+        out.push_str(&format!("{msg}\n"));
+        Ok(VmValue::Nil)
+    });
+    vm.register_builtin("type_of", |args, _out| {
+        let val = args.first().unwrap_or(&VmValue::Nil);
+        let t = match val {
+            VmValue::String(_) => "string",
+            VmValue::Int(_) => "int",
+            VmValue::Float(_) => "float",
+            VmValue::Bool(_) => "bool",
+            VmValue::Nil => "nil",
+            VmValue::List(_) => "list",
+            VmValue::Dict(_) => "dict",
+            VmValue::Closure(_) => "closure",
+        };
+        Ok(VmValue::String(t.to_string()))
+    });
+    vm.register_builtin("to_string", |args, _out| {
+        let val = args.first().unwrap_or(&VmValue::Nil);
+        Ok(VmValue::String(val.display()))
+    });
+    vm.register_builtin("to_int", |args, _out| {
+        let val = args.first().unwrap_or(&VmValue::Nil);
+        match val {
+            VmValue::Int(n) => Ok(VmValue::Int(*n)),
+            VmValue::Float(n) => Ok(VmValue::Int(*n as i64)),
+            VmValue::String(s) => Ok(s.parse::<i64>().map(VmValue::Int).unwrap_or(VmValue::Nil)),
+            _ => Ok(VmValue::Nil),
+        }
+    });
+    vm.register_builtin("to_float", |args, _out| {
+        let val = args.first().unwrap_or(&VmValue::Nil);
+        match val {
+            VmValue::Float(n) => Ok(VmValue::Float(*n)),
+            VmValue::Int(n) => Ok(VmValue::Float(*n as f64)),
+            VmValue::String(s) => Ok(s.parse::<f64>().map(VmValue::Float).unwrap_or(VmValue::Nil)),
+            _ => Ok(VmValue::Nil),
+        }
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::compiler::Compiler;
+    use harn_lexer::Lexer;
+    use harn_parser::Parser;
+
+    fn run_harn(source: &str) -> (String, VmValue) {
+        let mut lexer = Lexer::new(source);
+        let tokens = lexer.tokenize().unwrap();
+        let mut parser = Parser::new(tokens);
+        let program = parser.parse().unwrap();
+        let chunk = Compiler::new().compile(&program).unwrap();
+
+        let mut vm = Vm::new();
+        register_vm_stdlib(&mut vm);
+        let result = vm.execute(&chunk).unwrap();
+        (vm.output().to_string(), result)
+    }
+
+    fn run_output(source: &str) -> String {
+        run_harn(source).0.trim_end().to_string()
+    }
+
+    #[test]
+    fn test_arithmetic() {
+        let out =
+            run_output("pipeline t(task) { log(2 + 3)\nlog(10 - 4)\nlog(3 * 5)\nlog(10 / 3) }");
+        assert_eq!(out, "[harn] 5\n[harn] 6\n[harn] 15\n[harn] 3");
+    }
+
+    #[test]
+    fn test_mixed_arithmetic() {
+        let out = run_output("pipeline t(task) { log(3 + 1.5)\nlog(10 - 2.5) }");
+        assert_eq!(out, "[harn] 4.5\n[harn] 7.5");
+    }
+
+    #[test]
+    fn test_comparisons() {
+        let out =
+            run_output("pipeline t(task) { log(1 < 2)\nlog(2 > 3)\nlog(1 == 1)\nlog(1 != 2) }");
+        assert_eq!(out, "[harn] true\n[harn] false\n[harn] true\n[harn] true");
+    }
+
+    #[test]
+    fn test_let_var() {
+        let out = run_output("pipeline t(task) { let x = 42\nlog(x)\nvar y = 1\ny = 2\nlog(y) }");
+        assert_eq!(out, "[harn] 42\n[harn] 2");
+    }
+
+    #[test]
+    fn test_if_else() {
+        let out = run_output(
+            r#"pipeline t(task) { if true { log("yes") } if false { log("wrong") } else { log("no") } }"#,
+        );
+        assert_eq!(out, "[harn] yes\n[harn] no");
+    }
+
+    #[test]
+    fn test_while_loop() {
+        let out = run_output("pipeline t(task) { var i = 0\n while i < 5 { i = i + 1 }\n log(i) }");
+        assert_eq!(out, "[harn] 5");
+    }
+
+    #[test]
+    fn test_for_in() {
+        let out = run_output("pipeline t(task) { for item in [1, 2, 3] { log(item) } }");
+        assert_eq!(out, "[harn] 1\n[harn] 2\n[harn] 3");
+    }
+
+    #[test]
+    fn test_fn_decl_and_call() {
+        let out = run_output("pipeline t(task) { fn add(a, b) { return a + b }\nlog(add(3, 4)) }");
+        assert_eq!(out, "[harn] 7");
+    }
+
+    #[test]
+    fn test_closure() {
+        let out = run_output("pipeline t(task) { let double = { x -> x * 2 }\nlog(double(5)) }");
+        assert_eq!(out, "[harn] 10");
+    }
+
+    #[test]
+    fn test_closure_capture() {
+        let out = run_output(
+            "pipeline t(task) { let base = 10\nfn offset(x) { return x + base }\nlog(offset(5)) }",
+        );
+        assert_eq!(out, "[harn] 15");
+    }
+
+    #[test]
+    fn test_string_concat() {
+        let out = run_output(
+            r#"pipeline t(task) { let a = "hello" + " " + "world"
+log(a) }"#,
+        );
+        assert_eq!(out, "[harn] hello world");
+    }
+
+    #[test]
+    fn test_list_map() {
+        let out = run_output(
+            "pipeline t(task) { let doubled = [1, 2, 3].map({ x -> x * 2 })\nlog(doubled) }",
+        );
+        assert_eq!(out, "[harn] [2, 4, 6]");
+    }
+
+    #[test]
+    fn test_list_filter() {
+        let out = run_output(
+            "pipeline t(task) { let big = [1, 2, 3, 4, 5].filter({ x -> x > 3 })\nlog(big) }",
+        );
+        assert_eq!(out, "[harn] [4, 5]");
+    }
+
+    #[test]
+    fn test_list_reduce() {
+        let out = run_output(
+            "pipeline t(task) { let sum = [1, 2, 3, 4].reduce(0, { acc, x -> acc + x })\nlog(sum) }",
+        );
+        assert_eq!(out, "[harn] 10");
+    }
+
+    #[test]
+    fn test_dict_access() {
+        let out = run_output(
+            r#"pipeline t(task) { let d = {name: "test", value: 42}
+log(d.name)
+log(d.value) }"#,
+        );
+        assert_eq!(out, "[harn] test\n[harn] 42");
+    }
+
+    #[test]
+    fn test_dict_methods() {
+        let out = run_output(
+            r#"pipeline t(task) { let d = {a: 1, b: 2}
+log(d.keys())
+log(d.values())
+log(d.has("a"))
+log(d.has("z")) }"#,
+        );
+        assert_eq!(
+            out,
+            "[harn] [a, b]\n[harn] [1, 2]\n[harn] true\n[harn] false"
+        );
+    }
+
+    #[test]
+    fn test_pipe_operator() {
+        let out = run_output(
+            "pipeline t(task) { fn double(x) { return x * 2 }\nlet r = 5 |> double\nlog(r) }",
+        );
+        assert_eq!(out, "[harn] 10");
+    }
+
+    #[test]
+    fn test_pipe_with_closure() {
+        let out = run_output(
+            r#"pipeline t(task) { let r = "hello world" |> { s -> s.split(" ") }
+log(r) }"#,
+        );
+        assert_eq!(out, "[harn] [hello, world]");
+    }
+
+    #[test]
+    fn test_nil_coalescing() {
+        let out = run_output(
+            r#"pipeline t(task) { let a = nil ?? "fallback"
+log(a)
+let b = "present" ?? "fallback"
+log(b) }"#,
+        );
+        assert_eq!(out, "[harn] fallback\n[harn] present");
+    }
+
+    #[test]
+    fn test_logical_operators() {
+        let out =
+            run_output("pipeline t(task) { log(true && false)\nlog(true || false)\nlog(!true) }");
+        assert_eq!(out, "[harn] false\n[harn] true\n[harn] false");
+    }
+
+    #[test]
+    fn test_match() {
+        let out = run_output(
+            r#"pipeline t(task) { let x = "b"
+match x { "a" -> { log("first") } "b" -> { log("second") } "c" -> { log("third") } } }"#,
+        );
+        assert_eq!(out, "[harn] second");
+    }
+
+    #[test]
+    fn test_subscript() {
+        let out = run_output("pipeline t(task) { let arr = [10, 20, 30]\nlog(arr[1]) }");
+        assert_eq!(out, "[harn] 20");
+    }
+
+    #[test]
+    fn test_string_methods() {
+        let out = run_output(
+            r#"pipeline t(task) { log("hello world".replace("world", "harn"))
+log("a,b,c".split(","))
+log("  hello  ".trim())
+log("hello".starts_with("hel"))
+log("hello".ends_with("lo"))
+log("hello".substring(1, 3)) }"#,
+        );
+        assert_eq!(
+            out,
+            "[harn] hello harn\n[harn] [a, b, c]\n[harn] hello\n[harn] true\n[harn] true\n[harn] el"
+        );
+    }
+
+    #[test]
+    fn test_list_properties() {
+        let out = run_output(
+            "pipeline t(task) { let list = [1, 2, 3]\nlog(list.count)\nlog(list.empty)\nlog(list.first)\nlog(list.last) }",
+        );
+        assert_eq!(out, "[harn] 3\n[harn] false\n[harn] 1\n[harn] 3");
+    }
+
+    #[test]
+    fn test_recursive_function() {
+        let out = run_output(
+            "pipeline t(task) { fn fib(n) { if n <= 1 { return n } return fib(n - 1) + fib(n - 2) }\nlog(fib(10)) }",
+        );
+        assert_eq!(out, "[harn] 55");
+    }
+
+    #[test]
+    fn test_ternary() {
+        let out = run_output(
+            r#"pipeline t(task) { let x = 5
+let r = x > 0 ? "positive" : "non-positive"
+log(r) }"#,
+        );
+        assert_eq!(out, "[harn] positive");
+    }
+
+    #[test]
+    fn test_for_in_dict() {
+        let out = run_output(
+            "pipeline t(task) { let d = {a: 1, b: 2}\nfor entry in d { log(entry.key) } }",
+        );
+        assert_eq!(out, "[harn] a\n[harn] b");
+    }
+
+    #[test]
+    fn test_list_any_all() {
+        let out = run_output(
+            "pipeline t(task) { let nums = [2, 4, 6]\nlog(nums.any({ x -> x > 5 }))\nlog(nums.all({ x -> x > 0 }))\nlog(nums.all({ x -> x > 3 })) }",
+        );
+        assert_eq!(out, "[harn] true\n[harn] true\n[harn] false");
+    }
+
+    #[test]
+    fn test_disassembly() {
+        let mut lexer = Lexer::new("pipeline t(task) { log(2 + 3) }");
+        let tokens = lexer.tokenize().unwrap();
+        let mut parser = Parser::new(tokens);
+        let program = parser.parse().unwrap();
+        let chunk = Compiler::new().compile(&program).unwrap();
+        let disasm = chunk.disassemble("test");
+        assert!(disasm.contains("CONSTANT"));
+        assert!(disasm.contains("ADD"));
+        assert!(disasm.contains("CALL"));
+    }
+}
