@@ -4,7 +4,32 @@ use harn_lexer::Lexer;
 use harn_parser::{Node, Parser};
 use wasm_bindgen::prelude::*;
 
-/// Execute Harn source code and return the output.
+/// Execute Harn source code and return the output as a plain string.
+///
+/// This is a sync-only interpreter suitable for WASM environments.
+/// Async features (spawn, parallel, http_*, llm_call) are not available.
+#[wasm_bindgen]
+pub fn run(source: &str) -> String {
+    let mut lexer = Lexer::new(source);
+    let tokens = match lexer.tokenize() {
+        Ok(t) => t,
+        Err(e) => return format!("Lexer error: {e}"),
+    };
+
+    let mut parser = Parser::new(tokens);
+    let program = match parser.parse() {
+        Ok(p) => p,
+        Err(e) => return format!("Parse error: {e}"),
+    };
+
+    let mut interp = SyncInterpreter::new();
+    match interp.run(&program) {
+        Ok(()) => interp.output,
+        Err(e) => format!("Runtime error: {e}"),
+    }
+}
+
+/// Execute Harn source code and return the output (Result variant for JS interop).
 ///
 /// This is a sync-only interpreter suitable for WASM environments.
 /// Async features (spawn, parallel, http_*, llm_call) are not available.
@@ -42,6 +67,15 @@ pub fn check(source: &str) -> String {
     match parser.parse() {
         Ok(_) => "ok".to_string(),
         Err(e) => e.to_string(),
+    }
+}
+
+/// Format Harn source code.
+#[wasm_bindgen]
+pub fn format_code(source: &str) -> String {
+    match harn_fmt::format_source(source) {
+        Ok(formatted) => formatted,
+        Err(e) => format!("Format error: {e}"),
     }
 }
 

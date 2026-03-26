@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Harn Playground</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #1a1a2e;
+      color: #e0e0e0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      padding: 12px 24px;
+      background: #16213e;
+      border-bottom: 1px solid #333;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    header h1 {
+      font-size: 18px;
+      font-weight: 600;
+      color: #fff;
+    }
+    header h1 span { color: #64ffda; }
+    .controls {
+      display: flex;
+      gap: 8px;
+      margin-left: auto;
+    }
+    button {
+      padding: 6px 16px;
+      border: 1px solid #444;
+      border-radius: 4px;
+      background: #16213e;
+      color: #e0e0e0;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    button:hover { background: #1a1a4e; border-color: #64ffda; }
+    button.primary { background: #0f3460; border-color: #64ffda; color: #64ffda; }
+    button.primary:hover { background: #1a4a7a; }
+    .main {
+      flex: 1;
+      display: flex;
+      min-height: 0;
+    }
+    .editor-pane, .output-pane {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+    .editor-pane { border-right: 1px solid #333; }
+    .pane-header {
+      padding: 8px 16px;
+      background: #16213e;
+      border-bottom: 1px solid #333;
+      font-size: 12px;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    textarea, .output {
+      flex: 1;
+      padding: 16px;
+      font-family: "JetBrains Mono", "Fira Code", "SF Mono", monospace;
+      font-size: 14px;
+      line-height: 1.6;
+      border: none;
+      resize: none;
+    }
+    textarea {
+      background: #1a1a2e;
+      color: #e0e0e0;
+      outline: none;
+      tab-size: 2;
+    }
+    .output {
+      background: #0d1117;
+      color: #c9d1d9;
+      overflow-y: auto;
+      white-space: pre-wrap;
+    }
+    .output .error { color: #f85149; }
+    select {
+      padding: 4px 8px;
+      background: #16213e;
+      color: #e0e0e0;
+      border: 1px solid #444;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+    .status {
+      padding: 4px 16px;
+      background: #0d1117;
+      border-top: 1px solid #333;
+      font-size: 12px;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1><span>harn</span> playground</h1>
+    <select id="examples">
+      <option value="">-- examples --</option>
+      <option value="hello">Hello World</option>
+      <option value="fibonacci">Fibonacci</option>
+      <option value="data">Data Transform</option>
+      <option value="closures">Closures</option>
+      <option value="error">Error Handling</option>
+    </select>
+    <div class="controls">
+      <button class="primary" id="run-btn" onclick="runCode()">&#9654; Run</button>
+      <button id="fmt-btn" onclick="formatCode()">Format</button>
+      <button onclick="clearOutput()">Clear</button>
+    </div>
+  </header>
+  <div class="main">
+    <div class="editor-pane">
+      <div class="pane-header">source</div>
+      <textarea id="editor" spellcheck="false">pipeline default(task) {
+  log("Hello, Harn!")
+
+  let nums = [3, 1, 4, 1, 5, 9, 2, 6]
+  log("Sorted: " + to_string(nums))
+  log("Count: " + to_string(nums.count))
+
+  let greeting = { name -> "Hello, " + name + "!" }
+  log(greeting("world"))
+}</textarea>
+    </div>
+    <div class="output-pane">
+      <div class="pane-header">output</div>
+      <div class="output" id="output"></div>
+    </div>
+  </div>
+  <div class="status" id="status">Ready -- load WASM module to run code in the browser</div>
+
+  <script>
+    const EXAMPLES = {
+      hello: `pipeline default(task) {
+  log("Hello, Harn!")
+}`,
+      fibonacci: `pipeline default(task) {
+  fn fib(n) {
+    if n <= 1 {
+      return n
+    }
+    return fib(n - 1) + fib(n - 2)
+  }
+
+  for i in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10] {
+    log("fib(" + to_string(i) + ") = " + to_string(fib(i)))
+  }
+}`,
+      data: `pipeline default(task) {
+  let users = [
+    {name: "Alice", age: 30, role: "engineer"},
+    {name: "Bob", age: 25, role: "designer"},
+    {name: "Charlie", age: 35, role: "engineer"}
+  ]
+
+  let engineers = users.filter({ u -> u.role == "engineer" })
+  log("Engineers:")
+  for eng in engineers {
+    log("  " + eng.name + " (age " + to_string(eng.age) + ")")
+  }
+
+  let names = users.map({ u -> u.name })
+  log("All names: " + to_string(names))
+}`,
+      closures: `pipeline default(task) {
+  let double = { x -> x * 2 }
+  let add = { a, b -> a + b }
+
+  log(to_string(double(21)))
+  log(to_string(add(3, 4)))
+
+  let nums = [1, 2, 3, 4, 5]
+  let doubled = nums.map({ n -> n * 2 })
+  log("Doubled: " + to_string(doubled))
+}`,
+      error: `pipeline default(task) {
+  try {
+    log("Trying something risky...")
+    throw "oops!"
+  } catch (e) {
+    log("Caught: " + e)
+  }
+
+  log("Done!")
+}`
+    };
+
+    document.getElementById('examples').addEventListener('change', (e) => {
+      if (e.target.value && EXAMPLES[e.target.value]) {
+        document.getElementById('editor').value = EXAMPLES[e.target.value];
+        clearOutput();
+      }
+    });
+
+    // Tab key inserts spaces in the editor
+    document.getElementById('editor').addEventListener('keydown', (e) => {
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        const ta = e.target;
+        const start = ta.selectionStart;
+        ta.value = ta.value.substring(0, start) + '  ' + ta.value.substring(ta.selectionEnd);
+        ta.selectionStart = ta.selectionEnd = start + 2;
+      }
+      // Ctrl/Cmd+Enter to run
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        runCode();
+      }
+    });
+
+    let wasmModule = null;
+
+    async function loadWasm() {
+      try {
+        const { default: init, run: wasmRun, format_code: wasmFormat } = await import('./pkg/harn_wasm.js');
+        await init();
+        wasmModule = { run: wasmRun, format: wasmFormat };
+        document.getElementById('status').textContent = 'WASM loaded -- ready to run';
+        document.getElementById('run-btn').textContent = '\u25B6 Run';
+      } catch (e) {
+        document.getElementById('status').textContent = 'WASM not available -- build with: cd crates/harn-wasm && wasm-pack build --target web --out-dir ../../playground/pkg';
+      }
+    }
+
+    function runCode() {
+      const source = document.getElementById('editor').value;
+      const output = document.getElementById('output');
+
+      if (!wasmModule) {
+        output.innerHTML = '<span class="error">WASM module not loaded.\n\nBuild it with:\n  cd crates/harn-wasm &amp;&amp; wasm-pack build --target web --out-dir ../../playground/pkg\n\nThen serve this directory:\n  cd playground &amp;&amp; python3 -m http.server 8080</span>';
+        return;
+      }
+
+      const start = performance.now();
+      const result = wasmModule.run(source);
+      const elapsed = (performance.now() - start).toFixed(1);
+
+      if (result.startsWith('Lexer error:') || result.startsWith('Parse error:') || result.startsWith('Runtime error:') || result.startsWith('Compile error:')) {
+        output.innerHTML = `<span class="error">${escapeHtml(result)}</span>`;
+      } else {
+        output.textContent = result;
+      }
+
+      document.getElementById('status').textContent = `Executed in ${elapsed}ms`;
+    }
+
+    function formatCode() {
+      if (!wasmModule) {
+        document.getElementById('output').innerHTML = '<span class="error">WASM module not loaded.</span>';
+        return;
+      }
+      const source = document.getElementById('editor').value;
+      const result = wasmModule.format(source);
+      if (result.startsWith('Format error:')) {
+        document.getElementById('output').innerHTML = `<span class="error">${escapeHtml(result)}</span>`;
+      } else {
+        document.getElementById('editor').value = result;
+        document.getElementById('status').textContent = 'Code formatted';
+      }
+    }
+
+    function clearOutput() {
+      document.getElementById('output').textContent = '';
+      document.getElementById('status').textContent = 'Ready';
+    }
+
+    function escapeHtml(text) {
+      return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    // Try loading WASM on page load
+    loadWasm();
+  </script>
+</body>
+</html>
