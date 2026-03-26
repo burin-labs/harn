@@ -28,6 +28,14 @@ pub enum Node {
     ImportDecl {
         path: String,
     },
+    EnumDecl {
+        name: String,
+        variants: Vec<EnumVariant>,
+    },
+    StructDecl {
+        name: String,
+        fields: Vec<StructField>,
+    },
 
     // Control flow
     IfElse {
@@ -126,6 +134,18 @@ pub enum Node {
         value: Box<Node>,
     },
 
+    /// Enum variant construction: EnumName.Variant(args)
+    EnumConstruct {
+        enum_name: String,
+        variant: String,
+        args: Vec<Node>,
+    },
+    /// Struct construction: StructName { field: value, ... }
+    StructConstruct {
+        struct_name: String,
+        fields: Vec<DictEntry>,
+    },
+
     // Literals
     InterpolatedString(Vec<StringSegment>),
     StringLiteral(String),
@@ -155,6 +175,21 @@ pub struct MatchArm {
 pub struct DictEntry {
     pub key: Node,
     pub value: Node,
+}
+
+/// An enum variant declaration.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EnumVariant {
+    pub name: String,
+    pub fields: Vec<TypedParam>,
+}
+
+/// A struct field declaration.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StructField {
+    pub name: String,
+    pub type_expr: Option<TypeExpr>,
+    pub optional: bool,
 }
 
 /// A type annotation (optional, for runtime checking).

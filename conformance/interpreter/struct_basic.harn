@@ -1,0 +1,11 @@
+pipeline test(task) {
+  struct Point {
+    x: int
+    y: int
+  }
+
+  // For now, structs are constructed like dicts but tagged
+  let p = {x: 10, y: 20}
+  log(p.x)
+  log(p.y)
+}

@@ -1,0 +1,14 @@
+pipeline test(task) {
+  enum Status {
+    Active
+    Inactive
+    Pending(reason)
+  }
+
+  let s = Status.Pending("waiting for approval")
+  match s.variant {
+    "Active" -> { log("active") }
+    "Inactive" -> { log("inactive") }
+    "Pending" -> { log("pending: ${s.fields[0]}") }
+  }
+}

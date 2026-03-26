@@ -64,6 +64,8 @@ pub enum TokenKind {
     Spawn,
     While,
     TypeKw,
+    Enum,
+    Struct,
 
     // Literals
     Identifier(String),
@@ -140,6 +142,8 @@ impl fmt::Display for TokenKind {
             TokenKind::Spawn => write!(f, "spawn"),
             TokenKind::While => write!(f, "while"),
             TokenKind::TypeKw => write!(f, "type"),
+            TokenKind::Enum => write!(f, "enum"),
+            TokenKind::Struct => write!(f, "struct"),
             TokenKind::Identifier(s) => write!(f, "id({s})"),
             TokenKind::StringLiteral(s) => write!(f, "str({s})"),
             TokenKind::InterpolatedString(_) => write!(f, "istr(...)"),

@@ -390,6 +390,8 @@ impl Lexer {
             "spawn" => TokenKind::Spawn,
             "while" => TokenKind::While,
             "type" => TokenKind::TypeKw,
+            "enum" => TokenKind::Enum,
+            "struct" => TokenKind::Struct,
             _ => TokenKind::Identifier(ident),
         };
 

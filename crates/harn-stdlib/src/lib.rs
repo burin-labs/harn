@@ -41,6 +41,8 @@ pub fn register_stdlib(interp: &mut Interpreter) {
             Value::Dict(_) => "dict",
             Value::Closure { .. } => "closure",
             Value::TaskHandle { .. } => "taskHandle",
+            Value::EnumVariant { .. } => "enum",
+            Value::StructInstance { .. } => "struct",
         };
         Ok(Value::String(type_name.to_string()))
     });

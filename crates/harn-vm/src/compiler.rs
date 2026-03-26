@@ -438,6 +438,10 @@ impl Compiler {
             | Node::ImportDecl { .. }
             | Node::OverrideDecl { .. }
             | Node::TypeDecl { .. }
+            | Node::EnumDecl { .. }
+            | Node::StructDecl { .. }
+            | Node::EnumConstruct { .. }
+            | Node::StructConstruct { .. }
             | Node::Block(_) => {
                 self.chunk.emit(Op::Nil, self.line);
             }

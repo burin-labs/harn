@@ -147,6 +147,8 @@ impl Parser {
             TokenKind::Try => self.parse_try_catch(),
             TokenKind::Fn => self.parse_fn_decl(),
             TokenKind::TypeKw => self.parse_type_decl(),
+            TokenKind::Enum => self.parse_enum_decl(),
+            TokenKind::Struct => self.parse_struct_decl(),
             _ => self.parse_expression_statement(),
         }
     }
@@ -421,6 +423,70 @@ impl Parser {
         self.consume(&TokenKind::Assign, "=")?;
         let type_expr = self.parse_type_expr()?;
         Ok(Node::TypeDecl { name, type_expr })
+    }
+
+    fn parse_enum_decl(&mut self) -> Result<Node, ParserError> {
+        self.consume(&TokenKind::Enum, "enum")?;
+        let name = self.consume_identifier("enum name")?;
+        self.consume(&TokenKind::LBrace, "{")?;
+        self.skip_newlines();
+
+        let mut variants = Vec::new();
+        while !self.is_at_end() && !self.check(&TokenKind::RBrace) {
+            let variant_name = self.consume_identifier("variant name")?;
+            let fields = if self.check(&TokenKind::LParen) {
+                self.advance();
+                let params = self.parse_typed_param_list()?;
+                self.consume(&TokenKind::RParen, ")")?;
+                params
+            } else {
+                Vec::new()
+            };
+            variants.push(EnumVariant {
+                name: variant_name,
+                fields,
+            });
+            self.skip_newlines();
+            if self.check(&TokenKind::Comma) {
+                self.advance();
+                self.skip_newlines();
+            }
+        }
+
+        self.consume(&TokenKind::RBrace, "}")?;
+        Ok(Node::EnumDecl { name, variants })
+    }
+
+    fn parse_struct_decl(&mut self) -> Result<Node, ParserError> {
+        self.consume(&TokenKind::Struct, "struct")?;
+        let name = self.consume_identifier("struct name")?;
+        self.consume(&TokenKind::LBrace, "{")?;
+        self.skip_newlines();
+
+        let mut fields = Vec::new();
+        while !self.is_at_end() && !self.check(&TokenKind::RBrace) {
+            let field_name = self.consume_identifier("field name")?;
+            let optional = if self.check(&TokenKind::Question) {
+                self.advance();
+                true
+            } else {
+                false
+            };
+            let type_expr = self.try_parse_type_annotation()?;
+            fields.push(StructField {
+                name: field_name,
+                type_expr,
+                optional,
+            });
+            self.skip_newlines();
+            if self.check(&TokenKind::Comma) {
+                self.advance();
+                self.skip_newlines();
+            }
+        }
+
+        self.consume(&TokenKind::RBrace, "}")?;
+        Ok(Node::StructDecl { name, fields })
     }
 
     // --- Expressions (precedence climbing) ---

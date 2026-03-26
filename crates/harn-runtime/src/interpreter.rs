@@ -44,6 +44,10 @@ pub struct Interpreter {
     spawned: SpawnedTasks,
     /// Named type declarations (from `type Name = ...`).
     type_registry: BTreeMap<String, harn_parser::TypeExpr>,
+    /// Enum declarations: name → variants.
+    enum_registry: BTreeMap<String, Vec<harn_parser::EnumVariant>>,
+    /// Struct declarations: name → fields.
+    struct_registry: BTreeMap<String, Vec<harn_parser::StructField>>,
 }
 
 impl Default for Interpreter {
@@ -64,6 +68,8 @@ impl Interpreter {
             imported: Vec::new(),
             spawned: Arc::new(Mutex::new(BTreeMap::new())),
             type_registry: BTreeMap::new(),
+            enum_registry: BTreeMap::new(),
+            struct_registry: BTreeMap::new(),
         }
     }
 
@@ -79,6 +85,8 @@ impl Interpreter {
             imported: self.imported.clone(),
             spawned: Arc::clone(&self.spawned),
             type_registry: self.type_registry.clone(),
+            enum_registry: self.enum_registry.clone(),
+            struct_registry: self.struct_registry.clone(),
         }
     }
 
@@ -449,6 +457,48 @@ impl Interpreter {
             Node::TypeDecl { name, type_expr } => {
                 self.type_registry.insert(name.clone(), type_expr.clone());
                 Ok(Value::Nil)
+            }
+
+            Node::EnumDecl { name, variants } => {
+                self.enum_registry.insert(name.clone(), variants.clone());
+                Ok(Value::Nil)
+            }
+
+            Node::StructDecl { name, fields } => {
+                self.struct_registry.insert(name.clone(), fields.clone());
+                Ok(Value::Nil)
+            }
+
+            Node::EnumConstruct {
+                enum_name,
+                variant,
+                args,
+            } => {
+                let mut field_values = Vec::new();
+                for arg in args {
+                    field_values.push(self.eval(arg).await?);
+                }
+                Ok(Value::EnumVariant {
+                    enum_name: enum_name.clone(),
+                    variant: variant.clone(),
+                    fields: field_values,
+                })
+            }
+
+            Node::StructConstruct {
+                struct_name,
+                fields,
+            } => {
+                let mut map = BTreeMap::new();
+                for entry in fields {
+                    let key = self.eval(&entry.key).await?;
+                    let val = self.eval(&entry.value).await?;
+                    map.insert(key.as_string(), val);
+                }
+                Ok(Value::StructInstance {
+                    struct_name: struct_name.clone(),
+                    fields: map,
+                })
             }
 
             Node::Pipeline { .. } | Node::OverrideDecl { .. } => Ok(Value::Nil),
@@ -845,6 +895,15 @@ impl Interpreter {
         let arg_values = self.eval_args(args).await?;
 
         if let Node::Identifier(obj_name) = object {
+            // Enum variant construction: EnumName.Variant(args)
+            if self.enum_registry.contains_key(obj_name) {
+                return Ok(Value::EnumVariant {
+                    enum_name: obj_name.clone(),
+                    variant: method.to_string(),
+                    fields: arg_values,
+                });
+            }
+
             let qualified = format!("{obj_name}.{method}");
             if let Some(builtin) = self.builtins.get(&qualified).cloned() {
                 return builtin(&arg_values, &mut self.output);
@@ -858,6 +917,15 @@ impl Interpreter {
             Value::String(s) => self.eval_string_method(&s, method, &arg_values),
             Value::List(items) => self.eval_list_method(&items, method, &arg_values).await,
             Value::Dict(map) => self.eval_dict_method(&map, method, &arg_values).await,
+            // Enum variant field access
+            Value::EnumVariant { fields, .. } => {
+                if method == "fields" {
+                    Ok(Value::List(fields))
+                } else {
+                    Ok(Value::Nil)
+                }
+            }
+            // Struct field access is handled by PropertyAccess, not MethodCall
             _ => Ok(Value::Nil),
         }
     }
@@ -1075,6 +1143,17 @@ impl Interpreter {
         object: &Node,
         property: &str,
     ) -> Result<Value, RuntimeError> {
+        // Check for enum variant construction without args: EnumName.Variant
+        if let Node::Identifier(name) = object {
+            if self.enum_registry.contains_key(name) {
+                return Ok(Value::EnumVariant {
+                    enum_name: name.clone(),
+                    variant: property.to_string(),
+                    fields: Vec::new(),
+                });
+            }
+        }
+
         let obj = self.eval(object).await?;
         match &obj {
             Value::Dict(map) => Ok(map.get(property).cloned().unwrap_or(Value::Nil)),
@@ -1088,6 +1167,18 @@ impl Interpreter {
             Value::String(s) => match property {
                 "count" => Ok(Value::Int(s.chars().count() as i64)),
                 "empty" => Ok(Value::Bool(s.is_empty())),
+                _ => Ok(Value::Nil),
+            },
+            // Struct instance field access
+            Value::StructInstance { fields, .. } => {
+                Ok(fields.get(property).cloned().unwrap_or(Value::Nil))
+            }
+            // Enum variant: access variant name or fields
+            Value::EnumVariant {
+                variant, fields, ..
+            } => match property {
+                "variant" => Ok(Value::String(variant.clone())),
+                "fields" => Ok(Value::List(fields.clone())),
                 _ => Ok(Value::Nil),
             },
             _ => Ok(Value::Nil),

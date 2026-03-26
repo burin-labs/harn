@@ -1,0 +1,5 @@
+[harn] Result.Ok(42)
+[harn] Ok
+[harn] Result.Err(something went wrong)
+[harn] Err
+[harn] [something went wrong]

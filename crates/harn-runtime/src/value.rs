@@ -24,6 +24,17 @@ pub enum Value {
     TaskHandle {
         id: String,
     },
+    /// An enum variant value: EnumName.Variant(fields...)
+    EnumVariant {
+        enum_name: String,
+        variant: String,
+        fields: Vec<Value>,
+    },
+    /// A struct instance: StructName { field: value, ... }
+    StructInstance {
+        struct_name: String,
+        fields: BTreeMap<String, Value>,
+    },
 }
 
 impl Value {
@@ -38,6 +49,8 @@ impl Value {
             Value::Dict(map) => !map.is_empty(),
             Value::Closure { .. } => true,
             Value::TaskHandle { .. } => true,
+            Value::EnumVariant { .. } => true,
+            Value::StructInstance { fields, .. } => !fields.is_empty(),
         }
     }
 
@@ -113,6 +126,25 @@ impl fmt::Display for Value {
                 write!(f, "<fn({})>", params.join(", "))
             }
             Value::TaskHandle { id } => write!(f, "<task:{id}>"),
+            Value::EnumVariant {
+                enum_name,
+                variant,
+                fields,
+            } => {
+                if fields.is_empty() {
+                    write!(f, "{enum_name}.{variant}")
+                } else {
+                    let inner: Vec<String> = fields.iter().map(|v| v.to_string()).collect();
+                    write!(f, "{enum_name}.{variant}({})", inner.join(", "))
+                }
+            }
+            Value::StructInstance {
+                struct_name,
+                fields,
+            } => {
+                let inner: Vec<String> = fields.iter().map(|(k, v)| format!("{k}: {v}")).collect();
+                write!(f, "{struct_name} {{{}}}", inner.join(", "))
+            }
         }
     }
 }
@@ -129,6 +161,28 @@ impl PartialEq for Value {
             (Value::Dict(a), Value::Dict(b)) => a == b,
             (Value::Closure { .. }, Value::Closure { .. }) => false,
             (Value::TaskHandle { id: a }, Value::TaskHandle { id: b }) => a == b,
+            (
+                Value::EnumVariant {
+                    enum_name: a,
+                    variant: b,
+                    fields: c,
+                },
+                Value::EnumVariant {
+                    enum_name: d,
+                    variant: e,
+                    fields: f,
+                },
+            ) => a == d && b == e && c == f,
+            (
+                Value::StructInstance {
+                    struct_name: a,
+                    fields: b,
+                },
+                Value::StructInstance {
+                    struct_name: c,
+                    fields: d,
+                },
+            ) => a == c && b == d,
             _ => false,
         }
     }
@@ -144,6 +198,33 @@ pub fn values_equal(a: &Value, b: &Value) -> bool {
         (Value::Nil, Value::Nil) => true,
         (Value::Int(x), Value::Float(y)) => (*x as f64) == *y,
         (Value::Float(x), Value::Int(y)) => *x == (*y as f64),
+        (
+            Value::EnumVariant {
+                enum_name: a_e,
+                variant: a_v,
+                fields: a_f,
+            },
+            Value::EnumVariant {
+                enum_name: b_e,
+                variant: b_v,
+                fields: b_f,
+            },
+        ) => {
+            a_e == b_e
+                && a_v == b_v
+                && a_f.len() == b_f.len()
+                && a_f.iter().zip(b_f.iter()).all(|(x, y)| values_equal(x, y))
+        }
+        (
+            Value::StructInstance {
+                struct_name: a_s,
+                fields: a_f,
+            },
+            Value::StructInstance {
+                struct_name: b_s,
+                fields: b_f,
+            },
+        ) => a_s == b_s && a_f == b_f,
         _ => false,
     }
 }
@@ -269,6 +350,8 @@ pub fn value_type_name(value: &Value) -> &'static str {
         Value::Dict(_) => "dict",
         Value::Closure { .. } => "closure",
         Value::TaskHandle { .. } => "taskHandle",
+        Value::EnumVariant { .. } => "enum",
+        Value::StructInstance { .. } => "struct",
     }
 }
 

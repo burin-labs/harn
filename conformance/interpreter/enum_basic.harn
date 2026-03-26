@@ -1,0 +1,12 @@
+pipeline test(task) {
+  enum Color {
+    Red
+    Green
+    Blue
+  }
+
+  let c = Color.Red
+  log(c)
+  log(c == Color.Red)
+  log(c == Color.Blue)
+}
