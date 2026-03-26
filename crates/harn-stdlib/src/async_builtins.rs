@@ -122,4 +122,30 @@ pub fn register_async_builtins(interp: &mut Interpreter) {
         }
         Ok(Value::Nil)
     });
+
+    // atomic_set(a, value) — returns new atomic with updated value
+    interp.register_builtin("atomic_set", |args, _out| {
+        if args.len() >= 2 {
+            if let Value::Dict(map) = &args[0] {
+                let mut new_map = map.clone();
+                new_map.insert("value".to_string(), args[1].clone());
+                return Ok(Value::Dict(new_map));
+            }
+        }
+        Ok(Value::Nil)
+    });
+
+    // atomic_add(a, n) — returns new atomic with value incremented by n
+    interp.register_builtin("atomic_add", |args, _out| {
+        if args.len() >= 2 {
+            if let Value::Dict(map) = &args[0] {
+                let current = map.get("value").and_then(|v| v.as_int()).unwrap_or(0);
+                let delta = args[1].as_int().unwrap_or(0);
+                let mut new_map = map.clone();
+                new_map.insert("value".to_string(), Value::Int(current + delta));
+                return Ok(Value::Dict(new_map));
+            }
+        }
+        Ok(Value::Nil)
+    });
 }

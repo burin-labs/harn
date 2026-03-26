@@ -343,15 +343,28 @@ impl Compiler {
                             part_count += 1;
                         }
                         StringSegment::Expression(expr_str) => {
-                            // For interpolated expressions, we need to parse and compile them
-                            // For the VM, we store the expression source as a constant
-                            // and evaluate it at runtime (same approach as the tree-walker)
-                            let idx = self.chunk.add_constant(Constant::String(expr_str.clone()));
-                            self.chunk.emit_u16(Op::Constant, idx, self.line);
-                            part_count += 1;
-                            // Mark that this part needs expression evaluation
-                            // For now, we do string concat of the parts
-                            // TODO: proper interpolation in VM requires sub-compilation
+                            // Parse and compile the embedded expression
+                            let mut lexer = harn_lexer::Lexer::new(expr_str);
+                            if let Ok(tokens) = lexer.tokenize() {
+                                let mut parser = harn_parser::Parser::new(tokens);
+                                if let Ok(node) = parser.parse_single_expression() {
+                                    self.compile_node(&node)?;
+                                    // Convert result to string for concatenation
+                                    let to_str = self
+                                        .chunk
+                                        .add_constant(Constant::String("to_string".into()));
+                                    self.chunk.emit_u16(Op::Constant, to_str, self.line);
+                                    self.chunk.emit(Op::Swap, self.line);
+                                    self.chunk.emit_u8(Op::Call, 1, self.line);
+                                    part_count += 1;
+                                } else {
+                                    // Fallback: treat as literal string
+                                    let idx =
+                                        self.chunk.add_constant(Constant::String(expr_str.clone()));
+                                    self.chunk.emit_u16(Op::Constant, idx, self.line);
+                                    part_count += 1;
+                                }
+                            }
                         }
                     }
                 }

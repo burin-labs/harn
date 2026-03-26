@@ -706,11 +706,11 @@ impl Parser {
             || self.check(&TokenKind::Lte)
             || self.check(&TokenKind::Gte)
         {
-            let op = match self.current().unwrap().kind {
-                TokenKind::Lt => "<",
-                TokenKind::Gt => ">",
-                TokenKind::Lte => "<=",
-                TokenKind::Gte => ">=",
+            let op = match self.current().map(|t| &t.kind) {
+                Some(TokenKind::Lt) => "<",
+                Some(TokenKind::Gt) => ">",
+                Some(TokenKind::Lte) => "<=",
+                Some(TokenKind::Gte) => ">=",
                 _ => "<",
             };
             self.advance();
