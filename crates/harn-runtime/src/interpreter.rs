@@ -6,11 +6,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use harn_lexer::{Lexer, StringSegment};
-use harn_parser::{MatchArm, Node, Parser};
+use harn_parser::{MatchArm, Node, Parser, TypedParam};
 
 use crate::environment::Environment;
 use crate::error::RuntimeError;
-use crate::value::{compare_values, values_equal, Value};
+use crate::value::{check_type_with_registry, compare_values, values_equal, Value};
 
 /// Sync builtin function signature.
 pub type BuiltinFn =
@@ -42,6 +42,8 @@ pub struct Interpreter {
     imported: Vec<PathBuf>,
     /// Spawned task handles.
     spawned: SpawnedTasks,
+    /// Named type declarations (from `type Name = ...`).
+    type_registry: BTreeMap<String, harn_parser::TypeExpr>,
 }
 
 impl Default for Interpreter {
@@ -61,11 +63,11 @@ impl Interpreter {
             source_dir: PathBuf::from("."),
             imported: Vec::new(),
             spawned: Arc::new(Mutex::new(BTreeMap::new())),
+            type_registry: BTreeMap::new(),
         }
     }
 
     /// Create a child interpreter for parallel/spawn tasks.
-    /// Shares builtins and spawned-task registry, gets an isolated env and output.
     fn child_interpreter(&self, child_env: Environment) -> Self {
         Self {
             env: child_env,
@@ -76,6 +78,7 @@ impl Interpreter {
             source_dir: self.source_dir.clone(),
             imported: self.imported.clone(),
             spawned: Arc::clone(&self.spawned),
+            type_registry: self.type_registry.clone(),
         }
     }
 
@@ -222,14 +225,40 @@ impl Interpreter {
 
     async fn eval_inner(&mut self, node: &Node) -> Result<Value, RuntimeError> {
         match node {
-            Node::LetBinding { name, value } => {
+            Node::LetBinding {
+                name,
+                type_ann,
+                value,
+            } => {
                 let val = self.eval(value).await?;
+                if let Some(type_expr) = type_ann {
+                    check_type_with_registry(
+                        &val,
+                        type_expr,
+                        &format!("let {name}"),
+                        &self.type_registry,
+                    )
+                    .map_err(RuntimeError::thrown)?;
+                }
                 self.env.define(name, val, false);
                 Ok(Value::Nil)
             }
 
-            Node::VarBinding { name, value } => {
+            Node::VarBinding {
+                name,
+                type_ann,
+                value,
+            } => {
                 let val = self.eval(value).await?;
+                if let Some(type_expr) = type_ann {
+                    check_type_with_registry(
+                        &val,
+                        type_expr,
+                        &format!("var {name}"),
+                        &self.type_registry,
+                    )
+                    .map_err(RuntimeError::thrown)?;
+                }
                 self.env.define(name, val, true);
                 Ok(Value::Nil)
             }
@@ -383,7 +412,9 @@ impl Interpreter {
             }
 
             Node::Closure { params, body } => Ok(Value::Closure {
-                params: params.clone(),
+                params: TypedParam::names(params),
+                param_types: params.iter().map(|p| p.type_expr.clone()).collect(),
+                return_type: None,
                 body: body.clone(),
                 env: self.env.clone(),
             }),
@@ -394,9 +425,16 @@ impl Interpreter {
                 catch_body,
             } => self.eval_try_catch(body, error_var, catch_body).await,
 
-            Node::FnDecl { name, params, body } => {
+            Node::FnDecl {
+                name,
+                params,
+                return_type,
+                body,
+            } => {
                 let fn_value = Value::Closure {
-                    params: params.clone(),
+                    params: TypedParam::names(params),
+                    param_types: params.iter().map(|p| p.type_expr.clone()).collect(),
+                    return_type: return_type.clone(),
                     body: body.clone(),
                     env: self.env.clone(),
                 };
@@ -407,6 +445,11 @@ impl Interpreter {
             Node::SpawnExpr { body } => self.eval_spawn(body),
 
             Node::ImportDecl { path } => self.eval_import(path).await,
+
+            Node::TypeDecl { name, type_expr } => {
+                self.type_registry.insert(name.clone(), type_expr.clone());
+                Ok(Value::Nil)
+            }
 
             Node::Pipeline { .. } | Node::OverrideDecl { .. } => Ok(Value::Nil),
         }
@@ -681,9 +724,42 @@ impl Interpreter {
         args: &[Node],
     ) -> Result<Value, RuntimeError> {
         // Check for user-defined function (closure) first
-        if let Some(Value::Closure { params, body, env }) = self.env.get(name) {
+        if let Some(Value::Closure {
+            params,
+            param_types,
+            return_type,
+            body,
+            env,
+        }) = self.env.get(name)
+        {
             let arg_values = self.eval_args(args).await?;
-            return self.invoke_closure(&params, &body, &env, &arg_values).await;
+            // Runtime type check on arguments
+            for (i, (val, type_opt)) in arg_values.iter().zip(param_types.iter()).enumerate() {
+                if let Some(type_expr) = type_opt {
+                    let param_name = params.get(i).map(|s| s.as_str()).unwrap_or("?");
+                    check_type_with_registry(
+                        val,
+                        type_expr,
+                        &format!("parameter '{param_name}'"),
+                        &self.type_registry,
+                    )
+                    .map_err(RuntimeError::thrown)?;
+                }
+            }
+            let result = self
+                .invoke_closure(&params, &body, &env, &arg_values)
+                .await?;
+            // Runtime type check on return value
+            if let Some(ref ret_type) = return_type {
+                check_type_with_registry(
+                    &result,
+                    ret_type,
+                    &format!("return value of '{name}'"),
+                    &self.type_registry,
+                )
+                .map_err(RuntimeError::thrown)?;
+            }
+            return Ok(result);
         }
 
         // Built-in interpreter functions: await, cancel
@@ -873,7 +949,10 @@ impl Interpreter {
             }
             "reduce" => {
                 if args.len() >= 2 {
-                    if let Value::Closure { params, body, env } = &args[1] {
+                    if let Value::Closure {
+                        params, body, env, ..
+                    } = &args[1]
+                    {
                         let mut acc = args[0].clone();
                         for item in items {
                             acc = self
@@ -1026,7 +1105,10 @@ impl Interpreter {
         if op == "|>" {
             let left_val = self.eval(left).await?;
             let right_val = self.eval(right).await?;
-            if let Value::Closure { params, body, env } = &right_val {
+            if let Value::Closure {
+                params, body, env, ..
+            } = &right_val
+            {
                 return self.invoke_closure(params, body, env, &[left_val]).await;
             }
             if let Node::Identifier(name) = right {
@@ -1036,7 +1118,10 @@ impl Interpreter {
                 if let Some(builtin) = self.async_builtins.get(name.as_str()).cloned() {
                     return builtin(vec![left_val]).await;
                 }
-                if let Some(Value::Closure { params, body, env }) = self.env.get(name) {
+                if let Some(Value::Closure {
+                    params, body, env, ..
+                }) = self.env.get(name)
+                {
                     return self.invoke_closure(&params, &body, &env, &[left_val]).await;
                 }
             }
@@ -1179,7 +1264,9 @@ fn arg_string(args: &[Value], index: usize) -> String {
 
 fn require_closure(args: &[Value]) -> Result<(&[String], &[Node], &Environment), RuntimeError> {
     match args.first() {
-        Some(Value::Closure { params, body, env }) => Ok((params, body, env)),
+        Some(Value::Closure {
+            params, body, env, ..
+        }) => Ok((params, body, env)),
         _ => Err(RuntimeError::TypeMismatch {
             expected: "closure".to_string(),
             got: args.first().cloned().unwrap_or(Value::Nil),

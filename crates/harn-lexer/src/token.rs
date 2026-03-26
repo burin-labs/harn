@@ -63,6 +63,7 @@ pub enum TokenKind {
     Fn,
     Spawn,
     While,
+    TypeKw,
 
     // Literals
     Identifier(String),
@@ -93,6 +94,7 @@ pub enum TokenKind {
     Lt,       // <
     Gt,       // >
     Question, // ?
+    Bar,      // |  (for union types)
 
     // Delimiters
     LBrace,    // {
@@ -137,6 +139,7 @@ impl fmt::Display for TokenKind {
             TokenKind::Fn => write!(f, "fn"),
             TokenKind::Spawn => write!(f, "spawn"),
             TokenKind::While => write!(f, "while"),
+            TokenKind::TypeKw => write!(f, "type"),
             TokenKind::Identifier(s) => write!(f, "id({s})"),
             TokenKind::StringLiteral(s) => write!(f, "str({s})"),
             TokenKind::InterpolatedString(_) => write!(f, "istr(...)"),
@@ -161,6 +164,7 @@ impl fmt::Display for TokenKind {
             TokenKind::Lt => write!(f, "<"),
             TokenKind::Gt => write!(f, ">"),
             TokenKind::Question => write!(f, "?"),
+            TokenKind::Bar => write!(f, "|"),
             TokenKind::LBrace => write!(f, "{{"),
             TokenKind::RBrace => write!(f, "}}"),
             TokenKind::LParen => write!(f, "("),

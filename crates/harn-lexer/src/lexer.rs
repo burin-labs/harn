@@ -389,6 +389,7 @@ impl Lexer {
             "fn" => TokenKind::Fn,
             "spawn" => TokenKind::Spawn,
             "while" => TokenKind::While,
+            "type" => TokenKind::TypeKw,
             _ => TokenKind::Identifier(ident),
         };
 
@@ -442,6 +443,7 @@ impl Lexer {
             '<' => Some(TokenKind::Lt),
             '>' => Some(TokenKind::Gt),
             '?' => Some(TokenKind::Question),
+            '|' => Some(TokenKind::Bar),
             _ => None,
         }
     }

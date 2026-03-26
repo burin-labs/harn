@@ -1,0 +1,6 @@
+pipeline test(task) {
+  fn get_name() -> int {
+    return "not an int"
+  }
+  get_name()
+}

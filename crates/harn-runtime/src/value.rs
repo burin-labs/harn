@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::environment::Environment;
-use harn_parser::Node;
+use harn_parser::{Node, TypeExpr};
 
 /// Runtime values in the Harn interpreter.
 #[derive(Debug, Clone)]
@@ -16,6 +16,8 @@ pub enum Value {
     Dict(BTreeMap<String, Value>),
     Closure {
         params: Vec<String>,
+        param_types: Vec<Option<TypeExpr>>,
+        return_type: Option<TypeExpr>,
         body: Vec<Node>,
         env: Environment,
     },
@@ -166,5 +168,119 @@ fn cmp_f64(a: f64, b: f64) -> i32 {
         1
     } else {
         0
+    }
+}
+
+/// Check if a value matches a type expression. Returns Ok(()) or an error message.
+/// `type_registry` maps named types to their definitions (from `type Name = ...`).
+pub fn check_type(value: &Value, type_expr: &TypeExpr, context: &str) -> Result<(), String> {
+    check_type_with_registry(value, type_expr, context, &BTreeMap::new())
+}
+
+/// Check type with a type registry for resolving named type aliases.
+pub fn check_type_with_registry(
+    value: &Value,
+    type_expr: &TypeExpr,
+    context: &str,
+    registry: &BTreeMap<String, TypeExpr>,
+) -> Result<(), String> {
+    match type_expr {
+        TypeExpr::Named(name) => {
+            // Check if it's a user-defined type alias
+            if let Some(resolved) = registry.get(name) {
+                return check_type_with_registry(value, resolved, context, registry);
+            }
+            let actual = value_type_name(value);
+            if actual == name.as_str() {
+                Ok(())
+            } else {
+                Err(format!(
+                    "Type error at {context}: expected {name}, got {actual}"
+                ))
+            }
+        }
+        TypeExpr::Union(types) => {
+            for t in types {
+                if check_type_with_registry(value, t, context, registry).is_ok() {
+                    return Ok(());
+                }
+            }
+            let expected: Vec<String> = types.iter().map(type_expr_name).collect();
+            Err(format!(
+                "Type error at {context}: expected {}, got {}",
+                expected.join(" | "),
+                value_type_name(value)
+            ))
+        }
+        TypeExpr::Shape(fields) => {
+            let map = match value {
+                Value::Dict(map) => map,
+                _ => {
+                    return Err(format!(
+                        "Type error at {context}: expected dict shape, got {}",
+                        value_type_name(value)
+                    ))
+                }
+            };
+            for field in fields {
+                match map.get(&field.name) {
+                    Some(val) => check_type_with_registry(
+                        val,
+                        &field.type_expr,
+                        &format!("{context}.{}", field.name),
+                        registry,
+                    )?,
+                    None if field.optional => {} // OK, optional field absent
+                    None => {
+                        return Err(format!(
+                            "Type error at {context}: missing required field '{}'",
+                            field.name
+                        ))
+                    }
+                }
+            }
+            Ok(())
+        }
+        TypeExpr::List(inner) => {
+            if let Value::List(items) = value {
+                for (i, item) in items.iter().enumerate() {
+                    check_type_with_registry(item, inner, &format!("{context}[{i}]"), registry)?;
+                }
+                Ok(())
+            } else {
+                Err(format!(
+                    "Type error at {context}: expected list, got {}",
+                    value_type_name(value)
+                ))
+            }
+        }
+    }
+}
+
+/// Get the type name of a runtime value.
+pub fn value_type_name(value: &Value) -> &'static str {
+    match value {
+        Value::String(_) => "string",
+        Value::Int(_) => "int",
+        Value::Float(_) => "float",
+        Value::Bool(_) => "bool",
+        Value::Nil => "nil",
+        Value::List(_) => "list",
+        Value::Dict(_) => "dict",
+        Value::Closure { .. } => "closure",
+        Value::TaskHandle { .. } => "taskHandle",
+    }
+}
+
+fn type_expr_name(t: &TypeExpr) -> String {
+    match t {
+        TypeExpr::Named(n) => n.clone(),
+        TypeExpr::Union(types) => types
+            .iter()
+            .map(type_expr_name)
+            .collect::<Vec<_>>()
+            .join(" | "),
+        TypeExpr::Shape(_) => "{...}".to_string(),
+        TypeExpr::List(inner) => format!("list[{}]", type_expr_name(inner)),
     }
 }

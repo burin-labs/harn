@@ -1,5 +1,5 @@
 use harn_lexer::StringSegment;
-use harn_parser::Node;
+use harn_parser::{Node, TypedParam};
 
 use crate::chunk::{Chunk, CompiledFunction, Constant, Op};
 
@@ -87,13 +87,13 @@ impl Compiler {
                 self.chunk.emit_u16(Op::GetVar, idx, self.line);
             }
 
-            Node::LetBinding { name, value } => {
+            Node::LetBinding { name, value, .. } => {
                 self.compile_node(value)?;
                 let idx = self.chunk.add_constant(Constant::String(name.clone()));
                 self.chunk.emit_u16(Op::DefLet, idx, self.line);
             }
 
-            Node::VarBinding { name, value } => {
+            Node::VarBinding { name, value, .. } => {
                 self.compile_node(value)?;
                 let idx = self.chunk.add_constant(Constant::String(name.clone()));
                 self.chunk.emit_u16(Op::DefVar, idx, self.line);
@@ -360,7 +360,9 @@ impl Compiler {
                 }
             }
 
-            Node::FnDecl { name, params, body } => {
+            Node::FnDecl {
+                name, params, body, ..
+            } => {
                 // Compile function body into a separate chunk
                 let mut fn_compiler = Compiler::new();
                 fn_compiler.compile_block(body)?;
@@ -369,7 +371,7 @@ impl Compiler {
 
                 let func = CompiledFunction {
                     name: name.clone(),
-                    params: params.clone(),
+                    params: TypedParam::names(params),
                     chunk: fn_compiler.chunk,
                 };
                 let fn_idx = self.chunk.functions.len();
@@ -388,7 +390,7 @@ impl Compiler {
 
                 let func = CompiledFunction {
                     name: "<closure>".to_string(),
-                    params: params.clone(),
+                    params: TypedParam::names(params),
                     chunk: fn_compiler.chunk,
                 };
                 let fn_idx = self.chunk.functions.len();
@@ -435,6 +437,7 @@ impl Compiler {
             Node::Pipeline { .. }
             | Node::ImportDecl { .. }
             | Node::OverrideDecl { .. }
+            | Node::TypeDecl { .. }
             | Node::Block(_) => {
                 self.chunk.emit(Op::Nil, self.line);
             }

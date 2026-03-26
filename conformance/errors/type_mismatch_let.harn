@@ -1,0 +1,3 @@
+pipeline test(task) {
+  let x: int = "not an int"
+}

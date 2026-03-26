@@ -146,6 +146,7 @@ impl Parser {
             TokenKind::Override => self.parse_override(),
             TokenKind::Try => self.parse_try_catch(),
             TokenKind::Fn => self.parse_fn_decl(),
+            TokenKind::TypeKw => self.parse_type_decl(),
             _ => self.parse_expression_statement(),
         }
     }
@@ -153,10 +154,12 @@ impl Parser {
     fn parse_let_binding(&mut self) -> Result<Node, ParserError> {
         self.consume(&TokenKind::Let, "let")?;
         let name = self.consume_identifier("variable name")?;
+        let type_ann = self.try_parse_type_annotation()?;
         self.consume(&TokenKind::Assign, "=")?;
         let value = self.parse_expression()?;
         Ok(Node::LetBinding {
             name,
+            type_ann,
             value: Box::new(value),
         })
     }
@@ -164,10 +167,12 @@ impl Parser {
     fn parse_var_binding(&mut self) -> Result<Node, ParserError> {
         self.consume(&TokenKind::Var, "var")?;
         let name = self.consume_identifier("variable name")?;
+        let type_ann = self.try_parse_type_annotation()?;
         self.consume(&TokenKind::Assign, "=")?;
         let value = self.parse_expression()?;
         Ok(Node::VarBinding {
             name,
+            type_ann,
             value: Box::new(value),
         })
     }
@@ -390,12 +395,32 @@ impl Parser {
         self.consume(&TokenKind::Fn, "fn")?;
         let name = self.consume_identifier("function name")?;
         self.consume(&TokenKind::LParen, "(")?;
-        let params = self.parse_param_list()?;
+        let params = self.parse_typed_param_list()?;
         self.consume(&TokenKind::RParen, ")")?;
+        // Optional return type: -> type
+        let return_type = if self.check(&TokenKind::Arrow) {
+            self.advance();
+            Some(self.parse_type_expr()?)
+        } else {
+            None
+        };
         self.consume(&TokenKind::LBrace, "{")?;
         let body = self.parse_block()?;
         self.consume(&TokenKind::RBrace, "}")?;
-        Ok(Node::FnDecl { name, params, body })
+        Ok(Node::FnDecl {
+            name,
+            params,
+            return_type,
+            body,
+        })
+    }
+
+    fn parse_type_decl(&mut self) -> Result<Node, ParserError> {
+        self.consume(&TokenKind::TypeKw, "type")?;
+        let name = self.consume_identifier("type name")?;
+        self.consume(&TokenKind::Assign, "=")?;
+        let type_expr = self.parse_type_expr()?;
+        Ok(Node::TypeDecl { name, type_expr })
     }
 
     // --- Expressions (precedence climbing) ---
@@ -736,65 +761,67 @@ impl Parser {
             return Ok(Node::DictLiteral(Vec::new()));
         }
 
+        // Lookahead: scan for -> before } to disambiguate closure from dict.
+        // { ident -> ...} or { ident, ident -> ... } or { ident: type -> ... } = closure
+        // { ident: expr, ... } = dict
         let saved = self.pos;
-        if let Some(tok) = self.current() {
-            if let TokenKind::Identifier(name) = &tok.kind {
-                let name = name.clone();
-                let next = self.peek_kind();
-
-                if next == Some(&TokenKind::Arrow) {
-                    // Single-param closure: { param -> body }
-                    self.advance(); // skip identifier
-                    self.advance(); // skip ->
-                    let body = self.parse_block()?;
-                    self.consume(&TokenKind::RBrace, "}")?;
-                    return Ok(Node::Closure {
-                        params: vec![name],
-                        body,
-                    });
-                }
-
-                if next == Some(&TokenKind::Comma) {
-                    // Try multi-param closure: { a, b -> body }
-                    let mut params = vec![name];
-                    self.advance(); // skip first identifier
-                    while self.check(&TokenKind::Comma) {
-                        self.advance(); // skip comma
-                        self.skip_newlines();
-                        if let Some(tok) = self.current() {
-                            if let TokenKind::Identifier(p) = &tok.kind {
-                                params.push(p.clone());
-                                self.advance();
-                            } else {
-                                // Not a closure — restore
-                                self.pos = saved;
-                                return self.parse_dict_literal();
-                            }
-                        } else {
-                            self.pos = saved;
-                            return self.parse_dict_literal();
-                        }
-                    }
-                    if self.check(&TokenKind::Arrow) {
-                        self.advance(); // skip ->
-                        let body = self.parse_block()?;
-                        self.consume(&TokenKind::RBrace, "}")?;
-                        return Ok(Node::Closure { params, body });
-                    }
-                    // Not a closure — restore
-                    self.pos = saved;
-                    return self.parse_dict_literal();
-                }
-
-                if next == Some(&TokenKind::Colon) {
-                    self.pos = saved;
-                    return self.parse_dict_literal();
-                }
-            }
+        if self.is_closure_lookahead() {
+            self.pos = saved;
+            return self.parse_closure_body();
         }
-
         self.pos = saved;
         self.parse_dict_literal()
+    }
+
+    /// Scan forward to determine if this is a closure (has -> before matching }).
+    /// Does not consume tokens (caller saves/restores pos).
+    fn is_closure_lookahead(&mut self) -> bool {
+        let mut depth = 0;
+        while !self.is_at_end() {
+            if let Some(tok) = self.current() {
+                match &tok.kind {
+                    TokenKind::Arrow if depth == 0 => return true,
+                    TokenKind::LBrace | TokenKind::LParen | TokenKind::LBracket => depth += 1,
+                    TokenKind::RBrace if depth == 0 => return false,
+                    TokenKind::RBrace => depth -= 1,
+                    TokenKind::RParen | TokenKind::RBracket => {
+                        if depth > 0 {
+                            depth -= 1;
+                        }
+                    }
+                    _ => {}
+                }
+                self.advance();
+            } else {
+                return false;
+            }
+        }
+        false
+    }
+
+    /// Parse closure params and body (after opening { has been consumed).
+    fn parse_closure_body(&mut self) -> Result<Node, ParserError> {
+        let params = self.parse_typed_param_list_until_arrow()?;
+        self.consume(&TokenKind::Arrow, "->")?;
+        let body = self.parse_block()?;
+        self.consume(&TokenKind::RBrace, "}")?;
+        Ok(Node::Closure { params, body })
+    }
+
+    /// Parse typed params until we see ->. Handles: `x`, `x: int`, `x, y`, `x: int, y: string`.
+    fn parse_typed_param_list_until_arrow(&mut self) -> Result<Vec<TypedParam>, ParserError> {
+        let mut params = Vec::new();
+        self.skip_newlines();
+        while !self.is_at_end() && !self.check(&TokenKind::Arrow) {
+            let name = self.consume_identifier("parameter name")?;
+            let type_expr = self.try_parse_type_annotation()?;
+            params.push(TypedParam { name, type_expr });
+            if self.check(&TokenKind::Comma) {
+                self.advance();
+                self.skip_newlines();
+            }
+        }
+        Ok(params)
     }
 
     fn parse_dict_literal(&mut self) -> Result<Node, ParserError> {
@@ -829,6 +856,7 @@ impl Parser {
 
     // --- Helpers ---
 
+    /// Parse untyped parameter list (for pipelines, overrides).
     fn parse_param_list(&mut self) -> Result<Vec<String>, ParserError> {
         let mut params = Vec::new();
         self.skip_newlines();
@@ -841,6 +869,111 @@ impl Parser {
             }
         }
         Ok(params)
+    }
+
+    /// Parse typed parameter list (for fn declarations).
+    fn parse_typed_param_list(&mut self) -> Result<Vec<TypedParam>, ParserError> {
+        let mut params = Vec::new();
+        self.skip_newlines();
+
+        while !self.is_at_end() && !self.check(&TokenKind::RParen) {
+            let name = self.consume_identifier("parameter name")?;
+            let type_expr = self.try_parse_type_annotation()?;
+            params.push(TypedParam { name, type_expr });
+            if self.check(&TokenKind::Comma) {
+                self.advance();
+                self.skip_newlines();
+            }
+        }
+        Ok(params)
+    }
+
+    /// Try to parse an optional type annotation (`: type`).
+    /// Returns None if no colon follows.
+    fn try_parse_type_annotation(&mut self) -> Result<Option<TypeExpr>, ParserError> {
+        if !self.check(&TokenKind::Colon) {
+            return Ok(None);
+        }
+        self.advance(); // skip :
+        Ok(Some(self.parse_type_expr()?))
+    }
+
+    /// Parse a type expression: `int`, `string | nil`, `{name: string, age?: int}`.
+    fn parse_type_expr(&mut self) -> Result<TypeExpr, ParserError> {
+        self.skip_newlines();
+        let first = self.parse_type_primary()?;
+
+        // Check for union: type | type | ...
+        if self.check(&TokenKind::Bar) {
+            let mut types = vec![first];
+            while self.check(&TokenKind::Bar) {
+                self.advance(); // skip |
+                types.push(self.parse_type_primary()?);
+            }
+            return Ok(TypeExpr::Union(types));
+        }
+
+        Ok(first)
+    }
+
+    /// Parse a primary type: named type or shape type.
+    /// Accepts identifiers and certain keywords (nil, bool, etc.) as type names.
+    fn parse_type_primary(&mut self) -> Result<TypeExpr, ParserError> {
+        self.skip_newlines();
+        if self.check(&TokenKind::LBrace) {
+            return self.parse_shape_type();
+        }
+        // Accept keyword type names: nil, true, false map to their type names
+        if let Some(tok) = self.current() {
+            let type_name = match &tok.kind {
+                TokenKind::Nil => {
+                    self.advance();
+                    return Ok(TypeExpr::Named("nil".to_string()));
+                }
+                TokenKind::True | TokenKind::False => {
+                    self.advance();
+                    return Ok(TypeExpr::Named("bool".to_string()));
+                }
+                _ => None,
+            };
+            if let Some(name) = type_name {
+                return Ok(TypeExpr::Named(name));
+            }
+        }
+        let name = self.consume_identifier("type name")?;
+        Ok(TypeExpr::Named(name))
+    }
+
+    /// Parse a shape type: `{ name: string, age: int, active?: bool }`.
+    fn parse_shape_type(&mut self) -> Result<TypeExpr, ParserError> {
+        self.consume(&TokenKind::LBrace, "{")?;
+        let mut fields = Vec::new();
+        self.skip_newlines();
+
+        while !self.is_at_end() && !self.check(&TokenKind::RBrace) {
+            let name = self.consume_identifier("field name")?;
+            let optional = if self.check(&TokenKind::Question) {
+                self.advance();
+                true
+            } else {
+                false
+            };
+            self.consume(&TokenKind::Colon, ":")?;
+            let type_expr = self.parse_type_expr()?;
+            fields.push(ShapeField {
+                name,
+                type_expr,
+                optional,
+            });
+            self.skip_newlines();
+            if self.check(&TokenKind::Comma) {
+                self.advance();
+                self.skip_newlines();
+            }
+        }
+
+        self.consume(&TokenKind::RBrace, "}")?;
+        Ok(TypeExpr::Shape(fields))
     }
 
     fn parse_arg_list(&mut self) -> Result<Vec<Node>, ParserError> {

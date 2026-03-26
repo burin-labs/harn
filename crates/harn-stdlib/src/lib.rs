@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)]
+
 mod async_builtins;
 mod json;
 mod llm;

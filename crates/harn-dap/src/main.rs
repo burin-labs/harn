@@ -15,7 +15,6 @@ fn main() {
     let mut lines = reader.lines();
 
     while let Some(header) = read_header(&mut lines) {
-
         let content_length = header
             .strip_prefix("Content-Length: ")
             .and_then(|s| s.trim().parse::<usize>().ok())

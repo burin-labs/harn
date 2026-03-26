@@ -1,0 +1,8 @@
+pipeline test(task) {
+  let a: string | nil = "hello"
+  log(a)
+  let b: string | nil = nil
+  log(b)
+  let c: int | float = 3.14
+  log(c)
+}
