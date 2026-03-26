@@ -859,7 +859,7 @@ impl Interpreter {
         if resolved.extension().is_none() {
             resolved.set_extension("harn");
         }
-        let resolved = resolved.canonicalize().unwrap_or_else(|_| resolved);
+        let resolved = resolved.canonicalize().unwrap_or(resolved);
 
         if self.imported.contains(&resolved) {
             return Ok(Value::Nil);

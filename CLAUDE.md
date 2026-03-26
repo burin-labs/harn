@@ -32,6 +32,24 @@ cargo run -- repl
 cd crates/harn-wasm && wasm-pack build
 ```
 
+## Quality Commands
+
+```bash
+# Run all checks (format, lint, test, conformance)
+make all
+
+# Clippy lints (treats warnings as errors)
+make lint
+
+# Auto-format
+make fmt
+
+# Format check (CI mode, no changes)
+make fmt-check
+```
+
+Always run `make lint` before committing — clippy warnings are treated as errors.
+
 ## Architecture
 
 The execution pipeline is: **source → Lexer → Parser → TypeChecker → Interpreter**
