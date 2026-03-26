@@ -160,6 +160,17 @@ pipeline default(task) {
 }
 ```
 
+## Documentation
+
+- [Language basics](docs/language-basics.md) — syntax, types, operators, control flow, functions, collections
+- [LLM calls and agent loops](docs/llm-and-agents.md) — providers, API keys, `llm_call`, `agent_loop`, persistent mode
+- [Concurrency](docs/concurrency.md) — `spawn`/`await`, `parallel`, `parallel_map`, channels, atomics, mutex, deadline
+- [Error handling](docs/error-handling.md) — `try`/`catch`/`throw`, `retry`, typed catch
+- [Modules and imports](docs/modules.md) — library files, `import`, pipeline inheritance
+- [Builtin functions](docs/builtins.md) — complete reference for all built-in functions
+- [Language specification](spec/HARN_SPEC.md) — formal spec covering lexical rules, grammar, and semantics
+- [AST reference](spec/AST.md) — node types used by the parser
+
 ## For language designers
 
 Harn is a tree-walking async interpreter written in Rust. The execution pipeline is:
@@ -182,7 +193,7 @@ The codebase is organized as a Cargo workspace:
 | `harn-dap` | Debug Adapter Protocol |
 | `harn-wasm` | WASM target (built separately with wasm-pack) |
 
-The language spec lives in `spec/HARN_SPEC.md`. The tree-sitter grammar for editor support is in `tree-sitter-harn/`.
+The [language specification](spec/HARN_SPEC.md) is the authoritative reference. The tree-sitter grammar for editor support is in `tree-sitter-harn/`.
 
 ## For contributors
 
@@ -204,21 +215,3 @@ Pre-commit hooks run `fmt` and `clippy` automatically. After cloning, set them u
 ```bash
 git config core.hooksPath .githooks
 ```
-
-## Language feature overview
-
-**Core:** variables (`let`/`var`), `if`/`else`, `for`/`in`, `while`, `match`, `guard`, functions, closures, `return`
-
-**Types:** optional annotations, `int`, `float`, `string`, `bool`, `list[T]`, `dict`, enums, structs, union types (`string | nil`), shape types (`{x: int, y: int}`)
-
-**Collections:** list methods (`map`, `filter`, `reduce`, `find`, `any`, `all`, `flat_map`), dict methods (`keys`, `values`, `entries`, `merge`, `map_values`), ranges (`1 thru 10`, `0 upto n`)
-
-**Concurrency:** `spawn`/`await`, `parallel(n)`, `parallel_map(items)`, channels, atomics, mutex blocks, `deadline` timeouts
-
-**Error handling:** `try`/`catch`/`throw`, `retry n`, typed catch
-
-**Agent primitives:** `llm_call`, `agent_loop` with persistent mode, multi-provider support, `yield` for host integration, `ask` blocks
-
-**I/O & data:** `read_file`, `write_file`, `http_get`, `http_post`, `json_parse`, `json_stringify`, `regex_match`, `regex_replace`, string interpolation (`${expr}`), pipe operator (`|>`)
-
-**Modules:** `import` with subdirectory support, top-level `fn` declarations, pipeline inheritance with `extends`/`override`
