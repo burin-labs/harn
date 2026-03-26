@@ -21,6 +21,18 @@ async fn main() {
     }
 
     match args[1].as_str() {
+        "version" | "--version" | "-v" => {
+            println!(
+                r#"
+  ╱▔▔╲
+ ╱    ╲    harn v0.1.0
+ │ ◆  │    the agent harness language
+ │    │
+ ╰──╯╱    by burin
+   ╱╱
+"#
+            );
+        }
         "run" => {
             if args.len() < 3 {
                 eprintln!("Usage: harn run <file.harn>");

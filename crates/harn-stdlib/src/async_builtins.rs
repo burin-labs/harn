@@ -51,9 +51,13 @@ pub fn register_async_builtins(interp: &mut Interpreter) {
     });
 
     interp.register_async_builtin("sleep", |args| async move {
-        let ms = args.first().and_then(|a| a.as_int()).unwrap_or(0);
+        let ms = match args.first() {
+            Some(Value::Duration(ms)) => *ms,
+            Some(Value::Int(n)) => *n as u64,
+            _ => 0,
+        };
         if ms > 0 {
-            tokio::time::sleep(tokio::time::Duration::from_millis(ms as u64)).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(ms)).await;
         }
         Ok(Value::Nil)
     });

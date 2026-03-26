@@ -82,6 +82,28 @@ pub enum Node {
     SpawnExpr {
         body: Vec<Node>,
     },
+    /// Duration literal: 500ms, 5s, 30m, 2h
+    DurationLiteral(u64),
+    /// Range expression: start upto end (exclusive) or start thru end (inclusive)
+    RangeExpr {
+        start: Box<Node>,
+        end: Box<Node>,
+        inclusive: bool,
+    },
+    /// Guard clause: guard condition else { body }
+    GuardStmt {
+        condition: Box<Node>,
+        else_body: Vec<Node>,
+    },
+    /// Ask expression: ask { system: "...", user: "...", ... }
+    AskExpr {
+        fields: Vec<DictEntry>,
+    },
+    /// Deadline block: deadline DURATION { body }
+    DeadlineBlock {
+        duration: Box<Node>,
+        body: Vec<Node>,
+    },
 
     // Concurrency
     Parallel {

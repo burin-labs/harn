@@ -1,0 +1,7 @@
+pipeline test(task) {
+  log(500ms)
+  log(5s)
+  log(2m)
+  log(1h)
+  log(type_of(5s))
+}

@@ -341,6 +341,13 @@ impl Lexer {
             self.advance();
         }
 
+        // Check for duration suffix: ms, s, m, h
+        if !is_float {
+            if let Some(ms) = self.try_duration_suffix(&num_str) {
+                return Token::new(TokenKind::DurationLiteral(ms), self.line, start_col);
+            }
+        }
+
         if is_float {
             let n: f64 = num_str.parse().unwrap_or(0.0);
             Token::new(TokenKind::FloatLiteral(n), self.line, start_col)
@@ -348,6 +355,48 @@ impl Lexer {
             let n: i64 = num_str.parse().unwrap_or(0);
             Token::new(TokenKind::IntLiteral(n), self.line, start_col)
         }
+    }
+
+    /// Try to parse a duration suffix (ms, s, m, h) after a number.
+    /// Returns the duration in milliseconds if a suffix is found.
+    fn try_duration_suffix(&mut self, num_str: &str) -> Option<u64> {
+        let n: u64 = num_str.parse().ok()?;
+        if self.pos < self.source.len() {
+            let ch = self.source[self.pos];
+            if ch == 'm' && self.source.get(self.pos + 1) == Some(&'s') {
+                self.advance(); // m
+                self.advance(); // s
+                return Some(n);
+            }
+            if ch == 's'
+                && self
+                    .source
+                    .get(self.pos + 1)
+                    .is_none_or(|c| !c.is_alphanumeric())
+            {
+                self.advance(); // s
+                return Some(n * 1000);
+            }
+            if ch == 'm'
+                && self
+                    .source
+                    .get(self.pos + 1)
+                    .is_none_or(|c| !c.is_alphanumeric() && *c != 's')
+            {
+                self.advance(); // m
+                return Some(n * 60 * 1000);
+            }
+            if ch == 'h'
+                && self
+                    .source
+                    .get(self.pos + 1)
+                    .is_none_or(|c| !c.is_alphanumeric())
+            {
+                self.advance(); // h
+                return Some(n * 60 * 60 * 1000);
+            }
+        }
+        None
     }
 
     fn read_identifier(&mut self) -> Token {
@@ -392,6 +441,11 @@ impl Lexer {
             "type" => TokenKind::TypeKw,
             "enum" => TokenKind::Enum,
             "struct" => TokenKind::Struct,
+            "thru" => TokenKind::Thru,
+            "upto" => TokenKind::Upto,
+            "guard" => TokenKind::Guard,
+            "ask" => TokenKind::Ask,
+            "deadline" => TokenKind::Deadline,
             _ => TokenKind::Identifier(ident),
         };
 

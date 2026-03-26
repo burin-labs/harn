@@ -505,6 +505,90 @@ impl Interpreter {
                 })
             }
 
+            Node::DurationLiteral(ms) => Ok(Value::Duration(*ms)),
+
+            Node::RangeExpr {
+                start,
+                end,
+                inclusive,
+            } => {
+                let start_val = self.eval(start).await?;
+                let end_val = self.eval(end).await?;
+                let s = start_val.as_int().unwrap_or(0);
+                let e = end_val.as_int().unwrap_or(0);
+                let items: Vec<Value> = if *inclusive {
+                    (s..=e).map(Value::Int).collect()
+                } else {
+                    (s..e).map(Value::Int).collect()
+                };
+                Ok(Value::List(items))
+            }
+
+            Node::GuardStmt {
+                condition,
+                else_body,
+            } => {
+                let cond = self.eval(condition).await?;
+                if !cond.is_truthy() {
+                    // Guard failed — execute else body (which should return/throw)
+                    self.exec_statements(else_body).await?;
+                }
+                Ok(Value::Nil)
+            }
+
+            Node::AskExpr { fields } => {
+                // Construct an LLM call from the ask block fields
+                let mut prompt = String::new();
+                let mut system = None;
+                let mut options = BTreeMap::new();
+
+                for entry in fields {
+                    let key = self.eval(&entry.key).await?.as_string();
+                    let val = self.eval(&entry.value).await?;
+                    match key.as_str() {
+                        "user" | "prompt" => prompt = val.as_string(),
+                        "system" => system = Some(val.as_string()),
+                        _ => {
+                            options.insert(key, val);
+                        }
+                    }
+                }
+
+                // Call llm_call with extracted params
+                let mut args = vec![Value::String(prompt)];
+                if let Some(sys) = system {
+                    args.push(Value::String(sys));
+                } else {
+                    args.push(Value::Nil);
+                }
+                if !options.is_empty() {
+                    args.push(Value::Dict(options));
+                }
+
+                // Dispatch to llm_call async builtin
+                if let Some(builtin) = self.async_builtins.get("llm_call").cloned() {
+                    return builtin(args).await;
+                }
+                Err(RuntimeError::UndefinedBuiltin("llm_call".to_string()))
+            }
+
+            Node::DeadlineBlock { duration, body } => {
+                let dur_val = self.eval(duration).await?;
+                let ms = match &dur_val {
+                    Value::Duration(ms) => *ms,
+                    Value::Int(n) => *n as u64,
+                    _ => 30_000, // default 30s
+                };
+                let timeout = tokio::time::Duration::from_millis(ms);
+                match tokio::time::timeout(timeout, self.exec_statements(body)).await {
+                    Ok(result) => result,
+                    Err(_) => Err(RuntimeError::thrown(format!(
+                        "Deadline exceeded: {}",
+                        dur_val
+                    ))),
+                }
+            }
+
             Node::Pipeline { .. } | Node::OverrideDecl { .. } => Ok(Value::Nil),
         }
     }

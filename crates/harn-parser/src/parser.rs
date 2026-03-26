@@ -149,6 +149,8 @@ impl Parser {
             TokenKind::TypeKw => self.parse_type_decl(),
             TokenKind::Enum => self.parse_enum_decl(),
             TokenKind::Struct => self.parse_struct_decl(),
+            TokenKind::Guard => self.parse_guard(),
+            TokenKind::Deadline => self.parse_deadline(),
             _ => self.parse_expression_statement(),
         }
     }
@@ -491,6 +493,54 @@ impl Parser {
         Ok(Node::StructDecl { name, fields })
     }
 
+    fn parse_guard(&mut self) -> Result<Node, ParserError> {
+        self.consume(&TokenKind::Guard, "guard")?;
+        let condition = self.parse_expression()?;
+        // Consume "else" — we reuse the Else keyword
+        self.consume(&TokenKind::Else, "else")?;
+        self.consume(&TokenKind::LBrace, "{")?;
+        let else_body = self.parse_block()?;
+        self.consume(&TokenKind::RBrace, "}")?;
+        Ok(Node::GuardStmt {
+            condition: Box::new(condition),
+            else_body,
+        })
+    }
+
+    fn parse_deadline(&mut self) -> Result<Node, ParserError> {
+        self.consume(&TokenKind::Deadline, "deadline")?;
+        let duration = self.parse_primary()?;
+        self.consume(&TokenKind::LBrace, "{")?;
+        let body = self.parse_block()?;
+        self.consume(&TokenKind::RBrace, "}")?;
+        Ok(Node::DeadlineBlock {
+            duration: Box::new(duration),
+            body,
+        })
+    }
+
+    fn parse_ask_expr(&mut self) -> Result<Node, ParserError> {
+        self.consume(&TokenKind::Ask, "ask")?;
+        self.consume(&TokenKind::LBrace, "{")?;
+        // Parse as dict entries
+        let mut entries = Vec::new();
+        self.skip_newlines();
+        while !self.is_at_end() && !self.check(&TokenKind::RBrace) {
+            let name = self.consume_identifier("ask field")?;
+            let key = Node::StringLiteral(name);
+            self.consume(&TokenKind::Colon, ":")?;
+            let value = self.parse_expression()?;
+            entries.push(DictEntry { key, value });
+            self.skip_newlines();
+            if self.check(&TokenKind::Comma) {
+                self.advance();
+                self.skip_newlines();
+            }
+        }
+        self.consume(&TokenKind::RBrace, "}")?;
+        Ok(Node::AskExpr { fields: entries })
+    }
+
     // --- Expressions (precedence climbing) ---
 
     fn parse_expression_statement(&mut self) -> Result<Node, ParserError> {
@@ -515,15 +565,38 @@ impl Parser {
     }
 
     fn parse_pipe(&mut self) -> Result<Node, ParserError> {
-        let mut left = self.parse_ternary()?;
+        let mut left = self.parse_range()?;
         while self.check(&TokenKind::Pipe) {
             self.advance();
-            let right = self.parse_ternary()?;
+            let right = self.parse_range()?;
             left = Node::BinaryOp {
                 op: "|>".into(),
                 left: Box::new(left),
                 right: Box::new(right),
             };
+        }
+        Ok(left)
+    }
+
+    fn parse_range(&mut self) -> Result<Node, ParserError> {
+        let left = self.parse_ternary()?;
+        if self.check(&TokenKind::Thru) {
+            self.advance();
+            let right = self.parse_ternary()?;
+            return Ok(Node::RangeExpr {
+                start: Box::new(left),
+                end: Box::new(right),
+                inclusive: true,
+            });
+        }
+        if self.check(&TokenKind::Upto) {
+            self.advance();
+            let right = self.parse_ternary()?;
+            return Ok(Node::RangeExpr {
+                start: Box::new(left),
+                end: Box::new(right),
+                inclusive: false,
+            });
         }
         Ok(left)
     }
@@ -789,6 +862,13 @@ impl Parser {
             TokenKind::Retry => self.parse_retry(),
             TokenKind::If => self.parse_if_else(),
             TokenKind::Spawn => self.parse_spawn_expr(),
+            TokenKind::DurationLiteral(ms) => {
+                let ms = *ms;
+                self.advance();
+                Ok(Node::DurationLiteral(ms))
+            }
+            TokenKind::Ask => self.parse_ask_expr(),
+            TokenKind::Deadline => self.parse_deadline(),
             _ => Err(self.error("expression")),
         }
     }

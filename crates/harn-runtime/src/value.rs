@@ -30,6 +30,8 @@ pub enum Value {
         variant: String,
         fields: Vec<Value>,
     },
+    /// A duration value in milliseconds.
+    Duration(u64),
     /// A struct instance: StructName { field: value, ... }
     StructInstance {
         struct_name: String,
@@ -49,6 +51,7 @@ impl Value {
             Value::Dict(map) => !map.is_empty(),
             Value::Closure { .. } => true,
             Value::TaskHandle { .. } => true,
+            Value::Duration(ms) => *ms > 0,
             Value::EnumVariant { .. } => true,
             Value::StructInstance { fields, .. } => !fields.is_empty(),
         }
@@ -125,6 +128,17 @@ impl fmt::Display for Value {
             Value::Closure { params, .. } => {
                 write!(f, "<fn({})>", params.join(", "))
             }
+            Value::Duration(ms) => {
+                if *ms >= 3_600_000 && ms % 3_600_000 == 0 {
+                    write!(f, "{}h", ms / 3_600_000)
+                } else if *ms >= 60_000 && ms % 60_000 == 0 {
+                    write!(f, "{}m", ms / 60_000)
+                } else if *ms >= 1000 && ms % 1000 == 0 {
+                    write!(f, "{}s", ms / 1000)
+                } else {
+                    write!(f, "{}ms", ms)
+                }
+            }
             Value::TaskHandle { id } => write!(f, "<task:{id}>"),
             Value::EnumVariant {
                 enum_name,
@@ -160,6 +174,7 @@ impl PartialEq for Value {
             (Value::List(a), Value::List(b)) => a == b,
             (Value::Dict(a), Value::Dict(b)) => a == b,
             (Value::Closure { .. }, Value::Closure { .. }) => false,
+            (Value::Duration(a), Value::Duration(b)) => a == b,
             (Value::TaskHandle { id: a }, Value::TaskHandle { id: b }) => a == b,
             (
                 Value::EnumVariant {
@@ -349,6 +364,7 @@ pub fn value_type_name(value: &Value) -> &'static str {
         Value::List(_) => "list",
         Value::Dict(_) => "dict",
         Value::Closure { .. } => "closure",
+        Value::Duration(_) => "duration",
         Value::TaskHandle { .. } => "taskHandle",
         Value::EnumVariant { .. } => "enum",
         Value::StructInstance { .. } => "struct",

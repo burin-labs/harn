@@ -66,6 +66,11 @@ pub enum TokenKind {
     TypeKw,
     Enum,
     Struct,
+    Thru,
+    Upto,
+    Guard,
+    Ask,
+    Deadline,
 
     // Literals
     Identifier(String),
@@ -73,6 +78,8 @@ pub enum TokenKind {
     InterpolatedString(Vec<StringSegment>),
     IntLiteral(i64),
     FloatLiteral(f64),
+    /// Duration literal in milliseconds: 500ms, 5s, 30m, 2h
+    DurationLiteral(u64),
 
     // Two-character operators
     Eq,      // ==
@@ -144,11 +151,17 @@ impl fmt::Display for TokenKind {
             TokenKind::TypeKw => write!(f, "type"),
             TokenKind::Enum => write!(f, "enum"),
             TokenKind::Struct => write!(f, "struct"),
+            TokenKind::Thru => write!(f, "thru"),
+            TokenKind::Upto => write!(f, "upto"),
+            TokenKind::Guard => write!(f, "guard"),
+            TokenKind::Ask => write!(f, "ask"),
+            TokenKind::Deadline => write!(f, "deadline"),
             TokenKind::Identifier(s) => write!(f, "id({s})"),
             TokenKind::StringLiteral(s) => write!(f, "str({s})"),
             TokenKind::InterpolatedString(_) => write!(f, "istr(...)"),
             TokenKind::IntLiteral(n) => write!(f, "int({n})"),
             TokenKind::FloatLiteral(n) => write!(f, "float({n})"),
+            TokenKind::DurationLiteral(ms) => write!(f, "duration({ms}ms)"),
             TokenKind::Eq => write!(f, "=="),
             TokenKind::Neq => write!(f, "!="),
             TokenKind::And => write!(f, "&&"),

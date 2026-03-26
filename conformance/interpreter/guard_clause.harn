@@ -1,0 +1,10 @@
+pipeline test(task) {
+  fn process(x) {
+    guard x > 0 else {
+      return "invalid"
+    }
+    return "valid: ${x}"
+  }
+  log(process(5))
+  log(process(-1))
+}

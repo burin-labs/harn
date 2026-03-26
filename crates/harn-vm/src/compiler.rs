@@ -442,6 +442,11 @@ impl Compiler {
             | Node::StructDecl { .. }
             | Node::EnumConstruct { .. }
             | Node::StructConstruct { .. }
+            | Node::DurationLiteral(_)
+            | Node::RangeExpr { .. }
+            | Node::GuardStmt { .. }
+            | Node::AskExpr { .. }
+            | Node::DeadlineBlock { .. }
             | Node::Block(_) => {
                 self.chunk.emit(Op::Nil, self.line);
             }
