@@ -151,6 +151,7 @@ impl Parser {
             TokenKind::Struct => self.parse_struct_decl(),
             TokenKind::Guard => self.parse_guard(),
             TokenKind::Deadline => self.parse_deadline(),
+            TokenKind::Yield => self.parse_yield(),
             _ => self.parse_expression_statement(),
         }
     }
@@ -516,6 +517,17 @@ impl Parser {
         Ok(Node::DeadlineBlock {
             duration: Box::new(duration),
             body,
+        })
+    }
+
+    fn parse_yield(&mut self) -> Result<Node, ParserError> {
+        self.consume(&TokenKind::Yield, "yield")?;
+        if self.is_at_end() || self.check(&TokenKind::Newline) || self.check(&TokenKind::RBrace) {
+            return Ok(Node::YieldExpr { value: None });
+        }
+        let value = self.parse_expression()?;
+        Ok(Node::YieldExpr {
+            value: Some(Box::new(value)),
         })
     }
 

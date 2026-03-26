@@ -446,6 +446,7 @@ impl Lexer {
             "guard" => TokenKind::Guard,
             "ask" => TokenKind::Ask,
             "deadline" => TokenKind::Deadline,
+            "yield" => TokenKind::Yield,
             _ => TokenKind::Identifier(ident),
         };
 

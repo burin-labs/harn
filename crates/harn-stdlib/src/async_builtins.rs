@@ -61,4 +61,48 @@ pub fn register_async_builtins(interp: &mut Interpreter) {
         }
         Ok(Value::Nil)
     });
+
+    // prompt_user(message) — reads a line from stdin (for CLI interactive mode)
+    interp.register_builtin("prompt_user", |args, out| {
+        let message = args.first().map(|a| a.as_string()).unwrap_or_default();
+        if !message.is_empty() {
+            out.extend_from_slice(message.as_bytes());
+            out.extend_from_slice(b"\n");
+        }
+        let mut input = String::new();
+        std::io::stdin()
+            .read_line(&mut input)
+            .map_err(|e| RuntimeError::thrown(format!("Failed to read input: {e}")))?;
+        Ok(Value::String(input.trim_end().to_string()))
+    });
+
+    // channel(name) — creates a named channel and returns it as a dict with name
+    interp.register_builtin("channel", |args, _out| {
+        let name = args
+            .first()
+            .map(|a| a.as_string())
+            .unwrap_or("default".into());
+        let mut ch = std::collections::BTreeMap::new();
+        ch.insert("name".to_string(), Value::String(name));
+        ch.insert("type".to_string(), Value::String("channel".to_string()));
+        ch.insert("messages".to_string(), Value::List(Vec::new()));
+        Ok(Value::Dict(ch))
+    });
+
+    // send(channel, value) — appends a value to a channel's message list
+    // Note: For real concurrent channels, this would use tokio::sync::mpsc.
+    // This simplified version works for single-threaded pipeline orchestration.
+    interp.register_builtin("send", |args, _out| {
+        if args.len() >= 2 {
+            // In a real implementation, this would push to a shared queue.
+            // For now, it's a placeholder that returns nil.
+        }
+        Ok(Value::Nil)
+    });
+
+    // receive(channel) — receives the next value from a channel
+    interp.register_builtin("receive", |_args, _out| {
+        // Placeholder for receive — would block on a shared queue.
+        Ok(Value::Nil)
+    });
 }

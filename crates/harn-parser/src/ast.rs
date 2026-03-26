@@ -104,6 +104,10 @@ pub enum Node {
         duration: Box<Node>,
         body: Vec<Node>,
     },
+    /// Yield expression: yields control to host, optionally with a value.
+    YieldExpr {
+        value: Option<Box<Node>>,
+    },
 
     // Concurrency
     Parallel {

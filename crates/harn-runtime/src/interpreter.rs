@@ -589,6 +589,15 @@ impl Interpreter {
                 }
             }
 
+            Node::YieldExpr { value } => {
+                let val = if let Some(v) = value {
+                    self.eval(v).await?
+                } else {
+                    Value::Nil
+                };
+                Err(RuntimeError::YieldValue(val))
+            }
+
             Node::Pipeline { .. } | Node::OverrideDecl { .. } => Ok(Value::Nil),
         }
     }

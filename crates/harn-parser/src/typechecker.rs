@@ -557,6 +557,14 @@ impl TypeChecker {
                 })
             }
 
+            // List covariance: list[int] is compatible with list[float]
+            (TypeExpr::List(expected_inner), TypeExpr::List(actual_inner)) => {
+                self.types_compatible(expected_inner, actual_inner, scope)
+            }
+            // A bare "list" is compatible with any list[T]
+            (TypeExpr::Named(n), TypeExpr::List(_)) if n == "list" => true,
+            (TypeExpr::List(_), TypeExpr::Named(n)) if n == "list" => true,
+
             _ => false,
         }
     }
@@ -848,5 +856,28 @@ add("hello", 2) }"#,
         );
         assert_eq!(errs.len(), 1);
         assert!(errs[0].contains("cannot assign string"));
+    }
+
+    #[test]
+    fn test_covariance_int_to_float_in_fn() {
+        // int arg passed to float param should be accepted (promotion)
+        let errs = errors(
+            "pipeline t(task) { fn scale(x: float) -> float { return x * 2.0 }\nscale(42) }",
+        );
+        assert!(errs.is_empty());
+    }
+
+    #[test]
+    fn test_covariance_return_type() {
+        // fn returning int satisfies -> float
+        let errs = errors("pipeline t(task) { fn get() -> float { return 42 } }");
+        assert!(errs.is_empty());
+    }
+
+    #[test]
+    fn test_no_contravariance_float_to_int() {
+        // float arg to int param should fail (lossy)
+        let errs = errors("pipeline t(task) { fn add(a: int) -> int { return a + 1 }\nadd(3.14) }");
+        assert_eq!(errs.len(), 1);
     }
 }

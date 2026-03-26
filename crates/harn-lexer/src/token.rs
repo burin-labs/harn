@@ -71,6 +71,7 @@ pub enum TokenKind {
     Guard,
     Ask,
     Deadline,
+    Yield,
 
     // Literals
     Identifier(String),
@@ -156,6 +157,7 @@ impl fmt::Display for TokenKind {
             TokenKind::Guard => write!(f, "guard"),
             TokenKind::Ask => write!(f, "ask"),
             TokenKind::Deadline => write!(f, "deadline"),
+            TokenKind::Yield => write!(f, "yield"),
             TokenKind::Identifier(s) => write!(f, "id({s})"),
             TokenKind::StringLiteral(s) => write!(f, "str({s})"),
             TokenKind::InterpolatedString(_) => write!(f, "istr(...)"),

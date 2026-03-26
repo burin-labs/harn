@@ -25,6 +25,8 @@ pub enum RuntimeError {
     ThrownError(Value),
     /// Import failed.
     ImportError { path: String, reason: String },
+    /// Yield: pipeline paused, waiting for host to resume with a value.
+    YieldValue(Value),
 }
 
 impl RuntimeError {
@@ -49,6 +51,7 @@ impl RuntimeError {
             RuntimeError::RetryExhausted => "RetryError",
             RuntimeError::ThrownError(_) => "Error",
             RuntimeError::ImportError { .. } => "ImportError",
+            RuntimeError::YieldValue(_) => "Yield",
         }
     }
 }
@@ -74,6 +77,7 @@ impl fmt::Display for RuntimeError {
             RuntimeError::ImportError { path, reason } => {
                 write!(f, "Failed to import '{path}': {reason}")
             }
+            RuntimeError::YieldValue(value) => write!(f, "Yield: {}", value.as_string()),
         }
     }
 }

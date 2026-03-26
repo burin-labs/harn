@@ -1,0 +1,5 @@
+pipeline test(task) {
+  let ch = channel("events")
+  log(ch.name)
+  log(ch["type"])
+}
