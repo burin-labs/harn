@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::io::BufRead;
+use std::rc::Rc;
 
 use crate::chunk::{Chunk, CompiledFunction, Constant, Op};
 
@@ -8,12 +9,12 @@ use crate::chunk::{Chunk, CompiledFunction, Constant, Op};
 pub enum VmValue {
     Int(i64),
     Float(f64),
-    String(String),
+    String(Rc<str>),
     Bool(bool),
     Nil,
-    List(Vec<VmValue>),
-    Dict(BTreeMap<String, VmValue>),
-    Closure(VmClosure),
+    List(Rc<Vec<VmValue>>),
+    Dict(Rc<BTreeMap<String, VmValue>>),
+    Closure(Rc<VmClosure>),
     Duration(u64),
     EnumVariant {
         enum_name: String,
@@ -57,13 +58,6 @@ impl VmEnv {
         self.scopes.push(Scope {
             vars: BTreeMap::new(),
         });
-    }
-
-    #[allow(dead_code)]
-    fn pop_scope(&mut self) {
-        if self.scopes.len() > 1 {
-            self.scopes.pop();
-        }
     }
 
     fn get(&self, name: &str) -> Option<VmValue> {
@@ -172,7 +166,7 @@ impl VmValue {
                     n.to_string()
                 }
             }
-            VmValue::String(s) => s.clone(),
+            VmValue::String(s) => s.to_string(),
             VmValue::Bool(b) => (if *b { "true" } else { "false" }).to_string(),
             VmValue::Nil => "nil".to_string(),
             VmValue::List(items) => {
@@ -350,7 +344,7 @@ impl Vm {
         // Extract the thrown value from the error
         let thrown_value = match &error {
             VmError::Thrown(v) => v.clone(),
-            other => VmValue::String(other.to_string()),
+            other => VmValue::String(Rc::from(other.to_string())),
         };
 
         if let Some(handler) = self.exception_handlers.pop() {
@@ -456,7 +450,7 @@ impl Vm {
             let val = match &frame.chunk.constants[idx] {
                 Constant::Int(n) => VmValue::Int(*n),
                 Constant::Float(n) => VmValue::Float(*n),
-                Constant::String(s) => VmValue::String(s.clone()),
+                Constant::String(s) => VmValue::String(Rc::from(s.as_str())),
                 Constant::Bool(b) => VmValue::Bool(*b),
                 Constant::Nil => VmValue::Nil,
             };
@@ -589,11 +583,11 @@ impl Vm {
                     if let Some(VmValue::Closure(closure)) = self.env.get(&name) {
                         self.push_closure_frame(&closure, &args, &functions)?;
                         // Don't push result - frame will handle it on return
-                    } else if let Some(builtin) = self.builtins.get(&name) {
+                    } else if let Some(builtin) = self.builtins.get(name.as_ref()) {
                         let result = builtin(&args, &mut self.output)?;
                         self.stack.push(result);
                     } else {
-                        return Err(VmError::UndefinedBuiltin(name));
+                        return Err(VmError::UndefinedBuiltin(name.to_string()));
                     }
                 }
                 VmValue::Closure(closure) => {
@@ -618,13 +612,13 @@ impl Vm {
                 func,
                 env: self.env.clone(),
             };
-            self.stack.push(VmValue::Closure(closure));
+            self.stack.push(VmValue::Closure(Rc::new(closure)));
         } else if op == Op::BuildList as u8 {
             let frame = self.frames.last_mut().unwrap();
             let count = frame.chunk.read_u16(frame.ip) as usize;
             frame.ip += 2;
             let items = self.stack.split_off(self.stack.len().saturating_sub(count));
-            self.stack.push(VmValue::List(items));
+            self.stack.push(VmValue::List(Rc::new(items)));
         } else if op == Op::BuildDict as u8 {
             let frame = self.frames.last_mut().unwrap();
             let count = frame.chunk.read_u16(frame.ip) as usize;
@@ -639,7 +633,7 @@ impl Vm {
                     map.insert(key, pair[1].clone());
                 }
             }
-            self.stack.push(VmValue::Dict(map));
+            self.stack.push(VmValue::Dict(Rc::new(map)));
         } else if op == Op::Subscript as u8 {
             let idx = self.pop()?;
             let obj = self.pop()?;
@@ -692,7 +686,7 @@ impl Vm {
             frame.ip += 2;
             let parts = self.stack.split_off(self.stack.len().saturating_sub(count));
             let result: String = parts.iter().map(|p| p.display()).collect();
-            self.stack.push(VmValue::String(result));
+            self.stack.push(VmValue::String(Rc::from(result)));
         } else if op == Op::Pipe as u8 {
             let callable = self.pop()?;
             let value = self.pop()?;
@@ -704,7 +698,7 @@ impl Vm {
                 VmValue::String(name) => {
                     if let Some(VmValue::Closure(closure)) = self.env.get(&name) {
                         self.push_closure_frame(&closure, &[value], &functions)?;
-                    } else if let Some(builtin) = self.builtins.get(&name) {
+                    } else if let Some(builtin) = self.builtins.get(name.as_ref()) {
                         let result = builtin(&[value], &mut self.output)?;
                         self.stack.push(result);
                     } else {
@@ -724,14 +718,14 @@ impl Vm {
         } else if op == Op::IterInit as u8 {
             let iterable = self.pop()?;
             let items = match iterable {
-                VmValue::List(items) => items,
+                VmValue::List(items) => (*items).clone(),
                 VmValue::Dict(map) => map
-                    .into_iter()
+                    .iter()
                     .map(|(k, v)| {
-                        VmValue::Dict(BTreeMap::from([
-                            ("key".to_string(), VmValue::String(k)),
-                            ("value".to_string(), v),
-                        ]))
+                        VmValue::Dict(Rc::new(BTreeMap::from([
+                            ("key".to_string(), VmValue::String(Rc::from(k.as_str()))),
+                            ("value".to_string(), v.clone()),
+                        ])))
                     })
                     .collect(),
                 _ => Vec::new(),
@@ -878,37 +872,36 @@ impl Vm {
                 "count" => Ok(VmValue::Int(s.chars().count() as i64)),
                 "empty" => Ok(VmValue::Bool(s.is_empty())),
                 "contains" => Ok(VmValue::Bool(
-                    s.contains(&args.first().map(|a| a.display()).unwrap_or_default()),
+                    s.contains(&*args.first().map(|a| a.display()).unwrap_or_default()),
                 )),
-                "replace" if args.len() >= 2 => Ok(VmValue::String(
+                "replace" if args.len() >= 2 => Ok(VmValue::String(Rc::from(
                     s.replace(&args[0].display(), &args[1].display()),
-                )),
+                ))),
                 "split" => {
                     let sep = args.first().map(|a| a.display()).unwrap_or(",".into());
-                    Ok(VmValue::List(
-                        s.split(&sep)
-                            .map(|p| VmValue::String(p.to_string()))
+                    Ok(VmValue::List(Rc::new(
+                        s.split(&*sep)
+                            .map(|p| VmValue::String(Rc::from(p)))
                             .collect(),
-                    ))
+                    )))
                 }
-                "trim" => Ok(VmValue::String(s.trim().to_string())),
+                "trim" => Ok(VmValue::String(Rc::from(s.trim()))),
                 "starts_with" => Ok(VmValue::Bool(
-                    s.starts_with(&args.first().map(|a| a.display()).unwrap_or_default()),
+                    s.starts_with(&*args.first().map(|a| a.display()).unwrap_or_default()),
                 )),
                 "ends_with" => Ok(VmValue::Bool(
-                    s.ends_with(&args.first().map(|a| a.display()).unwrap_or_default()),
+                    s.ends_with(&*args.first().map(|a| a.display()).unwrap_or_default()),
                 )),
-                "lowercase" => Ok(VmValue::String(s.to_lowercase())),
-                "uppercase" => Ok(VmValue::String(s.to_uppercase())),
+                "lowercase" => Ok(VmValue::String(Rc::from(s.to_lowercase()))),
+                "uppercase" => Ok(VmValue::String(Rc::from(s.to_uppercase()))),
                 "substring" => {
                     let start = args.first().and_then(|a| a.as_int()).unwrap_or(0);
                     let len = s.chars().count() as i64;
                     let start = start.max(0).min(len) as usize;
                     let end = args.get(1).and_then(|a| a.as_int()).unwrap_or(len).min(len) as usize;
                     let end = end.max(start);
-                    Ok(VmValue::String(
-                        s.chars().skip(start).take(end - start).collect(),
-                    ))
+                    let substr: String = s.chars().skip(start).take(end - start).collect();
+                    Ok(VmValue::String(Rc::from(substr)))
                 }
                 _ => Ok(VmValue::Nil),
             },
@@ -918,14 +911,14 @@ impl Vm {
                 "map" => {
                     if let Some(VmValue::Closure(closure)) = args.first() {
                         let mut results = Vec::new();
-                        for item in items {
+                        for item in items.iter() {
                             results.push(self.call_closure_sync(
                                 closure,
                                 &[item.clone()],
                                 functions,
                             )?);
                         }
-                        Ok(VmValue::List(results))
+                        Ok(VmValue::List(Rc::new(results)))
                     } else {
                         Ok(VmValue::Nil)
                     }
@@ -933,14 +926,14 @@ impl Vm {
                 "filter" => {
                     if let Some(VmValue::Closure(closure)) = args.first() {
                         let mut results = Vec::new();
-                        for item in items {
+                        for item in items.iter() {
                             let result =
                                 self.call_closure_sync(closure, &[item.clone()], functions)?;
                             if result.is_truthy() {
                                 results.push(item.clone());
                             }
                         }
-                        Ok(VmValue::List(results))
+                        Ok(VmValue::List(Rc::new(results)))
                     } else {
                         Ok(VmValue::Nil)
                     }
@@ -949,7 +942,7 @@ impl Vm {
                     if args.len() >= 2 {
                         if let VmValue::Closure(closure) = &args[1] {
                             let mut acc = args[0].clone();
-                            for item in items {
+                            for item in items.iter() {
                                 acc = self.call_closure_sync(
                                     closure,
                                     &[acc, item.clone()],
@@ -963,7 +956,7 @@ impl Vm {
                 }
                 "find" => {
                     if let Some(VmValue::Closure(closure)) = args.first() {
-                        for item in items {
+                        for item in items.iter() {
                             let result =
                                 self.call_closure_sync(closure, &[item.clone()], functions)?;
                             if result.is_truthy() {
@@ -975,7 +968,7 @@ impl Vm {
                 }
                 "any" => {
                     if let Some(VmValue::Closure(closure)) = args.first() {
-                        for item in items {
+                        for item in items.iter() {
                             let result =
                                 self.call_closure_sync(closure, &[item.clone()], functions)?;
                             if result.is_truthy() {
@@ -989,7 +982,7 @@ impl Vm {
                 }
                 "all" => {
                     if let Some(VmValue::Closure(closure)) = args.first() {
-                        for item in items {
+                        for item in items.iter() {
                             let result =
                                 self.call_closure_sync(closure, &[item.clone()], functions)?;
                             if !result.is_truthy() {
@@ -1004,16 +997,16 @@ impl Vm {
                 "flat_map" => {
                     if let Some(VmValue::Closure(closure)) = args.first() {
                         let mut results = Vec::new();
-                        for item in items {
+                        for item in items.iter() {
                             let result =
                                 self.call_closure_sync(closure, &[item.clone()], functions)?;
                             if let VmValue::List(inner) = result {
-                                results.extend(inner);
+                                results.extend(inner.iter().cloned());
                             } else {
                                 results.push(result);
                             }
                         }
-                        Ok(VmValue::List(results))
+                        Ok(VmValue::List(Rc::new(results)))
                     } else {
                         Ok(VmValue::Nil)
                     }
@@ -1021,31 +1014,33 @@ impl Vm {
                 _ => Ok(VmValue::Nil),
             },
             VmValue::Dict(map) => match method {
-                "keys" => Ok(VmValue::List(
-                    map.keys().map(|k| VmValue::String(k.clone())).collect(),
-                )),
-                "values" => Ok(VmValue::List(map.values().cloned().collect())),
-                "entries" => Ok(VmValue::List(
+                "keys" => Ok(VmValue::List(Rc::new(
+                    map.keys()
+                        .map(|k| VmValue::String(Rc::from(k.as_str())))
+                        .collect(),
+                ))),
+                "values" => Ok(VmValue::List(Rc::new(map.values().cloned().collect()))),
+                "entries" => Ok(VmValue::List(Rc::new(
                     map.iter()
                         .map(|(k, v)| {
-                            VmValue::Dict(BTreeMap::from([
-                                ("key".to_string(), VmValue::String(k.clone())),
+                            VmValue::Dict(Rc::new(BTreeMap::from([
+                                ("key".to_string(), VmValue::String(Rc::from(k.as_str()))),
                                 ("value".to_string(), v.clone()),
-                            ]))
+                            ])))
                         })
                         .collect(),
-                )),
+                ))),
                 "count" => Ok(VmValue::Int(map.len() as i64)),
                 "has" => Ok(VmValue::Bool(map.contains_key(
                     &args.first().map(|a| a.display()).unwrap_or_default(),
                 ))),
                 "merge" => {
                     if let Some(VmValue::Dict(other)) = args.first() {
-                        let mut result = map.clone();
+                        let mut result = (**map).clone();
                         result.extend(other.iter().map(|(k, v)| (k.clone(), v.clone())));
-                        Ok(VmValue::Dict(result))
+                        Ok(VmValue::Dict(Rc::new(result)))
                     } else {
-                        Ok(VmValue::Dict(map.clone()))
+                        Ok(VmValue::Dict(Rc::clone(map)))
                     }
                 }
                 _ => Ok(VmValue::Nil),
@@ -1062,13 +1057,13 @@ impl Vm {
             (VmValue::Float(x), VmValue::Float(y)) => VmValue::Float(x + y),
             (VmValue::Int(x), VmValue::Float(y)) => VmValue::Float(*x as f64 + y),
             (VmValue::Float(x), VmValue::Int(y)) => VmValue::Float(x + *y as f64),
-            (VmValue::String(x), _) => VmValue::String(format!("{x}{}", b.display())),
+            (VmValue::String(x), _) => VmValue::String(Rc::from(format!("{x}{}", b.display()))),
             (VmValue::List(x), VmValue::List(y)) => {
-                let mut result = x.clone();
+                let mut result = (**x).clone();
                 result.extend(y.iter().cloned());
-                VmValue::List(result)
+                VmValue::List(Rc::new(result))
             }
-            _ => VmValue::String(format!("{}{}", a.display(), b.display())),
+            _ => VmValue::String(Rc::from(format!("{}{}", a.display(), b.display()))),
         }
     }
 
@@ -1130,11 +1125,11 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
     });
     vm.register_builtin("type_of", |args, _out| {
         let val = args.first().unwrap_or(&VmValue::Nil);
-        Ok(VmValue::String(val.type_name().to_string()))
+        Ok(VmValue::String(Rc::from(val.type_name())))
     });
     vm.register_builtin("to_string", |args, _out| {
         let val = args.first().unwrap_or(&VmValue::Nil);
-        Ok(VmValue::String(val.display()))
+        Ok(VmValue::String(Rc::from(val.display())))
     });
     vm.register_builtin("to_int", |args, _out| {
         let val = args.first().unwrap_or(&VmValue::Nil);
@@ -1157,23 +1152,23 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
 
     vm.register_builtin("json_stringify", |args, _out| {
         let val = args.first().unwrap_or(&VmValue::Nil);
-        Ok(VmValue::String(vm_value_to_json(val)))
+        Ok(VmValue::String(Rc::from(vm_value_to_json(val))))
     });
 
     vm.register_builtin("json_parse", |args, _out| {
         let text = args.first().map(|a| a.display()).unwrap_or_default();
         match serde_json::from_str::<serde_json::Value>(&text) {
             Ok(jv) => Ok(json_to_vm_value(&jv)),
-            Err(e) => Err(VmError::Thrown(VmValue::String(format!(
+            Err(e) => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
                 "JSON parse error: {e}"
-            )))),
+            ))))),
         }
     });
 
     vm.register_builtin("env", |args, _out| {
         let name = args.first().map(|a| a.display()).unwrap_or_default();
         match std::env::var(&name) {
-            Ok(val) => Ok(VmValue::String(val)),
+            Ok(val) => Ok(VmValue::String(Rc::from(val))),
             Err(_) => Ok(VmValue::Nil),
         }
     });
@@ -1190,10 +1185,10 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
     vm.register_builtin("read_file", |args, _out| {
         let path = args.first().map(|a| a.display()).unwrap_or_default();
         match std::fs::read_to_string(&path) {
-            Ok(content) => Ok(VmValue::String(content)),
-            Err(e) => Err(VmError::Thrown(VmValue::String(format!(
+            Ok(content) => Ok(VmValue::String(Rc::from(content))),
+            Err(e) => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
                 "Failed to read file {path}: {e}"
-            )))),
+            ))))),
         }
     });
 
@@ -1202,7 +1197,9 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
             let path = args[0].display();
             let content = args[1].display();
             std::fs::write(&path, &content).map_err(|e| {
-                VmError::Thrown(VmValue::String(format!("Failed to write file {path}: {e}")))
+                VmError::Thrown(VmValue::String(Rc::from(format!(
+                    "Failed to write file {path}: {e}"
+                ))))
             })?;
         }
         Ok(VmValue::Nil)
@@ -1217,16 +1214,17 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
         if args.len() >= 2 {
             let pattern = args[0].display();
             let text = args[1].display();
-            let re = regex::Regex::new(&pattern)
-                .map_err(|e| VmError::Thrown(VmValue::String(format!("Invalid regex: {e}"))))?;
+            let re = regex::Regex::new(&pattern).map_err(|e| {
+                VmError::Thrown(VmValue::String(Rc::from(format!("Invalid regex: {e}"))))
+            })?;
             let matches: Vec<VmValue> = re
                 .find_iter(&text)
-                .map(|m| VmValue::String(m.as_str().to_string()))
+                .map(|m| VmValue::String(Rc::from(m.as_str())))
                 .collect();
             if matches.is_empty() {
                 return Ok(VmValue::Nil);
             }
-            return Ok(VmValue::List(matches));
+            return Ok(VmValue::List(Rc::new(matches)));
         }
         Ok(VmValue::Nil)
     });
@@ -1236,11 +1234,12 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
             let pattern = args[0].display();
             let replacement = args[1].display();
             let text = args[2].display();
-            let re = regex::Regex::new(&pattern)
-                .map_err(|e| VmError::Thrown(VmValue::String(format!("Invalid regex: {e}"))))?;
-            return Ok(VmValue::String(
+            let re = regex::Regex::new(&pattern).map_err(|e| {
+                VmError::Thrown(VmValue::String(Rc::from(format!("Invalid regex: {e}"))))
+            })?;
+            return Ok(VmValue::String(Rc::from(
                 re.replace_all(&text, replacement.as_str()).into_owned(),
-            ));
+            )));
         }
         Ok(VmValue::Nil)
     });
@@ -1250,7 +1249,7 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
         out.push_str(&msg);
         let mut input = String::new();
         if std::io::stdin().lock().read_line(&mut input).is_ok() {
-            Ok(VmValue::String(input.trim_end().to_string()))
+            Ok(VmValue::String(Rc::from(input.trim_end())))
         } else {
             Ok(VmValue::Nil)
         }
@@ -1265,7 +1264,7 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
         } else {
             (start..end).map(VmValue::Int).collect()
         };
-        Ok(VmValue::List(items))
+        Ok(VmValue::List(Rc::new(items)))
     });
 }
 
@@ -1322,14 +1321,16 @@ fn json_to_vm_value(jv: &serde_json::Value) -> VmValue {
                 VmValue::Float(n.as_f64().unwrap_or(0.0))
             }
         }
-        serde_json::Value::String(s) => VmValue::String(s.clone()),
-        serde_json::Value::Array(arr) => VmValue::List(arr.iter().map(json_to_vm_value).collect()),
+        serde_json::Value::String(s) => VmValue::String(Rc::from(s.as_str())),
+        serde_json::Value::Array(arr) => {
+            VmValue::List(Rc::new(arr.iter().map(json_to_vm_value).collect()))
+        }
         serde_json::Value::Object(map) => {
             let mut m = BTreeMap::new();
             for (k, v) in map {
                 m.insert(k.clone(), json_to_vm_value(v));
             }
-            VmValue::Dict(m)
+            VmValue::Dict(Rc::new(m))
         }
     }
 }

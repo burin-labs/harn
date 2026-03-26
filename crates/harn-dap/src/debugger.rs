@@ -488,7 +488,7 @@ mod tests {
         let mut dbg = Debugger::new();
         dbg.variables.insert("x".to_string(), VmValue::Int(42));
         dbg.variables
-            .insert("name".to_string(), VmValue::String("hello".to_string()));
+            .insert("name".to_string(), VmValue::String("hello".into()));
 
         let responses = dbg.handle_message(make_request(
             1,

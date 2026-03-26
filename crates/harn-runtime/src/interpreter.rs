@@ -116,12 +116,6 @@ impl Interpreter {
             );
     }
 
-    /// Check if a builtin exists (sync or async).
-    #[allow(dead_code)]
-    pub fn has_builtin(&self, name: &str) -> bool {
-        self.builtins.contains_key(name) || self.async_builtins.contains_key(name)
-    }
-
     /// Set the base directory for resolving relative imports.
     pub fn set_source_dir(&mut self, dir: impl Into<PathBuf>) {
         self.source_dir = dir.into();

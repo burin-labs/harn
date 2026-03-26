@@ -174,24 +174,55 @@ pipeline default(task) {
 - [Language specification](spec/HARN_SPEC.md) — formal spec covering lexical rules, grammar, and semantics
 - [AST reference](spec/AST.md) — node types used by the parser
 
-## For language designers
+## Tooling
 
-Harn is a tree-walking async interpreter written in Rust. The execution pipeline is:
+Harn ships with built-in formatting and linting:
+
+```bash
+# Format a file (opinionated, 2-space indent)
+harn fmt myfile.harn
+harn fmt --check myfile.harn  # check without modifying
+
+# Lint a file
+harn lint myfile.harn
+```
+
+The linter catches: unused variables, unreachable code, `var` that should
+be `let`, empty blocks, and shadowed variables.
+
+Errors render with source context, like Rust:
 
 ```text
-source → Lexer → Parser → TypeChecker → Interpreter
+error: undefined variable `reponse`
+  --> pipeline.harn:12:15
+   |
+12 |   let output = reponse
+   |                ^^^^^^^ not found in this scope
+   |
+   = help: did you mean `response`?
+```
+
+## For language designers
+
+Harn has two execution backends, both written in Rust:
+
+```text
+source → Lexer → Parser → TypeChecker → Interpreter  (default, async)
+source → Lexer → Parser → TypeChecker → Compiler → VM  (--vm flag)
 ```
 
 The codebase is organized as a Cargo workspace:
 
 | Crate | Purpose |
 |---|---|
-| `harn-lexer` | Tokenizer |
-| `harn-parser` | Recursive-descent parser, AST, static type checker |
+| `harn-lexer` | Tokenizer with byte-offset span tracking |
+| `harn-parser` | Parser, spanned AST (`SNode`), type checker, diagnostic renderer |
 | `harn-runtime` | Async tree-walking interpreter, values, environments |
 | `harn-stdlib` | Builtins: I/O, JSON, HTTP, LLM, concurrency |
-| `harn-vm` | Bytecode compiler and VM (alternative backend) |
-| `harn-cli` | CLI: `run`, `test`, `repl`, `version` |
+| `harn-vm` | Bytecode compiler and VM with call frames and exception handling |
+| `harn-fmt` | Opinionated code formatter |
+| `harn-lint` | Linter with 5 rules |
+| `harn-cli` | CLI: `run`, `test`, `repl`, `version`, `fmt`, `lint` |
 | `harn-lsp` | Language Server Protocol |
 | `harn-dap` | Debug Adapter Protocol |
 | `harn-wasm` | WASM target (built separately with wasm-pack) |
