@@ -345,6 +345,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "harn-dap"
+version = "0.1.0"
+dependencies = [
+ "harn-lexer",
+ "harn-parser",
+ "harn-vm",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "harn-lexer"
 version = "0.1.0"
 
