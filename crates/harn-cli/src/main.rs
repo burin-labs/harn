@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::{env, fs, process};
 
 use harn_lexer::Lexer;
-use harn_parser::Parser;
+use harn_parser::{DiagnosticSeverity, Parser, TypeChecker};
 use harn_runtime::{HarnError, Interpreter};
 use harn_stdlib::{register_async_builtins, register_llm_builtins, register_stdlib};
 
@@ -74,6 +74,16 @@ async fn execute(source: &str, source_path: Option<&Path>) -> Result<Vec<u8>, Ha
 
     let mut parser = Parser::new(tokens);
     let program = parser.parse()?;
+
+    // Static type checking (pre-execution)
+    let type_diagnostics = TypeChecker::new().check(&program);
+    for diag in &type_diagnostics {
+        if diag.severity == DiagnosticSeverity::Error {
+            return Err(HarnError::Runtime(harn_runtime::RuntimeError::thrown(
+                diag.message.clone(),
+            )));
+        }
+    }
 
     let mut interp = Interpreter::new();
     register_stdlib(&mut interp);

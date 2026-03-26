@@ -1,1 +1,1 @@
-Type error at parameter 'a': expected int, got string
+expected int, got string

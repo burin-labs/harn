@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use harn_lexer::{Lexer, LexerError};
-use harn_parser::{Node, Parser, ParserError};
+use harn_parser::{Node, Parser, ParserError, TypeChecker};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
@@ -92,8 +92,31 @@ impl HarnLsp {
 
         // Parse
         let mut parser = Parser::new(tokens);
-        if let Err(e) = parser.parse() {
-            diagnostics.push(parser_error_to_diagnostic(&e));
+        let program = match parser.parse() {
+            Ok(p) => p,
+            Err(e) => {
+                diagnostics.push(parser_error_to_diagnostic(&e));
+                return diagnostics;
+            }
+        };
+
+        // Type check
+        let type_diags = TypeChecker::new().check(&program);
+        for diag in type_diags {
+            let severity = match diag.severity {
+                harn_parser::DiagnosticSeverity::Error => DiagnosticSeverity::ERROR,
+                harn_parser::DiagnosticSeverity::Warning => DiagnosticSeverity::WARNING,
+            };
+            diagnostics.push(Diagnostic {
+                range: Range {
+                    start: Position::new(0, 0),
+                    end: Position::new(0, 1),
+                },
+                severity: Some(severity),
+                source: Some("harn-typecheck".to_string()),
+                message: diag.message,
+                ..Default::default()
+            });
         }
 
         diagnostics
