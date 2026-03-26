@@ -156,7 +156,7 @@ pub fn register_stdlib(interp: &mut Interpreter) {
 
     interp.register_builtin("abs", |args, _out| {
         match args.first().unwrap_or(&Value::Nil) {
-            Value::Int(n) => Ok(Value::Int(n.abs())),
+            Value::Int(n) => Ok(Value::Int(n.wrapping_abs())),
             Value::Float(n) => Ok(Value::Float(n.abs())),
             _ => Ok(Value::Nil),
         }
@@ -230,9 +230,19 @@ pub fn register_stdlib(interp: &mut Interpreter) {
         if args.len() >= 2 {
             match (&args[0], &args[1]) {
                 (Value::Int(base), Value::Int(exp)) => {
-                    Ok(Value::Int((*base as f64).powi(*exp as i32) as i64))
+                    if *exp >= 0 && *exp <= u32::MAX as i64 {
+                        Ok(Value::Int(base.wrapping_pow(*exp as u32)))
+                    } else {
+                        Ok(Value::Float((*base as f64).powf(*exp as f64)))
+                    }
                 }
-                (Value::Float(base), Value::Int(exp)) => Ok(Value::Float(base.powi(*exp as i32))),
+                (Value::Float(base), Value::Int(exp)) => {
+                    if *exp >= i32::MIN as i64 && *exp <= i32::MAX as i64 {
+                        Ok(Value::Float(base.powi(*exp as i32)))
+                    } else {
+                        Ok(Value::Float(base.powf(*exp as f64)))
+                    }
+                }
                 (Value::Int(base), Value::Float(exp)) => {
                     Ok(Value::Float((*base as f64).powf(*exp)))
                 }
