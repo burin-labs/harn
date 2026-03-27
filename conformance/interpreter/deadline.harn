@@ -1,0 +1,7 @@
+pipeline test(task) {
+  let result = deadline 5s {
+    log("within deadline")
+    42
+  }
+  log(result)
+}

@@ -96,6 +96,23 @@ pub enum Op {
     /// Remove top exception handler (end of try body).
     PopHandler,
 
+    // --- Concurrency ---
+    /// Execute closure N times sequentially, push results as list.
+    /// Stack: count, closure → result_list
+    Parallel,
+    /// Execute closure for each item in list, push results as list.
+    /// Stack: list, closure → result_list
+    ParallelMap,
+    /// Store closure for deferred execution, push TaskHandle.
+    /// Stack: closure → TaskHandle
+    Spawn,
+
+    // --- Deadline ---
+    /// Pop duration value, push deadline onto internal deadline stack.
+    DeadlineSetup,
+    /// Pop deadline from internal deadline stack.
+    DeadlineEnd,
+
     // --- Misc ---
     /// Duplicate top of stack.
     Dup,
@@ -359,6 +376,12 @@ impl Chunk {
                     ip += 2;
                     out.push_str(&format!("CONCAT {:>4}\n", count));
                 }
+                x if x == Op::IterInit as u8 => out.push_str("ITER_INIT\n"),
+                x if x == Op::IterNext as u8 => {
+                    let target = self.read_u16(ip);
+                    ip += 2;
+                    out.push_str(&format!("ITER_NEXT {:>4}\n", target));
+                }
                 x if x == Op::Throw as u8 => out.push_str("THROW\n"),
                 x if x == Op::TryCatchSetup as u8 => {
                     let target = self.read_u16(ip);
@@ -367,6 +390,11 @@ impl Chunk {
                 }
                 x if x == Op::PopHandler as u8 => out.push_str("POP_HANDLER\n"),
                 x if x == Op::Pipe as u8 => out.push_str("PIPE\n"),
+                x if x == Op::Parallel as u8 => out.push_str("PARALLEL\n"),
+                x if x == Op::ParallelMap as u8 => out.push_str("PARALLEL_MAP\n"),
+                x if x == Op::Spawn as u8 => out.push_str("SPAWN\n"),
+                x if x == Op::DeadlineSetup as u8 => out.push_str("DEADLINE_SETUP\n"),
+                x if x == Op::DeadlineEnd as u8 => out.push_str("DEADLINE_END\n"),
                 x if x == Op::Dup as u8 => out.push_str("DUP\n"),
                 x if x == Op::Swap as u8 => out.push_str("SWAP\n"),
                 _ => {

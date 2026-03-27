@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::io::BufRead;
 use std::rc::Rc;
+use std::time::Instant;
 
 use crate::chunk::{Chunk, CompiledFunction, Constant, Op};
 
@@ -25,6 +26,7 @@ pub enum VmValue {
         struct_name: String,
         fields: BTreeMap<String, VmValue>,
     },
+    TaskHandle(String),
 }
 
 /// A compiled closure value.
@@ -141,6 +143,7 @@ impl VmValue {
             VmValue::Duration(ms) => *ms > 0,
             VmValue::EnumVariant { .. } => true,
             VmValue::StructInstance { fields, .. } => !fields.is_empty(),
+            VmValue::TaskHandle(_) => true,
         }
     }
 
@@ -157,6 +160,7 @@ impl VmValue {
             VmValue::Duration(_) => "duration",
             VmValue::EnumVariant { .. } => "enum",
             VmValue::StructInstance { .. } => "struct",
+            VmValue::TaskHandle(_) => "task_handle",
         }
     }
 
@@ -218,6 +222,7 @@ impl VmValue {
                     .collect();
                 format!("{struct_name} {{{}}}", inner.join(", "))
             }
+            VmValue::TaskHandle(id) => format!("<task:{id}>"),
         }
     }
 
@@ -239,6 +244,7 @@ fn values_equal(a: &VmValue, b: &VmValue) -> bool {
         (VmValue::Nil, VmValue::Nil) => true,
         (VmValue::Int(x), VmValue::Float(y)) => (*x as f64) == *y,
         (VmValue::Float(x), VmValue::Int(y)) => *x == (*y as f64),
+        (VmValue::TaskHandle(a), VmValue::TaskHandle(b)) => a == b,
         _ => false,
     }
 }
@@ -310,6 +316,12 @@ pub struct Vm {
     frames: Vec<CallFrame>,
     /// Exception handler stack.
     exception_handlers: Vec<ExceptionHandler>,
+    /// Deferred spawned task closures (sync VM executes on await).
+    spawned_closures: BTreeMap<String, Rc<VmClosure>>,
+    /// Counter for generating unique task IDs.
+    task_counter: u64,
+    /// Active deadline stack: (deadline_instant, frame_depth).
+    deadlines: Vec<(Instant, usize)>,
 }
 
 impl Vm {
@@ -322,6 +334,9 @@ impl Vm {
             iterators: Vec::new(),
             frames: Vec::new(),
             exception_handlers: Vec::new(),
+            spawned_closures: BTreeMap::new(),
+            task_counter: 0,
+            deadlines: Vec::new(),
         }
     }
 
@@ -359,6 +374,15 @@ impl Vm {
                 }
             }
 
+            // Clean up deadlines from unwound frames
+            while self
+                .deadlines
+                .last()
+                .is_some_and(|d| d.1 > handler.frame_depth)
+            {
+                self.deadlines.pop();
+            }
+
             // Restore stack to handler's depth
             self.stack.truncate(handler.stack_depth);
 
@@ -386,6 +410,19 @@ impl Vm {
         });
 
         loop {
+            // Check deadline before each instruction
+            if let Some(&(deadline, _)) = self.deadlines.last() {
+                if Instant::now() > deadline {
+                    self.deadlines.pop();
+                    let err = VmError::Thrown(VmValue::String(Rc::from("Deadline exceeded")));
+                    match self.handle_error(err) {
+                        Ok(None) => continue,
+                        Ok(Some(val)) => return Ok(val),
+                        Err(e) => return Err(e),
+                    }
+                }
+            }
+
             // Get current frame
             let frame = match self.frames.last_mut() {
                 Some(f) => f,
@@ -593,8 +630,30 @@ impl Vm {
 
             match callee {
                 VmValue::String(name) => {
-                    // Check closures in env
-                    if let Some(VmValue::Closure(closure)) = self.env.get(&name) {
+                    if name.as_ref() == "await" {
+                        // Deferred spawn: look up closure and execute now
+                        let task_id = args.first().and_then(|a| match a {
+                            VmValue::TaskHandle(id) => Some(id.clone()),
+                            _ => None,
+                        });
+                        if let Some(id) = task_id {
+                            if let Some(closure) = self.spawned_closures.remove(&id) {
+                                let result = self.call_closure_sync(&closure, &[], &functions)?;
+                                self.stack.push(result);
+                            } else {
+                                self.stack.push(VmValue::Nil);
+                            }
+                        } else {
+                            self.stack
+                                .push(args.into_iter().next().unwrap_or(VmValue::Nil));
+                        }
+                    } else if name.as_ref() == "cancel" {
+                        if let Some(VmValue::TaskHandle(id)) = args.first() {
+                            self.spawned_closures.remove(id);
+                        }
+                        self.stack.push(VmValue::Nil);
+                    } else if let Some(VmValue::Closure(closure)) = self.env.get(&name) {
+                        // Check closures in env
                         self.push_closure_frame(&closure, &args, &functions)?;
                         // Don't push result - frame will handle it on return
                     } else if let Some(builtin) = self.builtins.get(name.as_ref()) {
@@ -777,6 +836,62 @@ impl Vm {
             });
         } else if op == Op::PopHandler as u8 {
             self.exception_handlers.pop();
+        } else if op == Op::Parallel as u8 {
+            let closure = self.pop()?;
+            let count_val = self.pop()?;
+            let count = match &count_val {
+                VmValue::Int(n) => (*n).max(0) as usize,
+                _ => 0,
+            };
+            if let VmValue::Closure(closure) = closure {
+                let functions = self.frames.last().unwrap().chunk.functions.clone();
+                let mut results = Vec::with_capacity(count);
+                for i in 0..count {
+                    let result =
+                        self.call_closure_sync(&closure, &[VmValue::Int(i as i64)], &functions)?;
+                    results.push(result);
+                }
+                self.stack.push(VmValue::List(Rc::new(results)));
+            } else {
+                self.stack.push(VmValue::Nil);
+            }
+        } else if op == Op::ParallelMap as u8 {
+            let closure = self.pop()?;
+            let list_val = self.pop()?;
+            match (&list_val, &closure) {
+                (VmValue::List(items), VmValue::Closure(closure)) => {
+                    let functions = self.frames.last().unwrap().chunk.functions.clone();
+                    let mut results = Vec::with_capacity(items.len());
+                    for item in items.iter() {
+                        let result =
+                            self.call_closure_sync(closure, &[item.clone()], &functions)?;
+                        results.push(result);
+                    }
+                    self.stack.push(VmValue::List(Rc::new(results)));
+                }
+                _ => self.stack.push(VmValue::Nil),
+            }
+        } else if op == Op::Spawn as u8 {
+            let closure = self.pop()?;
+            if let VmValue::Closure(closure) = closure {
+                self.task_counter += 1;
+                let task_id = format!("vm_task_{}", self.task_counter);
+                self.spawned_closures.insert(task_id.clone(), closure);
+                self.stack.push(VmValue::TaskHandle(task_id));
+            } else {
+                self.stack.push(VmValue::Nil);
+            }
+        } else if op == Op::DeadlineSetup as u8 {
+            let dur_val = self.pop()?;
+            let ms = match &dur_val {
+                VmValue::Duration(ms) => *ms,
+                VmValue::Int(n) => (*n).max(0) as u64,
+                _ => 30_000,
+            };
+            let deadline = Instant::now() + std::time::Duration::from_millis(ms);
+            self.deadlines.push((deadline, self.frames.len()));
+        } else if op == Op::DeadlineEnd as u8 {
+            self.deadlines.pop();
         } else {
             return Err(VmError::InvalidInstruction(op));
         }
@@ -785,6 +900,19 @@ impl Vm {
     }
 
     const MAX_FRAMES: usize = 512;
+
+    /// Merge the caller's env into a closure's captured env for function calls.
+    fn merge_env_into_closure(caller_env: &VmEnv, closure: &VmClosure) -> VmEnv {
+        let mut call_env = closure.env.clone();
+        for scope in &caller_env.scopes {
+            for (name, (val, mutable)) in &scope.vars {
+                if call_env.get(name).is_none() {
+                    call_env.define(name, val.clone(), *mutable);
+                }
+            }
+        }
+        call_env
+    }
 
     /// Push a new call frame for a closure invocation.
     fn push_closure_frame(
@@ -798,16 +926,7 @@ impl Vm {
         }
         let saved_env = self.env.clone();
 
-        // Start with the closure's captured env, but also include
-        // the caller's definitions (for recursion and outer scope access).
-        let mut call_env = closure.env.clone();
-        for scope in &saved_env.scopes {
-            for (name, (val, mutable)) in &scope.vars {
-                if call_env.get(name).is_none() {
-                    call_env.define(name, val.clone(), *mutable);
-                }
-            }
-        }
+        let mut call_env = Self::merge_env_into_closure(&saved_env, closure);
         call_env.push_scope();
 
         for (i, param) in closure.func.params.iter().enumerate() {
@@ -853,15 +972,10 @@ impl Vm {
         let saved_env = self.env.clone();
         let saved_frames = std::mem::take(&mut self.frames);
         let saved_handlers = std::mem::take(&mut self.exception_handlers);
+        let saved_iterators = std::mem::take(&mut self.iterators);
+        let saved_deadlines = std::mem::take(&mut self.deadlines);
 
-        let mut call_env = closure.env.clone();
-        for scope in &saved_env.scopes {
-            for (name, (val, mutable)) in &scope.vars {
-                if call_env.get(name).is_none() {
-                    call_env.define(name, val.clone(), *mutable);
-                }
-            }
-        }
+        let mut call_env = Self::merge_env_into_closure(&saved_env, closure);
         call_env.push_scope();
 
         for (i, param) in closure.func.params.iter().enumerate() {
@@ -875,6 +989,8 @@ impl Vm {
         self.env = saved_env;
         self.frames = saved_frames;
         self.exception_handlers = saved_handlers;
+        self.iterators = saved_iterators;
+        self.deadlines = saved_deadlines;
 
         result
     }
@@ -1559,7 +1675,7 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
 
     vm.register_builtin("abs", |args, _out| {
         match args.first().unwrap_or(&VmValue::Nil) {
-            VmValue::Int(n) => Ok(VmValue::Int(n.abs())),
+            VmValue::Int(n) => Ok(VmValue::Int(n.wrapping_abs())),
             VmValue::Float(n) => Ok(VmValue::Float(n.abs())),
             _ => Ok(VmValue::Nil),
         }
@@ -1629,10 +1745,18 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
         if args.len() >= 2 {
             match (&args[0], &args[1]) {
                 (VmValue::Int(base), VmValue::Int(exp)) => {
-                    Ok(VmValue::Int((*base as f64).powi(*exp as i32) as i64))
+                    if *exp >= 0 && *exp <= u32::MAX as i64 {
+                        Ok(VmValue::Int(base.wrapping_pow(*exp as u32)))
+                    } else {
+                        Ok(VmValue::Float((*base as f64).powf(*exp as f64)))
+                    }
                 }
                 (VmValue::Float(base), VmValue::Int(exp)) => {
-                    Ok(VmValue::Float(base.powi(*exp as i32)))
+                    if *exp >= i32::MIN as i64 && *exp <= i32::MAX as i64 {
+                        Ok(VmValue::Float(base.powi(*exp as i32)))
+                    } else {
+                        Ok(VmValue::Float(base.powf(*exp as f64)))
+                    }
                 }
                 (VmValue::Int(base), VmValue::Float(exp)) => {
                     Ok(VmValue::Float((*base as f64).powf(*exp)))
@@ -2290,5 +2414,103 @@ try {
             out,
             "[harn] inner caught: inner\n[harn] outer caught: outer"
         );
+    }
+
+    // --- Concurrency tests ---
+
+    #[test]
+    fn test_parallel_basic() {
+        let out = run_output(
+            "pipeline t(task) { let results = parallel(3) { i -> i * 10 }\nlog(results) }",
+        );
+        assert_eq!(out, "[harn] [0, 10, 20]");
+    }
+
+    #[test]
+    fn test_parallel_no_variable() {
+        let out = run_output("pipeline t(task) { let results = parallel(3) { 42 }\nlog(results) }");
+        assert_eq!(out, "[harn] [42, 42, 42]");
+    }
+
+    #[test]
+    fn test_parallel_map_basic() {
+        let out = run_output(
+            "pipeline t(task) { let results = parallel_map([1, 2, 3]) { x -> x * x }\nlog(results) }",
+        );
+        assert_eq!(out, "[harn] [1, 4, 9]");
+    }
+
+    #[test]
+    fn test_spawn_await() {
+        let out = run_output(
+            r#"pipeline t(task) {
+let handle = spawn { log("spawned") }
+let result = await(handle)
+log("done")
+}"#,
+        );
+        assert_eq!(out, "[harn] spawned\n[harn] done");
+    }
+
+    #[test]
+    fn test_spawn_cancel() {
+        let out = run_output(
+            r#"pipeline t(task) {
+let handle = spawn { log("should be cancelled") }
+cancel(handle)
+log("cancelled")
+}"#,
+        );
+        assert_eq!(out, "[harn] cancelled");
+    }
+
+    #[test]
+    fn test_spawn_returns_value() {
+        let out = run_output("pipeline t(task) { let h = spawn { 42 }\nlet r = await(h)\nlog(r) }");
+        assert_eq!(out, "[harn] 42");
+    }
+
+    // --- Deadline tests ---
+
+    #[test]
+    fn test_deadline_success() {
+        let out = run_output(
+            r#"pipeline t(task) {
+let result = deadline 5s { log("within deadline")
+42 }
+log(result)
+}"#,
+        );
+        assert_eq!(out, "[harn] within deadline\n[harn] 42");
+    }
+
+    #[test]
+    fn test_deadline_exceeded() {
+        let result = run_harn_result(
+            r#"pipeline t(task) {
+deadline 1ms {
+  var i = 0
+  while i < 1000000 { i = i + 1 }
+}
+}"#,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_deadline_caught_by_try() {
+        let out = run_output(
+            r#"pipeline t(task) {
+try {
+  deadline 1ms {
+    var i = 0
+    while i < 1000000 { i = i + 1 }
+  }
+} catch(e) {
+  log("caught")
+}
+}"#,
+        );
+        assert_eq!(out, "[harn] caught");
     }
 }

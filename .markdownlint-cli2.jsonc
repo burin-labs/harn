@@ -12,5 +12,5 @@
     // Tables: don't enforce padding style
     "MD060": false
   },
-  "ignores": ["node_modules", "target"]
+  "ignores": ["node_modules", "target", ".burin"]
 }

@@ -29,6 +29,8 @@ struct TypeScope {
     functions: BTreeMap<String, FnSignature>,
     /// Named type aliases.
     type_aliases: BTreeMap<String, TypeExpr>,
+    /// Enum declarations: name → variant names.
+    enums: BTreeMap<String, Vec<String>>,
     parent: Option<Box<TypeScope>>,
 }
 
@@ -44,6 +46,7 @@ impl TypeScope {
             vars: BTreeMap::new(),
             functions: BTreeMap::new(),
             type_aliases: BTreeMap::new(),
+            enums: BTreeMap::new(),
             parent: None,
         }
     }
@@ -53,6 +56,7 @@ impl TypeScope {
             vars: BTreeMap::new(),
             functions: BTreeMap::new(),
             type_aliases: BTreeMap::new(),
+            enums: BTreeMap::new(),
             parent: Some(Box::new(self.clone())),
         }
     }
@@ -73,6 +77,12 @@ impl TypeScope {
         self.type_aliases
             .get(name)
             .or_else(|| self.parent.as_ref()?.resolve_type(name))
+    }
+
+    fn get_enum(&self, name: &str) -> Option<&Vec<String>> {
+        self.enums
+            .get(name)
+            .or_else(|| self.parent.as_ref()?.get_enum(name))
     }
 
     fn define_var(&mut self, name: &str, ty: InferredType) {
@@ -149,12 +159,13 @@ impl TypeChecker {
 
     /// Check a program and return diagnostics.
     pub fn check(mut self, program: &[SNode]) -> Vec<TypeDiagnostic> {
-        // First pass: register type declarations and function signatures
+        // First pass: register type and enum declarations into root scope
+        Self::register_declarations_into(&mut self.scope, program);
+
+        // Also scan pipeline bodies for declarations
         for snode in program {
-            if let Node::TypeDecl { name, type_expr } = &snode.node {
-                self.scope
-                    .type_aliases
-                    .insert(name.clone(), type_expr.clone());
+            if let Node::Pipeline { body, .. } = &snode.node {
+                Self::register_declarations_into(&mut self.scope, body);
             }
         }
 
@@ -188,6 +199,23 @@ impl TypeChecker {
         }
 
         self.diagnostics
+    }
+
+    /// Register type and enum declarations from AST nodes into a scope.
+    fn register_declarations_into(scope: &mut TypeScope, nodes: &[SNode]) {
+        for snode in nodes {
+            match &snode.node {
+                Node::TypeDecl { name, type_expr } => {
+                    scope.type_aliases.insert(name.clone(), type_expr.clone());
+                }
+                Node::EnumDecl { name, variants } => {
+                    let variant_names: Vec<String> =
+                        variants.iter().map(|v| v.name.clone()).collect();
+                    scope.enums.insert(name.clone(), variant_names);
+                }
+                _ => {}
+            }
+        }
     }
 
     fn check_block(&mut self, stmts: &[SNode], scope: &mut TypeScope) {
@@ -349,6 +377,21 @@ impl TypeChecker {
                 scope.type_aliases.insert(name.clone(), type_expr.clone());
             }
 
+            Node::EnumDecl { name, variants } => {
+                let variant_names: Vec<String> = variants.iter().map(|v| v.name.clone()).collect();
+                scope.enums.insert(name.clone(), variant_names);
+            }
+
+            Node::MatchExpr { value, arms } => {
+                self.check_node(value, scope);
+                for arm in arms {
+                    self.check_node(&arm.pattern, scope);
+                    let mut arm_scope = scope.child();
+                    self.check_block(&arm.body, &mut arm_scope);
+                }
+                self.check_match_exhaustiveness(value, arms, scope, span);
+            }
+
             // Recurse into nested expressions
             Node::BinaryOp { left, right, .. } => {
                 self.check_node(left, scope);
@@ -429,6 +472,89 @@ impl TypeChecker {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// Check if a match expression on an enum's `.variant` property covers all variants.
+    fn check_match_exhaustiveness(
+        &mut self,
+        value: &SNode,
+        arms: &[MatchArm],
+        scope: &TypeScope,
+        span: Span,
+    ) {
+        // Detect pattern: match <expr>.variant { "VariantA" -> ... }
+        let enum_name = match &value.node {
+            Node::PropertyAccess { object, property } if property == "variant" => {
+                // Infer the type of the object
+                match self.infer_type(object, scope) {
+                    Some(TypeExpr::Named(name)) => {
+                        if scope.get_enum(&name).is_some() {
+                            Some(name)
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                }
+            }
+            _ => {
+                // Direct match on an enum value: match <expr> { ... }
+                match self.infer_type(value, scope) {
+                    Some(TypeExpr::Named(name)) if scope.get_enum(&name).is_some() => Some(name),
+                    _ => None,
+                }
+            }
+        };
+
+        let Some(enum_name) = enum_name else {
+            return;
+        };
+        let Some(variants) = scope.get_enum(&enum_name) else {
+            return;
+        };
+
+        // Collect variant names covered by match arms
+        let mut covered: Vec<String> = Vec::new();
+        let mut has_wildcard = false;
+
+        for arm in arms {
+            match &arm.pattern.node {
+                // String literal pattern (matching on .variant): "VariantA"
+                Node::StringLiteral(s) => covered.push(s.clone()),
+                // Identifier pattern acts as a wildcard/catch-all
+                Node::Identifier(name) if name == "_" || !variants.contains(name) => {
+                    has_wildcard = true;
+                }
+                // Direct enum construct pattern: EnumName.Variant
+                Node::EnumConstruct { variant, .. } => covered.push(variant.clone()),
+                // PropertyAccess pattern: EnumName.Variant (no args)
+                Node::PropertyAccess { property, .. } => covered.push(property.clone()),
+                _ => {
+                    // Unknown pattern shape — conservatively treat as wildcard
+                    has_wildcard = true;
+                }
+            }
+        }
+
+        if has_wildcard {
+            return;
+        }
+
+        let missing: Vec<&String> = variants.iter().filter(|v| !covered.contains(v)).collect();
+        if !missing.is_empty() {
+            let missing_str = missing
+                .iter()
+                .map(|s| format!("\"{}\"", s))
+                .collect::<Vec<_>>()
+                .join(", ");
+            self.warning_at(
+                format!(
+                    "Non-exhaustive match on enum {}: missing variants {}",
+                    enum_name, missing_str
+                ),
+                span,
+            );
         }
     }
 
@@ -530,7 +656,28 @@ impl TypeChecker {
                 }
             }
 
-            Node::PropertyAccess { .. } | Node::SubscriptAccess { .. } => None,
+            Node::EnumConstruct { enum_name, .. } => Some(TypeExpr::Named(enum_name.clone())),
+
+            Node::PropertyAccess { object, property } => {
+                // EnumName.Variant → infer as the enum type
+                if let Node::Identifier(name) = &object.node {
+                    if scope.get_enum(name).is_some() {
+                        return Some(TypeExpr::Named(name.clone()));
+                    }
+                }
+                // .variant on an enum value → string
+                if property == "variant" {
+                    let obj_type = self.infer_type(object, scope);
+                    if let Some(TypeExpr::Named(name)) = &obj_type {
+                        if scope.get_enum(name).is_some() {
+                            return Some(TypeExpr::Named("string".into()));
+                        }
+                    }
+                }
+                None
+            }
+
+            Node::SubscriptAccess { .. } => None,
             Node::MethodCall { .. } => None,
 
             _ => None,
@@ -874,5 +1021,100 @@ add("hello", 2) }"#,
     fn test_no_contravariance_float_to_int() {
         let errs = errors("pipeline t(task) { fn add(a: int) -> int { return a + 1 }\nadd(3.14) }");
         assert_eq!(errs.len(), 1);
+    }
+
+    // --- Exhaustiveness checking tests ---
+
+    fn warnings(source: &str) -> Vec<String> {
+        check_source(source)
+            .into_iter()
+            .filter(|d| d.severity == DiagnosticSeverity::Warning)
+            .map(|d| d.message)
+            .collect()
+    }
+
+    #[test]
+    fn test_exhaustive_match_no_warning() {
+        let warns = warnings(
+            r#"pipeline t(task) {
+  enum Color { Red, Green, Blue }
+  let c = Color.Red
+  match c.variant {
+    "Red" -> { log("r") }
+    "Green" -> { log("g") }
+    "Blue" -> { log("b") }
+  }
+}"#,
+        );
+        let exhaustive_warns: Vec<_> = warns
+            .iter()
+            .filter(|w| w.contains("Non-exhaustive"))
+            .collect();
+        assert!(exhaustive_warns.is_empty());
+    }
+
+    #[test]
+    fn test_non_exhaustive_match_warning() {
+        let warns = warnings(
+            r#"pipeline t(task) {
+  enum Color { Red, Green, Blue }
+  let c = Color.Red
+  match c.variant {
+    "Red" -> { log("r") }
+    "Green" -> { log("g") }
+  }
+}"#,
+        );
+        let exhaustive_warns: Vec<_> = warns
+            .iter()
+            .filter(|w| w.contains("Non-exhaustive"))
+            .collect();
+        assert_eq!(exhaustive_warns.len(), 1);
+        assert!(exhaustive_warns[0].contains("Blue"));
+    }
+
+    #[test]
+    fn test_non_exhaustive_multiple_missing() {
+        let warns = warnings(
+            r#"pipeline t(task) {
+  enum Status { Active, Inactive, Pending }
+  let s = Status.Active
+  match s.variant {
+    "Active" -> { log("a") }
+  }
+}"#,
+        );
+        let exhaustive_warns: Vec<_> = warns
+            .iter()
+            .filter(|w| w.contains("Non-exhaustive"))
+            .collect();
+        assert_eq!(exhaustive_warns.len(), 1);
+        assert!(exhaustive_warns[0].contains("Inactive"));
+        assert!(exhaustive_warns[0].contains("Pending"));
+    }
+
+    #[test]
+    fn test_enum_construct_type_inference() {
+        let errs = errors(
+            r#"pipeline t(task) {
+  enum Color { Red, Green, Blue }
+  let c: Color = Color.Red
+}"#,
+        );
+        assert!(errs.is_empty());
+    }
+
+    // --- Type narrowing tests ---
+
+    #[test]
+    fn test_nil_coalescing_strips_nil() {
+        // After ??, nil should be stripped from the type
+        let errs = errors(
+            r#"pipeline t(task) {
+  let x: string | nil = nil
+  let y: string = x ?? "default"
+}"#,
+        );
+        assert!(errs.is_empty());
     }
 }

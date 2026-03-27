@@ -503,13 +503,15 @@ impl Compiler {
                 }
             }
 
-            Node::DeadlineBlock { body, .. } => {
-                // v1: just compile the body, skip timeout enforcement
+            Node::DeadlineBlock { duration, body } => {
+                self.compile_node(duration)?;
+                self.chunk.emit(Op::DeadlineSetup, self.line);
                 if body.is_empty() {
                     self.chunk.emit(Op::Nil, self.line);
                 } else {
                     self.compile_block(body)?;
                 }
+                self.chunk.emit(Op::DeadlineEnd, self.line);
             }
 
             Node::MutexBlock { body } => {
@@ -706,10 +708,60 @@ impl Compiler {
                 self.chunk.patch_jump(end_jump);
             }
 
-            // Features that fall back to tree-walker (not compiled)
-            Node::Parallel { .. } | Node::ParallelMap { .. } | Node::SpawnExpr { .. } => {
-                // These are complex control flow that the VM delegates to the tree-walker
-                self.chunk.emit(Op::Nil, self.line);
+            Node::Parallel {
+                count,
+                variable,
+                body,
+            } => {
+                self.compile_node(count)?;
+                let mut fn_compiler = Compiler::new();
+                fn_compiler.compile_block(body)?;
+                fn_compiler.chunk.emit(Op::Return, self.line);
+                let params = vec![variable.clone().unwrap_or_else(|| "__i__".to_string())];
+                let func = CompiledFunction {
+                    name: "<parallel>".to_string(),
+                    params,
+                    chunk: fn_compiler.chunk,
+                };
+                let fn_idx = self.chunk.functions.len();
+                self.chunk.functions.push(func);
+                self.chunk.emit_u16(Op::Closure, fn_idx as u16, self.line);
+                self.chunk.emit(Op::Parallel, self.line);
+            }
+
+            Node::ParallelMap {
+                list,
+                variable,
+                body,
+            } => {
+                self.compile_node(list)?;
+                let mut fn_compiler = Compiler::new();
+                fn_compiler.compile_block(body)?;
+                fn_compiler.chunk.emit(Op::Return, self.line);
+                let func = CompiledFunction {
+                    name: "<parallel_map>".to_string(),
+                    params: vec![variable.clone()],
+                    chunk: fn_compiler.chunk,
+                };
+                let fn_idx = self.chunk.functions.len();
+                self.chunk.functions.push(func);
+                self.chunk.emit_u16(Op::Closure, fn_idx as u16, self.line);
+                self.chunk.emit(Op::ParallelMap, self.line);
+            }
+
+            Node::SpawnExpr { body } => {
+                let mut fn_compiler = Compiler::new();
+                fn_compiler.compile_block(body)?;
+                fn_compiler.chunk.emit(Op::Return, self.line);
+                let func = CompiledFunction {
+                    name: "<spawn>".to_string(),
+                    params: vec![],
+                    chunk: fn_compiler.chunk,
+                };
+                let fn_idx = self.chunk.functions.len();
+                self.chunk.functions.push(func);
+                self.chunk.emit_u16(Op::Closure, fn_idx as u16, self.line);
+                self.chunk.emit(Op::Spawn, self.line);
             }
         }
         Ok(())
