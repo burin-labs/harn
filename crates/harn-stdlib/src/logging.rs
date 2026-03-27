@@ -16,7 +16,7 @@ struct TraceContext {
 }
 
 thread_local! {
-    static CURRENT_TRACE: RefCell<Option<TraceContext>> = const { RefCell::new(None) };
+    static TRACE_STACK: RefCell<Vec<TraceContext>> = const { RefCell::new(Vec::new()) };
 }
 
 fn level_to_u8(level: &str) -> Option<u8> {
@@ -107,8 +107,8 @@ fn build_log_line(level: &str, msg: &str, fields: Option<&BTreeMap<String, Value
     parts.push(format!("\"msg\":{}", escape_json_str(msg)));
 
     // Add trace context if active
-    CURRENT_TRACE.with(|ctx| {
-        if let Some(trace) = ctx.borrow().as_ref() {
+    TRACE_STACK.with(|stack| {
+        if let Some(trace) = stack.borrow().last() {
             parts.push(format!("\"trace_id\":{}", escape_json_str(&trace.trace_id)));
             parts.push(format!("\"span_id\":{}", escape_json_str(&trace.span_id)));
         }
@@ -146,6 +146,11 @@ fn write_log(level: &str, level_num: u8, args: &[Value], out: &mut Vec<u8>) {
 
 /// Register all structured logging builtins on an interpreter.
 pub fn register_logging_builtins(interp: &mut Interpreter) {
+    // Reset global state for clean per-program execution
+    MIN_LOG_LEVEL.store(0, Ordering::Relaxed);
+    TRACE_STACK.with(|stack| {
+        stack.borrow_mut().clear();
+    });
     // --- Structured log level builtins ---
 
     interp.register_builtin("log_debug", |args, out| {
@@ -188,10 +193,10 @@ pub fn register_logging_builtins(interp: &mut Interpreter) {
 
     interp.register_builtin("trace_start", |args, _out| {
         let name = args.first().map(|a| a.as_string()).unwrap_or_default();
-        let trace_id = CURRENT_TRACE.with(|ctx| {
-            let existing = ctx.borrow();
-            existing
-                .as_ref()
+        let trace_id = TRACE_STACK.with(|stack| {
+            stack
+                .borrow()
+                .last()
                 .map(|t| t.trace_id.clone())
                 .unwrap_or_else(gen_hex_id)
         });
@@ -201,9 +206,9 @@ pub fn register_logging_builtins(interp: &mut Interpreter) {
             .unwrap_or_default()
             .as_millis() as i64;
 
-        // Set current trace context
-        CURRENT_TRACE.with(|ctx| {
-            *ctx.borrow_mut() = Some(TraceContext {
+        // Push trace context onto stack (supports nesting)
+        TRACE_STACK.with(|stack| {
+            stack.borrow_mut().push(TraceContext {
                 trace_id: trace_id.clone(),
                 span_id: span_id.clone(),
             });
@@ -247,9 +252,9 @@ pub fn register_logging_builtins(interp: &mut Interpreter) {
             .map(|v| v.as_string())
             .unwrap_or_default();
 
-        // Clear trace context before logging to avoid duplicate trace fields
-        CURRENT_TRACE.with(|ctx| {
-            *ctx.borrow_mut() = None;
+        // Pop this span from the stack (restores parent span context)
+        TRACE_STACK.with(|stack| {
+            stack.borrow_mut().pop();
         });
 
         // Log span completion event (respects log level filtering)
@@ -268,13 +273,10 @@ pub fn register_logging_builtins(interp: &mut Interpreter) {
     });
 
     interp.register_builtin("trace_id", |_args, _out| {
-        let id = CURRENT_TRACE.with(|ctx| {
-            let existing = ctx.borrow();
-            existing
-                .as_ref()
-                .map(|t| t.trace_id.clone())
-                .unwrap_or_else(gen_hex_id)
-        });
-        Ok(Value::String(id))
+        let id = TRACE_STACK.with(|stack| stack.borrow().last().map(|t| t.trace_id.clone()));
+        match id {
+            Some(trace_id) => Ok(Value::String(trace_id)),
+            None => Ok(Value::Nil),
+        }
     });
 }

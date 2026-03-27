@@ -16,15 +16,16 @@ pipeline default() {
   println(schema.tools[0].name)
   println(schema.tools[0].inputSchema["type"])
 
-  // Test tool_parse_call with single tool call
+  // Test tool_parse_call with single tool call (always returns a list)
   let text = "I'll search for that. <tool_call>{\"name\": \"search\", \"arguments\": {\"query\": \"tokyo\"}}</tool_call>"
-  let call = tool_parse_call(text)
-  println(call.name)
-  println(call.arguments.query)
+  let calls = tool_parse_call(text)
+  println(calls.count())
+  println(calls[0].name)
+  println(calls[0].arguments.query)
 
   // Test tool_parse_call with no tool call
-  let no_call = tool_parse_call("Just regular text")
-  println(no_call)
+  let no_calls = tool_parse_call("Just regular text")
+  println(no_calls.count())
 
   // Test tool_format_result
   let result = tool_format_result("search", "13.96 million people")

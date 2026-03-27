@@ -4,6 +4,24 @@ use harn_runtime::{Interpreter, RuntimeError, Value};
 
 use crate::json::json_parse;
 
+/// Validate that a dict is a tool registry. Returns error if not.
+fn validate_registry(name: &str, dict: &BTreeMap<String, Value>) -> Result<(), RuntimeError> {
+    match dict.get("_type") {
+        Some(Value::String(t)) if t == "tool_registry" => Ok(()),
+        _ => Err(RuntimeError::thrown(format!(
+            "{name}: argument must be a tool registry (created with tool_registry())"
+        ))),
+    }
+}
+
+/// Extract tools list from a validated registry dict.
+fn get_tools(dict: &BTreeMap<String, Value>) -> &[Value] {
+    match dict.get("tools") {
+        Some(Value::List(list)) => list,
+        _ => &[],
+    }
+}
+
 /// Register tool registry builtins on an interpreter.
 pub fn register_tool_builtins(interp: &mut Interpreter) {
     // tool_registry() -> Dict
@@ -57,14 +75,24 @@ pub fn register_tool_builtins(interp: &mut Interpreter) {
 
         // Build the tool entry
         let mut tool_entry = BTreeMap::new();
-        tool_entry.insert("name".to_string(), Value::String(name));
+        tool_entry.insert("name".to_string(), Value::String(name.clone()));
         tool_entry.insert("description".to_string(), Value::String(description));
         tool_entry.insert("handler".to_string(), handler);
         tool_entry.insert("parameters".to_string(), parameters);
 
-        // Get the existing tools list and add the new tool
-        let mut tools = match registry.get("tools") {
-            Some(Value::List(list)) => list.clone(),
+        // Get the existing tools list, removing any existing tool with the same name (upsert)
+        let mut tools: Vec<Value> = match registry.get("tools") {
+            Some(Value::List(list)) => list
+                .iter()
+                .filter(|t| {
+                    if let Value::Dict(e) = t {
+                        e.get("name").map(|v| v.as_string()).as_deref() != Some(name.as_str())
+                    } else {
+                        true
+                    }
+                })
+                .cloned()
+                .collect(),
             _ => Vec::new(),
         };
         tools.push(Value::Dict(tool_entry));
@@ -82,11 +110,9 @@ pub fn register_tool_builtins(interp: &mut Interpreter) {
             Some(Value::Dict(map)) => map,
             _ => return Err(RuntimeError::thrown("tool_list: requires a tool registry")),
         };
+        validate_registry("tool_list", registry)?;
 
-        let tools = match registry.get("tools") {
-            Some(Value::List(list)) => list,
-            _ => return Ok(Value::List(Vec::new())),
-        };
+        let tools = get_tools(registry);
 
         let mut result = Vec::new();
         for tool in tools {
@@ -124,13 +150,10 @@ pub fn register_tool_builtins(interp: &mut Interpreter) {
                 ))
             }
         };
+        validate_registry("tool_find", registry)?;
 
         let target_name = args[1].as_string();
-
-        let tools = match registry.get("tools") {
-            Some(Value::List(list)) => list,
-            _ => return Ok(Value::Nil),
-        };
+        let tools = get_tools(registry);
 
         for tool in tools {
             if let Value::Dict(entry) = tool {
@@ -156,11 +179,9 @@ pub fn register_tool_builtins(interp: &mut Interpreter) {
                 ))
             }
         };
+        validate_registry("tool_describe", registry)?;
 
-        let tools = match registry.get("tools") {
-            Some(Value::List(list)) => list,
-            _ => return Ok(Value::String("Available tools:\n(none)".to_string())),
-        };
+        let tools = get_tools(registry);
 
         if tools.is_empty() {
             return Ok(Value::String("Available tools:\n(none)".to_string()));
@@ -208,6 +229,7 @@ pub fn register_tool_builtins(interp: &mut Interpreter) {
                 ))
             }
         };
+        validate_registry("tool_remove", &registry)?;
 
         let target_name = args[1].as_string();
 
@@ -240,11 +262,9 @@ pub fn register_tool_builtins(interp: &mut Interpreter) {
             Some(Value::Dict(map)) => map,
             _ => return Err(RuntimeError::thrown("tool_count: requires a tool registry")),
         };
+        validate_registry("tool_count", registry)?;
 
-        let count = match registry.get("tools") {
-            Some(Value::List(list)) => list.len(),
-            _ => 0,
-        };
+        let count = get_tools(registry).len();
 
         Ok(Value::Int(count as i64))
     });
@@ -270,7 +290,10 @@ pub fn register_tool_builtins(interp: &mut Interpreter) {
     // }
     interp.register_builtin("tool_schema", |args, _out| {
         let registry = match args.first() {
-            Some(Value::Dict(map)) => map,
+            Some(Value::Dict(map)) => {
+                validate_registry("tool_schema", map)?;
+                map
+            }
             _ => {
                 return Err(RuntimeError::thrown(
                     "tool_schema: requires a tool registry",
@@ -323,10 +346,10 @@ pub fn register_tool_builtins(interp: &mut Interpreter) {
         Ok(Value::Dict(schema))
     });
 
-    // tool_parse_call(text) -> Dict | Nil
-    // Parses a tool call from LLM output text using the universal
+    // tool_parse_call(text) -> List
+    // Parses tool calls from LLM output text using the universal
     // <tool_call>{"name": "...", "arguments": {...}}</tool_call> format.
-    // Returns {name: "...", arguments: {...}} or nil if no tool call found.
+    // Always returns a list of parsed call dicts (empty list if none found).
     interp.register_builtin("tool_parse_call", |args, _out| {
         let text = args.first().map(|a| a.as_string()).unwrap_or_default();
 
@@ -346,24 +369,20 @@ pub fn register_tool_builtins(interp: &mut Interpreter) {
             }
         }
 
-        if results.is_empty() {
-            Ok(Value::Nil)
-        } else if results.len() == 1 {
-            Ok(results.into_iter().next().unwrap())
-        } else {
-            Ok(Value::List(results))
-        }
+        Ok(Value::List(results))
     });
 
     // tool_format_result(name, result) -> String
     // Formats a tool result for feeding back to the LLM.
     // Output: <tool_result>{"name": "...", "result": "..."}</tool_result>
     interp.register_builtin("tool_format_result", |args, _out| {
-        let name = args.first().map(|a| a.as_string()).unwrap_or_default();
-        let result = args
-            .get(1)
-            .map(|a| a.as_string())
-            .unwrap_or("nil".to_string());
+        if args.len() < 2 {
+            return Err(RuntimeError::thrown(
+                "tool_format_result: requires name and result",
+            ));
+        }
+        let name = args[0].as_string();
+        let result = args[1].as_string();
 
         let json_name = escape_json_str(&name);
         let json_result = escape_json_str(&result);
@@ -378,7 +397,10 @@ pub fn register_tool_builtins(interp: &mut Interpreter) {
     // works with any LLM, regardless of native tool support.
     interp.register_builtin("tool_prompt", |args, _out| {
         let registry = match args.first() {
-            Some(Value::Dict(map)) => map,
+            Some(Value::Dict(map)) => {
+                validate_registry("tool_prompt", map)?;
+                map
+            }
             _ => {
                 return Err(RuntimeError::thrown(
                     "tool_prompt: requires a tool registry",
@@ -556,7 +578,7 @@ fn harn_type_to_json_schema(harn_type: &str) -> &str {
     }
 }
 
-/// Escape a string for safe embedding in JSON.
+/// Escape a string for safe embedding in JSON (without wrapping quotes).
 fn escape_json_str(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for ch in s.chars() {
@@ -566,6 +588,9 @@ fn escape_json_str(s: &str) -> String {
             '\n' => out.push_str("\\n"),
             '\r' => out.push_str("\\r"),
             '\t' => out.push_str("\\t"),
+            c if c.is_control() => {
+                out.push_str(&format!("\\u{:04x}", c as u32));
+            }
             c => out.push(c),
         }
     }

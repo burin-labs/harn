@@ -50,9 +50,7 @@ pub fn register_http_builtins(interp: &mut Interpreter) {
             Some(Value::Dict(d)) => d.clone(),
             _ => BTreeMap::new(),
         };
-        options
-            .entry("body".to_string())
-            .or_insert(Value::String(body));
+        options.insert("body".to_string(), Value::String(body));
         execute_request("POST", &url, &options).await
     });
 
@@ -67,9 +65,7 @@ pub fn register_http_builtins(interp: &mut Interpreter) {
             Some(Value::Dict(d)) => d.clone(),
             _ => BTreeMap::new(),
         };
-        options
-            .entry("body".to_string())
-            .or_insert(Value::String(body));
+        options.insert("body".to_string(), Value::String(body));
         execute_request("PUT", &url, &options).await
     });
 
@@ -84,9 +80,7 @@ pub fn register_http_builtins(interp: &mut Interpreter) {
             Some(Value::Dict(d)) => d.clone(),
             _ => BTreeMap::new(),
         };
-        options
-            .entry("body".to_string())
-            .or_insert(Value::String(body));
+        options.insert("body".to_string(), Value::String(body));
         execute_request("PATCH", &url, &options).await
     });
 
@@ -119,7 +113,7 @@ fn get_bool_option(options: &BTreeMap<String, Value>, key: &str, default: bool) 
 
 /// Determine if a reqwest error is retryable (timeout or connection error).
 fn is_retryable_error(err: &reqwest::Error) -> bool {
-    err.is_timeout() || err.is_connect() || err.is_request()
+    err.is_timeout() || err.is_connect()
 }
 
 /// Execute an HTTP request with retry support.
@@ -138,6 +132,13 @@ async fn execute_request(
     url: &str,
     options: &BTreeMap<String, Value>,
 ) -> Result<Value, RuntimeError> {
+    // Validate URL scheme
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err(RuntimeError::thrown(format!(
+            "http: URL must start with http:// or https://, got '{url}'"
+        )));
+    }
+
     let timeout_ms = get_int_option(options, "timeout", 30_000).max(0) as u64;
     let retries = get_int_option(options, "retries", 0).max(0) as u32;
     let backoff_ms = get_int_option(options, "backoff", 1000).max(0) as u64;
@@ -227,7 +228,7 @@ async fn execute_request(
             // Exponential backoff with +/-25% jitter.
             let base_delay = backoff_ms.saturating_mul(1u64 << (attempt - 1).min(30));
             let jitter = jitter_factor();
-            let delay_ms = (base_delay as f64 * jitter) as u64;
+            let delay_ms = ((base_delay as f64 * jitter) as u64).min(60_000);
             tokio::time::sleep(Duration::from_millis(delay_ms)).await;
         }
 
@@ -239,8 +240,9 @@ async fn execute_request(
 
         match req.send().await {
             Ok(response) => {
-                let status = response.status().as_u16() as i64;
-                let ok = (200..300).contains(&(status as u16));
+                let status_code = response.status().as_u16();
+                let ok = (200..300).contains(&status_code);
+                let status = status_code as i64;
 
                 // Collect response headers.
                 let mut resp_headers = BTreeMap::new();
@@ -285,6 +287,5 @@ async fn execute_request(
 /// Generate a jitter factor between 0.75 and 1.25.
 fn jitter_factor() -> f64 {
     use rand::Rng;
-    let jitter: f64 = rand::thread_rng().gen_range(0.75..=1.25);
-    jitter
+    rand::thread_rng().gen_range(0.75..=1.25)
 }
