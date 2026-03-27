@@ -6,7 +6,7 @@ pipeline default(task) {
         continue
       }
       sum = sum + i
-    } catch(e) {
+    } catch (e) {
       log(e)
     }
   }

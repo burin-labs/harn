@@ -16,3 +16,6 @@ harn-fmt = { path = "../harn-fmt" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 reedline = "0.38"
 nu-ansi-term = "0.50"
+toml = "0.8"
+serde = { version = "1", features = ["derive"] }
+notify = "7"

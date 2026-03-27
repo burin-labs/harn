@@ -4,7 +4,6 @@ pipeline test(task) {
     Green
     Blue
   }
-
   let c = Color.Red
   log(c)
   log(c == Color.Red)

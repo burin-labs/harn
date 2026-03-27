@@ -3,12 +3,10 @@ pipeline test(task) {
     NotFound(msg)
     Forbidden(msg)
   }
-
   // Typed catch only catches matching enum errors
   fn may_fail() {
     throw AppError.NotFound("page not found")
   }
-
   try {
     may_fail()
   } catch (e: AppError) {

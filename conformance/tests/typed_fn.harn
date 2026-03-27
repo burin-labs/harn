@@ -3,7 +3,6 @@ pipeline test(task) {
     return a + b
   }
   log(add(3, 4))
-
   fn greet(name: string) -> string {
     return "hello " + name
   }

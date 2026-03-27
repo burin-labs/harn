@@ -6,7 +6,7 @@ pipeline default(task) {
         break
       }
       found = i
-    } catch(e) {
+    } catch (e) {
       log(e)
     }
   }

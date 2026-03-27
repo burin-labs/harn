@@ -5,18 +5,15 @@ pipeline default() {
   log_info("should_not_appear")
   log_warn("should_not_appear")
   println("filtering_works")
-
   // Test 2: All builtins exist and don't crash (keep level at error to suppress output)
   log_debug("a")
   log_info("b", {key: "val"})
   log_warn("c", {n: 42})
   // Don't call log_error to keep output deterministic (it would emit JSON with a timestamp)
-
   // Test 3: Trace context builtins work
   let span = trace_start("op")
-  let tid = trace_id()
+  let _tid = trace_id()
   trace_end(span)
-
   // Reset level for subsequent tests
   log_set_level("debug")
   println("all_builtins_ok")

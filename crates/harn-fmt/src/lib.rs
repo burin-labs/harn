@@ -354,7 +354,7 @@ impl Formatter {
                     let params = format_typed_params(&m.params);
                     if let Some(ret) = &m.return_type {
                         self.writeln(&format!(
-                            "fn {}({}): {}",
+                            "fn {}({}) -> {}",
                             m.name,
                             params,
                             format_type_expr(ret)
@@ -1040,7 +1040,8 @@ impl Formatter {
     fn format_dict_key(&self, node: &SNode) -> String {
         match &node.node {
             Node::StringLiteral(s) if is_identifier(s) => s.clone(),
-            _ => self.format_expr(node),
+            // Non-string-literal keys are computed — wrap in [...]
+            _ => format!("[{}]", self.format_expr(node)),
         }
     }
 
@@ -1416,6 +1417,21 @@ mod tests {
     fn test_roundtrip_match() {
         assert_roundtrip(
             r#"pipeline default(task) { match x { "a" -> { log(1) } "b" -> { log(2) } } }"#,
+        );
+    }
+
+    #[test]
+    fn test_roundtrip_computed_dict_key() {
+        assert_roundtrip(
+            r#"pipeline default(task) { let k = "x"
+  let d = {[k]: 42, fixed: 1} }"#,
+        );
+    }
+
+    #[test]
+    fn test_roundtrip_interface() {
+        assert_roundtrip(
+            "interface Printable {\n  fn to_display() -> string\n}\npipeline default(task) { log(1) }",
         );
     }
 

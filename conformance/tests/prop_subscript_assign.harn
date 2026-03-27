@@ -3,26 +3,21 @@ pipeline test(task) {
   var config = {retries: 3, timeout: 30}
   config.retries = 5
   assert_eq(config.retries, 5, "dict property assignment")
-  
   // Dict subscript assignment
   var data = {name: "old"}
   data["name"] = "new"
   assert_eq(data.name, "new", "dict subscript assignment")
-
   // List subscript assignment
   var items = [1, 2, 3]
   items[0] = 99
   assert_eq(items[0], 99, "list subscript assignment")
-
   // Compound property assignment
   var counter = {value: 10}
   counter.value += 5
   assert_eq(counter.value, 15, "compound property assignment")
-
   // Compound subscript assignment
   var nums = [10, 20, 30]
   nums[1] += 5
   assert_eq(nums[1], 25, "compound subscript assignment")
-  
   log("property/subscript assignment: all tests passed")
 }

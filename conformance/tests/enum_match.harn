@@ -4,7 +4,6 @@ pipeline test(task) {
     Inactive
     Pending(reason)
   }
-
   let s = Status.Pending("waiting for approval")
   match s.variant {
     "Active" -> { log("active") }

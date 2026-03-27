@@ -1,22 +1,19 @@
 pipeline default() {
   var attempts = 0
-
-  retry(3) {
+  retry 3 {
     attempts = attempts + 1
     if attempts < 3 {
       throw "not yet"
     }
   }
-
   println(attempts)
-
   // retry with all attempts exhausted
   var failed = false
   try {
-    retry(2) {
+    retry 2 {
       throw "always fails"
     }
-  } catch(e) {
+  } catch (e) {
     failed = true
   }
   println(failed)

@@ -8,7 +8,6 @@ pipeline default() {
     _ -> { result = "other" }
   }
   println(result)
-
   // Wildcard with strings
   let s = "hello"
   var r2 = ""

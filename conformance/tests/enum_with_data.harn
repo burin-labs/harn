@@ -3,11 +3,9 @@ pipeline test(task) {
     Ok(value)
     Err(message)
   }
-
   let success = Result.Ok(42)
   log(success)
   log(success.variant)
-
   let failure = Result.Err("something went wrong")
   log(failure)
   log(failure.variant)

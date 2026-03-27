@@ -3,52 +3,42 @@ pipeline test(task) {
   var x = 10
   x += 5
   assert_eq(x, 15, "+= int")
-
   // -= on int
   var y = 20
   y -= 8
   assert_eq(y, 12, "-= int")
-
   // *= on int
   var z = 3
   z *= 4
   assert_eq(z, 12, "*= int")
-
   // /= on int
   var d = 20
   d /= 4
   assert_eq(d, 5, "/= int")
-
   // %= on int
   var m = 17
   m %= 5
   assert_eq(m, 2, "%= int")
-
   // += on float
   var f = 1.5
   f += 2.5
   assert_eq(f, 4.0, "+= float")
-
   // += on string
   var s = "hello"
   s += " world"
   assert_eq(s, "hello world", "+= string")
-
   // += on list
   var lst = [1, 2]
   lst += [3, 4]
   assert_eq(lst.count, 4, "+= list length")
-
   // += on dict
   var dict = {a: 1}
   dict += {b: 2}
   assert_eq(dict.a, 1, "+= dict preserves left")
   assert_eq(dict.b, 2, "+= dict adds right")
-
   // % operator (modulo)
   assert_eq(10 % 3, 1, "modulo basic")
   assert_eq(15 % 5, 0, "modulo even")
   assert_eq(7 % 2, 1, "modulo odd")
-
   log("compound assignment: all tests passed")
 }

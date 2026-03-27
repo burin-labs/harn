@@ -5,12 +5,10 @@ pipeline default() {
   println(now.month >= 1)
   println(now.month <= 12)
   println(now.timestamp > 0.0)
-
   // date_format with a known timestamp
   // 2024-01-15 00:00:00 UTC = 1705276800
   let formatted = date_format(1705276800.0, "%Y-%m-%d")
   println(formatted)
-
   // date_parse roundtrip
   let ts = date_parse("2024-01-15 00:00:00")
   println(ts)

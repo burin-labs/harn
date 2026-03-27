@@ -1,9 +1,9 @@
 pipeline test(task) {
-  let name = "world"
-  log("hello ${name}!")
-  let x = 5
-  log("result: ${x + 1}")
-  let a = "foo"
-  let b = "bar"
-  log("${a}-${b}")
+  let _name = "world"
+  log("hello ${_name}!")
+  let _x = 5
+  log("result: ${_x + 1}")
+  let _a = "foo"
+  let _b = "bar"
+  log("${_a}-${_b}")
 }

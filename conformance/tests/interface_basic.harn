@@ -3,18 +3,15 @@ pipeline default() {
   interface Printable {
     fn to_display() -> string
   }
-
   // Define a struct
   struct Point {
     x: int
     y: int
   }
-
   // Create struct instances (dict-style construction)
   let p = {x: 10, y: 20}
   println(p.x)
   println(p.y)
-
   // Interfaces are declarative type contracts
   println("interfaces work")
 }

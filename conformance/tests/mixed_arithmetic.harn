@@ -2,15 +2,12 @@ pipeline test(task) {
   // int + float promotes to float
   log(3 + 1.5)
   log(1.5 + 3)
-
   // int - float
   log(10 - 2.5)
   log(2.5 - 1)
-
   // int * float
   log(3 * 2.5)
   log(2.5 * 4)
-
   // int / float
   log(7 / 2.0)
   log(10.0 / 4)

@@ -4,7 +4,6 @@ pipeline default() {
   println(result.success)
   println(result.stdout.trim())
   println(result.status)
-
   // shell command
   let result2 = shell("echo 'shell works'")
   println(result2.success)

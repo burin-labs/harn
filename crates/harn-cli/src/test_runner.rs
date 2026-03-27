@@ -75,6 +75,7 @@ pub async fn run_test_file(
 
         let local = tokio::task::LocalSet::new();
         let path_clone = path.to_path_buf();
+        let source_clone = source.clone();
         let timeout = std::time::Duration::from_millis(timeout_ms);
         let result = tokio::time::timeout(
             timeout,
@@ -83,12 +84,19 @@ pub async fn run_test_file(
                 harn_vm::register_vm_stdlib(&mut vm);
                 harn_vm::register_http_builtins(&mut vm);
                 harn_vm::register_llm_builtins(&mut vm);
+                vm.set_source_info(&path_clone.display().to_string(), &source_clone);
                 if let Some(parent) = path_clone.parent() {
                     if !parent.as_os_str().is_empty() {
                         vm.set_source_dir(parent);
                     }
                 }
-                vm.execute(&chunk).await.map_err(|e| format!("{e}"))
+                match vm.execute(&chunk).await {
+                    Ok(val) => Ok(val),
+                    Err(e) => {
+                        let formatted = vm.format_runtime_error(&e);
+                        Err(formatted)
+                    }
+                }
             }),
         )
         .await;

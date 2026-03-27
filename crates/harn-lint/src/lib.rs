@@ -66,6 +66,18 @@ impl Linter {
         self.scopes.pop();
     }
 
+    /// Extract the root variable name from an assignment target.
+    /// For `x = ...` returns `x`, for `x.foo = ...` or `x[i] = ...` returns `x`.
+    fn root_var_name(node: &SNode) -> Option<String> {
+        match &node.node {
+            Node::Identifier(name) => Some(name.clone()),
+            Node::PropertyAccess { object, .. } | Node::SubscriptAccess { object, .. } => {
+                Self::root_var_name(object)
+            }
+            _ => None,
+        }
+    }
+
     /// Declare a variable in the current scope, checking for shadowing.
     fn declare_variable(&mut self, name: &str, span: Span, is_mutable: bool) {
         if name == "_" {
@@ -152,8 +164,8 @@ impl Linter {
             }
 
             Node::Assignment { target, value, .. } => {
-                if let Node::Identifier(name) = &target.node {
-                    self.assignments.insert(name.clone());
+                if let Some(name) = Self::root_var_name(target) {
+                    self.assignments.insert(name);
                 }
                 self.lint_node(target);
                 self.lint_node(value);
@@ -606,7 +618,7 @@ impl Linter {
     fn finalize(&mut self) {
         // Rule: unused-variable
         for decl in &self.declarations {
-            if decl.name == "_" {
+            if decl.name.starts_with('_') {
                 continue;
             }
             if !self.references.contains(&decl.name) {

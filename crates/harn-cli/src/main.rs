@@ -1,3 +1,4 @@
+mod package;
 mod test_runner;
 
 use std::io::{self, Write};
@@ -23,6 +24,7 @@ async fn main() {
         eprintln!("  test <file|dir>        Run test_* pipelines in file or directory");
         eprintln!("  test conformance       Run conformance test suite");
         eprintln!("  init [name]            Scaffold a new Harn project");
+        eprintln!("  add <name> --git <url> Add a dependency to harn.toml");
         eprintln!("  install                Install dependencies from harn.toml");
         eprintln!("  repl                   Interactive REPL");
         process::exit(1);
@@ -98,10 +100,6 @@ async fn main() {
             }
         }
         "test" => {
-            if args.len() < 3 {
-                eprintln!("Usage: harn test <file.harn|directory|conformance> [--filter <pattern>] [--junit <path>] [--timeout <ms>] [--parallel]");
-                process::exit(1);
-            }
             // Parse test flags
             let filter = args
                 .windows(2)
@@ -117,17 +115,46 @@ async fn main() {
                 .and_then(|w| w[1].parse().ok())
                 .unwrap_or(30_000);
             let parallel = args.iter().any(|a| a == "--parallel");
+            let watch = args.iter().any(|a| a == "--watch");
 
-            if args[2] == "conformance" {
-                run_conformance_tests(
-                    &args[2],
-                    filter.as_deref(),
-                    junit_path.as_deref(),
-                    timeout_ms,
-                )
-                .await;
+            // Collect flag values to exclude from target search
+            let flag_values: std::collections::HashSet<&str> = args
+                .windows(2)
+                .filter(|w| w[0].starts_with("--") && w[0] != "--parallel" && w[0] != "--watch")
+                .map(|w| w[1].as_str())
+                .collect();
+
+            let target = args
+                .iter()
+                .skip(2)
+                .find(|a| !a.starts_with("--") && !flag_values.contains(a.as_str()));
+
+            if let Some(t) = target {
+                if t == "conformance" {
+                    run_conformance_tests(t, filter.as_deref(), junit_path.as_deref(), timeout_ms)
+                        .await;
+                } else if watch {
+                    run_watch_tests(t, filter.as_deref(), timeout_ms, parallel).await;
+                } else {
+                    run_user_tests(t, filter.as_deref(), timeout_ms, parallel).await;
+                }
             } else {
-                run_user_tests(&args[2], filter.as_deref(), timeout_ms, parallel).await;
+                // Auto-discover tests/ directory
+                let test_dir = if PathBuf::from("tests").is_dir() {
+                    "tests".to_string()
+                } else {
+                    eprintln!(
+                        "Usage: harn test [path] [--filter <pattern>] [--watch] [--parallel]"
+                    );
+                    eprintln!("       harn test conformance");
+                    eprintln!("\nNo path specified and no tests/ directory found.");
+                    process::exit(1);
+                };
+                if watch {
+                    run_watch_tests(&test_dir, filter.as_deref(), timeout_ms, parallel).await;
+                } else {
+                    run_user_tests(&test_dir, filter.as_deref(), timeout_ms, parallel).await;
+                }
             }
         }
         "init" => {
@@ -135,7 +162,8 @@ async fn main() {
             init_project(name);
         }
         "repl" => run_repl().await,
-        "install" => install_packages(),
+        "install" => package::install_packages(),
+        "add" => package::add_package(&args[2..]),
         _ => {
             if args[1].ends_with(".harn") {
                 run_file(&args[1]).await;
@@ -322,7 +350,6 @@ fn fmt_file(path: &str, check_mode: bool) {
 
 async fn run_file(path: &str) {
     let (source, program) = parse_source_file(path);
-    let _ = source; // source kept for diagnostics but type checking uses AST only
 
     // Static type checking
     let type_diagnostics = TypeChecker::new().check(&program);
@@ -345,6 +372,7 @@ async fn run_file(path: &str) {
     harn_vm::register_vm_stdlib(&mut vm);
     harn_vm::register_http_builtins(&mut vm);
     harn_vm::register_llm_builtins(&mut vm);
+    vm.set_source_info(path, &source);
 
     if let Some(p) = std::path::Path::new(path).parent() {
         if !p.as_os_str().is_empty() {
@@ -360,7 +388,7 @@ async fn run_file(path: &str) {
             }
         }
         Err(e) => {
-            eprintln!("error: {e}");
+            eprint!("{}", vm.format_runtime_error(&e));
             process::exit(1);
         }
     }
@@ -699,13 +727,25 @@ async fn run_conformance_tests(
     }
 }
 
-async fn run_user_tests(path_str: &str, filter: Option<&str>, timeout_ms: u64, parallel: bool) {
-    let path = PathBuf::from(path_str);
-    if !path.exists() {
-        eprintln!("Path not found: {path_str}");
-        process::exit(1);
+fn print_test_results(summary: &test_runner::TestSummary) {
+    // Count unique files
+    let file_count = summary
+        .results
+        .iter()
+        .map(|r| r.file.as_str())
+        .collect::<std::collections::HashSet<_>>()
+        .len();
+
+    // Test count header
+    if summary.total > 0 {
+        println!(
+            "Running {} test{} from {} file{}...\n",
+            summary.total,
+            if summary.total == 1 { "" } else { "s" },
+            file_count,
+            if file_count == 1 { "" } else { "s" },
+        );
     }
-    let summary = test_runner::run_tests(&path, filter, timeout_ms, parallel).await;
 
     for result in &summary.results {
         if result.passed {
@@ -716,7 +756,10 @@ async fn run_user_tests(path_str: &str, filter: Option<&str>, timeout_ms: u64, p
         } else {
             println!("  \x1b[31mFAIL\x1b[0m  {} [{}]", result.name, result.file);
             if let Some(err) = &result.error {
-                println!("        {err}");
+                // Indent multi-line errors
+                for line in err.lines() {
+                    println!("        {line}");
+                }
             }
         }
     }
@@ -727,7 +770,6 @@ async fn run_user_tests(path_str: &str, filter: Option<&str>, timeout_ms: u64, p
             "\x1b[31m{} passed, {} failed, {} total ({} ms)\x1b[0m",
             summary.passed, summary.failed, summary.total, summary.duration_ms
         );
-        process::exit(1);
     } else if summary.total == 0 {
         println!("No test pipelines found");
     } else {
@@ -735,6 +777,77 @@ async fn run_user_tests(path_str: &str, filter: Option<&str>, timeout_ms: u64, p
             "\x1b[32m{} passed, {} total ({} ms)\x1b[0m",
             summary.passed, summary.total, summary.duration_ms
         );
+    }
+}
+
+async fn run_user_tests(path_str: &str, filter: Option<&str>, timeout_ms: u64, parallel: bool) {
+    let path = PathBuf::from(path_str);
+    if !path.exists() {
+        eprintln!("Path not found: {path_str}");
+        process::exit(1);
+    }
+    let summary = test_runner::run_tests(&path, filter, timeout_ms, parallel).await;
+    print_test_results(&summary);
+    if summary.failed > 0 {
+        process::exit(1);
+    }
+}
+
+async fn run_watch_tests(path_str: &str, filter: Option<&str>, timeout_ms: u64, parallel: bool) {
+    use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let path = PathBuf::from(path_str);
+    if !path.exists() {
+        eprintln!("Path not found: {path_str}");
+        process::exit(1);
+    }
+
+    println!("Watching {path_str} for changes... (Ctrl+C to stop)\n");
+
+    // Initial run
+    let summary = test_runner::run_tests(&path, filter, timeout_ms, parallel).await;
+    print_test_results(&summary);
+
+    // Set up file watcher
+    let (tx, rx) = mpsc::channel();
+    let mut watcher = RecommendedWatcher::new(tx, Config::default()).unwrap_or_else(|e| {
+        eprintln!("Failed to create file watcher: {e}");
+        process::exit(1);
+    });
+    watcher
+        .watch(&path, RecursiveMode::Recursive)
+        .unwrap_or_else(|e| {
+            eprintln!("Failed to watch {path_str}: {e}");
+            process::exit(1);
+        });
+
+    loop {
+        // Wait for a file change event
+        match rx.recv() {
+            Ok(Ok(event)) => {
+                // Only re-run for .harn file modifications
+                let is_harn = event
+                    .paths
+                    .iter()
+                    .any(|p| p.extension().is_some_and(|e| e == "harn"));
+                if !is_harn {
+                    continue;
+                }
+
+                // Debounce: drain any queued events
+                while rx.recv_timeout(Duration::from_millis(100)).is_ok() {}
+
+                println!("\n\x1b[2m─── file changed, re-running tests ───\x1b[0m\n");
+                let summary = test_runner::run_tests(&path, filter, timeout_ms, parallel).await;
+                print_test_results(&summary);
+            }
+            Ok(Err(e)) => {
+                eprintln!("Watch error: {e}");
+            }
+            Err(_) => break,
+        }
     }
 }
 
@@ -1104,131 +1217,4 @@ async fn run_repl() {
             }
         }
     }
-}
-
-/// Install packages from harn.toml
-fn install_packages() {
-    let manifest_path = Path::new("harn.toml");
-    if !manifest_path.exists() {
-        eprintln!("No harn.toml found in current directory.");
-        eprintln!("Create one with:");
-        eprintln!();
-        eprintln!("  [package]");
-        eprintln!("  name = \"my-project\"");
-        eprintln!("  version = \"0.1.0\"");
-        eprintln!();
-        eprintln!("  [dependencies]");
-        eprintln!("  # name = \"path/to/package\"");
-        process::exit(1);
-    }
-
-    let content = match fs::read_to_string(manifest_path) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("Failed to read harn.toml: {e}");
-            process::exit(1);
-        }
-    };
-
-    // Simple TOML parser for [dependencies] section
-    let mut in_deps = false;
-    let mut deps: Vec<(String, String)> = Vec::new();
-
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with('#') || trimmed.is_empty() {
-            continue;
-        }
-        if trimmed == "[dependencies]" {
-            in_deps = true;
-            continue;
-        }
-        if trimmed.starts_with('[') {
-            in_deps = false;
-            continue;
-        }
-        if in_deps {
-            if let Some((key, value)) = trimmed.split_once('=') {
-                let name = key.trim().trim_matches('"').to_string();
-                let path = value.trim().trim_matches('"').to_string();
-                deps.push((name, path));
-            }
-        }
-    }
-
-    if deps.is_empty() {
-        println!("No dependencies to install.");
-        return;
-    }
-
-    // Create .burin/packages directory
-    let pkg_dir = PathBuf::from(".burin/packages");
-    if let Err(e) = fs::create_dir_all(&pkg_dir) {
-        eprintln!("Failed to create package directory: {e}");
-        process::exit(1);
-    }
-
-    let mut installed = 0;
-    for (name, source_path) in &deps {
-        let source = Path::new(source_path);
-        let dest = pkg_dir.join(name);
-
-        if source.is_dir() {
-            // Copy directory
-            if dest.exists() {
-                println!("  updating {name} from {source_path}");
-                let _ = fs::remove_dir_all(&dest);
-            } else {
-                println!("  installing {name} from {source_path}");
-            }
-            if let Err(e) = copy_dir_recursive(source, &dest) {
-                eprintln!("  failed to install {name}: {e}");
-                continue;
-            }
-        } else if source.is_file() {
-            // Copy single file
-            let dest_file = pkg_dir.join(format!("{name}.harn"));
-            if dest_file.exists() {
-                println!("  updating {name} from {source_path}");
-            } else {
-                println!("  installing {name} from {source_path}");
-            }
-            if let Err(e) = fs::copy(source, &dest_file) {
-                eprintln!("  failed to install {name}: {e}");
-                continue;
-            }
-        } else {
-            // Try as .harn file
-            let harn_source = PathBuf::from(format!("{source_path}.harn"));
-            if harn_source.exists() {
-                let dest_file = pkg_dir.join(format!("{name}.harn"));
-                println!("  installing {name} from {}", harn_source.display());
-                if let Err(e) = fs::copy(&harn_source, &dest_file) {
-                    eprintln!("  failed to install {name}: {e}");
-                    continue;
-                }
-            } else {
-                eprintln!("  package source not found: {source_path}");
-                continue;
-            }
-        }
-        installed += 1;
-    }
-
-    println!("\nInstalled {installed} package(s) to .burin/packages/");
-}
-
-fn copy_dir_recursive(src: &Path, dst: &Path) -> io::Result<()> {
-    fs::create_dir_all(dst)?;
-    for entry in fs::read_dir(src)? {
-        let entry = entry?;
-        let ty = entry.file_type()?;
-        let dest_path = dst.join(entry.file_name());
-        if ty.is_dir() {
-            copy_dir_recursive(&entry.path(), &dest_path)?;
-        } else {
-            fs::copy(entry.path(), &dest_path)?;
-        }
-    }
-    Ok(())
 }

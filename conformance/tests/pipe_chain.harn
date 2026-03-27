@@ -1,6 +1,10 @@
 pipeline test(task) {
-  fn add1(x) { return x + 1 }
-  fn double(x) { return x * 2 }
+  fn add1(x) {
+    return x + 1
+  }
+  fn double(x) {
+    return x * 2
+  }
   let result = 3 |> add1 |> double
   log(result)
 }

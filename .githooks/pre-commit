@@ -5,6 +5,12 @@ echo "=== Pre-commit: checking formatting ==="
 cargo fmt --all -- --check
 echo "    Formatting OK."
 
+echo "=== Pre-commit: checking harn formatting ==="
+for f in conformance/tests/*.harn; do
+  cargo run --quiet --bin harn -- fmt --check "$f"
+done
+echo "    Harn formatting OK."
+
 echo "=== Pre-commit: running clippy ==="
 cargo clippy --workspace -- -D warnings
 echo "    Clippy OK."

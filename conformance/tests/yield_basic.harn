@@ -1,6 +1,6 @@
 pipeline test(task) {
   log("before yield")
-  // yield pauses execution — in test mode it throws YieldValue
-  // which the test runner catches as an error
-  // For conformance, test that code before yield runs
 }
+// yield pauses execution — in test mode it throws YieldValue
+// which the test runner catches as an error
+// For conformance, test that code before yield runs

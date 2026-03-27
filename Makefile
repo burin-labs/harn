@@ -1,7 +1,7 @@
-.PHONY: check fmt lint lint-md test conformance all
+.PHONY: check fmt lint lint-md lint-harn test conformance all
 
 # Full quality check: format, lint, test, conformance
-all: fmt lint lint-md test conformance
+all: fmt lint lint-md lint-harn test conformance
 
 # Format all code
 fmt:
@@ -22,6 +22,19 @@ conformance:
 # Lint markdown files
 lint-md:
 	npx markdownlint-cli2 "**/*.md"
+
+# Lint Harn conformance tests (check for warnings)
+lint-harn:
+	@echo "=== Linting Harn conformance tests ==="
+	@fail=0; for f in conformance/tests/*.harn; do \
+		output=$$(cargo run --quiet --bin harn -- check "$$f" 2>&1); \
+		if echo "$$output" | grep -qE '^.+: (warning|error)\['; then \
+			echo "$$output" | grep -v ": ok$$"; \
+			fail=1; \
+		fi; \
+	done; \
+	if [ "$$fail" = "1" ]; then echo "Lint issues found in conformance tests"; exit 1; fi
+	@echo "    Harn lint OK."
 
 # Format check (no changes, for CI)
 fmt-check:

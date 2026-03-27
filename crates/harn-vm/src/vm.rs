@@ -16,6 +16,8 @@ struct CallFrame {
     ip: usize,
     stack_base: usize,
     saved_env: VmEnv,
+    /// Function name for stack traces (empty for top-level pipeline).
+    fn_name: String,
 }
 
 /// Exception handler for try/catch.
@@ -78,6 +80,10 @@ pub struct Vm {
     source_dir: Option<std::path::PathBuf>,
     /// Already-imported file paths (cycle prevention).
     imported_paths: Vec<std::path::PathBuf>,
+    /// Source file path for error reporting.
+    source_file: Option<String>,
+    /// Source text for error reporting.
+    source_text: Option<String>,
 }
 
 impl Vm {
@@ -101,7 +107,15 @@ impl Vm {
             last_line: 0,
             source_dir: None,
             imported_paths: Vec::new(),
+            source_file: None,
+            source_text: None,
         }
+    }
+
+    /// Set source info for error reporting (file path and source text).
+    pub fn set_source_info(&mut self, file: &str, text: &str) {
+        self.source_file = Some(file.to_string());
+        self.source_text = Some(text.to_string());
     }
 
     /// Set breakpoints by source line number.
@@ -158,10 +172,14 @@ impl Vm {
             } else {
                 0
             };
-            let name = if i == 0 {
-                "pipeline".to_string()
+            let name = if frame.fn_name.is_empty() {
+                if i == 0 {
+                    "pipeline".to_string()
+                } else {
+                    format!("fn_{}", i)
+                }
             } else {
-                format!("fn_{}", i)
+                frame.fn_name.clone()
             };
             frames.push((name, line));
         }
@@ -283,6 +301,7 @@ impl Vm {
             ip: 0,
             stack_base: self.stack.len(),
             saved_env: self.env.clone(),
+            fn_name: String::new(),
         });
     }
 
@@ -326,6 +345,8 @@ impl Vm {
             last_line: 0,
             source_dir: None,
             imported_paths: Vec::new(),
+            source_file: self.source_file.clone(),
+            source_text: self.source_text.clone(),
         }
     }
 
@@ -355,25 +376,28 @@ impl Vm {
                 file_path.set_extension("harn");
             }
 
-            // Try .burin/packages/ fallback
+            // Try .harn/packages/ fallback (then .burin/packages/ for compat)
             if !file_path.exists() {
-                let pkg_path = base.join(".burin").join("packages").join(path);
-                if pkg_path.exists() {
-                    file_path = if pkg_path.is_dir() {
-                        let lib = pkg_path.join("lib.harn");
-                        if lib.exists() {
-                            lib
+                for pkg_dir in [".harn/packages", ".burin/packages"] {
+                    let pkg_path = base.join(pkg_dir).join(path);
+                    if pkg_path.exists() {
+                        file_path = if pkg_path.is_dir() {
+                            let lib = pkg_path.join("lib.harn");
+                            if lib.exists() {
+                                lib
+                            } else {
+                                pkg_path
+                            }
                         } else {
                             pkg_path
-                        }
-                    } else {
-                        pkg_path
-                    };
-                } else {
+                        };
+                        break;
+                    }
                     let mut pkg_harn = pkg_path.clone();
                     pkg_harn.set_extension("harn");
                     if pkg_harn.exists() {
                         file_path = pkg_harn;
+                        break;
                     }
                 }
             }
@@ -541,6 +565,7 @@ impl Vm {
             ip: 0,
             stack_base: self.stack.len(),
             saved_env: self.env.clone(),
+            fn_name: String::new(),
         });
 
         loop {
@@ -1320,6 +1345,7 @@ impl Vm {
             ip: 0,
             stack_base: self.stack.len(),
             saved_env,
+            fn_name: closure.func.name.clone(),
         });
 
         Ok(())
@@ -1924,6 +1950,81 @@ impl Vm {
                 b.type_name()
             ))),
         }
+    }
+
+    /// Format a runtime error with stack trace and source context.
+    ///
+    /// Produces rustc-style output:
+    /// ```text
+    /// error: Undefined variable: x
+    ///   --> file.harn:5:1
+    ///    |
+    ///  5 | log(x)
+    ///    |
+    ///   = note: called from greet at file.harn:2:1
+    /// ```
+    pub fn format_runtime_error(&self, error: &VmError) -> String {
+        let source = match &self.source_text {
+            Some(s) => s.as_str(),
+            None => return format!("error: {error}"),
+        };
+        let filename = self.source_file.as_deref().unwrap_or("<unknown>");
+
+        let error_msg = format!("{error}");
+        let mut out = String::new();
+
+        // Error header
+        out.push_str(&format!("error: {error_msg}\n"));
+
+        // Get the error location from the top frame
+        let frames: Vec<(&str, usize)> = self
+            .frames
+            .iter()
+            .map(|f| {
+                let line = if f.ip > 0 && f.ip - 1 < f.chunk.lines.len() {
+                    f.chunk.lines[f.ip - 1] as usize
+                } else {
+                    0
+                };
+                (f.fn_name.as_str(), line)
+            })
+            .collect();
+
+        if let Some((_name, line)) = frames.last() {
+            let line = *line;
+            if line > 0 {
+                let gutter_width = line.to_string().len();
+                out.push_str(&format!(
+                    "{:>width$}--> {filename}:{line}:1\n",
+                    " ",
+                    width = gutter_width + 1,
+                ));
+                // Show source line
+                if let Some(source_line) = source.lines().nth(line.saturating_sub(1)) {
+                    out.push_str(&format!("{:>width$} |\n", " ", width = gutter_width + 1));
+                    out.push_str(&format!(
+                        "{:>width$} | {source_line}\n",
+                        line,
+                        width = gutter_width + 1,
+                    ));
+                    out.push_str(&format!("{:>width$} |\n", " ", width = gutter_width + 1));
+                }
+            }
+        }
+
+        // Show call stack (bottom-up, skipping top frame which is already shown)
+        if frames.len() > 1 {
+            for (name, line) in frames.iter().rev().skip(1) {
+                let display_name = if name.is_empty() { "pipeline" } else { name };
+                if *line > 0 {
+                    out.push_str(&format!(
+                        "  = note: called from {display_name} at {filename}:{line}\n"
+                    ));
+                }
+            }
+        }
+
+        out
     }
 }
 
