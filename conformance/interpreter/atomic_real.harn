@@ -1,0 +1,30 @@
+pipeline default() {
+  // Create a real atomic
+  let counter = atomic(0)
+  println(type_of(counter))
+
+  // Basic get/set
+  println(atomic_get(counter))
+  atomic_set(counter, 10)
+  println(atomic_get(counter))
+
+  // Atomic add
+  atomic_add(counter, 5)
+  println(atomic_get(counter))
+
+  // Compare and swap
+  let success = atomic_cas(counter, 15, 20)
+  println(success)
+  println(atomic_get(counter))
+
+  let fail = atomic_cas(counter, 15, 30)
+  println(fail)
+  println(atomic_get(counter))
+
+  // Concurrent atomic increments
+  let a = atomic(0)
+  parallel(10) { i ->
+    atomic_add(a, 1)
+  }
+  println(atomic_get(a))
+}

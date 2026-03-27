@@ -1,0 +1,13 @@
+pipeline default() {
+  // pub fn is parsed and works
+  pub fn multiply(a, b) {
+    return a * b
+  }
+
+  fn divide(a, b) {
+    return a / b
+  }
+
+  println(multiply(6, 7))
+  println(divide(42, 6))
+}

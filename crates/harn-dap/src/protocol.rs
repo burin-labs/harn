@@ -68,6 +68,7 @@ pub struct Capabilities {
     pub supports_evaluate_for_hovers: bool,
     pub supports_step_in_targets_request: bool,
     pub supports_set_variable: bool,
+    pub supports_conditional_breakpoints: bool,
 }
 
 impl Default for Capabilities {
@@ -77,6 +78,7 @@ impl Default for Capabilities {
             supports_evaluate_for_hovers: true,
             supports_step_in_targets_request: false,
             supports_set_variable: false,
+            supports_conditional_breakpoints: true,
         }
     }
 }
@@ -89,6 +91,8 @@ pub struct Breakpoint {
     pub line: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<Source>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub condition: Option<String>,
 }
 
 /// DAP Source reference.

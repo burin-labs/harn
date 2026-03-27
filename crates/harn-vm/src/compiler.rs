@@ -598,10 +598,12 @@ impl Compiler {
             // Declarations that only register metadata (no runtime effect needed for v1)
             Node::Pipeline { .. }
             | Node::ImportDecl { .. }
+            | Node::SelectiveImport { .. }
             | Node::OverrideDecl { .. }
             | Node::TypeDecl { .. }
             | Node::EnumDecl { .. }
-            | Node::StructDecl { .. } => {
+            | Node::StructDecl { .. }
+            | Node::InterfaceDecl { .. } => {
                 self.chunk.emit(Op::Nil, self.line);
             }
 

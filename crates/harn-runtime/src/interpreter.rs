@@ -143,12 +143,17 @@ impl Interpreter {
                 self.pipelines.insert(name.clone(), node.clone());
             } else if let Node::ImportDecl { path } = &node.node {
                 self.eval_import(path).await?;
+            } else if let Node::SelectiveImport { names, path } = &node.node {
+                self.eval_selective_import(names, path).await?;
             }
         }
 
         // Execute non-pipeline, non-import top-level statements (fn, type, enum, struct decls)
         for node in program {
-            if !matches!(&node.node, Node::Pipeline { .. } | Node::ImportDecl { .. }) {
+            if !matches!(
+                &node.node,
+                Node::Pipeline { .. } | Node::ImportDecl { .. } | Node::SelectiveImport { .. }
+            ) {
                 self.eval(node).await?;
             }
         }
@@ -210,6 +215,8 @@ impl Interpreter {
                 self.pipelines.insert(name.clone(), node.clone());
             } else if let Node::ImportDecl { path } = &node.node {
                 self.eval_import(path).await?;
+            } else if let Node::SelectiveImport { names, path } = &node.node {
+                self.eval_selective_import(names, path).await?;
             }
         }
 
@@ -514,6 +521,7 @@ impl Interpreter {
                 params,
                 return_type,
                 body,
+                ..
             } => {
                 let fn_value = Value::Closure {
                     params: TypedParam::names(params),
@@ -530,6 +538,8 @@ impl Interpreter {
 
             Node::ImportDecl { path } => self.eval_import(path).await,
 
+            Node::SelectiveImport { names, path } => self.eval_selective_import(names, path).await,
+
             Node::TypeDecl { name, type_expr } => {
                 self.type_registry.insert(name.clone(), type_expr.clone());
                 Ok(Value::Nil)
@@ -542,6 +552,11 @@ impl Interpreter {
 
             Node::StructDecl { name, fields } => {
                 self.struct_registry.insert(name.clone(), fields.clone());
+                Ok(Value::Nil)
+            }
+
+            Node::InterfaceDecl { .. } => {
+                // Interface declarations are only used by the typechecker.
                 Ok(Value::Nil)
             }
 
@@ -729,12 +744,133 @@ impl Interpreter {
     ) -> Result<Value, RuntimeError> {
         let val = self.eval(value).await?;
         for arm in arms {
-            let pattern_val = self.eval(&arm.pattern).await?;
-            if values_equal(&val, &pattern_val) {
-                return self.exec_statements(&arm.body).await;
+            let mut bindings = Vec::new();
+            if self
+                .pattern_matches(&val, &arm.pattern, &mut bindings)
+                .await?
+            {
+                let arm_env = self.env.child();
+                for (name, bound_val) in bindings {
+                    arm_env.define(&name, bound_val, false);
+                }
+                return self.exec_in_env(arm_env, &arm.body).await;
             }
         }
         Ok(Value::Nil)
+    }
+
+    /// Check if a value matches a pattern, collecting variable bindings.
+    fn pattern_matches<'a>(
+        &'a mut self,
+        val: &'a Value,
+        pattern: &'a SNode,
+        bindings: &'a mut Vec<(String, Value)>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<bool, RuntimeError>> + 'a>> {
+        Box::pin(async move {
+            match &pattern.node {
+                // Wildcard: _ matches anything
+                Node::Identifier(name) if name == "_" => Ok(true),
+
+                // Enum variant pattern: EnumName.Variant or EnumName.Variant(bindings...)
+                Node::EnumConstruct {
+                    enum_name,
+                    variant,
+                    args,
+                } => {
+                    if let Value::EnumVariant {
+                        enum_name: ve,
+                        variant: vv,
+                        fields,
+                    } = val
+                    {
+                        if ve == enum_name && vv == variant {
+                            for (i, arg) in args.iter().enumerate() {
+                                if let Node::Identifier(name) = &arg.node {
+                                    if name != "_" {
+                                        let field_val =
+                                            fields.get(i).cloned().unwrap_or(Value::Nil);
+                                        bindings.push((name.clone(), field_val));
+                                    }
+                                }
+                            }
+                            return Ok(true);
+                        }
+                    }
+                    Ok(false)
+                }
+
+                // EnumName.Variant(args) parsed as MethodCall — treat as destructure pattern
+                Node::MethodCall {
+                    object,
+                    method,
+                    args,
+                } => {
+                    if let Node::Identifier(obj_name) = &object.node {
+                        if self.enum_registry.contains_key(obj_name) {
+                            if let Value::EnumVariant {
+                                enum_name,
+                                variant,
+                                fields,
+                            } = val
+                            {
+                                if enum_name == obj_name && variant == method {
+                                    for (i, arg) in args.iter().enumerate() {
+                                        if let Node::Identifier(name) = &arg.node {
+                                            if name != "_" {
+                                                let field_val =
+                                                    fields.get(i).cloned().unwrap_or(Value::Nil);
+                                                bindings.push((name.clone(), field_val));
+                                            }
+                                        }
+                                    }
+                                    return Ok(true);
+                                }
+                            }
+                            return Ok(false);
+                        }
+                    }
+                    let pattern_val = self.eval(pattern).await?;
+                    Ok(values_equal(val, &pattern_val))
+                }
+
+                // Enum variant without args (property access): EnumName.Variant
+                Node::PropertyAccess { object, property } => {
+                    if let Node::Identifier(obj_name) = &object.node {
+                        if self.enum_registry.contains_key(obj_name) {
+                            if let Value::EnumVariant {
+                                enum_name,
+                                variant,
+                                fields,
+                            } = val
+                            {
+                                return Ok(enum_name == obj_name
+                                    && variant == property
+                                    && fields.is_empty());
+                            }
+                            return Ok(false);
+                        }
+                    }
+                    let pattern_val = self.eval(pattern).await?;
+                    Ok(values_equal(val, &pattern_val))
+                }
+
+                // Bare identifier: if it's not a known variable, bind it as a new variable
+                Node::Identifier(name) => {
+                    if let Some(existing) = self.env.get(name) {
+                        Ok(values_equal(val, &existing))
+                    } else {
+                        bindings.push((name.clone(), val.clone()));
+                        Ok(true)
+                    }
+                }
+
+                // Literal or expression: evaluate and compare
+                _ => {
+                    let pattern_val = self.eval(pattern).await?;
+                    Ok(values_equal(val, &pattern_val))
+                }
+            }
+        })
     }
 
     async fn eval_while(
@@ -765,16 +901,23 @@ impl Interpreter {
         let count_val = self.eval(count_node).await?;
         let count = count_val.as_int().unwrap_or(3) as usize;
 
+        let mut last_err = None;
         for _attempt in 0..count {
             match self.exec_statements(body).await {
                 Ok(result) => return Ok(result),
                 Err(RuntimeError::ReturnValue(val)) => {
                     return Err(RuntimeError::ReturnValue(val));
                 }
-                Err(_) => {}
+                Err(e) => {
+                    last_err = Some(e);
+                }
             }
         }
-        Ok(Value::Nil)
+        // All retries exhausted — re-throw the last error
+        match last_err {
+            Some(e) => Err(e),
+            None => Ok(Value::Nil),
+        }
     }
 
     async fn eval_try_catch(
@@ -943,6 +1086,25 @@ impl Interpreter {
         if resolved.extension().is_none() {
             resolved.set_extension("harn");
         }
+
+        // Fallback: check .burin/packages/ for installed packages
+        if !resolved.exists() {
+            let pkg_path = self.source_dir.join(".burin/packages").join(path);
+            let mut pkg_resolved = pkg_path.clone();
+            if pkg_resolved.extension().is_none() {
+                pkg_resolved.set_extension("harn");
+            }
+            if pkg_resolved.exists() {
+                resolved = pkg_resolved;
+            } else {
+                // Try as directory with lib.harn
+                let dir_lib = pkg_path.join("lib.harn");
+                if dir_lib.exists() {
+                    resolved = dir_lib;
+                }
+            }
+        }
+
         let resolved = resolved.canonicalize().unwrap_or(resolved);
 
         if self.imported.contains(&resolved) {
@@ -969,15 +1131,153 @@ impl Interpreter {
             self.source_dir = parent.to_path_buf();
         }
 
+        // Check if module has any `pub fn` declarations
+        let has_pub = nodes
+            .iter()
+            .any(|n| matches!(&n.node, Node::FnDecl { is_pub: true, .. }));
+
+        // Collect public fn names (for visibility filtering)
+        let pub_fn_names: Vec<String> = if has_pub {
+            nodes
+                .iter()
+                .filter_map(|n| {
+                    if let Node::FnDecl {
+                        name, is_pub: true, ..
+                    } = &n.node
+                    {
+                        Some(name.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+
         for node in &nodes {
             if let Node::Pipeline { name, .. } = &node.node {
                 self.pipelines.insert(name.clone(), node.clone());
             }
         }
 
+        if has_pub {
+            // Module uses pub — evaluate in child env, copy only pub items back
+            let saved_env = self.env.clone();
+            let module_env = self.env.child();
+            self.env = module_env;
+
+            for node in &nodes {
+                if !matches!(node.node, Node::Pipeline { .. }) {
+                    self.eval(node).await?;
+                }
+            }
+
+            let module_env_ref = self.env.clone();
+            self.env = saved_env;
+
+            // Copy only pub functions
+            for name in &pub_fn_names {
+                if let Some(val) = module_env_ref.get(name) {
+                    self.env.define(name, val, false);
+                }
+            }
+        } else {
+            // No pub declarations — export everything (backward compat)
+            for node in &nodes {
+                if !matches!(node.node, Node::Pipeline { .. }) {
+                    self.eval(node).await?;
+                }
+            }
+        }
+
+        self.source_dir = prev_dir;
+        Ok(Value::Nil)
+    }
+
+    /// Selective import: import { foo, bar } from "module"
+    /// Only imports the named functions/pipelines from the module.
+    async fn eval_selective_import(
+        &mut self,
+        names: &[String],
+        path: &str,
+    ) -> Result<Value, RuntimeError> {
+        let mut resolved = self.source_dir.join(path);
+        if resolved.extension().is_none() {
+            resolved.set_extension("harn");
+        }
+
+        // Also check package directory: .burin/packages/<path>
+        if !resolved.exists() {
+            let pkg_path = self.source_dir.join(".burin/packages").join(path);
+            let mut pkg_resolved = pkg_path.clone();
+            if pkg_resolved.extension().is_none() {
+                pkg_resolved.set_extension("harn");
+            }
+            if pkg_resolved.exists() {
+                resolved = pkg_resolved;
+            } else {
+                // Try as directory with lib.harn
+                let dir_lib = pkg_path.join("lib.harn");
+                if dir_lib.exists() {
+                    resolved = dir_lib;
+                }
+            }
+        }
+
+        let resolved = resolved.canonicalize().unwrap_or(resolved);
+
+        // Prevent circular imports
+        if self.imported.contains(&resolved) {
+            return Ok(Value::Nil);
+        }
+        self.imported.push(resolved.clone());
+
+        let source = std::fs::read_to_string(&resolved).map_err(|e| RuntimeError::ImportError {
+            path: path.to_string(),
+            reason: e.to_string(),
+        })?;
+
+        let mut lexer = Lexer::new(&source);
+        let tokens = lexer
+            .tokenize()
+            .map_err(|e| RuntimeError::thrown(e.to_string()))?;
+        let mut parser = Parser::new(tokens);
+        let nodes = parser
+            .parse()
+            .map_err(|e| RuntimeError::thrown(e.to_string()))?;
+
+        let prev_dir = self.source_dir.clone();
+        if let Some(parent) = resolved.parent() {
+            self.source_dir = parent.to_path_buf();
+        }
+
+        // Create a temporary child interpreter to evaluate the module
+        let saved_env = self.env.clone();
+        let module_env = self.env.child();
+        self.env = module_env;
+
+        // Process all declarations in the module
+        for node in &nodes {
+            if let Node::Pipeline { name, .. } = &node.node {
+                if names.contains(name) {
+                    self.pipelines.insert(name.clone(), node.clone());
+                }
+            }
+        }
         for node in &nodes {
             if !matches!(node.node, Node::Pipeline { .. }) {
                 self.eval(node).await?;
+            }
+        }
+
+        // Extract only the requested names from the module scope
+        let module_env_ref = self.env.clone();
+        self.env = saved_env;
+
+        for name in names {
+            if let Some(val) = module_env_ref.get(name) {
+                self.env.define(name, val, false);
             }
         }
 
@@ -1786,14 +2086,6 @@ impl Interpreter {
         } else {
             return child.to_vec();
         };
-
-        let has_overrides = child
-            .iter()
-            .any(|n| matches!(n.node, Node::OverrideDecl { .. }));
-
-        if !has_overrides {
-            return child.to_vec();
-        }
 
         let non_overrides: Vec<SNode> = child
             .iter()

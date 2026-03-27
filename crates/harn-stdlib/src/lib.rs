@@ -44,6 +44,8 @@ pub fn register_stdlib(interp: &mut Interpreter) {
             Value::Duration(_) => "duration",
             Value::EnumVariant { .. } => "enum",
             Value::StructInstance { .. } => "struct",
+            Value::Channel(_) => "channel",
+            Value::Atomic(_) => "atomic",
         };
         Ok(Value::String(type_name.to_string()))
     });
@@ -343,6 +345,281 @@ pub fn register_stdlib(interp: &mut Interpreter) {
         }
         Ok(Value::Nil)
     });
+
+    // --- File system builtins ---
+
+    interp.register_builtin("file_exists", |args, _out| {
+        let path = args.first().map(|a| a.as_string()).unwrap_or_default();
+        Ok(Value::Bool(std::path::Path::new(&path).exists()))
+    });
+
+    interp.register_builtin("delete_file", |args, _out| {
+        let path = args.first().map(|a| a.as_string()).unwrap_or_default();
+        let p = std::path::Path::new(&path);
+        if p.is_dir() {
+            std::fs::remove_dir_all(&path).map_err(|e| {
+                RuntimeError::thrown(format!("Failed to delete directory {path}: {e}"))
+            })?;
+        } else {
+            std::fs::remove_file(&path)
+                .map_err(|e| RuntimeError::thrown(format!("Failed to delete file {path}: {e}")))?;
+        }
+        Ok(Value::Nil)
+    });
+
+    interp.register_builtin("list_dir", |args, _out| {
+        let path = args
+            .first()
+            .map(|a| a.as_string())
+            .unwrap_or_else(|| ".".to_string());
+        let entries = std::fs::read_dir(&path)
+            .map_err(|e| RuntimeError::thrown(format!("Failed to list directory {path}: {e}")))?;
+        let mut result = Vec::new();
+        for entry in entries {
+            let entry = entry.map_err(|e| RuntimeError::thrown(e.to_string()))?;
+            let name = entry.file_name().to_string_lossy().to_string();
+            result.push(Value::String(name));
+        }
+        result.sort_by_key(|a| a.as_string());
+        Ok(Value::List(result))
+    });
+
+    interp.register_builtin("mkdir", |args, _out| {
+        let path = args.first().map(|a| a.as_string()).unwrap_or_default();
+        std::fs::create_dir_all(&path)
+            .map_err(|e| RuntimeError::thrown(format!("Failed to create directory {path}: {e}")))?;
+        Ok(Value::Nil)
+    });
+
+    interp.register_builtin("path_join", |args, _out| {
+        let mut path = std::path::PathBuf::new();
+        for arg in args {
+            path.push(arg.as_string());
+        }
+        Ok(Value::String(path.to_string_lossy().to_string()))
+    });
+
+    interp.register_builtin("copy_file", |args, _out| {
+        if args.len() >= 2 {
+            let src = args[0].as_string();
+            let dst = args[1].as_string();
+            std::fs::copy(&src, &dst)
+                .map_err(|e| RuntimeError::thrown(format!("Failed to copy {src} to {dst}: {e}")))?;
+        }
+        Ok(Value::Nil)
+    });
+
+    interp.register_builtin("append_file", |args, _out| {
+        use std::io::Write;
+        if args.len() >= 2 {
+            let path = args[0].as_string();
+            let content = args[1].as_string();
+            let mut file = std::fs::OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(&path)
+                .map_err(|e| RuntimeError::thrown(format!("Failed to open file {path}: {e}")))?;
+            file.write_all(content.as_bytes()).map_err(|e| {
+                RuntimeError::thrown(format!("Failed to append to file {path}: {e}"))
+            })?;
+        }
+        Ok(Value::Nil)
+    });
+
+    interp.register_builtin("temp_dir", |_args, _out| {
+        Ok(Value::String(
+            std::env::temp_dir().to_string_lossy().to_string(),
+        ))
+    });
+
+    interp.register_builtin("stat", |args, _out| {
+        let path = args.first().map(|a| a.as_string()).unwrap_or_default();
+        let metadata = std::fs::metadata(&path)
+            .map_err(|e| RuntimeError::thrown(format!("Failed to stat {path}: {e}")))?;
+        let mut info = std::collections::BTreeMap::new();
+        info.insert("size".to_string(), Value::Int(metadata.len() as i64));
+        info.insert("is_file".to_string(), Value::Bool(metadata.is_file()));
+        info.insert("is_dir".to_string(), Value::Bool(metadata.is_dir()));
+        info.insert(
+            "readonly".to_string(),
+            Value::Bool(metadata.permissions().readonly()),
+        );
+        if let Ok(modified) = metadata.modified() {
+            if let Ok(dur) = modified.duration_since(std::time::UNIX_EPOCH) {
+                info.insert("modified".to_string(), Value::Float(dur.as_secs_f64()));
+            }
+        }
+        Ok(Value::Dict(info))
+    });
+
+    // --- Process execution builtins ---
+
+    interp.register_builtin("exec", |args, _out| {
+        if args.is_empty() {
+            return Err(RuntimeError::thrown("exec: command is required"));
+        }
+        let cmd = args[0].as_string();
+        let cmd_args: Vec<String> = args[1..].iter().map(|a| a.as_string()).collect();
+        let output = std::process::Command::new(&cmd)
+            .args(&cmd_args)
+            .output()
+            .map_err(|e| RuntimeError::thrown(format!("exec failed: {e}")))?;
+        let mut result = std::collections::BTreeMap::new();
+        result.insert(
+            "stdout".to_string(),
+            Value::String(String::from_utf8_lossy(&output.stdout).to_string()),
+        );
+        result.insert(
+            "stderr".to_string(),
+            Value::String(String::from_utf8_lossy(&output.stderr).to_string()),
+        );
+        result.insert(
+            "status".to_string(),
+            Value::Int(output.status.code().unwrap_or(-1) as i64),
+        );
+        result.insert("success".to_string(), Value::Bool(output.status.success()));
+        Ok(Value::Dict(result))
+    });
+
+    interp.register_builtin("shell", |args, _out| {
+        let cmd = args.first().map(|a| a.as_string()).unwrap_or_default();
+        if cmd.is_empty() {
+            return Err(RuntimeError::thrown("shell: command string is required"));
+        }
+        let shell = if cfg!(target_os = "windows") {
+            "cmd"
+        } else {
+            "sh"
+        };
+        let flag = if cfg!(target_os = "windows") {
+            "/C"
+        } else {
+            "-c"
+        };
+        let output = std::process::Command::new(shell)
+            .arg(flag)
+            .arg(&cmd)
+            .output()
+            .map_err(|e| RuntimeError::thrown(format!("shell failed: {e}")))?;
+        let mut result = std::collections::BTreeMap::new();
+        result.insert(
+            "stdout".to_string(),
+            Value::String(String::from_utf8_lossy(&output.stdout).to_string()),
+        );
+        result.insert(
+            "stderr".to_string(),
+            Value::String(String::from_utf8_lossy(&output.stderr).to_string()),
+        );
+        result.insert(
+            "status".to_string(),
+            Value::Int(output.status.code().unwrap_or(-1) as i64),
+        );
+        result.insert("success".to_string(), Value::Bool(output.status.success()));
+        Ok(Value::Dict(result))
+    });
+
+    // --- Date/time builtins ---
+
+    interp.register_builtin("date_now", |_args, _out| {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default();
+        let total_secs = now.as_secs();
+        let (y, m, d, hour, minute, second, dow) = civil_from_timestamp(total_secs);
+        let mut result = std::collections::BTreeMap::new();
+        result.insert("year".to_string(), Value::Int(y));
+        result.insert("month".to_string(), Value::Int(m));
+        result.insert("day".to_string(), Value::Int(d));
+        result.insert("hour".to_string(), Value::Int(hour));
+        result.insert("minute".to_string(), Value::Int(minute));
+        result.insert("second".to_string(), Value::Int(second));
+        result.insert("weekday".to_string(), Value::Int(dow));
+        result.insert("timestamp".to_string(), Value::Float(now.as_secs_f64()));
+        Ok(Value::Dict(result))
+    });
+
+    interp.register_builtin("date_format", |args, _out| {
+        // date_format(timestamp, format_str)
+        // Format tokens: %Y=year, %m=month, %d=day, %H=hour, %M=minute, %S=second
+        let ts = match args.first() {
+            Some(Value::Float(f)) => *f,
+            Some(Value::Int(n)) => *n as f64,
+            Some(Value::Dict(map)) => map
+                .get("timestamp")
+                .and_then(|v| match v {
+                    Value::Float(f) => Some(*f),
+                    Value::Int(n) => Some(*n as f64),
+                    _ => None,
+                })
+                .unwrap_or(0.0),
+            _ => 0.0,
+        };
+        let fmt = args
+            .get(1)
+            .map(|a| a.as_string())
+            .unwrap_or_else(|| "%Y-%m-%d %H:%M:%S".to_string());
+
+        let (y, m, d, hour, minute, second, _dow) = civil_from_timestamp(ts as u64);
+
+        let result = fmt
+            .replace("%Y", &format!("{y:04}"))
+            .replace("%m", &format!("{m:02}"))
+            .replace("%d", &format!("{d:02}"))
+            .replace("%H", &format!("{hour:02}"))
+            .replace("%M", &format!("{minute:02}"))
+            .replace("%S", &format!("{second:02}"));
+
+        Ok(Value::String(result))
+    });
+
+    interp.register_builtin("date_parse", |args, _out| {
+        // date_parse("2024-01-15 10:30:00") -> timestamp float
+        // Simple parser for "%Y-%m-%d %H:%M:%S" and "%Y-%m-%d"
+        let s = args.first().map(|a| a.as_string()).unwrap_or_default();
+        let parts: Vec<&str> = s.split(|c: char| !c.is_ascii_digit()).collect();
+        let parts: Vec<i64> = parts.iter().filter_map(|p| p.parse().ok()).collect();
+        if parts.len() < 3 {
+            return Err(RuntimeError::thrown(format!("Cannot parse date: {s}")));
+        }
+        let (y, m, d) = (parts[0], parts[1], parts[2]);
+        let hour = parts.get(3).copied().unwrap_or(0);
+        let minute = parts.get(4).copied().unwrap_or(0);
+        let second = parts.get(5).copied().unwrap_or(0);
+
+        // Convert to days since epoch (inverse of civil_from_days)
+        let (y_adj, m_adj) = if m <= 2 {
+            (y - 1, (m + 9) as u64)
+        } else {
+            (y, (m - 3) as u64)
+        };
+        let era = if y_adj >= 0 { y_adj } else { y_adj - 399 } / 400;
+        let yoe = (y_adj - era * 400) as u64;
+        let doy = (153 * m_adj + 2) / 5 + d as u64 - 1;
+        let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+        let days = era * 146097 + doe as i64 - 719468;
+        let ts = days * 86400 + hour * 3600 + minute * 60 + second;
+        Ok(Value::Float(ts as f64))
+    });
+
+    // --- String formatting ---
+
+    interp.register_builtin("format", |args, _out| {
+        // format("Hello, {}! You are {} years old.", name, age)
+        let template = args.first().map(|a| a.as_string()).unwrap_or_default();
+        let mut result = template;
+        for arg in args.iter().skip(1) {
+            if let Some(pos) = result.find("{}") {
+                result = format!(
+                    "{}{}{}",
+                    &result[..pos],
+                    arg.as_string(),
+                    &result[pos + 2..]
+                );
+            }
+        }
+        Ok(Value::String(result))
+    });
 }
 
 fn escape_json_string(s: &str) -> String {
@@ -385,4 +662,30 @@ fn value_to_json(val: &Value) -> String {
         }
         _ => "null".to_string(),
     }
+}
+
+/// Convert a Unix timestamp (seconds) to civil date components (UTC).
+/// Returns (year, month, day, hour, minute, second, weekday).
+/// Weekday: 0=Sunday, 1=Monday, ..., 6=Saturday.
+/// Uses Howard Hinnant's civil_from_days algorithm.
+fn civil_from_timestamp(total_secs: u64) -> (i64, i64, i64, i64, i64, i64, i64) {
+    let days = total_secs / 86400;
+    let time_of_day = total_secs % 86400;
+    let hour = (time_of_day / 3600) as i64;
+    let minute = ((time_of_day % 3600) / 60) as i64;
+    let second = (time_of_day % 60) as i64;
+
+    let z = days as i64 + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = (z - era * 146097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as i64;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as i64;
+    let y = if m <= 2 { y + 1 } else { y };
+    let dow = ((days + 4) % 7) as i64;
+
+    (y, m, d, hour, minute, second, dow)
 }

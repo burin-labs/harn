@@ -118,6 +118,7 @@ impl Formatter {
                 params,
                 return_type,
                 body,
+                is_pub,
             } => {
                 let params_str = format_typed_params(params);
                 let ret = if let Some(rt) = return_type {
@@ -125,7 +126,8 @@ impl Formatter {
                 } else {
                     String::new()
                 };
-                self.writeln(&format!("fn {name}({params_str}){ret} {{"));
+                let pub_prefix = if *is_pub { "pub " } else { "" };
+                self.writeln(&format!("{pub_prefix}fn {name}({params_str}){ret} {{"));
                 self.indent();
                 self.format_body(body);
                 self.dedent();
@@ -227,6 +229,10 @@ impl Formatter {
             Node::ImportDecl { path } => {
                 self.writeln(&format!("import \"{path}\""));
             }
+            Node::SelectiveImport { names, path } => {
+                let names_str = names.join(", ");
+                self.writeln(&format!("import {{ {names_str} }} from \"{path}\""));
+            }
             Node::MatchExpr { value, arms } => {
                 let val = self.format_expr(value);
                 self.writeln(&format!("match {val} {{"));
@@ -251,6 +257,25 @@ impl Formatter {
                 self.indent();
                 for f in fields {
                     self.format_struct_field(f);
+                }
+                self.dedent();
+                self.writeln("}");
+            }
+            Node::InterfaceDecl { name, methods } => {
+                self.writeln(&format!("interface {name} {{"));
+                self.indent();
+                for m in methods {
+                    let params = format_typed_params(&m.params);
+                    if let Some(ret) = &m.return_type {
+                        self.writeln(&format!(
+                            "fn {}({}): {}",
+                            m.name,
+                            params,
+                            format_type_expr(ret)
+                        ));
+                    } else {
+                        self.writeln(&format!("fn {}({})", m.name, params));
+                    }
                 }
                 self.dedent();
                 self.writeln("}");
@@ -851,6 +876,7 @@ impl Formatter {
                 params,
                 return_type,
                 body,
+                is_pub,
             } => {
                 let params_str = format_typed_params(params);
                 let ret = if let Some(rt) = return_type {
@@ -858,7 +884,8 @@ impl Formatter {
                 } else {
                     String::new()
                 };
-                let mut result = format!("fn {name}({params_str}){ret} {{\n");
+                let pub_prefix = if *is_pub { "pub " } else { "" };
+                let mut result = format!("{pub_prefix}fn {name}({params_str}){ret} {{\n");
                 let current_indent = self.indent + 1;
                 for n in body {
                     let indent_str = "  ".repeat(current_indent);
@@ -891,8 +918,12 @@ impl Formatter {
                 format!("var {name}{type_str} = {val}")
             }
             Node::ImportDecl { path } => format!("import \"{path}\""),
+            Node::SelectiveImport { names, path } => {
+                format!("import {{ {} }} from \"{path}\"", names.join(", "))
+            }
             Node::EnumDecl { name, .. } => format!("/* enum {name} */"),
             Node::StructDecl { name, .. } => format!("/* struct {name} */"),
+            Node::InterfaceDecl { name, .. } => format!("/* interface {name} */"),
             Node::OverrideDecl { name, .. } => format!("/* override {name} */"),
             Node::TypeDecl { name, type_expr } => {
                 let te = format_type_expr(type_expr);
@@ -1003,6 +1034,7 @@ impl Formatter {
                 params,
                 return_type,
                 body,
+                is_pub,
             } => {
                 let params_str = format_typed_params(params);
                 let ret = if let Some(rt) = return_type {
@@ -1010,7 +1042,8 @@ impl Formatter {
                 } else {
                     String::new()
                 };
-                let mut result = format!("fn {name}({params_str}){ret} {{\n");
+                let pub_prefix = if *is_pub { "pub " } else { "" };
+                let mut result = format!("{pub_prefix}fn {name}({params_str}){ret} {{\n");
                 for n in body {
                     let indent_str = "  ".repeat(indent_level + 1);
                     let expr = self.format_expr_or_stmt(n, indent_level + 1);
@@ -1143,6 +1176,9 @@ fn format_type_expr(te: &TypeExpr) -> String {
         }
         TypeExpr::List(inner) => {
             format!("list[{}]", format_type_expr(inner))
+        }
+        TypeExpr::DictType(k, v) => {
+            format!("dict[{}, {}]", format_type_expr(k), format_type_expr(v))
         }
     }
 }

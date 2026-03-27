@@ -444,8 +444,10 @@ impl Linter {
             | Node::NilLiteral
             | Node::DurationLiteral(_)
             | Node::ImportDecl { .. }
+            | Node::SelectiveImport { .. }
             | Node::EnumDecl { .. }
             | Node::StructDecl { .. }
+            | Node::InterfaceDecl { .. }
             | Node::OverrideDecl { .. }
             | Node::TypeDecl { .. } => {}
         }

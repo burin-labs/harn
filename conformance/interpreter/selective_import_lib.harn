@@ -1,0 +1,11 @@
+fn greet(name) {
+  return "Hello, " + name + "!"
+}
+
+pub fn add(a, b) {
+  return a + b
+}
+
+fn secret() {
+  return "hidden"
+}

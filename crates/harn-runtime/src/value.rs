@@ -1,8 +1,25 @@
 use std::collections::BTreeMap;
 use std::fmt;
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::Arc;
 
 use crate::environment::Environment;
 use harn_parser::{SNode, TypeExpr};
+
+/// A real channel backed by tokio::sync::mpsc.
+#[derive(Debug, Clone)]
+pub struct ChannelHandle {
+    pub name: String,
+    pub sender: Arc<tokio::sync::mpsc::Sender<Value>>,
+    pub receiver: Arc<tokio::sync::Mutex<tokio::sync::mpsc::Receiver<Value>>>,
+    pub closed: Arc<AtomicBool>,
+}
+
+/// A real atomic integer.
+#[derive(Debug, Clone)]
+pub struct AtomicHandle {
+    pub value: Arc<AtomicI64>,
+}
 
 /// Runtime values in the Harn interpreter.
 #[derive(Debug, Clone)]
@@ -37,6 +54,10 @@ pub enum Value {
         struct_name: String,
         fields: BTreeMap<String, Value>,
     },
+    /// A real channel for cross-task communication.
+    Channel(ChannelHandle),
+    /// A real atomic integer for shared mutable state.
+    Atomic(AtomicHandle),
 }
 
 impl Value {
@@ -54,6 +75,8 @@ impl Value {
             Value::Duration(ms) => *ms > 0,
             Value::EnumVariant { .. } => true,
             Value::StructInstance { fields, .. } => !fields.is_empty(),
+            Value::Channel(_) => true,
+            Value::Atomic(_) => true,
         }
     }
 
@@ -159,6 +182,8 @@ impl fmt::Display for Value {
                 let inner: Vec<String> = fields.iter().map(|(k, v)| format!("{k}: {v}")).collect();
                 write!(f, "{struct_name} {{{}}}", inner.join(", "))
             }
+            Value::Channel(ch) => write!(f, "<channel:{}>", ch.name),
+            Value::Atomic(a) => write!(f, "<atomic:{}>", a.value.load(Ordering::SeqCst)),
         }
     }
 }
@@ -176,6 +201,10 @@ impl PartialEq for Value {
             (Value::Closure { .. }, Value::Closure { .. }) => false,
             (Value::Duration(a), Value::Duration(b)) => a == b,
             (Value::TaskHandle { id: a }, Value::TaskHandle { id: b }) => a == b,
+            (Value::Channel(a), Value::Channel(b)) => a.name == b.name,
+            (Value::Atomic(a), Value::Atomic(b)) => {
+                a.value.load(Ordering::SeqCst) == b.value.load(Ordering::SeqCst)
+            }
             (
                 Value::EnumVariant {
                     enum_name: a,
@@ -350,6 +379,30 @@ pub fn check_type_with_registry(
                 ))
             }
         }
+        TypeExpr::DictType(key_type, val_type) => {
+            if let Value::Dict(map) = value {
+                for (k, v) in map {
+                    check_type_with_registry(
+                        &Value::String(k.clone()),
+                        key_type,
+                        &format!("{context}.key"),
+                        registry,
+                    )?;
+                    check_type_with_registry(
+                        v,
+                        val_type,
+                        &format!("{context}[\"{k}\"]"),
+                        registry,
+                    )?;
+                }
+                Ok(())
+            } else {
+                Err(format!(
+                    "Type error at {context}: expected dict, got {}",
+                    value_type_name(value)
+                ))
+            }
+        }
     }
 }
 
@@ -368,6 +421,8 @@ pub fn value_type_name(value: &Value) -> &'static str {
         Value::TaskHandle { .. } => "taskHandle",
         Value::EnumVariant { .. } => "enum",
         Value::StructInstance { .. } => "struct",
+        Value::Channel(_) => "channel",
+        Value::Atomic(_) => "atomic",
     }
 }
 
@@ -381,5 +436,6 @@ fn type_expr_name(t: &TypeExpr) -> String {
             .join(" | "),
         TypeExpr::Shape(_) => "{...}".to_string(),
         TypeExpr::List(inner) => format!("list[{}]", type_expr_name(inner)),
+        TypeExpr::DictType(k, v) => format!("dict[{}, {}]", type_expr_name(k), type_expr_name(v)),
     }
 }

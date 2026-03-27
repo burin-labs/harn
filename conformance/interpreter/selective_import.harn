@@ -1,0 +1,6 @@
+import { greet, add } from "selective_import_lib"
+
+pipeline default() {
+  println(greet("World"))
+  println(add(3, 4))
+}

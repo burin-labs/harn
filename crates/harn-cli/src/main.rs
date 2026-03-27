@@ -24,6 +24,7 @@ async fn main() {
         eprintln!("  test <file|dir>        Run test_* pipelines in file or directory");
         eprintln!("  test conformance       Run conformance test suite");
         eprintln!("  init [name]            Scaffold a new Harn project");
+        eprintln!("  install                Install dependencies from harn.toml");
         eprintln!("  repl                   Interactive REPL");
         process::exit(1);
     }
@@ -104,6 +105,7 @@ async fn main() {
             init_project(name);
         }
         "repl" => run_repl().await,
+        "install" => install_packages(),
         _ => {
             if args[1].ends_with(".harn") {
                 run_file(&args[1]).await;
@@ -638,4 +640,131 @@ async fn run_repl() {
             }
         }
     }
+}
+
+/// Install packages from harn.toml
+fn install_packages() {
+    let manifest_path = Path::new("harn.toml");
+    if !manifest_path.exists() {
+        eprintln!("No harn.toml found in current directory.");
+        eprintln!("Create one with:");
+        eprintln!();
+        eprintln!("  [package]");
+        eprintln!("  name = \"my-project\"");
+        eprintln!("  version = \"0.1.0\"");
+        eprintln!();
+        eprintln!("  [dependencies]");
+        eprintln!("  # name = \"path/to/package\"");
+        process::exit(1);
+    }
+
+    let content = match fs::read_to_string(manifest_path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Failed to read harn.toml: {e}");
+            process::exit(1);
+        }
+    };
+
+    // Simple TOML parser for [dependencies] section
+    let mut in_deps = false;
+    let mut deps: Vec<(String, String)> = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') || trimmed.is_empty() {
+            continue;
+        }
+        if trimmed == "[dependencies]" {
+            in_deps = true;
+            continue;
+        }
+        if trimmed.starts_with('[') {
+            in_deps = false;
+            continue;
+        }
+        if in_deps {
+            if let Some((key, value)) = trimmed.split_once('=') {
+                let name = key.trim().trim_matches('"').to_string();
+                let path = value.trim().trim_matches('"').to_string();
+                deps.push((name, path));
+            }
+        }
+    }
+
+    if deps.is_empty() {
+        println!("No dependencies to install.");
+        return;
+    }
+
+    // Create .burin/packages directory
+    let pkg_dir = PathBuf::from(".burin/packages");
+    if let Err(e) = fs::create_dir_all(&pkg_dir) {
+        eprintln!("Failed to create package directory: {e}");
+        process::exit(1);
+    }
+
+    let mut installed = 0;
+    for (name, source_path) in &deps {
+        let source = Path::new(source_path);
+        let dest = pkg_dir.join(name);
+
+        if source.is_dir() {
+            // Copy directory
+            if dest.exists() {
+                println!("  updating {name} from {source_path}");
+                let _ = fs::remove_dir_all(&dest);
+            } else {
+                println!("  installing {name} from {source_path}");
+            }
+            if let Err(e) = copy_dir_recursive(source, &dest) {
+                eprintln!("  failed to install {name}: {e}");
+                continue;
+            }
+        } else if source.is_file() {
+            // Copy single file
+            let dest_file = pkg_dir.join(format!("{name}.harn"));
+            if dest_file.exists() {
+                println!("  updating {name} from {source_path}");
+            } else {
+                println!("  installing {name} from {source_path}");
+            }
+            if let Err(e) = fs::copy(source, &dest_file) {
+                eprintln!("  failed to install {name}: {e}");
+                continue;
+            }
+        } else {
+            // Try as .harn file
+            let harn_source = PathBuf::from(format!("{source_path}.harn"));
+            if harn_source.exists() {
+                let dest_file = pkg_dir.join(format!("{name}.harn"));
+                println!("  installing {name} from {}", harn_source.display());
+                if let Err(e) = fs::copy(&harn_source, &dest_file) {
+                    eprintln!("  failed to install {name}: {e}");
+                    continue;
+                }
+            } else {
+                eprintln!("  package source not found: {source_path}");
+                continue;
+            }
+        }
+        installed += 1;
+    }
+
+    println!("\nInstalled {installed} package(s) to .burin/packages/");
+}
+
+fn copy_dir_recursive(src: &Path, dst: &Path) -> io::Result<()> {
+    fs::create_dir_all(dst)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        let dest_path = dst.join(entry.file_name());
+        if ty.is_dir() {
+            copy_dir_recursive(&entry.path(), &dest_path)?;
+        } else {
+            fs::copy(entry.path(), &dest_path)?;
+        }
+    }
+    Ok(())
 }

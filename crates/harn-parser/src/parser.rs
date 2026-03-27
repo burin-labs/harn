@@ -123,6 +123,33 @@ impl Parser {
     fn parse_import(&mut self) -> Result<SNode, ParserError> {
         let start = self.current_span();
         self.consume(&TokenKind::Import, "import")?;
+
+        // Check for selective import: import { foo, bar } from "module"
+        if self.check(&TokenKind::LBrace) {
+            self.advance(); // skip {
+            let mut names = Vec::new();
+            while !self.is_at_end() && !self.check(&TokenKind::RBrace) {
+                let name = self.consume_identifier("import name")?;
+                names.push(name);
+                if self.check(&TokenKind::Comma) {
+                    self.advance();
+                }
+            }
+            self.consume(&TokenKind::RBrace, "}")?;
+            self.consume(&TokenKind::From, "from")?;
+            if let Some(tok) = self.current() {
+                if let TokenKind::StringLiteral(path) = &tok.kind {
+                    let path = path.clone();
+                    self.advance();
+                    return Ok(spanned(
+                        Node::SelectiveImport { names, path },
+                        Span::merge(start, self.prev_span()),
+                    ));
+                }
+            }
+            return Err(self.error("import path string"));
+        }
+
         if let Some(tok) = self.current() {
             if let TokenKind::StringLiteral(path) = &tok.kind {
                 let path = path.clone();
@@ -170,10 +197,21 @@ impl Parser {
             TokenKind::Throw => self.parse_throw(),
             TokenKind::Override => self.parse_override(),
             TokenKind::Try => self.parse_try_catch(),
-            TokenKind::Fn => self.parse_fn_decl(),
+            TokenKind::Fn => self.parse_fn_decl_with_pub(false),
+            TokenKind::Pub => {
+                self.advance(); // consume 'pub'
+                let tok = self.current().ok_or_else(|| ParserError::UnexpectedEof {
+                    expected: "fn, struct, enum, or pipeline after pub".into(),
+                })?;
+                match &tok.kind {
+                    TokenKind::Fn => self.parse_fn_decl_with_pub(true),
+                    _ => Err(self.error("fn, struct, enum, or pipeline after pub")),
+                }
+            }
             TokenKind::TypeKw => self.parse_type_decl(),
             TokenKind::Enum => self.parse_enum_decl(),
             TokenKind::Struct => self.parse_struct_decl(),
+            TokenKind::Interface => self.parse_interface_decl(),
             TokenKind::Guard => self.parse_guard(),
             TokenKind::Deadline => self.parse_deadline(),
             TokenKind::Yield => self.parse_yield(),
@@ -479,7 +517,7 @@ impl Parser {
         ))
     }
 
-    fn parse_fn_decl(&mut self) -> Result<SNode, ParserError> {
+    fn parse_fn_decl_with_pub(&mut self, is_pub: bool) -> Result<SNode, ParserError> {
         let start = self.current_span();
         self.consume(&TokenKind::Fn, "fn")?;
         let name = self.consume_identifier("function name")?;
@@ -502,6 +540,7 @@ impl Parser {
                 params,
                 return_type,
                 body,
+                is_pub,
             },
             Span::merge(start, self.prev_span()),
         ))
@@ -587,6 +626,42 @@ impl Parser {
         self.consume(&TokenKind::RBrace, "}")?;
         Ok(spanned(
             Node::StructDecl { name, fields },
+            Span::merge(start, self.prev_span()),
+        ))
+    }
+
+    fn parse_interface_decl(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
+        self.consume(&TokenKind::Interface, "interface")?;
+        let name = self.consume_identifier("interface name")?;
+        self.consume(&TokenKind::LBrace, "{")?;
+        self.skip_newlines();
+
+        let mut methods = Vec::new();
+        while !self.is_at_end() && !self.check(&TokenKind::RBrace) {
+            self.consume(&TokenKind::Fn, "fn")?;
+            let method_name = self.consume_identifier("method name")?;
+            self.consume(&TokenKind::LParen, "(")?;
+            let params = self.parse_typed_param_list()?;
+            self.consume(&TokenKind::RParen, ")")?;
+            // Optional return type: -> type
+            let return_type = if self.check(&TokenKind::Arrow) {
+                self.advance();
+                Some(self.parse_type_expr()?)
+            } else {
+                None
+            };
+            methods.push(InterfaceMethod {
+                name: method_name,
+                params,
+                return_type,
+            });
+            self.skip_newlines();
+        }
+
+        self.consume(&TokenKind::RBrace, "}")?;
+        Ok(spanned(
+            Node::InterfaceDecl { name, methods },
             Span::merge(start, self.prev_span()),
         ))
     }
@@ -1346,6 +1421,25 @@ impl Parser {
             }
         }
         let name = self.consume_identifier("type name")?;
+        // Check for generic type parameters: list[int], dict[string, int]
+        if self.check(&TokenKind::LBracket) {
+            self.advance(); // skip [
+            let first_param = self.parse_type_expr()?;
+            if name == "list" {
+                self.consume(&TokenKind::RBracket, "]")?;
+                return Ok(TypeExpr::List(Box::new(first_param)));
+            } else if name == "dict" {
+                self.consume(&TokenKind::Comma, ",")?;
+                let second_param = self.parse_type_expr()?;
+                self.consume(&TokenKind::RBracket, "]")?;
+                return Ok(TypeExpr::DictType(
+                    Box::new(first_param),
+                    Box::new(second_param),
+                ));
+            }
+            // Unknown generic — just consume ] and treat as Named
+            self.consume(&TokenKind::RBracket, "]")?;
+        }
         Ok(TypeExpr::Named(name))
     }
 

@@ -1,0 +1,6 @@
+pipeline default() {
+  fn add(a: int, b: int) -> int {
+    return a + b
+  }
+  add("hello", "world")
+}

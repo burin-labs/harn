@@ -1,0 +1,20 @@
+pipeline default() {
+  // Create a real channel
+  let ch = channel("test", 10)
+  println(type_of(ch))
+
+  // Send and receive
+  let t = spawn {
+    send(ch, "hello")
+    send(ch, "world")
+    send(ch, 42)
+  }
+  await(t)
+
+  let v1 = receive(ch)
+  let v2 = receive(ch)
+  let v3 = receive(ch)
+  println(v1)
+  println(v2)
+  println(v3)
+}

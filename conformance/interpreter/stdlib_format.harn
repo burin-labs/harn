@@ -1,0 +1,8 @@
+pipeline default() {
+  let name = "world"
+  let age = 42
+  println(format("Hello, {}!", name))
+  println(format("{} is {} years old", name, age))
+  println(format("no placeholders"))
+  println(format("{} + {} = {}", 1, 2, 3))
+}

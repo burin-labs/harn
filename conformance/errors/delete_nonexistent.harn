@@ -1,0 +1,3 @@
+pipeline default() {
+  delete_file("/tmp/harn_this_file_does_not_exist_9999")
+}

@@ -77,6 +77,16 @@ impl VmEnv {
         }
     }
 
+    fn all_variables(&self) -> BTreeMap<String, VmValue> {
+        let mut vars = BTreeMap::new();
+        for scope in &self.scopes {
+            for (name, (value, _)) in &scope.vars {
+                vars.insert(name.clone(), value.clone());
+            }
+        }
+        vars
+    }
+
     fn assign(&mut self, name: &str, value: VmValue) -> Result<(), VmError> {
         for scope in self.scopes.iter_mut().rev() {
             if let Some((_, mutable)) = scope.vars.get(name) {
@@ -304,6 +314,24 @@ struct ExceptionHandler {
     frame_depth: usize,
 }
 
+/// Debug action returned by the debug hook.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DebugAction {
+    /// Continue execution normally.
+    Continue,
+    /// Stop (breakpoint hit, step complete).
+    Stop,
+}
+
+/// Information about current execution state for the debugger.
+#[derive(Debug, Clone)]
+pub struct DebugState {
+    pub line: usize,
+    pub variables: BTreeMap<String, VmValue>,
+    pub frame_name: String,
+    pub frame_depth: usize,
+}
+
 /// The Harn bytecode virtual machine.
 pub struct Vm {
     stack: Vec<VmValue>,
@@ -322,6 +350,16 @@ pub struct Vm {
     task_counter: u64,
     /// Active deadline stack: (deadline_instant, frame_depth).
     deadlines: Vec<(Instant, usize)>,
+    /// Breakpoints (source line numbers).
+    breakpoints: Vec<usize>,
+    /// Whether the VM is in step mode.
+    step_mode: bool,
+    /// The frame depth at which stepping started (for step-over).
+    step_frame_depth: usize,
+    /// Whether the VM is currently stopped at a debug point.
+    stopped: bool,
+    /// Last source line executed (to detect line changes).
+    last_line: usize,
 }
 
 impl Vm {
@@ -337,7 +375,194 @@ impl Vm {
             spawned_closures: BTreeMap::new(),
             task_counter: 0,
             deadlines: Vec::new(),
+            breakpoints: Vec::new(),
+            step_mode: false,
+            step_frame_depth: 0,
+            stopped: false,
+            last_line: 0,
         }
+    }
+
+    /// Set breakpoints by source line number.
+    pub fn set_breakpoints(&mut self, lines: Vec<usize>) {
+        self.breakpoints = lines;
+    }
+
+    /// Enable step mode (stop at next line).
+    pub fn set_step_mode(&mut self, step: bool) {
+        self.step_mode = step;
+        self.step_frame_depth = self.frames.len();
+    }
+
+    /// Enable step-over mode (stop at next line at same or lower frame depth).
+    pub fn set_step_over(&mut self) {
+        self.step_mode = true;
+        self.step_frame_depth = self.frames.len();
+    }
+
+    /// Enable step-out mode (stop when returning from current frame).
+    pub fn set_step_out(&mut self) {
+        self.step_mode = true;
+        self.step_frame_depth = self.frames.len().saturating_sub(1);
+    }
+
+    /// Check if the VM is stopped at a debug point.
+    pub fn is_stopped(&self) -> bool {
+        self.stopped
+    }
+
+    /// Get the current debug state (variables, line, etc.).
+    pub fn debug_state(&self) -> DebugState {
+        let line = self.current_line();
+        let variables = self.env.all_variables();
+        let frame_name = if self.frames.len() > 1 {
+            format!("frame_{}", self.frames.len() - 1)
+        } else {
+            "pipeline".to_string()
+        };
+        DebugState {
+            line,
+            variables,
+            frame_name,
+            frame_depth: self.frames.len(),
+        }
+    }
+
+    /// Get all stack frames for the debugger.
+    pub fn debug_stack_frames(&self) -> Vec<(String, usize)> {
+        let mut frames = Vec::new();
+        for (i, frame) in self.frames.iter().enumerate() {
+            let line = if frame.ip > 0 && frame.ip - 1 < frame.chunk.lines.len() {
+                frame.chunk.lines[frame.ip - 1] as usize
+            } else {
+                0
+            };
+            let name = if i == 0 {
+                "pipeline".to_string()
+            } else {
+                format!("fn_{}", i)
+            };
+            frames.push((name, line));
+        }
+        frames
+    }
+
+    /// Get the current source line.
+    fn current_line(&self) -> usize {
+        if let Some(frame) = self.frames.last() {
+            let ip = if frame.ip > 0 { frame.ip - 1 } else { 0 };
+            if ip < frame.chunk.lines.len() {
+                return frame.chunk.lines[ip] as usize;
+            }
+        }
+        0
+    }
+
+    /// Execute one instruction, returning whether to stop (breakpoint/step).
+    /// Returns Ok(None) to continue, Ok(Some(val)) on program end, Err on error.
+    pub fn step_execute(&mut self) -> Result<Option<(VmValue, bool)>, VmError> {
+        // Check if we need to stop at this line
+        let current_line = self.current_line();
+        let line_changed = current_line != self.last_line && current_line > 0;
+
+        if line_changed {
+            self.last_line = current_line;
+
+            // Check breakpoints
+            if self.breakpoints.contains(&current_line) {
+                self.stopped = true;
+                return Ok(Some((VmValue::Nil, true))); // true = stopped
+            }
+
+            // Check step mode
+            if self.step_mode && self.frames.len() <= self.step_frame_depth + 1 {
+                self.step_mode = false;
+                self.stopped = true;
+                return Ok(Some((VmValue::Nil, true))); // true = stopped
+            }
+        }
+
+        // Execute one instruction cycle
+        self.stopped = false;
+        self.execute_one_cycle()
+    }
+
+    /// Execute a single instruction cycle.
+    fn execute_one_cycle(&mut self) -> Result<Option<(VmValue, bool)>, VmError> {
+        // Check deadline
+        if let Some(&(deadline, _)) = self.deadlines.last() {
+            if Instant::now() > deadline {
+                self.deadlines.pop();
+                let err = VmError::Thrown(VmValue::String(Rc::from("Deadline exceeded")));
+                match self.handle_error(err) {
+                    Ok(None) => return Ok(None),
+                    Ok(Some(val)) => return Ok(Some((val, false))),
+                    Err(e) => return Err(e),
+                }
+            }
+        }
+
+        // Get current frame
+        let frame = match self.frames.last_mut() {
+            Some(f) => f,
+            None => {
+                let val = self.stack.pop().unwrap_or(VmValue::Nil);
+                return Ok(Some((val, false)));
+            }
+        };
+
+        // Check if we've reached end of chunk
+        if frame.ip >= frame.chunk.code.len() {
+            let val = self.stack.pop().unwrap_or(VmValue::Nil);
+            let popped_frame = self.frames.pop().unwrap();
+            if self.frames.is_empty() {
+                return Ok(Some((val, false)));
+            } else {
+                self.env = popped_frame.saved_env;
+                self.stack.truncate(popped_frame.stack_base);
+                self.stack.push(val);
+                return Ok(None);
+            }
+        }
+
+        let op = frame.chunk.code[frame.ip];
+        frame.ip += 1;
+
+        match self.execute_op(op) {
+            Ok(Some(val)) => Ok(Some((val, false))),
+            Ok(None) => Ok(None),
+            Err(VmError::Return(val)) => {
+                if let Some(popped_frame) = self.frames.pop() {
+                    let current_depth = self.frames.len();
+                    self.exception_handlers
+                        .retain(|h| h.frame_depth <= current_depth);
+                    if self.frames.is_empty() {
+                        return Ok(Some((val, false)));
+                    }
+                    self.env = popped_frame.saved_env;
+                    self.stack.truncate(popped_frame.stack_base);
+                    self.stack.push(val);
+                    Ok(None)
+                } else {
+                    Ok(Some((val, false)))
+                }
+            }
+            Err(e) => match self.handle_error(e) {
+                Ok(None) => Ok(None),
+                Ok(Some(val)) => Ok(Some((val, false))),
+                Err(e) => Err(e),
+            },
+        }
+    }
+
+    /// Initialize execution (push the initial frame).
+    pub fn start(&mut self, chunk: &Chunk) {
+        self.frames.push(CallFrame {
+            chunk: chunk.clone(),
+            ip: 0,
+            stack_base: self.stack.len(),
+            saved_env: self.env.clone(),
+        });
     }
 
     /// Register a builtin function.

@@ -52,6 +52,33 @@ const BUILTINS: &[&str] = &[
     "assert",
     "assert_eq",
     "assert_ne",
+    "file_exists",
+    "delete_file",
+    "list_dir",
+    "mkdir",
+    "path_join",
+    "copy_file",
+    "append_file",
+    "temp_dir",
+    "stat",
+    "exec",
+    "shell",
+    "date_now",
+    "date_format",
+    "date_parse",
+    "format",
+    "channel",
+    "send",
+    "receive",
+    "try_receive",
+    "close_channel",
+    "atomic",
+    "atomic_get",
+    "atomic_set",
+    "atomic_add",
+    "atomic_cas",
+    "select",
+    "prompt_user",
 ];
 
 /// Known keywords for completion.
@@ -80,6 +107,15 @@ const KEYWORDS: &[&str] = &[
     "fn",
     "spawn",
     "while",
+    "interface",
+    "pub",
+    "from",
+    "struct",
+    "enum",
+    "type",
+    "guard",
+    "deadline",
+    "mutex",
 ];
 
 /// String methods offered after `.` on a string value.
@@ -222,6 +258,7 @@ fn collect_symbols(snode: &SNode, symbols: &mut Vec<SymbolInfo>, scope_span: Opt
             params,
             return_type,
             body,
+            ..
         } => {
             let params_str = params
                 .iter()
@@ -316,6 +353,29 @@ fn collect_symbols(snode: &SNode, symbols: &mut Vec<SymbolInfo>, scope_span: Opt
                 def_span: snode.span,
                 type_info: None,
                 signature: Some(format!("struct {name} {{ {fields_str} }}")),
+                scope_span,
+            });
+        }
+        Node::InterfaceDecl { name, methods } => {
+            let methods_str = methods
+                .iter()
+                .map(|m| {
+                    let params = m
+                        .params
+                        .iter()
+                        .map(|p| p.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!("fn {}({})", m.name, params)
+                })
+                .collect::<Vec<_>>()
+                .join("; ");
+            symbols.push(SymbolInfo {
+                name: name.clone(),
+                kind: HarnSymbolKind::Struct,
+                def_span: snode.span,
+                type_info: None,
+                signature: Some(format!("interface {name} {{ {methods_str} }}")),
                 scope_span,
             });
         }
@@ -553,6 +613,7 @@ fn collect_symbols(snode: &SNode, symbols: &mut Vec<SymbolInfo>, scope_span: Opt
         | Node::Identifier(_)
         | Node::DurationLiteral(_)
         | Node::ImportDecl { .. }
+        | Node::SelectiveImport { .. }
         | Node::TypeDecl { .. }
         | Node::ReturnStmt { value: None }
         | Node::YieldExpr { value: None } => {}
@@ -842,7 +903,9 @@ fn collect_references(snode: &SNode, target_name: &str, refs: &mut Vec<Span>) {
         Node::YieldExpr { value: Some(v) } => {
             collect_references(v, target_name, refs);
         }
-        Node::EnumDecl { name, .. } | Node::StructDecl { name, .. } => {
+        Node::EnumDecl { name, .. }
+        | Node::StructDecl { name, .. }
+        | Node::InterfaceDecl { name, .. } => {
             if name == target_name {
                 refs.push(snode.span);
             }
@@ -1631,6 +1694,33 @@ fn builtin_doc(name: &str) -> Option<String> {
         "assert" => "**assert(condition, message?)** — Assert condition is truthy",
         "assert_eq" => "**assert_eq(actual, expected, message?)** — Assert two values are equal",
         "assert_ne" => "**assert_ne(actual, expected, message?)** — Assert two values are not equal",
+        "file_exists" => "**file_exists(path)** → bool — Check if file or directory exists",
+        "delete_file" => "**delete_file(path)** → nil — Delete a file or directory",
+        "list_dir" => "**list_dir(path?)** → list — List directory entries (sorted)",
+        "mkdir" => "**mkdir(path)** → nil — Create directory (and parents)",
+        "path_join" => "**path_join(parts...)** → string — Join path segments",
+        "copy_file" => "**copy_file(src, dst)** → nil — Copy a file",
+        "append_file" => "**append_file(path, content)** → nil — Append to a file",
+        "temp_dir" => "**temp_dir()** → string — System temp directory path",
+        "stat" => "**stat(path)** → dict — File metadata: size, is_file, is_dir, readonly, modified",
+        "exec" => "**exec(cmd, args...)** → dict — Run a command, returns {stdout, stderr, status, success}",
+        "shell" => "**shell(cmd)** → dict — Run shell command, returns {stdout, stderr, status, success}",
+        "date_now" => "**date_now()** → dict — Current UTC date: {year, month, day, hour, minute, second, weekday, timestamp}",
+        "date_format" => "**date_format(timestamp, fmt?)** → string — Format timestamp (%Y, %m, %d, %H, %M, %S)",
+        "date_parse" => "**date_parse(str)** → float — Parse date string to Unix timestamp",
+        "format" => "**format(template, args...)** → string — String formatting with {} placeholders",
+        "channel" => "**channel(name?, capacity?)** → channel — Create an async channel",
+        "send" => "**send(channel, value)** → bool — Send a value on a channel",
+        "receive" => "**receive(channel)** → value — Receive next value from channel (blocks)",
+        "try_receive" => "**try_receive(channel)** → value | nil — Non-blocking receive",
+        "close_channel" => "**close_channel(channel)** → nil — Close a channel",
+        "atomic" => "**atomic(initial?)** → atomic — Create an atomic integer",
+        "atomic_get" => "**atomic_get(a)** → int — Read atomic value",
+        "atomic_set" => "**atomic_set(a, value)** → int — Set atomic value, returns old",
+        "atomic_add" => "**atomic_add(a, n)** → int — Atomically add, returns previous value",
+        "atomic_cas" => "**atomic_cas(a, expected, new)** → bool — Compare-and-swap",
+        "select" => "**select(ch1, ch2, ...)** → dict — Wait for first channel with data: {index, value, channel}",
+        "prompt_user" => "**prompt_user(message?)** → string — Read a line from stdin",
         _ => return None,
     };
     Some(doc.to_string())

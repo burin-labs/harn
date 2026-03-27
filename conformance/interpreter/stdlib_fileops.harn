@@ -1,0 +1,41 @@
+pipeline default() {
+  let tmp = temp_dir()
+  let test_dir = path_join(tmp, "harn_test_fileops")
+  mkdir(test_dir)
+
+  // path_join
+  let p = path_join(test_dir, "hello.txt")
+  println(p != "")
+
+  // write and read
+  write_file(p, "hello world")
+  println(file_exists(p))
+  let content = read_file(p)
+  println(content)
+
+  // append
+  append_file(p, " appended")
+  println(read_file(p))
+
+  // stat
+  let info = stat(p)
+  println(info.is_file)
+  println(info.is_dir)
+
+  // copy
+  let p2 = path_join(test_dir, "copy.txt")
+  copy_file(p, p2)
+  println(file_exists(p2))
+  println(read_file(p2))
+
+  // list_dir
+  let files = list_dir(test_dir)
+  println(files.count)
+
+  // delete
+  delete_file(p)
+  println(file_exists(p))
+
+  // cleanup
+  delete_file(test_dir)
+}

@@ -56,6 +56,11 @@ pub enum Node {
     ImportDecl {
         path: String,
     },
+    /// Selective import: import { foo, bar } from "module"
+    SelectiveImport {
+        names: Vec<String>,
+        path: String,
+    },
     EnumDecl {
         name: String,
         variants: Vec<EnumVariant>,
@@ -63,6 +68,10 @@ pub enum Node {
     StructDecl {
         name: String,
         fields: Vec<StructField>,
+    },
+    InterfaceDecl {
+        name: String,
+        methods: Vec<InterfaceMethod>,
     },
 
     // Control flow
@@ -102,6 +111,7 @@ pub enum Node {
         params: Vec<TypedParam>,
         return_type: Option<TypeExpr>,
         body: Vec<SNode>,
+        is_pub: bool,
     },
     TypeDecl {
         name: String,
@@ -251,6 +261,14 @@ pub struct StructField {
     pub optional: bool,
 }
 
+/// An interface method signature.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InterfaceMethod {
+    pub name: String,
+    pub params: Vec<TypedParam>,
+    pub return_type: Option<TypeExpr>,
+}
+
 /// A type annotation (optional, for runtime checking).
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeExpr {
@@ -261,8 +279,10 @@ pub enum TypeExpr {
     Union(Vec<TypeExpr>),
     /// A dict shape type: `{name: string, age: int, active?: bool}`.
     Shape(Vec<ShapeField>),
-    /// A list type: `list[int]` (future extension).
+    /// A list type: `list[int]`.
     List(Box<TypeExpr>),
+    /// A dict type with key and value types: `dict[string, int]`.
+    DictType(Box<TypeExpr>, Box<TypeExpr>),
 }
 
 /// A field in a dict shape type.

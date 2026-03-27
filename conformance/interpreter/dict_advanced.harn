@@ -1,0 +1,26 @@
+pipeline test(task) {
+  let d = {a: 1, b: 2, c: 3}
+  log(d.entries().map({x -> x.key}))
+  log(d.entries().map({x -> x.value}))
+  log(d.count)
+
+  let mapped_values = d.map_values({k, v -> v * 2})
+  log(mapped_values.a)
+  log(mapped_values.b)
+  log(mapped_values.c)
+
+  let filtered_dict = d.filter({k, v -> v > 1})
+  log(filtered_dict.has("a"))
+  log(filtered_dict.has("b"))
+  log(filtered_dict.has("c"))
+
+  let d_remove = {a: 1, b: 2, c: 3}
+  d_remove.remove("b")
+  log(d_remove.has("a"))
+  log(d_remove.has("b"))
+  log(d_remove.has("c"))
+
+  log(d.get("a"))
+  log(d.get("z", "default_value"))
+  log(d.get("z")) // Should be nil
+}

@@ -31,6 +31,10 @@ struct TypeScope {
     type_aliases: BTreeMap<String, TypeExpr>,
     /// Enum declarations: name → variant names.
     enums: BTreeMap<String, Vec<String>>,
+    /// Interface declarations: name → method signatures.
+    interfaces: BTreeMap<String, Vec<InterfaceMethod>>,
+    /// Struct declarations: name → field types.
+    structs: BTreeMap<String, Vec<(String, InferredType)>>,
     parent: Option<Box<TypeScope>>,
 }
 
@@ -47,6 +51,8 @@ impl TypeScope {
             functions: BTreeMap::new(),
             type_aliases: BTreeMap::new(),
             enums: BTreeMap::new(),
+            interfaces: BTreeMap::new(),
+            structs: BTreeMap::new(),
             parent: None,
         }
     }
@@ -57,6 +63,8 @@ impl TypeScope {
             functions: BTreeMap::new(),
             type_aliases: BTreeMap::new(),
             enums: BTreeMap::new(),
+            interfaces: BTreeMap::new(),
+            structs: BTreeMap::new(),
             parent: Some(Box::new(self.clone())),
         }
     }
@@ -85,6 +93,13 @@ impl TypeScope {
             .or_else(|| self.parent.as_ref()?.get_enum(name))
     }
 
+    #[allow(dead_code)]
+    fn get_interface(&self, name: &str) -> Option<&Vec<InterfaceMethod>> {
+        self.interfaces
+            .get(name)
+            .or_else(|| self.parent.as_ref()?.get_interface(name))
+    }
+
     fn define_var(&mut self, name: &str, ty: InferredType) {
         self.vars.insert(name.to_string(), ty);
     }
@@ -97,13 +112,18 @@ impl TypeScope {
 /// Known return types for builtin functions.
 fn builtin_return_type(name: &str) -> InferredType {
     match name {
-        "log" | "print" | "println" | "write_file" | "sleep" | "cancel" | "exit" => {
+        "log" | "print" | "println" | "write_file" | "sleep" | "cancel" | "exit"
+        | "delete_file" | "mkdir" | "copy_file" | "append_file" => {
             Some(TypeExpr::Named("nil".into()))
         }
         "type_of" | "to_string" | "json_stringify" | "read_file" | "http_get" | "http_post"
-        | "llm_call" | "agent_loop" | "regex_replace" => Some(TypeExpr::Named("string".into())),
+        | "llm_call" | "agent_loop" | "regex_replace" | "path_join" | "temp_dir"
+        | "date_format" | "format" => Some(TypeExpr::Named("string".into())),
         "to_int" => Some(TypeExpr::Named("int".into())),
-        "to_float" | "timestamp" => Some(TypeExpr::Named("float".into())),
+        "to_float" | "timestamp" | "date_parse" => Some(TypeExpr::Named("float".into())),
+        "file_exists" => Some(TypeExpr::Named("bool".into())),
+        "list_dir" => Some(TypeExpr::Named("list".into())),
+        "stat" | "exec" | "shell" | "date_now" => Some(TypeExpr::Named("dict".into())),
         "env" | "regex_match" => Some(TypeExpr::Union(vec![
             TypeExpr::Named("string".into()),
             TypeExpr::Named("nil".into()),
@@ -140,6 +160,21 @@ fn is_builtin(name: &str) -> bool {
             | "agent_loop"
             | "await"
             | "cancel"
+            | "file_exists"
+            | "delete_file"
+            | "list_dir"
+            | "mkdir"
+            | "path_join"
+            | "copy_file"
+            | "append_file"
+            | "temp_dir"
+            | "stat"
+            | "exec"
+            | "shell"
+            | "date_now"
+            | "date_format"
+            | "date_parse"
+            | "format"
     )
 }
 
@@ -181,6 +216,7 @@ impl TypeChecker {
                     params,
                     return_type,
                     body,
+                    ..
                 } => {
                     let sig = FnSignature {
                         params: params
@@ -201,7 +237,7 @@ impl TypeChecker {
         self.diagnostics
     }
 
-    /// Register type and enum declarations from AST nodes into a scope.
+    /// Register type, enum, interface, and struct declarations from AST nodes into a scope.
     fn register_declarations_into(scope: &mut TypeScope, nodes: &[SNode]) {
         for snode in nodes {
             match &snode.node {
@@ -212,6 +248,16 @@ impl TypeChecker {
                     let variant_names: Vec<String> =
                         variants.iter().map(|v| v.name.clone()).collect();
                     scope.enums.insert(name.clone(), variant_names);
+                }
+                Node::InterfaceDecl { name, methods } => {
+                    scope.interfaces.insert(name.clone(), methods.clone());
+                }
+                Node::StructDecl { name, fields } => {
+                    let field_types: Vec<(String, InferredType)> = fields
+                        .iter()
+                        .map(|f| (f.name.clone(), f.type_expr.clone()))
+                        .collect();
+                    scope.structs.insert(name.clone(), field_types);
                 }
                 _ => {}
             }
@@ -282,6 +328,7 @@ impl TypeChecker {
                 params,
                 return_type,
                 body,
+                ..
             } => {
                 let sig = FnSignature {
                     params: params
@@ -380,6 +427,18 @@ impl TypeChecker {
             Node::EnumDecl { name, variants } => {
                 let variant_names: Vec<String> = variants.iter().map(|v| v.name.clone()).collect();
                 scope.enums.insert(name.clone(), variant_names);
+            }
+
+            Node::StructDecl { name, fields } => {
+                let field_types: Vec<(String, InferredType)> = fields
+                    .iter()
+                    .map(|f| (f.name.clone(), f.type_expr.clone()))
+                    .collect();
+                scope.structs.insert(name.clone(), field_types);
+            }
+
+            Node::InterfaceDecl { name, methods } => {
+                scope.interfaces.insert(name.clone(), methods.clone());
             }
 
             Node::MatchExpr { value, arms } => {
@@ -716,6 +775,11 @@ impl TypeChecker {
             }
             (TypeExpr::Named(n), TypeExpr::List(_)) if n == "list" => true,
             (TypeExpr::List(_), TypeExpr::Named(n)) if n == "list" => true,
+            (TypeExpr::DictType(ek, ev), TypeExpr::DictType(ak, av)) => {
+                self.types_compatible(ek, ak, scope) && self.types_compatible(ev, av, scope)
+            }
+            (TypeExpr::Named(n), TypeExpr::DictType(_, _)) if n == "dict" => true,
+            (TypeExpr::DictType(_, _), TypeExpr::Named(n)) if n == "dict" => true,
             _ => false,
         }
     }
@@ -830,6 +894,7 @@ pub fn format_type(ty: &TypeExpr) -> String {
             format!("{{{}}}", inner.join(", "))
         }
         TypeExpr::List(inner) => format!("list[{}]", format_type(inner)),
+        TypeExpr::DictType(k, v) => format!("dict[{}, {}]", format_type(k), format_type(v)),
     }
 }
 

@@ -1,5 +1,5 @@
 pipeline test(task) {
   let counter = atomic(0)
   log(atomic_get(counter))
-  log(counter["type"])
+  log(type_of(counter))
 }

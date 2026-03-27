@@ -1,0 +1,20 @@
+pipeline default() {
+  // Wildcard pattern
+  let x = 42
+  var result = ""
+  match x {
+    1 -> { result = "one" }
+    2 -> { result = "two" }
+    _ -> { result = "other" }
+  }
+  println(result)
+
+  // Wildcard with strings
+  let s = "hello"
+  var r2 = ""
+  match s {
+    "bye" -> { r2 = "farewell" }
+    _ -> { r2 = "catch-all" }
+  }
+  println(r2)
+}

@@ -1,0 +1,8 @@
+pipeline base(task) {
+  println("base step 1")
+  println("base step 2")
+}
+
+pipeline default(task) extends base {
+  println("child step 3")
+}

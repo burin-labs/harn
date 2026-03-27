@@ -13,7 +13,13 @@ module.exports = grammar({
     source_file: ($) => repeat($._top_level),
 
     _top_level: ($) =>
-      choice($.pipeline_declaration, $.import_declaration, $._statement, $._newline),
+      choice(
+        $.pipeline_declaration,
+        $.import_declaration,
+        $.interface_declaration,
+        $._statement,
+        $._newline
+      ),
 
     _newline: (_) => "\n",
 
@@ -37,7 +43,11 @@ module.exports = grammar({
         $.block
       ),
 
-    import_declaration: ($) => seq("import", $.string_literal),
+    import_declaration: ($) =>
+      choice(
+        seq("import", $.string_literal),
+        seq("import", "{", commaSep1($.identifier), "}", "from", $.string_literal)
+      ),
 
     // --- Statements ---
 
@@ -120,12 +130,33 @@ module.exports = grammar({
 
     fn_declaration: ($) =>
       seq(
+        optional("pub"),
         "fn",
         field("name", $.identifier),
         "(",
         optional($.parameter_list),
         ")",
+        optional(seq("->", $.type_annotation)),
         field("body", $.block)
+      ),
+
+    interface_declaration: ($) =>
+      seq(
+        "interface",
+        field("name", $.identifier),
+        "{",
+        repeat($.interface_method),
+        "}"
+      ),
+
+    interface_method: ($) =>
+      seq(
+        "fn",
+        field("name", $.identifier),
+        "(",
+        optional($.parameter_list),
+        ")",
+        optional(seq("->", $.type_annotation))
       ),
 
     override_declaration: ($) =>
@@ -311,5 +342,17 @@ module.exports = grammar({
 
     argument_list: ($) =>
       seq($._expression, repeat(seq(",", $._expression))),
+
+    type_annotation: ($) =>
+      choice(
+        seq($.identifier, "[", $.type_annotation, ",", $.type_annotation, "]"),
+        seq($.identifier, "[", $.type_annotation, "]"),
+        seq($.type_annotation, "|", $.type_annotation),
+        $.identifier
+      ),
   },
 });
+
+function commaSep1(rule) {
+  return seq(rule, repeat(seq(",", rule)));
+}
