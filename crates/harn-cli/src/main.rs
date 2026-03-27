@@ -55,7 +55,7 @@ async fn main() {
             match file {
                 Some(f) => {
                     if use_vm {
-                        run_file_vm(f);
+                        run_file_vm(f).await;
                     } else {
                         run_file(f).await;
                     }
@@ -236,7 +236,7 @@ async fn run_file(path: &str) {
     }
 }
 
-fn run_file_vm(path: &str) {
+async fn run_file_vm(path: &str) {
     let source = match fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) => {
@@ -274,7 +274,7 @@ fn run_file_vm(path: &str) {
     let mut vm = harn_vm::Vm::new();
     harn_vm::register_vm_stdlib(&mut vm);
 
-    match vm.execute(&chunk) {
+    match vm.execute(&chunk).await {
         Ok(_) => {
             let output = vm.output();
             if !output.is_empty() {

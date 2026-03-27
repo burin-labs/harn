@@ -1,9 +1,18 @@
 use std::collections::BTreeMap;
+use std::future::Future;
 use std::io::BufRead;
+use std::pin::Pin;
 use std::rc::Rc;
 use std::time::Instant;
 
 use crate::chunk::{Chunk, CompiledFunction, Constant, Op};
+
+/// An async builtin function for the VM.
+pub type VmAsyncBuiltinFn =
+    Rc<dyn Fn(Vec<VmValue>) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>>>>>;
+
+/// A spawned async task handle.
+pub type VmTaskHandle = tokio::task::JoinHandle<Result<(VmValue, String), VmError>>;
 
 /// VM runtime value.
 #[derive(Debug, Clone)]
@@ -340,7 +349,7 @@ fn compare_values(a: &VmValue, b: &VmValue) -> i32 {
 }
 
 /// Sync builtin function for the VM.
-pub type VmBuiltinFn = Box<dyn Fn(&[VmValue], &mut String) -> Result<VmValue, VmError>>;
+pub type VmBuiltinFn = Rc<dyn Fn(&[VmValue], &mut String) -> Result<VmValue, VmError>>;
 
 /// Call frame for function execution.
 struct CallFrame {
@@ -381,14 +390,15 @@ pub struct Vm {
     env: VmEnv,
     output: String,
     builtins: BTreeMap<String, VmBuiltinFn>,
+    async_builtins: BTreeMap<String, VmAsyncBuiltinFn>,
     /// Iterator state for for-in loops.
     iterators: Vec<(Vec<VmValue>, usize)>,
     /// Call frame stack.
     frames: Vec<CallFrame>,
     /// Exception handler stack.
     exception_handlers: Vec<ExceptionHandler>,
-    /// Deferred spawned task closures (sync VM executes on await).
-    spawned_closures: BTreeMap<String, Rc<VmClosure>>,
+    /// Spawned async task handles.
+    spawned_tasks: BTreeMap<String, VmTaskHandle>,
     /// Counter for generating unique task IDs.
     task_counter: u64,
     /// Active deadline stack: (deadline_instant, frame_depth).
@@ -412,10 +422,11 @@ impl Vm {
             env: VmEnv::new(),
             output: String::new(),
             builtins: BTreeMap::new(),
+            async_builtins: BTreeMap::new(),
             iterators: Vec::new(),
             frames: Vec::new(),
             exception_handlers: Vec::new(),
-            spawned_closures: BTreeMap::new(),
+            spawned_tasks: BTreeMap::new(),
             task_counter: 0,
             deadlines: Vec::new(),
             breakpoints: Vec::new(),
@@ -503,7 +514,7 @@ impl Vm {
 
     /// Execute one instruction, returning whether to stop (breakpoint/step).
     /// Returns Ok(None) to continue, Ok(Some(val)) on program end, Err on error.
-    pub fn step_execute(&mut self) -> Result<Option<(VmValue, bool)>, VmError> {
+    pub async fn step_execute(&mut self) -> Result<Option<(VmValue, bool)>, VmError> {
         // Check if we need to stop at this line
         let current_line = self.current_line();
         let line_changed = current_line != self.last_line && current_line > 0;
@@ -527,11 +538,11 @@ impl Vm {
 
         // Execute one instruction cycle
         self.stopped = false;
-        self.execute_one_cycle()
+        self.execute_one_cycle().await
     }
 
     /// Execute a single instruction cycle.
-    fn execute_one_cycle(&mut self) -> Result<Option<(VmValue, bool)>, VmError> {
+    async fn execute_one_cycle(&mut self) -> Result<Option<(VmValue, bool)>, VmError> {
         // Check deadline
         if let Some(&(deadline, _)) = self.deadlines.last() {
             if Instant::now() > deadline {
@@ -571,7 +582,7 @@ impl Vm {
         let op = frame.chunk.code[frame.ip];
         frame.ip += 1;
 
-        match self.execute_op(op) {
+        match self.execute_op(op).await {
             Ok(Some(val)) => Ok(Some((val, false))),
             Ok(None) => Ok(None),
             Err(VmError::Return(val)) => {
@@ -608,12 +619,45 @@ impl Vm {
         });
     }
 
-    /// Register a builtin function.
+    /// Register a sync builtin function.
     pub fn register_builtin<F>(&mut self, name: &str, f: F)
     where
         F: Fn(&[VmValue], &mut String) -> Result<VmValue, VmError> + 'static,
     {
-        self.builtins.insert(name.to_string(), Box::new(f));
+        self.builtins.insert(name.to_string(), Rc::new(f));
+    }
+
+    /// Register an async builtin function.
+    pub fn register_async_builtin<F, Fut>(&mut self, name: &str, f: F)
+    where
+        F: Fn(Vec<VmValue>) -> Fut + 'static,
+        Fut: Future<Output = Result<VmValue, VmError>> + 'static,
+    {
+        self.async_builtins
+            .insert(name.to_string(), Rc::new(move |args| Box::pin(f(args))));
+    }
+
+    /// Create a child VM that shares builtins and env but has fresh execution state.
+    /// Used for parallel/spawn to fork the VM for concurrent tasks.
+    fn child_vm(&self) -> Vm {
+        Vm {
+            stack: Vec::with_capacity(64),
+            env: self.env.clone(),
+            output: String::new(),
+            builtins: self.builtins.clone(),
+            async_builtins: self.async_builtins.clone(),
+            iterators: Vec::new(),
+            frames: Vec::new(),
+            exception_handlers: Vec::new(),
+            spawned_tasks: BTreeMap::new(),
+            task_counter: 0,
+            deadlines: Vec::new(),
+            breakpoints: Vec::new(),
+            step_mode: false,
+            step_frame_depth: 0,
+            stopped: false,
+            last_line: 0,
+        }
     }
 
     /// Get the captured output.
@@ -622,8 +666,8 @@ impl Vm {
     }
 
     /// Execute a compiled chunk.
-    pub fn execute(&mut self, chunk: &Chunk) -> Result<VmValue, VmError> {
-        self.run_chunk(chunk)
+    pub async fn execute(&mut self, chunk: &Chunk) -> Result<VmValue, VmError> {
+        self.run_chunk(chunk).await
     }
 
     /// Convert a VmError into either a handled exception (returning Ok) or a propagated error.
@@ -668,7 +712,7 @@ impl Vm {
         }
     }
 
-    fn run_chunk(&mut self, chunk: &Chunk) -> Result<VmValue, VmError> {
+    async fn run_chunk(&mut self, chunk: &Chunk) -> Result<VmValue, VmError> {
         // Push initial frame
         self.frames.push(CallFrame {
             chunk: chunk.clone(),
@@ -717,7 +761,7 @@ impl Vm {
             let op = frame.chunk.code[frame.ip];
             frame.ip += 1;
 
-            match self.execute_op(op) {
+            match self.execute_op(op).await {
                 Ok(Some(val)) => return Ok(val),
                 Ok(None) => continue,
                 Err(VmError::Return(val)) => {
@@ -753,7 +797,7 @@ impl Vm {
     /// - Ok(None): continue execution
     /// - Ok(Some(val)): return this value (top-level exit)
     /// - Err(e): error occurred
-    fn execute_op(&mut self, op: u8) -> Result<Option<VmValue>, VmError> {
+    async fn execute_op(&mut self, op: u8) -> Result<Option<VmValue>, VmError> {
         // We need to borrow frame fields, but we also need &mut self for other ops.
         // Strategy: read what we need from the frame first, then do the work.
 
@@ -903,14 +947,16 @@ impl Vm {
             match callee {
                 VmValue::String(name) => {
                     if name.as_ref() == "await" {
-                        // Deferred spawn: look up closure and execute now
                         let task_id = args.first().and_then(|a| match a {
                             VmValue::TaskHandle(id) => Some(id.clone()),
                             _ => None,
                         });
                         if let Some(id) = task_id {
-                            if let Some(closure) = self.spawned_closures.remove(&id) {
-                                let result = self.call_closure_sync(&closure, &[], &functions)?;
+                            if let Some(handle) = self.spawned_tasks.remove(&id) {
+                                let (result, task_output) = handle.await.map_err(|e| {
+                                    VmError::Runtime(format!("Task join error: {e}"))
+                                })??;
+                                self.output.push_str(&task_output);
                                 self.stack.push(result);
                             } else {
                                 self.stack.push(VmValue::Nil);
@@ -921,15 +967,22 @@ impl Vm {
                         }
                     } else if name.as_ref() == "cancel" {
                         if let Some(VmValue::TaskHandle(id)) = args.first() {
-                            self.spawned_closures.remove(id);
+                            if let Some(handle) = self.spawned_tasks.remove(id) {
+                                handle.abort();
+                            }
                         }
                         self.stack.push(VmValue::Nil);
                     } else if let Some(VmValue::Closure(closure)) = self.env.get(&name) {
                         // Check closures in env
                         self.push_closure_frame(&closure, &args, &functions)?;
                         // Don't push result - frame will handle it on return
-                    } else if let Some(builtin) = self.builtins.get(name.as_ref()) {
+                    } else if let Some(builtin) = self.builtins.get(name.as_ref()).cloned() {
                         let result = builtin(&args, &mut self.output)?;
+                        self.stack.push(result);
+                    } else if let Some(async_builtin) =
+                        self.async_builtins.get(name.as_ref()).cloned()
+                    {
+                        let result = async_builtin(args).await?;
                         self.stack.push(result);
                     } else {
                         return Err(VmError::UndefinedBuiltin(name.to_string()));
@@ -1023,7 +1076,7 @@ impl Vm {
             let functions = frame.chunk.functions.clone();
             let args: Vec<VmValue> = self.stack.split_off(self.stack.len().saturating_sub(argc));
             let obj = self.pop()?;
-            let result = self.call_method(obj, &method, &args, &functions)?;
+            let result = self.call_method(obj, &method, &args, &functions).await?;
             self.stack.push(result);
         } else if op == Op::Concat as u8 {
             let frame = self.frames.last_mut().unwrap();
@@ -1116,12 +1169,24 @@ impl Vm {
                 _ => 0,
             };
             if let VmValue::Closure(closure) = closure {
-                let functions = self.frames.last().unwrap().chunk.functions.clone();
-                let mut results = Vec::with_capacity(count);
+                let mut handles = Vec::with_capacity(count);
                 for i in 0..count {
-                    let result =
-                        self.call_closure_sync(&closure, &[VmValue::Int(i as i64)], &functions)?;
-                    results.push(result);
+                    let mut child = self.child_vm();
+                    let closure = closure.clone();
+                    handles.push(tokio::task::spawn_local(async move {
+                        let result = child
+                            .call_closure(&closure, &[VmValue::Int(i as i64)], &[])
+                            .await?;
+                        Ok((result, std::mem::take(&mut child.output)))
+                    }));
+                }
+                let mut results = vec![VmValue::Nil; count];
+                for (i, handle) in handles.into_iter().enumerate() {
+                    let (val, task_output): (VmValue, String) = handle
+                        .await
+                        .map_err(|e| VmError::Runtime(format!("Parallel task error: {e}")))??;
+                    self.output.push_str(&task_output);
+                    results[i] = val;
                 }
                 self.stack.push(VmValue::List(Rc::new(results)));
             } else {
@@ -1132,12 +1197,24 @@ impl Vm {
             let list_val = self.pop()?;
             match (&list_val, &closure) {
                 (VmValue::List(items), VmValue::Closure(closure)) => {
-                    let functions = self.frames.last().unwrap().chunk.functions.clone();
-                    let mut results = Vec::with_capacity(items.len());
+                    let len = items.len();
+                    let mut handles = Vec::with_capacity(len);
                     for item in items.iter() {
-                        let result =
-                            self.call_closure_sync(closure, &[item.clone()], &functions)?;
-                        results.push(result);
+                        let mut child = self.child_vm();
+                        let closure = closure.clone();
+                        let item = item.clone();
+                        handles.push(tokio::task::spawn_local(async move {
+                            let result = child.call_closure(&closure, &[item], &[]).await?;
+                            Ok((result, std::mem::take(&mut child.output)))
+                        }));
+                    }
+                    let mut results = Vec::with_capacity(len);
+                    for handle in handles {
+                        let (val, task_output): (VmValue, String) = handle
+                            .await
+                            .map_err(|e| VmError::Runtime(format!("Parallel map error: {e}")))??;
+                        self.output.push_str(&task_output);
+                        results.push(val);
                     }
                     self.stack.push(VmValue::List(Rc::new(results)));
                 }
@@ -1148,7 +1225,12 @@ impl Vm {
             if let VmValue::Closure(closure) = closure {
                 self.task_counter += 1;
                 let task_id = format!("vm_task_{}", self.task_counter);
-                self.spawned_closures.insert(task_id.clone(), closure);
+                let mut child = self.child_vm();
+                let handle = tokio::task::spawn_local(async move {
+                    let result = child.call_closure(&closure, &[], &[]).await?;
+                    Ok((result, std::mem::take(&mut child.output)))
+                });
+                self.spawned_tasks.insert(task_id.clone(), handle);
                 self.stack.push(VmValue::TaskHandle(task_id));
             } else {
                 self.stack.push(VmValue::Nil);
@@ -1233,502 +1315,511 @@ impl Vm {
         }
     }
 
-    /// Call a closure synchronously (used by method calls like .map/.filter etc.)
-    /// This still uses recursive execution for simplicity in method dispatch.
-    fn call_closure_sync(
-        &mut self,
-        closure: &VmClosure,
-        args: &[VmValue],
-        _parent_functions: &[CompiledFunction],
-    ) -> Result<VmValue, VmError> {
-        let saved_env = self.env.clone();
-        let saved_frames = std::mem::take(&mut self.frames);
-        let saved_handlers = std::mem::take(&mut self.exception_handlers);
-        let saved_iterators = std::mem::take(&mut self.iterators);
-        let saved_deadlines = std::mem::take(&mut self.deadlines);
+    /// Call a closure (used by method calls like .map/.filter etc.)
+    /// Uses recursive execution for simplicity in method dispatch.
+    fn call_closure<'a>(
+        &'a mut self,
+        closure: &'a VmClosure,
+        args: &'a [VmValue],
+        _parent_functions: &'a [CompiledFunction],
+    ) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + 'a>> {
+        Box::pin(async move {
+            let saved_env = self.env.clone();
+            let saved_frames = std::mem::take(&mut self.frames);
+            let saved_handlers = std::mem::take(&mut self.exception_handlers);
+            let saved_iterators = std::mem::take(&mut self.iterators);
+            let saved_deadlines = std::mem::take(&mut self.deadlines);
 
-        let mut call_env = Self::merge_env_into_closure(&saved_env, closure);
-        call_env.push_scope();
+            let mut call_env = Self::merge_env_into_closure(&saved_env, closure);
+            call_env.push_scope();
 
-        for (i, param) in closure.func.params.iter().enumerate() {
-            let val = args.get(i).cloned().unwrap_or(VmValue::Nil);
-            call_env.define(param, val, false);
-        }
+            for (i, param) in closure.func.params.iter().enumerate() {
+                let val = args.get(i).cloned().unwrap_or(VmValue::Nil);
+                call_env.define(param, val, false);
+            }
 
-        self.env = call_env;
-        let result = self.run_chunk(&closure.func.chunk);
+            self.env = call_env;
+            let result = self.run_chunk(&closure.func.chunk).await;
 
-        self.env = saved_env;
-        self.frames = saved_frames;
-        self.exception_handlers = saved_handlers;
-        self.iterators = saved_iterators;
-        self.deadlines = saved_deadlines;
+            self.env = saved_env;
+            self.frames = saved_frames;
+            self.exception_handlers = saved_handlers;
+            self.iterators = saved_iterators;
+            self.deadlines = saved_deadlines;
 
-        result
+            result
+        })
     }
 
-    fn call_method(
-        &mut self,
+    fn call_method<'a>(
+        &'a mut self,
         obj: VmValue,
-        method: &str,
-        args: &[VmValue],
-        functions: &[CompiledFunction],
-    ) -> Result<VmValue, VmError> {
-        match &obj {
-            VmValue::String(s) => match method {
-                "count" => Ok(VmValue::Int(s.chars().count() as i64)),
-                "empty" => Ok(VmValue::Bool(s.is_empty())),
-                "contains" => Ok(VmValue::Bool(
-                    s.contains(&*args.first().map(|a| a.display()).unwrap_or_default()),
-                )),
-                "replace" if args.len() >= 2 => Ok(VmValue::String(Rc::from(
-                    s.replace(&args[0].display(), &args[1].display()),
-                ))),
-                "split" => {
-                    let sep = args.first().map(|a| a.display()).unwrap_or(",".into());
-                    Ok(VmValue::List(Rc::new(
-                        s.split(&*sep)
-                            .map(|p| VmValue::String(Rc::from(p)))
-                            .collect(),
-                    )))
-                }
-                "trim" => Ok(VmValue::String(Rc::from(s.trim()))),
-                "starts_with" => Ok(VmValue::Bool(
-                    s.starts_with(&*args.first().map(|a| a.display()).unwrap_or_default()),
-                )),
-                "ends_with" => Ok(VmValue::Bool(
-                    s.ends_with(&*args.first().map(|a| a.display()).unwrap_or_default()),
-                )),
-                "lowercase" => Ok(VmValue::String(Rc::from(s.to_lowercase()))),
-                "uppercase" => Ok(VmValue::String(Rc::from(s.to_uppercase()))),
-                "substring" => {
-                    let start = args.first().and_then(|a| a.as_int()).unwrap_or(0);
-                    let len = s.chars().count() as i64;
-                    let start = start.max(0).min(len) as usize;
-                    let end = args.get(1).and_then(|a| a.as_int()).unwrap_or(len).min(len) as usize;
-                    let end = end.max(start);
-                    let substr: String = s.chars().skip(start).take(end - start).collect();
-                    Ok(VmValue::String(Rc::from(substr)))
-                }
-                "index_of" => {
-                    let needle = args.first().map(|a| a.display()).unwrap_or_default();
-                    Ok(VmValue::Int(
-                        s.find(&needle).map(|i| i as i64).unwrap_or(-1),
-                    ))
-                }
-                "chars" => Ok(VmValue::List(Rc::new(
-                    s.chars()
-                        .map(|c| VmValue::String(Rc::from(c.to_string())))
-                        .collect(),
-                ))),
-                "repeat" => {
-                    let n = args.first().and_then(|a| a.as_int()).unwrap_or(1);
-                    Ok(VmValue::String(Rc::from(s.repeat(n.max(0) as usize))))
-                }
-                "reverse" => Ok(VmValue::String(Rc::from(
-                    s.chars().rev().collect::<String>(),
-                ))),
-                "pad_left" => {
-                    let width = args.first().and_then(|a| a.as_int()).unwrap_or(0) as usize;
-                    let pad_char = args
-                        .get(1)
-                        .map(|a| a.display())
-                        .and_then(|s| s.chars().next())
-                        .unwrap_or(' ');
-                    let current_len = s.chars().count();
-                    if current_len >= width {
-                        Ok(VmValue::String(Rc::clone(s)))
-                    } else {
-                        let padding: String =
-                            std::iter::repeat_n(pad_char, width - current_len).collect();
-                        Ok(VmValue::String(Rc::from(format!("{padding}{s}"))))
-                    }
-                }
-                "pad_right" => {
-                    let width = args.first().and_then(|a| a.as_int()).unwrap_or(0) as usize;
-                    let pad_char = args
-                        .get(1)
-                        .map(|a| a.display())
-                        .and_then(|s| s.chars().next())
-                        .unwrap_or(' ');
-                    let current_len = s.chars().count();
-                    if current_len >= width {
-                        Ok(VmValue::String(Rc::clone(s)))
-                    } else {
-                        let padding: String =
-                            std::iter::repeat_n(pad_char, width - current_len).collect();
-                        Ok(VmValue::String(Rc::from(format!("{s}{padding}"))))
-                    }
-                }
-                _ => Ok(VmValue::Nil),
-            },
-            VmValue::List(items) => match method {
-                "count" => Ok(VmValue::Int(items.len() as i64)),
-                "empty" => Ok(VmValue::Bool(items.is_empty())),
-                "map" => {
-                    if let Some(VmValue::Closure(closure)) = args.first() {
-                        let mut results = Vec::new();
-                        for item in items.iter() {
-                            results.push(self.call_closure_sync(
-                                closure,
-                                &[item.clone()],
-                                functions,
-                            )?);
-                        }
-                        Ok(VmValue::List(Rc::new(results)))
-                    } else {
-                        Ok(VmValue::Nil)
-                    }
-                }
-                "filter" => {
-                    if let Some(VmValue::Closure(closure)) = args.first() {
-                        let mut results = Vec::new();
-                        for item in items.iter() {
-                            let result =
-                                self.call_closure_sync(closure, &[item.clone()], functions)?;
-                            if result.is_truthy() {
-                                results.push(item.clone());
-                            }
-                        }
-                        Ok(VmValue::List(Rc::new(results)))
-                    } else {
-                        Ok(VmValue::Nil)
-                    }
-                }
-                "reduce" => {
-                    if args.len() >= 2 {
-                        if let VmValue::Closure(closure) = &args[1] {
-                            let mut acc = args[0].clone();
-                            for item in items.iter() {
-                                acc = self.call_closure_sync(
-                                    closure,
-                                    &[acc, item.clone()],
-                                    functions,
-                                )?;
-                            }
-                            return Ok(acc);
-                        }
-                    }
-                    Ok(VmValue::Nil)
-                }
-                "find" => {
-                    if let Some(VmValue::Closure(closure)) = args.first() {
-                        for item in items.iter() {
-                            let result =
-                                self.call_closure_sync(closure, &[item.clone()], functions)?;
-                            if result.is_truthy() {
-                                return Ok(item.clone());
-                            }
-                        }
-                    }
-                    Ok(VmValue::Nil)
-                }
-                "any" => {
-                    if let Some(VmValue::Closure(closure)) = args.first() {
-                        for item in items.iter() {
-                            let result =
-                                self.call_closure_sync(closure, &[item.clone()], functions)?;
-                            if result.is_truthy() {
-                                return Ok(VmValue::Bool(true));
-                            }
-                        }
-                        Ok(VmValue::Bool(false))
-                    } else {
-                        Ok(VmValue::Bool(false))
-                    }
-                }
-                "all" => {
-                    if let Some(VmValue::Closure(closure)) = args.first() {
-                        for item in items.iter() {
-                            let result =
-                                self.call_closure_sync(closure, &[item.clone()], functions)?;
-                            if !result.is_truthy() {
-                                return Ok(VmValue::Bool(false));
-                            }
-                        }
-                        Ok(VmValue::Bool(true))
-                    } else {
-                        Ok(VmValue::Bool(true))
-                    }
-                }
-                "flat_map" => {
-                    if let Some(VmValue::Closure(closure)) = args.first() {
-                        let mut results = Vec::new();
-                        for item in items.iter() {
-                            let result =
-                                self.call_closure_sync(closure, &[item.clone()], functions)?;
-                            if let VmValue::List(inner) = result {
-                                results.extend(inner.iter().cloned());
-                            } else {
-                                results.push(result);
-                            }
-                        }
-                        Ok(VmValue::List(Rc::new(results)))
-                    } else {
-                        Ok(VmValue::Nil)
-                    }
-                }
-                "sort" => {
-                    let mut sorted: Vec<VmValue> = items.iter().cloned().collect();
-                    sorted.sort_by(|a, b| compare_values(a, b).cmp(&0));
-                    Ok(VmValue::List(Rc::new(sorted)))
-                }
-                "sort_by" => {
-                    if let Some(VmValue::Closure(closure)) = args.first() {
-                        let mut keyed: Vec<(VmValue, VmValue)> = Vec::new();
-                        for item in items.iter() {
-                            let key =
-                                self.call_closure_sync(closure, &[item.clone()], functions)?;
-                            keyed.push((item.clone(), key));
-                        }
-                        keyed.sort_by(|(_, ka), (_, kb)| compare_values(ka, kb).cmp(&0));
+        method: &'a str,
+        args: &'a [VmValue],
+        functions: &'a [CompiledFunction],
+    ) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + 'a>> {
+        Box::pin(async move {
+            match &obj {
+                VmValue::String(s) => match method {
+                    "count" => Ok(VmValue::Int(s.chars().count() as i64)),
+                    "empty" => Ok(VmValue::Bool(s.is_empty())),
+                    "contains" => Ok(VmValue::Bool(
+                        s.contains(&*args.first().map(|a| a.display()).unwrap_or_default()),
+                    )),
+                    "replace" if args.len() >= 2 => Ok(VmValue::String(Rc::from(
+                        s.replace(&args[0].display(), &args[1].display()),
+                    ))),
+                    "split" => {
+                        let sep = args.first().map(|a| a.display()).unwrap_or(",".into());
                         Ok(VmValue::List(Rc::new(
-                            keyed.into_iter().map(|(v, _)| v).collect(),
+                            s.split(&*sep)
+                                .map(|p| VmValue::String(Rc::from(p)))
+                                .collect(),
                         )))
-                    } else {
+                    }
+                    "trim" => Ok(VmValue::String(Rc::from(s.trim()))),
+                    "starts_with" => Ok(VmValue::Bool(
+                        s.starts_with(&*args.first().map(|a| a.display()).unwrap_or_default()),
+                    )),
+                    "ends_with" => Ok(VmValue::Bool(
+                        s.ends_with(&*args.first().map(|a| a.display()).unwrap_or_default()),
+                    )),
+                    "lowercase" => Ok(VmValue::String(Rc::from(s.to_lowercase()))),
+                    "uppercase" => Ok(VmValue::String(Rc::from(s.to_uppercase()))),
+                    "substring" => {
+                        let start = args.first().and_then(|a| a.as_int()).unwrap_or(0);
+                        let len = s.chars().count() as i64;
+                        let start = start.max(0).min(len) as usize;
+                        let end =
+                            args.get(1).and_then(|a| a.as_int()).unwrap_or(len).min(len) as usize;
+                        let end = end.max(start);
+                        let substr: String = s.chars().skip(start).take(end - start).collect();
+                        Ok(VmValue::String(Rc::from(substr)))
+                    }
+                    "index_of" => {
+                        let needle = args.first().map(|a| a.display()).unwrap_or_default();
+                        Ok(VmValue::Int(
+                            s.find(&needle).map(|i| i as i64).unwrap_or(-1),
+                        ))
+                    }
+                    "chars" => Ok(VmValue::List(Rc::new(
+                        s.chars()
+                            .map(|c| VmValue::String(Rc::from(c.to_string())))
+                            .collect(),
+                    ))),
+                    "repeat" => {
+                        let n = args.first().and_then(|a| a.as_int()).unwrap_or(1);
+                        Ok(VmValue::String(Rc::from(s.repeat(n.max(0) as usize))))
+                    }
+                    "reverse" => Ok(VmValue::String(Rc::from(
+                        s.chars().rev().collect::<String>(),
+                    ))),
+                    "pad_left" => {
+                        let width = args.first().and_then(|a| a.as_int()).unwrap_or(0) as usize;
+                        let pad_char = args
+                            .get(1)
+                            .map(|a| a.display())
+                            .and_then(|s| s.chars().next())
+                            .unwrap_or(' ');
+                        let current_len = s.chars().count();
+                        if current_len >= width {
+                            Ok(VmValue::String(Rc::clone(s)))
+                        } else {
+                            let padding: String =
+                                std::iter::repeat_n(pad_char, width - current_len).collect();
+                            Ok(VmValue::String(Rc::from(format!("{padding}{s}"))))
+                        }
+                    }
+                    "pad_right" => {
+                        let width = args.first().and_then(|a| a.as_int()).unwrap_or(0) as usize;
+                        let pad_char = args
+                            .get(1)
+                            .map(|a| a.display())
+                            .and_then(|s| s.chars().next())
+                            .unwrap_or(' ');
+                        let current_len = s.chars().count();
+                        if current_len >= width {
+                            Ok(VmValue::String(Rc::clone(s)))
+                        } else {
+                            let padding: String =
+                                std::iter::repeat_n(pad_char, width - current_len).collect();
+                            Ok(VmValue::String(Rc::from(format!("{s}{padding}"))))
+                        }
+                    }
+                    _ => Ok(VmValue::Nil),
+                },
+                VmValue::List(items) => match method {
+                    "count" => Ok(VmValue::Int(items.len() as i64)),
+                    "empty" => Ok(VmValue::Bool(items.is_empty())),
+                    "map" => {
+                        if let Some(VmValue::Closure(closure)) = args.first() {
+                            let mut results = Vec::new();
+                            for item in items.iter() {
+                                results.push(
+                                    self.call_closure(closure, &[item.clone()], functions)
+                                        .await?,
+                                );
+                            }
+                            Ok(VmValue::List(Rc::new(results)))
+                        } else {
+                            Ok(VmValue::Nil)
+                        }
+                    }
+                    "filter" => {
+                        if let Some(VmValue::Closure(closure)) = args.first() {
+                            let mut results = Vec::new();
+                            for item in items.iter() {
+                                let result = self
+                                    .call_closure(closure, &[item.clone()], functions)
+                                    .await?;
+                                if result.is_truthy() {
+                                    results.push(item.clone());
+                                }
+                            }
+                            Ok(VmValue::List(Rc::new(results)))
+                        } else {
+                            Ok(VmValue::Nil)
+                        }
+                    }
+                    "reduce" => {
+                        if args.len() >= 2 {
+                            if let VmValue::Closure(closure) = &args[1] {
+                                let mut acc = args[0].clone();
+                                for item in items.iter() {
+                                    acc = self
+                                        .call_closure(closure, &[acc, item.clone()], functions)
+                                        .await?;
+                                }
+                                return Ok(acc);
+                            }
+                        }
                         Ok(VmValue::Nil)
                     }
-                }
-                "reverse" => {
-                    let mut rev: Vec<VmValue> = items.iter().cloned().collect();
-                    rev.reverse();
-                    Ok(VmValue::List(Rc::new(rev)))
-                }
-                "join" => {
-                    let sep = if args.is_empty() {
-                        String::new()
-                    } else {
-                        args[0].display()
-                    };
-                    let joined: String = items
-                        .iter()
-                        .map(|v| v.display())
-                        .collect::<Vec<_>>()
-                        .join(&sep);
-                    Ok(VmValue::String(Rc::from(joined)))
-                }
-                "contains" => {
-                    let needle = args.first().unwrap_or(&VmValue::Nil);
-                    Ok(VmValue::Bool(items.iter().any(|v| values_equal(v, needle))))
-                }
-                "index_of" => {
-                    let needle = args.first().unwrap_or(&VmValue::Nil);
-                    let idx = items.iter().position(|v| values_equal(v, needle));
-                    Ok(VmValue::Int(idx.map(|i| i as i64).unwrap_or(-1)))
-                }
-                "enumerate" => {
-                    let result: Vec<VmValue> = items
-                        .iter()
-                        .enumerate()
-                        .map(|(i, v)| {
-                            VmValue::Dict(Rc::new(BTreeMap::from([
-                                ("index".to_string(), VmValue::Int(i as i64)),
-                                ("value".to_string(), v.clone()),
-                            ])))
-                        })
-                        .collect();
-                    Ok(VmValue::List(Rc::new(result)))
-                }
-                "zip" => {
-                    if let Some(VmValue::List(other)) = args.first() {
+                    "find" => {
+                        if let Some(VmValue::Closure(closure)) = args.first() {
+                            for item in items.iter() {
+                                let result = self
+                                    .call_closure(closure, &[item.clone()], functions)
+                                    .await?;
+                                if result.is_truthy() {
+                                    return Ok(item.clone());
+                                }
+                            }
+                        }
+                        Ok(VmValue::Nil)
+                    }
+                    "any" => {
+                        if let Some(VmValue::Closure(closure)) = args.first() {
+                            for item in items.iter() {
+                                let result = self
+                                    .call_closure(closure, &[item.clone()], functions)
+                                    .await?;
+                                if result.is_truthy() {
+                                    return Ok(VmValue::Bool(true));
+                                }
+                            }
+                            Ok(VmValue::Bool(false))
+                        } else {
+                            Ok(VmValue::Bool(false))
+                        }
+                    }
+                    "all" => {
+                        if let Some(VmValue::Closure(closure)) = args.first() {
+                            for item in items.iter() {
+                                let result = self
+                                    .call_closure(closure, &[item.clone()], functions)
+                                    .await?;
+                                if !result.is_truthy() {
+                                    return Ok(VmValue::Bool(false));
+                                }
+                            }
+                            Ok(VmValue::Bool(true))
+                        } else {
+                            Ok(VmValue::Bool(true))
+                        }
+                    }
+                    "flat_map" => {
+                        if let Some(VmValue::Closure(closure)) = args.first() {
+                            let mut results = Vec::new();
+                            for item in items.iter() {
+                                let result = self
+                                    .call_closure(closure, &[item.clone()], functions)
+                                    .await?;
+                                if let VmValue::List(inner) = result {
+                                    results.extend(inner.iter().cloned());
+                                } else {
+                                    results.push(result);
+                                }
+                            }
+                            Ok(VmValue::List(Rc::new(results)))
+                        } else {
+                            Ok(VmValue::Nil)
+                        }
+                    }
+                    "sort" => {
+                        let mut sorted: Vec<VmValue> = items.iter().cloned().collect();
+                        sorted.sort_by(|a, b| compare_values(a, b).cmp(&0));
+                        Ok(VmValue::List(Rc::new(sorted)))
+                    }
+                    "sort_by" => {
+                        if let Some(VmValue::Closure(closure)) = args.first() {
+                            let mut keyed: Vec<(VmValue, VmValue)> = Vec::new();
+                            for item in items.iter() {
+                                let key = self
+                                    .call_closure(closure, &[item.clone()], functions)
+                                    .await?;
+                                keyed.push((item.clone(), key));
+                            }
+                            keyed.sort_by(|(_, ka), (_, kb)| compare_values(ka, kb).cmp(&0));
+                            Ok(VmValue::List(Rc::new(
+                                keyed.into_iter().map(|(v, _)| v).collect(),
+                            )))
+                        } else {
+                            Ok(VmValue::Nil)
+                        }
+                    }
+                    "reverse" => {
+                        let mut rev: Vec<VmValue> = items.iter().cloned().collect();
+                        rev.reverse();
+                        Ok(VmValue::List(Rc::new(rev)))
+                    }
+                    "join" => {
+                        let sep = if args.is_empty() {
+                            String::new()
+                        } else {
+                            args[0].display()
+                        };
+                        let joined: String = items
+                            .iter()
+                            .map(|v| v.display())
+                            .collect::<Vec<_>>()
+                            .join(&sep);
+                        Ok(VmValue::String(Rc::from(joined)))
+                    }
+                    "contains" => {
+                        let needle = args.first().unwrap_or(&VmValue::Nil);
+                        Ok(VmValue::Bool(items.iter().any(|v| values_equal(v, needle))))
+                    }
+                    "index_of" => {
+                        let needle = args.first().unwrap_or(&VmValue::Nil);
+                        let idx = items.iter().position(|v| values_equal(v, needle));
+                        Ok(VmValue::Int(idx.map(|i| i as i64).unwrap_or(-1)))
+                    }
+                    "enumerate" => {
                         let result: Vec<VmValue> = items
                             .iter()
-                            .zip(other.iter())
-                            .map(|(a, b)| VmValue::List(Rc::new(vec![a.clone(), b.clone()])))
+                            .enumerate()
+                            .map(|(i, v)| {
+                                VmValue::Dict(Rc::new(BTreeMap::from([
+                                    ("index".to_string(), VmValue::Int(i as i64)),
+                                    ("value".to_string(), v.clone()),
+                                ])))
+                            })
                             .collect();
                         Ok(VmValue::List(Rc::new(result)))
-                    } else {
-                        Ok(VmValue::List(Rc::new(Vec::new())))
                     }
-                }
-                "slice" => {
-                    let len = items.len() as i64;
-                    let start_raw = args.first().and_then(|a| a.as_int()).unwrap_or(0);
-                    let start = if start_raw < 0 {
-                        (len + start_raw).max(0) as usize
-                    } else {
-                        (start_raw.min(len)) as usize
-                    };
-                    let end = if args.len() > 1 {
-                        let end_raw = args[1].as_int().unwrap_or(len);
-                        if end_raw < 0 {
-                            (len + end_raw).max(0) as usize
+                    "zip" => {
+                        if let Some(VmValue::List(other)) = args.first() {
+                            let result: Vec<VmValue> = items
+                                .iter()
+                                .zip(other.iter())
+                                .map(|(a, b)| VmValue::List(Rc::new(vec![a.clone(), b.clone()])))
+                                .collect();
+                            Ok(VmValue::List(Rc::new(result)))
                         } else {
-                            (end_raw.min(len)) as usize
-                        }
-                    } else {
-                        len as usize
-                    };
-                    let end = end.max(start);
-                    Ok(VmValue::List(Rc::new(items[start..end].to_vec())))
-                }
-                "unique" => {
-                    let mut seen: Vec<VmValue> = Vec::new();
-                    let mut result = Vec::new();
-                    for item in items.iter() {
-                        if !seen.iter().any(|s| values_equal(s, item)) {
-                            seen.push(item.clone());
-                            result.push(item.clone());
+                            Ok(VmValue::List(Rc::new(Vec::new())))
                         }
                     }
-                    Ok(VmValue::List(Rc::new(result)))
-                }
-                "take" => {
-                    let n = args.first().and_then(|a| a.as_int()).unwrap_or(0).max(0) as usize;
-                    Ok(VmValue::List(Rc::new(
-                        items.iter().take(n).cloned().collect(),
-                    )))
-                }
-                "skip" => {
-                    let n = args.first().and_then(|a| a.as_int()).unwrap_or(0).max(0) as usize;
-                    Ok(VmValue::List(Rc::new(
-                        items.iter().skip(n).cloned().collect(),
-                    )))
-                }
-                "sum" => {
-                    let mut int_sum: i64 = 0;
-                    let mut has_float = false;
-                    let mut float_sum: f64 = 0.0;
-                    for item in items.iter() {
-                        match item {
-                            VmValue::Int(n) => {
-                                int_sum = int_sum.wrapping_add(*n);
-                                float_sum += *n as f64;
-                            }
-                            VmValue::Float(n) => {
-                                has_float = true;
-                                float_sum += n;
-                            }
-                            _ => {}
-                        }
-                    }
-                    if has_float {
-                        Ok(VmValue::Float(float_sum))
-                    } else {
-                        Ok(VmValue::Int(int_sum))
-                    }
-                }
-                "min" => {
-                    if items.is_empty() {
-                        return Ok(VmValue::Nil);
-                    }
-                    let mut min_val = items[0].clone();
-                    for item in &items[1..] {
-                        if compare_values(item, &min_val) < 0 {
-                            min_val = item.clone();
-                        }
-                    }
-                    Ok(min_val)
-                }
-                "max" => {
-                    if items.is_empty() {
-                        return Ok(VmValue::Nil);
-                    }
-                    let mut max_val = items[0].clone();
-                    for item in &items[1..] {
-                        if compare_values(item, &max_val) > 0 {
-                            max_val = item.clone();
-                        }
-                    }
-                    Ok(max_val)
-                }
-                "flatten" => {
-                    let mut result = Vec::new();
-                    for item in items.iter() {
-                        if let VmValue::List(inner) = item {
-                            result.extend(inner.iter().cloned());
+                    "slice" => {
+                        let len = items.len() as i64;
+                        let start_raw = args.first().and_then(|a| a.as_int()).unwrap_or(0);
+                        let start = if start_raw < 0 {
+                            (len + start_raw).max(0) as usize
                         } else {
-                            result.push(item.clone());
+                            (start_raw.min(len)) as usize
+                        };
+                        let end = if args.len() > 1 {
+                            let end_raw = args[1].as_int().unwrap_or(len);
+                            if end_raw < 0 {
+                                (len + end_raw).max(0) as usize
+                            } else {
+                                (end_raw.min(len)) as usize
+                            }
+                        } else {
+                            len as usize
+                        };
+                        let end = end.max(start);
+                        Ok(VmValue::List(Rc::new(items[start..end].to_vec())))
+                    }
+                    "unique" => {
+                        let mut seen: Vec<VmValue> = Vec::new();
+                        let mut result = Vec::new();
+                        for item in items.iter() {
+                            if !seen.iter().any(|s| values_equal(s, item)) {
+                                seen.push(item.clone());
+                                result.push(item.clone());
+                            }
+                        }
+                        Ok(VmValue::List(Rc::new(result)))
+                    }
+                    "take" => {
+                        let n = args.first().and_then(|a| a.as_int()).unwrap_or(0).max(0) as usize;
+                        Ok(VmValue::List(Rc::new(
+                            items.iter().take(n).cloned().collect(),
+                        )))
+                    }
+                    "skip" => {
+                        let n = args.first().and_then(|a| a.as_int()).unwrap_or(0).max(0) as usize;
+                        Ok(VmValue::List(Rc::new(
+                            items.iter().skip(n).cloned().collect(),
+                        )))
+                    }
+                    "sum" => {
+                        let mut int_sum: i64 = 0;
+                        let mut has_float = false;
+                        let mut float_sum: f64 = 0.0;
+                        for item in items.iter() {
+                            match item {
+                                VmValue::Int(n) => {
+                                    int_sum = int_sum.wrapping_add(*n);
+                                    float_sum += *n as f64;
+                                }
+                                VmValue::Float(n) => {
+                                    has_float = true;
+                                    float_sum += n;
+                                }
+                                _ => {}
+                            }
+                        }
+                        if has_float {
+                            Ok(VmValue::Float(float_sum))
+                        } else {
+                            Ok(VmValue::Int(int_sum))
                         }
                     }
-                    Ok(VmValue::List(Rc::new(result)))
-                }
-                "push" => {
-                    let mut new_list: Vec<VmValue> = items.iter().cloned().collect();
-                    if let Some(item) = args.first() {
-                        new_list.push(item.clone());
+                    "min" => {
+                        if items.is_empty() {
+                            return Ok(VmValue::Nil);
+                        }
+                        let mut min_val = items[0].clone();
+                        for item in &items[1..] {
+                            if compare_values(item, &min_val) < 0 {
+                                min_val = item.clone();
+                            }
+                        }
+                        Ok(min_val)
                     }
-                    Ok(VmValue::List(Rc::new(new_list)))
-                }
-                "pop" => {
-                    let mut new_list: Vec<VmValue> = items.iter().cloned().collect();
-                    new_list.pop();
-                    Ok(VmValue::List(Rc::new(new_list)))
-                }
-                _ => Ok(VmValue::Nil),
-            },
-            VmValue::Dict(map) => match method {
-                "keys" => Ok(VmValue::List(Rc::new(
-                    map.keys()
-                        .map(|k| VmValue::String(Rc::from(k.as_str())))
-                        .collect(),
-                ))),
-                "values" => Ok(VmValue::List(Rc::new(map.values().cloned().collect()))),
-                "entries" => Ok(VmValue::List(Rc::new(
-                    map.iter()
-                        .map(|(k, v)| {
-                            VmValue::Dict(Rc::new(BTreeMap::from([
-                                ("key".to_string(), VmValue::String(Rc::from(k.as_str()))),
-                                ("value".to_string(), v.clone()),
-                            ])))
-                        })
-                        .collect(),
-                ))),
-                "count" => Ok(VmValue::Int(map.len() as i64)),
-                "has" => Ok(VmValue::Bool(map.contains_key(
-                    &args.first().map(|a| a.display()).unwrap_or_default(),
-                ))),
-                "merge" => {
-                    if let Some(VmValue::Dict(other)) = args.first() {
+                    "max" => {
+                        if items.is_empty() {
+                            return Ok(VmValue::Nil);
+                        }
+                        let mut max_val = items[0].clone();
+                        for item in &items[1..] {
+                            if compare_values(item, &max_val) > 0 {
+                                max_val = item.clone();
+                            }
+                        }
+                        Ok(max_val)
+                    }
+                    "flatten" => {
+                        let mut result = Vec::new();
+                        for item in items.iter() {
+                            if let VmValue::List(inner) = item {
+                                result.extend(inner.iter().cloned());
+                            } else {
+                                result.push(item.clone());
+                            }
+                        }
+                        Ok(VmValue::List(Rc::new(result)))
+                    }
+                    "push" => {
+                        let mut new_list: Vec<VmValue> = items.iter().cloned().collect();
+                        if let Some(item) = args.first() {
+                            new_list.push(item.clone());
+                        }
+                        Ok(VmValue::List(Rc::new(new_list)))
+                    }
+                    "pop" => {
+                        let mut new_list: Vec<VmValue> = items.iter().cloned().collect();
+                        new_list.pop();
+                        Ok(VmValue::List(Rc::new(new_list)))
+                    }
+                    _ => Ok(VmValue::Nil),
+                },
+                VmValue::Dict(map) => match method {
+                    "keys" => Ok(VmValue::List(Rc::new(
+                        map.keys()
+                            .map(|k| VmValue::String(Rc::from(k.as_str())))
+                            .collect(),
+                    ))),
+                    "values" => Ok(VmValue::List(Rc::new(map.values().cloned().collect()))),
+                    "entries" => Ok(VmValue::List(Rc::new(
+                        map.iter()
+                            .map(|(k, v)| {
+                                VmValue::Dict(Rc::new(BTreeMap::from([
+                                    ("key".to_string(), VmValue::String(Rc::from(k.as_str()))),
+                                    ("value".to_string(), v.clone()),
+                                ])))
+                            })
+                            .collect(),
+                    ))),
+                    "count" => Ok(VmValue::Int(map.len() as i64)),
+                    "has" => Ok(VmValue::Bool(map.contains_key(
+                        &args.first().map(|a| a.display()).unwrap_or_default(),
+                    ))),
+                    "merge" => {
+                        if let Some(VmValue::Dict(other)) = args.first() {
+                            let mut result = (**map).clone();
+                            result.extend(other.iter().map(|(k, v)| (k.clone(), v.clone())));
+                            Ok(VmValue::Dict(Rc::new(result)))
+                        } else {
+                            Ok(VmValue::Dict(Rc::clone(map)))
+                        }
+                    }
+                    "map_values" => {
+                        if let Some(VmValue::Closure(closure)) = args.first() {
+                            let mut result = BTreeMap::new();
+                            for (k, v) in map.iter() {
+                                let mapped =
+                                    self.call_closure(closure, &[v.clone()], functions).await?;
+                                result.insert(k.clone(), mapped);
+                            }
+                            Ok(VmValue::Dict(Rc::new(result)))
+                        } else {
+                            Ok(VmValue::Nil)
+                        }
+                    }
+                    "filter" => {
+                        if let Some(VmValue::Closure(closure)) = args.first() {
+                            let mut result = BTreeMap::new();
+                            for (k, v) in map.iter() {
+                                let keep =
+                                    self.call_closure(closure, &[v.clone()], functions).await?;
+                                if keep.is_truthy() {
+                                    result.insert(k.clone(), v.clone());
+                                }
+                            }
+                            Ok(VmValue::Dict(Rc::new(result)))
+                        } else {
+                            Ok(VmValue::Nil)
+                        }
+                    }
+                    "remove" => {
+                        let key = args.first().map(|a| a.display()).unwrap_or_default();
                         let mut result = (**map).clone();
-                        result.extend(other.iter().map(|(k, v)| (k.clone(), v.clone())));
+                        result.remove(&key);
                         Ok(VmValue::Dict(Rc::new(result)))
-                    } else {
-                        Ok(VmValue::Dict(Rc::clone(map)))
                     }
-                }
-                "map_values" => {
-                    if let Some(VmValue::Closure(closure)) = args.first() {
-                        let mut result = BTreeMap::new();
-                        for (k, v) in map.iter() {
-                            let mapped =
-                                self.call_closure_sync(closure, &[v.clone()], functions)?;
-                            result.insert(k.clone(), mapped);
-                        }
-                        Ok(VmValue::Dict(Rc::new(result)))
-                    } else {
-                        Ok(VmValue::Nil)
+                    "get" => {
+                        let key = args.first().map(|a| a.display()).unwrap_or_default();
+                        let default = args.get(1).cloned().unwrap_or(VmValue::Nil);
+                        Ok(map.get(&key).cloned().unwrap_or(default))
                     }
-                }
-                "filter" => {
-                    if let Some(VmValue::Closure(closure)) = args.first() {
-                        let mut result = BTreeMap::new();
-                        for (k, v) in map.iter() {
-                            let keep = self.call_closure_sync(closure, &[v.clone()], functions)?;
-                            if keep.is_truthy() {
-                                result.insert(k.clone(), v.clone());
-                            }
-                        }
-                        Ok(VmValue::Dict(Rc::new(result)))
-                    } else {
-                        Ok(VmValue::Nil)
-                    }
-                }
-                "remove" => {
-                    let key = args.first().map(|a| a.display()).unwrap_or_default();
-                    let mut result = (**map).clone();
-                    result.remove(&key);
-                    Ok(VmValue::Dict(Rc::new(result)))
-                }
-                "get" => {
-                    let key = args.first().map(|a| a.display()).unwrap_or_default();
-                    let default = args.get(1).cloned().unwrap_or(VmValue::Nil);
-                    Ok(map.get(&key).cloned().unwrap_or(default))
-                }
+                    _ => Ok(VmValue::Nil),
+                },
                 _ => Ok(VmValue::Nil),
-            },
-            _ => Ok(VmValue::Nil),
-        }
+            }
+        })
     }
 
     // --- Arithmetic helpers ---
@@ -2224,16 +2315,27 @@ mod tests {
     use harn_parser::Parser;
 
     fn run_harn(source: &str) -> (String, VmValue) {
-        let mut lexer = Lexer::new(source);
-        let tokens = lexer.tokenize().unwrap();
-        let mut parser = Parser::new(tokens);
-        let program = parser.parse().unwrap();
-        let chunk = Compiler::new().compile(&program).unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let local = tokio::task::LocalSet::new();
+            local
+                .run_until(async {
+                    let mut lexer = Lexer::new(source);
+                    let tokens = lexer.tokenize().unwrap();
+                    let mut parser = Parser::new(tokens);
+                    let program = parser.parse().unwrap();
+                    let chunk = Compiler::new().compile(&program).unwrap();
 
-        let mut vm = Vm::new();
-        register_vm_stdlib(&mut vm);
-        let result = vm.execute(&chunk).unwrap();
-        (vm.output().to_string(), result)
+                    let mut vm = Vm::new();
+                    register_vm_stdlib(&mut vm);
+                    let result = vm.execute(&chunk).await.unwrap();
+                    (vm.output().to_string(), result)
+                })
+                .await
+        })
     }
 
     fn run_output(source: &str) -> String {
@@ -2241,16 +2343,27 @@ mod tests {
     }
 
     fn run_harn_result(source: &str) -> Result<(String, VmValue), VmError> {
-        let mut lexer = Lexer::new(source);
-        let tokens = lexer.tokenize().unwrap();
-        let mut parser = Parser::new(tokens);
-        let program = parser.parse().unwrap();
-        let chunk = Compiler::new().compile(&program).unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let local = tokio::task::LocalSet::new();
+            local
+                .run_until(async {
+                    let mut lexer = Lexer::new(source);
+                    let tokens = lexer.tokenize().unwrap();
+                    let mut parser = Parser::new(tokens);
+                    let program = parser.parse().unwrap();
+                    let chunk = Compiler::new().compile(&program).unwrap();
 
-        let mut vm = Vm::new();
-        register_vm_stdlib(&mut vm);
-        let result = vm.execute(&chunk)?;
-        Ok((vm.output().to_string(), result))
+                    let mut vm = Vm::new();
+                    register_vm_stdlib(&mut vm);
+                    let result = vm.execute(&chunk).await?;
+                    Ok((vm.output().to_string(), result))
+                })
+                .await
+        })
     }
 
     #[test]
@@ -2529,29 +2642,51 @@ log(result)
     // --- Additional test coverage ---
 
     fn run_vm(source: &str) -> String {
-        let mut lexer = Lexer::new(source);
-        let tokens = lexer.tokenize().unwrap();
-        let mut parser = Parser::new(tokens);
-        let program = parser.parse().unwrap();
-        let chunk = Compiler::new().compile(&program).unwrap();
-        let mut vm = Vm::new();
-        register_vm_stdlib(&mut vm);
-        vm.execute(&chunk).unwrap();
-        vm.output().to_string()
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let local = tokio::task::LocalSet::new();
+            local
+                .run_until(async {
+                    let mut lexer = Lexer::new(source);
+                    let tokens = lexer.tokenize().unwrap();
+                    let mut parser = Parser::new(tokens);
+                    let program = parser.parse().unwrap();
+                    let chunk = Compiler::new().compile(&program).unwrap();
+                    let mut vm = Vm::new();
+                    register_vm_stdlib(&mut vm);
+                    vm.execute(&chunk).await.unwrap();
+                    vm.output().to_string()
+                })
+                .await
+        })
     }
 
     fn run_vm_err(source: &str) -> String {
-        let mut lexer = Lexer::new(source);
-        let tokens = lexer.tokenize().unwrap();
-        let mut parser = Parser::new(tokens);
-        let program = parser.parse().unwrap();
-        let chunk = Compiler::new().compile(&program).unwrap();
-        let mut vm = Vm::new();
-        register_vm_stdlib(&mut vm);
-        match vm.execute(&chunk) {
-            Err(e) => format!("{}", e),
-            Ok(_) => panic!("Expected error"),
-        }
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let local = tokio::task::LocalSet::new();
+            local
+                .run_until(async {
+                    let mut lexer = Lexer::new(source);
+                    let tokens = lexer.tokenize().unwrap();
+                    let mut parser = Parser::new(tokens);
+                    let program = parser.parse().unwrap();
+                    let chunk = Compiler::new().compile(&program).unwrap();
+                    let mut vm = Vm::new();
+                    register_vm_stdlib(&mut vm);
+                    match vm.execute(&chunk).await {
+                        Err(e) => format!("{}", e),
+                        Ok(_) => panic!("Expected error"),
+                    }
+                })
+                .await
+        })
     }
 
     #[test]

@@ -275,7 +275,14 @@ impl Debugger {
         self.next_var_ref = 100;
 
         loop {
-            let step_result = self.vm.as_mut().unwrap().step_execute();
+            let step_result = {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap();
+                let vm = self.vm.as_mut().unwrap();
+                rt.block_on(async { vm.step_execute().await })
+            };
             match step_result {
                 Ok(Some((val, stopped))) => {
                     if stopped {
