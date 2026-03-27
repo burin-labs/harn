@@ -74,7 +74,7 @@ impl Value {
             Value::TaskHandle { .. } => true,
             Value::Duration(ms) => *ms > 0,
             Value::EnumVariant { .. } => true,
-            Value::StructInstance { fields, .. } => !fields.is_empty(),
+            Value::StructInstance { .. } => true,
             Value::Channel(_) => true,
             Value::Atomic(_) => true,
         }
@@ -268,7 +268,23 @@ pub fn values_equal(a: &Value, b: &Value) -> bool {
                 struct_name: b_s,
                 fields: b_f,
             },
-        ) => a_s == b_s && a_f == b_f,
+        ) => {
+            a_s == b_s
+                && a_f.len() == b_f.len()
+                && a_f
+                    .iter()
+                    .zip(b_f.iter())
+                    .all(|((k1, v1), (k2, v2))| k1 == k2 && values_equal(v1, v2))
+        }
+        (Value::List(a), Value::List(b)) => {
+            a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| values_equal(x, y))
+        }
+        (Value::Dict(a), Value::Dict(b)) => {
+            a.len() == b.len()
+                && a.iter()
+                    .zip(b.iter())
+                    .all(|((k1, v1), (k2, v2))| k1 == k2 && values_equal(v1, v2))
+        }
         _ => false,
     }
 }

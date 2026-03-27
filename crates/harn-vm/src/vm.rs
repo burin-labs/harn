@@ -152,7 +152,7 @@ impl VmValue {
             VmValue::Closure(_) => true,
             VmValue::Duration(ms) => *ms > 0,
             VmValue::EnumVariant { .. } => true,
-            VmValue::StructInstance { fields, .. } => !fields.is_empty(),
+            VmValue::StructInstance { .. } => true,
             VmValue::TaskHandle(_) => true,
         }
     }
@@ -255,6 +255,49 @@ fn values_equal(a: &VmValue, b: &VmValue) -> bool {
         (VmValue::Int(x), VmValue::Float(y)) => (*x as f64) == *y,
         (VmValue::Float(x), VmValue::Int(y)) => *x == (*y as f64),
         (VmValue::TaskHandle(a), VmValue::TaskHandle(b)) => a == b,
+        (VmValue::List(a), VmValue::List(b)) => {
+            a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| values_equal(x, y))
+        }
+        (VmValue::Dict(a), VmValue::Dict(b)) => {
+            a.len() == b.len()
+                && a.iter()
+                    .zip(b.iter())
+                    .all(|((k1, v1), (k2, v2))| k1 == k2 && values_equal(v1, v2))
+        }
+        (
+            VmValue::EnumVariant {
+                enum_name: a_e,
+                variant: a_v,
+                fields: a_f,
+            },
+            VmValue::EnumVariant {
+                enum_name: b_e,
+                variant: b_v,
+                fields: b_f,
+            },
+        ) => {
+            a_e == b_e
+                && a_v == b_v
+                && a_f.len() == b_f.len()
+                && a_f.iter().zip(b_f.iter()).all(|(x, y)| values_equal(x, y))
+        }
+        (
+            VmValue::StructInstance {
+                struct_name: a_s,
+                fields: a_f,
+            },
+            VmValue::StructInstance {
+                struct_name: b_s,
+                fields: b_f,
+            },
+        ) => {
+            a_s == b_s
+                && a_f.len() == b_f.len()
+                && a_f
+                    .iter()
+                    .zip(b_f.iter())
+                    .all(|((k1, v1), (k2, v2))| k1 == k2 && values_equal(v1, v2))
+        }
         _ => false,
     }
 }
@@ -782,7 +825,7 @@ impl Vm {
         } else if op == Op::Negate as u8 {
             let v = self.pop()?;
             self.stack.push(match v {
-                VmValue::Int(n) => VmValue::Int(-n),
+                VmValue::Int(n) => VmValue::Int(n.wrapping_neg()),
                 VmValue::Float(n) => VmValue::Float(-n),
                 _ => {
                     return Err(VmError::Runtime(format!(

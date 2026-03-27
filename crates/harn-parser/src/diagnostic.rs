@@ -43,9 +43,8 @@ pub fn render_diagnostic(
     out.push_str(&format!("{:>width$} |\n", " ", width = gutter_width + 1));
 
     // Source line
-    let lines: Vec<&str> = source.lines().collect();
-    if line_num > 0 && line_num <= lines.len() {
-        let source_line = lines[line_num - 1];
+    let source_line_opt = source.lines().nth(line_num.wrapping_sub(1));
+    if let Some(source_line) = source_line_opt.filter(|_| line_num > 0) {
         out.push_str(&format!(
             "{:>width$} | {source_line}\n",
             line_num,
@@ -55,8 +54,8 @@ pub fn render_diagnostic(
         // Caret line
         if let Some(label_text) = label {
             // Calculate span display width using character counts, not byte offsets
-            let span_len = if span.end > span.start {
-                let span_text = &source[span.start..span.end.min(source.len())];
+            let span_len = if span.end > span.start && span.start <= source.len() {
+                let span_text = &source[span.start.min(source.len())..span.end.min(source.len())];
                 span_text.chars().count().max(1)
             } else {
                 1

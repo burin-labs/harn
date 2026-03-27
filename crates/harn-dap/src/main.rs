@@ -1,7 +1,7 @@
 mod debugger;
 mod protocol;
 
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead, Read, Write};
 
 use debugger::Debugger;
 use protocol::{DapMessage, DapResponse};
@@ -11,38 +11,19 @@ fn main() {
     let mut stdout = io::stdout();
     let mut debugger = Debugger::new();
 
-    let reader = stdin.lock();
-    let mut lines = reader.lines();
+    let mut reader = io::BufReader::new(stdin.lock());
 
-    while let Some(header) = read_header(&mut lines) {
-        let content_length = header
-            .strip_prefix("Content-Length: ")
-            .and_then(|s| s.trim().parse::<usize>().ok())
-            .unwrap_or(0);
-
+    while let Some(content_length) = read_content_length(&mut reader) {
         if content_length == 0 {
             continue;
         }
 
-        // Skip empty line after header
-        let _ = lines.next();
-
-        // Read content body
-        let mut body = String::new();
-        let mut remaining = content_length;
-        while remaining > 0 {
-            if let Some(Ok(line)) = lines.next() {
-                body.push_str(&line);
-                body.push('\n');
-                if body.len() >= content_length {
-                    break;
-                }
-                remaining = content_length.saturating_sub(body.len());
-            } else {
-                break;
-            }
+        // Read exact body bytes
+        let mut body_bytes = vec![0u8; content_length];
+        if reader.read_exact(&mut body_bytes).is_err() {
+            break;
         }
-        let body = body.trim_end().to_string();
+        let body = String::from_utf8_lossy(&body_bytes);
 
         // Parse and handle the message
         match serde_json::from_str::<DapMessage>(&body) {
@@ -60,23 +41,37 @@ fn main() {
     }
 }
 
-fn read_header(lines: &mut io::Lines<io::StdinLock>) -> Option<String> {
+fn read_content_length(reader: &mut io::BufReader<io::StdinLock>) -> Option<usize> {
+    let mut content_length = 0usize;
     loop {
-        let line = lines.next()?.ok()?;
-        let trimmed = line.trim();
-        if trimmed.starts_with("Content-Length:") {
-            return Some(trimmed.to_string());
-        }
-        if trimmed.is_empty() {
-            continue;
+        let mut line = String::new();
+        match reader.read_line(&mut line) {
+            Ok(0) => return None, // EOF
+            Ok(_) => {
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    // Empty line signals end of headers
+                    if content_length > 0 {
+                        return Some(content_length);
+                    }
+                    continue;
+                }
+                if let Some(val) = trimmed.strip_prefix("Content-Length:") {
+                    if let Ok(len) = val.trim().parse::<usize>() {
+                        content_length = len;
+                    }
+                }
+            }
+            Err(_) => return None,
         }
     }
 }
 
 fn send_response(stdout: &mut io::Stdout, response: &DapResponse) {
-    let body = serde_json::to_string(response).unwrap();
-    let header = format!("Content-Length: {}\r\n\r\n", body.len());
-    stdout.write_all(header.as_bytes()).ok();
-    stdout.write_all(body.as_bytes()).ok();
-    stdout.flush().ok();
+    if let Ok(body) = serde_json::to_string(response) {
+        let header = format!("Content-Length: {}\r\n\r\n", body.len());
+        let _ = stdout.write_all(header.as_bytes());
+        let _ = stdout.write_all(body.as_bytes());
+        let _ = stdout.flush();
+    }
 }

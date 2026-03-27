@@ -268,23 +268,31 @@ pub fn register_async_builtins(interp: &mut Interpreter) {
             }
         }
 
-        // Poll channels in a loop until one has data
-        // We use try_recv first for fairness, then async recv via tokio::select
+        // Poll channels in a loop until one has data or all are closed
         loop {
-            // First try non-blocking receives
+            let mut all_closed = true;
             for (i, ch) in channels.iter().enumerate() {
                 if let Ok(mut rx) = ch.receiver.try_lock() {
-                    if let Ok(val) = rx.try_recv() {
-                        let mut result = std::collections::BTreeMap::new();
-                        result.insert("index".to_string(), Value::Int(i as i64));
-                        result.insert("value".to_string(), val);
-                        result.insert("channel".to_string(), Value::String(ch.name.clone()));
-                        return Ok(Value::Dict(result));
+                    match rx.try_recv() {
+                        Ok(val) => {
+                            let mut result = std::collections::BTreeMap::new();
+                            result.insert("index".to_string(), Value::Int(i as i64));
+                            result.insert("value".to_string(), val);
+                            result.insert("channel".to_string(), Value::String(ch.name.clone()));
+                            return Ok(Value::Dict(result));
+                        }
+                        Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
+                            all_closed = false;
+                        }
+                        Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {}
                     }
                 }
             }
+            if all_closed {
+                return Ok(Value::Nil);
+            }
             // Brief sleep to avoid burning CPU while polling
-            tokio::time::sleep(tokio::time::Duration::from_micros(100)).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
         }
     });
 }

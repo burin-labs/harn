@@ -59,6 +59,11 @@ pub fn register_llm_builtins(interp: &mut Interpreter) {
             .as_ref()
             .and_then(|o| o.get("nudge"))
             .map(|v| v.as_string());
+        let max_tokens = options
+            .as_ref()
+            .and_then(|o| o.get("max_tokens"))
+            .and_then(|v| v.as_int())
+            .unwrap_or(4096);
 
         let mut system_prompt = system.unwrap_or_default();
         if persistent {
@@ -88,7 +93,7 @@ pub fn register_llm_builtins(interp: &mut Interpreter) {
                 } else {
                     Some(&system_prompt)
                 },
-                4096,
+                max_tokens,
             )
             .await?;
 
@@ -169,26 +174,6 @@ fn resolve_api_key(provider: &str) -> Result<String, RuntimeError> {
         _ => std::env::var("ANTHROPIC_API_KEY").map_err(|_| {
             RuntimeError::thrown("Missing API key: set ANTHROPIC_API_KEY environment variable")
         }),
-    }
-}
-
-#[allow(dead_code)]
-fn resolve_base_url(provider: &str, options: &Option<BTreeMap<String, Value>>) -> String {
-    // Allow custom base_url override
-    if let Some(url) = options
-        .as_ref()
-        .and_then(|o| o.get("base_url"))
-        .map(|v| v.as_string())
-    {
-        return url;
-    }
-    match provider {
-        "ollama" => {
-            std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://localhost:11434".to_string())
-        }
-        "openrouter" => "https://openrouter.ai/api".to_string(),
-        "openai" => "https://api.openai.com".to_string(),
-        _ => "https://api.anthropic.com".to_string(),
     }
 }
 

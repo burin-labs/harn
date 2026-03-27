@@ -34,12 +34,13 @@ async fn main() {
             println!(
                 r#"
   ╱▔▔╲
- ╱    ╲    harn v0.1.0
+ ╱    ╲    harn v{}
  │ ◆  │    the agent harness language
  │    │
  ╰──╯╱    by burin
    ╱╱
-"#
+"#,
+                env!("CARGO_PKG_VERSION")
             );
         }
         "run" => {
@@ -406,11 +407,24 @@ async fn run_conformance_tests(dir: &str) {
                 .display();
 
             if expected_file.exists() {
-                let source = fs::read_to_string(harn_file).unwrap();
-                let expected = fs::read_to_string(&expected_file)
-                    .unwrap()
-                    .trim_end()
-                    .to_string();
+                let source = match fs::read_to_string(harn_file) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        println!("  FAIL  {rel_path}");
+                        errors.push(format!("{rel_path}: IO error reading source: {e}"));
+                        failed += 1;
+                        continue;
+                    }
+                };
+                let expected = match fs::read_to_string(&expected_file) {
+                    Ok(s) => s.trim_end().to_string(),
+                    Err(e) => {
+                        println!("  FAIL  {rel_path}");
+                        errors.push(format!("{rel_path}: IO error reading expected: {e}"));
+                        failed += 1;
+                        continue;
+                    }
+                };
 
                 match execute(&source, Some(harn_file.as_path())).await {
                     Ok(output) => {
@@ -433,11 +447,24 @@ async fn run_conformance_tests(dir: &str) {
                     }
                 }
             } else if error_file.exists() {
-                let source = fs::read_to_string(harn_file).unwrap();
-                let expected_error = fs::read_to_string(&error_file)
-                    .unwrap()
-                    .trim_end()
-                    .to_string();
+                let source = match fs::read_to_string(harn_file) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        println!("  FAIL  {rel_path}");
+                        errors.push(format!("{rel_path}: IO error reading source: {e}"));
+                        failed += 1;
+                        continue;
+                    }
+                };
+                let expected_error = match fs::read_to_string(&error_file) {
+                    Ok(s) => s.trim_end().to_string(),
+                    Err(e) => {
+                        println!("  FAIL  {rel_path}");
+                        errors.push(format!("{rel_path}: IO error reading expected error: {e}"));
+                        failed += 1;
+                        continue;
+                    }
+                };
 
                 match execute(&source, Some(harn_file.as_path())).await {
                     Err(ref err) if err.to_string().contains(&expected_error) => {

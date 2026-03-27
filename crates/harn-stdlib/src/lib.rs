@@ -9,6 +9,25 @@ use harn_runtime::{Interpreter, RuntimeError, Value};
 pub use async_builtins::register_async_builtins;
 pub use llm::register_llm_builtins;
 
+/// Convert a process::Output into a Harn Dict value.
+fn output_to_value(output: std::process::Output) -> Value {
+    let mut result = std::collections::BTreeMap::new();
+    result.insert(
+        "stdout".to_string(),
+        Value::String(String::from_utf8_lossy(&output.stdout).to_string()),
+    );
+    result.insert(
+        "stderr".to_string(),
+        Value::String(String::from_utf8_lossy(&output.stderr).to_string()),
+    );
+    result.insert(
+        "status".to_string(),
+        Value::Int(output.status.code().unwrap_or(-1) as i64),
+    );
+    result.insert("success".to_string(), Value::Bool(output.status.success()));
+    Value::Dict(result)
+}
+
 /// Register all standard library builtins on an interpreter.
 pub fn register_stdlib(interp: &mut Interpreter) {
     interp.register_builtin("log", |args, out| {
@@ -60,7 +79,7 @@ pub fn register_stdlib(interp: &mut Interpreter) {
         match val {
             Value::Int(n) => Ok(Value::Int(*n)),
             Value::Float(n) => {
-                if n.is_finite() && *n >= i64::MIN as f64 && *n <= i64::MAX as f64 {
+                if n.is_finite() && *n >= i64::MIN as f64 && *n < (i64::MAX as f64) + 1.0 {
                     Ok(Value::Int(*n as i64))
                 } else {
                     Ok(Value::Nil)
@@ -198,7 +217,14 @@ pub fn register_stdlib(interp: &mut Interpreter) {
 
     interp.register_builtin("floor", |args, _out| {
         match args.first().unwrap_or(&Value::Nil) {
-            Value::Float(n) => Ok(Value::Int(n.floor() as i64)),
+            Value::Float(n) => {
+                let r = n.floor();
+                if r.is_finite() && r >= i64::MIN as f64 && r < (i64::MAX as f64) + 1.0 {
+                    Ok(Value::Int(r as i64))
+                } else {
+                    Ok(Value::Nil)
+                }
+            }
             Value::Int(n) => Ok(Value::Int(*n)),
             _ => Ok(Value::Nil),
         }
@@ -206,7 +232,14 @@ pub fn register_stdlib(interp: &mut Interpreter) {
 
     interp.register_builtin("ceil", |args, _out| {
         match args.first().unwrap_or(&Value::Nil) {
-            Value::Float(n) => Ok(Value::Int(n.ceil() as i64)),
+            Value::Float(n) => {
+                let r = n.ceil();
+                if r.is_finite() && r >= i64::MIN as f64 && r < (i64::MAX as f64) + 1.0 {
+                    Ok(Value::Int(r as i64))
+                } else {
+                    Ok(Value::Nil)
+                }
+            }
             Value::Int(n) => Ok(Value::Int(*n)),
             _ => Ok(Value::Nil),
         }
@@ -214,7 +247,14 @@ pub fn register_stdlib(interp: &mut Interpreter) {
 
     interp.register_builtin("round", |args, _out| {
         match args.first().unwrap_or(&Value::Nil) {
-            Value::Float(n) => Ok(Value::Int(n.round() as i64)),
+            Value::Float(n) => {
+                let r = n.round();
+                if r.is_finite() && r >= i64::MIN as f64 && r < (i64::MAX as f64) + 1.0 {
+                    Ok(Value::Int(r as i64))
+                } else {
+                    Ok(Value::Nil)
+                }
+            }
             Value::Int(n) => Ok(Value::Int(*n)),
             _ => Ok(Value::Nil),
         }
@@ -464,21 +504,7 @@ pub fn register_stdlib(interp: &mut Interpreter) {
             .args(&cmd_args)
             .output()
             .map_err(|e| RuntimeError::thrown(format!("exec failed: {e}")))?;
-        let mut result = std::collections::BTreeMap::new();
-        result.insert(
-            "stdout".to_string(),
-            Value::String(String::from_utf8_lossy(&output.stdout).to_string()),
-        );
-        result.insert(
-            "stderr".to_string(),
-            Value::String(String::from_utf8_lossy(&output.stderr).to_string()),
-        );
-        result.insert(
-            "status".to_string(),
-            Value::Int(output.status.code().unwrap_or(-1) as i64),
-        );
-        result.insert("success".to_string(), Value::Bool(output.status.success()));
-        Ok(Value::Dict(result))
+        Ok(output_to_value(output))
     });
 
     interp.register_builtin("shell", |args, _out| {
@@ -501,21 +527,7 @@ pub fn register_stdlib(interp: &mut Interpreter) {
             .arg(&cmd)
             .output()
             .map_err(|e| RuntimeError::thrown(format!("shell failed: {e}")))?;
-        let mut result = std::collections::BTreeMap::new();
-        result.insert(
-            "stdout".to_string(),
-            Value::String(String::from_utf8_lossy(&output.stdout).to_string()),
-        );
-        result.insert(
-            "stderr".to_string(),
-            Value::String(String::from_utf8_lossy(&output.stderr).to_string()),
-        );
-        result.insert(
-            "status".to_string(),
-            Value::Int(output.status.code().unwrap_or(-1) as i64),
-        );
-        result.insert("success".to_string(), Value::Bool(output.status.success()));
-        Ok(Value::Dict(result))
+        Ok(output_to_value(output))
     });
 
     // --- Date/time builtins ---
@@ -607,17 +619,19 @@ pub fn register_stdlib(interp: &mut Interpreter) {
     interp.register_builtin("format", |args, _out| {
         // format("Hello, {}! You are {} years old.", name, age)
         let template = args.first().map(|a| a.as_string()).unwrap_or_default();
-        let mut result = template;
-        for arg in args.iter().skip(1) {
-            if let Some(pos) = result.find("{}") {
-                result = format!(
-                    "{}{}{}",
-                    &result[..pos],
-                    arg.as_string(),
-                    &result[pos + 2..]
-                );
+        let mut result = String::with_capacity(template.len());
+        let mut arg_iter = args.iter().skip(1);
+        let mut rest = template.as_str();
+        while let Some(pos) = rest.find("{}") {
+            result.push_str(&rest[..pos]);
+            if let Some(arg) = arg_iter.next() {
+                result.push_str(&arg.as_string());
+            } else {
+                result.push_str("{}");
             }
+            rest = &rest[pos + 2..];
         }
+        result.push_str(rest);
         Ok(Value::String(result))
     });
 }
@@ -646,7 +660,13 @@ fn value_to_json(val: &Value) -> String {
     match val {
         Value::String(s) => escape_json_string(s),
         Value::Int(n) => n.to_string(),
-        Value::Float(n) => n.to_string(),
+        Value::Float(n) => {
+            if n.is_finite() {
+                n.to_string()
+            } else {
+                "null".to_string()
+            }
+        }
         Value::Bool(b) => b.to_string(),
         Value::Nil => "null".to_string(),
         Value::List(items) => {

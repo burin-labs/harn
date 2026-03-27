@@ -450,7 +450,7 @@ impl Interpreter {
                 match op.as_str() {
                     "!" => Ok(Value::Bool(!val.is_truthy())),
                     "-" => match val {
-                        Value::Int(n) => Ok(Value::Int(-n)),
+                        Value::Int(n) => Ok(Value::Int(n.wrapping_neg())),
                         Value::Float(n) => Ok(Value::Float(-n)),
                         _ => Ok(Value::Nil),
                     },
@@ -667,7 +667,7 @@ impl Interpreter {
                 let dur_val = self.eval(duration).await?;
                 let ms = match &dur_val {
                     Value::Duration(ms) => *ms,
-                    Value::Int(n) => *n as u64,
+                    Value::Int(n) => (*n).max(0) as u64,
                     _ => 30_000, // default 30s
                 };
                 let timeout = tokio::time::Duration::from_millis(ms);
@@ -1507,7 +1507,12 @@ impl Interpreter {
             }
             "index_of" => {
                 let needle = arg_string(args, 0);
-                Ok(Value::Int(s.find(&needle).map(|i| i as i64).unwrap_or(-1)))
+                let char_idx = s
+                    .char_indices()
+                    .position(|(i, _)| s[i..].starts_with(needle.as_str()))
+                    .map(|i| i as i64)
+                    .unwrap_or(-1);
+                Ok(Value::Int(char_idx))
             }
             "chars" => Ok(Value::List(
                 s.chars().map(|c| Value::String(c.to_string())).collect(),

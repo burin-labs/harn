@@ -58,7 +58,10 @@ impl RuntimeError {
 
     /// Returns true if this is an internal control-flow error (not user-facing).
     pub fn is_internal(&self) -> bool {
-        matches!(self, RuntimeError::ReturnValue(_))
+        matches!(
+            self,
+            RuntimeError::ReturnValue(_) | RuntimeError::YieldValue(_)
+        )
     }
 
     /// Get a short error category label for display.

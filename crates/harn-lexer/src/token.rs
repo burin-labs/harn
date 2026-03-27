@@ -30,15 +30,6 @@ pub struct Span {
 }
 
 impl Span {
-    pub fn new(line: usize, column: usize) -> Self {
-        Self {
-            start: 0,
-            end: 0,
-            line,
-            column,
-        }
-    }
-
     pub fn with_offsets(start: usize, end: usize, line: usize, column: usize) -> Self {
         Self {
             start,
@@ -255,13 +246,6 @@ pub struct Token {
 }
 
 impl Token {
-    pub fn new(kind: TokenKind, line: usize, column: usize) -> Self {
-        Self {
-            kind,
-            span: Span::new(line, column),
-        }
-    }
-
     pub fn with_span(kind: TokenKind, span: Span) -> Self {
         Self { kind, span }
     }

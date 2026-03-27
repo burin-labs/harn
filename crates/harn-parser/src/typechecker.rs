@@ -207,8 +207,11 @@ impl TypeChecker {
         // Check each top-level node
         for snode in program {
             match &snode.node {
-                Node::Pipeline { body, .. } => {
+                Node::Pipeline { params, body, .. } => {
                     let mut child = self.scope.child();
+                    for p in params {
+                        child.define_var(p, None);
+                    }
                     self.check_block(body, &mut child);
                 }
                 Node::FnDecl {
@@ -229,7 +232,12 @@ impl TypeChecker {
                     self.check_fn_body(params, return_type, body);
                 }
                 _ => {
-                    self.check_node(snode, &mut self.scope.clone());
+                    let mut scope = self.scope.clone();
+                    self.check_node(snode, &mut scope);
+                    // Merge any new definitions back into the top-level scope
+                    for (name, ty) in scope.vars {
+                        self.scope.vars.entry(name).or_insert(ty);
+                    }
                 }
             }
         }

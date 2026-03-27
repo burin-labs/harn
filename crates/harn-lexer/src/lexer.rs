@@ -230,8 +230,7 @@ impl Lexer {
             if ch == '$' && self.peek() == Some('{') {
                 has_interpolation = true;
                 if !value.is_empty() {
-                    segments.push(StringSegment::Literal(value.clone()));
-                    value.clear();
+                    segments.push(StringSegment::Literal(std::mem::take(&mut value)));
                 }
                 self.advance(); // skip $
                 self.advance(); // skip {
@@ -389,11 +388,20 @@ impl Lexer {
                 Span::with_offsets(start_byte, self.byte_pos, self.line, start_col),
             )
         } else {
-            let n: i64 = num_str.parse().unwrap_or(0);
-            Token::with_span(
-                TokenKind::IntLiteral(n),
-                Span::with_offsets(start_byte, self.byte_pos, self.line, start_col),
-            )
+            match num_str.parse::<i64>() {
+                Ok(n) => Token::with_span(
+                    TokenKind::IntLiteral(n),
+                    Span::with_offsets(start_byte, self.byte_pos, self.line, start_col),
+                ),
+                Err(_) => {
+                    // Integer overflow: fall back to float
+                    let n: f64 = num_str.parse().unwrap_or(0.0);
+                    Token::with_span(
+                        TokenKind::FloatLiteral(n),
+                        Span::with_offsets(start_byte, self.byte_pos, self.line, start_col),
+                    )
+                }
+            }
         }
     }
 

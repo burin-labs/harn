@@ -99,8 +99,8 @@ impl Environment {
 
 /// Compute the Levenshtein edit distance between two strings.
 fn levenshtein(a: &str, b: &str) -> usize {
-    let a_len = a.len();
-    let b_len = b.len();
+    let a_len = a.chars().count();
+    let b_len = b.chars().count();
     if a_len == 0 {
         return b_len;
     }

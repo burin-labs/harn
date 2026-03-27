@@ -70,8 +70,34 @@ impl JsonParser {
                         let hex = self.take_n(4)?;
                         let cp = u32::from_str_radix(&hex, 16)
                             .map_err(|_| format!("Invalid unicode escape: \\u{hex}"))?;
-                        let ch = char::from_u32(cp)
-                            .ok_or_else(|| format!("Invalid unicode codepoint: {cp}"))?;
+                        // Handle UTF-16 surrogate pairs
+                        let ch = if (0xD800..=0xDBFF).contains(&cp) {
+                            // High surrogate: expect \uXXXX low surrogate
+                            if self.peek() == Some('\\') && self.peek_at(1) == Some('u') {
+                                self.next(); // consume '\'
+                                self.next(); // consume 'u'
+                                let hex2 = self.take_n(4)?;
+                                let cp2 = u32::from_str_radix(&hex2, 16)
+                                    .map_err(|_| format!("Invalid unicode escape: \\u{hex2}"))?;
+                                if (0xDC00..=0xDFFF).contains(&cp2) {
+                                    let combined = 0x10000 + ((cp - 0xD800) << 10) + (cp2 - 0xDC00);
+                                    char::from_u32(combined).ok_or_else(|| {
+                                        format!("Invalid surrogate pair: \\u{hex}\\u{hex2}")
+                                    })?
+                                } else {
+                                    return Err(format!(
+                                        "Expected low surrogate after \\u{hex}, got \\u{hex2}"
+                                    ));
+                                }
+                            } else {
+                                return Err(format!(
+                                    "Expected low surrogate after high surrogate \\u{hex}"
+                                ));
+                            }
+                        } else {
+                            char::from_u32(cp)
+                                .ok_or_else(|| format!("Invalid unicode codepoint: {cp}"))?
+                        };
                         s.push(ch);
                     }
                     Some(c) => return Err(format!("Invalid escape sequence: \\{c}")),
@@ -189,6 +215,10 @@ impl JsonParser {
 
     fn peek(&self) -> Option<char> {
         self.chars.get(self.pos).copied()
+    }
+
+    fn peek_at(&self, offset: usize) -> Option<char> {
+        self.chars.get(self.pos + offset).copied()
     }
 
     fn next(&mut self) -> Option<char> {
