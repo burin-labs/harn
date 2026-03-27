@@ -77,6 +77,41 @@ impl Compiler {
         Ok(self.chunk)
     }
 
+    /// Compile a specific named pipeline (for test runners).
+    pub fn compile_named(
+        mut self,
+        program: &[SNode],
+        pipeline_name: &str,
+    ) -> Result<Chunk, CompileError> {
+        Self::collect_enum_names(program, &mut self.enum_names);
+
+        for sn in program {
+            if matches!(
+                &sn.node,
+                Node::ImportDecl { .. } | Node::SelectiveImport { .. }
+            ) {
+                self.compile_node(sn)?;
+            }
+        }
+
+        let target = program
+            .iter()
+            .find(|sn| matches!(&sn.node, Node::Pipeline { name, .. } if name == pipeline_name));
+
+        if let Some(sn) = target {
+            if let Node::Pipeline { body, extends, .. } = &sn.node {
+                if let Some(parent_name) = extends {
+                    self.compile_parent_pipeline(program, parent_name)?;
+                }
+                self.compile_block(body)?;
+            }
+        }
+
+        self.chunk.emit(Op::Nil, self.line);
+        self.chunk.emit(Op::Return, self.line);
+        Ok(self.chunk)
+    }
+
     /// Recursively compile parent pipeline bodies (for extends).
     fn compile_parent_pipeline(
         &mut self,

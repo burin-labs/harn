@@ -47,21 +47,21 @@ async fn main() {
             );
         }
         "run" => {
-            let use_vm = args.iter().any(|a| a == "--vm");
+            let use_interp = args.iter().any(|a| a == "--interp");
             let file = args
                 .iter()
                 .skip(2)
                 .find(|a| a.ends_with(".harn") || !a.starts_with("--"));
             match file {
                 Some(f) => {
-                    if use_vm {
-                        run_file_vm(f).await;
-                    } else {
+                    if use_interp {
                         run_file(f).await;
+                    } else {
+                        run_file_vm(f).await;
                     }
                 }
                 None => {
-                    eprintln!("Usage: harn run [--vm] <file.harn>");
+                    eprintln!("Usage: harn run <file.harn>");
                     process::exit(1);
                 }
             }
@@ -273,6 +273,14 @@ async fn run_file_vm(path: &str) {
 
     let mut vm = harn_vm::Vm::new();
     harn_vm::register_vm_stdlib(&mut vm);
+    harn_vm::register_http_builtins(&mut vm);
+    harn_vm::register_llm_builtins(&mut vm);
+
+    if let Some(p) = std::path::Path::new(path).parent() {
+        if !p.as_os_str().is_empty() {
+            vm.set_source_dir(p);
+        }
+    }
 
     match vm.execute(&chunk).await {
         Ok(_) => {
@@ -394,6 +402,8 @@ async fn execute_vm(source: &str, source_path: Option<&Path>) -> Result<String, 
         .run_until(async {
             let mut vm = harn_vm::Vm::new();
             harn_vm::register_vm_stdlib(&mut vm);
+            harn_vm::register_http_builtins(&mut vm);
+            harn_vm::register_llm_builtins(&mut vm);
             if let Some(path) = source_path {
                 if let Some(parent) = path.parent() {
                     if !parent.as_os_str().is_empty() {
@@ -698,9 +708,9 @@ async fn run_repl() {
                 }
 
                 let source = format!("pipeline repl(task) {{\n{line}\n}}");
-                match execute(&source, None).await {
+                match execute_vm(&source, None).await {
                     Ok(output) => {
-                        stdout.write_all(&output).ok();
+                        stdout.write_all(output.as_bytes()).ok();
                     }
                     Err(e) => eprintln!("Error: {e}"),
                 }

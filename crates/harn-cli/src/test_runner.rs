@@ -3,11 +3,6 @@ use std::time::Instant;
 
 use harn_lexer::Lexer;
 use harn_parser::{Node, Parser};
-use harn_runtime::Interpreter;
-use harn_stdlib::{
-    register_async_builtins, register_http_builtins, register_llm_builtins,
-    register_logging_builtins, register_stdlib, register_tool_builtins,
-};
 
 pub struct TestResult {
     pub name: String,
@@ -25,7 +20,7 @@ pub struct TestSummary {
     pub duration_ms: u64,
 }
 
-/// Run all test_* pipelines in a single source file.
+/// Run all test_* pipelines in a single source file using the VM.
 pub async fn run_test_file(path: &Path) -> Result<Vec<TestResult>, String> {
     let source = std::fs::read_to_string(path)
         .map_err(|e| format!("Failed to read {}: {e}", path.display()))?;
@@ -53,32 +48,42 @@ pub async fn run_test_file(path: &Path) -> Result<Vec<TestResult>, String> {
     for test_name in &test_names {
         let start = Instant::now();
 
-        // Create fresh interpreter for each test
-        let mut interp = Interpreter::new();
-        register_stdlib(&mut interp);
-        register_async_builtins(&mut interp);
-        register_http_builtins(&mut interp);
-        register_llm_builtins(&mut interp);
-        register_logging_builtins(&mut interp);
-        register_tool_builtins(&mut interp);
-
-        if let Some(parent) = path.parent() {
-            if !parent.as_os_str().is_empty() {
-                interp.set_source_dir(parent);
+        // Compile the test pipeline via the VM compiler
+        let chunk = match harn_vm::Compiler::new().compile_named(&program, test_name) {
+            Ok(c) => c,
+            Err(e) => {
+                results.push(TestResult {
+                    name: test_name.clone(),
+                    file: path.display().to_string(),
+                    passed: false,
+                    error: Some(format!("Compile error: {e}")),
+                    duration_ms: 0,
+                });
+                continue;
             }
-        }
+        };
 
         let local = tokio::task::LocalSet::new();
-        let program_clone = program.clone();
-        let test_name_clone = test_name.clone();
+        let path_clone = path.to_path_buf();
         let result = local
-            .run_until(async { interp.run_test(&program_clone, &test_name_clone).await })
+            .run_until(async {
+                let mut vm = harn_vm::Vm::new();
+                harn_vm::register_vm_stdlib(&mut vm);
+                harn_vm::register_http_builtins(&mut vm);
+                harn_vm::register_llm_builtins(&mut vm);
+                if let Some(parent) = path_clone.parent() {
+                    if !parent.as_os_str().is_empty() {
+                        vm.set_source_dir(parent);
+                    }
+                }
+                vm.execute(&chunk).await.map_err(|e| format!("{e}"))
+            })
             .await;
 
         let duration = start.elapsed().as_millis() as u64;
 
         match result {
-            Ok(()) => {
+            Ok(_) => {
                 results.push(TestResult {
                     name: test_name.clone(),
                     file: path.display().to_string(),
@@ -92,7 +97,7 @@ pub async fn run_test_file(path: &Path) -> Result<Vec<TestResult>, String> {
                     name: test_name.clone(),
                     file: path.display().to_string(),
                     passed: false,
-                    error: Some(format!("{e}")),
+                    error: Some(e),
                     duration_ms: duration,
                 });
             }
@@ -149,7 +154,6 @@ fn discover_test_files(dir: &Path) -> Vec<PathBuf> {
             if path.is_dir() {
                 files.extend(discover_test_files(&path));
             } else if path.extension().is_some_and(|e| e == "harn") {
-                // Only include files that have test_ pipelines
                 if let Ok(content) = std::fs::read_to_string(&path) {
                     if content.contains("test_") {
                         files.push(path);
