@@ -118,15 +118,20 @@ pub enum TokenKind {
     DurationLiteral(u64),
 
     // Two-character operators
-    Eq,      // ==
-    Neq,     // !=
-    And,     // &&
-    Or,      // ||
-    Pipe,    // |>
-    NilCoal, // ??
-    Arrow,   // ->
-    Lte,     // <=
-    Gte,     // >=
+    Eq,            // ==
+    Neq,           // !=
+    And,           // &&
+    Or,            // ||
+    Pipe,          // |>
+    NilCoal,       // ??
+    Arrow,         // ->
+    Lte,           // <=
+    Gte,           // >=
+    PlusAssign,    // +=
+    MinusAssign,   // -=
+    StarAssign,    // *=
+    SlashAssign,   // /=
+    PercentAssign, // %=
 
     // Single-character operators
     Assign,   // =
@@ -136,6 +141,7 @@ pub enum TokenKind {
     Minus,    // -
     Star,     // *
     Slash,    // /
+    Percent,  // %
     Lt,       // <
     Gt,       // >
     Question, // ?
@@ -151,6 +157,10 @@ pub enum TokenKind {
     Comma,     // ,
     Colon,     // :
     Semicolon, // ;
+
+    // Comments
+    LineComment(String),  // // text
+    BlockComment(String), // /* text */
 
     // Special
     Newline,
@@ -212,6 +222,11 @@ impl fmt::Display for TokenKind {
             TokenKind::Arrow => write!(f, "->"),
             TokenKind::Lte => write!(f, "<="),
             TokenKind::Gte => write!(f, ">="),
+            TokenKind::PlusAssign => write!(f, "+="),
+            TokenKind::MinusAssign => write!(f, "-="),
+            TokenKind::StarAssign => write!(f, "*="),
+            TokenKind::SlashAssign => write!(f, "/="),
+            TokenKind::PercentAssign => write!(f, "%="),
             TokenKind::Assign => write!(f, "="),
             TokenKind::Not => write!(f, "!"),
             TokenKind::Dot => write!(f, "."),
@@ -219,6 +234,7 @@ impl fmt::Display for TokenKind {
             TokenKind::Minus => write!(f, "-"),
             TokenKind::Star => write!(f, "*"),
             TokenKind::Slash => write!(f, "/"),
+            TokenKind::Percent => write!(f, "%"),
             TokenKind::Lt => write!(f, "<"),
             TokenKind::Gt => write!(f, ">"),
             TokenKind::Question => write!(f, "?"),
@@ -232,6 +248,8 @@ impl fmt::Display for TokenKind {
             TokenKind::Comma => write!(f, ","),
             TokenKind::Colon => write!(f, ":"),
             TokenKind::Semicolon => write!(f, ";"),
+            TokenKind::LineComment(s) => write!(f, "// {s}"),
+            TokenKind::BlockComment(s) => write!(f, "/* {s} */"),
             TokenKind::Newline => write!(f, "\\n"),
             TokenKind::Eof => write!(f, "EOF"),
         }

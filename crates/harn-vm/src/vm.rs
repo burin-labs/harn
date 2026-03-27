@@ -822,6 +822,10 @@ impl Vm {
             let b = self.pop()?;
             let a = self.pop()?;
             self.stack.push(self.div(a, b)?);
+        } else if op == Op::Mod as u8 {
+            let b = self.pop()?;
+            let a = self.pop()?;
+            self.stack.push(self.modulo(a, b)?);
         } else if op == Op::Negate as u8 {
             let v = self.pop()?;
             self.stack.push(match v {
@@ -1741,6 +1745,11 @@ impl Vm {
                 result.extend(y.iter().cloned());
                 VmValue::List(Rc::new(result))
             }
+            (VmValue::Dict(x), VmValue::Dict(y)) => {
+                let mut result = (**x).clone();
+                result.extend(y.iter().map(|(k, v)| (k.clone(), v.clone())));
+                VmValue::Dict(Rc::new(result))
+            }
             _ => VmValue::String(Rc::from(format!("{}{}", a.display(), b.display()))),
         }
     }
@@ -1777,6 +1786,24 @@ impl Vm {
             (VmValue::Float(x), VmValue::Int(y)) => Ok(VmValue::Float(x / *y as f64)),
             _ => Err(VmError::Runtime(format!(
                 "Cannot divide {} by {}",
+                a.type_name(),
+                b.type_name()
+            ))),
+        }
+    }
+
+    fn modulo(&self, a: VmValue, b: VmValue) -> Result<VmValue, VmError> {
+        match (&a, &b) {
+            (VmValue::Int(_), VmValue::Int(y)) if *y == 0 => Err(VmError::DivisionByZero),
+            (VmValue::Int(x), VmValue::Int(y)) => Ok(VmValue::Int(x % y)),
+            (VmValue::Float(_), VmValue::Float(y)) if *y == 0.0 => Err(VmError::DivisionByZero),
+            (VmValue::Float(x), VmValue::Float(y)) => Ok(VmValue::Float(x % y)),
+            (VmValue::Int(_), VmValue::Float(y)) if *y == 0.0 => Err(VmError::DivisionByZero),
+            (VmValue::Int(x), VmValue::Float(y)) => Ok(VmValue::Float(*x as f64 % y)),
+            (VmValue::Float(_), VmValue::Int(y)) if *y == 0 => Err(VmError::DivisionByZero),
+            (VmValue::Float(x), VmValue::Int(y)) => Ok(VmValue::Float(x % *y as f64)),
+            _ => Err(VmError::Runtime(format!(
+                "Cannot modulo {} by {}",
                 a.type_name(),
                 b.type_name()
             ))),

@@ -343,11 +343,20 @@ impl Interpreter {
                 Ok(Value::Nil)
             }
 
-            Node::Assignment { target, value } => {
+            Node::Assignment { target, value, op } => {
                 let val = self.eval(value).await?;
                 if let Node::Identifier(name) = &target.node {
+                    let final_val = if let Some(op) = op {
+                        let current = self.env.get(name).ok_or_else(|| {
+                            RuntimeError::thrown(format!("Undefined variable '{name}'"))
+                                .with_span(target.span)
+                        })?;
+                        Self::apply_arithmetic_op(op, current, val)?
+                    } else {
+                        val
+                    };
                     self.env
-                        .assign(name, val)
+                        .assign(name, final_val)
                         .map_err(|e| e.with_span(target.span))?;
                 }
                 Ok(Value::Nil)
@@ -2007,13 +2016,29 @@ impl Interpreter {
         let left_val = self.eval(left).await?;
         let right_val = self.eval(right).await?;
 
+        // Comparison operators (not shared with compound assignment)
         match op {
-            "==" => Ok(Value::Bool(values_equal(&left_val, &right_val))),
-            "!=" => Ok(Value::Bool(!values_equal(&left_val, &right_val))),
-            "<" => Ok(Value::Bool(compare_values(&left_val, &right_val) < 0)),
-            ">" => Ok(Value::Bool(compare_values(&left_val, &right_val) > 0)),
-            "<=" => Ok(Value::Bool(compare_values(&left_val, &right_val) <= 0)),
-            ">=" => Ok(Value::Bool(compare_values(&left_val, &right_val) >= 0)),
+            "==" => return Ok(Value::Bool(values_equal(&left_val, &right_val))),
+            "!=" => return Ok(Value::Bool(!values_equal(&left_val, &right_val))),
+            "<" => return Ok(Value::Bool(compare_values(&left_val, &right_val) < 0)),
+            ">" => return Ok(Value::Bool(compare_values(&left_val, &right_val) > 0)),
+            "<=" => return Ok(Value::Bool(compare_values(&left_val, &right_val) <= 0)),
+            ">=" => return Ok(Value::Bool(compare_values(&left_val, &right_val) >= 0)),
+            _ => {}
+        }
+
+        // Arithmetic / concatenation — delegates to shared helper
+        Self::apply_arithmetic_op(op, left_val, right_val)
+    }
+
+    /// Apply an arithmetic or concatenation operator on two values.
+    /// Shared between `eval_binary_op` and compound assignment.
+    fn apply_arithmetic_op(
+        op: &str,
+        left_val: Value,
+        right_val: Value,
+    ) -> Result<Value, RuntimeError> {
+        match op {
             "+" => match (&left_val, &right_val) {
                 (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a.wrapping_add(*b))),
                 (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a + b)),
@@ -2024,6 +2049,11 @@ impl Interpreter {
                     let mut result = a.clone();
                     result.extend(b.iter().cloned());
                     Ok(Value::List(result))
+                }
+                (Value::Dict(a), Value::Dict(b)) => {
+                    let mut result = a.clone();
+                    result.extend(b.iter().map(|(k, v)| (k.clone(), v.clone())));
+                    Ok(Value::Dict(result))
                 }
                 _ => Ok(Value::String(format!(
                     "{}{}",
@@ -2050,6 +2080,13 @@ impl Interpreter {
                 (Value::Float(a), Value::Float(b)) if *b != 0.0 => Ok(Value::Float(a / b)),
                 (Value::Int(a), Value::Float(b)) if *b != 0.0 => Ok(Value::Float(*a as f64 / b)),
                 (Value::Float(a), Value::Int(b)) if *b != 0 => Ok(Value::Float(a / *b as f64)),
+                _ => Ok(Value::Nil),
+            },
+            "%" => match (&left_val, &right_val) {
+                (Value::Int(a), Value::Int(b)) if *b != 0 => Ok(Value::Int(a % b)),
+                (Value::Float(a), Value::Float(b)) if *b != 0.0 => Ok(Value::Float(a % b)),
+                (Value::Int(a), Value::Float(b)) if *b != 0.0 => Ok(Value::Float(*a as f64 % b)),
+                (Value::Float(a), Value::Int(b)) if *b != 0 => Ok(Value::Float(a % *b as f64)),
                 _ => Ok(Value::Nil),
             },
             _ => Ok(Value::Nil),

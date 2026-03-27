@@ -40,11 +40,16 @@ impl std::error::Error for ParserError {}
 pub struct Parser {
     tokens: Vec<Token>,
     pos: usize,
+    errors: Vec<ParserError>,
 }
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
-        Self { tokens, pos: 0 }
+        Self {
+            tokens,
+            pos: 0,
+            errors: Vec::new(),
+        }
     }
 
     fn current_span(&self) -> Span {
@@ -52,6 +57,10 @@ impl Parser {
             .get(self.pos)
             .map(|t| t.span)
             .unwrap_or(Span::dummy())
+    }
+
+    fn current_kind(&self) -> Option<&TokenKind> {
+        self.tokens.get(self.pos).map(|t| &t.kind)
     }
 
     fn prev_span(&self) -> Span {
@@ -62,23 +71,95 @@ impl Parser {
         }
     }
 
-    /// Parse a complete .harn file.
+    /// Parse a complete .harn file. Reports multiple errors via recovery.
     pub fn parse(&mut self) -> Result<Vec<SNode>, ParserError> {
         let mut nodes = Vec::new();
         self.skip_newlines();
 
         while !self.is_at_end() {
-            if self.check(&TokenKind::Import) {
-                nodes.push(self.parse_import()?);
+            // Skip any stray closing braces at top level (after recovery)
+            if self.check(&TokenKind::RBrace) {
+                self.advance();
+                self.skip_newlines();
+                continue;
+            }
+
+            let result = if self.check(&TokenKind::Import) {
+                self.parse_import()
             } else if self.check(&TokenKind::Pipeline) {
-                nodes.push(self.parse_pipeline()?);
+                self.parse_pipeline()
             } else {
-                // Allow top-level statements (for error reporting on malformed files)
-                nodes.push(self.parse_statement()?);
+                self.parse_statement()
+            };
+
+            match result {
+                Ok(node) => nodes.push(node),
+                Err(err) => {
+                    self.errors.push(err);
+                    self.synchronize();
+                }
             }
             self.skip_newlines();
         }
+
+        if let Some(first) = self.errors.first() {
+            return Err(first.clone());
+        }
         Ok(nodes)
+    }
+
+    /// Return all accumulated parser errors (after `parse()` returns).
+    pub fn all_errors(&self) -> &[ParserError] {
+        &self.errors
+    }
+
+    /// Check if the current token is one that starts a statement.
+    fn is_statement_start(&self) -> bool {
+        matches!(
+            self.current_kind(),
+            Some(
+                TokenKind::Let
+                    | TokenKind::Var
+                    | TokenKind::If
+                    | TokenKind::For
+                    | TokenKind::While
+                    | TokenKind::Match
+                    | TokenKind::Retry
+                    | TokenKind::Return
+                    | TokenKind::Throw
+                    | TokenKind::Fn
+                    | TokenKind::Pub
+                    | TokenKind::Try
+                    | TokenKind::Pipeline
+                    | TokenKind::Import
+                    | TokenKind::Parallel
+                    | TokenKind::ParallelMap
+                    | TokenKind::Enum
+                    | TokenKind::Struct
+                    | TokenKind::Interface
+                    | TokenKind::Guard
+                    | TokenKind::Deadline
+                    | TokenKind::Yield
+                    | TokenKind::Mutex
+            )
+        )
+    }
+
+    /// Advance past tokens until we reach a likely statement boundary.
+    fn synchronize(&mut self) {
+        while !self.is_at_end() {
+            if self.check(&TokenKind::Newline) {
+                self.advance();
+                if self.is_at_end() || self.is_statement_start() {
+                    return;
+                }
+                continue;
+            }
+            if self.check(&TokenKind::RBrace) {
+                return;
+            }
+            self.advance();
+        }
     }
 
     /// Parse a single expression (for string interpolation).
@@ -763,17 +844,45 @@ impl Parser {
         let start = self.current_span();
         let expr = self.parse_expression()?;
 
-        // Check for assignment: identifier = value
-        if self.check(&TokenKind::Assign) && matches!(expr.node, Node::Identifier(_)) {
-            self.advance();
-            let value = self.parse_expression()?;
-            return Ok(spanned(
-                Node::Assignment {
-                    target: Box::new(expr),
-                    value: Box::new(value),
-                },
-                Span::merge(start, self.prev_span()),
-            ));
+        // Check for assignment or compound assignment: identifier = value, identifier += value, etc.
+        if matches!(expr.node, Node::Identifier(_)) {
+            if self.check(&TokenKind::Assign) {
+                self.advance();
+                let value = self.parse_expression()?;
+                return Ok(spanned(
+                    Node::Assignment {
+                        target: Box::new(expr),
+                        value: Box::new(value),
+                        op: None,
+                    },
+                    Span::merge(start, self.prev_span()),
+                ));
+            }
+            let compound_op = if self.check(&TokenKind::PlusAssign) {
+                Some("+")
+            } else if self.check(&TokenKind::MinusAssign) {
+                Some("-")
+            } else if self.check(&TokenKind::StarAssign) {
+                Some("*")
+            } else if self.check(&TokenKind::SlashAssign) {
+                Some("/")
+            } else if self.check(&TokenKind::PercentAssign) {
+                Some("%")
+            } else {
+                None
+            };
+            if let Some(op) = compound_op {
+                self.advance();
+                let value = self.parse_expression()?;
+                return Ok(spanned(
+                    Node::Assignment {
+                        target: Box::new(expr),
+                        value: Box::new(value),
+                        op: Some(op.into()),
+                    },
+                    Span::merge(start, self.prev_span()),
+                ));
+            }
         }
 
         Ok(expr)
@@ -984,12 +1093,17 @@ impl Parser {
 
     fn parse_multiplicative(&mut self) -> Result<SNode, ParserError> {
         let mut left = self.parse_unary()?;
-        while self.check(&TokenKind::Star) || self.check(&TokenKind::Slash) {
+        while self.check(&TokenKind::Star)
+            || self.check(&TokenKind::Slash)
+            || self.check(&TokenKind::Percent)
+        {
             let start = left.span;
             let op = if self.check(&TokenKind::Star) {
                 "*"
-            } else {
+            } else if self.check(&TokenKind::Slash) {
                 "/"
+            } else {
+                "%"
             };
             self.advance();
             let right = self.parse_unary()?;

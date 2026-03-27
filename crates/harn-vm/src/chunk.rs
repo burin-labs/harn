@@ -28,6 +28,7 @@ pub enum Op {
     Sub,
     Mul,
     Div,
+    Mod,
     Negate,
 
     // --- Comparison ---
@@ -307,6 +308,7 @@ impl Chunk {
                 x if x == Op::Sub as u8 => out.push_str("SUB\n"),
                 x if x == Op::Mul as u8 => out.push_str("MUL\n"),
                 x if x == Op::Div as u8 => out.push_str("DIV\n"),
+                x if x == Op::Mod as u8 => out.push_str("MOD\n"),
                 x if x == Op::Negate as u8 => out.push_str("NEGATE\n"),
                 x if x == Op::Equal as u8 => out.push_str("EQUAL\n"),
                 x if x == Op::NotEqual as u8 => out.push_str("NOT_EQUAL\n"),

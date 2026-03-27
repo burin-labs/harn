@@ -253,7 +253,7 @@ impl SyncInterpreter {
                 self.env.define(name, val, true);
                 Ok(Val::Nil)
             }
-            Node::Assignment { target, value } => {
+            Node::Assignment { target, value, .. } => {
                 let val = self.eval(value)?;
                 if let Node::Identifier(name) = target.as_ref() {
                     self.env.assign(name, val).map_err(EvalStop::Error)?;

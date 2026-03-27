@@ -198,6 +198,8 @@ pub enum Node {
     Assignment {
         target: Box<SNode>,
         value: Box<SNode>,
+        /// None = plain `=`, Some("+") = `+=`, etc.
+        op: Option<String>,
     },
     ThrowStmt {
         value: Box<SNode>,

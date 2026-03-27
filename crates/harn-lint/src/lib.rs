@@ -137,7 +137,7 @@ impl Linter {
                 self.declare_variable(name, snode.span, true);
             }
 
-            Node::Assignment { target, value } => {
+            Node::Assignment { target, value, .. } => {
                 if let Node::Identifier(name) = &target.node {
                     self.assignments.insert(name.clone());
                 }

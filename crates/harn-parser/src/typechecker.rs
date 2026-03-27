@@ -375,7 +375,15 @@ impl TypeChecker {
             } => {
                 self.check_node(iterable, scope);
                 let mut loop_scope = scope.child();
-                loop_scope.define_var(variable, None);
+                // Infer loop variable type from iterable
+                let elem_type = match self.infer_type(iterable, scope) {
+                    Some(TypeExpr::List(inner)) => Some(*inner),
+                    Some(TypeExpr::Named(n)) if n == "string" => {
+                        Some(TypeExpr::Named("string".into()))
+                    }
+                    _ => None,
+                };
+                loop_scope.define_var(variable, elem_type);
                 self.check_block(body, &mut loop_scope);
             }
 
@@ -406,11 +414,19 @@ impl TypeChecker {
                 self.check_node(val, scope);
             }
 
-            Node::Assignment { target, value } => {
+            Node::Assignment {
+                target, value, op, ..
+            } => {
                 self.check_node(value, scope);
                 if let Node::Identifier(name) = &target.node {
                     if let Some(Some(var_type)) = scope.get_var(name) {
-                        let assigned = self.infer_type(value, scope);
+                        let value_type = self.infer_type(value, scope);
+                        let assigned = if let Some(op) = op {
+                            let var_inferred = scope.get_var(name).cloned().flatten();
+                            infer_binary_op_type(op, &var_inferred, &value_type)
+                        } else {
+                            value_type
+                        };
                         if let Some(actual) = &assigned {
                             if !self.types_compatible(var_type, actual, scope) {
                                 self.error_at(
@@ -459,10 +475,43 @@ impl TypeChecker {
                 self.check_match_exhaustiveness(value, arms, scope, span);
             }
 
-            // Recurse into nested expressions
-            Node::BinaryOp { left, right, .. } => {
+            // Recurse into nested expressions + validate binary op types
+            Node::BinaryOp { op, left, right } => {
                 self.check_node(left, scope);
                 self.check_node(right, scope);
+                // Validate operator/type compatibility
+                let lt = self.infer_type(left, scope);
+                let rt = self.infer_type(right, scope);
+                if let (Some(TypeExpr::Named(l)), Some(TypeExpr::Named(r))) = (&lt, &rt) {
+                    match op.as_str() {
+                        "-" | "*" | "/" | "%" => {
+                            let numeric = ["int", "float"];
+                            if !numeric.contains(&l.as_str()) || !numeric.contains(&r.as_str()) {
+                                self.warning_at(
+                                    format!(
+                                        "Operator '{op}' may not be valid for types {} and {}",
+                                        l, r
+                                    ),
+                                    span,
+                                );
+                            }
+                        }
+                        "+" => {
+                            // + is valid for int, float, string, list, dict
+                            let valid = ["int", "float", "string", "list", "dict"];
+                            if !valid.contains(&l.as_str()) && !valid.contains(&r.as_str()) {
+                                self.warning_at(
+                                    format!(
+                                        "Operator '+' may not be valid for types {} and {}",
+                                        l, r
+                                    ),
+                                    span,
+                                );
+                            }
+                        }
+                        _ => {}
+                    }
+                }
             }
             Node::UnaryOp { operand, .. } => {
                 self.check_node(operand, scope);
@@ -744,8 +793,57 @@ impl TypeChecker {
                 None
             }
 
-            Node::SubscriptAccess { .. } => None,
-            Node::MethodCall { .. } => None,
+            Node::SubscriptAccess { object, .. } => {
+                let obj_type = self.infer_type(object, scope);
+                match &obj_type {
+                    Some(TypeExpr::List(inner)) => Some(*inner.clone()),
+                    Some(TypeExpr::DictType(_, v)) => Some(*v.clone()),
+                    Some(TypeExpr::Named(n)) if n == "list" => None,
+                    Some(TypeExpr::Named(n)) if n == "dict" => None,
+                    Some(TypeExpr::Named(n)) if n == "string" => {
+                        Some(TypeExpr::Named("string".into()))
+                    }
+                    _ => None,
+                }
+            }
+            Node::MethodCall { object, method, .. } => {
+                let obj_type = self.infer_type(object, scope);
+                let is_dict = matches!(&obj_type, Some(TypeExpr::Named(n)) if n == "dict")
+                    || matches!(&obj_type, Some(TypeExpr::DictType(..)));
+                match method.as_str() {
+                    // Shared: bool-returning methods
+                    "contains" | "starts_with" | "ends_with" | "empty" | "has" | "any" | "all" => {
+                        Some(TypeExpr::Named("bool".into()))
+                    }
+                    // Shared: int-returning methods
+                    "count" | "index_of" => Some(TypeExpr::Named("int".into())),
+                    // String methods
+                    "trim" | "lowercase" | "uppercase" | "reverse" | "replace" | "substring"
+                    | "pad_left" | "pad_right" | "repeat" | "join" => {
+                        Some(TypeExpr::Named("string".into()))
+                    }
+                    "split" | "chars" => Some(TypeExpr::Named("list".into())),
+                    // filter returns dict for dicts, list for lists
+                    "filter" => {
+                        if is_dict {
+                            Some(TypeExpr::Named("dict".into()))
+                        } else {
+                            Some(TypeExpr::Named("list".into()))
+                        }
+                    }
+                    // List methods
+                    "map" | "flat_map" | "sort" => Some(TypeExpr::Named("list".into())),
+                    "reduce" | "find" | "first" | "last" => None,
+                    // Dict methods
+                    "keys" | "values" | "entries" => Some(TypeExpr::Named("list".into())),
+                    "merge" | "map_values" => Some(TypeExpr::Named("dict".into())),
+                    // Conversions
+                    "to_string" => Some(TypeExpr::Named("string".into())),
+                    "to_int" => Some(TypeExpr::Named("int".into())),
+                    "to_float" => Some(TypeExpr::Named("float".into())),
+                    _ => None,
+                }
+            }
 
             _ => None,
         }
@@ -835,22 +933,13 @@ fn infer_binary_op_type(op: &str, left: &InferredType, right: &InferredType) -> 
                     ("float", _) | (_, "float") => Some(TypeExpr::Named("float".into())),
                     ("string", _) => Some(TypeExpr::Named("string".into())),
                     ("list", "list") => Some(TypeExpr::Named("list".into())),
+                    ("dict", "dict") => Some(TypeExpr::Named("dict".into())),
                     _ => Some(TypeExpr::Named("string".into())),
                 }
             }
             _ => None,
         },
-        "-" | "*" => match (left, right) {
-            (Some(TypeExpr::Named(l)), Some(TypeExpr::Named(r))) => {
-                match (l.as_str(), r.as_str()) {
-                    ("int", "int") => Some(TypeExpr::Named("int".into())),
-                    ("float", _) | (_, "float") => Some(TypeExpr::Named("float".into())),
-                    _ => None,
-                }
-            }
-            _ => None,
-        },
-        "/" => match (left, right) {
+        "-" | "*" | "/" | "%" => match (left, right) {
             (Some(TypeExpr::Named(l)), Some(TypeExpr::Named(r))) => {
                 match (l.as_str(), r.as_str()) {
                     ("int", "int") => Some(TypeExpr::Named("int".into())),

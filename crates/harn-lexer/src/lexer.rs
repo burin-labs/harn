@@ -47,7 +47,16 @@ impl Lexer {
         }
     }
 
+    /// Tokenize source code, including comment tokens.
+    pub fn tokenize_with_comments(&mut self) -> Result<Vec<Token>, LexerError> {
+        self.tokenize_inner(true)
+    }
+
     pub fn tokenize(&mut self) -> Result<Vec<Token>, LexerError> {
+        self.tokenize_inner(false)
+    }
+
+    fn tokenize_inner(&mut self, keep_comments: bool) -> Result<Vec<Token>, LexerError> {
         let mut tokens = Vec::new();
 
         while self.pos < self.source.len() {
@@ -75,11 +84,17 @@ impl Lexer {
             // Comments
             if ch == '/' {
                 if self.peek() == Some('/') {
-                    self.skip_line_comment();
+                    let tok = self.read_line_comment();
+                    if keep_comments {
+                        tokens.push(tok);
+                    }
                     continue;
                 }
                 if self.peek() == Some('*') {
-                    self.skip_block_comment()?;
+                    let tok = self.read_block_comment()?;
+                    if keep_comments {
+                        tokens.push(tok);
+                    }
                     continue;
                 }
             }
@@ -154,39 +169,63 @@ impl Lexer {
         )
     }
 
-    fn skip_line_comment(&mut self) {
+    fn read_line_comment(&mut self) -> Token {
+        let start_byte = self.byte_pos;
+        let start_col = self.column;
+        let start_line = self.line;
+        self.advance(); // skip first /
+        self.advance(); // skip second /
+        let mut text = String::new();
         while self.pos < self.source.len() && self.source[self.pos] != '\n' {
+            text.push(self.source[self.pos]);
             self.advance();
         }
+        Token::with_span(
+            TokenKind::LineComment(text),
+            Span::with_offsets(start_byte, self.byte_pos, start_line, start_col),
+        )
     }
 
-    fn skip_block_comment(&mut self) -> Result<(), LexerError> {
+    fn read_block_comment(&mut self) -> Result<Token, LexerError> {
+        let start_byte = self.byte_pos;
         let start = Span::with_offsets(self.byte_pos, self.byte_pos, self.line, self.column);
         self.advance(); // skip /
         self.advance(); // skip *
+        let mut text = String::new();
         let mut depth = 1;
         while self.pos < self.source.len() && depth > 0 {
             if self.source[self.pos] == '/' && self.peek() == Some('*') {
                 depth += 1;
+                text.push('/');
+                text.push('*');
                 self.advance();
                 self.advance();
             } else if self.source[self.pos] == '*' && self.peek() == Some('/') {
                 depth -= 1;
+                if depth > 0 {
+                    text.push('*');
+                    text.push('/');
+                }
                 self.advance();
                 self.advance();
             } else if self.source[self.pos] == '\n' {
+                text.push('\n');
                 self.byte_pos += self.source[self.pos].len_utf8();
                 self.line += 1;
                 self.column = 1;
                 self.pos += 1;
             } else {
+                text.push(self.source[self.pos]);
                 self.advance();
             }
         }
         if depth > 0 {
             return Err(LexerError::UnterminatedBlockComment(start));
         }
-        Ok(())
+        Ok(Token::with_span(
+            TokenKind::BlockComment(text),
+            Span::with_offsets(start_byte, self.byte_pos, self.line, start.column),
+        ))
     }
 
     fn read_string(&mut self) -> Result<Token, LexerError> {
@@ -524,6 +563,11 @@ impl Lexer {
             ('|', '>') => TokenKind::Pipe,
             ('?', '?') => TokenKind::NilCoal,
             ('-', '>') => TokenKind::Arrow,
+            ('-', '=') => TokenKind::MinusAssign,
+            ('+', '=') => TokenKind::PlusAssign,
+            ('*', '=') => TokenKind::StarAssign,
+            ('/', '=') => TokenKind::SlashAssign,
+            ('%', '=') => TokenKind::PercentAssign,
             ('<', '=') => TokenKind::Lte,
             ('>', '=') => TokenKind::Gte,
             _ => return None,
@@ -557,6 +601,7 @@ impl Lexer {
             '-' => Some(TokenKind::Minus),
             '*' => Some(TokenKind::Star),
             '/' => Some(TokenKind::Slash),
+            '%' => Some(TokenKind::Percent),
             '<' => Some(TokenKind::Lt),
             '>' => Some(TokenKind::Gt),
             '?' => Some(TokenKind::Question),

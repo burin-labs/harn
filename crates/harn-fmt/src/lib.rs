@@ -1,4 +1,6 @@
-use harn_lexer::{Lexer, StringSegment};
+use std::collections::BTreeMap;
+
+use harn_lexer::{Lexer, StringSegment, TokenKind};
 use harn_parser::{Node, Parser, SNode, TypeExpr, TypedParam};
 
 /// Escape a string for embedding in double-quoted output.
@@ -9,16 +11,44 @@ fn escape_string(s: &str) -> String {
         .replace('\t', "\\t")
 }
 
+/// A captured comment with metadata.
+#[derive(Debug, Clone)]
+struct Comment {
+    text: String,
+    is_block: bool,
+}
+
 /// Format Harn source code to canonical style.
-///
-/// Note: comments are not preserved (the lexer discards them).
 pub fn format_source(source: &str) -> Result<String, String> {
+    // Lex once with comments, then partition
     let mut lexer = Lexer::new(source);
-    let tokens = lexer.tokenize().map_err(|e| e.to_string())?;
-    let mut parser = Parser::new(tokens);
+    let all_tokens = lexer.tokenize_with_comments().map_err(|e| e.to_string())?;
+
+    // Extract comments by source line, and filter to parser tokens
+    let mut comments: BTreeMap<usize, Vec<Comment>> = BTreeMap::new();
+    let mut parser_tokens = Vec::with_capacity(all_tokens.len());
+    for tok in all_tokens {
+        match &tok.kind {
+            TokenKind::LineComment(text) => {
+                comments.entry(tok.span.line).or_default().push(Comment {
+                    text: text.clone(),
+                    is_block: false,
+                });
+            }
+            TokenKind::BlockComment(text) => {
+                comments.entry(tok.span.line).or_default().push(Comment {
+                    text: text.clone(),
+                    is_block: true,
+                });
+            }
+            _ => parser_tokens.push(tok),
+        }
+    }
+
+    let mut parser = Parser::new(parser_tokens);
     let program = parser.parse().map_err(|e| e.to_string())?;
 
-    let mut fmt = Formatter::new();
+    let mut fmt = Formatter::new(comments);
     fmt.format_program(&program);
     Ok(fmt.finish())
 }
@@ -26,13 +56,19 @@ pub fn format_source(source: &str) -> Result<String, String> {
 struct Formatter {
     output: String,
     indent: usize,
+    /// Line → comments on that line.
+    comments: BTreeMap<usize, Vec<Comment>>,
+    /// Track which comment lines have been emitted.
+    emitted_lines: std::collections::HashSet<usize>,
 }
 
 impl Formatter {
-    fn new() -> Self {
+    fn new(comments: BTreeMap<usize, Vec<Comment>>) -> Self {
         Self {
             output: String::new(),
             indent: 0,
+            comments,
+            emitted_lines: std::collections::HashSet::new(),
         }
     }
 
@@ -66,16 +102,60 @@ impl Formatter {
         self.output.push('\n');
     }
 
+    /// Emit any comments on the given source line that haven't been emitted yet.
+    fn emit_comments_for_line(&mut self, line: usize) {
+        if self.emitted_lines.contains(&line) {
+            return;
+        }
+        if let Some(comments) = self.comments.get(&line).cloned() {
+            self.emitted_lines.insert(line);
+            for c in &comments {
+                if c.is_block {
+                    self.writeln(&format!("/*{}*/", c.text));
+                } else {
+                    self.writeln(&format!("//{}", c.text));
+                }
+            }
+        }
+    }
+
+    /// Emit any standalone comments whose line is between `from` and `to` (exclusive).
+    fn emit_comments_in_range(&mut self, from: usize, to: usize) {
+        let lines: Vec<usize> = self
+            .comments
+            .keys()
+            .filter(|&&l| l >= from && l < to && !self.emitted_lines.contains(&l))
+            .copied()
+            .collect();
+        for line in lines {
+            self.emit_comments_for_line(line);
+        }
+    }
+
     fn format_program(&mut self, nodes: &[SNode]) {
+        // Emit any leading comments before the first node
+        if let Some(first) = nodes.first() {
+            self.emit_comments_in_range(1, first.span.line);
+        }
         for (i, node) in nodes.iter().enumerate() {
             if i > 0 {
                 self.output.push('\n');
+                // Emit comments between this node and the previous one
+                let prev_end = nodes[i - 1].span.line + 1;
+                self.emit_comments_in_range(prev_end, node.span.line);
             }
             self.format_node(node);
+        }
+        // Emit any trailing comments after the last node
+        if !self.comments.is_empty() {
+            let max_line = *self.comments.keys().max().unwrap_or(&0);
+            let last_line = nodes.last().map(|n| n.span.line + 1).unwrap_or(1);
+            self.emit_comments_in_range(last_line, max_line + 1);
         }
     }
 
     fn format_node(&mut self, node: &SNode) {
+        let node_line = node.span.line;
         match &node.node {
             Node::Pipeline {
                 name,
@@ -91,7 +171,7 @@ impl Formatter {
                 };
                 self.writeln(&format!("pipeline {name}({params_str}){ext} {{"));
                 self.indent();
-                self.format_body(body);
+                self.format_body(body, node_line);
                 self.dedent();
                 self.writeln("}");
             }
@@ -129,7 +209,7 @@ impl Formatter {
                 let pub_prefix = if *is_pub { "pub " } else { "" };
                 self.writeln(&format!("{pub_prefix}fn {name}({params_str}){ret} {{"));
                 self.indent();
-                self.format_body(body);
+                self.format_body(body, node_line);
                 self.dedent();
                 self.writeln("}");
             }
@@ -141,7 +221,7 @@ impl Formatter {
                 let cond = self.format_expr(condition);
                 self.writeln(&format!("if {cond} {{"));
                 self.indent();
-                self.format_body(then_body);
+                self.format_body(then_body, node_line);
                 self.dedent();
                 if let Some(eb) = else_body {
                     // Check if else body is a single if-else (else-if chain)
@@ -156,7 +236,7 @@ impl Formatter {
                     }
                     self.writeln("} else {");
                     self.indent();
-                    self.format_body(eb);
+                    self.format_body(eb, node_line);
                     self.dedent();
                     self.writeln("}");
                 } else {
@@ -171,7 +251,7 @@ impl Formatter {
                 let iter_str = self.format_expr(iterable);
                 self.writeln(&format!("for {variable} in {iter_str} {{"));
                 self.indent();
-                self.format_body(body);
+                self.format_body(body, node_line);
                 self.dedent();
                 self.writeln("}");
             }
@@ -179,7 +259,7 @@ impl Formatter {
                 let cond = self.format_expr(condition);
                 self.writeln(&format!("while {cond} {{"));
                 self.indent();
-                self.format_body(body);
+                self.format_body(body, node_line);
                 self.dedent();
                 self.writeln("}");
             }
@@ -187,7 +267,7 @@ impl Formatter {
                 let cnt = self.format_expr(count);
                 self.writeln(&format!("retry {cnt} {{"));
                 self.indent();
-                self.format_body(body);
+                self.format_body(body, node_line);
                 self.dedent();
                 self.writeln("}");
             }
@@ -199,7 +279,7 @@ impl Formatter {
             } => {
                 self.writeln("try {");
                 self.indent();
-                self.format_body(body);
+                self.format_body(body, node_line);
                 self.dedent();
                 let catch_param = match (error_var, error_type) {
                     (Some(var), Some(ty)) => {
@@ -210,7 +290,7 @@ impl Formatter {
                 };
                 self.writeln(&format!("}} catch{catch_param} {{"));
                 self.indent();
-                self.format_body(catch_body);
+                self.format_body(catch_body, node_line);
                 self.dedent();
                 self.writeln("}");
             }
@@ -292,7 +372,7 @@ impl Formatter {
                     self.writeln(&format!("parallel({cnt}) {{"));
                 }
                 self.indent();
-                self.format_body(body);
+                self.format_body(body, node_line);
                 self.dedent();
                 self.writeln("}");
             }
@@ -304,14 +384,14 @@ impl Formatter {
                 let lst = self.format_expr(list);
                 self.writeln(&format!("parallel_map({lst}) {{ {variable} ->"));
                 self.indent();
-                self.format_body(body);
+                self.format_body(body, node_line);
                 self.dedent();
                 self.writeln("}");
             }
             Node::SpawnExpr { body } => {
                 self.writeln("spawn {");
                 self.indent();
-                self.format_body(body);
+                self.format_body(body, node_line);
                 self.dedent();
                 self.writeln("}");
             }
@@ -322,7 +402,7 @@ impl Formatter {
                 let cond = self.format_expr(condition);
                 self.writeln(&format!("guard {cond} else {{"));
                 self.indent();
-                self.format_body(else_body);
+                self.format_body(else_body, node_line);
                 self.dedent();
                 self.writeln("}");
             }
@@ -330,14 +410,14 @@ impl Formatter {
                 let dur = self.format_expr(duration);
                 self.writeln(&format!("deadline {dur} {{"));
                 self.indent();
-                self.format_body(body);
+                self.format_body(body, node_line);
                 self.dedent();
                 self.writeln("}");
             }
             Node::MutexBlock { body } => {
                 self.writeln("mutex {");
                 self.indent();
-                self.format_body(body);
+                self.format_body(body, node_line);
                 self.dedent();
                 self.writeln("}");
             }
@@ -353,7 +433,7 @@ impl Formatter {
                 let params_str = params.join(", ");
                 self.writeln(&format!("override {name}({params_str}) {{"));
                 self.indent();
-                self.format_body(body);
+                self.format_body(body, node_line);
                 self.dedent();
                 self.writeln("}");
             }
@@ -364,7 +444,7 @@ impl Formatter {
             Node::Block(stmts) => {
                 self.writeln("{");
                 self.indent();
-                self.format_body(stmts);
+                self.format_body(stmts, node_line);
                 self.dedent();
                 self.writeln("}");
             }
@@ -378,6 +458,7 @@ impl Formatter {
 
     /// Like format_node but without writing the leading indent (for else-if chains).
     fn format_node_no_indent(&mut self, node: &SNode) {
+        let line = node.span.line;
         if let Node::IfElse {
             condition,
             then_body,
@@ -387,7 +468,7 @@ impl Formatter {
             let cond = self.format_expr(condition);
             self.output.push_str(&format!("if {cond} {{\n"));
             self.indent();
-            self.format_body(then_body);
+            self.format_body(then_body, line);
             self.dedent();
             if let Some(eb) = else_body {
                 if eb.len() == 1 {
@@ -400,7 +481,7 @@ impl Formatter {
                 }
                 self.writeln("} else {");
                 self.indent();
-                self.format_body(eb);
+                self.format_body(eb, line);
                 self.dedent();
                 self.writeln("}");
             } else {
@@ -409,8 +490,16 @@ impl Formatter {
         }
     }
 
-    fn format_body(&mut self, nodes: &[SNode]) {
-        for node in nodes {
+    fn format_body(&mut self, nodes: &[SNode], block_start_line: usize) {
+        for (i, node) in nodes.iter().enumerate() {
+            let range_start = if i > 0 {
+                nodes[i - 1].span.line + 1
+            } else {
+                // For the first statement, emit comments between
+                // the block opening and this node
+                block_start_line + 1
+            };
+            self.emit_comments_in_range(range_start, node.span.line);
             self.format_node(node);
         }
     }
@@ -491,10 +580,16 @@ impl Formatter {
                 let f = self.format_expr(false_expr);
                 format!("{cond} ? {t} : {f}")
             }
-            Node::Assignment { target, value } => {
+            Node::Assignment {
+                target, value, op, ..
+            } => {
                 let t = self.format_expr(target);
                 let v = self.format_expr(value);
-                format!("{t} = {v}")
+                if let Some(op) = op {
+                    format!("{t} {op}= {v}")
+                } else {
+                    format!("{t} = {v}")
+                }
             }
             Node::ListLiteral(elems) => {
                 let items = elems
@@ -1121,7 +1216,7 @@ impl Formatter {
         } else {
             self.writeln(&format!("{pattern} -> {{"));
             self.indent();
-            self.format_body(&arm.body);
+            self.format_body(&arm.body, arm.pattern.span.line);
             self.dedent();
             self.writeln("}");
         }

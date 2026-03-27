@@ -1,7 +1,42 @@
 pipeline test(task) {
+  // Basic dict merge
   let a = {x: 1}
   let b = {y: 2}
-  let c = a.merge(b)
-  log(c.has("x"))
-  log(c.has("y"))
+  let merged = a + b
+  assert_eq(merged.x, 1, "merge should preserve left dict values")
+  assert_eq(merged.y, 2, "merge should include right dict values")
+
+  // Right-side wins on key conflicts
+  let c = {x: 1, y: 2}
+  let d = {y: 99, z: 3}
+  let result = c + d
+  assert_eq(result.x, 1, "non-conflicting left key preserved")
+  assert_eq(result.y, 99, "right-side wins on conflict")
+  assert_eq(result.z, 3, "non-conflicting right key preserved")
+
+  // Merge with empty dict
+  let e = {a: 1}
+  let empty = {}
+  let r1 = e + empty
+  let r2 = empty + e
+  assert_eq(r1.a, 1, "merge with empty right preserves left")
+  assert_eq(r2.a, 1, "merge with empty left preserves right")
+
+  // Chained merges
+  let x = {a: 1}
+  let y = {b: 2}
+  let z = {c: 3}
+  let chained = x + y + z
+  assert_eq(chained.a, 1, "chained merge first dict")
+  assert_eq(chained.b, 2, "chained merge second dict")
+  assert_eq(chained.c, 3, "chained merge third dict")
+
+  // .merge() method (original test coverage)
+  let m1 = {x: 1}
+  let m2 = {y: 2}
+  let m3 = m1.merge(m2)
+  assert(m3.has("x"), ".merge preserves left keys")
+  assert(m3.has("y"), ".merge includes right keys")
+
+  log("dict merge: all tests passed")
 }

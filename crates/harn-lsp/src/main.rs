@@ -526,7 +526,7 @@ fn collect_symbols(snode: &SNode, symbols: &mut Vec<SymbolInfo>, scope_span: Opt
             collect_symbols(object, symbols, scope_span);
             collect_symbols(index, symbols, scope_span);
         }
-        Node::Assignment { target, value } => {
+        Node::Assignment { target, value, .. } => {
             collect_symbols(target, symbols, scope_span);
             collect_symbols(value, symbols, scope_span);
         }
@@ -798,7 +798,7 @@ fn collect_references(snode: &SNode, target_name: &str, refs: &mut Vec<Span>) {
             collect_references(object, target_name, refs);
             collect_references(index, target_name, refs);
         }
-        Node::Assignment { target, value } => {
+        Node::Assignment { target, value, .. } => {
             collect_references(target, target_name, refs);
             collect_references(value, target_name, refs);
         }
@@ -958,12 +958,14 @@ impl DocumentState {
             }
         };
 
-        // Parse
+        // Parse (with error recovery — report all errors)
         let mut parser = Parser::new(tokens);
         let program = match parser.parse() {
             Ok(p) => p,
-            Err(e) => {
-                self.diagnostics.push(parser_error_to_diagnostic(&e));
+            Err(_) => {
+                for e in parser.all_errors() {
+                    self.diagnostics.push(parser_error_to_diagnostic(e));
+                }
                 return;
             }
         };

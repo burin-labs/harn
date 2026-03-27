@@ -142,8 +142,10 @@ fn lint_file(path: &str) {
     let mut parser = Parser::new(tokens);
     let program = match parser.parse() {
         Ok(p) => p,
-        Err(e) => {
-            eprintln!("{path}: parse error: {e}");
+        Err(_) => {
+            for e in parser.all_errors() {
+                eprintln!("{path}: parse error: {e}");
+            }
             process::exit(1);
         }
     };

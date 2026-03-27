@@ -106,11 +106,33 @@ impl Compiler {
                 self.chunk.emit_u16(Op::DefVar, idx, self.line);
             }
 
-            Node::Assignment { target, value } => {
-                self.compile_node(value)?;
+            Node::Assignment {
+                target, value, op, ..
+            } => {
                 if let Node::Identifier(name) = &target.node {
                     let idx = self.chunk.add_constant(Constant::String(name.clone()));
-                    self.chunk.emit_u16(Op::SetVar, idx, self.line);
+                    if let Some(op) = op {
+                        // Compound assignment: get current, compute, set
+                        self.chunk.emit_u16(Op::GetVar, idx, self.line);
+                        self.compile_node(value)?;
+                        match op.as_str() {
+                            "+" => self.chunk.emit(Op::Add, self.line),
+                            "-" => self.chunk.emit(Op::Sub, self.line),
+                            "*" => self.chunk.emit(Op::Mul, self.line),
+                            "/" => self.chunk.emit(Op::Div, self.line),
+                            "%" => self.chunk.emit(Op::Mod, self.line),
+                            _ => {
+                                return Err(CompileError {
+                                    message: format!("Unknown compound operator: {op}"),
+                                    line: self.line,
+                                })
+                            }
+                        }
+                        self.chunk.emit_u16(Op::SetVar, idx, self.line);
+                    } else {
+                        self.compile_node(value)?;
+                        self.chunk.emit_u16(Op::SetVar, idx, self.line);
+                    }
                 }
             }
 
@@ -170,6 +192,7 @@ impl Compiler {
                     "-" => self.chunk.emit(Op::Sub, self.line),
                     "*" => self.chunk.emit(Op::Mul, self.line),
                     "/" => self.chunk.emit(Op::Div, self.line),
+                    "%" => self.chunk.emit(Op::Mod, self.line),
                     "==" => self.chunk.emit(Op::Equal, self.line),
                     "!=" => self.chunk.emit(Op::NotEqual, self.line),
                     "<" => self.chunk.emit(Op::Less, self.line),

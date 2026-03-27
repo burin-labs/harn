@@ -1,0 +1,6 @@
+pipeline test(task) {
+  let x = )
+  let y = 42
+  let z = )
+  log(y)
+}
