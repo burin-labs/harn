@@ -317,11 +317,10 @@ error: undefined variable `reponse`
 
 ## For language designers
 
-Harn has two execution backends, both written in Rust:
+Harn's execution pipeline, written in Rust:
 
 ```text
-source → Lexer → Parser → TypeChecker → Interpreter  (default, async)
-source → Lexer → Parser → TypeChecker → Compiler → VM  (--vm flag)
+source -> Lexer -> Parser -> TypeChecker -> Compiler -> VM (bytecode)
 ```
 
 The codebase is organized as a Cargo workspace:
@@ -330,9 +329,7 @@ The codebase is organized as a Cargo workspace:
 |---|---|
 | `harn-lexer` | Tokenizer with byte-offset span tracking |
 | `harn-parser` | Parser, spanned AST (`SNode`), type checker, diagnostic renderer |
-| `harn-runtime` | Async tree-walking interpreter, values, environments |
-| `harn-stdlib` | Builtins: I/O, JSON, HTTP, LLM, concurrency |
-| `harn-vm` | Bytecode compiler and VM with call frames and exception handling |
+| `harn-vm` | Bytecode compiler, VM, and all builtin functions |
 | `harn-fmt` | Opinionated code formatter |
 | `harn-lint` | Linter with 5 rules |
 | `harn-cli` | CLI: `run`, `test`, `repl`, `init`, `fmt`, `lint`, `version` |
@@ -358,7 +355,7 @@ make conformance  # 108 language conformance tests
 
 Conformance tests in `conformance/` are the primary way to verify language
 behavior. Each test is a `.harn` file paired with a `.expected` or `.error`
-file. Add one whenever you change the parser or interpreter.
+file. Add one whenever you change the parser or VM.
 
 Pre-commit hooks run `fmt` and `clippy` automatically. After cloning, set them up:
 

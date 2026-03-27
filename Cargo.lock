@@ -341,8 +341,6 @@ dependencies = [
  "harn-lexer",
  "harn-lint",
  "harn-parser",
- "harn-runtime",
- "harn-stdlib",
  "harn-vm",
  "tokio",
 ]
@@ -395,28 +393,6 @@ name = "harn-parser"
 version = "0.1.0"
 dependencies = [
  "harn-lexer",
-]
-
-[[package]]
-name = "harn-runtime"
-version = "0.1.0"
-dependencies = [
- "harn-lexer",
- "harn-parser",
- "tokio",
-]
-
-[[package]]
-name = "harn-stdlib"
-version = "0.1.0"
-dependencies = [
- "base64",
- "harn-runtime",
- "rand",
- "regex",
- "reqwest",
- "serde_json",
- "tokio",
 ]
 
 [[package]]

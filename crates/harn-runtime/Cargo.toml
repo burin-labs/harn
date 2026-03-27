@@ -1,9 +1,0 @@
-[package]
-name = "harn-runtime"
-version.workspace = true
-edition.workspace = true
-
-[dependencies]
-harn-lexer = { path = "../harn-lexer" }
-harn-parser = { path = "../harn-parser" }
-tokio = { version = "1", features = ["rt", "sync", "macros"] }

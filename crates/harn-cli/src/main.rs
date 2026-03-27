@@ -8,11 +8,6 @@ use harn_fmt::format_source;
 use harn_lexer::Lexer;
 use harn_lint::{lint, LintSeverity};
 use harn_parser::{DiagnosticSeverity, Parser, TypeChecker};
-use harn_runtime::{HarnError, Interpreter};
-use harn_stdlib::{
-    register_async_builtins, register_http_builtins, register_llm_builtins,
-    register_logging_builtins, register_stdlib, register_tool_builtins,
-};
 
 #[tokio::main]
 async fn main() {
@@ -47,18 +42,13 @@ async fn main() {
             );
         }
         "run" => {
-            let use_interp = args.iter().any(|a| a == "--interp");
             let file = args
                 .iter()
                 .skip(2)
                 .find(|a| a.ends_with(".harn") || !a.starts_with("--"));
             match file {
                 Some(f) => {
-                    if use_interp {
-                        run_file(f).await;
-                    } else {
-                        run_file_vm(f).await;
-                    }
+                    run_file(f).await;
                 }
                 None => {
                     eprintln!("Usage: harn run <file.harn>");
@@ -225,26 +215,6 @@ async fn run_file(path: &str) {
         }
     };
 
-    match execute(&source, Some(Path::new(path))).await {
-        Ok(output) => {
-            io::stdout().write_all(&output).ok();
-        }
-        Err(e) => {
-            render_error(&e, &source, path);
-            process::exit(1);
-        }
-    }
-}
-
-async fn run_file_vm(path: &str) {
-    let source = match fs::read_to_string(path) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("Error reading {path}: {e}");
-            process::exit(1);
-        }
-    };
-
     let mut lexer = Lexer::new(&source);
     let tokens = match lexer.tokenize() {
         Ok(t) => t,
@@ -296,90 +266,7 @@ async fn run_file_vm(path: &str) {
     }
 }
 
-fn render_error(err: &HarnError, source: &str, filename: &str) {
-    if let Some(span) = err.span() {
-        // Build label and help from the error details
-        let (label, help) = match err {
-            HarnError::Runtime(harn_runtime::RuntimeError::UndefinedVariable {
-                suggestion,
-                ..
-            }) => (
-                Some("not found in this scope"),
-                suggestion.as_ref().map(|s| format!("did you mean `{s}`?")),
-            ),
-            HarnError::Runtime(harn_runtime::RuntimeError::ImmutableAssignment { .. }) => {
-                (Some("cannot assign to immutable binding"), None)
-            }
-            HarnError::Runtime(harn_runtime::RuntimeError::UndefinedBuiltin {
-                suggestion, ..
-            }) => (
-                Some("not found"),
-                suggestion.as_ref().map(|s| format!("did you mean `{s}`?")),
-            ),
-            HarnError::Lexer(_) => (Some("here"), None),
-            HarnError::Parser(_) => (Some("unexpected token"), None),
-            _ => (None, None),
-        };
-
-        let diagnostic = harn_parser::diagnostic::render_diagnostic(
-            source,
-            filename,
-            &span,
-            "error",
-            &err.to_string(),
-            label,
-            help.as_deref(),
-        );
-        eprint!("{diagnostic}");
-    } else {
-        eprintln!("{err}");
-    }
-}
-
-async fn execute(source: &str, source_path: Option<&Path>) -> Result<Vec<u8>, HarnError> {
-    let mut lexer = Lexer::new(source);
-    let tokens = lexer.tokenize()?;
-
-    let mut parser = Parser::new(tokens);
-    let program = parser.parse()?;
-
-    // Static type checking (pre-execution)
-    let type_diagnostics = TypeChecker::new().check(&program);
-    for diag in &type_diagnostics {
-        if diag.severity == DiagnosticSeverity::Error {
-            return Err(HarnError::Runtime(harn_runtime::RuntimeError::thrown(
-                diag.message.clone(),
-            )));
-        }
-    }
-
-    let mut interp = Interpreter::new();
-    register_stdlib(&mut interp);
-    register_async_builtins(&mut interp);
-    register_http_builtins(&mut interp);
-    register_llm_builtins(&mut interp);
-    register_logging_builtins(&mut interp);
-    register_tool_builtins(&mut interp);
-
-    if let Some(path) = source_path {
-        if let Some(parent) = path.parent() {
-            if !parent.as_os_str().is_empty() {
-                interp.set_source_dir(parent);
-            }
-        }
-    }
-
-    // Use a LocalSet because Interpreter is not Send (contains non-Send futures)
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            interp.run(&program).await?;
-            Ok(interp.take_output())
-        })
-        .await
-}
-
-async fn execute_vm(source: &str, source_path: Option<&Path>) -> Result<String, String> {
+async fn execute(source: &str, source_path: Option<&Path>) -> Result<String, String> {
     let mut lexer = Lexer::new(source);
     let tokens = lexer.tokenize().map_err(|e| e.to_string())?;
     let mut parser = Parser::new(tokens);
@@ -480,7 +367,7 @@ async fn run_conformance_tests(dir: &str) {
                     }
                 };
 
-                match execute_vm(&source, Some(harn_file.as_path())).await {
+                match execute(&source, Some(harn_file.as_path())).await {
                     Ok(output) => {
                         let actual = output.trim_end().to_string();
                         if actual == expected {
@@ -520,7 +407,7 @@ async fn run_conformance_tests(dir: &str) {
                     }
                 };
 
-                match execute_vm(&source, Some(harn_file.as_path())).await {
+                match execute(&source, Some(harn_file.as_path())).await {
                     Err(ref err) if err.contains(&expected_error) => {
                         println!("  PASS  {rel_path}");
                         passed += 1;
@@ -708,7 +595,7 @@ async fn run_repl() {
                 }
 
                 let source = format!("pipeline repl(task) {{\n{line}\n}}");
-                match execute_vm(&source, None).await {
+                match execute(&source, None).await {
                     Ok(output) => {
                         stdout.write_all(output.as_bytes()).ok();
                     }

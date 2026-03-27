@@ -2,8 +2,6 @@
 members = [
     "crates/harn-lexer",
     "crates/harn-parser",
-    "crates/harn-runtime",
-    "crates/harn-stdlib",
     "crates/harn-cli",
     "crates/harn-lsp",
     "crates/harn-vm",
