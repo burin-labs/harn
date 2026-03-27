@@ -2,7 +2,9 @@ use std::collections::BTreeMap;
 
 use harn_lexer::Lexer;
 use harn_parser::Parser;
-use harn_vm::{register_vm_stdlib, Compiler, Vm, VmValue};
+use harn_vm::{
+    register_http_builtins, register_llm_builtins, register_vm_stdlib, Compiler, Vm, VmValue,
+};
 use serde_json::json;
 
 use crate::protocol::*;
@@ -54,6 +56,8 @@ pub struct Debugger {
     program_state: ProgramState,
     /// Structured variable references: reference_id → children
     var_refs: BTreeMap<i64, Vec<(String, VmValue)>>,
+    /// Tokio runtime for async VM execution.
+    runtime: tokio::runtime::Runtime,
     /// Next variable reference ID (start at 100 to avoid conflict with scope refs).
     next_var_ref: i64,
 }
@@ -75,6 +79,10 @@ impl Debugger {
             program_state: ProgramState::NotStarted,
             var_refs: BTreeMap::new(),
             next_var_ref: 100,
+            runtime: tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap(),
         }
     }
 
@@ -181,6 +189,16 @@ impl Debugger {
 
         let mut vm = Vm::new();
         register_vm_stdlib(&mut vm);
+        register_http_builtins(&mut vm);
+        register_llm_builtins(&mut vm);
+
+        if let Some(ref path) = self.source_path {
+            if let Some(parent) = std::path::Path::new(path).parent() {
+                if !parent.as_os_str().is_empty() {
+                    vm.set_source_dir(parent);
+                }
+            }
+        }
 
         // Set breakpoints on the VM
         let bp_lines: Vec<usize> = self.breakpoints.iter().map(|bp| bp.line as usize).collect();
@@ -276,12 +294,8 @@ impl Debugger {
 
         loop {
             let step_result = {
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .unwrap();
                 let vm = self.vm.as_mut().unwrap();
-                rt.block_on(async { vm.step_execute().await })
+                self.runtime.block_on(async { vm.step_execute().await })
             };
             match step_result {
                 Ok(Some((val, stopped))) => {

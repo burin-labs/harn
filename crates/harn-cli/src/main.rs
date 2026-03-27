@@ -219,7 +219,16 @@ async fn run_file(path: &str) {
     let tokens = match lexer.tokenize() {
         Ok(t) => t,
         Err(e) => {
-            eprintln!("{path}: lex error: {e}");
+            let diagnostic = harn_parser::diagnostic::render_diagnostic(
+                &source,
+                path,
+                &error_span_from_lex(&e),
+                "error",
+                &e.to_string(),
+                Some("here"),
+                None,
+            );
+            eprint!("{diagnostic}");
             process::exit(1);
         }
     };
@@ -227,16 +236,50 @@ async fn run_file(path: &str) {
     let mut parser = Parser::new(tokens);
     let program = match parser.parse() {
         Ok(p) => p,
-        Err(e) => {
-            eprintln!("{path}: parse error: {e}");
+        Err(_) => {
+            for e in parser.all_errors() {
+                let span = error_span_from_parse(e);
+                let diagnostic = harn_parser::diagnostic::render_diagnostic(
+                    &source,
+                    path,
+                    &span,
+                    "error",
+                    &e.to_string(),
+                    Some("unexpected token"),
+                    None,
+                );
+                eprint!("{diagnostic}");
+            }
             process::exit(1);
         }
     };
 
+    // Static type checking
+    let type_diagnostics = TypeChecker::new().check(&program);
+    for diag in &type_diagnostics {
+        if diag.severity == DiagnosticSeverity::Error {
+            if let Some(span) = &diag.span {
+                let diagnostic = harn_parser::diagnostic::render_diagnostic(
+                    &source,
+                    path,
+                    span,
+                    "error",
+                    &diag.message,
+                    None,
+                    None,
+                );
+                eprint!("{diagnostic}");
+            } else {
+                eprintln!("error: {}", diag.message);
+            }
+            process::exit(1);
+        }
+    }
+
     let chunk = match harn_vm::Compiler::new().compile(&program) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("{path}: compile error: {e}");
+            eprintln!("error: compile error: {e}");
             process::exit(1);
         }
     };
@@ -260,9 +303,24 @@ async fn run_file(path: &str) {
             }
         }
         Err(e) => {
-            eprintln!("VM error: {e}");
+            eprintln!("error: {e}");
             process::exit(1);
         }
+    }
+}
+
+fn error_span_from_lex(e: &harn_lexer::LexerError) -> harn_lexer::Span {
+    match e {
+        harn_lexer::LexerError::UnexpectedCharacter(_, span)
+        | harn_lexer::LexerError::UnterminatedString(span)
+        | harn_lexer::LexerError::UnterminatedBlockComment(span) => *span,
+    }
+}
+
+fn error_span_from_parse(e: &harn_parser::ParserError) -> harn_lexer::Span {
+    match e {
+        harn_parser::ParserError::Unexpected { span, .. } => *span,
+        harn_parser::ParserError::UnexpectedEof { .. } => harn_lexer::Span::dummy(),
     }
 }
 
