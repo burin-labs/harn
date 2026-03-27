@@ -107,6 +107,8 @@ pub enum TokenKind {
     Deadline,
     Yield,
     Mutex,
+    Break,
+    Continue,
 
     // Literals
     Identifier(String),
@@ -207,6 +209,8 @@ impl fmt::Display for TokenKind {
             TokenKind::Deadline => write!(f, "deadline"),
             TokenKind::Yield => write!(f, "yield"),
             TokenKind::Mutex => write!(f, "mutex"),
+            TokenKind::Break => write!(f, "break"),
+            TokenKind::Continue => write!(f, "continue"),
             TokenKind::Identifier(s) => write!(f, "id({s})"),
             TokenKind::StringLiteral(s) => write!(f, "str({s})"),
             TokenKind::InterpolatedString(_) => write!(f, "istr(...)"),

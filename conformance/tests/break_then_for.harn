@@ -1,0 +1,14 @@
+pipeline default(task) {
+  var result = ""
+  for i in [1, 2, 3, 4, 5] {
+    if i == 3 {
+      break
+    }
+    result = result + to_string(i)
+  }
+  // Second loop should work independently
+  for j in ["x", "y", "z"] {
+    result = result + j
+  }
+  log(result)
+}

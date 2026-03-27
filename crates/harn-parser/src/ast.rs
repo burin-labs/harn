@@ -150,6 +150,10 @@ pub enum Node {
     MutexBlock {
         body: Vec<SNode>,
     },
+    /// Break out of a loop.
+    BreakStmt,
+    /// Continue to next loop iteration.
+    ContinueStmt,
 
     // Concurrency
     Parallel {

@@ -17,6 +17,7 @@ async fn main() {
         eprintln!("Usage: harn <command> [args]");
         eprintln!("Commands:");
         eprintln!("  run <file.harn>        Execute a Harn file");
+        eprintln!("  check <file.harn>     Type-check and lint without executing");
         eprintln!("  lint <file.harn>       Lint a Harn file");
         eprintln!("  fmt <file.harn>        Format a Harn file");
         eprintln!("  test <file|dir>        Run test_* pipelines in file or directory");
@@ -56,6 +57,19 @@ async fn main() {
                 }
             }
         }
+        "check" => {
+            let file = args
+                .iter()
+                .skip(2)
+                .find(|a| a.ends_with(".harn") || !a.starts_with("--"));
+            match file {
+                Some(f) => check_file(f),
+                None => {
+                    eprintln!("Usage: harn check <file.harn>");
+                    process::exit(1);
+                }
+            }
+        }
         "lint" => {
             let file = args
                 .iter()
@@ -85,13 +99,35 @@ async fn main() {
         }
         "test" => {
             if args.len() < 3 {
-                eprintln!("Usage: harn test <file.harn|directory|conformance>");
+                eprintln!("Usage: harn test <file.harn|directory|conformance> [--filter <pattern>] [--junit <path>] [--timeout <ms>] [--parallel]");
                 process::exit(1);
             }
+            // Parse test flags
+            let filter = args
+                .windows(2)
+                .find(|w| w[0] == "--filter")
+                .map(|w| w[1].clone());
+            let junit_path = args
+                .windows(2)
+                .find(|w| w[0] == "--junit")
+                .map(|w| w[1].clone());
+            let timeout_ms: u64 = args
+                .windows(2)
+                .find(|w| w[0] == "--timeout")
+                .and_then(|w| w[1].parse().ok())
+                .unwrap_or(30_000);
+            let parallel = args.iter().any(|a| a == "--parallel");
+
             if args[2] == "conformance" {
-                run_conformance_tests(&args[2]).await;
+                run_conformance_tests(
+                    &args[2],
+                    filter.as_deref(),
+                    junit_path.as_deref(),
+                    timeout_ms,
+                )
+                .await;
             } else {
-                run_user_tests(&args[2]).await;
+                run_user_tests(&args[2], filter.as_deref(), timeout_ms, parallel).await;
             }
         }
         "init" => {
@@ -111,102 +147,8 @@ async fn main() {
     }
 }
 
-fn lint_file(path: &str) {
-    let source = match fs::read_to_string(path) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("Error reading {path}: {e}");
-            process::exit(1);
-        }
-    };
-
-    let mut lexer = Lexer::new(&source);
-    let tokens = match lexer.tokenize() {
-        Ok(t) => t,
-        Err(e) => {
-            eprintln!("{path}: lex error: {e}");
-            process::exit(1);
-        }
-    };
-
-    let mut parser = Parser::new(tokens);
-    let program = match parser.parse() {
-        Ok(p) => p,
-        Err(_) => {
-            for e in parser.all_errors() {
-                eprintln!("{path}: parse error: {e}");
-            }
-            process::exit(1);
-        }
-    };
-
-    let diagnostics = lint(&program);
-
-    if diagnostics.is_empty() {
-        println!("{path}: no issues found");
-        return;
-    }
-
-    let mut has_error = false;
-    for diag in &diagnostics {
-        let severity = match diag.severity {
-            LintSeverity::Warning => "warning",
-            LintSeverity::Error => {
-                has_error = true;
-                "error"
-            }
-        };
-        println!(
-            "{path}:{}:{}: {severity}[{}]: {}",
-            diag.span.line, diag.span.column, diag.rule, diag.message
-        );
-        if let Some(ref suggestion) = diag.suggestion {
-            println!("  suggestion: {suggestion}");
-        }
-    }
-
-    if has_error {
-        process::exit(1);
-    }
-}
-
-fn fmt_file(path: &str, check_mode: bool) {
-    let source = match fs::read_to_string(path) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("Error reading {path}: {e}");
-            process::exit(1);
-        }
-    };
-
-    let formatted = match format_source(&source) {
-        Ok(f) => f,
-        Err(e) => {
-            eprintln!("{path}: {e}");
-            process::exit(1);
-        }
-    };
-
-    if check_mode {
-        if source != formatted {
-            eprintln!("{path}: would be reformatted");
-            process::exit(1);
-        }
-        println!("{path}: ok");
-    } else if source != formatted {
-        match fs::write(path, &formatted) {
-            Ok(()) => println!("formatted {path}"),
-            Err(e) => {
-                eprintln!("Error writing {path}: {e}");
-                process::exit(1);
-            }
-        }
-    } else {
-        println!("{path}: already formatted");
-    }
-}
-
-async fn run_file(path: &str) {
+/// Parse a .harn file, returning (source, AST). Exits on error.
+fn parse_source_file(path: &str) -> (String, Vec<harn_parser::SNode>) {
     let source = match fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) => {
@@ -254,24 +196,139 @@ async fn run_file(path: &str) {
         }
     };
 
+    (source, program)
+}
+
+fn print_lint_diagnostics(path: &str, diagnostics: &[harn_lint::LintDiagnostic]) -> bool {
+    let mut has_error = false;
+    for diag in diagnostics {
+        let severity = match diag.severity {
+            LintSeverity::Warning => "warning",
+            LintSeverity::Error => {
+                has_error = true;
+                "error"
+            }
+        };
+        println!(
+            "{path}:{}:{}: {severity}[{}]: {}",
+            diag.span.line, diag.span.column, diag.rule, diag.message
+        );
+        if let Some(ref suggestion) = diag.suggestion {
+            println!("  suggestion: {suggestion}");
+        }
+    }
+    has_error
+}
+
+fn check_file(path: &str) {
+    let (source, program) = parse_source_file(path);
+
+    let mut has_error = false;
+    let mut diagnostic_count = 0;
+
+    // Type checking
+    let type_diagnostics = TypeChecker::new().check(&program);
+    for diag in &type_diagnostics {
+        let severity = match diag.severity {
+            DiagnosticSeverity::Error => {
+                has_error = true;
+                "error"
+            }
+            DiagnosticSeverity::Warning => "warning",
+        };
+        diagnostic_count += 1;
+        if let Some(span) = &diag.span {
+            let rendered = harn_parser::diagnostic::render_diagnostic(
+                &source,
+                path,
+                span,
+                severity,
+                &diag.message,
+                None,
+                None,
+            );
+            eprint!("{rendered}");
+        } else {
+            eprintln!("{severity}: {}", diag.message);
+        }
+    }
+
+    // Linting
+    let lint_diagnostics = lint(&program);
+    diagnostic_count += lint_diagnostics.len();
+    if print_lint_diagnostics(path, &lint_diagnostics) {
+        has_error = true;
+    }
+
+    if diagnostic_count == 0 {
+        println!("{path}: ok");
+    }
+
+    if has_error {
+        process::exit(1);
+    }
+}
+
+fn lint_file(path: &str) {
+    let (_source, program) = parse_source_file(path);
+
+    let diagnostics = lint(&program);
+
+    if diagnostics.is_empty() {
+        println!("{path}: no issues found");
+        return;
+    }
+
+    if print_lint_diagnostics(path, &diagnostics) {
+        process::exit(1);
+    }
+}
+
+fn fmt_file(path: &str, check_mode: bool) {
+    let source = match fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error reading {path}: {e}");
+            process::exit(1);
+        }
+    };
+
+    let formatted = match format_source(&source) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("{path}: {e}");
+            process::exit(1);
+        }
+    };
+
+    if check_mode {
+        if source != formatted {
+            eprintln!("{path}: would be reformatted");
+            process::exit(1);
+        }
+        println!("{path}: ok");
+    } else if source != formatted {
+        match fs::write(path, &formatted) {
+            Ok(()) => println!("formatted {path}"),
+            Err(e) => {
+                eprintln!("Error writing {path}: {e}");
+                process::exit(1);
+            }
+        }
+    } else {
+        println!("{path}: already formatted");
+    }
+}
+
+async fn run_file(path: &str) {
+    let (source, program) = parse_source_file(path);
+    let _ = source; // source kept for diagnostics but type checking uses AST only
+
     // Static type checking
     let type_diagnostics = TypeChecker::new().check(&program);
     for diag in &type_diagnostics {
         if diag.severity == DiagnosticSeverity::Error {
-            if let Some(span) = &diag.span {
-                let diagnostic = harn_parser::diagnostic::render_diagnostic(
-                    &source,
-                    path,
-                    span,
-                    "error",
-                    &diag.message,
-                    None,
-                    None,
-                );
-                eprint!("{diagnostic}");
-            } else {
-                eprintln!("error: {}", diag.message);
-            }
+            eprintln!("error: {}", diag.message);
             process::exit(1);
         }
     }
@@ -362,7 +419,76 @@ async fn execute(source: &str, source_path: Option<&Path>) -> Result<String, Str
         .await
 }
 
-async fn run_conformance_tests(dir: &str) {
+/// Produce a simple line diff between expected and actual.
+fn simple_diff(expected: &str, actual: &str) -> String {
+    let mut result = String::new();
+    let expected_lines: Vec<&str> = expected.lines().collect();
+    let actual_lines: Vec<&str> = actual.lines().collect();
+    let max = expected_lines.len().max(actual_lines.len());
+    for i in 0..max {
+        let exp = expected_lines.get(i).copied().unwrap_or("");
+        let act = actual_lines.get(i).copied().unwrap_or("");
+        if exp == act {
+            result.push_str(&format!("  {exp}\n"));
+        } else {
+            result.push_str(&format!("\x1b[31m- {exp}\x1b[0m\n"));
+            result.push_str(&format!("\x1b[32m+ {act}\x1b[0m\n"));
+        }
+    }
+    result
+}
+
+/// Write JUnit XML report.
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
+fn write_junit_xml(path: &str, results: &[(String, bool, String, u64)]) {
+    let total = results.len();
+    let failures = results.iter().filter(|r| !r.1).count();
+    let total_time: f64 = results.iter().map(|r| r.3 as f64 / 1000.0).sum();
+
+    let mut xml = String::new();
+    xml.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+    xml.push_str(&format!(
+        "<testsuite name=\"harn\" tests=\"{total}\" failures=\"{failures}\" time=\"{total_time:.3}\">\n"
+    ));
+    for (name, passed, error_msg, duration_ms) in results {
+        let time = *duration_ms as f64 / 1000.0;
+        let escaped_name = xml_escape(name);
+        xml.push_str(&format!(
+            "  <testcase name=\"{escaped_name}\" time=\"{time:.3}\""
+        ));
+        if *passed {
+            xml.push_str(" />\n");
+        } else {
+            xml.push_str(">\n");
+            let escaped = xml_escape(error_msg);
+            xml.push_str(&format!(
+                "    <failure message=\"test failed\">{escaped}</failure>\n"
+            ));
+            xml.push_str("  </testcase>\n");
+        }
+    }
+    xml.push_str("</testsuite>\n");
+
+    if let Err(e) = fs::write(path, &xml) {
+        eprintln!("Failed to write JUnit XML to {path}: {e}");
+    } else {
+        println!("JUnit XML written to {path}");
+    }
+}
+
+async fn run_conformance_tests(
+    dir: &str,
+    filter: Option<&str>,
+    junit_path: Option<&str>,
+    timeout_ms: u64,
+) {
     let dir_path = PathBuf::from(dir);
     if !dir_path.exists() {
         eprintln!("Directory not found: {dir}");
@@ -372,6 +498,8 @@ async fn run_conformance_tests(dir: &str) {
     let mut passed = 0;
     let mut failed = 0;
     let mut errors: Vec<String> = Vec::new();
+    // (name, passed, error_msg, duration_ms)
+    let mut junit_results: Vec<(String, bool, String, u64)> = Vec::new();
 
     let mut test_dirs = Vec::new();
     if let Ok(entries) = fs::read_dir(&dir_path) {
@@ -403,14 +531,24 @@ async fn run_conformance_tests(dir: &str) {
             let rel_path = harn_file
                 .strip_prefix(&dir_path)
                 .unwrap_or(harn_file)
-                .display();
+                .display()
+                .to_string();
+
+            // Apply filter
+            if let Some(pattern) = filter {
+                if !rel_path.contains(pattern) {
+                    continue;
+                }
+            }
 
             if expected_file.exists() {
                 let source = match fs::read_to_string(harn_file) {
                     Ok(s) => s,
                     Err(e) => {
-                        println!("  FAIL  {rel_path}");
-                        errors.push(format!("{rel_path}: IO error reading source: {e}"));
+                        println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
+                        let msg = format!("{rel_path}: IO error reading source: {e}");
+                        errors.push(msg.clone());
+                        junit_results.push((rel_path, false, msg, 0));
                         failed += 1;
                         continue;
                     }
@@ -418,30 +556,51 @@ async fn run_conformance_tests(dir: &str) {
                 let expected = match fs::read_to_string(&expected_file) {
                     Ok(s) => s.trim_end().to_string(),
                     Err(e) => {
-                        println!("  FAIL  {rel_path}");
-                        errors.push(format!("{rel_path}: IO error reading expected: {e}"));
+                        println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
+                        let msg = format!("{rel_path}: IO error reading expected: {e}");
+                        errors.push(msg.clone());
+                        junit_results.push((rel_path, false, msg, 0));
                         failed += 1;
                         continue;
                     }
                 };
 
-                match execute(&source, Some(harn_file.as_path())).await {
-                    Ok(output) => {
+                let start = std::time::Instant::now();
+                let result = tokio::time::timeout(
+                    std::time::Duration::from_millis(timeout_ms),
+                    execute(&source, Some(harn_file.as_path())),
+                )
+                .await;
+                let duration_ms = start.elapsed().as_millis() as u64;
+
+                match result {
+                    Ok(Ok(output)) => {
                         let actual = output.trim_end().to_string();
                         if actual == expected {
-                            println!("  PASS  {rel_path}");
+                            println!("  \x1b[32mPASS\x1b[0m  {rel_path}");
+                            junit_results.push((rel_path, true, String::new(), duration_ms));
                             passed += 1;
                         } else {
-                            println!("  FAIL  {rel_path}");
-                            errors.push(format!(
-                                "{rel_path}:\n  expected: {expected}\n  actual:   {actual}"
-                            ));
+                            println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
+                            let diff = simple_diff(&expected, &actual);
+                            let msg = format!("{rel_path}:\n{diff}");
+                            errors.push(msg.clone());
+                            junit_results.push((rel_path, false, msg, duration_ms));
                             failed += 1;
                         }
                     }
-                    Err(e) => {
-                        println!("  FAIL  {rel_path}");
-                        errors.push(format!("{rel_path}: runtime error: {e}"));
+                    Ok(Err(e)) => {
+                        println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
+                        let msg = format!("{rel_path}: runtime error: {e}");
+                        errors.push(msg.clone());
+                        junit_results.push((rel_path, false, msg, duration_ms));
+                        failed += 1;
+                    }
+                    Err(_) => {
+                        println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
+                        let msg = format!("{rel_path}: timed out after {timeout_ms}ms");
+                        errors.push(msg.clone());
+                        junit_results.push((rel_path, false, msg, timeout_ms));
                         failed += 1;
                     }
                 }
@@ -449,8 +608,10 @@ async fn run_conformance_tests(dir: &str) {
                 let source = match fs::read_to_string(harn_file) {
                     Ok(s) => s,
                     Err(e) => {
-                        println!("  FAIL  {rel_path}");
-                        errors.push(format!("{rel_path}: IO error reading source: {e}"));
+                        println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
+                        let msg = format!("{rel_path}: IO error reading source: {e}");
+                        errors.push(msg.clone());
+                        junit_results.push((rel_path, false, msg, 0));
                         failed += 1;
                         continue;
                     }
@@ -458,30 +619,52 @@ async fn run_conformance_tests(dir: &str) {
                 let expected_error = match fs::read_to_string(&error_file) {
                     Ok(s) => s.trim_end().to_string(),
                     Err(e) => {
-                        println!("  FAIL  {rel_path}");
-                        errors.push(format!("{rel_path}: IO error reading expected error: {e}"));
+                        println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
+                        let msg = format!("{rel_path}: IO error reading expected error: {e}");
+                        errors.push(msg.clone());
+                        junit_results.push((rel_path, false, msg, 0));
                         failed += 1;
                         continue;
                     }
                 };
 
-                match execute(&source, Some(harn_file.as_path())).await {
-                    Err(ref err) if err.contains(&expected_error) => {
-                        println!("  PASS  {rel_path}");
+                let start = std::time::Instant::now();
+                let result = tokio::time::timeout(
+                    std::time::Duration::from_millis(timeout_ms),
+                    execute(&source, Some(harn_file.as_path())),
+                )
+                .await;
+                let duration_ms = start.elapsed().as_millis() as u64;
+
+                match result {
+                    Ok(Err(ref err)) if err.contains(&expected_error) => {
+                        println!("  \x1b[32mPASS\x1b[0m  {rel_path}");
+                        junit_results.push((rel_path, true, String::new(), duration_ms));
                         passed += 1;
                     }
-                    Err(err) => {
-                        println!("  FAIL  {rel_path}");
-                        errors.push(format!(
+                    Ok(Err(err)) => {
+                        println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
+                        let msg = format!(
                             "{rel_path}:\n  expected error containing: {expected_error}\n  actual error: {err}"
-                        ));
+                        );
+                        errors.push(msg.clone());
+                        junit_results.push((rel_path, false, msg, duration_ms));
                         failed += 1;
                     }
-                    Ok(_) => {
-                        println!("  FAIL  {rel_path}");
-                        errors.push(format!(
+                    Ok(Ok(_)) => {
+                        println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
+                        let msg = format!(
                             "{rel_path}: expected error containing '{expected_error}', but succeeded"
-                        ));
+                        );
+                        errors.push(msg.clone());
+                        junit_results.push((rel_path, false, msg, duration_ms));
+                        failed += 1;
+                    }
+                    Err(_) => {
+                        println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
+                        let msg = format!("{rel_path}: timed out after {timeout_ms}ms");
+                        errors.push(msg.clone());
+                        junit_results.push((rel_path, false, msg, timeout_ms));
                         failed += 1;
                     }
                 }
@@ -490,10 +673,21 @@ async fn run_conformance_tests(dir: &str) {
     }
 
     println!();
-    println!(
-        "{passed} passed, {failed} failed, {} total",
-        passed + failed
-    );
+    if failed > 0 {
+        println!(
+            "\x1b[31m{passed} passed, {failed} failed, {} total\x1b[0m",
+            passed + failed
+        );
+    } else {
+        println!(
+            "\x1b[32m{passed} passed, {failed} failed, {} total\x1b[0m",
+            passed + failed
+        );
+    }
+
+    if let Some(path) = junit_path {
+        write_junit_xml(path, &junit_results);
+    }
 
     if !errors.is_empty() {
         println!();
@@ -505,13 +699,13 @@ async fn run_conformance_tests(dir: &str) {
     }
 }
 
-async fn run_user_tests(path_str: &str) {
+async fn run_user_tests(path_str: &str, filter: Option<&str>, timeout_ms: u64, parallel: bool) {
     let path = PathBuf::from(path_str);
     if !path.exists() {
         eprintln!("Path not found: {path_str}");
         process::exit(1);
     }
-    let summary = test_runner::run_tests(&path).await;
+    let summary = test_runner::run_tests(&path, filter, timeout_ms, parallel).await;
 
     for result in &summary.results {
         if result.passed {
@@ -530,7 +724,7 @@ async fn run_user_tests(path_str: &str) {
     println!();
     if summary.failed > 0 {
         println!(
-            "{} passed, {} failed, {} total ({} ms)",
+            "\x1b[31m{} passed, {} failed, {} total ({} ms)\x1b[0m",
             summary.passed, summary.failed, summary.total, summary.duration_ms
         );
         process::exit(1);
@@ -538,7 +732,7 @@ async fn run_user_tests(path_str: &str) {
         println!("No test pipelines found");
     } else {
         println!(
-            "{} passed, {} total ({} ms)",
+            "\x1b[32m{} passed, {} total ({} ms)\x1b[0m",
             summary.passed, summary.total, summary.duration_ms
         );
     }
@@ -629,25 +823,258 @@ fn write_if_new(path: &Path, content: &str) {
     }
 }
 
+/// Harn REPL keyword completer.
+struct HarnCompleter {
+    keywords: Vec<String>,
+}
+
+impl reedline::Completer for HarnCompleter {
+    fn complete(&mut self, line: &str, pos: usize) -> Vec<reedline::Suggestion> {
+        let text = &line[..pos];
+        let word_start = text
+            .rfind(|c: char| !c.is_alphanumeric() && c != '_')
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        let prefix = &text[word_start..];
+        if prefix.is_empty() {
+            return Vec::new();
+        }
+
+        self.keywords
+            .iter()
+            .filter(|kw| kw.starts_with(prefix) && kw.as_str() != prefix)
+            .map(|kw| reedline::Suggestion {
+                value: kw.clone(),
+                description: None,
+                style: None,
+                extra: None,
+                span: reedline::Span::new(word_start, pos),
+                append_whitespace: true,
+            })
+            .collect()
+    }
+}
+
+/// Harn REPL syntax highlighter.
+struct HarnHighlighter {
+    keywords: Vec<String>,
+}
+
+impl reedline::Highlighter for HarnHighlighter {
+    fn highlight(&self, line: &str, _cursor: usize) -> reedline::StyledText {
+        let mut styled = reedline::StyledText::new();
+        let mut remaining = line;
+
+        while !remaining.is_empty() {
+            if remaining.starts_with(|c: char| c.is_alphabetic() || c == '_') {
+                let end = remaining
+                    .find(|c: char| !c.is_alphanumeric() && c != '_')
+                    .unwrap_or(remaining.len());
+                let word = &remaining[..end];
+                if self.keywords.contains(&word.to_string()) {
+                    styled.push((
+                        nu_ansi_term::Style::new()
+                            .fg(nu_ansi_term::Color::Blue)
+                            .bold(),
+                        word.to_string(),
+                    ));
+                } else if word == "true" || word == "false" || word == "nil" {
+                    styled.push((
+                        nu_ansi_term::Style::new().fg(nu_ansi_term::Color::Yellow),
+                        word.to_string(),
+                    ));
+                } else {
+                    styled.push((nu_ansi_term::Style::new(), word.to_string()));
+                }
+                remaining = &remaining[end..];
+            } else if remaining.starts_with('"') {
+                let end = remaining[1..]
+                    .find('"')
+                    .map(|i| i + 2)
+                    .unwrap_or(remaining.len());
+                let s = &remaining[..end];
+                styled.push((
+                    nu_ansi_term::Style::new().fg(nu_ansi_term::Color::Green),
+                    s.to_string(),
+                ));
+                remaining = &remaining[end..];
+            } else if remaining.starts_with("//") {
+                styled.push((
+                    nu_ansi_term::Style::new().fg(nu_ansi_term::Color::DarkGray),
+                    remaining.to_string(),
+                ));
+                remaining = "";
+            } else if remaining.starts_with(|c: char| c.is_ascii_digit()) {
+                let end = remaining
+                    .find(|c: char| !c.is_ascii_digit() && c != '.' && c != '_')
+                    .unwrap_or(remaining.len());
+                let num = &remaining[..end];
+                styled.push((
+                    nu_ansi_term::Style::new().fg(nu_ansi_term::Color::Cyan),
+                    num.to_string(),
+                ));
+                remaining = &remaining[end..];
+            } else {
+                let ch = &remaining[..remaining.ceil_char_boundary(1)];
+                styled.push((nu_ansi_term::Style::new(), ch.to_string()));
+                remaining = &remaining[ch.len()..];
+            }
+        }
+        styled
+    }
+}
+
+/// Harn REPL validator for multi-line input.
+struct HarnValidator;
+
+impl reedline::Validator for HarnValidator {
+    fn validate(&self, line: &str) -> reedline::ValidationResult {
+        let open_braces = line.chars().filter(|c| *c == '{').count();
+        let close_braces = line.chars().filter(|c| *c == '}').count();
+        let open_parens = line.chars().filter(|c| *c == '(').count();
+        let close_parens = line.chars().filter(|c| *c == ')').count();
+        let open_brackets = line.chars().filter(|c| *c == '[').count();
+        let close_brackets = line.chars().filter(|c| *c == ']').count();
+
+        if open_braces > close_braces
+            || open_parens > close_parens
+            || open_brackets > close_brackets
+        {
+            reedline::ValidationResult::Incomplete
+        } else {
+            reedline::ValidationResult::Complete
+        }
+    }
+}
+
 async fn run_repl() {
+    use reedline::{DefaultPrompt, DefaultPromptSegment, FileBackedHistory, Reedline, Signal};
+
     println!("Harn REPL v0.1.0");
     println!("Type expressions or statements. Ctrl+D to exit.");
 
-    let stdin = io::stdin();
-    let mut stdout = io::stdout();
+    let harn_keywords: Vec<String> = [
+        "pipeline",
+        "fn",
+        "let",
+        "var",
+        "if",
+        "else",
+        "for",
+        "in",
+        "while",
+        "match",
+        "return",
+        "break",
+        "continue",
+        "import",
+        "from",
+        "try",
+        "catch",
+        "throw",
+        "spawn",
+        "parallel",
+        "parallel_map",
+        "retry",
+        "guard",
+        "deadline",
+        "mutex",
+        "enum",
+        "struct",
+        "type",
+        "pub",
+        "extends",
+        "override",
+        "true",
+        "false",
+        "nil",
+        "log",
+        "print",
+        "println",
+        "assert",
+        "assert_eq",
+        "assert_ne",
+        "type_of",
+        "to_string",
+        "to_int",
+        "to_float",
+        "json_stringify",
+        "json_parse",
+        "read_file",
+        "write_file",
+        "file_exists",
+        "exec",
+        "env",
+        "timestamp",
+        "abs",
+        "min",
+        "max",
+        "floor",
+        "ceil",
+        "round",
+        "sqrt",
+        "pow",
+        "random",
+        "regex_match",
+        "regex_replace",
+        "http_get",
+        "http_post",
+        "llm_call",
+        "llm_stream",
+        "channel",
+        "send",
+        "receive",
+        "close",
+        "sleep",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+
+    let completer = Box::new(HarnCompleter {
+        keywords: harn_keywords.clone(),
+    });
+    let highlighter = Box::new(HarnHighlighter {
+        keywords: harn_keywords,
+    });
+    let validator = Box::new(HarnValidator);
+
+    let history_path = std::env::var_os("HOME")
+        .map(|h| PathBuf::from(h).join(".harn_history"))
+        .unwrap_or_else(|| PathBuf::from(".harn_history"));
+
+    let history = Box::new(
+        FileBackedHistory::with_file(1000, history_path)
+            .unwrap_or_else(|_| FileBackedHistory::new(1000).expect("history")),
+    );
+
+    let mut line_editor = Reedline::create()
+        .with_completer(completer)
+        .with_highlighter(highlighter)
+        .with_validator(validator)
+        .with_history(history);
+
+    let prompt = DefaultPrompt::new(
+        DefaultPromptSegment::Basic("harn".to_string()),
+        DefaultPromptSegment::Empty,
+    );
 
     loop {
-        print!("> ");
-        stdout.flush().ok();
-
-        let mut line = String::new();
-        match stdin.read_line(&mut line) {
-            Ok(0) => {
-                println!();
-                break;
+        // Run reedline in spawn_blocking since it blocks on terminal input
+        let input = tokio::task::spawn_blocking({
+            let mut editor = std::mem::replace(&mut line_editor, Reedline::create());
+            let prompt = prompt.clone();
+            move || {
+                let result = editor.read_line(&prompt);
+                (editor, result)
             }
-            Ok(_) => {
-                let line = line.trim();
+        })
+        .await;
+
+        match input {
+            Ok((editor, Ok(Signal::Success(line)))) => {
+                line_editor = editor;
+                let line = line.trim().to_string();
                 if line.is_empty() {
                     continue;
                 }
@@ -655,13 +1082,24 @@ async fn run_repl() {
                 let source = format!("pipeline repl(task) {{\n{line}\n}}");
                 match execute(&source, None).await {
                     Ok(output) => {
-                        stdout.write_all(output.as_bytes()).ok();
+                        if !output.is_empty() {
+                            io::stdout().write_all(output.as_bytes()).ok();
+                        }
                     }
                     Err(e) => eprintln!("Error: {e}"),
                 }
             }
-            Err(e) => {
+            Ok((_, Ok(Signal::CtrlC))) => continue,
+            Ok((_, Ok(Signal::CtrlD))) => {
+                println!("Goodbye!");
+                break;
+            }
+            Ok((_editor, Err(e))) => {
                 eprintln!("Read error: {e}");
+                break;
+            }
+            Err(e) => {
+                eprintln!("Runtime error: {e}");
                 break;
             }
         }

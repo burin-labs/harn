@@ -1,0 +1,10 @@
+pipeline default(task) {
+  var sum = 0
+  for i in 1 upto 6 {
+    if i == 3 {
+      continue
+    }
+    sum = sum + i
+  }
+  log(sum)
+}

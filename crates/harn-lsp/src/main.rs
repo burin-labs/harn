@@ -616,7 +616,9 @@ fn collect_symbols(snode: &SNode, symbols: &mut Vec<SymbolInfo>, scope_span: Opt
         | Node::SelectiveImport { .. }
         | Node::TypeDecl { .. }
         | Node::ReturnStmt { value: None }
-        | Node::YieldExpr { value: None } => {}
+        | Node::YieldExpr { value: None }
+        | Node::BreakStmt
+        | Node::ContinueStmt => {}
     }
 }
 

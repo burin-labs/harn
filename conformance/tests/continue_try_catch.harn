@@ -1,0 +1,14 @@
+pipeline default(task) {
+  var sum = 0
+  for i in [1, 2, 3, 4, 5] {
+    try {
+      if i % 2 == 0 {
+        continue
+      }
+      sum = sum + i
+    } catch(e) {
+      log(e)
+    }
+  }
+  log(sum)
+}

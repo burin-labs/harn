@@ -119,7 +119,7 @@ the execution loop.
 
 ### Conformance tests
 
-Tests live in `conformance/interpreter/` and `conformance/errors/`. Each
+Tests live in `conformance/tests/` and `conformance/errors/`. Each
 test is a `.harn` file paired with a `.expected` or `.error` file. The
 CLI `test` command executes each `.harn` file and compares trimmed output.
 Error tests check that the expected error text is a substring of the

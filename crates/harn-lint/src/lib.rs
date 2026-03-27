@@ -27,6 +27,12 @@ struct Declaration {
     is_mutable: bool,
 }
 
+/// An import tracked during linting.
+struct ImportInfo {
+    names: Vec<String>,
+    span: Span,
+}
+
 /// The linter walks the AST and collects diagnostics.
 struct Linter {
     diagnostics: Vec<LintDiagnostic>,
@@ -34,6 +40,9 @@ struct Linter {
     declarations: Vec<Declaration>,
     references: HashSet<String>,
     assignments: HashSet<String>,
+    imports: Vec<ImportInfo>,
+    /// Track whether we are inside a loop (for break/continue validation).
+    loop_depth: usize,
 }
 
 impl Linter {
@@ -44,6 +53,8 @@ impl Linter {
             declarations: Vec::new(),
             references: HashSet::new(),
             assignments: HashSet::new(),
+            imports: Vec::new(),
+            loop_depth: 0,
         }
     }
 
@@ -120,10 +131,13 @@ impl Linter {
                 // The function name itself is referenced (callable).
                 self.references.insert(name.clone());
                 self.push_scope();
+                let saved_loop_depth = self.loop_depth;
+                self.loop_depth = 0; // Functions are a new scope
                 for p in params {
                     self.declare_variable(&p.name, snode.span, false);
                 }
                 self.lint_block(body);
+                self.loop_depth = saved_loop_depth;
                 self.pop_scope();
             }
 
@@ -172,7 +186,42 @@ impl Linter {
                 self.lint_node(index);
             }
 
-            Node::BinaryOp { left, right, .. } => {
+            Node::BinaryOp { op, left, right } => {
+                // Rule: comparison-to-bool
+                if op == "==" || op == "!=" {
+                    let is_bool_left = matches!(left.node, Node::BoolLiteral(_));
+                    let is_bool_right = matches!(right.node, Node::BoolLiteral(_));
+                    if is_bool_left || is_bool_right {
+                        let (suggestion, msg) = if op == "==" {
+                            if matches!(right.node, Node::BoolLiteral(true))
+                                || matches!(left.node, Node::BoolLiteral(true))
+                            {
+                                (
+                                    "remove the comparison, use the expression directly",
+                                    "comparison to `true` is redundant",
+                                )
+                            } else {
+                                ("use `!expr` instead", "comparison to `false` is redundant")
+                            }
+                        } else if matches!(right.node, Node::BoolLiteral(true))
+                            || matches!(left.node, Node::BoolLiteral(true))
+                        {
+                            ("use `!expr` instead", "`!= true` is redundant")
+                        } else {
+                            (
+                                "remove the comparison, use the expression directly",
+                                "`!= false` is redundant",
+                            )
+                        };
+                        self.diagnostics.push(LintDiagnostic {
+                            rule: "comparison-to-bool",
+                            message: msg.to_string(),
+                            span: snode.span,
+                            severity: LintSeverity::Warning,
+                            suggestion: Some(suggestion.to_string()),
+                        });
+                    }
+                }
                 self.lint_node(left);
                 self.lint_node(right);
             }
@@ -207,6 +256,27 @@ impl Linter {
                         suggestion: Some("remove the empty if or add a body".to_string()),
                     });
                 }
+                // Rule: unnecessary-else-return
+                if let Some(else_b) = else_body {
+                    let then_returns = then_body
+                        .last()
+                        .is_some_and(|s| matches!(s.node, Node::ReturnStmt { .. }));
+                    let else_returns = else_b
+                        .last()
+                        .is_some_and(|s| matches!(s.node, Node::ReturnStmt { .. }));
+                    if then_returns && else_returns {
+                        self.diagnostics.push(LintDiagnostic {
+                            rule: "unnecessary-else-return",
+                            message: "both if and else branches return — else is unnecessary"
+                                .to_string(),
+                            span: snode.span,
+                            severity: LintSeverity::Warning,
+                            suggestion: Some(
+                                "remove the else and place its body after the if".to_string(),
+                            ),
+                        });
+                    }
+                }
                 self.push_scope();
                 self.lint_block(then_body);
                 self.pop_scope();
@@ -237,7 +307,9 @@ impl Linter {
                     scope.insert(variable.clone());
                 }
                 self.references.insert(variable.clone());
+                self.loop_depth += 1;
                 self.lint_block(body);
+                self.loop_depth -= 1;
                 self.pop_scope();
             }
 
@@ -253,7 +325,9 @@ impl Linter {
                     });
                 }
                 self.push_scope();
+                self.loop_depth += 1;
                 self.lint_block(body);
+                self.loop_depth -= 1;
                 self.pop_scope();
             }
 
@@ -288,7 +362,20 @@ impl Linter {
 
             Node::MatchExpr { value, arms } => {
                 self.lint_node(value);
-                for arm in arms {
+                // Rule: duplicate-match-arm (uses PartialEq on Node)
+                for (i, arm) in arms.iter().enumerate() {
+                    for earlier in &arms[..i] {
+                        if arm.pattern.node == earlier.pattern.node {
+                            self.diagnostics.push(LintDiagnostic {
+                                rule: "duplicate-match-arm",
+                                message: "duplicate match arm pattern".to_string(),
+                                span: arm.pattern.span,
+                                severity: LintSeverity::Warning,
+                                suggestion: Some("remove the duplicate arm".to_string()),
+                            });
+                            break;
+                        }
+                    }
                     self.lint_node(&arm.pattern);
                     self.push_scope();
                     self.lint_block(&arm.body);
@@ -321,10 +408,13 @@ impl Linter {
 
             Node::Closure { params, body } => {
                 self.push_scope();
+                let saved_loop_depth = self.loop_depth;
+                self.loop_depth = 0; // Closures are a new scope — break/continue invalid
                 for p in params {
                     self.declare_variable(&p.name, snode.span, false);
                 }
                 self.lint_block(body);
+                self.loop_depth = saved_loop_depth;
                 self.pop_scope();
             }
 
@@ -444,12 +534,40 @@ impl Linter {
             | Node::NilLiteral
             | Node::DurationLiteral(_)
             | Node::ImportDecl { .. }
-            | Node::SelectiveImport { .. }
             | Node::EnumDecl { .. }
             | Node::StructDecl { .. }
             | Node::InterfaceDecl { .. }
             | Node::OverrideDecl { .. }
-            | Node::TypeDecl { .. } => {}
+            | Node::TypeDecl { .. }
+            | Node::BreakStmt
+            | Node::ContinueStmt => {
+                // Rule: break/continue outside loop
+                if matches!(snode.node, Node::BreakStmt | Node::ContinueStmt)
+                    && self.loop_depth == 0
+                {
+                    let keyword = if matches!(snode.node, Node::BreakStmt) {
+                        "break"
+                    } else {
+                        "continue"
+                    };
+                    self.diagnostics.push(LintDiagnostic {
+                        rule: "break-outside-loop",
+                        message: format!("`{keyword}` used outside of a loop"),
+                        span: snode.span,
+                        severity: LintSeverity::Error,
+                        suggestion: Some(format!(
+                            "`{keyword}` can only be used inside for or while loops"
+                        )),
+                    });
+                }
+            }
+
+            Node::SelectiveImport { names, .. } => {
+                self.imports.push(ImportInfo {
+                    names: names.clone(),
+                    span: snode.span,
+                });
+            }
         }
     }
 
@@ -472,7 +590,13 @@ impl Linter {
 
             self.lint_node(node);
 
-            if matches!(node.node, Node::ReturnStmt { .. } | Node::ThrowStmt { .. }) {
+            if matches!(
+                node.node,
+                Node::ReturnStmt { .. }
+                    | Node::ThrowStmt { .. }
+                    | Node::BreakStmt
+                    | Node::ContinueStmt
+            ) {
                 found_terminator = true;
             }
         }
@@ -493,6 +617,21 @@ impl Linter {
                     severity: LintSeverity::Warning,
                     suggestion: Some(format!("prefix with underscore: `_{}`", decl.name)),
                 });
+            }
+        }
+
+        // Rule: unused-import
+        for import in &self.imports {
+            for name in &import.names {
+                if !self.references.contains(name) {
+                    self.diagnostics.push(LintDiagnostic {
+                        rule: "unused-import",
+                        message: format!("imported name `{name}` is never used"),
+                        span: import.span,
+                        severity: LintSeverity::Warning,
+                        suggestion: Some(format!("remove `{name}` from the import")),
+                    });
+                }
             }
         }
 
@@ -757,5 +896,163 @@ pipeline default(task) {
         assert!(has_rule(&diags, "mutable-never-reassigned"));
         assert!(has_rule(&diags, "unreachable-code"));
         assert_eq!(count_rule(&diags, "unreachable-code"), 1);
+    }
+
+    #[test]
+    fn test_comparison_to_bool_true() {
+        let diags = lint_source(
+            r#"
+pipeline default(task) {
+    let x = true
+    if x == true { log("yes") }
+}
+"#,
+        );
+        assert!(
+            has_rule(&diags, "comparison-to-bool"),
+            "expected comparison-to-bool, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_comparison_to_bool_false() {
+        let diags = lint_source(
+            r#"
+pipeline default(task) {
+    let x = true
+    if x == false { log("no") }
+}
+"#,
+        );
+        assert!(
+            has_rule(&diags, "comparison-to-bool"),
+            "expected comparison-to-bool, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_no_comparison_to_bool_for_normal() {
+        let diags = lint_source(
+            r#"
+pipeline default(task) {
+    let x = 1
+    if x == 1 { log("one") }
+}
+"#,
+        );
+        assert!(
+            !has_rule(&diags, "comparison-to-bool"),
+            "should not trigger for non-bool comparison: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_unnecessary_else_return() {
+        let diags = lint_source(
+            r#"
+pipeline default(task) {
+    let x = 1
+    if x == 1 {
+        return "one"
+    } else {
+        return "other"
+    }
+}
+"#,
+        );
+        assert!(
+            has_rule(&diags, "unnecessary-else-return"),
+            "expected unnecessary-else-return, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_no_unnecessary_else_return_when_no_return() {
+        let diags = lint_source(
+            r#"
+pipeline default(task) {
+    let x = 1
+    if x == 1 {
+        log("one")
+    } else {
+        log("other")
+    }
+}
+"#,
+        );
+        assert!(
+            !has_rule(&diags, "unnecessary-else-return"),
+            "should not trigger when branches don't return: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_duplicate_match_arm() {
+        let diags = lint_source(
+            r#"
+pipeline default(task) {
+    let x = 1
+    match x {
+        1 -> { log("one") }
+        1 -> { log("also one") }
+        _ -> { log("other") }
+    }
+}
+"#,
+        );
+        assert!(
+            has_rule(&diags, "duplicate-match-arm"),
+            "expected duplicate-match-arm, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_break_outside_loop() {
+        let diags = lint_source(
+            r#"
+pipeline default(task) {
+    break
+}
+"#,
+        );
+        assert!(
+            has_rule(&diags, "break-outside-loop"),
+            "expected break-outside-loop, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_break_inside_loop_ok() {
+        let diags = lint_source(
+            r#"
+pipeline default(task) {
+    while true {
+        break
+    }
+}
+"#,
+        );
+        assert!(
+            !has_rule(&diags, "break-outside-loop"),
+            "break inside loop should be fine: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_unreachable_after_break() {
+        let diags = lint_source(
+            r#"
+pipeline default(task) {
+    while true {
+        break
+        log("unreachable")
+    }
+}
+"#,
+        );
+        assert!(
+            has_rule(&diags, "unreachable-code"),
+            "expected unreachable-code after break, got: {diags:?}"
+        );
     }
 }

@@ -1,0 +1,8 @@
+pipeline default(task) {
+  let arr = [10, 20, 30, 40, 50]
+  log(arr[-1])
+  log(arr[-2])
+  log(arr[-5])
+  // Out of bounds negative returns nil
+  log(arr[-100])
+}

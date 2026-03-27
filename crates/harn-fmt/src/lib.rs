@@ -306,6 +306,12 @@ impl Formatter {
                 let v = self.format_expr(value);
                 self.writeln(&format!("throw {v}"));
             }
+            Node::BreakStmt => {
+                self.writeln("break");
+            }
+            Node::ContinueStmt => {
+                self.writeln("continue");
+            }
             Node::ImportDecl { path } => {
                 self.writeln(&format!("import \"{path}\""));
             }
@@ -702,6 +708,8 @@ impl Formatter {
                 let v = self.format_expr(value);
                 format!("throw {v}")
             }
+            Node::BreakStmt => "break".to_string(),
+            Node::ContinueStmt => "continue".to_string(),
             Node::Block(stmts) => {
                 let mut result = String::from("{\n");
                 let current_indent = self.indent + 1;
@@ -1348,6 +1356,8 @@ fn is_simple_expr(node: &SNode) -> bool {
             | Node::RangeExpr { .. }
             | Node::EnumConstruct { .. }
             | Node::ReturnStmt { .. }
+            | Node::BreakStmt
+            | Node::ContinueStmt
     )
 }
 

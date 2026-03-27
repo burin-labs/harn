@@ -539,6 +539,8 @@ impl Lexer {
             "deadline" => TokenKind::Deadline,
             "yield" => TokenKind::Yield,
             "mutex" => TokenKind::Mutex,
+            "break" => TokenKind::Break,
+            "continue" => TokenKind::Continue,
             _ => TokenKind::Identifier(ident),
         };
 

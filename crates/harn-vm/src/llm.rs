@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 use std::rc::Rc;
+use std::sync::Arc;
 
-use crate::value::{VmError, VmValue};
+use crate::value::{VmChannelHandle, VmError, VmValue};
 use crate::vm::Vm;
 
 /// Register LLM builtins on a VM.
@@ -133,6 +134,59 @@ pub fn register_llm_builtins(vm: &mut Vm) {
         }
 
         Ok(VmValue::String(Rc::from(total_text.as_str())))
+    });
+
+    vm.register_async_builtin("llm_stream", |args| async move {
+        let prompt = args.first().map(|a| a.display()).unwrap_or_default();
+        let system = args.get(1).map(|a| a.display());
+        let options = args.get(2).and_then(|a| a.as_dict()).cloned();
+
+        let provider = vm_resolve_provider(&options);
+        let model = vm_resolve_model(&options, &provider);
+        let api_key = vm_resolve_api_key(&provider)?;
+        let max_tokens = options
+            .as_ref()
+            .and_then(|o| o.get("max_tokens"))
+            .and_then(|v| v.as_int())
+            .unwrap_or(4096);
+
+        // Create a channel for streaming chunks
+        let (tx, rx) = tokio::sync::mpsc::channel::<VmValue>(64);
+        let closed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let closed_clone = closed.clone();
+        #[allow(clippy::arc_with_non_send_sync)]
+        let tx_arc = Arc::new(tx);
+        let tx_for_task = tx_arc.clone();
+
+        // Spawn a task that does the SSE streaming and pushes chunks
+        tokio::task::spawn_local(async move {
+            let result = vm_stream_llm(
+                &provider,
+                &model,
+                &api_key,
+                &prompt,
+                system.as_deref(),
+                max_tokens,
+                &tx_for_task,
+            )
+            .await;
+            closed_clone.store(true, std::sync::atomic::Ordering::Relaxed);
+            if let Err(e) = result {
+                let _ = tx_for_task
+                    .send(VmValue::String(Rc::from(format!("error: {e}"))))
+                    .await;
+            }
+        });
+
+        // Return the channel handle for iteration
+        #[allow(clippy::arc_with_non_send_sync)]
+        let handle = VmChannelHandle {
+            name: "llm_stream".to_string(),
+            sender: tx_arc,
+            receiver: Arc::new(tokio::sync::Mutex::new(rx)),
+            closed,
+        };
+        Ok(VmValue::Channel(handle))
     });
 }
 
@@ -313,4 +367,129 @@ async fn vm_call_llm_messages(
             Ok(VmValue::String(Rc::from(text.as_str())))
         }
     }
+}
+
+/// Stream LLM response via SSE and push text chunks into the channel.
+async fn vm_stream_llm(
+    provider: &str,
+    model: &str,
+    api_key: &str,
+    prompt: &str,
+    system: Option<&str>,
+    max_tokens: i64,
+    tx: &tokio::sync::mpsc::Sender<VmValue>,
+) -> Result<(), VmError> {
+    use reqwest_eventsource::{Event, EventSource};
+    use tokio_stream::StreamExt;
+
+    let client = reqwest::Client::new();
+
+    let request = match provider {
+        "openai" | "ollama" | "openrouter" => {
+            let base_url = match provider {
+                "ollama" => std::env::var("OLLAMA_HOST")
+                    .unwrap_or_else(|_| "http://localhost:11434".to_string()),
+                "openrouter" => "https://openrouter.ai/api".to_string(),
+                _ => "https://api.openai.com".to_string(),
+            };
+
+            let mut msgs = Vec::new();
+            if let Some(sys) = system {
+                msgs.push(serde_json::json!({"role": "system", "content": sys}));
+            }
+            msgs.push(serde_json::json!({"role": "user", "content": prompt}));
+
+            let body = serde_json::json!({
+                "model": model,
+                "messages": msgs,
+                "max_tokens": max_tokens,
+                "stream": true,
+            });
+
+            let mut req = client
+                .post(format!("{base_url}/v1/chat/completions"))
+                .header("Content-Type", "application/json")
+                .json(&body);
+            if !api_key.is_empty() {
+                req = req.header("Authorization", format!("Bearer {api_key}"));
+            }
+            req
+        }
+        _ => {
+            // Anthropic
+            let mut body = serde_json::json!({
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": max_tokens,
+                "stream": true,
+            });
+            if let Some(sys) = system {
+                body["system"] = serde_json::json!(sys);
+            }
+
+            client
+                .post("https://api.anthropic.com/v1/messages")
+                .header("x-api-key", api_key)
+                .header("anthropic-version", "2023-06-01")
+                .header("Content-Type", "application/json")
+                .json(&body)
+        }
+    };
+
+    let is_anthropic = !matches!(provider, "openai" | "ollama" | "openrouter");
+
+    let mut es = EventSource::new(request).map_err(|e| {
+        VmError::Thrown(VmValue::String(Rc::from(format!(
+            "LLM stream setup error: {e}"
+        ))))
+    })?;
+
+    // Process SSE events
+    while let Some(event) = es.next().await {
+        match event {
+            Ok(Event::Message(msg)) => {
+                if msg.data == "[DONE]" {
+                    break;
+                }
+                let chunk_text = if is_anthropic {
+                    parse_anthropic_sse_chunk(&msg.data)
+                } else {
+                    parse_openai_sse_chunk(&msg.data)
+                };
+                if let Some(text) = chunk_text {
+                    if !text.is_empty()
+                        && tx
+                            .send(VmValue::String(Rc::from(text.as_str())))
+                            .await
+                            .is_err()
+                    {
+                        break;
+                    }
+                }
+            }
+            Ok(Event::Open) => {}
+            Err(_) => break,
+        }
+    }
+
+    es.close();
+    Ok(())
+}
+
+/// Parse a text delta from an OpenAI SSE chunk.
+fn parse_openai_sse_chunk(data: &str) -> Option<String> {
+    let json: serde_json::Value = serde_json::from_str(data).ok()?;
+    json["choices"][0]["delta"]["content"]
+        .as_str()
+        .map(|s| s.to_string())
+}
+
+/// Parse a text delta from an Anthropic SSE chunk.
+fn parse_anthropic_sse_chunk(data: &str) -> Option<String> {
+    let json: serde_json::Value = serde_json::from_str(data).ok()?;
+    // Anthropic uses content_block_delta events with delta.text
+    if json["type"].as_str() == Some("content_block_delta") {
+        return json["delta"]["text"].as_str().map(|s| s.to_string());
+    }
+    None
 }

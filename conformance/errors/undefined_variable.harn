@@ -1,0 +1,3 @@
+pipeline default(task) {
+  log(undefined_var)
+}

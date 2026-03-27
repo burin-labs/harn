@@ -138,6 +138,10 @@ pub enum Op {
     /// If match succeeds, pushes true; else pushes false.
     MatchEnum,
 
+    // --- Loop control ---
+    /// Pop the top iterator from the iterator stack (cleanup on break from for-in).
+    PopIterator,
+
     // --- Misc ---
     /// Duplicate top of stack.
     Dup,
@@ -489,6 +493,7 @@ impl Chunk {
                         self.constants[variant_idx as usize]
                     ));
                 }
+                x if x == Op::PopIterator as u8 => out.push_str("POP_ITERATOR\n"),
                 x if x == Op::Dup as u8 => out.push_str("DUP\n"),
                 x if x == Op::Swap as u8 => out.push_str("SWAP\n"),
                 _ => {

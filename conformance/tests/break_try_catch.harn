@@ -1,0 +1,14 @@
+pipeline default(task) {
+  var found = 0
+  for i in [1, 2, 3, 4, 5] {
+    try {
+      if i == 3 {
+        break
+      }
+      found = i
+    } catch(e) {
+      log(e)
+    }
+  }
+  log(found)
+}

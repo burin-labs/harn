@@ -297,6 +297,16 @@ impl Parser {
             TokenKind::Deadline => self.parse_deadline(),
             TokenKind::Yield => self.parse_yield(),
             TokenKind::Mutex => self.parse_mutex(),
+            TokenKind::Break => {
+                let span = self.current_span();
+                self.advance();
+                Ok(spanned(Node::BreakStmt, span))
+            }
+            TokenKind::Continue => {
+                let span = self.current_span();
+                self.advance();
+                Ok(spanned(Node::ContinueStmt, span))
+            }
             _ => self.parse_expression_statement(),
         }
     }

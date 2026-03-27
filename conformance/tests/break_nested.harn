@@ -1,0 +1,12 @@
+pipeline default(task) {
+  var result = ""
+  for i in [1, 2, 3] {
+    for j in ["a", "b", "c"] {
+      if j == "b" {
+        break
+      }
+      result = result + to_string(i) + j + " "
+    }
+  }
+  log(result)
+}

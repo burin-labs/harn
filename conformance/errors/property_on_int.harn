@@ -1,0 +1,4 @@
+pipeline default(task) {
+  let x = 42
+  log(x.name)
+}

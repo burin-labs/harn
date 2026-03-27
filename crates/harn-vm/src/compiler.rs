@@ -18,12 +18,28 @@ impl std::fmt::Display for CompileError {
 
 impl std::error::Error for CompileError {}
 
+/// Tracks loop context for break/continue compilation.
+struct LoopContext {
+    /// Offset of the loop start (for continue).
+    start_offset: usize,
+    /// Positions of break jumps that need patching to the loop end.
+    break_patches: Vec<usize>,
+    /// True if this is a for-in loop (has an iterator to clean up on break).
+    has_iterator: bool,
+    /// Number of exception handlers active at loop entry.
+    handler_depth: usize,
+}
+
 /// Compiles an AST into bytecode.
 pub struct Compiler {
     chunk: Chunk,
     line: u32,
     /// Track enum type names so PropertyAccess on them can produce EnumVariant.
     enum_names: std::collections::HashSet<String>,
+    /// Stack of active loop contexts for break/continue.
+    loop_stack: Vec<LoopContext>,
+    /// Current depth of exception handlers (for cleanup on break/continue).
+    handler_depth: usize,
 }
 
 impl Compiler {
@@ -32,6 +48,8 @@ impl Compiler {
             chunk: Chunk::new(),
             line: 1,
             enum_names: std::collections::HashSet::new(),
+            loop_stack: Vec::new(),
+            handler_depth: 0,
         }
     }
 
@@ -453,6 +471,12 @@ impl Compiler {
 
             Node::WhileLoop { condition, body } => {
                 let loop_start = self.chunk.current_offset();
+                self.loop_stack.push(LoopContext {
+                    start_offset: loop_start,
+                    break_patches: Vec::new(),
+                    has_iterator: false,
+                    handler_depth: self.handler_depth,
+                });
                 self.compile_node(condition)?;
                 let exit_jump = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
                 self.chunk.emit(Op::Pop, self.line); // pop condition
@@ -467,6 +491,11 @@ impl Compiler {
                 self.chunk.emit_u16(Op::Jump, loop_start as u16, self.line);
                 self.chunk.patch_jump(exit_jump);
                 self.chunk.emit(Op::Pop, self.line); // pop condition
+                                                     // Patch all break jumps to here
+                let ctx = self.loop_stack.pop().unwrap();
+                for patch_pos in ctx.break_patches {
+                    self.chunk.patch_jump(patch_pos);
+                }
                 self.chunk.emit(Op::Nil, self.line);
             }
 
@@ -482,16 +511,31 @@ impl Compiler {
                 // Initialize iterator
                 self.chunk.emit(Op::IterInit, self.line);
                 let loop_start = self.chunk.current_offset();
+                self.loop_stack.push(LoopContext {
+                    start_offset: loop_start,
+                    break_patches: Vec::new(),
+                    has_iterator: true,
+                    handler_depth: self.handler_depth,
+                });
                 // Try to get next item — jumps to end if exhausted
                 let exit_jump_pos = self.chunk.emit_jump(Op::IterNext, self.line);
                 // Define loop variable with current item (item is on stack from IterNext)
                 self.chunk.emit_u16(Op::DefVar, var_idx, self.line);
-                // Compile body
-                self.compile_block(body)?;
-                self.chunk.emit(Op::Pop, self.line);
+                // Compile body statements, popping all results
+                for sn in body {
+                    self.compile_node(sn)?;
+                    if Self::produces_value(&sn.node) {
+                        self.chunk.emit(Op::Pop, self.line);
+                    }
+                }
                 // Loop back
                 self.chunk.emit_u16(Op::Jump, loop_start as u16, self.line);
                 self.chunk.patch_jump(exit_jump_pos);
+                // Patch all break jumps to here
+                let ctx = self.loop_stack.pop().unwrap();
+                for patch_pos in ctx.break_patches {
+                    self.chunk.patch_jump(patch_pos);
+                }
                 // Push nil as result (iterator state was consumed)
                 self.chunk.emit(Op::Nil, self.line);
             }
@@ -503,6 +547,46 @@ impl Compiler {
                     self.chunk.emit(Op::Nil, self.line);
                 }
                 self.chunk.emit(Op::Return, self.line);
+            }
+
+            Node::BreakStmt => {
+                if self.loop_stack.is_empty() {
+                    return Err(CompileError {
+                        message: "break outside of loop".to_string(),
+                        line: self.line,
+                    });
+                }
+                let ctx = self.loop_stack.last().unwrap();
+                // Pop exception handlers that were pushed inside the loop
+                for _ in ctx.handler_depth..self.handler_depth {
+                    self.chunk.emit(Op::PopHandler, self.line);
+                }
+                // Pop iterator if breaking from a for-in loop
+                if ctx.has_iterator {
+                    self.chunk.emit(Op::PopIterator, self.line);
+                }
+                let patch = self.chunk.emit_jump(Op::Jump, self.line);
+                self.loop_stack
+                    .last_mut()
+                    .unwrap()
+                    .break_patches
+                    .push(patch);
+            }
+
+            Node::ContinueStmt => {
+                if self.loop_stack.is_empty() {
+                    return Err(CompileError {
+                        message: "continue outside of loop".to_string(),
+                        line: self.line,
+                    });
+                }
+                let ctx = self.loop_stack.last().unwrap();
+                // Pop exception handlers that were pushed inside the loop
+                for _ in ctx.handler_depth..self.handler_depth {
+                    self.chunk.emit(Op::PopHandler, self.line);
+                }
+                let loop_start = ctx.start_offset;
+                self.chunk.emit_u16(Op::Jump, loop_start as u16, self.line);
             }
 
             Node::ListLiteral(elements) => {
@@ -977,6 +1061,7 @@ impl Compiler {
                 };
 
                 // 1. Emit TryCatchSetup with placeholder offset to catch handler
+                self.handler_depth += 1;
                 let catch_jump = self.chunk.emit_jump(Op::TryCatchSetup, self.line);
                 // Emit the type name index as extra u16 after the jump offset
                 let hi = (type_name_idx >> 8) as u8;
@@ -998,6 +1083,7 @@ impl Compiler {
                 }
 
                 // 3. Emit PopHandler (successful try body completion)
+                self.handler_depth -= 1;
                 self.chunk.emit(Op::PopHandler, self.line);
 
                 // 4. Emit Jump past catch body
@@ -1173,7 +1259,9 @@ impl Compiler {
             | Node::Assignment { .. }
             | Node::ReturnStmt { .. }
             | Node::FnDecl { .. }
-            | Node::ThrowStmt { .. } => false,
+            | Node::ThrowStmt { .. }
+            | Node::BreakStmt
+            | Node::ContinueStmt => false,
             // These compound nodes explicitly produce a value
             Node::TryCatch { .. }
             | Node::Retry { .. }

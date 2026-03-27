@@ -21,7 +21,11 @@ pub struct TestSummary {
 }
 
 /// Run all test_* pipelines in a single source file using the VM.
-pub async fn run_test_file(path: &Path) -> Result<Vec<TestResult>, String> {
+pub async fn run_test_file(
+    path: &Path,
+    filter: Option<&str>,
+    timeout_ms: u64,
+) -> Result<Vec<TestResult>, String> {
     let source = std::fs::read_to_string(path)
         .map_err(|e| format!("Failed to read {}: {e}", path.display()))?;
 
@@ -36,6 +40,12 @@ pub async fn run_test_file(path: &Path) -> Result<Vec<TestResult>, String> {
         .filter_map(|snode| {
             if let Node::Pipeline { name, .. } = &snode.node {
                 if name.starts_with("test_") {
+                    // Apply filter
+                    if let Some(pattern) = filter {
+                        if !name.contains(pattern) {
+                            return None;
+                        }
+                    }
                     return Some(name.clone());
                 }
             }
@@ -65,8 +75,10 @@ pub async fn run_test_file(path: &Path) -> Result<Vec<TestResult>, String> {
 
         let local = tokio::task::LocalSet::new();
         let path_clone = path.to_path_buf();
-        let result = local
-            .run_until(async {
+        let timeout = std::time::Duration::from_millis(timeout_ms);
+        let result = tokio::time::timeout(
+            timeout,
+            local.run_until(async {
                 let mut vm = harn_vm::Vm::new();
                 harn_vm::register_vm_stdlib(&mut vm);
                 harn_vm::register_http_builtins(&mut vm);
@@ -77,13 +89,14 @@ pub async fn run_test_file(path: &Path) -> Result<Vec<TestResult>, String> {
                     }
                 }
                 vm.execute(&chunk).await.map_err(|e| format!("{e}"))
-            })
-            .await;
+            }),
+        )
+        .await;
 
         let duration = start.elapsed().as_millis() as u64;
 
         match result {
-            Ok(_) => {
+            Ok(Ok(_)) => {
                 results.push(TestResult {
                     name: test_name.clone(),
                     file: path.display().to_string(),
@@ -92,13 +105,22 @@ pub async fn run_test_file(path: &Path) -> Result<Vec<TestResult>, String> {
                     duration_ms: duration,
                 });
             }
-            Err(e) => {
+            Ok(Err(e)) => {
                 results.push(TestResult {
                     name: test_name.clone(),
                     file: path.display().to_string(),
                     passed: false,
                     error: Some(e),
                     duration_ms: duration,
+                });
+            }
+            Err(_) => {
+                results.push(TestResult {
+                    name: test_name.clone(),
+                    file: path.display().to_string(),
+                    passed: false,
+                    error: Some(format!("timed out after {timeout_ms}ms")),
+                    duration_ms: timeout_ms,
                 });
             }
         }
@@ -108,7 +130,12 @@ pub async fn run_test_file(path: &Path) -> Result<Vec<TestResult>, String> {
 }
 
 /// Discover and run tests in a file or directory.
-pub async fn run_tests(path: &Path) -> TestSummary {
+pub async fn run_tests(
+    path: &Path,
+    filter: Option<&str>,
+    timeout_ms: u64,
+    parallel: bool,
+) -> TestSummary {
     let start = Instant::now();
     let mut all_results = Vec::new();
 
@@ -118,17 +145,55 @@ pub async fn run_tests(path: &Path) -> TestSummary {
         vec![path.to_path_buf()]
     };
 
-    for file in &files {
-        match run_test_file(file).await {
-            Ok(results) => all_results.extend(results),
-            Err(e) => {
-                all_results.push(TestResult {
-                    name: "<file error>".to_string(),
-                    file: file.display().to_string(),
-                    passed: false,
-                    error: Some(e),
-                    duration_ms: 0,
-                });
+    if parallel {
+        // Run files concurrently using spawn_local
+        let local = tokio::task::LocalSet::new();
+        let results = local
+            .run_until(async {
+                let mut handles = Vec::new();
+                for file in files {
+                    let filter = filter.map(|s| s.to_string());
+                    handles.push(tokio::task::spawn_local(async move {
+                        run_test_file(&file, filter.as_deref(), timeout_ms).await
+                    }));
+                }
+                let mut results = Vec::new();
+                for handle in handles {
+                    match handle.await {
+                        Ok(Ok(r)) => results.extend(r),
+                        Ok(Err(e)) => results.push(TestResult {
+                            name: "<file error>".to_string(),
+                            file: String::new(),
+                            passed: false,
+                            error: Some(e),
+                            duration_ms: 0,
+                        }),
+                        Err(e) => results.push(TestResult {
+                            name: "<join error>".to_string(),
+                            file: String::new(),
+                            passed: false,
+                            error: Some(format!("{e}")),
+                            duration_ms: 0,
+                        }),
+                    }
+                }
+                results
+            })
+            .await;
+        all_results = results;
+    } else {
+        for file in &files {
+            match run_test_file(file, filter, timeout_ms).await {
+                Ok(results) => all_results.extend(results),
+                Err(e) => {
+                    all_results.push(TestResult {
+                        name: "<file error>".to_string(),
+                        file: file.display().to_string(),
+                        passed: false,
+                        error: Some(e),
+                        duration_ms: 0,
+                    });
+                }
             }
         }
     }

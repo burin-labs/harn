@@ -650,8 +650,10 @@ impl Vm {
                 Constant::String(s) => s.clone(),
                 _ => return Err(VmError::TypeError("expected string constant".into())),
             };
-            let val = self.env.get(&name).unwrap_or(VmValue::Nil);
-            self.stack.push(val);
+            match self.env.get(&name) {
+                Some(val) => self.stack.push(val),
+                None => return Err(VmError::UndefinedVariable(name)),
+            }
         } else if op == Op::DefLet as u8 {
             let frame = self.frames.last_mut().unwrap();
             let idx = frame.chunk.read_u16(frame.ip) as usize;
@@ -859,11 +861,44 @@ impl Vm {
             let idx = self.pop()?;
             let obj = self.pop()?;
             let result = match (&obj, &idx) {
-                (VmValue::List(items), VmValue::Int(i)) if *i >= 0 => {
-                    items.get(*i as usize).cloned().unwrap_or(VmValue::Nil)
+                (VmValue::List(items), VmValue::Int(i)) => {
+                    if *i < 0 {
+                        let pos = items.len() as i64 + *i;
+                        if pos < 0 {
+                            VmValue::Nil
+                        } else {
+                            items.get(pos as usize).cloned().unwrap_or(VmValue::Nil)
+                        }
+                    } else {
+                        items.get(*i as usize).cloned().unwrap_or(VmValue::Nil)
+                    }
                 }
                 (VmValue::Dict(map), _) => map.get(&idx.display()).cloned().unwrap_or(VmValue::Nil),
-                _ => VmValue::Nil,
+                (VmValue::String(s), VmValue::Int(i)) => {
+                    if *i < 0 {
+                        let pos = s.chars().count() as i64 + *i;
+                        if pos < 0 {
+                            VmValue::Nil
+                        } else {
+                            s.chars()
+                                .nth(pos as usize)
+                                .map(|c| VmValue::String(Rc::from(c.to_string())))
+                                .unwrap_or(VmValue::Nil)
+                        }
+                    } else {
+                        s.chars()
+                            .nth(*i as usize)
+                            .map(|c| VmValue::String(Rc::from(c.to_string())))
+                            .unwrap_or(VmValue::Nil)
+                    }
+                }
+                _ => {
+                    return Err(VmError::TypeError(format!(
+                        "cannot index into {} with {}",
+                        obj.type_name(),
+                        idx.type_name()
+                    )));
+                }
             };
             self.stack.push(result);
         } else if op == Op::GetProperty as u8 {
@@ -896,7 +931,17 @@ impl Vm {
                 VmValue::StructInstance { fields, .. } => {
                     fields.get(&name).cloned().unwrap_or(VmValue::Nil)
                 }
-                _ => VmValue::Nil,
+                VmValue::Nil => {
+                    return Err(VmError::TypeError(format!(
+                        "cannot access property `{name}` on nil"
+                    )));
+                }
+                _ => {
+                    return Err(VmError::TypeError(format!(
+                        "cannot access property `{name}` on {}",
+                        obj.type_name()
+                    )));
+                }
             };
             self.stack.push(result);
         } else if op == Op::SetProperty as u8 {
@@ -930,7 +975,12 @@ impl Vm {
                             },
                         )?;
                     }
-                    _ => {}
+                    _ => {
+                        return Err(VmError::TypeError(format!(
+                            "cannot set property `{prop_name}` on {}",
+                            obj.type_name()
+                        )));
+                    }
                 }
             }
         } else if op == Op::SetSubscript as u8 {
@@ -1000,11 +1050,21 @@ impl Vm {
                     } else if let Some(builtin) = self.builtins.get(name.as_ref()) {
                         let result = builtin(&[value], &mut self.output)?;
                         self.stack.push(result);
+                    } else if let Some(async_builtin) =
+                        self.async_builtins.get(name.as_ref()).cloned()
+                    {
+                        let result = async_builtin(vec![value]).await?;
+                        self.stack.push(result);
                     } else {
-                        self.stack.push(VmValue::Nil);
+                        return Err(VmError::UndefinedBuiltin(name.to_string()));
                     }
                 }
-                _ => self.stack.push(VmValue::Nil),
+                _ => {
+                    return Err(VmError::TypeError(format!(
+                        "cannot pipe into {}",
+                        callable.type_name()
+                    )));
+                }
             }
         } else if op == Op::Dup as u8 {
             let val = self.peek()?.clone();
@@ -1048,6 +1108,8 @@ impl Vm {
                 let frame = self.frames.last_mut().unwrap();
                 frame.ip = target;
             }
+        } else if op == Op::PopIterator as u8 {
+            self.iterators.pop();
         } else if op == Op::Throw as u8 {
             let val = self.pop()?;
             return Err(VmError::Thrown(val));
