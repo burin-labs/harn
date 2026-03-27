@@ -126,6 +126,18 @@ pub enum Op {
     /// Pop deadline from internal deadline stack.
     DeadlineEnd,
 
+    // --- Enum ---
+    /// Build an enum variant value.
+    /// arg1: u16 = constant index (enum name), arg2: u16 = constant index (variant name),
+    /// arg3: u16 = field count. Fields are on stack.
+    BuildEnum,
+
+    // --- Match ---
+    /// Match an enum pattern. Checks enum_name + variant on the top of stack (dup'd match value).
+    /// arg1: u16 = constant index (enum name), arg2: u16 = constant index (variant name).
+    /// If match succeeds, pushes true; else pushes false.
+    MatchEnum,
+
     // --- Misc ---
     /// Duplicate top of stack.
     Dup,
@@ -448,6 +460,35 @@ impl Chunk {
                 }
                 x if x == Op::DeadlineSetup as u8 => out.push_str("DEADLINE_SETUP\n"),
                 x if x == Op::DeadlineEnd as u8 => out.push_str("DEADLINE_END\n"),
+                x if x == Op::BuildEnum as u8 => {
+                    let enum_idx = self.read_u16(ip);
+                    ip += 2;
+                    let variant_idx = self.read_u16(ip);
+                    ip += 2;
+                    let field_count = self.read_u16(ip);
+                    ip += 2;
+                    out.push_str(&format!(
+                        "BUILD_ENUM {:>4} ({}) {:>4} ({}) fields={}\n",
+                        enum_idx,
+                        self.constants[enum_idx as usize],
+                        variant_idx,
+                        self.constants[variant_idx as usize],
+                        field_count
+                    ));
+                }
+                x if x == Op::MatchEnum as u8 => {
+                    let enum_idx = self.read_u16(ip);
+                    ip += 2;
+                    let variant_idx = self.read_u16(ip);
+                    ip += 2;
+                    out.push_str(&format!(
+                        "MATCH_ENUM {:>4} ({}) {:>4} ({})\n",
+                        enum_idx,
+                        self.constants[enum_idx as usize],
+                        variant_idx,
+                        self.constants[variant_idx as usize]
+                    ));
+                }
                 x if x == Op::Dup as u8 => out.push_str("DUP\n"),
                 x if x == Op::Swap as u8 => out.push_str("SWAP\n"),
                 _ => {

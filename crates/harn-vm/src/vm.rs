@@ -402,6 +402,8 @@ struct ExceptionHandler {
     catch_ip: usize,
     stack_depth: usize,
     frame_depth: usize,
+    /// If non-empty, this catch only handles errors whose enum_name matches.
+    error_type: String,
 }
 
 /// Debug action returned by the debug hook.
@@ -781,6 +783,11 @@ impl Vm {
                 .parse()
                 .map_err(|e| VmError::Runtime(format!("Import parse error: {e}")))?;
 
+            // Check if the module has any pub fn declarations
+            let has_pub = program
+                .iter()
+                .any(|n| matches!(&n.node, harn_parser::Node::FnDecl { is_pub: true, .. }));
+
             // Execute top-level declarations from the imported file
             for node in &program {
                 match &node.node {
@@ -791,8 +798,10 @@ impl Vm {
                         is_pub,
                         ..
                     } => {
-                        // Only import pub functions for selective imports
-                        if selected_names.is_some() && !is_pub {
+                        // For selective imports: import any function that was explicitly named
+                        // For wildcard imports: if module has pub fns, only import pub ones;
+                        //   if no pub fns, import everything (backward compat)
+                        if selected_names.is_none() && has_pub && !is_pub {
                             continue;
                         }
                         if let Some(names) = selected_names {
@@ -859,6 +868,18 @@ impl Vm {
         };
 
         if let Some(handler) = self.exception_handlers.pop() {
+            // Check if this is a typed catch that doesn't match the thrown value
+            if !handler.error_type.is_empty() {
+                let matches = match &thrown_value {
+                    VmValue::EnumVariant { enum_name, .. } => *enum_name == handler.error_type,
+                    _ => false,
+                };
+                if !matches {
+                    // This handler doesn't match — try the next one
+                    return self.handle_error(error);
+                }
+            }
+
             // Unwind call frames back to the handler's frame depth
             while self.frames.len() > handler.frame_depth {
                 if let Some(frame) = self.frames.pop() {
@@ -1244,6 +1265,16 @@ impl Vm {
                     "empty" => VmValue::Bool(s.is_empty()),
                     _ => VmValue::Nil,
                 },
+                VmValue::EnumVariant {
+                    variant, fields, ..
+                } => match name.as_str() {
+                    "variant" => VmValue::String(Rc::from(variant.as_str())),
+                    "fields" => VmValue::List(Rc::new(fields.clone())),
+                    _ => VmValue::Nil,
+                },
+                VmValue::StructInstance { fields, .. } => {
+                    fields.get(&name).cloned().unwrap_or(VmValue::Nil)
+                }
                 _ => VmValue::Nil,
             };
             self.stack.push(result);
@@ -1403,10 +1434,18 @@ impl Vm {
             let frame = self.frames.last_mut().unwrap();
             let catch_offset = frame.chunk.read_u16(frame.ip) as usize;
             frame.ip += 2;
+            // Read the error type name index (extra u16)
+            let type_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            let error_type = match &frame.chunk.constants[type_idx] {
+                Constant::String(s) => s.clone(),
+                _ => String::new(),
+            };
             self.exception_handlers.push(ExceptionHandler {
                 catch_ip: catch_offset,
                 stack_depth: self.stack.len(),
                 frame_depth: self.frames.len(),
+                error_type,
             });
         } else if op == Op::PopHandler as u8 {
             self.exception_handlers.pop();
@@ -1511,6 +1550,44 @@ impl Vm {
             self.deadlines.push((deadline, self.frames.len()));
         } else if op == Op::DeadlineEnd as u8 {
             self.deadlines.pop();
+        } else if op == Op::BuildEnum as u8 {
+            let frame = self.frames.last_mut().unwrap();
+            let enum_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            let variant_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            let field_count = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            let enum_name = Self::const_string(&frame.chunk.constants[enum_idx])?;
+            let variant = Self::const_string(&frame.chunk.constants[variant_idx])?;
+            let fields = self
+                .stack
+                .split_off(self.stack.len().saturating_sub(field_count));
+            self.stack.push(VmValue::EnumVariant {
+                enum_name,
+                variant,
+                fields,
+            });
+        } else if op == Op::MatchEnum as u8 {
+            let frame = self.frames.last_mut().unwrap();
+            let enum_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            let variant_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            let enum_name = Self::const_string(&frame.chunk.constants[enum_idx])?;
+            let variant_name = Self::const_string(&frame.chunk.constants[variant_idx])?;
+            let val = self.pop()?;
+            let matches = match &val {
+                VmValue::EnumVariant {
+                    enum_name: en,
+                    variant: vn,
+                    ..
+                } => *en == enum_name && *vn == variant_name,
+                _ => false,
+            };
+            // Push the value back (we only peeked conceptually), then push the bool
+            self.stack.push(val);
+            self.stack.push(VmValue::Bool(matches));
         } else {
             return Err(VmError::InvalidInstruction(op));
         }

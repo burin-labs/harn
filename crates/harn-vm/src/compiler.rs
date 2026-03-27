@@ -22,6 +22,8 @@ impl std::error::Error for CompileError {}
 pub struct Compiler {
     chunk: Chunk,
     line: u32,
+    /// Track enum type names so PropertyAccess on them can produce EnumVariant.
+    enum_names: std::collections::HashSet<String>,
 }
 
 impl Compiler {
@@ -29,12 +31,27 @@ impl Compiler {
         Self {
             chunk: Chunk::new(),
             line: 1,
+            enum_names: std::collections::HashSet::new(),
         }
     }
 
     /// Compile a program (list of top-level nodes) into a Chunk.
-    /// Finds the entry pipeline and compiles its body.
+    /// Finds the entry pipeline and compiles its body, including inherited bodies.
     pub fn compile(mut self, program: &[SNode]) -> Result<Chunk, CompileError> {
+        // Pre-scan the entire program for enum declarations (including inside pipelines)
+        // so we can recognize EnumName.Variant as enum construction.
+        Self::collect_enum_names(program, &mut self.enum_names);
+
+        // Compile all top-level non-pipeline declarations first (fn, enum, etc.)
+        for sn in program {
+            match &sn.node {
+                Node::ImportDecl { .. } | Node::SelectiveImport { .. } => {
+                    self.compile_node(sn)?;
+                }
+                _ => {}
+            }
+        }
+
         // Find entry pipeline
         let main = program
             .iter()
@@ -46,7 +63,11 @@ impl Compiler {
             });
 
         if let Some(sn) = main {
-            if let Node::Pipeline { body, .. } = &sn.node {
+            if let Node::Pipeline { body, extends, .. } = &sn.node {
+                // If this pipeline extends another, compile the parent chain first
+                if let Some(parent_name) = extends {
+                    self.compile_parent_pipeline(program, parent_name)?;
+                }
                 self.compile_block(body)?;
             }
         }
@@ -54,6 +75,33 @@ impl Compiler {
         self.chunk.emit(Op::Nil, self.line);
         self.chunk.emit(Op::Return, self.line);
         Ok(self.chunk)
+    }
+
+    /// Recursively compile parent pipeline bodies (for extends).
+    fn compile_parent_pipeline(
+        &mut self,
+        program: &[SNode],
+        parent_name: &str,
+    ) -> Result<(), CompileError> {
+        let parent = program
+            .iter()
+            .find(|sn| matches!(&sn.node, Node::Pipeline { name, .. } if name == parent_name));
+        if let Some(sn) = parent {
+            if let Node::Pipeline { body, extends, .. } = &sn.node {
+                // Recurse if this parent also extends another
+                if let Some(grandparent) = extends {
+                    self.compile_parent_pipeline(program, grandparent)?;
+                }
+                // Compile parent body - pop all statement values
+                for stmt in body {
+                    self.compile_node(stmt)?;
+                    if Self::produces_value(&stmt.node) {
+                        self.chunk.emit(Op::Pop, self.line);
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     fn compile_block(&mut self, stmts: &[SNode]) -> Result<(), CompileError> {
@@ -278,6 +326,32 @@ impl Compiler {
                 method,
                 args,
             } => {
+                // Check if this is an enum variant construction with args: EnumName.Variant(args)
+                if let Node::Identifier(name) = &object.node {
+                    if self.enum_names.contains(name) {
+                        // Compile args, then BuildEnum
+                        for arg in args {
+                            self.compile_node(arg)?;
+                        }
+                        let enum_idx = self.chunk.add_constant(Constant::String(name.clone()));
+                        let var_idx = self.chunk.add_constant(Constant::String(method.clone()));
+                        self.chunk.emit_u16(Op::BuildEnum, enum_idx, self.line);
+                        let hi = (var_idx >> 8) as u8;
+                        let lo = var_idx as u8;
+                        self.chunk.code.push(hi);
+                        self.chunk.code.push(lo);
+                        self.chunk.lines.push(self.line);
+                        self.chunk.lines.push(self.line);
+                        let fc = args.len() as u16;
+                        let fhi = (fc >> 8) as u8;
+                        let flo = fc as u8;
+                        self.chunk.code.push(fhi);
+                        self.chunk.code.push(flo);
+                        self.chunk.lines.push(self.line);
+                        self.chunk.lines.push(self.line);
+                        return Ok(());
+                    }
+                }
                 self.compile_node(object)?;
                 for arg in args {
                     self.compile_node(arg)?;
@@ -288,6 +362,27 @@ impl Compiler {
             }
 
             Node::PropertyAccess { object, property } => {
+                // Check if this is an enum variant construction: EnumName.Variant
+                if let Node::Identifier(name) = &object.node {
+                    if self.enum_names.contains(name) {
+                        // Emit BuildEnum with 0 fields
+                        let enum_idx = self.chunk.add_constant(Constant::String(name.clone()));
+                        let var_idx = self.chunk.add_constant(Constant::String(property.clone()));
+                        self.chunk.emit_u16(Op::BuildEnum, enum_idx, self.line);
+                        let hi = (var_idx >> 8) as u8;
+                        let lo = var_idx as u8;
+                        self.chunk.code.push(hi);
+                        self.chunk.code.push(lo);
+                        self.chunk.lines.push(self.line);
+                        self.chunk.lines.push(self.line);
+                        // 0 fields
+                        self.chunk.code.push(0);
+                        self.chunk.code.push(0);
+                        self.chunk.lines.push(self.line);
+                        self.chunk.lines.push(self.line);
+                        return Ok(());
+                    }
+                }
                 self.compile_node(object)?;
                 let idx = self.chunk.add_constant(Constant::String(property.clone()));
                 self.chunk.emit_u16(Op::GetProperty, idx, self.line);
@@ -437,6 +532,7 @@ impl Compiler {
             } => {
                 // Compile function body into a separate chunk
                 let mut fn_compiler = Compiler::new();
+                fn_compiler.enum_names = self.enum_names.clone();
                 fn_compiler.compile_block(body)?;
                 fn_compiler.chunk.emit(Op::Nil, self.line);
                 fn_compiler.chunk.emit(Op::Return, self.line);
@@ -456,6 +552,7 @@ impl Compiler {
 
             Node::Closure { params, body } => {
                 let mut fn_compiler = Compiler::new();
+                fn_compiler.enum_names = self.enum_names.clone();
                 fn_compiler.compile_block(body)?;
                 // If block didn't end with return, the last value is on the stack
                 fn_compiler.chunk.emit(Op::Return, self.line);
@@ -480,16 +577,165 @@ impl Compiler {
                 self.compile_node(value)?;
                 let mut end_jumps = Vec::new();
                 for arm in arms {
-                    self.chunk.emit(Op::Dup, self.line);
-                    self.compile_node(&arm.pattern)?;
-                    self.chunk.emit(Op::Equal, self.line);
-                    let skip = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
-                    self.chunk.emit(Op::Pop, self.line); // pop bool
-                    self.chunk.emit(Op::Pop, self.line); // pop match value
-                    self.compile_block(&arm.body)?;
-                    end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
-                    self.chunk.patch_jump(skip);
-                    self.chunk.emit(Op::Pop, self.line); // pop bool
+                    match &arm.pattern.node {
+                        // Wildcard `_` — always matches
+                        Node::Identifier(name) if name == "_" => {
+                            self.chunk.emit(Op::Pop, self.line); // pop match value
+                            self.compile_match_body(&arm.body)?;
+                            end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
+                        }
+                        // Enum destructuring: EnumConstruct pattern
+                        Node::EnumConstruct {
+                            enum_name,
+                            variant,
+                            args: pat_args,
+                        } => {
+                            // Check if the match value is this enum variant
+                            self.chunk.emit(Op::Dup, self.line);
+                            let en_idx =
+                                self.chunk.add_constant(Constant::String(enum_name.clone()));
+                            let vn_idx = self.chunk.add_constant(Constant::String(variant.clone()));
+                            self.chunk.emit_u16(Op::MatchEnum, en_idx, self.line);
+                            let hi = (vn_idx >> 8) as u8;
+                            let lo = vn_idx as u8;
+                            self.chunk.code.push(hi);
+                            self.chunk.code.push(lo);
+                            self.chunk.lines.push(self.line);
+                            self.chunk.lines.push(self.line);
+                            // Stack: [match_value, bool]
+                            let skip = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
+                            self.chunk.emit(Op::Pop, self.line); // pop bool
+
+                            // Destructure: bind field variables from the enum's fields
+                            // The match value is still on the stack; we need to extract fields
+                            for (i, pat_arg) in pat_args.iter().enumerate() {
+                                if let Node::Identifier(binding_name) = &pat_arg.node {
+                                    // Dup the match value, get .fields, subscript [i]
+                                    self.chunk.emit(Op::Dup, self.line);
+                                    let fields_idx = self
+                                        .chunk
+                                        .add_constant(Constant::String("fields".to_string()));
+                                    self.chunk.emit_u16(Op::GetProperty, fields_idx, self.line);
+                                    let idx_const =
+                                        self.chunk.add_constant(Constant::Int(i as i64));
+                                    self.chunk.emit_u16(Op::Constant, idx_const, self.line);
+                                    self.chunk.emit(Op::Subscript, self.line);
+                                    let name_idx = self
+                                        .chunk
+                                        .add_constant(Constant::String(binding_name.clone()));
+                                    self.chunk.emit_u16(Op::DefLet, name_idx, self.line);
+                                }
+                            }
+
+                            self.chunk.emit(Op::Pop, self.line); // pop match value
+                            self.compile_match_body(&arm.body)?;
+                            end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
+                            self.chunk.patch_jump(skip);
+                            self.chunk.emit(Op::Pop, self.line); // pop bool
+                        }
+                        // Enum variant without args: PropertyAccess(EnumName, Variant)
+                        Node::PropertyAccess { object, property } if matches!(&object.node, Node::Identifier(n) if self.enum_names.contains(n)) =>
+                        {
+                            let enum_name = if let Node::Identifier(n) = &object.node {
+                                n.clone()
+                            } else {
+                                unreachable!()
+                            };
+                            self.chunk.emit(Op::Dup, self.line);
+                            let en_idx = self.chunk.add_constant(Constant::String(enum_name));
+                            let vn_idx =
+                                self.chunk.add_constant(Constant::String(property.clone()));
+                            self.chunk.emit_u16(Op::MatchEnum, en_idx, self.line);
+                            let hi = (vn_idx >> 8) as u8;
+                            let lo = vn_idx as u8;
+                            self.chunk.code.push(hi);
+                            self.chunk.code.push(lo);
+                            self.chunk.lines.push(self.line);
+                            self.chunk.lines.push(self.line);
+                            let skip = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
+                            self.chunk.emit(Op::Pop, self.line); // pop bool
+                            self.chunk.emit(Op::Pop, self.line); // pop match value
+                            self.compile_match_body(&arm.body)?;
+                            end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
+                            self.chunk.patch_jump(skip);
+                            self.chunk.emit(Op::Pop, self.line); // pop bool
+                        }
+                        // Enum destructuring via MethodCall: EnumName.Variant(bindings...)
+                        // Parser produces MethodCall for EnumName.Variant(x) patterns
+                        Node::MethodCall {
+                            object,
+                            method,
+                            args: pat_args,
+                        } if matches!(&object.node, Node::Identifier(n) if self.enum_names.contains(n)) =>
+                        {
+                            let enum_name = if let Node::Identifier(n) = &object.node {
+                                n.clone()
+                            } else {
+                                unreachable!()
+                            };
+                            // Check if the match value is this enum variant
+                            self.chunk.emit(Op::Dup, self.line);
+                            let en_idx = self.chunk.add_constant(Constant::String(enum_name));
+                            let vn_idx = self.chunk.add_constant(Constant::String(method.clone()));
+                            self.chunk.emit_u16(Op::MatchEnum, en_idx, self.line);
+                            let hi = (vn_idx >> 8) as u8;
+                            let lo = vn_idx as u8;
+                            self.chunk.code.push(hi);
+                            self.chunk.code.push(lo);
+                            self.chunk.lines.push(self.line);
+                            self.chunk.lines.push(self.line);
+                            let skip = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
+                            self.chunk.emit(Op::Pop, self.line); // pop bool
+
+                            // Destructure: bind field variables
+                            for (i, pat_arg) in pat_args.iter().enumerate() {
+                                if let Node::Identifier(binding_name) = &pat_arg.node {
+                                    self.chunk.emit(Op::Dup, self.line);
+                                    let fields_idx = self
+                                        .chunk
+                                        .add_constant(Constant::String("fields".to_string()));
+                                    self.chunk.emit_u16(Op::GetProperty, fields_idx, self.line);
+                                    let idx_const =
+                                        self.chunk.add_constant(Constant::Int(i as i64));
+                                    self.chunk.emit_u16(Op::Constant, idx_const, self.line);
+                                    self.chunk.emit(Op::Subscript, self.line);
+                                    let name_idx = self
+                                        .chunk
+                                        .add_constant(Constant::String(binding_name.clone()));
+                                    self.chunk.emit_u16(Op::DefLet, name_idx, self.line);
+                                }
+                            }
+
+                            self.chunk.emit(Op::Pop, self.line); // pop match value
+                            self.compile_match_body(&arm.body)?;
+                            end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
+                            self.chunk.patch_jump(skip);
+                            self.chunk.emit(Op::Pop, self.line); // pop bool
+                        }
+                        // Binding pattern: bare identifier (not a literal)
+                        Node::Identifier(name) => {
+                            // Bind the match value to this name, always matches
+                            self.chunk.emit(Op::Dup, self.line); // dup for binding
+                            let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
+                            self.chunk.emit_u16(Op::DefLet, name_idx, self.line);
+                            self.chunk.emit(Op::Pop, self.line); // pop match value
+                            self.compile_match_body(&arm.body)?;
+                            end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
+                        }
+                        // Literal/expression pattern — compare with Equal
+                        _ => {
+                            self.chunk.emit(Op::Dup, self.line);
+                            self.compile_node(&arm.pattern)?;
+                            self.chunk.emit(Op::Equal, self.line);
+                            let skip = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
+                            self.chunk.emit(Op::Pop, self.line); // pop bool
+                            self.chunk.emit(Op::Pop, self.line); // pop match value
+                            self.compile_match_body(&arm.body)?;
+                            end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
+                            self.chunk.patch_jump(skip);
+                            self.chunk.emit(Op::Pop, self.line); // pop bool
+                        }
+                    }
                 }
                 // No match — pop value, push nil
                 self.chunk.emit(Op::Pop, self.line);
@@ -565,7 +811,15 @@ impl Compiler {
                 if body.is_empty() {
                     self.chunk.emit(Op::Nil, self.line);
                 } else {
-                    self.compile_block(body)?;
+                    // Compile body, but pop intermediate values and push nil at the end.
+                    // The body typically contains statements (assignments) that don't produce values.
+                    for sn in body {
+                        self.compile_node(sn)?;
+                        if Self::produces_value(&sn.node) {
+                            self.chunk.emit(Op::Pop, self.line);
+                        }
+                    }
+                    self.chunk.emit(Op::Nil, self.line);
                 }
             }
 
@@ -590,33 +844,27 @@ impl Compiler {
                 variant,
                 args,
             } => {
-                // Build args list, then build a dict representing the enum variant
-                // Store as a dict with __enum__, __variant__, and __fields__ keys
-                let enum_key = self
-                    .chunk
-                    .add_constant(Constant::String("__enum__".to_string()));
-                let enum_val = self.chunk.add_constant(Constant::String(enum_name.clone()));
-                self.chunk.emit_u16(Op::Constant, enum_key, self.line);
-                self.chunk.emit_u16(Op::Constant, enum_val, self.line);
-
-                let var_key = self
-                    .chunk
-                    .add_constant(Constant::String("__variant__".to_string()));
-                let var_val = self.chunk.add_constant(Constant::String(variant.clone()));
-                self.chunk.emit_u16(Op::Constant, var_key, self.line);
-                self.chunk.emit_u16(Op::Constant, var_val, self.line);
-
-                let fields_key = self
-                    .chunk
-                    .add_constant(Constant::String("__fields__".to_string()));
-                self.chunk.emit_u16(Op::Constant, fields_key, self.line);
+                // Push field values onto the stack, then BuildEnum
                 for arg in args {
                     self.compile_node(arg)?;
                 }
-                self.chunk
-                    .emit_u16(Op::BuildList, args.len() as u16, self.line);
-
-                self.chunk.emit_u16(Op::BuildDict, 3, self.line);
+                let enum_idx = self.chunk.add_constant(Constant::String(enum_name.clone()));
+                let var_idx = self.chunk.add_constant(Constant::String(variant.clone()));
+                // BuildEnum: enum_name_idx, variant_idx, field_count
+                self.chunk.emit_u16(Op::BuildEnum, enum_idx, self.line);
+                let hi = (var_idx >> 8) as u8;
+                let lo = var_idx as u8;
+                self.chunk.code.push(hi);
+                self.chunk.code.push(lo);
+                self.chunk.lines.push(self.line);
+                self.chunk.lines.push(self.line);
+                let fc = args.len() as u16;
+                let fhi = (fc >> 8) as u8;
+                let flo = fc as u8;
+                self.chunk.code.push(fhi);
+                self.chunk.code.push(flo);
+                self.chunk.lines.push(self.line);
+                self.chunk.lines.push(self.line);
             }
 
             Node::StructConstruct {
@@ -673,11 +921,35 @@ impl Compiler {
             Node::TryCatch {
                 body,
                 error_var,
+                error_type,
                 catch_body,
-                ..
             } => {
+                // Extract the type name for typed catch (e.g., "AppError")
+                let type_name = error_type.as_ref().and_then(|te| {
+                    // TypeExpr is a Named(String) for simple type names
+                    if let harn_parser::TypeExpr::Named(name) = te {
+                        Some(name.clone())
+                    } else {
+                        None
+                    }
+                });
+
+                // Store the error type name as a constant (or empty string for untyped)
+                let type_name_idx = if let Some(ref tn) = type_name {
+                    self.chunk.add_constant(Constant::String(tn.clone()))
+                } else {
+                    self.chunk.add_constant(Constant::String(String::new()))
+                };
+
                 // 1. Emit TryCatchSetup with placeholder offset to catch handler
                 let catch_jump = self.chunk.emit_jump(Op::TryCatchSetup, self.line);
+                // Emit the type name index as extra u16 after the jump offset
+                let hi = (type_name_idx >> 8) as u8;
+                let lo = type_name_idx as u8;
+                self.chunk.code.push(hi);
+                self.chunk.code.push(lo);
+                self.chunk.lines.push(self.line);
+                self.chunk.lines.push(self.line);
 
                 // 2. Compile try body
                 if body.is_empty() {
@@ -731,11 +1003,27 @@ impl Compiler {
                     .add_constant(Constant::String(counter_name.to_string()));
                 self.chunk.emit_u16(Op::DefVar, counter_idx, self.line);
 
+                // Also store the last error for re-throwing
+                self.chunk.emit(Op::Nil, self.line);
+                let err_name = "__retry_last_error__";
+                let err_idx = self
+                    .chunk
+                    .add_constant(Constant::String(err_name.to_string()));
+                self.chunk.emit_u16(Op::DefVar, err_idx, self.line);
+
                 // Loop start
                 let loop_start = self.chunk.current_offset();
 
-                // Set up try/catch
+                // Set up try/catch (untyped - empty type name)
                 let catch_jump = self.chunk.emit_jump(Op::TryCatchSetup, self.line);
+                // Emit empty type name for untyped catch
+                let empty_type = self.chunk.add_constant(Constant::String(String::new()));
+                let hi = (empty_type >> 8) as u8;
+                let lo = empty_type as u8;
+                self.chunk.code.push(hi);
+                self.chunk.code.push(lo);
+                self.chunk.lines.push(self.line);
+                self.chunk.lines.push(self.line);
 
                 // Compile body
                 self.compile_block(body)?;
@@ -746,7 +1034,10 @@ impl Compiler {
 
                 // Catch handler
                 self.chunk.patch_jump(catch_jump);
-                // Pop the error value (we don't use it)
+                // Save the error value for potential re-throw
+                self.chunk.emit(Op::Dup, self.line);
+                self.chunk.emit_u16(Op::SetVar, err_idx, self.line);
+                // Pop the error value
                 self.chunk.emit(Op::Pop, self.line);
 
                 // Decrement counter
@@ -765,12 +1056,15 @@ impl Compiler {
                 self.chunk.emit(Op::Pop, self.line); // pop condition
                 self.chunk.emit_u16(Op::Jump, loop_start as u16, self.line);
 
-                // No more retries — push nil
+                // No more retries — re-throw the last error
                 self.chunk.patch_jump(retry_jump);
                 self.chunk.emit(Op::Pop, self.line); // pop condition
-                self.chunk.emit(Op::Nil, self.line);
+                self.chunk.emit_u16(Op::GetVar, err_idx, self.line);
+                self.chunk.emit(Op::Throw, self.line);
 
                 self.chunk.patch_jump(end_jump);
+                // Push nil as the result of a successful retry block
+                self.chunk.emit(Op::Nil, self.line);
             }
 
             Node::Parallel {
@@ -780,6 +1074,7 @@ impl Compiler {
             } => {
                 self.compile_node(count)?;
                 let mut fn_compiler = Compiler::new();
+                fn_compiler.enum_names = self.enum_names.clone();
                 fn_compiler.compile_block(body)?;
                 fn_compiler.chunk.emit(Op::Return, self.line);
                 let params = vec![variable.clone().unwrap_or_else(|| "__i__".to_string())];
@@ -801,6 +1096,7 @@ impl Compiler {
             } => {
                 self.compile_node(list)?;
                 let mut fn_compiler = Compiler::new();
+                fn_compiler.enum_names = self.enum_names.clone();
                 fn_compiler.compile_block(body)?;
                 fn_compiler.chunk.emit(Op::Return, self.line);
                 let func = CompiledFunction {
@@ -816,6 +1112,7 @@ impl Compiler {
 
             Node::SpawnExpr { body } => {
                 let mut fn_compiler = Compiler::new();
+                fn_compiler.enum_names = self.enum_names.clone();
                 fn_compiler.compile_block(body)?;
                 fn_compiler.chunk.emit(Op::Return, self.line);
                 let func = CompiledFunction {
@@ -872,6 +1169,20 @@ impl Compiler {
         })
     }
 
+    /// Compile a match arm body, ensuring it always pushes exactly one value.
+    fn compile_match_body(&mut self, body: &[SNode]) -> Result<(), CompileError> {
+        if body.is_empty() {
+            self.chunk.emit(Op::Nil, self.line);
+        } else {
+            self.compile_block(body)?;
+            // If the last statement doesn't produce a value, push nil
+            if !Self::produces_value(&body.last().unwrap().node) {
+                self.chunk.emit(Op::Nil, self.line);
+            }
+        }
+        Ok(())
+    }
+
     /// Emit the binary op instruction for a compound assignment operator.
     fn emit_compound_op(&mut self, op: &str) -> Result<(), CompileError> {
         match op {
@@ -897,6 +1208,29 @@ impl Compiler {
             Node::PropertyAccess { object, .. } => self.root_var_name(object),
             Node::SubscriptAccess { object, .. } => self.root_var_name(object),
             _ => None,
+        }
+    }
+}
+
+impl Compiler {
+    /// Recursively collect all enum type names from the AST.
+    fn collect_enum_names(nodes: &[SNode], names: &mut std::collections::HashSet<String>) {
+        for sn in nodes {
+            match &sn.node {
+                Node::EnumDecl { name, .. } => {
+                    names.insert(name.clone());
+                }
+                Node::Pipeline { body, .. } => {
+                    Self::collect_enum_names(body, names);
+                }
+                Node::FnDecl { body, .. } => {
+                    Self::collect_enum_names(body, names);
+                }
+                Node::Block(stmts) => {
+                    Self::collect_enum_names(stmts, names);
+                }
+                _ => {}
+            }
         }
     }
 }
