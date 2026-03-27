@@ -356,6 +356,7 @@ dependencies = [
  "harn-vm",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -422,11 +423,14 @@ dependencies = [
 name = "harn-vm"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "harn-lexer",
  "harn-parser",
  "rand",
  "regex",
+ "reqwest",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]

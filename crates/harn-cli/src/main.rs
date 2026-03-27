@@ -371,6 +371,42 @@ async fn execute(source: &str, source_path: Option<&Path>) -> Result<Vec<u8>, Ha
         .await
 }
 
+async fn execute_vm(source: &str, source_path: Option<&Path>) -> Result<String, String> {
+    let mut lexer = Lexer::new(source);
+    let tokens = lexer.tokenize().map_err(|e| e.to_string())?;
+    let mut parser = Parser::new(tokens);
+    let program = parser.parse().map_err(|e| e.to_string())?;
+
+    // Static type checking (same as interpreter path)
+    let type_diagnostics = TypeChecker::new().check(&program);
+    for diag in &type_diagnostics {
+        if diag.severity == DiagnosticSeverity::Error {
+            return Err(diag.message.clone());
+        }
+    }
+
+    let chunk = harn_vm::Compiler::new()
+        .compile(&program)
+        .map_err(|e| e.to_string())?;
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let mut vm = harn_vm::Vm::new();
+            harn_vm::register_vm_stdlib(&mut vm);
+            if let Some(path) = source_path {
+                if let Some(parent) = path.parent() {
+                    if !parent.as_os_str().is_empty() {
+                        vm.set_source_dir(parent);
+                    }
+                }
+            }
+            vm.execute(&chunk).await.map_err(|e| e.to_string())?;
+            Ok(vm.output().to_string())
+        })
+        .await
+}
+
 async fn run_conformance_tests(dir: &str) {
     let dir_path = PathBuf::from(dir);
     if !dir_path.exists() {
@@ -434,9 +470,9 @@ async fn run_conformance_tests(dir: &str) {
                     }
                 };
 
-                match execute(&source, Some(harn_file.as_path())).await {
+                match execute_vm(&source, Some(harn_file.as_path())).await {
                     Ok(output) => {
-                        let actual = String::from_utf8_lossy(&output).trim_end().to_string();
+                        let actual = output.trim_end().to_string();
                         if actual == expected {
                             println!("  PASS  {rel_path}");
                             passed += 1;
@@ -474,8 +510,8 @@ async fn run_conformance_tests(dir: &str) {
                     }
                 };
 
-                match execute(&source, Some(harn_file.as_path())).await {
-                    Err(ref err) if err.to_string().contains(&expected_error) => {
+                match execute_vm(&source, Some(harn_file.as_path())).await {
+                    Err(ref err) if err.contains(&expected_error) => {
                         println!("  PASS  {rel_path}");
                         passed += 1;
                     }

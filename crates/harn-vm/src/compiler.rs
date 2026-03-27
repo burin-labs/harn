@@ -88,6 +88,10 @@ impl Compiler {
             Node::BoolLiteral(true) => self.chunk.emit(Op::True, self.line),
             Node::BoolLiteral(false) => self.chunk.emit(Op::False, self.line),
             Node::NilLiteral => self.chunk.emit(Op::Nil, self.line),
+            Node::DurationLiteral(ms) => {
+                let idx = self.chunk.add_constant(Constant::Duration(*ms));
+                self.chunk.emit_u16(Op::Constant, idx, self.line);
+            }
 
             Node::Identifier(name) => {
                 let idx = self.chunk.add_constant(Constant::String(name.clone()));
@@ -495,12 +499,6 @@ impl Compiler {
                 }
             }
 
-            Node::DurationLiteral(ms) => {
-                // Durations are just integers in milliseconds
-                let idx = self.chunk.add_constant(Constant::Int(*ms as i64));
-                self.chunk.emit_u16(Op::Constant, idx, self.line);
-            }
-
             Node::RangeExpr {
                 start,
                 end,
@@ -643,10 +641,27 @@ impl Compiler {
                     .emit_u16(Op::BuildDict, (fields.len() + 1) as u16, self.line);
             }
 
+            Node::ImportDecl { path } => {
+                let idx = self.chunk.add_constant(Constant::String(path.clone()));
+                self.chunk.emit_u16(Op::Import, idx, self.line);
+            }
+
+            Node::SelectiveImport { names, path } => {
+                let path_idx = self.chunk.add_constant(Constant::String(path.clone()));
+                let names_str = names.join(",");
+                let names_idx = self.chunk.add_constant(Constant::String(names_str));
+                self.chunk
+                    .emit_u16(Op::SelectiveImport, path_idx, self.line);
+                let hi = (names_idx >> 8) as u8;
+                let lo = names_idx as u8;
+                self.chunk.code.push(hi);
+                self.chunk.code.push(lo);
+                self.chunk.lines.push(self.line);
+                self.chunk.lines.push(self.line);
+            }
+
             // Declarations that only register metadata (no runtime effect needed for v1)
             Node::Pipeline { .. }
-            | Node::ImportDecl { .. }
-            | Node::SelectiveImport { .. }
             | Node::OverrideDecl { .. }
             | Node::TypeDecl { .. }
             | Node::EnumDecl { .. }
@@ -840,6 +855,23 @@ impl Compiler {
 }
 
 impl Compiler {
+    /// Compile a function body into a CompiledFunction (for import support).
+    pub fn compile_fn_body(
+        &mut self,
+        params: &[TypedParam],
+        body: &[SNode],
+    ) -> Result<CompiledFunction, CompileError> {
+        let mut fn_compiler = Compiler::new();
+        fn_compiler.compile_block(body)?;
+        fn_compiler.chunk.emit(Op::Nil, 0);
+        fn_compiler.chunk.emit(Op::Return, 0);
+        Ok(CompiledFunction {
+            name: String::new(),
+            params: TypedParam::names(params),
+            chunk: fn_compiler.chunk,
+        })
+    }
+
     /// Emit the binary op instruction for a compound assignment operator.
     fn emit_compound_op(&mut self, op: &str) -> Result<(), CompileError> {
         match op {

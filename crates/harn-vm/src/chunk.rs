@@ -114,6 +114,12 @@ pub enum Op {
     /// Stack: closure → TaskHandle
     Spawn,
 
+    // --- Imports ---
+    /// Import a file. arg: u16 = constant index (path string).
+    Import,
+    /// Selective import. arg1: u16 = path string, arg2: u16 = names list constant.
+    SelectiveImport,
+
     // --- Deadline ---
     /// Pop duration value, push deadline onto internal deadline stack.
     DeadlineSetup,
@@ -135,6 +141,7 @@ pub enum Constant {
     String(String),
     Bool(bool),
     Nil,
+    Duration(u64),
 }
 
 impl fmt::Display for Constant {
@@ -145,6 +152,7 @@ impl fmt::Display for Constant {
             Constant::String(s) => write!(f, "\"{s}\""),
             Constant::Bool(b) => write!(f, "{b}"),
             Constant::Nil => write!(f, "nil"),
+            Constant::Duration(ms) => write!(f, "{ms}ms"),
         }
     }
 }
@@ -417,6 +425,27 @@ impl Chunk {
                 x if x == Op::Parallel as u8 => out.push_str("PARALLEL\n"),
                 x if x == Op::ParallelMap as u8 => out.push_str("PARALLEL_MAP\n"),
                 x if x == Op::Spawn as u8 => out.push_str("SPAWN\n"),
+                x if x == Op::Import as u8 => {
+                    let idx = self.read_u16(ip);
+                    ip += 2;
+                    out.push_str(&format!(
+                        "IMPORT {:>4} ({})\n",
+                        idx, self.constants[idx as usize]
+                    ));
+                }
+                x if x == Op::SelectiveImport as u8 => {
+                    let path_idx = self.read_u16(ip);
+                    ip += 2;
+                    let names_idx = self.read_u16(ip);
+                    ip += 2;
+                    out.push_str(&format!(
+                        "SELECTIVE_IMPORT {:>4} ({}) names: {:>4} ({})\n",
+                        path_idx,
+                        self.constants[path_idx as usize],
+                        names_idx,
+                        self.constants[names_idx as usize]
+                    ));
+                }
                 x if x == Op::DeadlineSetup as u8 => out.push_str("DEADLINE_SETUP\n"),
                 x if x == Op::DeadlineEnd as u8 => out.push_str("DEADLINE_END\n"),
                 x if x == Op::Dup as u8 => out.push_str("DUP\n"),

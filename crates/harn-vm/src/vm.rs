@@ -451,6 +451,10 @@ pub struct Vm {
     stopped: bool,
     /// Last source line executed (to detect line changes).
     last_line: usize,
+    /// Source directory for resolving imports.
+    source_dir: Option<std::path::PathBuf>,
+    /// Already-imported file paths (cycle prevention).
+    imported_paths: Vec<std::path::PathBuf>,
 }
 
 impl Vm {
@@ -472,6 +476,8 @@ impl Vm {
             step_frame_depth: 0,
             stopped: false,
             last_line: 0,
+            source_dir: None,
+            imported_paths: Vec::new(),
         }
     }
 
@@ -695,7 +701,143 @@ impl Vm {
             step_frame_depth: 0,
             stopped: false,
             last_line: 0,
+            source_dir: None,
+            imported_paths: Vec::new(),
         }
+    }
+
+    /// Set the source directory for import resolution.
+    pub fn set_source_dir(&mut self, dir: &std::path::Path) {
+        self.source_dir = Some(dir.to_path_buf());
+    }
+
+    /// Execute an import, reading and running the file's declarations.
+    fn execute_import<'a>(
+        &'a mut self,
+        path: &'a str,
+        selected_names: Option<&'a [String]>,
+    ) -> Pin<Box<dyn Future<Output = Result<(), VmError>> + 'a>> {
+        Box::pin(async move {
+            use std::path::PathBuf;
+
+            // Resolve the file path
+            let base = self
+                .source_dir
+                .clone()
+                .unwrap_or_else(|| PathBuf::from("."));
+            let mut file_path = base.join(path);
+
+            // Try with .harn extension if no extension
+            if !file_path.exists() && file_path.extension().is_none() {
+                file_path.set_extension("harn");
+            }
+
+            // Try .burin/packages/ fallback
+            if !file_path.exists() {
+                let pkg_path = base.join(".burin").join("packages").join(path);
+                if pkg_path.exists() {
+                    file_path = if pkg_path.is_dir() {
+                        let lib = pkg_path.join("lib.harn");
+                        if lib.exists() {
+                            lib
+                        } else {
+                            pkg_path
+                        }
+                    } else {
+                        pkg_path
+                    };
+                } else {
+                    let mut pkg_harn = pkg_path.clone();
+                    pkg_harn.set_extension("harn");
+                    if pkg_harn.exists() {
+                        file_path = pkg_harn;
+                    }
+                }
+            }
+
+            // Cycle detection
+            let canonical = file_path
+                .canonicalize()
+                .unwrap_or_else(|_| file_path.clone());
+            if self.imported_paths.contains(&canonical) {
+                return Ok(()); // already imported
+            }
+            self.imported_paths.push(canonical);
+
+            // Read, lex, parse
+            let source = std::fs::read_to_string(&file_path).map_err(|e| {
+                VmError::Runtime(format!(
+                    "Import error: cannot read '{}': {e}",
+                    file_path.display()
+                ))
+            })?;
+
+            let mut lexer = harn_lexer::Lexer::new(&source);
+            let tokens = lexer
+                .tokenize()
+                .map_err(|e| VmError::Runtime(format!("Import lex error: {e}")))?;
+            let mut parser = harn_parser::Parser::new(tokens);
+            let program = parser
+                .parse()
+                .map_err(|e| VmError::Runtime(format!("Import parse error: {e}")))?;
+
+            // Execute top-level declarations from the imported file
+            for node in &program {
+                match &node.node {
+                    harn_parser::Node::FnDecl {
+                        name,
+                        params,
+                        body,
+                        is_pub,
+                        ..
+                    } => {
+                        // Only import pub functions for selective imports
+                        if selected_names.is_some() && !is_pub {
+                            continue;
+                        }
+                        if let Some(names) = selected_names {
+                            if !names.contains(name) {
+                                continue;
+                            }
+                        }
+                        // Compile the function body into a closure and define it
+                        let mut compiler = crate::Compiler::new();
+                        let func_chunk = compiler
+                            .compile_fn_body(params, body)
+                            .map_err(|e| VmError::Runtime(format!("Import compile error: {e}")))?;
+                        let closure = VmClosure {
+                            func: func_chunk,
+                            env: self.env.clone(),
+                        };
+                        self.env
+                            .define(name, VmValue::Closure(Rc::new(closure)), false);
+                    }
+                    harn_parser::Node::ImportDecl { path: sub_path } => {
+                        // Handle nested imports - set source_dir relative to the imported file
+                        let old_dir = self.source_dir.clone();
+                        if let Some(parent) = file_path.parent() {
+                            self.source_dir = Some(parent.to_path_buf());
+                        }
+                        self.execute_import(sub_path, None).await?;
+                        self.source_dir = old_dir;
+                    }
+                    harn_parser::Node::SelectiveImport {
+                        names,
+                        path: sub_path,
+                    } => {
+                        let old_dir = self.source_dir.clone();
+                        if let Some(parent) = file_path.parent() {
+                            self.source_dir = Some(parent.to_path_buf());
+                        }
+                        self.execute_import(sub_path, Some(names)).await?;
+                        self.source_dir = old_dir;
+                    }
+                    _ => {} // Skip other top-level nodes (pipelines, enums, etc.)
+                }
+            }
+
+            Ok(())
+        })
     }
 
     /// Get the captured output.
@@ -849,6 +991,7 @@ impl Vm {
                 Constant::String(s) => VmValue::String(Rc::from(s.as_str())),
                 Constant::Bool(b) => VmValue::Bool(*b),
                 Constant::Nil => VmValue::Nil,
+                Constant::Duration(ms) => VmValue::Duration(*ms),
             };
             self.stack.push(val);
         } else if op == Op::Nil as u8 {
@@ -1341,6 +1484,22 @@ impl Vm {
             } else {
                 self.stack.push(VmValue::Nil);
             }
+        } else if op == Op::Import as u8 {
+            let frame = self.frames.last_mut().unwrap();
+            let path_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            let import_path = Self::const_string(&frame.chunk.constants[path_idx])?;
+            self.execute_import(&import_path, None).await?;
+        } else if op == Op::SelectiveImport as u8 {
+            let frame = self.frames.last_mut().unwrap();
+            let path_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            let names_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            let import_path = Self::const_string(&frame.chunk.constants[path_idx])?;
+            let names_str = Self::const_string(&frame.chunk.constants[names_idx])?;
+            let names: Vec<String> = names_str.split(',').map(|s| s.to_string()).collect();
+            self.execute_import(&import_path, Some(&names)).await?;
         } else if op == Op::DeadlineSetup as u8 {
             let dur_val = self.pop()?;
             let ms = match &dur_val {
