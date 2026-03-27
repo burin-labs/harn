@@ -345,19 +345,81 @@ impl Interpreter {
 
             Node::Assignment { target, value, op } => {
                 let val = self.eval(value).await?;
-                if let Node::Identifier(name) = &target.node {
-                    let final_val = if let Some(op) = op {
-                        let current = self.env.get(name).ok_or_else(|| {
-                            RuntimeError::thrown(format!("Undefined variable '{name}'"))
-                                .with_span(target.span)
-                        })?;
-                        Self::apply_arithmetic_op(op, current, val)?
-                    } else {
-                        val
-                    };
-                    self.env
-                        .assign(name, final_val)
-                        .map_err(|e| e.with_span(target.span))?;
+                match &target.node {
+                    Node::Identifier(name) => {
+                        let final_val = if let Some(op) = op {
+                            let current = self.env.get(name).ok_or_else(|| {
+                                RuntimeError::thrown(format!("Undefined variable '{name}'"))
+                                    .with_span(target.span)
+                            })?;
+                            Self::apply_arithmetic_op(op, current, val)?
+                        } else {
+                            val
+                        };
+                        self.env
+                            .assign(name, final_val)
+                            .map_err(|e| e.with_span(target.span))?;
+                    }
+                    Node::PropertyAccess { object, property } => {
+                        let final_val = if let Some(op) = op {
+                            let current = self.eval(target).await?;
+                            Self::apply_arithmetic_op(op, current, val)?
+                        } else {
+                            val
+                        };
+                        if let Node::Identifier(var_name) = &object.node {
+                            if let Some(obj) = self.env.get(var_name) {
+                                let new_obj = match obj {
+                                    Value::Dict(mut map) => {
+                                        map.insert(property.clone(), final_val);
+                                        Value::Dict(map)
+                                    }
+                                    _ => return Ok(Value::Nil),
+                                };
+                                self.env
+                                    .assign(var_name, new_obj)
+                                    .map_err(|e| e.with_span(target.span))?;
+                            }
+                        }
+                    }
+                    Node::SubscriptAccess { object, index } => {
+                        let final_val = if let Some(op) = op {
+                            let current = self.eval(target).await?;
+                            Self::apply_arithmetic_op(op, current, val)?
+                        } else {
+                            val
+                        };
+                        let idx_val = self.eval(index).await?;
+                        if let Node::Identifier(var_name) = &object.node {
+                            if let Some(obj) = self.env.get(var_name) {
+                                let new_obj = match obj {
+                                    Value::List(mut items) => {
+                                        if let Value::Int(i) = &idx_val {
+                                            let idx = if *i < 0 {
+                                                (items.len() as i64 + i).max(0) as usize
+                                            } else {
+                                                *i as usize
+                                            };
+                                            if idx < items.len() {
+                                                items[idx] = final_val;
+                                            }
+                                        }
+                                        Value::List(items)
+                                    }
+                                    Value::Dict(mut map) => {
+                                        let key = idx_val.as_string();
+                                        map.insert(key, final_val);
+                                        Value::Dict(map)
+                                    }
+                                    _ => return Ok(Value::Nil),
+                                };
+                                self.env
+                                    .assign(var_name, new_obj)
+                                    .map_err(|e| e.with_span(target.span))?;
+                            }
+                        }
+                    }
+                    _ => {}
                 }
                 Ok(Value::Nil)
             }

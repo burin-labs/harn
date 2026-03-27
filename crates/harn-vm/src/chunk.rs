@@ -71,6 +71,12 @@ pub enum Op {
     // --- Object operations ---
     /// Property access. arg: u16 = constant index (property name).
     GetProperty,
+    /// Property assignment. arg: u16 = constant index (property name).
+    /// Stack: [value] → assigns to the named variable's property.
+    SetProperty,
+    /// Subscript assignment. arg: u16 = constant index (variable name).
+    /// Stack: [index, value] → assigns to variable[index] = value.
+    SetSubscript,
     /// Method call. arg1: u16 = constant index (method name), arg2: u8 = arg count.
     MethodCall,
 
@@ -360,6 +366,22 @@ impl Chunk {
                     ip += 2;
                     out.push_str(&format!(
                         "GET_PROPERTY {:>4} ({})\n",
+                        idx, self.constants[idx as usize]
+                    ));
+                }
+                x if x == Op::SetProperty as u8 => {
+                    let idx = self.read_u16(ip);
+                    ip += 2;
+                    out.push_str(&format!(
+                        "SET_PROPERTY {:>4} ({})\n",
+                        idx, self.constants[idx as usize]
+                    ));
+                }
+                x if x == Op::SetSubscript as u8 => {
+                    let idx = self.read_u16(ip);
+                    ip += 2;
+                    out.push_str(&format!(
+                        "SET_SUBSCRIPT {:>4} ({})\n",
                         idx, self.constants[idx as usize]
                     ));
                 }

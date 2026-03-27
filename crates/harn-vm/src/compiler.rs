@@ -112,26 +112,51 @@ impl Compiler {
                 if let Node::Identifier(name) = &target.node {
                     let idx = self.chunk.add_constant(Constant::String(name.clone()));
                     if let Some(op) = op {
-                        // Compound assignment: get current, compute, set
                         self.chunk.emit_u16(Op::GetVar, idx, self.line);
                         self.compile_node(value)?;
-                        match op.as_str() {
-                            "+" => self.chunk.emit(Op::Add, self.line),
-                            "-" => self.chunk.emit(Op::Sub, self.line),
-                            "*" => self.chunk.emit(Op::Mul, self.line),
-                            "/" => self.chunk.emit(Op::Div, self.line),
-                            "%" => self.chunk.emit(Op::Mod, self.line),
-                            _ => {
-                                return Err(CompileError {
-                                    message: format!("Unknown compound operator: {op}"),
-                                    line: self.line,
-                                })
-                            }
-                        }
+                        self.emit_compound_op(op)?;
                         self.chunk.emit_u16(Op::SetVar, idx, self.line);
                     } else {
                         self.compile_node(value)?;
                         self.chunk.emit_u16(Op::SetVar, idx, self.line);
+                    }
+                } else if let Node::PropertyAccess { object, property } = &target.node {
+                    // obj.field = value → SetProperty
+                    if let Some(var_name) = self.root_var_name(object) {
+                        let var_idx = self.chunk.add_constant(Constant::String(var_name.clone()));
+                        let prop_idx = self.chunk.add_constant(Constant::String(property.clone()));
+                        if let Some(op) = op {
+                            // compound: obj.field += value
+                            self.compile_node(target)?; // push current obj.field
+                            self.compile_node(value)?;
+                            self.emit_compound_op(op)?;
+                        } else {
+                            self.compile_node(value)?;
+                        }
+                        // Stack: [new_value]
+                        // SetProperty reads var_idx from env, sets prop, writes back
+                        self.chunk.emit_u16(Op::SetProperty, prop_idx, self.line);
+                        // Encode the variable name index as a second u16
+                        let hi = (var_idx >> 8) as u8;
+                        let lo = var_idx as u8;
+                        self.chunk.code.push(hi);
+                        self.chunk.code.push(lo);
+                        self.chunk.lines.push(self.line);
+                        self.chunk.lines.push(self.line);
+                    }
+                } else if let Node::SubscriptAccess { object, index } = &target.node {
+                    // obj[idx] = value → SetSubscript
+                    if let Some(var_name) = self.root_var_name(object) {
+                        let var_idx = self.chunk.add_constant(Constant::String(var_name.clone()));
+                        if let Some(op) = op {
+                            self.compile_node(target)?;
+                            self.compile_node(value)?;
+                            self.emit_compound_op(op)?;
+                        } else {
+                            self.compile_node(value)?;
+                        }
+                        self.compile_node(index)?;
+                        self.chunk.emit_u16(Op::SetSubscript, var_idx, self.line);
                     }
                 }
             }
@@ -810,6 +835,36 @@ impl Compiler {
             | Node::MutexBlock { .. } => true,
             // All other expressions produce values
             _ => true,
+        }
+    }
+}
+
+impl Compiler {
+    /// Emit the binary op instruction for a compound assignment operator.
+    fn emit_compound_op(&mut self, op: &str) -> Result<(), CompileError> {
+        match op {
+            "+" => self.chunk.emit(Op::Add, self.line),
+            "-" => self.chunk.emit(Op::Sub, self.line),
+            "*" => self.chunk.emit(Op::Mul, self.line),
+            "/" => self.chunk.emit(Op::Div, self.line),
+            "%" => self.chunk.emit(Op::Mod, self.line),
+            _ => {
+                return Err(CompileError {
+                    message: format!("Unknown compound operator: {op}"),
+                    line: self.line,
+                })
+            }
+        }
+        Ok(())
+    }
+
+    /// Extract the root variable name from a (possibly nested) access expression.
+    fn root_var_name(&self, node: &SNode) -> Option<String> {
+        match &node.node {
+            Node::Identifier(name) => Some(name.clone()),
+            Node::PropertyAccess { object, .. } => self.root_var_name(object),
+            Node::SubscriptAccess { object, .. } => self.root_var_name(object),
+            _ => None,
         }
     }
 }

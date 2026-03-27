@@ -1066,6 +1066,74 @@ impl Vm {
                 _ => VmValue::Nil,
             };
             self.stack.push(result);
+        } else if op == Op::SetProperty as u8 {
+            let frame = self.frames.last_mut().unwrap();
+            let prop_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            let var_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            let prop_name = Self::const_string(&frame.chunk.constants[prop_idx])?;
+            let var_name = Self::const_string(&frame.chunk.constants[var_idx])?;
+            let new_value = self.pop()?;
+            if let Some(obj) = self.env.get(&var_name) {
+                match obj {
+                    VmValue::Dict(map) => {
+                        let mut new_map = (*map).clone();
+                        new_map.insert(prop_name, new_value);
+                        self.env
+                            .assign(&var_name, VmValue::Dict(Rc::new(new_map)))?;
+                    }
+                    VmValue::StructInstance {
+                        struct_name,
+                        fields,
+                    } => {
+                        let mut new_fields = fields.clone();
+                        new_fields.insert(prop_name, new_value);
+                        self.env.assign(
+                            &var_name,
+                            VmValue::StructInstance {
+                                struct_name,
+                                fields: new_fields,
+                            },
+                        )?;
+                    }
+                    _ => {}
+                }
+            }
+        } else if op == Op::SetSubscript as u8 {
+            let frame = self.frames.last_mut().unwrap();
+            let var_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            let var_name = Self::const_string(&frame.chunk.constants[var_idx])?;
+            let index = self.pop()?;
+            let new_value = self.pop()?;
+            if let Some(obj) = self.env.get(&var_name) {
+                match obj {
+                    VmValue::List(items) => {
+                        if let Some(i) = index.as_int() {
+                            let mut new_items = (*items).clone();
+                            let idx = if i < 0 {
+                                (new_items.len() as i64 + i).max(0) as usize
+                            } else {
+                                i as usize
+                            };
+                            if idx < new_items.len() {
+                                new_items[idx] = new_value;
+                                self.env
+                                    .assign(&var_name, VmValue::List(Rc::new(new_items)))?;
+                            }
+                        }
+                    }
+                    VmValue::Dict(map) => {
+                        let key = index.display();
+                        let mut new_map = (*map).clone();
+                        new_map.insert(key, new_value);
+                        self.env
+                            .assign(&var_name, VmValue::Dict(Rc::new(new_map)))?;
+                    }
+                    _ => {}
+                }
+            }
         } else if op == Op::MethodCall as u8 {
             let frame = self.frames.last_mut().unwrap();
             let name_idx = frame.chunk.read_u16(frame.ip) as usize;

@@ -844,8 +844,13 @@ impl Parser {
         let start = self.current_span();
         let expr = self.parse_expression()?;
 
-        // Check for assignment or compound assignment: identifier = value, identifier += value, etc.
-        if matches!(expr.node, Node::Identifier(_)) {
+        // Check for assignment or compound assignment on valid targets:
+        // identifier, property access (obj.field), subscript access (obj[key])
+        let is_assignable = matches!(
+            expr.node,
+            Node::Identifier(_) | Node::PropertyAccess { .. } | Node::SubscriptAccess { .. }
+        );
+        if is_assignable {
             if self.check(&TokenKind::Assign) {
                 self.advance();
                 let value = self.parse_expression()?;
