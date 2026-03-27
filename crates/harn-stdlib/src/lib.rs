@@ -1,13 +1,19 @@
 #![allow(clippy::result_large_err)]
 
 mod async_builtins;
+mod http;
 mod json;
 mod llm;
+mod logging;
+mod tools;
 
 use harn_runtime::{Interpreter, RuntimeError, Value};
 
 pub use async_builtins::register_async_builtins;
+pub use http::register_http_builtins;
 pub use llm::register_llm_builtins;
+pub use logging::register_logging_builtins;
+pub use tools::register_tool_builtins;
 
 /// Convert a process::Output into a Harn Dict value.
 fn output_to_value(output: std::process::Output) -> Value {

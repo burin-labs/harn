@@ -96,7 +96,9 @@ The interpreter is `!Send` — runs inside `tokio::task::LocalSet`.
   value types (`value.rs`), scoped environments (`environment.rs`),
   error types with spans and suggestions (`error.rs`).
 - **harn-stdlib** — Builtin functions: core I/O (`lib.rs`), JSON (`json.rs`),
-  LLM calls (`llm.rs`), async builtins (`async_builtins.rs`).
+  LLM calls (`llm.rs`), async builtins (`async_builtins.rs`),
+  HTTP client with retries (`http.rs`), structured logging (`logging.rs`),
+  tool registry with JSON Schema support (`tools.rs`).
 - **harn-vm** — Bytecode compiler (`compiler.rs`), chunk/opcode definitions
   (`chunk.rs`), and stack-based VM (`vm.rs`). 35+ opcodes including
   concurrency (Parallel, ParallelMap, Spawn) and deadline enforcement

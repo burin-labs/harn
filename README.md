@@ -100,6 +100,38 @@ pipeline default(task) {
 
 Harn supports Anthropic, OpenAI, Ollama, and OpenRouter out of the box.
 
+### Build an agent with tools
+
+Register tools with JSON Schema-compatible definitions, then let the LLM
+call them:
+
+```javascript
+pipeline default(task) {
+  let tools = tool_registry()
+  let tools = tool_add(tools, "search", "Search the web", { query ->
+    return http_get("https://api.search.com?q=" + query).body
+  }, {query: "string"})
+
+  let tools = tool_add(tools, "calculate", "Evaluate math", { expr ->
+    return shell("echo '" + expr + "' | bc").stdout
+  }, {expression: "string"})
+
+  // Generate a universal prompt that works with any LLM
+  let system = tool_prompt(tools)
+
+  let response = llm_call(task, system)
+
+  // Parse and dispatch tool calls from LLM output
+  let call = tool_parse_call(response)
+  if call != nil {
+    let tool = tool_find(tools, call.name)
+    let handler = tool.handler
+    let result = handler(call.arguments.query)
+    log(result)
+  }
+}
+```
+
 ## What the language looks like
 
 ### Data transformation with pipes
@@ -152,6 +184,53 @@ pipeline default(task) {
   for a in analyses {
     log(a)
   }
+}
+```
+
+### HTTP with retries and timeouts
+
+Production-ready HTTP with automatic retries and exponential backoff:
+
+```javascript
+pipeline default(task) {
+  // Full request with options
+  let r = http_request("POST", "https://api.example.com/data", {
+    body: json_stringify({query: task}),
+    headers: {content_type: "application/json"},
+    auth: "Bearer sk-...",
+    timeout: 5000,
+    retries: 3,
+    backoff: 1000
+  })
+
+  if r.ok {
+    log(json_parse(r.body))
+  }
+
+  // Shorthand helpers
+  let page = http_get("https://example.com")
+  let resp = http_post("https://api.example.com", json_stringify({x: 1}))
+}
+```
+
+### Structured logging
+
+JSON-structured logs with levels, fields, and trace context:
+
+```javascript
+pipeline default(task) {
+  let span = trace_start("process_request")
+
+  log_info("processing", {task: task, step: "start"})
+
+  // All log calls within a trace include trace_id automatically
+  log_debug("details", {verbose: true})
+  log_warn("slow response", {latency_ms: 500})
+
+  trace_end(span)
+
+  // Filter by level
+  log_set_level("warn")  // only warn and error after this
 }
 ```
 
@@ -274,7 +353,7 @@ make all
 make fmt          # auto-format
 make lint         # clippy (warnings are errors)
 make test         # Rust unit tests
-make conformance  # 80 language conformance tests
+make conformance  # 108 language conformance tests
 ```
 
 Conformance tests in `conformance/` are the primary way to verify language

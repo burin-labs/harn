@@ -1,0 +1,20 @@
+pipeline test(task) {
+  // Test error handling: connection refused should throw, caught by try/catch
+  try {
+    let r = http_get("http://127.0.0.1:1", {timeout: 100})
+    println("unexpected success")
+  } catch (e) {
+    // Should get a connection error
+    println("caught_error")
+  }
+
+  // Test http_request exists and validates args
+  try {
+    let r = http_request("GET", "", {timeout: 100})
+    println("unexpected success")
+  } catch (e) {
+    println("caught_empty_url")
+  }
+
+  println("http_builtins_ok")
+}

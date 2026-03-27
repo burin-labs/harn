@@ -4,7 +4,10 @@ use std::time::Instant;
 use harn_lexer::Lexer;
 use harn_parser::{Node, Parser};
 use harn_runtime::Interpreter;
-use harn_stdlib::{register_async_builtins, register_llm_builtins, register_stdlib};
+use harn_stdlib::{
+    register_async_builtins, register_http_builtins, register_llm_builtins,
+    register_logging_builtins, register_stdlib, register_tool_builtins,
+};
 
 pub struct TestResult {
     pub name: String,
@@ -54,7 +57,10 @@ pub async fn run_test_file(path: &Path) -> Result<Vec<TestResult>, String> {
         let mut interp = Interpreter::new();
         register_stdlib(&mut interp);
         register_async_builtins(&mut interp);
+        register_http_builtins(&mut interp);
         register_llm_builtins(&mut interp);
+        register_logging_builtins(&mut interp);
+        register_tool_builtins(&mut interp);
 
         if let Some(parent) = path.parent() {
             if !parent.as_os_str().is_empty() {

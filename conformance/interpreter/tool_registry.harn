@@ -1,0 +1,47 @@
+pipeline default() {
+  // Create registry
+  let tools = tool_registry()
+  println(type_of(tools))
+  println(tool_count(tools))
+
+  // Add tools with closure handlers
+  let tools = tool_add(tools, "greet", "Greet a person", { name ->
+    return "Hello, " + name + "!"
+  }, {name: "string"})
+
+  let tools = tool_add(tools, "add", "Add two numbers", { a, b ->
+    return a + b
+  }, {a: "int", b: "int"})
+
+  println(tool_count(tools))
+
+  // List tools (no handlers exposed)
+  let list = tool_list(tools)
+  println(list.count())
+  println(list[0].name)
+  println(list[1].name)
+
+  // Find a tool
+  let found = tool_find(tools, "greet")
+  println(found.name)
+  println(found.description)
+
+  // Call the handler by extracting it to a variable
+  let handler = found.handler
+  let result = handler("World")
+  println(result)
+
+  // Find non-existent tool
+  let missing = tool_find(tools, "nonexistent")
+  println(missing)
+
+  // Describe for LLM system prompt
+  let desc = tool_describe(tools)
+  println(desc)
+
+  // Remove a tool
+  let tools = tool_remove(tools, "greet")
+  println(tool_count(tools))
+
+  println("tool_registry_ok")
+}

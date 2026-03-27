@@ -1,0 +1,15 @@
+dict
+0
+2
+2
+greet
+add
+greet
+Greet a person
+Hello, World!
+nil
+Available tools:
+- add(a: int, b: int): Add two numbers
+- greet(name: string): Greet a person
+1
+tool_registry_ok

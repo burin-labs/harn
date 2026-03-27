@@ -1,0 +1,34 @@
+pipeline default() {
+  // Create registry with tools
+  let tools = tool_registry()
+  let tools = tool_add(tools, "search", "Search the web", { query ->
+    return "results for: " + query
+  }, {query: "string"})
+
+  let tools = tool_add(tools, "calculate", "Evaluate math", { expr ->
+    return "42"
+  }, {expression: "string", precision: "int"})
+
+  // Test tool_schema generates OpenAPI-like schema
+  let schema = tool_schema(tools)
+  println(schema.schema_version)
+  println(schema.tools.count())
+  println(schema.tools[0].name)
+  println(schema.tools[0].inputSchema["type"])
+
+  // Test tool_parse_call with single tool call
+  let text = "I'll search for that. <tool_call>{\"name\": \"search\", \"arguments\": {\"query\": \"tokyo\"}}</tool_call>"
+  let call = tool_parse_call(text)
+  println(call.name)
+  println(call.arguments.query)
+
+  // Test tool_parse_call with no tool call
+  let no_call = tool_parse_call("Just regular text")
+  println(no_call)
+
+  // Test tool_format_result
+  let result = tool_format_result("search", "13.96 million people")
+  println(result)
+
+  println("tool_schema_ok")
+}
