@@ -1085,6 +1085,41 @@ impl Vm {
                 }
             };
             self.stack.push(result);
+        } else if op == Op::GetPropertyOpt as u8 {
+            // Optional chaining: obj?.property — returns nil if obj is nil
+            let frame = self.frames.last_mut().unwrap();
+            let idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            let name = Self::const_string(&frame.chunk.constants[idx])?;
+            let obj = self.pop()?;
+            let result = match &obj {
+                VmValue::Nil => VmValue::Nil,
+                VmValue::Dict(map) => map.get(&name).cloned().unwrap_or(VmValue::Nil),
+                VmValue::List(items) => match name.as_str() {
+                    "count" => VmValue::Int(items.len() as i64),
+                    "empty" => VmValue::Bool(items.is_empty()),
+                    "first" => items.first().cloned().unwrap_or(VmValue::Nil),
+                    "last" => items.last().cloned().unwrap_or(VmValue::Nil),
+                    _ => VmValue::Nil,
+                },
+                VmValue::String(s) => match name.as_str() {
+                    "count" => VmValue::Int(s.chars().count() as i64),
+                    "empty" => VmValue::Bool(s.is_empty()),
+                    _ => VmValue::Nil,
+                },
+                VmValue::EnumVariant {
+                    variant, fields, ..
+                } => match name.as_str() {
+                    "variant" => VmValue::String(Rc::from(variant.as_str())),
+                    "fields" => VmValue::List(Rc::new(fields.clone())),
+                    _ => VmValue::Nil,
+                },
+                VmValue::StructInstance { fields, .. } => {
+                    fields.get(&name).cloned().unwrap_or(VmValue::Nil)
+                }
+                _ => VmValue::Nil,
+            };
+            self.stack.push(result);
         } else if op == Op::SetProperty as u8 {
             let frame = self.frames.last_mut().unwrap();
             let prop_idx = frame.chunk.read_u16(frame.ip) as usize;

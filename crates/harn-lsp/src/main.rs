@@ -594,7 +594,7 @@ fn collect_symbols(snode: &SNode, symbols: &mut Vec<SymbolInfo>, scope_span: Opt
                 collect_symbols(a, symbols, scope_span);
             }
         }
-        Node::PropertyAccess { object, .. } => {
+        Node::PropertyAccess { object, .. } | Node::OptionalPropertyAccess { object, .. } => {
             collect_symbols(object, symbols, scope_span);
         }
         Node::SubscriptAccess { object, index } => {
@@ -868,7 +868,7 @@ fn collect_references(snode: &SNode, target_name: &str, refs: &mut Vec<Span>) {
                 collect_references(a, target_name, refs);
             }
         }
-        Node::PropertyAccess { object, .. } => {
+        Node::PropertyAccess { object, .. } | Node::OptionalPropertyAccess { object, .. } => {
             collect_references(object, target_name, refs);
         }
         Node::SubscriptAccess { object, index } => {

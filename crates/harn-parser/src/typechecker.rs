@@ -538,7 +538,7 @@ impl TypeChecker {
                     self.check_node(arg, scope);
                 }
             }
-            Node::PropertyAccess { object, .. } => {
+            Node::PropertyAccess { object, .. } | Node::OptionalPropertyAccess { object, .. } => {
                 self.check_node(object, scope);
             }
             Node::SubscriptAccess { object, index } => {

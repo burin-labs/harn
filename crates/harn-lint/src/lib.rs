@@ -71,9 +71,9 @@ impl Linter {
     fn root_var_name(node: &SNode) -> Option<String> {
         match &node.node {
             Node::Identifier(name) => Some(name.clone()),
-            Node::PropertyAccess { object, .. } | Node::SubscriptAccess { object, .. } => {
-                Self::root_var_name(object)
-            }
+            Node::PropertyAccess { object, .. }
+            | Node::OptionalPropertyAccess { object, .. }
+            | Node::SubscriptAccess { object, .. } => Self::root_var_name(object),
             _ => None,
         }
     }
@@ -189,7 +189,7 @@ impl Linter {
                 }
             }
 
-            Node::PropertyAccess { object, .. } => {
+            Node::PropertyAccess { object, .. } | Node::OptionalPropertyAccess { object, .. } => {
                 self.lint_node(object);
             }
 

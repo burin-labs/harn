@@ -1,0 +1,20 @@
+pipeline default() {
+  // Optional chaining on nil returns nil
+  let x = nil
+  println(x?.count)
+  println(x?.name)
+  // Optional chaining on non-nil works normally
+  let d = {name: "Alice", age: 30}
+  println(d?.name)
+  println(d?.age)
+  // Chained optional access
+  let nested = {inner: {value: 42}}
+  println(nested?.inner?.value)
+  // Optional on list
+  let items = [1, 2, 3]
+  println(items?.count)
+  println(items?.first)
+  // Nil propagation through chain
+  let empty = nil
+  println(empty?.inner?.value)
+}

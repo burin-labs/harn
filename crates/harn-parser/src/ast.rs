@@ -181,6 +181,11 @@ pub enum Node {
         object: Box<SNode>,
         property: String,
     },
+    /// Optional chaining: `obj?.property` — returns nil if obj is nil.
+    OptionalPropertyAccess {
+        object: Box<SNode>,
+        property: String,
+    },
     SubscriptAccess {
         object: Box<SNode>,
         index: Box<SNode>,

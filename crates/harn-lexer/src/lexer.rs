@@ -564,6 +564,7 @@ impl Lexer {
             ('|', '|') => TokenKind::Or,
             ('|', '>') => TokenKind::Pipe,
             ('?', '?') => TokenKind::NilCoal,
+            ('?', '.') => TokenKind::QuestionDot,
             ('-', '>') => TokenKind::Arrow,
             ('-', '=') => TokenKind::MinusAssign,
             ('+', '=') => TokenKind::PlusAssign,

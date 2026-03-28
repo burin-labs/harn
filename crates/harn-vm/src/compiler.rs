@@ -455,6 +455,12 @@ impl Compiler {
                 self.chunk.emit_u16(Op::GetProperty, idx, self.line);
             }
 
+            Node::OptionalPropertyAccess { object, property } => {
+                self.compile_node(object)?;
+                let idx = self.chunk.add_constant(Constant::String(property.clone()));
+                self.chunk.emit_u16(Op::GetPropertyOpt, idx, self.line);
+            }
+
             Node::SubscriptAccess { object, index } => {
                 self.compile_node(object)?;
                 self.compile_node(index)?;
@@ -1384,7 +1390,9 @@ impl Compiler {
     fn root_var_name(&self, node: &SNode) -> Option<String> {
         match &node.node {
             Node::Identifier(name) => Some(name.clone()),
-            Node::PropertyAccess { object, .. } => self.root_var_name(object),
+            Node::PropertyAccess { object, .. } | Node::OptionalPropertyAccess { object, .. } => {
+                self.root_var_name(object)
+            }
             Node::SubscriptAccess { object, .. } => self.root_var_name(object),
             _ => None,
         }

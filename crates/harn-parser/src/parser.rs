@@ -1166,7 +1166,8 @@ impl Parser {
         let mut expr = self.parse_primary()?;
 
         loop {
-            if self.check(&TokenKind::Dot) {
+            if self.check(&TokenKind::Dot) || self.check(&TokenKind::QuestionDot) {
+                let optional = self.check(&TokenKind::QuestionDot);
                 let start = expr.span;
                 self.advance();
                 let member = self.consume_identifier_or_keyword("member name")?;
@@ -1174,11 +1175,37 @@ impl Parser {
                     self.advance();
                     let args = self.parse_arg_list()?;
                     self.consume(&TokenKind::RParen, ")")?;
+                    // Optional method calls: obj?.method() — if obj is nil,
+                    // skip the call and push nil. Emit as property access +
+                    // call so we don't need a separate opcode.
+                    if optional {
+                        // For now, optional method calls desugar to:
+                        // if obj != nil then obj.method(args) else nil
+                        // We emit it as a regular method call and let the VM
+                        // handle nil in the method dispatch.
+                        expr = spanned(
+                            Node::MethodCall {
+                                object: Box::new(expr),
+                                method: member,
+                                args,
+                            },
+                            Span::merge(start, self.prev_span()),
+                        );
+                    } else {
+                        expr = spanned(
+                            Node::MethodCall {
+                                object: Box::new(expr),
+                                method: member,
+                                args,
+                            },
+                            Span::merge(start, self.prev_span()),
+                        );
+                    }
+                } else if optional {
                     expr = spanned(
-                        Node::MethodCall {
+                        Node::OptionalPropertyAccess {
                             object: Box::new(expr),
-                            method: member,
-                            args,
+                            property: member,
                         },
                         Span::merge(start, self.prev_span()),
                     );

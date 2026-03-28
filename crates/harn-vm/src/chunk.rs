@@ -75,6 +75,9 @@ pub enum Op {
     // --- Object operations ---
     /// Property access. arg: u16 = constant index (property name).
     GetProperty,
+    /// Optional property access (?.). Like GetProperty but returns nil
+    /// instead of erroring when the object is nil. arg: u16 = constant index.
+    GetPropertyOpt,
     /// Property assignment. arg: u16 = constant index (property name).
     /// Stack: [value] → assigns to the named variable's property.
     SetProperty,
@@ -429,6 +432,14 @@ impl Chunk {
                     ip += 2;
                     out.push_str(&format!(
                         "GET_PROPERTY {:>4} ({})\n",
+                        idx, self.constants[idx as usize]
+                    ));
+                }
+                x if x == Op::GetPropertyOpt as u8 => {
+                    let idx = self.read_u16(ip);
+                    ip += 2;
+                    out.push_str(&format!(
+                        "GET_PROPERTY_OPT {:>4} ({})\n",
                         idx, self.constants[idx as usize]
                     ));
                 }

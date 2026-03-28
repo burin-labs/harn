@@ -571,6 +571,10 @@ impl Formatter {
                 let obj = self.format_expr(object);
                 format!("{obj}.{property}")
             }
+            Node::OptionalPropertyAccess { object, property } => {
+                let obj = self.format_expr(object);
+                format!("{obj}?.{property}")
+            }
             Node::SubscriptAccess { object, index } => {
                 let obj = self.format_expr(object);
                 let idx = self.format_expr(index);
@@ -1349,6 +1353,7 @@ fn is_simple_expr(node: &SNode) -> bool {
             | Node::FunctionCall { .. }
             | Node::MethodCall { .. }
             | Node::PropertyAccess { .. }
+            | Node::OptionalPropertyAccess { .. }
             | Node::SubscriptAccess { .. }
             | Node::Ternary { .. }
             | Node::Assignment { .. }
