@@ -3,7 +3,7 @@
 mod chunk;
 mod compiler;
 mod http;
-mod llm;
+pub mod llm;
 pub mod stdlib;
 pub mod value;
 mod vm;

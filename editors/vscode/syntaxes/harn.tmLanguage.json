@@ -1,0 +1,141 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Harn",
+  "scopeName": "source.harn",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#keywords" },
+    { "include": "#storage" },
+    { "include": "#constants" },
+    { "include": "#types" },
+    { "include": "#functions" },
+    { "include": "#operators" },
+    { "include": "#punctuation" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.harn",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.harn",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.harn",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.harn",
+              "match": "\\\\."
+            },
+            {
+              "name": "meta.embedded.expression.harn",
+              "begin": "\\$\\{",
+              "end": "\\}",
+              "beginCaptures": {
+                "0": { "name": "punctuation.definition.template-expression.begin.harn" }
+              },
+              "endCaptures": {
+                "0": { "name": "punctuation.definition.template-expression.end.harn" }
+              },
+              "patterns": [
+                { "include": "source.harn" }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.harn",
+          "match": "\\b\\d+\\.\\d+\\b"
+        },
+        {
+          "name": "constant.numeric.integer.harn",
+          "match": "\\b\\d+\\b"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.harn",
+          "match": "\\b(if|else|for|in|while|match|return|break|continue|try|catch|throw|import|from|spawn|await|cancel|parallel|parallel_map|retry|guard|deadline)\\b"
+        },
+        {
+          "name": "keyword.declaration.harn",
+          "match": "\\b(pipeline|fn|enum|struct|interface|extends|override|pub)\\b"
+        }
+      ]
+    },
+    "storage": {
+      "patterns": [
+        {
+          "name": "storage.type.harn",
+          "match": "\\b(let|var)\\b"
+        }
+      ]
+    },
+    "constants": {
+      "patterns": [
+        {
+          "name": "constant.language.harn",
+          "match": "\\b(true|false|nil)\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "support.type.harn",
+          "match": "\\b(int|float|string|bool|list|dict|any|void)\\b"
+        },
+        {
+          "name": "entity.name.type.harn",
+          "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
+        }
+      ]
+    },
+    "functions": {
+      "patterns": [
+        {
+          "name": "entity.name.function.harn",
+          "match": "\\b([a-z_][a-zA-Z0-9_]*)\\s*(?=\\()"
+        },
+        {
+          "name": "support.function.builtin.harn",
+          "match": "\\b(log|print|println|assert|assert_eq|assert_ne|type_of|to_string|to_int|to_float|len|push|pop|keys|values|has_key|delete|sort|reverse|join|split|trim|starts_with|ends_with|contains|replace|to_upper|to_lower|json_stringify|json_parse|read_file|write_file|file_exists|exec|env|timestamp|abs|min|max|floor|ceil|round|sqrt|pow|random|regex_match|regex_replace|http_get|http_post|http_request|llm_call|llm_stream|agent_loop|channel|send|receive|close|sleep|conversation|add_user|add_assistant|add_system|add_message|add_tool_result|tool_registry|tool_add|tool_list|tool_find|tool_remove|tool_count|tool_describe|tool_schema|tool_prompt|tool_parse_call|tool_format_result)\\b"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.harn",
+          "match": "(\\|>|->|=>|\\.\\.=?|\\+\\+|&&|\\|\\||\\?\\?|[+\\-*/%=<>!&|^]=?)"
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.separator.harn",
+          "match": "[{}()\\[\\],;:]"
+        }
+      ]
+    }
+  }
+}

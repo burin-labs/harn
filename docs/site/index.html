@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Harn — The Agent Pipeline Language</title>
+  <meta name="description" content="Harn is a pipeline-oriented programming language for orchestrating AI coding agents. Built-in LLM calls, tool use, structured output, and async concurrency.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <nav>
+    <div class="nav-inner">
+      <a href="/" class="logo">harn</a>
+      <div class="nav-links">
+        <a href="#quickstart">Quickstart</a>
+        <a href="#features">Features</a>
+        <a href="#guide">Guide</a>
+        <a href="https://github.com/burin-labs/harn" target="_blank">GitHub</a>
+      </div>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <h1>The language for AI agent pipelines</h1>
+    <p class="subtitle">Build, test, and debug AI agent workflows in a fraction of the code. Harn has native LLM calls, tool use, structured output, and async concurrency built into the language.</p>
+    <div class="hero-actions">
+      <a href="#quickstart" class="btn primary">Get Started</a>
+      <a href="https://github.com/burin-labs/harn" class="btn secondary" target="_blank">View on GitHub</a>
+    </div>
+    <pre class="hero-code"><code><span class="kw">pipeline</span> <span class="fn">default</span>(task) {
+  <span class="kw">let</span> tools = tool_registry()
+    |> tool_add(<span class="str">"search"</span>, <span class="str">"Search the web"</span>, search_fn, {query: <span class="str">"string"</span>})
+
+  <span class="kw">let</span> result = llm_call(task, <span class="str">"You are a research assistant"</span>, {
+    tools: tools,
+    response_format: <span class="str">"json"</span>,
+  })
+
+  log(result.data)
+}</code></pre>
+  </header>
+
+  <section id="quickstart" class="section">
+    <h2>Quickstart</h2>
+    <div class="steps">
+      <div class="step">
+        <h3>1. Install</h3>
+        <pre><code>cargo install harn-cli</code></pre>
+        <p>Or build from source:</p>
+        <pre><code>git clone https://github.com/burin-labs/harn
+cd harn && cargo build --release
+cp target/release/harn ~/.local/bin/</code></pre>
+      </div>
+      <div class="step">
+        <h3>2. Create a project</h3>
+        <pre><code>harn init my-agent
+cd my-agent</code></pre>
+      </div>
+      <div class="step">
+        <h3>3. Write your first pipeline</h3>
+        <pre><code><span class="cm">// main.harn</span>
+<span class="kw">pipeline</span> <span class="fn">default</span>(task) {
+  <span class="kw">let</span> response = llm_call(
+    <span class="str">"Summarize: ${task}"</span>,
+    <span class="str">"Be concise."</span>
+  )
+  log(response)
+}</code></pre>
+      </div>
+      <div class="step">
+        <h3>4. Run it</h3>
+        <pre><code>export ANTHROPIC_API_KEY=sk-...
+harn run main.harn</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <section id="features" class="section alt">
+    <h2>Why Harn?</h2>
+    <div class="feature-grid">
+      <div class="feature">
+        <h3>Native LLM Calls</h3>
+        <p>Call Claude, GPT, or local models with a single function. Structured JSON output, streaming, and multi-turn conversations built in.</p>
+        <pre><code><span class="kw">let</span> data = llm_call(prompt, system, {
+  response_format: <span class="str">"json"</span>,
+  model: <span class="str">"claude-sonnet-4-20250514"</span>,
+})
+log(data.data.summary)</code></pre>
+      </div>
+      <div class="feature">
+        <h3>Tool Use</h3>
+        <p>Register functions as tools and let the LLM call them. Uses native Anthropic tool_use and OpenAI function calling protocols.</p>
+        <pre><code><span class="kw">let</span> tools = tool_registry()
+  |> tool_add(<span class="str">"read_file"</span>, <span class="str">"Read a file"</span>,
+     read_fn, {path: <span class="str">"string"</span>})
+
+<span class="kw">let</span> r = llm_call(task, sys, {tools: tools})</code></pre>
+      </div>
+      <div class="feature">
+        <h3>Pipeline Operator</h3>
+        <p>Chain operations with <code>|></code> for readable data transformation pipelines.</p>
+        <pre><code><span class="kw">let</span> result = data
+  |> filter(<span class="kw">fn</span>(x) { x.score > 0.8 })
+  |> map(<span class="kw">fn</span>(x) { x.name })
+  |> join(<span class="str">", "</span>)</code></pre>
+      </div>
+      <div class="feature">
+        <h3>Async Concurrency</h3>
+        <p>Run tasks in parallel with <code>spawn</code>/<code>await</code>, channels, mutexes, and atomics. Deadlines and timeouts built in.</p>
+        <pre><code><span class="kw">parallel</span>(3) { i ->
+  <span class="kw">let</span> result = llm_call(tasks[i])
+  send(ch, result)
+}</code></pre>
+      </div>
+      <div class="feature">
+        <h3>Execution Tracing</h3>
+        <p>See every LLM call, token count, and cost with <code>--trace</code>. Record and replay LLM responses for deterministic CI testing.</p>
+        <pre><code>$ harn run --trace agent.harn
+<span class="cm"># --- LLM trace ---
+#  #1: claude-sonnet | 1.2k in + 350 out | 1200ms
+#  1 call, 1550 tokens, ~$0.0089</span></code></pre>
+      </div>
+      <div class="feature">
+        <h3>First-class Testing</h3>
+        <p>Test pipelines with <code>test_*</code> naming convention, assertion builtins with source locations, auto-discovery, and watch mode.</p>
+        <pre><code><span class="kw">pipeline</span> <span class="fn">test_extraction</span>(task) {
+  <span class="kw">let</span> r = llm_call(prompt, sys, {
+    response_format: <span class="str">"json"</span>
+  })
+  assert_eq(r.data.name, <span class="str">"Alice"</span>)
+}</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <section id="guide" class="section">
+    <h2>Language Guide</h2>
+    <div class="guide-toc">
+      <div class="toc-col">
+        <h3>Basics</h3>
+        <ul>
+          <li>Pipelines &amp; Functions</li>
+          <li>Variables: <code>let</code> / <code>var</code></li>
+          <li>Types: <code>int</code>, <code>float</code>, <code>string</code>, <code>bool</code>, <code>list</code>, <code>dict</code></li>
+          <li>Control flow: <code>if</code>, <code>for</code>, <code>while</code>, <code>match</code></li>
+          <li>Pattern matching with enums</li>
+          <li>Try / catch / throw</li>
+        </ul>
+      </div>
+      <div class="toc-col">
+        <h3>AI Agent Features</h3>
+        <ul>
+          <li>LLM calls: <code>llm_call</code>, <code>llm_stream</code></li>
+          <li>Structured output: JSON mode</li>
+          <li>Tool use: native provider protocols</li>
+          <li>Conversation management</li>
+          <li>Agent loops: <code>agent_loop</code></li>
+          <li>Tracing &amp; cost tracking</li>
+        </ul>
+      </div>
+      <div class="toc-col">
+        <h3>Concurrency</h3>
+        <ul>
+          <li><code>spawn</code> / <code>await</code> / <code>cancel</code></li>
+          <li><code>parallel</code> / <code>parallel_map</code></li>
+          <li>Channels: <code>channel</code>, <code>send</code>, <code>receive</code></li>
+          <li>Mutexes &amp; atomics</li>
+          <li>Deadlines &amp; timeouts</li>
+        </ul>
+      </div>
+    </div>
+    <p class="guide-link">Full language specification: <a href="https://github.com/burin-labs/harn/blob/main/spec/HARN_SPEC.md" target="_blank">HARN_SPEC.md</a></p>
+  </section>
+
+  <footer>
+    <p>Harn is open source under the MIT license. Built by <a href="https://burincode.com" target="_blank">Burin</a>.</p>
+  </footer>
+</body>
+</html>

@@ -45,16 +45,17 @@ async fn main() {
             );
         }
         "run" => {
+            let trace = args.iter().any(|a| a == "--trace");
             let file = args
                 .iter()
                 .skip(2)
-                .find(|a| a.ends_with(".harn") || !a.starts_with("--"));
+                .find(|a| a.ends_with(".harn") || (!a.starts_with("--") && a != &"--trace"));
             match file {
                 Some(f) => {
-                    run_file(f).await;
+                    run_file(f, trace).await;
                 }
                 None => {
-                    eprintln!("Usage: harn run <file.harn>");
+                    eprintln!("Usage: harn run [--trace] <file.harn>");
                     process::exit(1);
                 }
             }
@@ -116,11 +117,32 @@ async fn main() {
                 .unwrap_or(30_000);
             let parallel = args.iter().any(|a| a == "--parallel");
             let watch = args.iter().any(|a| a == "--watch");
+            let record = args.iter().any(|a| a == "--record");
+            let replay = args.iter().any(|a| a == "--replay");
+
+            // Set up LLM replay mode
+            if record {
+                harn_vm::llm::set_replay_mode(
+                    harn_vm::llm::LlmReplayMode::Record,
+                    ".harn-fixtures",
+                );
+            } else if replay {
+                harn_vm::llm::set_replay_mode(
+                    harn_vm::llm::LlmReplayMode::Replay,
+                    ".harn-fixtures",
+                );
+            }
 
             // Collect flag values to exclude from target search
             let flag_values: std::collections::HashSet<&str> = args
                 .windows(2)
-                .filter(|w| w[0].starts_with("--") && w[0] != "--parallel" && w[0] != "--watch")
+                .filter(|w| {
+                    w[0].starts_with("--")
+                        && !matches!(
+                            w[0].as_str(),
+                            "--parallel" | "--watch" | "--record" | "--replay"
+                        )
+                })
                 .map(|w| w[1].as_str())
                 .collect();
 
@@ -166,7 +188,7 @@ async fn main() {
         "add" => package::add_package(&args[2..]),
         _ => {
             if args[1].ends_with(".harn") {
-                run_file(&args[1]).await;
+                run_file(&args[1], false).await;
             } else {
                 eprintln!("Unknown command: {}", args[1]);
                 process::exit(1);
@@ -348,7 +370,7 @@ fn fmt_file(path: &str, check_mode: bool) {
     }
 }
 
-async fn run_file(path: &str) {
+async fn run_file(path: &str, trace: bool) {
     let (source, program) = parse_source_file(path);
 
     // Static type checking
@@ -367,6 +389,10 @@ async fn run_file(path: &str) {
             process::exit(1);
         }
     };
+
+    if trace {
+        harn_vm::llm::enable_tracing();
+    }
 
     let mut vm = harn_vm::Vm::new();
     harn_vm::register_vm_stdlib(&mut vm);
@@ -392,6 +418,47 @@ async fn run_file(path: &str) {
             process::exit(1);
         }
     }
+
+    if trace {
+        print_trace_summary();
+    }
+}
+
+fn print_trace_summary() {
+    let entries = harn_vm::llm::take_trace();
+    if entries.is_empty() {
+        return;
+    }
+    eprintln!("\n\x1b[2m─── LLM trace ───\x1b[0m");
+    let mut total_input = 0i64;
+    let mut total_output = 0i64;
+    let mut total_ms = 0u64;
+    for (i, entry) in entries.iter().enumerate() {
+        eprintln!(
+            "  #{}: {} | {} in + {} out tokens | {} ms",
+            i + 1,
+            entry.model,
+            entry.input_tokens,
+            entry.output_tokens,
+            entry.duration_ms,
+        );
+        total_input += entry.input_tokens;
+        total_output += entry.output_tokens;
+        total_ms += entry.duration_ms;
+    }
+    let total_tokens = total_input + total_output;
+    // Rough cost estimate (Sonnet 4 pricing: $3/MTok input, $15/MTok output)
+    let cost = (total_input as f64 * 3.0 + total_output as f64 * 15.0) / 1_000_000.0;
+    eprintln!(
+        "  \x1b[1m{} call{}, {} tokens ({}in + {}out), {} ms, ~${:.4}\x1b[0m",
+        entries.len(),
+        if entries.len() == 1 { "" } else { "s" },
+        total_tokens,
+        total_input,
+        total_output,
+        total_ms,
+        cost,
+    );
 }
 
 fn error_span_from_lex(e: &harn_lexer::LexerError) -> harn_lexer::Span {

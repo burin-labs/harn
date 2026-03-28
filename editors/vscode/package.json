@@ -1,0 +1,68 @@
+{
+  "name": "harn-lang",
+  "displayName": "Harn Language",
+  "description": "Language support for Harn — the pipeline-oriented language for AI agents",
+  "version": "0.1.0",
+  "publisher": "burin-labs",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/burin-labs/harn"
+  },
+  "categories": ["Programming Languages"],
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "activationEvents": [
+    "onLanguage:harn"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "harn",
+        "aliases": ["Harn", "harn"],
+        "extensions": [".harn"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "harn",
+        "scopeName": "source.harn",
+        "path": "./syntaxes/harn.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "harn.runPipeline",
+        "title": "Harn: Run Pipeline"
+      },
+      {
+        "command": "harn.formatFile",
+        "title": "Harn: Format File"
+      }
+    ],
+    "configuration": {
+      "title": "Harn",
+      "properties": {
+        "harn.path": {
+          "type": "string",
+          "default": "harn",
+          "description": "Path to the harn binary"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.80.0",
+    "typescript": "^5.0.0",
+    "@vscode/vsce": "^2.0.0"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}

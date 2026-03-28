@@ -1,12 +1,124 @@
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use crate::stdlib::json_to_vm_value;
 use crate::value::{VmChannelHandle, VmError, VmValue};
 use crate::vm::Vm;
 
+// =============================================================================
+// LLM trace log (thread-local for async-safe access)
+// =============================================================================
+
+/// A single LLM call trace entry.
+#[derive(Debug, Clone)]
+pub struct LlmTraceEntry {
+    pub model: String,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub duration_ms: u64,
+}
+
+/// LLM replay mode.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LlmReplayMode {
+    Off,
+    Record,
+    Replay,
+}
+
+thread_local! {
+    static LLM_TRACE: RefCell<Vec<LlmTraceEntry>> = const { RefCell::new(Vec::new()) };
+    static LLM_TRACING_ENABLED: RefCell<bool> = const { RefCell::new(false) };
+    static LLM_REPLAY_MODE: RefCell<LlmReplayMode> = const { RefCell::new(LlmReplayMode::Off) };
+    static LLM_FIXTURE_DIR: RefCell<String> = const { RefCell::new(String::new()) };
+}
+
+/// Enable LLM tracing for the current thread.
+pub fn enable_tracing() {
+    LLM_TRACING_ENABLED.with(|v| *v.borrow_mut() = true);
+}
+
+/// Get and clear the trace log.
+pub fn take_trace() -> Vec<LlmTraceEntry> {
+    LLM_TRACE.with(|v| std::mem::take(&mut *v.borrow_mut()))
+}
+
+/// Set LLM replay mode (record/replay) and fixture directory.
+pub fn set_replay_mode(mode: LlmReplayMode, fixture_dir: &str) {
+    LLM_REPLAY_MODE.with(|v| *v.borrow_mut() = mode);
+    LLM_FIXTURE_DIR.with(|v| *v.borrow_mut() = fixture_dir.to_string());
+}
+
+fn get_replay_mode() -> LlmReplayMode {
+    LLM_REPLAY_MODE.with(|v| *v.borrow())
+}
+
+fn get_fixture_dir() -> String {
+    LLM_FIXTURE_DIR.with(|v| v.borrow().clone())
+}
+
+/// Hash a request for fixture file naming.
+fn fixture_hash(model: &str, messages: &[serde_json::Value], system: Option<&str>) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    model.hash(&mut hasher);
+    format!("{messages:?}").hash(&mut hasher);
+    system.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
+fn save_fixture(hash: &str, result: &LlmResult) {
+    let dir = get_fixture_dir();
+    if dir.is_empty() {
+        return;
+    }
+    let _ = std::fs::create_dir_all(&dir);
+    let path = format!("{dir}/{hash}.json");
+    let json = serde_json::json!({
+        "text": result.text,
+        "tool_calls": result.tool_calls,
+        "input_tokens": result.input_tokens,
+        "output_tokens": result.output_tokens,
+        "model": result.model,
+    });
+    let _ = std::fs::write(
+        &path,
+        serde_json::to_string_pretty(&json).unwrap_or_default(),
+    );
+}
+
+fn load_fixture(hash: &str) -> Option<LlmResult> {
+    let dir = get_fixture_dir();
+    if dir.is_empty() {
+        return None;
+    }
+    let path = format!("{dir}/{hash}.json");
+    let content = std::fs::read_to_string(&path).ok()?;
+    let json: serde_json::Value = serde_json::from_str(&content).ok()?;
+    Some(LlmResult {
+        text: json["text"].as_str().unwrap_or("").to_string(),
+        tool_calls: json["tool_calls"].as_array().cloned().unwrap_or_default(),
+        input_tokens: json["input_tokens"].as_i64().unwrap_or(0),
+        output_tokens: json["output_tokens"].as_i64().unwrap_or(0),
+        model: json["model"].as_str().unwrap_or("").to_string(),
+    })
+}
+
+fn trace_llm_call(entry: LlmTraceEntry) {
+    LLM_TRACING_ENABLED.with(|enabled| {
+        if *enabled.borrow() {
+            LLM_TRACE.with(|v| v.borrow_mut().push(entry));
+        }
+    });
+}
+
 /// Register LLM builtins on a VM.
 pub fn register_llm_builtins(vm: &mut Vm) {
+    // =========================================================================
+    // llm_call — core LLM request with structured output + tool use
+    // =========================================================================
     vm.register_async_builtin("llm_call", |args| async move {
         let prompt = args.first().map(|a| a.display()).unwrap_or_default();
         let system = args.get(1).map(|a| a.display());
@@ -15,23 +127,78 @@ pub fn register_llm_builtins(vm: &mut Vm) {
         let provider = vm_resolve_provider(&options);
         let model = vm_resolve_model(&options, &provider);
         let api_key = vm_resolve_api_key(&provider)?;
-        let max_tokens = options
+        let max_tokens = opt_int(&options, "max_tokens").unwrap_or(4096);
+        let response_format = opt_str(&options, "response_format");
+        let json_schema = options
             .as_ref()
-            .and_then(|o| o.get("max_tokens"))
-            .and_then(|v| v.as_int())
-            .unwrap_or(4096);
+            .and_then(|o| o.get("schema"))
+            .and_then(|v| v.as_dict())
+            .cloned();
+        let temperature = opt_float(&options, "temperature");
+        let tools_val = options.as_ref().and_then(|o| o.get("tools")).cloned();
+        let messages_val = options.as_ref().and_then(|o| o.get("messages")).cloned();
 
-        vm_call_llm(
+        // Build messages — either from messages option or from prompt
+        let messages = if let Some(VmValue::List(msg_list)) = &messages_val {
+            vm_messages_to_json(msg_list)?
+        } else {
+            vec![serde_json::json!({"role": "user", "content": prompt})]
+        };
+
+        // Build native tool definitions from tool_registry or tool list
+        let native_tools = if let Some(tools) = &tools_val {
+            Some(vm_tools_to_native(tools, &provider)?)
+        } else {
+            None
+        };
+
+        let start = std::time::Instant::now();
+        let result = vm_call_llm_full(
             &provider,
             &model,
             &api_key,
-            &prompt,
+            &messages,
             system.as_deref(),
             max_tokens,
+            response_format.as_deref(),
+            json_schema.as_ref(),
+            temperature,
+            native_tools.as_deref(),
         )
-        .await
+        .await?;
+        trace_llm_call(LlmTraceEntry {
+            model: result.model.clone(),
+            input_tokens: result.input_tokens,
+            output_tokens: result.output_tokens,
+            duration_ms: start.elapsed().as_millis() as u64,
+        });
+
+        // If response_format is "json", parse the response
+        if response_format.as_deref() == Some("json") {
+            // Find JSON in the response (may have markdown code fences)
+            let json_str = extract_json(&result.text);
+            let parsed = serde_json::from_str::<serde_json::Value>(json_str)
+                .ok()
+                .map(|jv| json_to_vm_value(&jv));
+            return Ok(vm_build_llm_result(&result, parsed));
+        }
+
+        // If tool_use blocks are present, return structured result
+        if !result.tool_calls.is_empty() {
+            return Ok(vm_build_llm_result(&result, None));
+        }
+
+        // Simple text response — return string for backward compat
+        if result.input_tokens == 0 && result.output_tokens == 0 && result.tool_calls.is_empty() {
+            return Ok(VmValue::String(Rc::from(result.text.as_str())));
+        }
+
+        Ok(vm_build_llm_result(&result, None))
     });
 
+    // =========================================================================
+    // agent_loop — multi-turn persistent agent loop
+    // =========================================================================
     vm.register_async_builtin("agent_loop", |args| async move {
         let prompt = args.first().map(|a| a.display()).unwrap_or_default();
         let system = args.get(1).map(|a| a.display());
@@ -40,30 +207,11 @@ pub fn register_llm_builtins(vm: &mut Vm) {
         let provider = vm_resolve_provider(&options);
         let model = vm_resolve_model(&options, &provider);
         let api_key = vm_resolve_api_key(&provider)?;
-        let max_iterations = options
-            .as_ref()
-            .and_then(|o| o.get("max_iterations"))
-            .and_then(|v| v.as_int())
-            .unwrap_or(50) as usize;
-        let persistent = options
-            .as_ref()
-            .and_then(|o| o.get("persistent"))
-            .map(|v| v.is_truthy())
-            .unwrap_or(false);
-        let max_nudges = options
-            .as_ref()
-            .and_then(|o| o.get("max_nudges"))
-            .and_then(|v| v.as_int())
-            .unwrap_or(3) as usize;
-        let custom_nudge = options
-            .as_ref()
-            .and_then(|o| o.get("nudge"))
-            .map(|v| v.display());
-        let max_tokens = options
-            .as_ref()
-            .and_then(|o| o.get("max_tokens"))
-            .and_then(|v| v.as_int())
-            .unwrap_or(4096);
+        let max_iterations = opt_int(&options, "max_iterations").unwrap_or(50) as usize;
+        let persistent = opt_bool(&options, "persistent");
+        let max_nudges = opt_int(&options, "max_nudges").unwrap_or(3) as usize;
+        let custom_nudge = opt_str(&options, "nudge");
+        let max_tokens = opt_int(&options, "max_tokens").unwrap_or(4096);
 
         let mut system_prompt = system.unwrap_or_default();
         if persistent {
@@ -83,7 +231,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
         let mut consecutive_text_only = 0usize;
 
         for _iteration in 0..max_iterations {
-            let response = vm_call_llm_messages(
+            let result = vm_call_llm_full(
                 &provider,
                 &model,
                 &api_key,
@@ -94,10 +242,14 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                     Some(&system_prompt)
                 },
                 max_tokens,
+                None,
+                None,
+                None,
+                None,
             )
             .await?;
 
-            let text = response.display();
+            let text = result.text.clone();
             total_text.push_str(&text);
 
             messages.push(serde_json::json!({
@@ -118,14 +270,12 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                 break;
             }
 
-            let nudge = if let Some(ref custom) = custom_nudge {
-                custom.clone()
-            } else {
+            let nudge = custom_nudge.clone().unwrap_or_else(|| {
                 "You have not output ##DONE## yet — the task is not complete. \
                  Use your tools to continue working. \
                  Only output ##DONE## when the task is fully complete and verified."
                     .to_string()
-            };
+            });
 
             messages.push(serde_json::json!({
                 "role": "user",
@@ -136,6 +286,9 @@ pub fn register_llm_builtins(vm: &mut Vm) {
         Ok(VmValue::String(Rc::from(total_text.as_str())))
     });
 
+    // =========================================================================
+    // llm_stream — SSE streaming
+    // =========================================================================
     vm.register_async_builtin("llm_stream", |args| async move {
         let prompt = args.first().map(|a| a.display()).unwrap_or_default();
         let system = args.get(1).map(|a| a.display());
@@ -144,13 +297,8 @@ pub fn register_llm_builtins(vm: &mut Vm) {
         let provider = vm_resolve_provider(&options);
         let model = vm_resolve_model(&options, &provider);
         let api_key = vm_resolve_api_key(&provider)?;
-        let max_tokens = options
-            .as_ref()
-            .and_then(|o| o.get("max_tokens"))
-            .and_then(|v| v.as_int())
-            .unwrap_or(4096);
+        let max_tokens = opt_int(&options, "max_tokens").unwrap_or(4096);
 
-        // Create a channel for streaming chunks
         let (tx, rx) = tokio::sync::mpsc::channel::<VmValue>(64);
         let closed = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let closed_clone = closed.clone();
@@ -158,7 +306,6 @@ pub fn register_llm_builtins(vm: &mut Vm) {
         let tx_arc = Arc::new(tx);
         let tx_for_task = tx_arc.clone();
 
-        // Spawn a task that does the SSE streaming and pushes chunks
         tokio::task::spawn_local(async move {
             let result = vm_stream_llm(
                 &provider,
@@ -178,7 +325,6 @@ pub fn register_llm_builtins(vm: &mut Vm) {
             }
         });
 
-        // Return the channel handle for iteration
         #[allow(clippy::arc_with_non_send_sync)]
         let handle = VmChannelHandle {
             name: "llm_stream".to_string(),
@@ -188,10 +334,182 @@ pub fn register_llm_builtins(vm: &mut Vm) {
         };
         Ok(VmValue::Channel(handle))
     });
+
+    // =========================================================================
+    // Conversation management builtins
+    // =========================================================================
+
+    vm.register_builtin("conversation", |_args, _out| {
+        // Returns a list (messages array) — can be passed to llm_call via options.messages
+        Ok(VmValue::List(Rc::new(Vec::new())))
+    });
+
+    vm.register_builtin("add_message", |args, _out| {
+        let messages = match args.first() {
+            Some(VmValue::List(list)) => (**list).clone(),
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "add_message: first argument must be a message list",
+                ))));
+            }
+        };
+        let role = args.get(1).map(|a| a.display()).unwrap_or_default();
+        let content = args.get(2).map(|a| a.display()).unwrap_or_default();
+
+        let mut msg = BTreeMap::new();
+        msg.insert("role".to_string(), VmValue::String(Rc::from(role.as_str())));
+        msg.insert(
+            "content".to_string(),
+            VmValue::String(Rc::from(content.as_str())),
+        );
+
+        let mut new_messages = messages;
+        new_messages.push(VmValue::Dict(Rc::new(msg)));
+        Ok(VmValue::List(Rc::new(new_messages)))
+    });
+
+    vm.register_builtin("add_user", |args, _out| vm_add_role_message(args, "user"));
+
+    vm.register_builtin("add_assistant", |args, _out| {
+        vm_add_role_message(args, "assistant")
+    });
+
+    vm.register_builtin("add_system", |args, _out| {
+        vm_add_role_message(args, "system")
+    });
+
+    vm.register_builtin("add_tool_result", |args, _out| {
+        let messages = match args.first() {
+            Some(VmValue::List(list)) => (**list).clone(),
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "add_tool_result: first argument must be a message list",
+                ))));
+            }
+        };
+        let tool_use_id = args.get(1).map(|a| a.display()).unwrap_or_default();
+        let result_content = args.get(2).map(|a| a.display()).unwrap_or_default();
+
+        let mut msg = BTreeMap::new();
+        msg.insert("role".to_string(), VmValue::String(Rc::from("tool_result")));
+        msg.insert(
+            "tool_use_id".to_string(),
+            VmValue::String(Rc::from(tool_use_id.as_str())),
+        );
+        msg.insert(
+            "content".to_string(),
+            VmValue::String(Rc::from(result_content.as_str())),
+        );
+
+        let mut new_messages = messages;
+        new_messages.push(VmValue::Dict(Rc::new(msg)));
+        Ok(VmValue::List(Rc::new(new_messages)))
+    });
 }
 
 // =============================================================================
-// LLM helpers
+// LLM response type
+// =============================================================================
+
+struct LlmResult {
+    text: String,
+    tool_calls: Vec<serde_json::Value>,
+    input_tokens: i64,
+    output_tokens: i64,
+    model: String,
+}
+
+fn vm_build_llm_result(result: &LlmResult, parsed_json: Option<VmValue>) -> VmValue {
+    let mut dict = BTreeMap::new();
+    dict.insert(
+        "text".to_string(),
+        VmValue::String(Rc::from(result.text.as_str())),
+    );
+    dict.insert(
+        "model".to_string(),
+        VmValue::String(Rc::from(result.model.as_str())),
+    );
+    dict.insert(
+        "input_tokens".to_string(),
+        VmValue::Int(result.input_tokens),
+    );
+    dict.insert(
+        "output_tokens".to_string(),
+        VmValue::Int(result.output_tokens),
+    );
+
+    if let Some(json_val) = parsed_json {
+        dict.insert("data".to_string(), json_val);
+    }
+
+    if !result.tool_calls.is_empty() {
+        let calls: Vec<VmValue> = result.tool_calls.iter().map(json_to_vm_value).collect();
+        dict.insert("tool_calls".to_string(), VmValue::List(Rc::new(calls)));
+    }
+
+    VmValue::Dict(Rc::new(dict))
+}
+
+// =============================================================================
+// Helper: add a role message to a conversation list
+// =============================================================================
+
+fn vm_add_role_message(args: &[VmValue], role: &str) -> Result<VmValue, VmError> {
+    let messages = match args.first() {
+        Some(VmValue::List(list)) => (**list).clone(),
+        _ => {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                "add_{role}: first argument must be a message list"
+            )))));
+        }
+    };
+    let content = args.get(1).map(|a| a.display()).unwrap_or_default();
+
+    let mut msg = BTreeMap::new();
+    msg.insert(
+        "role".to_string(),
+        VmValue::String(Rc::from(role.to_string().as_str())),
+    );
+    msg.insert(
+        "content".to_string(),
+        VmValue::String(Rc::from(content.as_str())),
+    );
+
+    let mut new_messages = messages;
+    new_messages.push(VmValue::Dict(Rc::new(msg)));
+    Ok(VmValue::List(Rc::new(new_messages)))
+}
+
+// =============================================================================
+// Option extraction helpers
+// =============================================================================
+
+fn opt_str(options: &Option<BTreeMap<String, VmValue>>, key: &str) -> Option<String> {
+    options.as_ref()?.get(key).map(|v| v.display())
+}
+
+fn opt_int(options: &Option<BTreeMap<String, VmValue>>, key: &str) -> Option<i64> {
+    options.as_ref()?.get(key)?.as_int()
+}
+
+fn opt_float(options: &Option<BTreeMap<String, VmValue>>, key: &str) -> Option<f64> {
+    options.as_ref()?.get(key).and_then(|v| match v {
+        VmValue::Float(f) => Some(*f),
+        VmValue::Int(i) => Some(*i as f64),
+        _ => None,
+    })
+}
+
+fn opt_bool(options: &Option<BTreeMap<String, VmValue>>, key: &str) -> bool {
+    options
+        .as_ref()
+        .and_then(|o| o.get(key))
+        .map(|v| v.is_truthy())
+        .unwrap_or(false)
+}
+
+// =============================================================================
+// Provider/model/key resolution
 // =============================================================================
 
 fn vm_resolve_provider(options: &Option<BTreeMap<String, VmValue>>) -> String {
@@ -236,29 +554,199 @@ fn vm_resolve_api_key(provider: &str) -> Result<String, VmError> {
     }
 }
 
-async fn vm_call_llm(
-    provider: &str,
-    model: &str,
-    api_key: &str,
-    prompt: &str,
-    system: Option<&str>,
-    max_tokens: i64,
-) -> Result<VmValue, VmError> {
-    let messages = vec![serde_json::json!({
-        "role": "user",
-        "content": prompt,
-    })];
-    vm_call_llm_messages(provider, model, api_key, &messages, system, max_tokens).await
+// =============================================================================
+// Convert VmValue messages to JSON for API calls
+// =============================================================================
+
+fn vm_messages_to_json(msg_list: &[VmValue]) -> Result<Vec<serde_json::Value>, VmError> {
+    let mut messages = Vec::new();
+    for msg in msg_list {
+        if let VmValue::Dict(d) = msg {
+            let role = d
+                .get("role")
+                .map(|v| v.display())
+                .unwrap_or_else(|| "user".to_string());
+            let content = d.get("content").map(|v| v.display()).unwrap_or_default();
+
+            if role == "tool_result" {
+                // Anthropic tool result format
+                let tool_use_id = d
+                    .get("tool_use_id")
+                    .map(|v| v.display())
+                    .unwrap_or_default();
+                messages.push(serde_json::json!({
+                    "role": "user",
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": tool_use_id,
+                        "content": content,
+                    }],
+                }));
+            } else {
+                messages.push(serde_json::json!({
+                    "role": role,
+                    "content": content,
+                }));
+            }
+        }
+    }
+    Ok(messages)
 }
 
-async fn vm_call_llm_messages(
+// =============================================================================
+// Convert tool_registry to native tool definitions
+// =============================================================================
+
+fn vm_tools_to_native(
+    tools_val: &VmValue,
+    provider: &str,
+) -> Result<Vec<serde_json::Value>, VmError> {
+    // Accept either a tool_registry dict or a list of tool dicts
+    let tools_list = match tools_val {
+        VmValue::Dict(d) => {
+            // tool_registry — extract tools list
+            match d.get("tools") {
+                Some(VmValue::List(list)) => list.as_ref().clone(),
+                _ => Vec::new(),
+            }
+        }
+        VmValue::List(list) => list.as_ref().clone(),
+        _ => {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "tools must be a tool_registry or a list of tool definitions",
+            ))));
+        }
+    };
+
+    let mut native_tools = Vec::new();
+    for tool in &tools_list {
+        if let VmValue::Dict(entry) = tool {
+            let name = entry.get("name").map(|v| v.display()).unwrap_or_default();
+            let description = entry
+                .get("description")
+                .map(|v| v.display())
+                .unwrap_or_default();
+            let params = entry.get("parameters").and_then(|v| v.as_dict());
+
+            let input_schema = vm_build_json_schema(params);
+
+            match provider {
+                "openai" | "openrouter" => {
+                    native_tools.push(serde_json::json!({
+                        "type": "function",
+                        "function": {
+                            "name": name,
+                            "description": description,
+                            "parameters": input_schema,
+                        }
+                    }));
+                }
+                _ => {
+                    // Anthropic format
+                    native_tools.push(serde_json::json!({
+                        "name": name,
+                        "description": description,
+                        "input_schema": input_schema,
+                    }));
+                }
+            }
+        }
+    }
+    Ok(native_tools)
+}
+
+fn vm_build_json_schema(params: Option<&BTreeMap<String, VmValue>>) -> serde_json::Value {
+    let mut properties = serde_json::Map::new();
+    let mut required = Vec::new();
+
+    if let Some(params) = params {
+        for (name, type_val) in params {
+            let type_str = type_val.display();
+            let json_type = match type_str.as_str() {
+                "int" | "integer" => "integer",
+                "float" | "number" => "number",
+                "bool" | "boolean" => "boolean",
+                "list" | "array" => "array",
+                "dict" | "object" => "object",
+                _ => "string",
+            };
+            properties.insert(name.clone(), serde_json::json!({"type": json_type}));
+            required.push(serde_json::Value::String(name.clone()));
+        }
+    }
+
+    serde_json::json!({
+        "type": "object",
+        "properties": properties,
+        "required": required,
+    })
+}
+
+// =============================================================================
+// Core LLM call with all options
+// =============================================================================
+
+#[allow(clippy::too_many_arguments)]
+async fn vm_call_llm_full(
     provider: &str,
     model: &str,
     api_key: &str,
     messages: &[serde_json::Value],
     system: Option<&str>,
     max_tokens: i64,
-) -> Result<VmValue, VmError> {
+    response_format: Option<&str>,
+    json_schema: Option<&BTreeMap<String, VmValue>>,
+    temperature: Option<f64>,
+    native_tools: Option<&[serde_json::Value]>,
+) -> Result<LlmResult, VmError> {
+    let replay_mode = get_replay_mode();
+    let hash = fixture_hash(model, messages, system);
+
+    // In replay mode, return cached fixture
+    if replay_mode == LlmReplayMode::Replay {
+        if let Some(result) = load_fixture(&hash) {
+            return Ok(result);
+        }
+        return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+            "No fixture found for LLM call (hash: {hash}). Run with --record first."
+        )))));
+    }
+
+    let result = vm_call_llm_api(
+        provider,
+        model,
+        api_key,
+        messages,
+        system,
+        max_tokens,
+        response_format,
+        json_schema,
+        temperature,
+        native_tools,
+    )
+    .await?;
+
+    // In record mode, save the fixture
+    if replay_mode == LlmReplayMode::Record {
+        save_fixture(&hash, &result);
+    }
+
+    Ok(result)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn vm_call_llm_api(
+    provider: &str,
+    model: &str,
+    api_key: &str,
+    messages: &[serde_json::Value],
+    system: Option<&str>,
+    max_tokens: i64,
+    response_format: Option<&str>,
+    json_schema: Option<&BTreeMap<String, VmValue>>,
+    temperature: Option<f64>,
+    native_tools: Option<&[serde_json::Value]>,
+) -> Result<LlmResult, VmError> {
     let client = reqwest::Client::new();
 
     match provider {
@@ -276,11 +764,40 @@ async fn vm_call_llm_messages(
             }
             msgs.extend(messages.iter().cloned());
 
-            let body = serde_json::json!({
+            let mut body = serde_json::json!({
                 "model": model,
                 "messages": msgs,
                 "max_tokens": max_tokens,
             });
+
+            if let Some(temp) = temperature {
+                body["temperature"] = serde_json::json!(temp);
+            }
+
+            // Structured output for OpenAI
+            if response_format == Some("json") {
+                if let Some(schema) = json_schema {
+                    // OpenAI structured output with JSON schema
+                    let schema_json = vm_value_dict_to_json(schema);
+                    body["response_format"] = serde_json::json!({
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": "response",
+                            "schema": schema_json,
+                            "strict": true,
+                        }
+                    });
+                } else {
+                    body["response_format"] = serde_json::json!({"type": "json_object"});
+                }
+            }
+
+            // Native tool use for OpenAI
+            if let Some(tools) = native_tools {
+                if !tools.is_empty() {
+                    body["tools"] = serde_json::json!(tools);
+                }
+            }
 
             let mut req = client
                 .post(format!("{base_url}/v1/chat/completions"))
@@ -313,9 +830,37 @@ async fn vm_call_llm_messages(
                 .as_str()
                 .unwrap_or("")
                 .to_string();
-            Ok(VmValue::String(Rc::from(text.as_str())))
+
+            // Extract tool calls from OpenAI format
+            let mut tool_calls = Vec::new();
+            if let Some(calls) = json["choices"][0]["message"]["tool_calls"].as_array() {
+                for call in calls {
+                    let name = call["function"]["name"].as_str().unwrap_or("").to_string();
+                    let args_str = call["function"]["arguments"].as_str().unwrap_or("{}");
+                    let arguments: serde_json::Value =
+                        serde_json::from_str(args_str).unwrap_or(serde_json::json!({}));
+                    let id = call["id"].as_str().unwrap_or("").to_string();
+                    tool_calls.push(serde_json::json!({
+                        "id": id,
+                        "name": name,
+                        "arguments": arguments,
+                    }));
+                }
+            }
+
+            let input_tokens = json["usage"]["prompt_tokens"].as_i64().unwrap_or(0);
+            let output_tokens = json["usage"]["completion_tokens"].as_i64().unwrap_or(0);
+
+            Ok(LlmResult {
+                text,
+                tool_calls,
+                input_tokens,
+                output_tokens,
+                model: model.to_string(),
+            })
         }
         _ => {
+            // Anthropic
             let mut body = serde_json::json!({
                 "model": model,
                 "messages": messages,
@@ -323,6 +868,16 @@ async fn vm_call_llm_messages(
             });
             if let Some(sys) = system {
                 body["system"] = serde_json::json!(sys);
+            }
+            if let Some(temp) = temperature {
+                body["temperature"] = serde_json::json!(temp);
+            }
+
+            // Native tool use for Anthropic
+            if let Some(tools) = native_tools {
+                if !tools.is_empty() {
+                    body["tools"] = serde_json::json!(tools);
+                }
             }
 
             let response = client
@@ -345,18 +900,34 @@ async fn vm_call_llm_messages(
                 ))))
             })?;
 
-            let text = json["content"]
-                .as_array()
-                .map(|blocks| {
-                    blocks
-                        .iter()
-                        .filter_map(|b| b["text"].as_str())
-                        .collect::<Vec<_>>()
-                        .join("")
-                })
-                .unwrap_or_default();
+            // Extract text and tool_use blocks from Anthropic response
+            let mut text = String::new();
+            let mut tool_calls = Vec::new();
 
-            if text.is_empty() {
+            if let Some(content) = json["content"].as_array() {
+                for block in content {
+                    match block["type"].as_str() {
+                        Some("text") => {
+                            if let Some(t) = block["text"].as_str() {
+                                text.push_str(t);
+                            }
+                        }
+                        Some("tool_use") => {
+                            let name = block["name"].as_str().unwrap_or("").to_string();
+                            let id = block["id"].as_str().unwrap_or("").to_string();
+                            let input = block["input"].clone();
+                            tool_calls.push(serde_json::json!({
+                                "id": id,
+                                "name": name,
+                                "arguments": input,
+                            }));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+
+            if text.is_empty() && tool_calls.is_empty() {
                 if let Some(err) = json["error"]["message"].as_str() {
                     return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
                         "Anthropic API error: {err}"
@@ -364,12 +935,24 @@ async fn vm_call_llm_messages(
                 }
             }
 
-            Ok(VmValue::String(Rc::from(text.as_str())))
+            let input_tokens = json["usage"]["input_tokens"].as_i64().unwrap_or(0);
+            let output_tokens = json["usage"]["output_tokens"].as_i64().unwrap_or(0);
+
+            Ok(LlmResult {
+                text,
+                tool_calls,
+                input_tokens,
+                output_tokens,
+                model: model.to_string(),
+            })
         }
     }
 }
 
-/// Stream LLM response via SSE and push text chunks into the channel.
+// =============================================================================
+// Streaming
+// =============================================================================
+
 async fn vm_stream_llm(
     provider: &str,
     model: &str,
@@ -416,7 +999,6 @@ async fn vm_stream_llm(
             req
         }
         _ => {
-            // Anthropic
             let mut body = serde_json::json!({
                 "model": model,
                 "messages": [{"role": "user", "content": prompt}],
@@ -444,7 +1026,6 @@ async fn vm_stream_llm(
         ))))
     })?;
 
-    // Process SSE events
     while let Some(event) = es.next().await {
         match event {
             Ok(Event::Message(msg)) => {
@@ -476,7 +1057,6 @@ async fn vm_stream_llm(
     Ok(())
 }
 
-/// Parse a text delta from an OpenAI SSE chunk.
 fn parse_openai_sse_chunk(data: &str) -> Option<String> {
     let json: serde_json::Value = serde_json::from_str(data).ok()?;
     json["choices"][0]["delta"]["content"]
@@ -484,12 +1064,58 @@ fn parse_openai_sse_chunk(data: &str) -> Option<String> {
         .map(|s| s.to_string())
 }
 
-/// Parse a text delta from an Anthropic SSE chunk.
 fn parse_anthropic_sse_chunk(data: &str) -> Option<String> {
     let json: serde_json::Value = serde_json::from_str(data).ok()?;
-    // Anthropic uses content_block_delta events with delta.text
     if json["type"].as_str() == Some("content_block_delta") {
         return json["delta"]["text"].as_str().map(|s| s.to_string());
     }
     None
+}
+
+// =============================================================================
+// Utility helpers
+// =============================================================================
+
+/// Extract JSON from a string that may contain markdown fences.
+fn extract_json(text: &str) -> &str {
+    let trimmed = text.trim();
+    // Try to extract from ```json ... ``` fences
+    if let Some(start) = trimmed.find("```json") {
+        let after = &trimmed[start + 7..];
+        if let Some(end) = after.find("```") {
+            return after[..end].trim();
+        }
+    }
+    // Try to extract from ``` ... ``` fences
+    if let Some(start) = trimmed.find("```") {
+        let after = &trimmed[start + 3..];
+        if let Some(end) = after.find("```") {
+            return after[..end].trim();
+        }
+    }
+    trimmed
+}
+
+/// Convert a VmValue dict to serde_json::Value for API payloads.
+fn vm_value_dict_to_json(dict: &BTreeMap<String, VmValue>) -> serde_json::Value {
+    let mut map = serde_json::Map::new();
+    for (k, v) in dict {
+        map.insert(k.clone(), vm_value_to_json(v));
+    }
+    serde_json::Value::Object(map)
+}
+
+fn vm_value_to_json(val: &VmValue) -> serde_json::Value {
+    match val {
+        VmValue::Int(i) => serde_json::json!(i),
+        VmValue::Float(f) => serde_json::json!(f),
+        VmValue::String(s) => serde_json::json!(s.as_ref()),
+        VmValue::Bool(b) => serde_json::json!(b),
+        VmValue::Nil => serde_json::Value::Null,
+        VmValue::List(list) => {
+            serde_json::Value::Array(list.iter().map(vm_value_to_json).collect())
+        }
+        VmValue::Dict(d) => vm_value_dict_to_json(d),
+        _ => serde_json::json!(val.display()),
+    }
 }
