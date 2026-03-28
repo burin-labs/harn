@@ -303,9 +303,9 @@ pub enum TypeExpr {
     Union(Vec<TypeExpr>),
     /// A dict shape type: `{name: string, age: int, active?: bool}`.
     Shape(Vec<ShapeField>),
-    /// A list type: `list[int]`.
+    /// A list type: `list<int>`.
     List(Box<TypeExpr>),
-    /// A dict type with key and value types: `dict[string, int]`.
+    /// A dict type with key and value types: `dict<string, int>`.
     DictType(Box<TypeExpr>, Box<TypeExpr>),
 }
 

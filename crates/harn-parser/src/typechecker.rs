@@ -992,7 +992,7 @@ impl TypeChecker {
                         )
                 })
             }),
-            // dict[K, V] expected, Shape actual → all field values must match V
+            // dict<K, V> expected, Shape actual → all field values must match V
             (TypeExpr::DictType(ek, ev), TypeExpr::Shape(af)) => {
                 let keys_ok = matches!(ek.as_ref(), TypeExpr::Named(n) if n == "string");
                 keys_ok
@@ -1000,7 +1000,7 @@ impl TypeChecker {
                         .iter()
                         .all(|f| self.types_compatible(ev, &f.type_expr, scope))
             }
-            // Shape expected, dict[K, V] actual → gradual: allow since dict may have the fields
+            // Shape expected, dict<K, V> actual → gradual: allow since dict may have the fields
             (TypeExpr::Shape(_), TypeExpr::DictType(_, _)) => true,
             (TypeExpr::List(expected_inner), TypeExpr::List(actual_inner)) => {
                 self.types_compatible(expected_inner, actual_inner, scope)
@@ -1154,8 +1154,8 @@ pub fn format_type(ty: &TypeExpr) -> String {
                 .collect();
             format!("{{{}}}", inner.join(", "))
         }
-        TypeExpr::List(inner) => format!("list[{}]", format_type(inner)),
-        TypeExpr::DictType(k, v) => format!("dict[{}, {}]", format_type(k), format_type(v)),
+        TypeExpr::List(inner) => format!("list<{}>", format_type(inner)),
+        TypeExpr::DictType(k, v) => format!("dict<{}, {}>", format_type(k), format_type(v)),
     }
 }
 

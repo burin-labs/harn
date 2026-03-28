@@ -23,7 +23,7 @@ pipeline default() {
   // Shape assigned to generic dict
   let d: dict = {a: 1, b: 2}
   println(d["a"])
-  // Shape compatible with dict[string, int]
-  let typed: dict[string, int] = {x: 1, y: 2}
+  // Shape compatible with dict<string, int>
+  let typed: dict<string, int> = {x: 1, y: 2}
   println(typed["x"])
 }

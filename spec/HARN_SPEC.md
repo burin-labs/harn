@@ -847,8 +847,8 @@ let id: int | string = "abc"
 ### Parameterized types
 
 ```harn
-let numbers: list[int] = [1, 2, 3]
-let headers: dict[string, string] = {content_type: "json"}
+let numbers: list<int> = [1, 2, 3]
+let headers: dict<string, string> = {content_type: "json"}
 ```
 
 ### Structural types (shapes)
@@ -881,7 +881,7 @@ Nested shapes:
 let data: {user: {name: string}, tags: list} = {user: {name: "X"}, tags: []}
 ```
 
-Shapes are compatible with `dict` and `dict[string, V]` when all field values match `V`.
+Shapes are compatible with `dict` and `dict<string, V>` when all field values match `V`.
 
 ### Type aliases
 
@@ -907,7 +907,7 @@ fn add(a: int, b: int) -> int {
 - Dict literals with string keys infer a structural shape type.
 - Dict literals with computed keys infer as generic `dict`.
 - Shape-to-shape: all required fields in the expected type must exist with compatible types.
-- Shape-to-`dict[K, V]`: all field values must be compatible with `V`.
+- Shape-to-`dict<K, V>`: all field values must be compatible with `V`.
 - Type errors are reported at compile time and halt execution.
 
 ## Built-in methods

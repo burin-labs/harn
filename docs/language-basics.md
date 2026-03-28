@@ -57,7 +57,7 @@ Annotations are optional and checked at compile time:
 ```harn
 let x: int = 42
 let name: string = "hello"
-let nums: list[int] = [1, 2, 3]
+let nums: list<int> = [1, 2, 3]
 
 fn add(a: int, b: int) -> int {
   return a + b
@@ -65,7 +65,7 @@ fn add(a: int, b: int) -> int {
 ```
 
 Supported type expressions: `int`, `float`, `string`, `bool`, `nil`, `list`,
-`list[T]`, `dict`, `dict[K, V]`, union types (`string | nil`), and structural
+`list<T>`, `dict`, `dict<K, V>`, union types (`string | nil`), and structural
 shape types (`{name: string, age: int}`).
 
 ### Structural types (shapes)

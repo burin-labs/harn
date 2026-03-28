@@ -547,7 +547,7 @@ impl Debugger {
                     .enumerate()
                     .map(|(i, v)| (format!("[{i}]"), v.clone()))
                     .collect();
-                let display = format!("list[{}]", items.len());
+                let display = format!("list<{}>", items.len());
                 if children.is_empty() {
                     (0, display)
                 } else {
@@ -557,7 +557,7 @@ impl Debugger {
             VmValue::Dict(map) => {
                 let children: Vec<(String, VmValue)> =
                     map.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-                let display = format!("dict[{}]", map.len());
+                let display = format!("dict<{}>", map.len());
                 if children.is_empty() {
                     (0, display)
                 } else {

@@ -121,7 +121,7 @@ for rustc-style diagnostic rendering.
 annotations are optional. Supports structural typing: dict literals
 with string keys infer `Shape` types, enabling compile-time checking
 of `{name: string, age: int}` shape annotations with width subtyping.
-Also supports `list[T]`, `dict[K, V]`, union types, and type aliases.
+Also supports `list<T>`, `dict<K, V>`, union types, and type aliases.
 The checker tracks enums for match exhaustiveness warnings.
 
 **VM concurrency model**: The VM is async (runs inside a tokio

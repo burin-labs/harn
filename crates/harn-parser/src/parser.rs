@@ -1765,24 +1765,24 @@ impl Parser {
             }
         }
         let name = self.consume_identifier("type name")?;
-        // Check for generic type parameters: list[int], dict[string, int]
-        if self.check(&TokenKind::LBracket) {
-            self.advance(); // skip [
+        // Check for generic type parameters: list<int>, dict<string, int>
+        if self.check(&TokenKind::Lt) {
+            self.advance(); // skip <
             let first_param = self.parse_type_expr()?;
             if name == "list" {
-                self.consume(&TokenKind::RBracket, "]")?;
+                self.consume(&TokenKind::Gt, ">")?;
                 return Ok(TypeExpr::List(Box::new(first_param)));
             } else if name == "dict" {
                 self.consume(&TokenKind::Comma, ",")?;
                 let second_param = self.parse_type_expr()?;
-                self.consume(&TokenKind::RBracket, "]")?;
+                self.consume(&TokenKind::Gt, ">")?;
                 return Ok(TypeExpr::DictType(
                     Box::new(first_param),
                     Box::new(second_param),
                 ));
             }
-            // Unknown generic — just consume ] and treat as Named
-            self.consume(&TokenKind::RBracket, "]")?;
+            // Unknown generic — just consume > and treat as Named
+            self.consume(&TokenKind::Gt, ">")?;
         }
         Ok(TypeExpr::Named(name))
     }
