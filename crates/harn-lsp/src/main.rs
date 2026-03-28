@@ -1179,6 +1179,23 @@ impl DocumentState {
             });
         }
 
+        // Lint
+        let lint_diags = harn_lint::lint(&program);
+        for ld in lint_diags {
+            let severity = match ld.severity {
+                harn_lint::LintSeverity::Warning => DiagnosticSeverity::WARNING,
+                harn_lint::LintSeverity::Error => DiagnosticSeverity::ERROR,
+            };
+            let range = span_to_range(&ld.span);
+            self.diagnostics.push(Diagnostic {
+                range,
+                severity: Some(severity),
+                source: Some("harn-lint".to_string()),
+                message: format!("[{}] {}", ld.rule, ld.message),
+                ..Default::default()
+            });
+        }
+
         // Build symbol table
         self.symbols = build_symbol_table(&program);
         self.ast = Some(program);
@@ -1791,6 +1808,8 @@ impl LanguageServer for HarnLsp {
                         },
                     ),
                 ),
+                code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
+                rename_provider: Some(OneOf::Left(true)),
                 ..Default::default()
             },
             ..Default::default()
@@ -2244,6 +2263,247 @@ impl LanguageServer for HarnLsp {
     }
 
     // -----------------------------------------------------------------------
+    // Code actions (quick-fix for lint diagnostics)
+    // -----------------------------------------------------------------------
+    async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
+        let uri = &params.text_document.uri;
+        let mut actions = Vec::new();
+
+        let docs = self.documents.lock().unwrap();
+        let state = match docs.get(uri) {
+            Some(s) => s,
+            None => return Ok(Some(actions)),
+        };
+        let source = state.source.clone();
+        drop(docs);
+
+        for diag in &params.context.diagnostics {
+            let msg = &diag.message;
+
+            // --- [mutable-never-reassigned]: replace `var` with `let` ---
+            if msg.contains("[mutable-never-reassigned]") {
+                // Find the `var` keyword at the start of the diagnostic range
+                let offset = lsp_position_to_offset(&source, diag.range.start);
+                // Scan forward from the line start to find "var" keyword
+                if let Some(var_pos) = source[offset..].find("var") {
+                    let abs_pos = offset + var_pos;
+                    // Verify it's actually the `var` keyword (next char is space or newline)
+                    if abs_pos + 3 <= source.len()
+                        && (abs_pos == 0 || !source.as_bytes()[abs_pos - 1].is_ascii_alphanumeric())
+                        && (abs_pos + 3 == source.len()
+                            || !source.as_bytes()[abs_pos + 3].is_ascii_alphanumeric())
+                    {
+                        let start = offset_to_position(&source, abs_pos);
+                        let end = offset_to_position(&source, abs_pos + 3);
+                        let edit_range = Range { start, end };
+
+                        let mut changes = HashMap::new();
+                        changes.insert(
+                            uri.clone(),
+                            vec![TextEdit {
+                                range: edit_range,
+                                new_text: "let".to_string(),
+                            }],
+                        );
+                        actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+                            title: "Change `var` to `let`".to_string(),
+                            kind: Some(CodeActionKind::QUICKFIX),
+                            diagnostics: Some(vec![diag.clone()]),
+                            edit: Some(WorkspaceEdit {
+                                changes: Some(changes),
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        }));
+                    }
+                }
+            }
+
+            // --- [unused-variable] / [unused-parameter]: add `_` prefix ---
+            if msg.contains("[unused-variable]") || msg.contains("[unused-parameter]") {
+                // Extract the variable name from the message: "variable `foo` is declared..."
+                // or "parameter `foo` is declared..."
+                if let Some(name) = extract_backtick_name(msg) {
+                    // Find the name in the source around the diagnostic range
+                    let offset = lsp_position_to_offset(&source, diag.range.start);
+                    let end_offset = lsp_position_to_offset(&source, diag.range.end)
+                        .max(offset + 1)
+                        .min(source.len());
+                    let search_region = &source[offset..end_offset];
+                    if let Some(name_pos) = find_word_in_region(search_region, &name) {
+                        let abs_pos = offset + name_pos;
+                        let start = offset_to_position(&source, abs_pos);
+                        let end = offset_to_position(&source, abs_pos + name.len());
+                        let edit_range = Range { start, end };
+
+                        let mut changes = HashMap::new();
+                        changes.insert(
+                            uri.clone(),
+                            vec![TextEdit {
+                                range: edit_range,
+                                new_text: format!("_{name}"),
+                            }],
+                        );
+                        let label = if msg.contains("[unused-variable]") {
+                            "variable"
+                        } else {
+                            "parameter"
+                        };
+                        actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+                            title: format!("Prefix {label} `{name}` with `_`"),
+                            kind: Some(CodeActionKind::QUICKFIX),
+                            diagnostics: Some(vec![diag.clone()]),
+                            edit: Some(WorkspaceEdit {
+                                changes: Some(changes),
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        }));
+                    }
+                }
+            }
+
+            // --- [comparison-to-bool]: simplify boolean comparison ---
+            if msg.contains("[comparison-to-bool]") {
+                let offset = lsp_position_to_offset(&source, diag.range.start);
+                let end_offset = lsp_position_to_offset(&source, diag.range.end)
+                    .max(offset + 1)
+                    .min(source.len());
+                let expr_text = &source[offset..end_offset];
+
+                // Try to produce a simplified replacement
+                let replacement = simplify_bool_comparison(expr_text);
+                if let Some(new_text) = replacement {
+                    let mut changes = HashMap::new();
+                    changes.insert(
+                        uri.clone(),
+                        vec![TextEdit {
+                            range: diag.range,
+                            new_text,
+                        }],
+                    );
+                    actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+                        title: "Simplify boolean comparison".to_string(),
+                        kind: Some(CodeActionKind::QUICKFIX),
+                        diagnostics: Some(vec![diag.clone()]),
+                        edit: Some(WorkspaceEdit {
+                            changes: Some(changes),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }));
+                }
+            }
+        }
+
+        Ok(Some(actions))
+    }
+
+    // -----------------------------------------------------------------------
+    // Rename (document-wide symbol rename)
+    // -----------------------------------------------------------------------
+    async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
+        let uri = &params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+        let new_name = &params.new_name;
+
+        let docs = self.documents.lock().unwrap();
+        let state = match docs.get(uri) {
+            Some(s) => s,
+            None => return Ok(None),
+        };
+        let source = state.source.clone();
+        let ast = state.ast.clone();
+        let symbols = state.symbols.clone();
+        drop(docs);
+
+        let old_name = match Self::word_at_position(&source, position) {
+            Some(w) => w,
+            None => return Ok(None),
+        };
+
+        // Verify the name refers to a known symbol (definition or builtin).
+        // Builtins should not be renamed.
+        if BUILTINS.iter().any(|(n, _)| *n == old_name) {
+            return Ok(None);
+        }
+
+        // Check that the symbol exists in the symbol table
+        let symbol_exists = symbols.iter().any(|s| s.name == old_name);
+        if !symbol_exists {
+            return Ok(None);
+        }
+
+        // Collect all references from the AST
+        let program = match ast {
+            Some(p) => p,
+            None => return Ok(None),
+        };
+        let ref_spans = find_references(&program, &old_name);
+        if ref_spans.is_empty() {
+            return Ok(None);
+        }
+
+        // For each reference span, find the exact position of the name within
+        // the span text. Definition nodes have spans covering the whole
+        // declaration, so we search within each span for the identifier token.
+        let mut edits = Vec::new();
+        let mut seen_offsets = std::collections::HashSet::new();
+
+        // Also scan lexer tokens for precise identifier positions
+        let mut lexer = Lexer::new(&source);
+        if let Ok(tokens) = lexer.tokenize() {
+            for token in &tokens {
+                if let TokenKind::Identifier(ref name) = token.kind {
+                    if name == &old_name && !seen_offsets.contains(&token.span.start) {
+                        // Verify this token falls within one of the reference spans
+                        let in_ref = ref_spans
+                            .iter()
+                            .any(|rs| token.span.start >= rs.start && token.span.end <= rs.end);
+                        if in_ref {
+                            seen_offsets.insert(token.span.start);
+                            let start = offset_to_position(&source, token.span.start);
+                            let end = offset_to_position(&source, token.span.end);
+                            edits.push(TextEdit {
+                                range: Range { start, end },
+                                new_text: new_name.clone(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Also handle definition sites where the name appears as a string
+        // field rather than an Identifier token (Pipeline name, FnDecl name,
+        // LetBinding/VarBinding pattern names, etc.). These show up in the
+        // token stream as Identifier tokens too, so the above loop should
+        // catch them. But for pipeline/fn declarations, the name token
+        // appears right after the keyword, which we already captured.
+
+        if edits.is_empty() {
+            return Ok(None);
+        }
+
+        // Sort edits by position (bottom-up) to avoid offset shifting issues
+        edits.sort_by(|a, b| {
+            b.range
+                .start
+                .line
+                .cmp(&a.range.start.line)
+                .then(b.range.start.character.cmp(&a.range.start.character))
+        });
+
+        let mut changes = HashMap::new();
+        changes.insert(uri.clone(), edits);
+
+        Ok(Some(WorkspaceEdit {
+            changes: Some(changes),
+            ..Default::default()
+        }))
+    }
+
+    // -----------------------------------------------------------------------
     // Semantic tokens (lexer-based with symbol table enhancement)
     // -----------------------------------------------------------------------
     async fn semantic_tokens_full(
@@ -2448,6 +2708,92 @@ fn keyword_doc(name: &str) -> Option<String> {
         _ => return None,
     };
     Some(doc.to_string())
+}
+
+// ---------------------------------------------------------------------------
+// Code action helpers
+// ---------------------------------------------------------------------------
+
+/// Convert a byte offset in `source` to a 0-based LSP Position.
+fn offset_to_position(source: &str, offset: usize) -> Position {
+    let mut line = 0u32;
+    let mut col = 0u32;
+    for (i, ch) in source.char_indices() {
+        if i == offset {
+            return Position::new(line, col);
+        }
+        if ch == '\n' {
+            line += 1;
+            col = 0;
+        } else {
+            col += 1;
+        }
+    }
+    // offset == source.len() (end of file)
+    Position::new(line, col)
+}
+
+/// Extract the first backtick-quoted name from a diagnostic message.
+/// E.g., "variable `foo` is declared but never used" -> Some("foo")
+fn extract_backtick_name(msg: &str) -> Option<String> {
+    let start = msg.find('`')? + 1;
+    let rest = &msg[start..];
+    let end = rest.find('`')?;
+    Some(rest[..end].to_string())
+}
+
+/// Find the byte offset of a whole-word occurrence of `word` within `region`.
+fn find_word_in_region(region: &str, word: &str) -> Option<usize> {
+    let mut search_from = 0;
+    while let Some(pos) = region[search_from..].find(word) {
+        let abs = search_from + pos;
+        let before_ok = abs == 0
+            || !region.as_bytes()[abs - 1].is_ascii_alphanumeric()
+                && region.as_bytes()[abs - 1] != b'_';
+        let after_pos = abs + word.len();
+        let after_ok = after_pos >= region.len()
+            || !region.as_bytes()[after_pos].is_ascii_alphanumeric()
+                && region.as_bytes()[after_pos] != b'_';
+        if before_ok && after_ok {
+            return Some(abs);
+        }
+        search_from = abs + 1;
+    }
+    None
+}
+
+/// Simplify a boolean comparison expression.
+/// Handles patterns like `x == true`, `x == false`, `true == x`, `false == x`.
+fn simplify_bool_comparison(expr: &str) -> Option<String> {
+    let trimmed = expr.trim();
+
+    // Try to split on `==` or `!=`
+    for op in &["==", "!="] {
+        if let Some(idx) = trimmed.find(op) {
+            let lhs = trimmed[..idx].trim();
+            let rhs = trimmed[idx + op.len()..].trim();
+
+            let (bool_val, other) = if rhs == "true" || rhs == "false" {
+                (rhs, lhs)
+            } else if lhs == "true" || lhs == "false" {
+                (lhs, rhs)
+            } else {
+                continue;
+            };
+
+            let is_eq = *op == "==";
+            let is_true = bool_val == "true";
+
+            // `x == true` -> `x`, `x == false` -> `!x`
+            // `x != true` -> `!x`, `x != false` -> `x`
+            return if is_eq == is_true {
+                Some(other.to_string())
+            } else {
+                Some(format!("!{other}"))
+            };
+        }
+    }
+    None
 }
 
 // ---------------------------------------------------------------------------

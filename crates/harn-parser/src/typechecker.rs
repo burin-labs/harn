@@ -517,8 +517,54 @@ impl TypeChecker {
 
             Node::MatchExpr { value, arms } => {
                 self.check_node(value, scope);
+                let value_type = self.infer_type(value, scope);
                 for arm in arms {
                     self.check_node(&arm.pattern, scope);
+                    // Check for incompatible literal pattern types
+                    if let Some(ref vt) = value_type {
+                        let value_type_name = format_type(vt);
+                        let mismatch = match &arm.pattern.node {
+                            Node::StringLiteral(_) => {
+                                !self.types_compatible(vt, &TypeExpr::Named("string".into()), scope)
+                            }
+                            Node::IntLiteral(_) => {
+                                !self.types_compatible(vt, &TypeExpr::Named("int".into()), scope)
+                                    && !self.types_compatible(
+                                        vt,
+                                        &TypeExpr::Named("float".into()),
+                                        scope,
+                                    )
+                            }
+                            Node::FloatLiteral(_) => {
+                                !self.types_compatible(vt, &TypeExpr::Named("float".into()), scope)
+                                    && !self.types_compatible(
+                                        vt,
+                                        &TypeExpr::Named("int".into()),
+                                        scope,
+                                    )
+                            }
+                            Node::BoolLiteral(_) => {
+                                !self.types_compatible(vt, &TypeExpr::Named("bool".into()), scope)
+                            }
+                            _ => false,
+                        };
+                        if mismatch {
+                            let pattern_type = match &arm.pattern.node {
+                                Node::StringLiteral(_) => "string",
+                                Node::IntLiteral(_) => "int",
+                                Node::FloatLiteral(_) => "float",
+                                Node::BoolLiteral(_) => "bool",
+                                _ => unreachable!(),
+                            };
+                            self.warning_at(
+                                format!(
+                                    "Match pattern type mismatch: matching {} against {} literal",
+                                    value_type_name, pattern_type
+                                ),
+                                arm.pattern.span,
+                            );
+                        }
+                    }
                     let mut arm_scope = scope.child();
                     self.check_block(&arm.body, &mut arm_scope);
                 }
@@ -1472,5 +1518,176 @@ add("hello", 2) }"#,
             "expected detail about wrong type, got: {}",
             errs[0]
         );
+    }
+
+    // --- Match pattern type validation tests ---
+
+    #[test]
+    fn test_match_pattern_string_against_int() {
+        let warns = warnings(
+            r#"pipeline t(task) {
+  let x: int = 42
+  match x {
+    "hello" -> { log("bad") }
+    42 -> { log("ok") }
+  }
+}"#,
+        );
+        let pattern_warns: Vec<_> = warns
+            .iter()
+            .filter(|w| w.contains("Match pattern type mismatch"))
+            .collect();
+        assert_eq!(pattern_warns.len(), 1);
+        assert!(pattern_warns[0].contains("matching int against string literal"));
+    }
+
+    #[test]
+    fn test_match_pattern_int_against_string() {
+        let warns = warnings(
+            r#"pipeline t(task) {
+  let x: string = "hello"
+  match x {
+    42 -> { log("bad") }
+    "hello" -> { log("ok") }
+  }
+}"#,
+        );
+        let pattern_warns: Vec<_> = warns
+            .iter()
+            .filter(|w| w.contains("Match pattern type mismatch"))
+            .collect();
+        assert_eq!(pattern_warns.len(), 1);
+        assert!(pattern_warns[0].contains("matching string against int literal"));
+    }
+
+    #[test]
+    fn test_match_pattern_bool_against_int() {
+        let warns = warnings(
+            r#"pipeline t(task) {
+  let x: int = 42
+  match x {
+    true -> { log("bad") }
+    42 -> { log("ok") }
+  }
+}"#,
+        );
+        let pattern_warns: Vec<_> = warns
+            .iter()
+            .filter(|w| w.contains("Match pattern type mismatch"))
+            .collect();
+        assert_eq!(pattern_warns.len(), 1);
+        assert!(pattern_warns[0].contains("matching int against bool literal"));
+    }
+
+    #[test]
+    fn test_match_pattern_float_against_string() {
+        let warns = warnings(
+            r#"pipeline t(task) {
+  let x: string = "hello"
+  match x {
+    3.14 -> { log("bad") }
+    "hello" -> { log("ok") }
+  }
+}"#,
+        );
+        let pattern_warns: Vec<_> = warns
+            .iter()
+            .filter(|w| w.contains("Match pattern type mismatch"))
+            .collect();
+        assert_eq!(pattern_warns.len(), 1);
+        assert!(pattern_warns[0].contains("matching string against float literal"));
+    }
+
+    #[test]
+    fn test_match_pattern_int_against_float_ok() {
+        // int and float are compatible for match patterns
+        let warns = warnings(
+            r#"pipeline t(task) {
+  let x: float = 3.14
+  match x {
+    42 -> { log("ok") }
+    _ -> { log("default") }
+  }
+}"#,
+        );
+        let pattern_warns: Vec<_> = warns
+            .iter()
+            .filter(|w| w.contains("Match pattern type mismatch"))
+            .collect();
+        assert!(pattern_warns.is_empty());
+    }
+
+    #[test]
+    fn test_match_pattern_float_against_int_ok() {
+        // float and int are compatible for match patterns
+        let warns = warnings(
+            r#"pipeline t(task) {
+  let x: int = 42
+  match x {
+    3.14 -> { log("close") }
+    _ -> { log("default") }
+  }
+}"#,
+        );
+        let pattern_warns: Vec<_> = warns
+            .iter()
+            .filter(|w| w.contains("Match pattern type mismatch"))
+            .collect();
+        assert!(pattern_warns.is_empty());
+    }
+
+    #[test]
+    fn test_match_pattern_correct_types_no_warning() {
+        let warns = warnings(
+            r#"pipeline t(task) {
+  let x: int = 42
+  match x {
+    1 -> { log("one") }
+    2 -> { log("two") }
+    _ -> { log("other") }
+  }
+}"#,
+        );
+        let pattern_warns: Vec<_> = warns
+            .iter()
+            .filter(|w| w.contains("Match pattern type mismatch"))
+            .collect();
+        assert!(pattern_warns.is_empty());
+    }
+
+    #[test]
+    fn test_match_pattern_wildcard_no_warning() {
+        let warns = warnings(
+            r#"pipeline t(task) {
+  let x: int = 42
+  match x {
+    _ -> { log("catch all") }
+  }
+}"#,
+        );
+        let pattern_warns: Vec<_> = warns
+            .iter()
+            .filter(|w| w.contains("Match pattern type mismatch"))
+            .collect();
+        assert!(pattern_warns.is_empty());
+    }
+
+    #[test]
+    fn test_match_pattern_untyped_no_warning() {
+        // When value has no known type, no warning should be emitted
+        let warns = warnings(
+            r#"pipeline t(task) {
+  let x = some_unknown_fn()
+  match x {
+    "hello" -> { log("string") }
+    42 -> { log("int") }
+  }
+}"#,
+        );
+        let pattern_warns: Vec<_> = warns
+            .iter()
+            .filter(|w| w.contains("Match pattern type mismatch"))
+            .collect();
+        assert!(pattern_warns.is_empty());
     }
 }

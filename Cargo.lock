@@ -498,6 +498,7 @@ name = "harn-lsp"
 version = "0.3.3"
 dependencies = [
  "harn-lexer",
+ "harn-lint",
  "harn-parser",
  "serde_json",
  "tokio",
