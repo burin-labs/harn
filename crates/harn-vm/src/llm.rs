@@ -1130,7 +1130,7 @@ fn vm_value_dict_to_json(dict: &BTreeMap<String, VmValue>) -> serde_json::Value 
     serde_json::Value::Object(map)
 }
 
-fn vm_value_to_json(val: &VmValue) -> serde_json::Value {
+pub fn vm_value_to_json(val: &VmValue) -> serde_json::Value {
     match val {
         VmValue::Int(i) => serde_json::json!(i),
         VmValue::Float(f) => serde_json::json!(f),

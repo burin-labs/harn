@@ -48,16 +48,33 @@ async fn main() {
         }
         "run" => {
             let trace = args.iter().any(|a| a == "--trace");
+            let bridge = args.iter().any(|a| a == "--bridge");
+            let arg_json = args
+                .windows(2)
+                .find(|w| w[0] == "--arg")
+                .map(|w| w[1].clone());
+
+            // Find the .harn file (skip flag values)
+            let flag_vals: std::collections::HashSet<&str> = args
+                .windows(2)
+                .filter(|w| w[0] == "--arg")
+                .map(|w| w[1].as_str())
+                .collect();
             let file = args
                 .iter()
                 .skip(2)
-                .find(|a| a.ends_with(".harn") || (!a.starts_with("--") && a != &"--trace"));
+                .find(|a| !a.starts_with("--") && !flag_vals.contains(a.as_str()));
+
             match file {
                 Some(f) => {
-                    run_file(f, trace).await;
+                    if bridge {
+                        run_file_bridge(f, arg_json.as_deref()).await;
+                    } else {
+                        run_file(f, trace).await;
+                    }
                 }
                 None => {
-                    eprintln!("Usage: harn run [--trace] <file.harn>");
+                    eprintln!("Usage: harn run [--trace] [--bridge --arg <json>] <file.harn>");
                     process::exit(1);
                 }
             }
@@ -461,6 +478,77 @@ fn print_trace_summary() {
         total_ms,
         cost,
     );
+}
+
+async fn run_file_bridge(path: &str, arg_json: Option<&str>) {
+    let (source, program) = parse_source_file(path);
+
+    // In bridge mode, compile a specific pipeline or default
+    let chunk = match harn_vm::Compiler::new().compile(&program) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("error: compile error: {e}");
+            process::exit(1);
+        }
+    };
+
+    let local = tokio::task::LocalSet::new();
+    let path_owned = path.to_string();
+    let source_owned = source;
+    let arg_owned = arg_json.map(|s| s.to_string());
+
+    let exit_code = local
+        .run_until(async move {
+            let bridge = std::rc::Rc::new(harn_vm::bridge::HostBridge::new());
+
+            let mut vm = harn_vm::Vm::new();
+
+            // Register language builtins (string ops, math, json, etc.)
+            harn_vm::register_vm_stdlib(&mut vm);
+
+            // Override with bridge builtins (llm_call, file I/O, etc.)
+            harn_vm::bridge_builtins::register_bridge_builtins(&mut vm, bridge.clone());
+
+            vm.set_source_info(&path_owned, &source_owned);
+            if let Some(p) = std::path::Path::new(&path_owned).parent() {
+                if !p.as_os_str().is_empty() {
+                    vm.set_source_dir(p);
+                }
+            }
+
+            // If --arg was provided, inject it as the pipeline parameter
+            if let Some(arg_str) = &arg_owned {
+                match serde_json::from_str::<serde_json::Value>(arg_str) {
+                    Ok(val) => {
+                        let vm_val = harn_vm::bridge::json_result_to_vm_value(&val);
+                        vm.set_global("task", vm_val);
+                    }
+                    Err(e) => {
+                        bridge.send_output(&format!("error: invalid --arg JSON: {e}\n"));
+                        return 1;
+                    }
+                }
+            }
+
+            match vm.execute(&chunk).await {
+                Ok(_) => {
+                    // Send any buffered output
+                    let output = vm.output();
+                    if !output.is_empty() {
+                        bridge.send_output(output);
+                    }
+                    0
+                }
+                Err(e) => {
+                    let formatted = vm.format_runtime_error(&e);
+                    bridge.notify("error", serde_json::json!({"message": formatted}));
+                    1
+                }
+            }
+        })
+        .await;
+
+    process::exit(exit_code);
 }
 
 fn error_span_from_lex(e: &harn_lexer::LexerError) -> harn_lexer::Span {

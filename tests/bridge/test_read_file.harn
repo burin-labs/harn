@@ -1,0 +1,4 @@
+pipeline default(task) {
+  let content = read_file("src/main.rs")
+  log(content)
+}

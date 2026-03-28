@@ -456,6 +456,7 @@ dependencies = [
  "nu-ansi-term",
  "reedline",
  "serde",
+ "serde_json",
  "tokio",
  "toml",
 ]

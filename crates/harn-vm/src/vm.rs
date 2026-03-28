@@ -313,6 +313,11 @@ impl Vm {
         self.builtins.insert(name.to_string(), Rc::new(f));
     }
 
+    /// Remove a sync builtin (so an async version can take precedence).
+    pub fn unregister_builtin(&mut self, name: &str) {
+        self.builtins.remove(name);
+    }
+
     /// Register an async builtin function.
     pub fn register_async_builtin<F, Fut>(&mut self, name: &str, f: F)
     where
@@ -353,6 +358,11 @@ impl Vm {
     /// Set the source directory for import resolution.
     pub fn set_source_dir(&mut self, dir: &std::path::Path) {
         self.source_dir = Some(dir.to_path_buf());
+    }
+
+    /// Set a global variable in the VM's environment.
+    pub fn set_global(&mut self, name: &str, value: VmValue) {
+        self.env.define(name, value, false);
     }
 
     /// Execute an import, reading and running the file's declarations.

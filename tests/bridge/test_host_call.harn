@@ -1,0 +1,4 @@
+pipeline default(task) {
+  let result = host_call("get_system_prompt", {})
+  log(result)
+}

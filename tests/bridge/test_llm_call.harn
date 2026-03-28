@@ -1,0 +1,4 @@
+pipeline default(task) {
+  let response = llm_call("What is 2+2?", "Be concise")
+  log(response)
+}
