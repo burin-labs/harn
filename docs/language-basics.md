@@ -355,6 +355,69 @@ let valid = check_a()
 Note: `-` does not continue across lines because it doubles as unary
 negation.
 
+A backslash at the end of a line forces the next line to continue the
+current expression, even when no operator is present:
+
+```javascript
+let long_value = some_function( \
+  arg1, arg2, arg3 \
+)
+```
+
+## Destructuring
+
+Destructuring extracts values from dicts and lists into local variables.
+
+### Dict destructuring
+
+```javascript
+let person = {name: "Alice", age: 30}
+let {name, age} = person
+log(name)  // "Alice"
+log(age)   // 30
+```
+
+### List destructuring
+
+```javascript
+let items = [1, 2, 3, 4, 5]
+let [first, ...rest] = items
+log(first)  // 1
+log(rest)   // [2, 3, 4, 5]
+```
+
+### Renaming
+
+Use `:` to bind a dict field to a different variable name:
+
+```javascript
+let data = {name: "Alice"}
+let {name: user_name} = data
+log(user_name)  // "Alice"
+```
+
+### Destructuring in for-in loops
+
+```javascript
+let entries = [{key: "a", value: 1}, {key: "b", value: 2}]
+for {key, value} in entries {
+  log("${key}: ${value}")
+}
+```
+
+### Missing keys and empty rest
+
+Missing keys destructure to `nil`. A rest pattern with no remaining
+items gives an empty collection:
+
+```javascript
+let {name, email} = {name: "Alice"}
+log(email)  // nil
+
+let [only, ...rest] = [42]
+log(rest)   // []
+```
+
 ## Collections
 
 ### Lists

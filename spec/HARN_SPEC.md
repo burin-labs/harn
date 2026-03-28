@@ -15,6 +15,21 @@ Spaces (`' '`), tabs (`'\t'`), and carriage returns (`'\r'`) are insignificant a
 between tokens. Newlines (`'\n'`) are significant tokens used as statement separators.
 The parser skips newlines between statements but they are preserved in the token stream.
 
+### Backslash line continuation
+
+A backslash (`\`) immediately before a newline joins the current line with the next.
+Both the backslash and the newline are removed from the token stream, so the two
+physical lines are treated as a single logical line by the lexer.
+
+```harn
+let total = 1 + 2 \
+  + 3 + 4
+// equivalent to: let total = 1 + 2 + 3 + 4
+```
+
+This is useful for breaking long expressions that do not involve a binary operator
+eligible for multiline continuation (see "Multiline expressions").
+
 ### Comments
 
 ```javascript
@@ -211,10 +226,10 @@ statement ::= let_binding
             | fn_decl
             | expression_statement
 
-let_binding    ::= 'let' IDENTIFIER (':' type_expr)? '=' expression
-var_binding    ::= 'var' IDENTIFIER (':' type_expr)? '=' expression
+let_binding    ::= 'let' binding_pattern (':' type_expr)? '=' expression
+var_binding    ::= 'var' binding_pattern (':' type_expr)? '=' expression
 if_else        ::= 'if' expression '{' block '}' ('else' (if_else | '{' block '}'))?
-for_in         ::= 'for' IDENTIFIER 'in' expression '{' block '}'
+for_in         ::= 'for' binding_pattern 'in' expression '{' block '}'
 match_expr     ::= 'match' expression '{' (expression '->' '{' block '}')* '}'
 while_loop     ::= 'while' ('(' expression ')' | expression) '{' block '}'
 retry_block    ::= 'retry' ('(' expression ')' | primary) '{' block '}'
@@ -227,6 +242,18 @@ try_catch      ::= 'try' '{' block '}' 'catch' ('(' IDENTIFIER ')')? '{' block '
 fn_decl        ::= 'fn' IDENTIFIER '(' param_list ')' ('->' type_expr)? '{' block '}'
 
 expression_statement ::= expression ('=' expression)?
+
+binding_pattern ::= IDENTIFIER
+                  | '{' dict_pattern_fields '}'
+                  | '[' list_pattern_elements ']'
+
+dict_pattern_fields   ::= dict_pattern_field (',' dict_pattern_field)*
+dict_pattern_field    ::= '...' IDENTIFIER              (* rest pattern *)
+                        | IDENTIFIER (':' IDENTIFIER)?   (* key, optional rename *)
+
+list_pattern_elements ::= list_pattern_element (',' list_pattern_element)*
+list_pattern_element  ::= '...' IDENTIFIER              (* rest pattern *)
+                        | IDENTIFIER
 ```
 
 The `expression_statement` rule handles both bare expressions (function calls, method calls)
@@ -384,6 +411,88 @@ New child scopes are created for:
 - `block` nodes
 
 Control flow statements (`if`/`else`, `match`) execute in the current scope without creating a new child scope.
+
+## Destructuring patterns
+
+Destructuring binds multiple variables from a dict or list in a single
+`let`, `var`, or `for`-`in` statement.
+
+### Dict destructuring
+
+```harn
+let {name, age} = {name: "Alice", age: 30}
+// name == "Alice", age == 30
+```
+
+Each field name in the pattern extracts the value for the matching key.
+If the key is missing from the dict, the variable is bound to `nil`.
+
+### List destructuring
+
+```harn
+let [first, second, third] = [10, 20, 30]
+// first == 10, second == 20, third == 30
+```
+
+Elements are bound positionally. If there are more bindings than elements
+in the list, the excess bindings receive `nil`.
+
+### Field renaming
+
+A dict pattern field can be renamed with `key: alias` syntax:
+
+```harn
+let {name: user_name} = {name: "Bob"}
+// user_name == "Bob"
+```
+
+### Rest patterns
+
+A `...rest` element collects remaining items into a new list or dict:
+
+```harn
+let [head, ...tail] = [1, 2, 3, 4]
+// head == 1, tail == [2, 3, 4]
+
+let {name, ...extras} = {name: "Carol", age: 25, role: "dev"}
+// name == "Carol", extras == {age: 25, role: "dev"}
+```
+
+If there are no remaining items, the rest variable is bound to `[]` for
+list patterns or `{}` for dict patterns. The rest element must appear
+last in the pattern.
+
+### For-in destructuring
+
+Destructuring patterns work in `for`-`in` loops to unpack each element:
+
+```harn
+let entries = [{name: "X", val: 1}, {name: "Y", val: 2}]
+for {name, val} in entries {
+  println("${name}=${val}")
+}
+
+let pairs = [[1, 2], [3, 4]]
+for [a, b] in pairs {
+  println("${a}+${b}")
+}
+```
+
+### Var destructuring
+
+`var` destructuring creates mutable bindings that can be reassigned:
+
+```harn
+var {x, y} = {x: 1, y: 2}
+x = 10
+y = 20
+```
+
+### Type errors
+
+Destructuring a non-dict value with a dict pattern or a non-list value
+with a list pattern produces a runtime error. For example,
+`let {a} = "hello"` throws `"dict destructuring requires a dict value"`.
 
 ## Evaluation order
 
@@ -612,6 +721,47 @@ cancel(handle)
 `spawn` launches an async task and returns a `taskHandle`.
 `await` (a built-in interpreter function, not a keyword) blocks until the task completes
 and returns its result. `cancel` cancels the task.
+
+### Channels
+
+Channels provide typed message-passing between concurrent tasks.
+
+```harn
+let ch = channel("name", 10)   // buffered channel with capacity 10
+send(ch, "hello")               // send a value
+let msg = receive(ch)           // blocking receive
+```
+
+#### Channel iteration
+
+A `for`-`in` loop over a channel asynchronously receives values until the
+channel is closed and drained:
+
+```harn
+let ch = channel("stream", 10)
+spawn {
+  send(ch, "a")
+  send(ch, "b")
+  close_channel(ch)
+}
+for item in ch {
+  println(item)    // prints "a", then "b"
+}
+// loop exits after channel is closed and all items are consumed
+```
+
+When the channel is closed, remaining buffered items are still delivered.
+The loop exits once all items have been consumed.
+
+#### close_channel(ch)
+
+Closes a channel. After closing, `send` returns `false` and no new values
+are accepted. Buffered items can still be received.
+
+#### try_receive(ch)
+
+Non-blocking receive. Returns the next value from the channel, or `nil` if
+the channel is empty (regardless of whether it is closed).
 
 ## Error model
 
@@ -845,3 +995,114 @@ Six builtins provide a persistent key-value store backed by `.harn/store.json`:
 
 The store file is created lazily on first mutation. In bridge mode, the
 host can override these builtins via the bridge protocol.
+
+## Sandbox mode
+
+The `harn run` command supports sandbox flags that restrict which builtins
+a program may call.
+
+### --deny
+
+```bash
+harn run --deny read_file,write_file,exec script.harn
+```
+
+Denies the listed builtins. Any call to a denied builtin produces a
+runtime error:
+
+```text
+Permission denied: builtin 'read_file' is not allowed in sandbox mode
+  (use --allow read_file to permit)
+```
+
+### --allow
+
+```bash
+harn run --allow llm,llm_stream script.harn
+```
+
+Allows only the listed builtins plus the core builtins (see below). All
+other builtins are denied.
+
+`--deny` and `--allow` cannot be used together; specifying both is an error.
+
+### Core builtins
+
+The following builtins are always allowed, even when using `--allow`:
+
+`println`, `print`, `log`, `type_of`, `to_string`, `to_int`, `to_float`,
+`len`, `assert`, `assert_eq`, `assert_ne`, `json_parse`, `json_stringify`
+
+### Propagation
+
+Sandbox restrictions propagate to child VMs created by `spawn`,
+`parallel`, and `parallel_map`. A child VM inherits the same set of
+denied builtins as its parent.
+
+## Test framework
+
+Harn includes a built-in test runner invoked via `harn test`.
+
+### Running tests
+
+```bash
+harn test path/to/tests/         # run all test files in a directory
+harn test path/to/test_file.harn # run tests in a single file
+```
+
+### Test discovery
+
+The test runner scans `.harn` files for pipelines whose names start with
+`test_`. Each such pipeline is executed independently. A test passes if
+it completes without error; it fails if it throws or an assertion fails.
+
+```harn
+pipeline test_addition() {
+  assert_eq(1 + 1, 2)
+}
+
+pipeline test_string_concat() {
+  let result = "hello" + " " + "world"
+  assert_eq(result, "hello world")
+}
+```
+
+### Assertions
+
+Three assertion builtins are available (they work outside of tests too):
+
+| Function | Description |
+|---|---|
+| `assert(condition)` | Throws if `condition` is falsy |
+| `assert_eq(a, b)` | Throws if `a != b`, showing both values |
+| `assert_ne(a, b)` | Throws if `a == b`, showing both values |
+
+### Mock LLM provider
+
+During `harn test`, the `HARN_LLM_PROVIDER` environment variable is
+automatically set to `"mock"` unless explicitly overridden. The mock
+provider returns deterministic placeholder responses, allowing tests
+that call `llm` or `llm_stream` to run without API keys.
+
+### CLI options
+
+| Flag | Description |
+|---|---|
+| `--filter <pattern>` | Only run tests whose names contain `<pattern>` |
+| `--timeout <ms>` | Per-test timeout in milliseconds (default 30000) |
+| `--parallel` | Run test files concurrently |
+| `--junit <path>` | Write JUnit XML report to `<path>` |
+| `--record` | Record LLM responses to `.harn-fixtures/` |
+| `--replay` | Replay LLM responses from `.harn-fixtures/` |
+
+## Environment variables
+
+The following environment variables configure runtime behavior:
+
+| Variable | Description |
+|---|---|
+| `HARN_LLM_PROVIDER` | Override the default LLM provider. Accepted values: `anthropic` (default), `openai`, `openrouter`, `ollama`, `mock`. |
+| `HARN_LLM_TIMEOUT` | LLM request timeout in seconds. Default `120`. |
+| `ANTHROPIC_API_KEY` | API key for the Anthropic provider. |
+| `OPENAI_API_KEY` | API key for the OpenAI provider. |
+| `OPENROUTER_API_KEY` | API key for the OpenRouter provider. |

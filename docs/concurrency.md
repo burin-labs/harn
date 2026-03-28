@@ -77,6 +77,41 @@ send(ch, {event: "start", timestamp: timestamp()})
 let msg = receive(ch)
 ```
 
+## Channel iteration
+
+You can iterate over a channel with a `for` loop. The loop receives
+messages one at a time and exits when the channel is closed and fully
+drained:
+
+```javascript
+let ch = channel("stream")
+
+spawn {
+  send(ch, "chunk 1")
+  send(ch, "chunk 2")
+  close_channel(ch)
+}
+
+for chunk in ch {
+  log(chunk)
+}
+// prints "chunk 1" then "chunk 2", then the loop ends
+```
+
+This is especially useful with `llm_stream`, which returns a channel
+of response chunks:
+
+```javascript
+let stream = llm_stream("Tell me a story", "You are a storyteller")
+for chunk in stream {
+  print(chunk)
+}
+```
+
+Use `try_receive(ch)` for non-blocking reads -- it returns `nil`
+immediately if no message is available. Use `close_channel(ch)` to
+signal that no more messages will be sent.
+
 ## Atomics
 
 Thread-safe counters:

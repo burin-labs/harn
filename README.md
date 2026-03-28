@@ -4,7 +4,8 @@
 
 A programming language for orchestrating AI agents.
 
-Harn gives you pipelines, concurrency, LLM calls, and error recovery as
+Harn gives you pipelines, concurrency, LLM calls, error recovery,
+destructuring, a built-in test framework, and sandboxed execution as
 language primitives — not library abstractions. Instead of wiring together
 agents in Python with callbacks and retry decorators, you write this:
 
@@ -304,6 +305,17 @@ harn test myfile_test.harn
 
 The linter catches: unused variables, unreachable code, `var` that should
 be `let`, empty blocks, and shadowed variables.
+
+### Sandbox mode
+
+Run untrusted code with restricted filesystem and network access:
+
+```bash
+harn run --sandbox script.harn
+```
+
+In sandbox mode, file operations are confined to the working directory
+and network calls are disabled by default.
 
 Errors render with source context, like Rust:
 

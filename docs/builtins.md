@@ -78,6 +78,21 @@ let data = json_extract(response)         // parse, stripping fences
 let name = json_extract(response, "name") // extract just one key
 ```
 
+## Math
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `abs(n)` | n: int or float | int or float | Absolute value |
+| `ceil(n)` | n: float | int | Ceiling (rounds up). Ints pass through unchanged |
+| `floor(n)` | n: float | int | Floor (rounds down). Ints pass through unchanged |
+| `round(n)` | n: float | int | Round to nearest integer. Ints pass through unchanged |
+| `sqrt(n)` | n: int or float | float | Square root |
+| `pow(base, exp)` | base: number, exp: number | int or float | Exponentiation. Returns int when both args are int and exp is non-negative |
+| `min(a, b)` | a: number, b: number | int or float | Minimum of two values. Returns float if either argument is float |
+| `max(a, b)` | a: number, b: number | int or float | Maximum of two values. Returns float if either argument is float |
+| `random()` | none | float | Random float in [0, 1) |
+| `random_int(min, max)` | min: int, max: int | int | Random integer in [min, max] inclusive |
+
 ## String functions
 
 | Function | Parameters | Returns | Description |
@@ -110,6 +125,14 @@ let name = json_extract(response, "name") // extract just one key
 |---|---|---|---|
 | `read_file(path)` | path: string | string | Read entire file as UTF-8 string. Throws on failure |
 | `write_file(path, content)` | path: string, content: string | nil | Write string to file. Throws on failure |
+| `append_file(path, content)` | path: string, content: string | nil | Append string to file, creating it if it doesn't exist. Throws on failure |
+| `copy_file(src, dst)` | src: string, dst: string | nil | Copy a file. Throws on failure |
+| `delete_file(path)` | path: string | nil | Delete a file or directory (recursive). Throws on failure |
+| `file_exists(path)` | path: string | bool | Check if a file or directory exists |
+| `list_dir(path?)` | path: string (default `"."`) | list | List directory contents as sorted list of file names. Throws on failure |
+| `mkdir(path)` | path: string | nil | Create directory and all parent directories. Throws on failure |
+| `stat(path)` | path: string | dict | File metadata: `{size, is_file, is_dir, readonly, modified}`. Throws on failure |
+| `temp_dir()` | none | string | System temporary directory path |
 | `render(path, bindings?)` | path: string, bindings: dict | string | Read a template file and replace `{{key}}` placeholders with values from bindings dict. Without bindings, just reads the file |
 
 ## Environment and system
@@ -118,6 +141,7 @@ let name = json_extract(response, "name") // extract just one key
 |---|---|---|---|
 | `env(name)` | name: string | string or nil | Read environment variable |
 | `timestamp()` | none | float | Unix timestamp in seconds with sub-second precision |
+| `exec(cmd, args...)` | cmd: string, args: strings | dict | Execute external command. Returns `{stdout, stderr, status, success}`. Throws if command cannot be spawned |
 | `exit(code)` | code: int (default 0) | never | Terminate the process |
 
 ## Regular expressions
@@ -126,6 +150,22 @@ let name = json_extract(response, "name") // extract just one key
 |---|---|---|---|
 | `regex_match(pattern, text)` | pattern: string, text: string | list or nil | Find all non-overlapping matches. Returns nil if no matches |
 | `regex_replace(pattern, replacement, text)` | pattern: string, replacement: string, text: string | string | Replace all matches. Throws on invalid regex |
+
+## Date/Time
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `date_now()` | none | dict | Current UTC datetime as dict with `year`, `month`, `day`, `hour`, `minute`, `second`, `weekday`, and `timestamp` fields |
+| `date_parse(str)` | str: string | float | Parse a datetime string (e.g., `"2024-01-15 10:30:00"`) into a Unix timestamp. Extracts numeric components from the string. Throws if fewer than 3 parts (year, month, day) |
+| `date_format(dt, format?)` | dt: float, int, or dict; format: string (default `"%Y-%m-%d %H:%M:%S"`) | string | Format a timestamp or date dict as a string. Supports `%Y`, `%m`, `%d`, `%H`, `%M`, `%S` placeholders |
+
+## Testing
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `assert(condition, msg?)` | condition: any, msg: string (optional) | nil | Assert value is truthy. Throws with message on failure |
+| `assert_eq(a, b, msg?)` | a: any, b: any, msg: string (optional) | nil | Assert two values are equal. Throws with message on failure |
+| `assert_ne(a, b, msg?)` | a: any, b: any, msg: string (optional) | nil | Assert two values are not equal. Throws with message on failure |
 
 ## HTTP
 
@@ -156,7 +196,10 @@ Both throw on network errors.
 |---|---|---|---|
 | `channel(name?)` | name: string (default `"default"`) | dict | Create a channel with `name`, `type`, and `messages` fields |
 | `send(ch, value)` | ch: dict, value: any | nil | Send a value to a channel |
-| `receive(ch)` | ch: dict | any | Receive a value from a channel |
+| `receive(ch)` | ch: dict | any | Receive a value from a channel (blocks until data available) |
+| `close_channel(ch)` | ch: channel | nil | Close a channel, preventing further sends |
+| `try_receive(ch)` | ch: channel | any or nil | Non-blocking receive. Returns nil if no data available |
+| `select(ch1, ch2, ...)` | channels: channel | dict or nil | Wait for data on any channel. Returns `{index, value, channel}` for the first ready channel, or nil if all closed |
 
 ### Atomics
 
