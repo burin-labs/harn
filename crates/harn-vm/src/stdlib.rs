@@ -628,6 +628,38 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
     });
 
     // =========================================================================
+    // Standalone string function builtins
+    // =========================================================================
+
+    vm.register_builtin("trim", |args, _out| {
+        let s = args.first().map(|a| a.display()).unwrap_or_default();
+        Ok(VmValue::String(Rc::from(s.trim())))
+    });
+
+    vm.register_builtin("lowercase", |args, _out| {
+        let s = args.first().map(|a| a.display()).unwrap_or_default();
+        Ok(VmValue::String(Rc::from(s.to_lowercase().as_str())))
+    });
+
+    vm.register_builtin("uppercase", |args, _out| {
+        let s = args.first().map(|a| a.display()).unwrap_or_default();
+        Ok(VmValue::String(Rc::from(s.to_uppercase().as_str())))
+    });
+
+    vm.register_builtin("split", |args, _out| {
+        let s = args.first().map(|a| a.display()).unwrap_or_default();
+        let sep = args
+            .get(1)
+            .map(|a| a.display())
+            .unwrap_or_else(|| " ".to_string());
+        let parts: Vec<VmValue> = s
+            .split(&sep)
+            .map(|p| VmValue::String(Rc::from(p)))
+            .collect();
+        Ok(VmValue::List(Rc::new(parts)))
+    });
+
+    // =========================================================================
     // Logging builtins
     // =========================================================================
 

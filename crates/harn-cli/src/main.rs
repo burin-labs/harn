@@ -1,3 +1,5 @@
+mod a2a;
+mod acp;
 mod package;
 mod test_runner;
 
@@ -26,6 +28,8 @@ async fn main() {
         eprintln!("  init [name]            Scaffold a new Harn project");
         eprintln!("  add <name> --git <url> Add a dependency to harn.toml");
         eprintln!("  install                Install dependencies from harn.toml");
+        eprintln!("  serve [--port N] <file> Serve a pipeline as an A2A agent over HTTP");
+        eprintln!("  acp [pipeline.harn]    Start an ACP server on stdio");
         eprintln!("  repl                   Interactive REPL");
         eprintln!();
         eprintln!("Test flags: --filter <pattern> --watch --record --replay --parallel");
@@ -201,6 +205,36 @@ async fn main() {
         "init" => {
             let name = args.get(2).map(|s| s.as_str());
             init_project(name);
+        }
+        "serve" => {
+            let port: u16 = args
+                .windows(2)
+                .find(|w| w[0] == "--port")
+                .and_then(|w| w[1].parse().ok())
+                .unwrap_or(8080);
+
+            let flag_values: std::collections::HashSet<&str> = args
+                .windows(2)
+                .filter(|w| w[0] == "--port")
+                .map(|w| w[1].as_str())
+                .collect();
+
+            let file = args
+                .iter()
+                .skip(2)
+                .find(|a| !a.starts_with("--") && !flag_values.contains(a.as_str()));
+
+            match file {
+                Some(f) => a2a::run_a2a_server(f, port).await,
+                None => {
+                    eprintln!("Usage: harn serve [--port N] <file.harn>");
+                    process::exit(1);
+                }
+            }
+        }
+        "acp" => {
+            let pipeline = args.get(2).map(|s| s.as_str());
+            acp::run_acp_server(pipeline).await;
         }
         "repl" => run_repl().await,
         "install" => package::install_packages(),

@@ -1,0 +1,7 @@
+pipeline default() {
+  println(trim("  hello  "))
+  println(lowercase("HELLO"))
+  println(uppercase("hello"))
+  let parts = split("a,b,c", ",")
+  println(parts)
+}

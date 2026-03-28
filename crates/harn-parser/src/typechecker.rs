@@ -177,6 +177,10 @@ fn is_builtin(name: &str) -> bool {
             | "format"
             | "json_validate"
             | "json_extract"
+            | "trim"
+            | "lowercase"
+            | "uppercase"
+            | "split"
     )
 }
 
