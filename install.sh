@@ -16,6 +16,7 @@ case "$OS" in
   linux)
     case "$ARCH" in
       x86_64) TARGET="x86_64-unknown-linux-gnu" ;;
+      aarch64) TARGET="aarch64-unknown-linux-gnu" ;;
       *) echo "Unsupported architecture: $ARCH"; exit 1 ;;
     esac
     ;;
@@ -35,13 +36,20 @@ URL="https://github.com/$REPO/releases/download/$LATEST/harn-$TARGET.tar.gz"
 echo "Downloading harn $LATEST for $TARGET..."
 
 TMPDIR=$(mktemp -d)
+trap 'rm -rf "$TMPDIR"' EXIT
 curl -sL "$URL" -o "$TMPDIR/harn.tar.gz"
 tar xzf "$TMPDIR/harn.tar.gz" -C "$TMPDIR"
 
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
-echo "Installing to $INSTALL_DIR/harn..."
-install -m 755 "$TMPDIR/harn" "$INSTALL_DIR/harn"
-rm -rf "$TMPDIR"
+echo "Installing to $INSTALL_DIR..."
+
+if [ -w "$INSTALL_DIR" ]; then
+  install -m 755 "$TMPDIR/harn" "$INSTALL_DIR/harn"
+  install -m 755 "$TMPDIR/harn-dap" "$INSTALL_DIR/harn-dap" 2>/dev/null || true
+else
+  sudo install -m 755 "$TMPDIR/harn" "$INSTALL_DIR/harn"
+  sudo install -m 755 "$TMPDIR/harn-dap" "$INSTALL_DIR/harn-dap" 2>/dev/null || true
+fi
 
 echo "harn $LATEST installed successfully!"
-echo "Run 'harn --version' to verify."
+echo "Run 'harn version' to verify."

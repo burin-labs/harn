@@ -75,3 +75,5 @@ jobs:
           key: ${{ runner.os }}-cargo-conformance-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-conformance-
       - run: make conformance
+      - run: make lint-harn
+      - run: make fmt-harn
