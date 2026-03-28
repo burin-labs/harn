@@ -550,6 +550,7 @@ fn vm_resolve_model(options: &Option<BTreeMap<String, VmValue>>, provider: &str)
         .as_ref()
         .and_then(|o| o.get("model"))
         .map(|v| v.display())
+        .or_else(|| std::env::var("HARN_LLM_MODEL").ok())
         .unwrap_or_else(|| match provider {
             "openai" => "gpt-4o".to_string(),
             "ollama" => "llama3.2".to_string(),
