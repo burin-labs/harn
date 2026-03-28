@@ -1,0 +1,11 @@
+import "std/collections"
+
+pipeline default() {
+  // filter_nil: removes nil, empty string, and "null" string
+  let d = {name: "alice", age: 30, empty: "", nothing: nil, fake_null: "null", valid: "ok"}
+  let cleaned = filter_nil(d)
+  println(cleaned.name)
+  println(cleaned.age)
+  println(cleaned.valid)
+  println(len(cleaned.keys()))
+}

@@ -20,6 +20,8 @@
 "spawn" @keyword
 "parallel" @keyword
 "parallel_map" @keyword
+"type" @keyword
+"pub" @keyword
 
 ; Literals
 (true) @boolean
@@ -59,8 +61,20 @@
   property: (identifier) @property)
 
 ; Parameters
-(parameter_list
-  (identifier) @variable.parameter)
+(typed_parameter
+  name: (identifier) @variable.parameter)
+
+; Type declarations
+(type_declaration
+  name: (identifier) @type.definition)
+
+; Type annotations
+(type_annotation
+  (identifier) @type)
+
+; Shape type fields
+(shape_field
+  name: (identifier) @property)
 
 ; Operators
 "|>" @operator
@@ -92,6 +106,7 @@
 "}" @punctuation.bracket
 "," @punctuation.delimiter
 "." @punctuation.delimiter
+"?." @punctuation.delimiter
 
 ; Comments
 (comment) @comment

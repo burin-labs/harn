@@ -1,0 +1,30 @@
+{
+  "grammars": [
+    {
+      "name": "harn",
+      "camelcase": "Harn",
+      "scope": "source.harn",
+      "path": ".",
+      "file-types": [
+        "harn"
+      ],
+      "highlights": "queries/highlights.scm"
+    }
+  ],
+  "metadata": {
+    "version": "0.1.0",
+    "license": "MIT",
+    "description": "Tree-sitter grammar for the Harn programming language",
+    "links": {
+      "repository": "https://github.com/tree-sitter/tree-sitter-harn"
+    }
+  },
+  "bindings": {
+    "c": true,
+    "go": true,
+    "node": true,
+    "python": true,
+    "rust": true,
+    "swift": true
+  }
+}

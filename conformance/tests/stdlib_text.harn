@@ -1,0 +1,41 @@
+import "std/text"
+
+pipeline default() {
+  // extract_paths
+  let paths = extract_paths("Error in /src/main.rs at line 5\nAlso see ./lib/test.go\n// /ignored/comment.txt")
+  println(len(paths))
+  println(paths[0])
+  println(paths[1])
+  // parse_cells
+  let response = "Here is code:\n```go\nfmt.Println(\"hi\")\n```\nAnd a call:\n```call python\nwrite_file(\"test.py\", code)\n```\nDone"
+  let cells = parse_cells(response)
+  println(len(cells))
+  println(cells[0].type)
+  println(cells[0].lang)
+  println(cells[0].code)
+  println(cells[1].type)
+  println(cells[1].lang)
+  // filter_test_cells
+  let filtered = filter_test_cells(cells, nil)
+  println(len(filtered))
+  let filtered2 = filter_test_cells(cells, "test.py")
+  println(len(filtered2))
+  // truncate_head_tail
+  let long_text = join(["a", "b", "c", "d", "e", "f", "g", "h"], "\n")
+  let short = truncate_head_tail(long_text, 2)
+  println(contains(short, "4 lines omitted"))
+  let no_trunc = truncate_head_tail("one\ntwo\nthree", 2)
+  println(no_trunc)
+  // detect_compile_error
+  println(detect_compile_error("SyntaxError: unexpected EOF"))
+  println(detect_compile_error("all tests passed"))
+  println(detect_compile_error("error: cannot find module"))
+  // has_got_want
+  println(has_got_want("got: 5\nwant: 10"))
+  println(has_got_want("Got: foo\nExpected: bar"))
+  println(has_got_want("just got: something"))
+  // format_test_errors
+  let output = "ok test1\nFAIL test2\nerror: bad input\nok test3\nassert failed"
+  let formatted = format_test_errors(output)
+  println(formatted)
+}

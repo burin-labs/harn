@@ -167,6 +167,21 @@ Both throw on network errors.
 | `atomic_set(a, value)` | a: dict, value: any | dict | Returns new atomic with updated value |
 | `atomic_add(a, delta)` | a: dict, delta: int | dict | Returns new atomic with incremented value |
 
+## Persistent store
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `store_get(key)` | key: string | any | Retrieve value from store, nil if missing |
+| `store_set(key, value)` | key: string, value: any | nil | Store value, auto-saves to `.harn/store.json` |
+| `store_delete(key)` | key: string | nil | Remove key from store |
+| `store_list()` | none | list | List all keys (sorted) |
+| `store_save()` | none | nil | Explicitly flush store to disk |
+| `store_clear()` | none | nil | Remove all keys from store |
+
+The store is backed by `.harn/store.json` relative to the script's
+directory. The file is created lazily on first `store_set`. In bridge mode,
+the host can override these builtins.
+
 ## LLM
 
 See [LLM calls and agent loops](llm-and-agents.md) for full documentation.

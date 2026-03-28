@@ -320,6 +320,41 @@ let result = data
   |> json_stringify
 ```
 
+### Pipe placeholder (`_`)
+
+Use `_` to control where the piped value is placed in the call:
+
+```javascript
+"hello world" |> split(_, " ")       // ["hello", "world"]
+[3, 1, 2] |> _.sort()               // [1, 2, 3]
+items |> len(_)                      // length of items
+"world" |> replace("hello _", "_", _) // "hello world"
+```
+
+Without `_`, the value is passed as the sole argument to a closure or
+function name.
+
+## Multiline expressions
+
+Binary operators, method chains, and pipes can span multiple lines:
+
+```javascript
+let message = "hello"
+  + " "
+  + "world"
+
+let result = items
+  .filter({ x -> x > 0 })
+  .map({ x -> x * 2 })
+
+let valid = check_a()
+  && check_b()
+  || fallback()
+```
+
+Note: `-` does not continue across lines because it doubles as unary
+negation.
+
 ## Collections
 
 ### Lists

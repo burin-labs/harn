@@ -547,7 +547,7 @@ fn vm_resolve_model(options: &Option<BTreeMap<String, VmValue>>, provider: &str)
 
 fn vm_resolve_api_key(provider: &str) -> Result<String, VmError> {
     match provider {
-        "ollama" => Ok(String::new()),
+        "mock" | "ollama" => Ok(String::new()),
         "openai" => std::env::var("OPENAI_API_KEY").map_err(|_| {
             VmError::Thrown(VmValue::String(Rc::from(
                 "Missing API key: set OPENAI_API_KEY environment variable",
@@ -696,6 +696,74 @@ fn vm_build_json_schema(params: Option<&BTreeMap<String, VmValue>>) -> serde_jso
 }
 
 // =============================================================================
+// Mock LLM provider — deterministic responses for testing without API keys
+// =============================================================================
+
+fn mock_llm_response(
+    messages: &[serde_json::Value],
+    system: Option<&str>,
+    native_tools: Option<&[serde_json::Value]>,
+) -> LlmResult {
+    // Extract the last user message for generating a deterministic response.
+    let last_msg = messages
+        .last()
+        .and_then(|m| m.get("content"))
+        .and_then(|c| c.as_str())
+        .unwrap_or("");
+
+    // If tools are provided, generate a mock tool call for the first tool.
+    if let Some(tools) = native_tools {
+        if let Some(first_tool) = tools.first() {
+            let tool_name = first_tool
+                .get("name")
+                .or_else(|| first_tool.get("function").and_then(|f| f.get("name")))
+                .and_then(|n| n.as_str())
+                .unwrap_or("unknown");
+            return LlmResult {
+                text: String::new(),
+                tool_calls: vec![serde_json::json!({
+                    "id": "mock_call_1",
+                    "type": "function",
+                    "function": {
+                        "name": tool_name,
+                        "arguments": "{}"
+                    }
+                })],
+                input_tokens: last_msg.len() as i64,
+                output_tokens: 20,
+                model: "mock".to_string(),
+            };
+        }
+    }
+
+    // Generate response based on the prompt content.
+    // Include ##DONE## if the system prompt mentions it (agent_loop compatibility).
+    let done_sentinel = if system.is_some_and(|s| s.contains("##DONE##")) {
+        " ##DONE##"
+    } else {
+        ""
+    };
+
+    let response = if last_msg.is_empty() {
+        format!("Mock LLM response{done_sentinel}")
+    } else {
+        let word_count = last_msg.split_whitespace().count();
+        format!(
+            "Mock response to {word_count}-word prompt: {}{done_sentinel}",
+            last_msg.chars().take(100).collect::<String>()
+        )
+    };
+
+    LlmResult {
+        text: response,
+        tool_calls: vec![],
+        input_tokens: last_msg.len() as i64,
+        output_tokens: 30,
+        model: "mock".to_string(),
+    }
+}
+
+// =============================================================================
 // Core LLM call with all options
 // =============================================================================
 
@@ -712,6 +780,11 @@ async fn vm_call_llm_full(
     temperature: Option<f64>,
     native_tools: Option<&[serde_json::Value]>,
 ) -> Result<LlmResult, VmError> {
+    // Mock provider: return deterministic response without API call.
+    if provider == "mock" {
+        return Ok(mock_llm_response(messages, system, native_tools));
+    }
+
     let replay_mode = get_replay_mode();
     let hash = fixture_hash(model, messages, system);
 

@@ -451,6 +451,10 @@ async fn run_file(path: &str, trace: bool) {
     harn_vm::register_vm_stdlib(&mut vm);
     harn_vm::register_http_builtins(&mut vm);
     harn_vm::register_llm_builtins(&mut vm);
+    let store_base = std::path::Path::new(path)
+        .parent()
+        .unwrap_or(std::path::Path::new("."));
+    harn_vm::register_store_builtins(&mut vm, store_base);
     vm.set_source_info(path, &source);
 
     if let Some(p) = std::path::Path::new(path).parent() {
@@ -586,6 +590,12 @@ async fn run_file_bridge(path: &str, arg_json: Option<&str>) {
             // Register language builtins (string ops, math, json, etc.)
             harn_vm::register_vm_stdlib(&mut vm);
 
+            // Register store builtins (before bridge so host can override)
+            let store_base = std::path::Path::new(&path_owned)
+                .parent()
+                .unwrap_or(std::path::Path::new("."));
+            harn_vm::register_store_builtins(&mut vm, store_base);
+
             // Override with bridge builtins (llm_call, file I/O, etc.)
             harn_vm::bridge_builtins::register_bridge_builtins(&mut vm, bridge.clone());
 
@@ -674,6 +684,10 @@ async fn execute(source: &str, source_path: Option<&Path>) -> Result<String, Str
             harn_vm::register_vm_stdlib(&mut vm);
             harn_vm::register_http_builtins(&mut vm);
             harn_vm::register_llm_builtins(&mut vm);
+            let store_base = source_path
+                .and_then(|p| p.parent())
+                .unwrap_or(std::path::Path::new("."));
+            harn_vm::register_store_builtins(&mut vm, store_base);
             if let Some(path) = source_path {
                 if let Some(parent) = path.parent() {
                     if !parent.as_os_str().is_empty() {

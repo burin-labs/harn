@@ -3,7 +3,11 @@
   "version": "0.1.0",
   "description": "Tree-sitter grammar for the Harn programming language",
   "main": "bindings/node",
-  "keywords": ["tree-sitter", "parser", "harn"],
+  "keywords": [
+    "tree-sitter",
+    "parser",
+    "harn"
+  ],
   "license": "MIT",
   "dependencies": {
     "node-addon-api": "^8.0.0",
@@ -16,12 +20,5 @@
     "build": "tree-sitter generate && tree-sitter build",
     "test": "tree-sitter test",
     "parse": "tree-sitter parse"
-  },
-  "tree-sitter": [
-    {
-      "scope": "source.harn",
-      "file-types": ["harn"],
-      "highlights": "queries/highlights.scm"
-    }
-  ]
+  }
 }

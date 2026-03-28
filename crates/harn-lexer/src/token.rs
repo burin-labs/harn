@@ -27,6 +27,8 @@ pub struct Span {
     pub line: usize,
     /// 1-based column number of start position.
     pub column: usize,
+    /// 1-based line number of end position (for multiline span detection).
+    pub end_line: usize,
 }
 
 impl Span {
@@ -36,6 +38,7 @@ impl Span {
             end,
             line,
             column,
+            end_line: line,
         }
     }
 
@@ -46,6 +49,7 @@ impl Span {
             end: b.end,
             line: a.line,
             column: a.column,
+            end_line: b.end_line,
         }
     }
 
@@ -56,6 +60,7 @@ impl Span {
             end: 0,
             line: 0,
             column: 0,
+            end_line: 0,
         }
     }
 }

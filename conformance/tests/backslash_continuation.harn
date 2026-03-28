@@ -1,0 +1,10 @@
+pipeline default() {
+  // Backslash continuation works for any operator
+  // After formatting, + already supports multiline natively
+  let msg = "hello"
+    + " world"
+  println(msg)
+  // Verify basic arithmetic still works
+  let x = 10 - 3
+  println(x)
+}

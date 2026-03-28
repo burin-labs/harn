@@ -69,6 +69,48 @@ pipeline default(task) {
 }
 ```
 
+## Standard library modules
+
+Harn includes built-in modules that are compiled into the interpreter.
+Import them with the `std/` prefix:
+
+```javascript
+import "std/text"
+import "std/collections"
+```
+
+### std/text
+
+Text processing utilities for LLM output and code analysis:
+
+| Function | Description |
+|---|---|
+| `extract_paths(text)` | Extract file paths from text, filtering comments and validating extensions |
+| `parse_cells(response)` | Parse fenced code blocks from LLM output. Returns `[{type, lang, code}]` |
+| `filter_test_cells(cells, target_file?)` | Filter cells to keep code blocks and write_file calls |
+| `truncate_head_tail(text, n)` | Keep first/last n lines with omission marker |
+| `detect_compile_error(output)` | Check for compile error patterns (SyntaxError, etc.) |
+| `has_got_want(output)` | Check for got/want test failure patterns |
+| `format_test_errors(output)` | Extract error-relevant lines (max 20) |
+
+### std/collections
+
+Collection utilities and store helpers:
+
+| Function | Description |
+|---|---|
+| `filter_nil(dict)` | Remove entries where value is nil, empty string, or "null" |
+| `store_stale(key, max_age_seconds)` | Check if a store key's timestamp is stale |
+| `store_refresh(key)` | Update a store key's timestamp to now |
+
+### Selective imports
+
+Import specific functions from any module:
+
+```javascript
+import { extract_paths, parse_cells } from "std/text"
+```
+
 ## Import behavior
 
 1. The imported file is parsed and executed

@@ -1,0 +1,24 @@
+2
+./lib/test.go
+/src/main.rs
+2
+code
+go
+fmt.Println("hi")
+call
+python
+2
+2
+true
+one
+two
+three
+true
+false
+true
+true
+true
+false
+FAIL test2
+error: bad input
+assert failed

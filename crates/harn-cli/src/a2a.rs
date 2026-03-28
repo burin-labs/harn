@@ -1,5 +1,7 @@
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -9,6 +11,78 @@ use harn_parser::{DiagnosticSeverity, Parser, TypeChecker};
 
 /// Global task ID counter.
 static TASK_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+// ---------------------------------------------------------------------------
+// Task state tracking
+// ---------------------------------------------------------------------------
+
+/// The lifecycle states of an A2A task.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum TaskStatus {
+    Submitted,
+    Working,
+    Completed,
+    Failed,
+    Cancelled,
+}
+
+impl TaskStatus {
+    fn as_str(&self) -> &'static str {
+        match self {
+            TaskStatus::Submitted => "submitted",
+            TaskStatus::Working => "working",
+            TaskStatus::Completed => "completed",
+            TaskStatus::Failed => "failed",
+            TaskStatus::Cancelled => "cancelled",
+        }
+    }
+
+    /// A task can only be cancelled while it is still in-progress.
+    fn is_terminal(&self) -> bool {
+        matches!(
+            self,
+            TaskStatus::Completed | TaskStatus::Failed | TaskStatus::Cancelled
+        )
+    }
+}
+
+/// An A2A message in the task history.
+#[derive(Clone, Debug)]
+struct TaskMessage {
+    role: String,
+    parts: Vec<serde_json::Value>,
+}
+
+/// Persistent state for a single A2A task.
+#[derive(Clone, Debug)]
+struct TaskState {
+    id: String,
+    status: TaskStatus,
+    history: Vec<TaskMessage>,
+}
+
+impl TaskState {
+    fn to_json(&self) -> serde_json::Value {
+        let history: Vec<serde_json::Value> = self
+            .history
+            .iter()
+            .map(|m| {
+                serde_json::json!({
+                    "role": m.role,
+                    "parts": m.parts,
+                })
+            })
+            .collect();
+        serde_json::json!({
+            "id": self.id,
+            "status": {"state": self.status.as_str()},
+            "history": history,
+        })
+    }
+}
+
+/// Thread-safe map of task-id -> TaskState.
+type TaskStore = Arc<Mutex<HashMap<String, TaskState>>>;
 
 /// Generate the Agent Card JSON for a pipeline file.
 fn agent_card(pipeline_name: &str, port: u16) -> serde_json::Value {
@@ -74,6 +148,8 @@ async fn execute_pipeline(path: &str, task_text: &str) -> Result<String, String>
             harn_vm::register_vm_stdlib(&mut vm);
             harn_vm::register_http_builtins(&mut vm);
             harn_vm::register_llm_builtins(&mut vm);
+            let store_base = Path::new(&path_owned).parent().unwrap_or(Path::new("."));
+            harn_vm::register_store_builtins(&mut vm, store_base);
             vm.set_source_info(&path_owned, &source_owned);
 
             if let Some(p) = Path::new(&path_owned).parent() {
@@ -94,26 +170,68 @@ async fn execute_pipeline(path: &str, task_text: &str) -> Result<String, String>
         .await
 }
 
-/// Build a JSON-RPC success response wrapping an A2A Task object.
-fn task_response(rpc_id: &serde_json::Value, task_text: &str, output: &str) -> serde_json::Value {
+/// Create a new task in the store with `submitted` status, returning its id.
+fn create_task(store: &TaskStore, task_text: &str) -> String {
     let task_id = format!("task-{}", TASK_COUNTER.fetch_add(1, Ordering::Relaxed));
+    let task = TaskState {
+        id: task_id.clone(),
+        status: TaskStatus::Submitted,
+        history: vec![TaskMessage {
+            role: "user".to_string(),
+            parts: vec![serde_json::json!({"type": "text", "text": task_text})],
+        }],
+    };
+    store.lock().unwrap().insert(task_id.clone(), task);
+    task_id
+}
+
+/// Transition a task to `working`.
+fn mark_task_working(store: &TaskStore, task_id: &str) {
+    if let Some(task) = store.lock().unwrap().get_mut(task_id) {
+        task.status = TaskStatus::Working;
+    }
+}
+
+/// Check whether a task has been cancelled (used to skip execution).
+fn is_task_cancelled(store: &TaskStore, task_id: &str) -> bool {
+    store
+        .lock()
+        .unwrap()
+        .get(task_id)
+        .is_some_and(|t| t.status == TaskStatus::Cancelled)
+}
+
+/// Complete a task with the agent's output.
+fn complete_task(store: &TaskStore, task_id: &str, output: &str) {
+    if let Some(task) = store.lock().unwrap().get_mut(task_id) {
+        task.status = TaskStatus::Completed;
+        task.history.push(TaskMessage {
+            role: "agent".to_string(),
+            parts: vec![serde_json::json!({"type": "text", "text": output.trim_end()})],
+        });
+    }
+}
+
+/// Mark a task as failed with an error message.
+fn fail_task(store: &TaskStore, task_id: &str, error: &str) {
+    if let Some(task) = store.lock().unwrap().get_mut(task_id) {
+        task.status = TaskStatus::Failed;
+        task.history.push(TaskMessage {
+            role: "agent".to_string(),
+            parts: vec![serde_json::json!({"type": "text", "text": error})],
+        });
+    }
+}
+
+/// Build a JSON-RPC success response wrapping a task's JSON representation.
+fn task_rpc_response(
+    rpc_id: &serde_json::Value,
+    task_json: serde_json::Value,
+) -> serde_json::Value {
     serde_json::json!({
         "jsonrpc": "2.0",
         "id": rpc_id,
-        "result": {
-            "id": task_id,
-            "status": {"state": "completed"},
-            "history": [
-                {
-                    "role": "user",
-                    "parts": [{"type": "text", "text": task_text}]
-                },
-                {
-                    "role": "agent",
-                    "parts": [{"type": "text", "text": output.trim_end()}]
-                }
-            ]
-        }
+        "result": task_json,
     })
 }
 
@@ -179,6 +297,7 @@ async fn handle_connection(
     mut stream: tokio::net::TcpStream,
     pipeline_path: &str,
     card_json: &str,
+    store: &TaskStore,
 ) {
     let mut buf = vec![0u8; 65536];
     let n = match stream.read(&mut buf).await {
@@ -252,10 +371,73 @@ async fn handle_connection(
         }
         // A2A JSON-RPC endpoint
         ("POST", "/") => {
-            let resp = handle_jsonrpc(pipeline_path, &body).await;
+            let resp = handle_jsonrpc(pipeline_path, &body, store).await;
             let resp_bytes = resp.as_bytes();
             let _ =
                 write_http_response(&mut stream, 200, "OK", "application/json", resp_bytes).await;
+        }
+        // REST-style task retrieval: GET /tasks/:id
+        ("GET", p) if p.starts_with("/tasks/") => {
+            let task_id = &p["/tasks/".len()..];
+            let task_json = store.lock().unwrap().get(task_id).map(|t| t.to_json());
+            match task_json {
+                Some(json) => {
+                    let body_bytes = serde_json::to_string(&json).unwrap_or_default();
+                    let _ = write_http_response(
+                        &mut stream,
+                        200,
+                        "OK",
+                        "application/json",
+                        body_bytes.as_bytes(),
+                    )
+                    .await;
+                }
+                None => {
+                    let _ = write_http_response(
+                        &mut stream,
+                        404,
+                        "Not Found",
+                        "application/json",
+                        b"{\"error\":\"task not found\"}",
+                    )
+                    .await;
+                }
+            }
+        }
+        // REST-style task cancellation: POST /tasks/:id/cancel
+        ("POST", p) if p.starts_with("/tasks/") && p.ends_with("/cancel") => {
+            let task_id = &p["/tasks/".len()..p.len() - "/cancel".len()];
+            let result = cancel_task(store, task_id);
+            match result {
+                Ok(json) => {
+                    let body_bytes = serde_json::to_string(&json).unwrap_or_default();
+                    let _ = write_http_response(
+                        &mut stream,
+                        200,
+                        "OK",
+                        "application/json",
+                        body_bytes.as_bytes(),
+                    )
+                    .await;
+                }
+                Err(msg) => {
+                    let status = if msg.contains("not found") { 404 } else { 409 };
+                    let status_text = if status == 404 {
+                        "Not Found"
+                    } else {
+                        "Conflict"
+                    };
+                    let err_body = serde_json::json!({"error": msg}).to_string();
+                    let _ = write_http_response(
+                        &mut stream,
+                        status,
+                        status_text,
+                        "application/json",
+                        err_body.as_bytes(),
+                    )
+                    .await;
+                }
+            }
         }
         _ => {
             let _ = write_http_response(&mut stream, 404, "Not Found", "text/plain", b"Not Found")
@@ -264,8 +446,26 @@ async fn handle_connection(
     }
 }
 
+/// Cancel a task by id. Returns the updated task JSON on success, or an error
+/// message on failure.
+fn cancel_task(store: &TaskStore, task_id: &str) -> Result<serde_json::Value, String> {
+    let mut map = store.lock().unwrap();
+    let task = map
+        .get_mut(task_id)
+        .ok_or_else(|| format!("Task not found: {task_id}"))?;
+    if task.status.is_terminal() {
+        return Err(format!(
+            "Task {} is already in terminal state: {}",
+            task_id,
+            task.status.as_str()
+        ));
+    }
+    task.status = TaskStatus::Cancelled;
+    Ok(task.to_json())
+}
+
 /// Handle a JSON-RPC request body, returning the JSON response string.
-async fn handle_jsonrpc(pipeline_path: &str, body: &str) -> String {
+async fn handle_jsonrpc(pipeline_path: &str, body: &str, store: &TaskStore) -> String {
     let parsed: serde_json::Value = match serde_json::from_str(body) {
         Ok(v) => v,
         Err(e) => {
@@ -305,9 +505,63 @@ async fn handle_jsonrpc(pipeline_path: &str, body: &str) -> String {
                     "Invalid params: no text part found in message",
                 )
             } else {
-                match execute_pipeline(pipeline_path, task_text).await {
-                    Ok(output) => task_response(&rpc_id, task_text, &output),
-                    Err(e) => error_response(&rpc_id, -32000, &format!("Pipeline error: {e}")),
+                // Create task and track its lifecycle
+                let task_id = create_task(store, task_text);
+                mark_task_working(store, &task_id);
+
+                // Check if cancelled before we even start execution
+                if is_task_cancelled(store, &task_id) {
+                    let task_json = store.lock().unwrap().get(&task_id).unwrap().to_json();
+                    task_rpc_response(&rpc_id, task_json)
+                } else {
+                    match execute_pipeline(pipeline_path, task_text).await {
+                        Ok(output) => {
+                            // Check cancellation after execution too
+                            if is_task_cancelled(store, &task_id) {
+                                let task_json =
+                                    store.lock().unwrap().get(&task_id).unwrap().to_json();
+                                task_rpc_response(&rpc_id, task_json)
+                            } else {
+                                complete_task(store, &task_id, &output);
+                                let task_json =
+                                    store.lock().unwrap().get(&task_id).unwrap().to_json();
+                                task_rpc_response(&rpc_id, task_json)
+                            }
+                        }
+                        Err(e) => {
+                            fail_task(store, &task_id, &e);
+                            error_response(&rpc_id, -32000, &format!("Pipeline error: {e}"))
+                        }
+                    }
+                }
+            }
+        }
+        "task/get" => {
+            let task_id = parsed
+                .pointer("/params/id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if task_id.is_empty() {
+                error_response(&rpc_id, -32602, "Invalid params: missing task id")
+            } else {
+                let task_json = store.lock().unwrap().get(task_id).map(|t| t.to_json());
+                match task_json {
+                    Some(json) => task_rpc_response(&rpc_id, json),
+                    None => error_response(&rpc_id, -32001, &format!("Task not found: {task_id}")),
+                }
+            }
+        }
+        "task/cancel" => {
+            let task_id = parsed
+                .pointer("/params/id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if task_id.is_empty() {
+                error_response(&rpc_id, -32602, "Invalid params: missing task id")
+            } else {
+                match cancel_task(store, task_id) {
+                    Ok(json) => task_rpc_response(&rpc_id, json),
+                    Err(msg) => error_response(&rpc_id, -32001, &msg),
                 }
             }
         }
@@ -330,6 +584,8 @@ pub async fn run_a2a_server(pipeline_path: &str, port: u16) {
     let card = agent_card(&name, port);
     let card_json = serde_json::to_string_pretty(&card).unwrap_or_default();
 
+    let store: TaskStore = Arc::new(Mutex::new(HashMap::new()));
+
     let addr = format!("0.0.0.0:{port}");
     let listener = match TcpListener::bind(&addr).await {
         Ok(l) => l,
@@ -351,7 +607,7 @@ pub async fn run_a2a_server(pipeline_path: &str, port: u16) {
                 // Each connection is handled inline (not spawned) because the
                 // VM uses LocalSet and is !Send. For a simple A2A server this
                 // is fine -- requests are handled sequentially.
-                handle_connection(stream, &pipeline, &card).await;
+                handle_connection(stream, &pipeline, &card, &store).await;
             }
             Err(e) => {
                 eprintln!("Accept error: {e}");

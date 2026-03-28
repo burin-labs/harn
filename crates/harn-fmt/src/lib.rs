@@ -540,7 +540,13 @@ impl Formatter {
             Node::BinaryOp { op, left, right } => {
                 let l = self.format_expr(left);
                 let r = self.format_expr(right);
-                format!("{l} {op} {r}")
+                // Preserve multiline formatting when the operands span lines
+                if left.span.line < right.span.line {
+                    let pad = "  ".repeat(self.indent + 1);
+                    format!("{l}\n{pad}{op} {r}")
+                } else {
+                    format!("{l} {op} {r}")
+                }
             }
             Node::UnaryOp { op, operand } => {
                 let expr = self.format_expr(operand);
@@ -565,7 +571,15 @@ impl Formatter {
                     .map(|a| self.format_expr(a))
                     .collect::<Vec<_>>()
                     .join(", ");
-                format!("{obj}.{method}({args_str})")
+                // Preserve multiline method chains: if the `.` was on a
+                // later line than where the object expression ends, keep
+                // it on its own line.
+                if object.span.end_line > 0 && node.span.end_line > object.span.end_line {
+                    let pad = "  ".repeat(self.indent + 1);
+                    format!("{obj}\n{pad}.{method}({args_str})")
+                } else {
+                    format!("{obj}.{method}({args_str})")
+                }
             }
             Node::OptionalMethodCall {
                 object,
@@ -578,7 +592,12 @@ impl Formatter {
                     .map(|a| self.format_expr(a))
                     .collect::<Vec<_>>()
                     .join(", ");
-                format!("{obj}?.{method}({args_str})")
+                if object.span.end_line > 0 && node.span.end_line > object.span.end_line {
+                    let pad = "  ".repeat(self.indent + 1);
+                    format!("{obj}\n{pad}?.{method}({args_str})")
+                } else {
+                    format!("{obj}?.{method}({args_str})")
+                }
             }
             Node::PropertyAccess { object, property } => {
                 let obj = self.format_expr(object);

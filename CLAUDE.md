@@ -84,15 +84,19 @@ via `tokio::task::spawn_local` for `parallel`, `parallel_map`, and
   (`typechecker.rs`), diagnostic renderer (`diagnostic.rs`).
 - **harn-vm** -- The sole execution engine. Modular structure:
   `value.rs` (VmValue, VmEnv, errors), `chunk.rs` (opcodes, bytecode),
-  `compiler.rs` (AST -> bytecode), `vm.rs` (async execution loop),
-  `stdlib.rs` (95+ builtin functions), `http.rs` (HTTP client with
-  retries), `llm.rs` (LLM calls for Anthropic/OpenAI/Ollama),
+  `compiler.rs` (AST -> bytecode, pipe placeholder desugaring),
+  `vm.rs` (async execution loop), `stdlib.rs` (95+ builtin functions),
+  `stdlib_modules.rs` (embedded std/text, std/collections .harn modules),
+  `store.rs` (persistent key-value store backed by .harn/store.json),
+  `http.rs` (HTTP client with retries),
+  `llm.rs` (LLM calls for Anthropic/OpenAI/Ollama),
   `mcp.rs` (MCP client for external tool servers),
   `bridge.rs` / `bridge_builtins.rs` (JSON-RPC host delegation).
   45+ opcodes including TailCall, GetPropertyOpt, MethodCallOpt,
   Slice, concurrency, imports, enums, and deadlines. In bridge mode,
   unknown builtins are automatically delegated to the host via
-  `builtin_call` JSON-RPC.
+  `builtin_call` JSON-RPC. Stdlib .harn files live in `stdlib/` at
+  the repo root and are embedded via `include_str!`.
 - **harn-fmt** -- AST-based code formatter. Canonical 2-space indent style.
 - **harn-lint** -- Linter with 5 rules: unused-variable, unreachable-code,
   mutable-never-reassigned, empty-block, shadow-variable.

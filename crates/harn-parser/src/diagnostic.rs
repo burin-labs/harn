@@ -95,6 +95,7 @@ mod tests {
             end: 29,
             line: 2,
             column: 13,
+            end_line: 2,
         };
         let output = render_diagnostic(
             source,
@@ -119,6 +120,7 @@ mod tests {
             end: 10,
             line: 1,
             column: 9,
+            end_line: 1,
         };
         let output = render_diagnostic(
             source,

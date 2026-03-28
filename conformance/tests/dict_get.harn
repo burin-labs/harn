@@ -1,0 +1,17 @@
+pipeline test(task) {
+  let d = {name: "Alice", age: 30, active: true}
+  // 1-arg: key exists
+  log(d.get("name"))
+  log(d.get("age"))
+  log(d.get("active"))
+  // 1-arg: key missing -> nil
+  log(d.get("missing"))
+  // 2-arg: key exists -> value (ignores default)
+  log(d.get("name", "fallback"))
+  // 2-arg: key missing -> default
+  log(d.get("missing", 0))
+  log(d.get("missing", "default_val"))
+  log(d.get("missing", false))
+  // 0-arg: no key -> nil
+  log(d.get())
+}

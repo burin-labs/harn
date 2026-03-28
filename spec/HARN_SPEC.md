@@ -173,10 +173,24 @@ before checking the expected token.
 ```ebnf
 program       ::= (import_decl | pipeline_decl)*
 import_decl   ::= 'import' STRING_LITERAL
+                 | 'import' '{' IDENTIFIER (',' IDENTIFIER)* '}' 'from' STRING_LITERAL
 pipeline_decl ::= 'pipeline' IDENTIFIER '(' param_list ')' ('extends' IDENTIFIER)? '{' block '}'
 param_list    ::= (IDENTIFIER (',' IDENTIFIER)*)?
 block         ::= statement*
 ```
+
+#### Standard library modules
+
+Imports starting with `std/` load embedded stdlib modules:
+
+- `import "std/text"` — text processing (extract_paths, parse_cells,
+  filter_test_cells, truncate_head_tail, detect_compile_error, has_got_want,
+  format_test_errors)
+- `import "std/collections"` — collection utilities (filter_nil, store_stale,
+  store_refresh)
+
+These modules are compiled into the interpreter binary and require no
+filesystem access.
 
 ### Statements
 
@@ -290,6 +304,45 @@ From lowest to highest binding:
 | 10 | `!` `-` (unary) | Right (prefix) | Unary |
 | 11 | `.` `[]` `()` | Left | Postfix (member, subscript, call) |
 
+### Multiline expressions
+
+Binary operators `||`, `&&`, `+`, `*`, `/`, `%`, `|>` and the `.` member
+access operator can span multiple lines. The operator at the start of a
+continuation line causes the parser to treat it as a continuation of the
+previous expression rather than a new statement.
+
+Note: `-` does not support multiline continuation because it is also a
+unary negation prefix.
+
+```harn
+let result = items
+  .filter({ x -> x > 0 })
+  .map({ x -> x * 2 })
+
+let msg = "hello"
+  + " "
+  + "world"
+
+let ok = check_a()
+  && check_b()
+  || fallback()
+```
+
+### Pipe placeholder (`_`)
+
+When the right side of `|>` contains `_` identifiers, the expression is
+automatically wrapped in a closure where `_` is replaced with the piped
+value:
+
+```harn
+"hello world" |> split(_, " ")     // desugars to: |> { __pipe -> split(__pipe, " ") }
+[3, 1, 2] |> _.sort()             // desugars to: |> { __pipe -> __pipe.sort() }
+items |> len(_)                    // desugars to: |> { __pipe -> len(__pipe) }
+```
+
+Without `_`, the pipe passes the value as the first argument to a closure
+or function.
+
 ## Scope rules
 
 Harn uses lexical scoping with a parent-chain environment model.
@@ -364,10 +417,16 @@ though this is mostly relevant for closures and parallel bodies.
 
 ### Import resolution
 
-`import "path.harn"` loads and parses the file via `HarnLoader`, which searches:
+`import "path"` resolves in this order:
 
-1. `<projectRoot>/.burin/pipelines/<name>.harn`
-2. Bundle resources
+1. If path starts with `std/`, loads embedded stdlib module (e.g. `std/text`)
+2. Relative to current file's directory; auto-adds `.harn` extension
+3. `.harn/packages/<path>` then `.burin/packages/<path>` directories
+4. Package directories with `lib.harn` entry point
+
+Selective imports: `import { name1, name2 } from "module"` imports only
+the specified functions. Functions marked `pub` are exported by default;
+if no `pub` functions exist, all functions are exported.
 
 Imported pipelines are registered for later invocation.
 Non-pipeline top-level statements (fn declarations, let bindings) are executed immediately.
@@ -770,3 +829,19 @@ and `negative_knowledge.record(...)`.
 | `returnValue(value?)` | Internal: used to implement `return` (not a user-facing error) |
 | `retryExhausted` | All retry attempts failed |
 | `thrownError(value)` | User-thrown error via `throw` |
+
+## Persistent store
+
+Six builtins provide a persistent key-value store backed by `.harn/store.json`:
+
+| Function | Description |
+|---|---|
+| `store_get(key)` | Retrieve value or nil |
+| `store_set(key, value)` | Set key, auto-saves to disk |
+| `store_delete(key)` | Remove key, auto-saves |
+| `store_list()` | List all keys (sorted) |
+| `store_save()` | Explicit flush to disk |
+| `store_clear()` | Remove all keys, auto-saves |
+
+The store file is created lazily on first mutation. In bridge mode, the
+host can override these builtins via the bridge protocol.

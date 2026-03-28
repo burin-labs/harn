@@ -68,6 +68,15 @@ impl Lexer {
                 continue;
             }
 
+            // Backslash line continuation: `\` immediately before newline joins lines
+            if ch == '\\' && self.peek() == Some('\n') {
+                self.advance(); // skip `\`
+                self.advance(); // skip `\n`
+                self.line += 1;
+                self.column = 1;
+                continue;
+            }
+
             // Newlines
             if ch == '\n' {
                 let start = self.byte_pos;
@@ -744,6 +753,18 @@ mod tests {
         assert_eq!(tokens[0].kind, TokenKind::Identifier("a".into()));
         assert_eq!(tokens[1].kind, TokenKind::Newline);
         assert_eq!(tokens[2].kind, TokenKind::Identifier("b".into()));
+    }
+
+    #[test]
+    fn test_backslash_continuation() {
+        // Backslash before newline joins lines — no Newline token emitted
+        let mut lexer = Lexer::new("10 \\\n- 3");
+        let tokens = lexer.tokenize().unwrap();
+        assert_eq!(tokens[0].kind, TokenKind::IntLiteral(10));
+        assert_eq!(tokens[1].kind, TokenKind::Minus);
+        assert_eq!(tokens[2].kind, TokenKind::IntLiteral(3));
+        // No Newline token between 10 and -
+        assert_eq!(tokens.len(), 4); // 10, -, 3, EOF
     }
 
     #[test]

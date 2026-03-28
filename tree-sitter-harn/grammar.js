@@ -5,7 +5,13 @@ module.exports = grammar({
 
   extras: ($) => [/[ \t\r]/, $.comment],
 
-  conflicts: ($) => [[$.dict_literal, $.closure]],
+  conflicts: ($) => [
+    [$.dict_literal, $.shape_type],
+    [$.type_annotation],
+    [$._statement, $._expression],
+    [$._primary, $.type_annotation],
+    [$.typed_parameter, $.shape_field],
+  ],
 
   word: ($) => $.identifier,
 
@@ -17,6 +23,7 @@ module.exports = grammar({
         $.pipeline_declaration,
         $.import_declaration,
         $.interface_declaration,
+        $.type_declaration,
         $._statement,
         $._newline
       ),
@@ -72,10 +79,22 @@ module.exports = grammar({
       ),
 
     let_binding: ($) =>
-      seq("let", field("name", $.identifier), "=", field("value", $._expression)),
+      seq(
+        "let",
+        field("name", $.identifier),
+        optional(seq(":", field("type", $.type_annotation))),
+        "=",
+        field("value", $._expression)
+      ),
 
     var_binding: ($) =>
-      seq("var", field("name", $.identifier), "=", field("value", $._expression)),
+      seq(
+        "var",
+        field("name", $.identifier),
+        optional(seq(":", field("type", $.type_annotation))),
+        "=",
+        field("value", $._expression)
+      ),
 
     assignment: ($) =>
       seq(field("target", $.identifier), "=", field("value", $._expression)),
@@ -124,7 +143,7 @@ module.exports = grammar({
         field("handler", $.block)
       ),
 
-    return_statement: ($) => seq("return", optional($._expression)),
+    return_statement: ($) => prec.right(seq("return", optional($._expression))),
 
     throw_statement: ($) => seq("throw", $._expression),
 
@@ -148,6 +167,9 @@ module.exports = grammar({
         repeat($.interface_method),
         "}"
       ),
+
+    type_declaration: ($) =>
+      seq("type", field("name", $.identifier), "=", field("type", $.type_annotation)),
 
     interface_method: ($) =>
       seq(
@@ -355,7 +377,13 @@ module.exports = grammar({
     block: ($) => seq("{", repeat(choice($._statement, $._newline)), "}"),
 
     parameter_list: ($) =>
-      seq($.identifier, repeat(seq(",", $.identifier))),
+      seq($.typed_parameter, repeat(seq(",", $.typed_parameter))),
+
+    typed_parameter: ($) =>
+      seq(
+        field("name", $.identifier),
+        optional(seq(":", field("type", $.type_annotation)))
+      ),
 
     argument_list: ($) =>
       seq($._expression, repeat(seq(",", $._expression))),
@@ -364,8 +392,30 @@ module.exports = grammar({
       choice(
         seq($.identifier, "[", $.type_annotation, ",", $.type_annotation, "]"),
         seq($.identifier, "[", $.type_annotation, "]"),
-        seq($.type_annotation, "|", $.type_annotation),
+        prec.left(1, seq($.type_annotation, "|", $.type_annotation)),
+        $.shape_type,
         $.identifier
+      ),
+
+    shape_type: ($) =>
+      seq(
+        "{",
+        optional(
+          seq(
+            $.shape_field,
+            repeat(seq(",", $.shape_field)),
+            optional(",")
+          )
+        ),
+        "}"
+      ),
+
+    shape_field: ($) =>
+      seq(
+        field("name", $.identifier),
+        optional("?"),
+        ":",
+        field("type", $.type_annotation)
       ),
   },
 });

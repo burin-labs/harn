@@ -3,7 +3,7 @@ use std::sync::Mutex;
 
 use harn_lexer::{Lexer, LexerError, Span};
 use harn_parser::{
-    format_type, DictEntry, Node, Parser, ParserError, SNode, TypeChecker, TypeExpr,
+    format_type, DictEntry, Node, Parser, ParserError, SNode, ShapeField, TypeChecker, TypeExpr,
 };
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
@@ -717,7 +717,9 @@ fn collect_dict_entries(
     }
 }
 
-/// Simple literal type inference for hover/completion.
+/// Literal type inference for hover/completion.
+/// Mirrors the typechecker's `infer_type` for literals, including shape-type
+/// inference for dict literals whose keys are all string literals.
 fn infer_literal_type(snode: &SNode) -> Option<TypeExpr> {
     match &snode.node {
         Node::IntLiteral(_) => Some(TypeExpr::Named("int".into())),
@@ -727,10 +729,69 @@ fn infer_literal_type(snode: &SNode) -> Option<TypeExpr> {
         }
         Node::BoolLiteral(_) => Some(TypeExpr::Named("bool".into())),
         Node::NilLiteral => Some(TypeExpr::Named("nil".into())),
-        Node::ListLiteral(_) => Some(TypeExpr::Named("list".into())),
-        Node::DictLiteral(_) => Some(TypeExpr::Named("dict".into())),
+        Node::ListLiteral(items) => {
+            // Try to infer element type from first item
+            if let Some(first) = items.first() {
+                if let Some(elem_ty) = infer_literal_type(first) {
+                    return Some(TypeExpr::List(Box::new(elem_ty)));
+                }
+            }
+            Some(TypeExpr::Named("list".into()))
+        }
+        Node::DictLiteral(entries) => {
+            // Infer shape type when all keys are string literals
+            let mut fields = Vec::new();
+            let mut all_string_keys = true;
+            for entry in entries {
+                if let Node::StringLiteral(key) = &entry.key.node {
+                    let val_type =
+                        infer_literal_type(&entry.value).unwrap_or(TypeExpr::Named("nil".into()));
+                    fields.push(ShapeField {
+                        name: key.clone(),
+                        type_expr: val_type,
+                        optional: false,
+                    });
+                } else {
+                    all_string_keys = false;
+                    break;
+                }
+            }
+            if all_string_keys && !fields.is_empty() {
+                Some(TypeExpr::Shape(fields))
+            } else {
+                Some(TypeExpr::Named("dict".into()))
+            }
+        }
         Node::Closure { .. } => Some(TypeExpr::Named("closure".into())),
         _ => None,
+    }
+}
+
+/// Format a shape type with one field per line for complex hover tooltips.
+/// Only produces output for `TypeExpr::Shape` with 2+ fields; returns empty
+/// string otherwise (the compact one-liner is sufficient).
+fn format_shape_expanded(ty: &TypeExpr, indent: usize) -> String {
+    if let TypeExpr::Shape(fields) = ty {
+        if fields.len() < 2 {
+            return String::new();
+        }
+        let pad = "  ".repeat(indent + 1);
+        let mut lines = Vec::new();
+        lines.push("```harn".to_string());
+        lines.push(format!("{}{{", "  ".repeat(indent)));
+        for f in fields {
+            let opt = if f.optional { "?" } else { "" };
+            lines.push(format!(
+                "{pad}{}{opt}: {}",
+                f.name,
+                format_type(&f.type_expr)
+            ));
+        }
+        lines.push(format!("{}}}", "  ".repeat(indent)));
+        lines.push("```".to_string());
+        lines.join("\n")
+    } else {
+        String::new()
     }
 }
 
@@ -1155,6 +1216,18 @@ fn position_in_span(pos: &Position, span: &Span, source: &str) -> bool {
         return false;
     }
     true
+}
+
+/// Convert a 0-based LSP Position to a byte offset in the source string.
+fn lsp_position_to_offset(source: &str, pos: Position) -> usize {
+    let mut offset = 0;
+    for (i, line) in source.split('\n').enumerate() {
+        if i == pos.line as usize {
+            return offset + (pos.character as usize).min(line.len());
+        }
+        offset += line.len() + 1; // +1 for the newline
+    }
+    source.len()
 }
 
 // ---------------------------------------------------------------------------
@@ -1645,16 +1718,63 @@ impl LanguageServer for HarnLsp {
             }));
         }
 
-        // Check user-defined symbols
+        // Check user-defined symbols — prefer the innermost scope that
+        // contains the cursor position so that shadowed bindings resolve
+        // to the closest definition.
+        let cursor_offset = lsp_position_to_offset(&source, position);
+        let mut best: Option<&SymbolInfo> = None;
         for sym in &symbols {
-            if sym.name == word {
-                let mut hover_text = String::new();
+            if sym.name != word {
+                continue;
+            }
+            // If the symbol has a scope_span, check if the cursor byte
+            // offset falls within it.
+            let in_scope = match sym.scope_span {
+                Some(sp) => cursor_offset >= sp.start && cursor_offset <= sp.end,
+                None => true, // top-level symbol is always visible
+            };
+            if !in_scope {
+                continue;
+            }
+            // Prefer the symbol with the narrowest (innermost) scope.
+            match best {
+                None => best = Some(sym),
+                Some(prev) => {
+                    let prev_scope_size = match prev.scope_span {
+                        Some(sp) => sp.end.saturating_sub(sp.start),
+                        None => usize::MAX,
+                    };
+                    let this_scope_size = match sym.scope_span {
+                        Some(sp) => sp.end.saturating_sub(sp.start),
+                        None => usize::MAX,
+                    };
+                    if this_scope_size < prev_scope_size {
+                        best = Some(sym);
+                    }
+                }
+            }
+        }
+        if let Some(sym) = best {
+            let mut hover_text = String::new();
 
-                // Show signature if available
-                if let Some(ref sig) = sym.signature {
-                    hover_text.push_str(&format!("```harn\n{sig}\n```\n"));
+            // Show signature if available (functions, pipelines, structs, enums)
+            if let Some(ref sig) = sym.signature {
+                hover_text.push_str(&format!("```harn\n{sig}\n```\n"));
+            } else {
+                // For variables/parameters, build a code-block declaration
+                // with the type annotation when known.
+                let keyword = match sym.kind {
+                    HarnSymbolKind::Variable => "let",
+                    HarnSymbolKind::Parameter => "param",
+                    _ => "",
+                };
+                if let Some(ref ty) = sym.type_info {
+                    hover_text.push_str(&format!(
+                        "```harn\n{keyword} {}: {}\n```\n",
+                        sym.name,
+                        format_type(ty)
+                    ));
                 } else {
-                    // Show kind + name
                     let kind_str = match sym.kind {
                         HarnSymbolKind::Pipeline => "pipeline",
                         HarnSymbolKind::Function => "function",
@@ -1665,20 +1785,31 @@ impl LanguageServer for HarnLsp {
                     };
                     hover_text.push_str(&format!("**{kind_str}** `{}`", sym.name));
                 }
-
-                // Show type if known
-                if let Some(ref ty) = sym.type_info {
-                    hover_text.push_str(&format!("\n\nType: `{}`", format_type(ty)));
-                }
-
-                return Ok(Some(Hover {
-                    contents: HoverContents::Markup(MarkupContent {
-                        kind: MarkupKind::Markdown,
-                        value: hover_text,
-                    }),
-                    range: None,
-                }));
             }
+
+            // For functions with a return type, show it below the signature
+            // (signatures already include "-> type", so only add for
+            // variables/params where the type is a shape and worth expanding).
+            if sym.signature.is_none() {
+                if let Some(ref ty) = sym.type_info {
+                    if matches!(ty, TypeExpr::Shape(_)) {
+                        // Already shown in the code block above; add a
+                        // human-readable breakdown for complex shapes.
+                        let expanded = format_shape_expanded(ty, 0);
+                        if !expanded.is_empty() {
+                            hover_text.push_str(&format!("\n{expanded}"));
+                        }
+                    }
+                }
+            }
+
+            return Ok(Some(Hover {
+                contents: HoverContents::Markup(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value: hover_text,
+                }),
+                range: None,
+            }));
         }
 
         Ok(None)

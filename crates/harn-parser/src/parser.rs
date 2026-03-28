@@ -910,7 +910,7 @@ impl Parser {
 
     fn parse_pipe(&mut self) -> Result<SNode, ParserError> {
         let mut left = self.parse_range()?;
-        while self.check(&TokenKind::Pipe) {
+        while self.check_skip_newlines(&TokenKind::Pipe) {
             let start = left.span;
             self.advance();
             let right = self.parse_range()?;
@@ -997,7 +997,7 @@ impl Parser {
 
     fn parse_logical_or(&mut self) -> Result<SNode, ParserError> {
         let mut left = self.parse_logical_and()?;
-        while self.check(&TokenKind::Or) {
+        while self.check_skip_newlines(&TokenKind::Or) {
             let start = left.span;
             self.advance();
             let right = self.parse_logical_and()?;
@@ -1015,7 +1015,7 @@ impl Parser {
 
     fn parse_logical_and(&mut self) -> Result<SNode, ParserError> {
         let mut left = self.parse_equality()?;
-        while self.check(&TokenKind::And) {
+        while self.check_skip_newlines(&TokenKind::And) {
             let start = left.span;
             self.advance();
             let right = self.parse_equality()?;
@@ -1085,7 +1085,7 @@ impl Parser {
 
     fn parse_additive(&mut self) -> Result<SNode, ParserError> {
         let mut left = self.parse_multiplicative()?;
-        while self.check(&TokenKind::Plus) || self.check(&TokenKind::Minus) {
+        while self.check_skip_newlines(&TokenKind::Plus) || self.check(&TokenKind::Minus) {
             let start = left.span;
             let op = if self.check(&TokenKind::Plus) {
                 "+"
@@ -1108,9 +1108,9 @@ impl Parser {
 
     fn parse_multiplicative(&mut self) -> Result<SNode, ParserError> {
         let mut left = self.parse_unary()?;
-        while self.check(&TokenKind::Star)
-            || self.check(&TokenKind::Slash)
-            || self.check(&TokenKind::Percent)
+        while self.check_skip_newlines(&TokenKind::Star)
+            || self.check_skip_newlines(&TokenKind::Slash)
+            || self.check_skip_newlines(&TokenKind::Percent)
         {
             let start = left.span;
             let op = if self.check(&TokenKind::Star) {
@@ -1166,7 +1166,9 @@ impl Parser {
         let mut expr = self.parse_primary()?;
 
         loop {
-            if self.check(&TokenKind::Dot) || self.check(&TokenKind::QuestionDot) {
+            if self.check_skip_newlines(&TokenKind::Dot)
+                || self.check_skip_newlines(&TokenKind::QuestionDot)
+            {
                 let optional = self.check(&TokenKind::QuestionDot);
                 let start = expr.span;
                 self.advance();
@@ -1713,6 +1715,19 @@ impl Parser {
         self.current()
             .map(|t| std::mem::discriminant(&t.kind) == std::mem::discriminant(kind))
             .unwrap_or(false)
+    }
+
+    /// Check for a token kind, skipping past any newlines first.
+    /// Used for binary operators like `||` and `&&` that can span lines.
+    fn check_skip_newlines(&mut self, kind: &TokenKind) -> bool {
+        let saved = self.pos;
+        self.skip_newlines();
+        if self.check(kind) {
+            true
+        } else {
+            self.pos = saved;
+            false
+        }
     }
 
     fn advance(&mut self) {
