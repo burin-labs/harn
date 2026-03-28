@@ -48,8 +48,8 @@ cd crates/harn-wasm && wasm-pack build
 ## Quality commands
 
 ```bash
-# Run all checks (format, lint, test, conformance)
-make all
+# Run all checks (format, lint, test, conformance) — use -j for parallel
+make all -j
 
 # Clippy lints (treats warnings as errors)
 make lint
@@ -98,7 +98,8 @@ via `tokio::task::spawn_local` for `parallel`, `parallel_map`, and
   mutable-never-reassigned, empty-block, shadow-variable.
 - **harn-cli** -- CLI entry point. Subcommands: `run`, `test`, `repl`,
   `version`, `fmt`, `lint`, `init`, `acp`, `serve`.
-  `acp.rs` (Agent Client Protocol JSON-RPC server),
+  `acp.rs` (ACP JSON-RPC server with builtin delegation,
+  `terminal/*` and `fs/*` support),
   `a2a.rs` (Agent-to-Agent HTTP server with Agent Card).
 - **harn-lsp** -- Language Server Protocol implementation.
 - **harn-dap** -- Debug Adapter Protocol implementation.
@@ -113,9 +114,11 @@ for rustc-style diagnostic rendering.
 
 **Gradual type system**: The typechecker in `typechecker.rs` uses
 `InferredType = Option<TypeExpr>` -- `None` means unknown/untyped. Type
-annotations are optional. The checker tracks enums for match
-exhaustiveness warnings and infers types through enum constructs and
-property access.
+annotations are optional. Supports structural typing: dict literals
+with string keys infer `Shape` types, enabling compile-time checking
+of `{name: string, age: int}` shape annotations with width subtyping.
+Also supports `list[T]`, `dict[K, V]`, union types, and type aliases.
+The checker tracks enums for match exhaustiveness warnings.
 
 **VM concurrency model**: The VM is async (runs inside a tokio
 `LocalSet`). `spawn` creates real async tasks via

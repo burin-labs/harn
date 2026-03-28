@@ -30,18 +30,8 @@ pipeline default(task) {
   } catch (e) {
     log("Caught outer: ${e}")
   }
-  fn find_first_over(list, threshold) {
-    var i = 0
-    while i < list.count {
-      if list[i] > threshold {
-        return list[i]
-      }
-      i = i + 1
-    }
-    return nil
-  }
-  log("First > 50: ${find_first_over([10, 20, 60, 30], 50)}")
-  log("First > 100: ${find_first_over([10, 20, 60, 30], 100)}")
+  log("First > 50: ${[10, 20, 60, 30].find({ x -> x > 50 })}")
+  log("First > 100: ${[10, 20, 60, 30].find({ x -> x > 100 })}")
   let config = {debug: true, verbose: false, level: 3}
   let overrides = {verbose: true, timeout: 30}
   let merged = config.merge(overrides)

@@ -753,7 +753,31 @@ impl TypeChecker {
             Node::BoolLiteral(_) => Some(TypeExpr::Named("bool".into())),
             Node::NilLiteral => Some(TypeExpr::Named("nil".into())),
             Node::ListLiteral(_) => Some(TypeExpr::Named("list".into())),
-            Node::DictLiteral(_) => Some(TypeExpr::Named("dict".into())),
+            Node::DictLiteral(entries) => {
+                // Infer shape type when all keys are string literals
+                let mut fields = Vec::new();
+                let mut all_string_keys = true;
+                for entry in entries {
+                    if let Node::StringLiteral(key) = &entry.key.node {
+                        let val_type = self
+                            .infer_type(&entry.value, scope)
+                            .unwrap_or(TypeExpr::Named("nil".into()));
+                        fields.push(ShapeField {
+                            name: key.clone(),
+                            type_expr: val_type,
+                            optional: false,
+                        });
+                    } else {
+                        all_string_keys = false;
+                        break;
+                    }
+                }
+                if all_string_keys && !fields.is_empty() {
+                    Some(TypeExpr::Shape(fields))
+                } else {
+                    Some(TypeExpr::Named("dict".into()))
+                }
+            }
             Node::Closure { .. } => Some(TypeExpr::Named("closure".into())),
 
             Node::Identifier(name) => scope.get_var(name).cloned().flatten(),
@@ -816,14 +840,32 @@ impl TypeChecker {
                         }
                     }
                 }
+                // Shape field access: obj.field → field type
+                let obj_type = self.infer_type(object, scope);
+                if let Some(TypeExpr::Shape(fields)) = &obj_type {
+                    if let Some(field) = fields.iter().find(|f| f.name == *property) {
+                        return Some(field.type_expr.clone());
+                    }
+                }
                 None
             }
 
-            Node::SubscriptAccess { object, .. } => {
+            Node::SubscriptAccess { object, index } => {
                 let obj_type = self.infer_type(object, scope);
                 match &obj_type {
                     Some(TypeExpr::List(inner)) => Some(*inner.clone()),
                     Some(TypeExpr::DictType(_, v)) => Some(*v.clone()),
+                    Some(TypeExpr::Shape(fields)) => {
+                        // If index is a string literal, look up the field type
+                        if let Node::StringLiteral(key) = &index.node {
+                            fields
+                                .iter()
+                                .find(|f| &f.name == key)
+                                .map(|f| f.type_expr.clone())
+                        } else {
+                            None
+                        }
+                    }
                     Some(TypeExpr::Named(n)) if n == "list" => None,
                     Some(TypeExpr::Named(n)) if n == "dict" => None,
                     Some(TypeExpr::Named(n)) if n == "string" => {
@@ -902,6 +944,7 @@ impl TypeChecker {
                 .iter()
                 .all(|m| self.types_compatible(expected_type, m, scope)),
             (TypeExpr::Shape(_), TypeExpr::Named(n)) if n == "dict" => true,
+            (TypeExpr::Named(n), TypeExpr::Shape(_)) if n == "dict" => true,
             (TypeExpr::Shape(ef), TypeExpr::Shape(af)) => ef.iter().all(|expected_field| {
                 if expected_field.optional {
                     return true;
@@ -915,6 +958,16 @@ impl TypeChecker {
                         )
                 })
             }),
+            // dict[K, V] expected, Shape actual → all field values must match V
+            (TypeExpr::DictType(ek, ev), TypeExpr::Shape(af)) => {
+                let keys_ok = matches!(ek.as_ref(), TypeExpr::Named(n) if n == "string");
+                keys_ok
+                    && af
+                        .iter()
+                        .all(|f| self.types_compatible(ev, &f.type_expr, scope))
+            }
+            // Shape expected, dict[K, V] actual → gradual: allow since dict may have the fields
+            (TypeExpr::Shape(_), TypeExpr::DictType(_, _)) => true,
             (TypeExpr::List(expected_inner), TypeExpr::List(actual_inner)) => {
                 self.types_compatible(expected_inner, actual_inner, scope)
             }

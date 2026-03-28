@@ -1,16 +1,14 @@
-pipeline default(task, project) {
+pipeline default(task) {
   log("Starting agent pipeline")
-  log("Task: ${task}")
-  log("Project: ${project}")
   let steps = ["analyze", "plan", "execute", "verify"]
   for step in steps {
     log("Step: ${step}")
     retry 3 {
       match step {
-        "analyze" -> log("  Analyzing task requirements...")
-        "plan" -> log("  Creating execution plan...")
-        "execute" -> log("  Executing changes...")
-        "verify" -> log("  Verifying results...")
+        "analyze" -> { log("  Analyzing task requirements...") }
+        "plan" -> { log("  Creating execution plan...") }
+        "execute" -> { log("  Executing changes...") }
+        "verify" -> { log("  Verifying results...") }
       }
     }
   }

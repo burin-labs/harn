@@ -1,0 +1,1 @@
+declared as {name: string, age: int}, but assigned {name: int, age: int}

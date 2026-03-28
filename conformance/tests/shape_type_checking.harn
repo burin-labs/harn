@@ -1,0 +1,29 @@
+pipeline default() {
+  // Basic shape annotation
+  let user: {name: string, age: int} = {name: "Alice", age: 30}
+  println(user["name"])
+  println(user["age"])
+  // Optional fields — missing optional is fine
+  let config: {host: string, port?: int} = {host: "localhost"}
+  println(config["host"])
+  // Width subtyping — extra fields allowed
+  fn greet(u: {name: string}) -> string {
+    return "hi " + u["name"]
+  }
+  println(greet({name: "Bob", age: 25, role: "admin"}))
+  // Nested shapes
+  let data: {user: {name: string}, tags: list} = {user: {name: "X"}, tags: [1, 2]}
+  println(data["user"]["name"])
+  // Shape as return type
+  fn make_point() -> {x: int, y: int} {
+    return {x: 10, y: 20}
+  }
+  let p = make_point()
+  println(p["x"] + p["y"])
+  // Shape assigned to generic dict
+  let d: dict = {a: 1, b: 2}
+  println(d["a"])
+  // Shape compatible with dict[string, int]
+  let typed: dict[string, int] = {x: 1, y: 2}
+  println(typed["x"])
+}

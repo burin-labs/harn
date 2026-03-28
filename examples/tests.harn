@@ -1,20 +1,17 @@
 // Example test file — run with: harn test examples/tests.harn
-
-fn add(a, b) {
-  return a + b
-}
-
-fn greet(name) {
-  return "hello " + name
-}
-
 pipeline test_addition(task) {
+  fn add(a, b) {
+    return a + b
+  }
   assert_eq(add(2, 3), 5)
   assert_eq(add(-1, 1), 0)
   assert_eq(add(0, 0), 0)
 }
 
 pipeline test_string_operations(task) {
+  fn greet(name) {
+    return "hello " + name
+  }
   assert_eq(greet("world"), "hello world")
   assert("hello".contains("ell"))
   assert(!"hello".contains("xyz"))

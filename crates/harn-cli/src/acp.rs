@@ -22,7 +22,7 @@ use tokio::sync::{oneshot, Mutex};
 struct Session {
     cwd: PathBuf,
     /// If a cancel was requested for the current prompt execution.
-    cancelled: Rc<AtomicBool>,
+    cancelled: Arc<AtomicBool>,
 }
 
 // ---------------------------------------------------------------------------
@@ -113,8 +113,11 @@ impl AcpServer {
             serde_json::json!({
                 "sessionId": session_id,
                 "update": {
-                    "type": "agent_message_chunk",
-                    "text": text,
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": {
+                        "type": "text",
+                        "text": text,
+                    },
                 },
             }),
         );
@@ -170,7 +173,7 @@ impl AcpServer {
             session_id.clone(),
             Session {
                 cwd,
-                cancelled: Rc::new(AtomicBool::new(false)),
+                cancelled: Arc::new(AtomicBool::new(false)),
             },
         );
 
@@ -334,6 +337,15 @@ impl AcpServer {
             }
         }
     }
+
+    fn handle_session_list(&self, id: &serde_json::Value) {
+        let sessions: Vec<serde_json::Value> = self
+            .sessions
+            .keys()
+            .map(|sid| serde_json::json!({"sessionId": sid}))
+            .collect();
+        self.send_response(id, serde_json::json!({"sessions": sessions}));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -347,7 +359,7 @@ struct AcpBridge {
     stdout_lock: Arc<std::sync::Mutex<()>>,
     pending: Arc<Mutex<HashMap<u64, oneshot::Sender<serde_json::Value>>>>,
     next_id_counter: AtomicU64,
-    cancelled: Rc<AtomicBool>,
+    cancelled: Arc<AtomicBool>,
 }
 
 impl AcpBridge {
@@ -379,8 +391,11 @@ impl AcpBridge {
             serde_json::json!({
                 "sessionId": self.session_id,
                 "update": {
-                    "type": "agent_message_chunk",
-                    "text": text,
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": {
+                        "type": "text",
+                        "text": text,
+                    },
                 },
             }),
         );
@@ -502,6 +517,18 @@ async fn execute_chunk(
     // Register ACP-specific builtins that delegate file I/O to the editor.
     register_acp_builtins(&mut vm, bridge.clone());
 
+    // Set up bridge delegation so unknown builtins are forwarded to the ACP
+    // client as `builtin_call` JSON-RPC requests.  This reuses the same
+    // pending map and stdout lock as the AcpBridge, so responses from the
+    // client's stdin reader are dispatched correctly.
+    let host_bridge = Rc::new(harn_vm::bridge::HostBridge::from_parts(
+        bridge.pending.clone(),
+        Arc::new(AtomicBool::new(false)), // separate cancel flag for bridge calls
+        bridge.stdout_lock.clone(),
+        bridge.next_id_counter.fetch_add(10_000, Ordering::SeqCst),
+    ));
+    vm.set_bridge(host_bridge);
+
     match vm.execute(&chunk).await {
         Ok(_) => Ok(vm.output().to_string()),
         Err(e) => {
@@ -612,12 +639,126 @@ fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Rc<AcpBridge>) {
         Ok(harn_vm::VmValue::Nil)
     });
 
-    let b = bridge;
+    let b = bridge.clone();
     vm.register_builtin("emit_response", move |args, _out| {
         let text = args.first().map(|a| a.display()).unwrap_or_default();
         b.send_update(&text);
         Ok(harn_vm::VmValue::Nil)
     });
+
+    // --- Terminal: delegate exec/shell via terminal/create + wait + output + release ---
+
+    for name in ["exec", "shell"] {
+        vm.unregister_builtin(name);
+    }
+
+    let b = bridge.clone();
+    vm.register_async_builtin("exec", move |args| {
+        let bridge = b.clone();
+        async move { acp_terminal_exec(&bridge, &args).await }
+    });
+
+    let b = bridge;
+    vm.register_async_builtin("shell", move |args| {
+        let bridge = b.clone();
+        async move { acp_terminal_exec(&bridge, &args).await }
+    });
+}
+
+/// Execute a command through ACP terminal/create + wait_for_exit + output + release.
+async fn acp_terminal_exec(
+    bridge: &AcpBridge,
+    args: &[harn_vm::VmValue],
+) -> Result<harn_vm::VmValue, harn_vm::VmError> {
+    let cmd = args.first().map(|a| a.display()).unwrap_or_default();
+    if cmd.is_empty() {
+        return Err(harn_vm::VmError::Thrown(harn_vm::VmValue::String(
+            Rc::from("exec: command is required"),
+        )));
+    }
+
+    // 1. Create a terminal with the command.
+    let create_result = bridge
+        .call_client(
+            "terminal/create",
+            serde_json::json!({
+                "sessionId": bridge.session_id,
+                "command": cmd,
+            }),
+        )
+        .await?;
+
+    let terminal_id = create_result
+        .get("terminalId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    if terminal_id.is_empty() {
+        // Client doesn't support terminal — fall back to local exec.
+        let output = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(&cmd)
+            .output()
+            .map_err(|e| {
+                harn_vm::VmError::Thrown(harn_vm::VmValue::String(Rc::from(format!(
+                    "exec failed: {e}"
+                ))))
+            })?;
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        let exit_code = output.status.code().unwrap_or(-1);
+        let mut map = std::collections::BTreeMap::new();
+        map.insert(
+            "stdout".to_string(),
+            harn_vm::VmValue::String(Rc::from(stdout)),
+        );
+        map.insert(
+            "stderr".to_string(),
+            harn_vm::VmValue::String(Rc::from(stderr)),
+        );
+        map.insert(
+            "exit_code".to_string(),
+            harn_vm::VmValue::Int(exit_code as i64),
+        );
+        return Ok(harn_vm::VmValue::Dict(Rc::new(map)));
+    }
+
+    // 2. Wait for the command to finish.
+    let _ = bridge
+        .call_client(
+            "terminal/wait_for_exit",
+            serde_json::json!({
+                "sessionId": bridge.session_id,
+                "terminalId": terminal_id,
+            }),
+        )
+        .await;
+
+    // 3. Read the output.
+    let output_result = bridge
+        .call_client(
+            "terminal/output",
+            serde_json::json!({
+                "sessionId": bridge.session_id,
+                "terminalId": terminal_id,
+            }),
+        )
+        .await
+        .unwrap_or(serde_json::json!({}));
+
+    // 4. Release the terminal.
+    let _ = bridge
+        .call_client(
+            "terminal/release",
+            serde_json::json!({
+                "sessionId": bridge.session_id,
+                "terminalId": terminal_id,
+            }),
+        )
+        .await;
+
+    Ok(harn_vm::bridge::json_result_to_vm_value(&output_result))
 }
 
 /// Write a `session/update` notification directly through a stdout lock.
@@ -628,8 +769,11 @@ fn send_update_raw(stdout_lock: &Arc<std::sync::Mutex<()>>, session_id: &str, te
         "params": {
             "sessionId": session_id,
             "update": {
-                "type": "agent_message_chunk",
-                "text": text,
+                "sessionUpdate": "agent_message_chunk",
+                "content": {
+                    "type": "text",
+                    "text": text,
+                },
             },
         },
     });
@@ -741,6 +885,9 @@ pub async fn run_acp_server(pipeline: Option<&str>) {
                     }
                     "session/cancel" => {
                         server.handle_session_cancel(&params);
+                    }
+                    "session/list" => {
+                        server.handle_session_list(&id);
                     }
                     _ => {
                         // Unknown method — send error if it has an id.

@@ -197,8 +197,8 @@ statement ::= let_binding
             | fn_decl
             | expression_statement
 
-let_binding    ::= 'let' IDENTIFIER '=' expression
-var_binding    ::= 'var' IDENTIFIER '=' expression
+let_binding    ::= 'let' IDENTIFIER (':' type_expr)? '=' expression
+var_binding    ::= 'var' IDENTIFIER (':' type_expr)? '=' expression
 if_else        ::= 'if' expression '{' block '}' ('else' (if_else | '{' block '}'))?
 for_in         ::= 'for' IDENTIFIER 'in' expression '{' block '}'
 match_expr     ::= 'match' expression '{' (expression '->' '{' block '}')* '}'
@@ -210,7 +210,7 @@ return_stmt    ::= 'return' expression?
 throw_stmt     ::= 'throw' expression
 override_decl  ::= 'override' IDENTIFIER '(' param_list ')' '{' block '}'
 try_catch      ::= 'try' '{' block '}' 'catch' ('(' IDENTIFIER ')')? '{' block '}'
-fn_decl        ::= 'fn' IDENTIFIER '(' param_list ')' '{' block '}'
+fn_decl        ::= 'fn' IDENTIFIER '(' param_list ')' ('->' type_expr)? '{' block '}'
 
 expression_statement ::= expression ('=' expression)?
 ```
@@ -612,6 +612,94 @@ environment (not the call-site environment), and parameters are bound as immutab
 `return value` inside a function/closure unwinds execution via
 `HarnRuntimeError.returnValue`. The closure invocation catches this and returns the value.
 `return` inside a pipeline terminates the pipeline.
+
+## Type annotations
+
+Harn has an optional, gradual type system. Type annotations are checked at compile time
+but do not affect runtime behavior. Omitting annotations is always valid.
+
+### Basic types
+
+```harn
+let name: string = "Alice"
+let age: int = 30
+let rate: float = 3.14
+let ok: bool = true
+let nothing: nil = nil
+```
+
+### Union types
+
+```harn
+let value: string | nil = nil
+let id: int | string = "abc"
+```
+
+### Parameterized types
+
+```harn
+let numbers: list[int] = [1, 2, 3]
+let headers: dict[string, string] = {content_type: "json"}
+```
+
+### Structural types (shapes)
+
+Dict shape types describe the expected fields of a dict value. The type checker
+verifies that dict literals have the required fields with compatible types.
+
+```harn
+let user: {name: string, age: int} = {name: "Alice", age: 30}
+```
+
+Optional fields use `?` and need not be present:
+
+```harn
+let config: {host: string, port?: int} = {host: "localhost"}
+```
+
+Width subtyping: a dict with extra fields satisfies a shape that requires fewer fields.
+
+```harn
+fn greet(u: {name: string}) -> string {
+  return "hi " + u["name"]
+}
+greet({name: "Bob", age: 25})  // OK — extra field allowed
+```
+
+Nested shapes:
+
+```harn
+let data: {user: {name: string}, tags: list} = {user: {name: "X"}, tags: []}
+```
+
+Shapes are compatible with `dict` and `dict[string, V]` when all field values match `V`.
+
+### Type aliases
+
+```harn
+type Config = {model: string, max_tokens: int}
+let cfg: Config = {model: "gpt-4", max_tokens: 100}
+```
+
+### Function type annotations
+
+Parameters and return types can be annotated:
+
+```harn
+fn add(a: int, b: int) -> int {
+  return a + b
+}
+```
+
+### Type checking behavior
+
+- Annotations are optional (gradual typing). Untyped values are `None` and skip checks.
+- `int` is assignable to `float`.
+- Dict literals with string keys infer a structural shape type.
+- Dict literals with computed keys infer as generic `dict`.
+- Shape-to-shape: all required fields in the expected type must exist with compatible types.
+- Shape-to-`dict[K, V]`: all field values must be compatible with `V`.
+- Type errors are reported at compile time and halt execution.
 
 ## Built-in methods
 

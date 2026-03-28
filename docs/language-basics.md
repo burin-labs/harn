@@ -52,9 +52,9 @@ Harn is dynamically typed with optional type annotations.
 
 ### Type annotations
 
-Annotations are optional and checked at runtime:
+Annotations are optional and checked at compile time:
 
-```javascript
+```harn
 let x: int = 42
 let name: string = "hello"
 let nums: list[int] = [1, 2, 3]
@@ -65,8 +65,31 @@ fn add(a: int, b: int) -> int {
 ```
 
 Supported type expressions: `int`, `float`, `string`, `bool`, `nil`, `list`,
-`list[T]`, `dict`, union types (`string | nil`), and shape types
-(`{x: int, y: int}`).
+`list[T]`, `dict`, `dict[K, V]`, union types (`string | nil`), and structural
+shape types (`{name: string, age: int}`).
+
+### Structural types (shapes)
+
+Shape types describe the expected fields of a dict. The type checker verifies
+that required fields are present with compatible types. Extra fields are allowed
+(width subtyping).
+
+```harn
+let user: {name: string, age: int} = {name: "Alice", age: 30}
+let config: {host: string, port?: int} = {host: "localhost"}
+
+fn greet(u: {name: string}) -> string {
+  return "hi " + u["name"]
+}
+greet({name: "Bob", age: 25})
+```
+
+Use `type` aliases for reusable shape definitions:
+
+```harn
+type Config = {model: string, max_tokens: int}
+let cfg: Config = {model: "gpt-4", max_tokens: 100}
+```
 
 ### Truthiness
 

@@ -97,6 +97,25 @@ impl HostBridge {
         }
     }
 
+    /// Create a bridge from pre-existing shared state.
+    ///
+    /// Unlike `new()`, does **not** spawn a stdin reader — the caller is
+    /// responsible for dispatching responses into `pending`.  This is used
+    /// by ACP mode which already has its own stdin reader.
+    pub fn from_parts(
+        pending: Arc<Mutex<HashMap<u64, oneshot::Sender<serde_json::Value>>>>,
+        cancelled: Arc<AtomicBool>,
+        stdout_lock: Arc<std::sync::Mutex<()>>,
+        start_id: u64,
+    ) -> Self {
+        Self {
+            next_id: AtomicU64::new(start_id),
+            pending,
+            cancelled,
+            stdout_lock,
+        }
+    }
+
     /// Write a complete JSON-RPC line to stdout, serialized through a mutex.
     fn write_line(&self, line: &str) -> Result<(), VmError> {
         let _guard = self.stdout_lock.lock().unwrap_or_else(|e| e.into_inner());

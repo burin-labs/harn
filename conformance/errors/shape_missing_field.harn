@@ -1,0 +1,4 @@
+pipeline default() {
+  let user: {name: string, age: int} = {age: 30}
+  println(user)
+}

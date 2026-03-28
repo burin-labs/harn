@@ -334,7 +334,7 @@ The codebase is organized as a Cargo workspace:
 | `harn-vm` | Bytecode compiler, VM, and all builtin functions |
 | `harn-fmt` | Opinionated code formatter |
 | `harn-lint` | Linter with 5 rules |
-| `harn-cli` | CLI: `run`, `test`, `repl`, `init`, `fmt`, `lint`, `version` |
+| `harn-cli` | CLI: `run`, `test`, `repl`, `init`, `fmt`, `lint`, `version`, `acp`, `serve` |
 | `harn-lsp` | Language Server Protocol |
 | `harn-dap` | Debug Adapter Protocol |
 | `harn-wasm` | WASM target (built separately with wasm-pack) |
@@ -352,7 +352,7 @@ make all
 make fmt          # auto-format
 make lint         # clippy (warnings are errors)
 make test         # Rust unit tests
-make conformance  # 108 language conformance tests
+make conformance  # language conformance tests
 ```
 
 Conformance tests in `conformance/` are the primary way to verify language

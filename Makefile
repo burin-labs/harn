@@ -1,7 +1,10 @@
 .PHONY: check fmt fmt-harn lint lint-md lint-harn test conformance all
 
-# Full quality check: format, lint, test, conformance
-all: fmt fmt-harn lint lint-md lint-harn test conformance
+# Full quality check: format first, then lint/test in parallel.
+# Usage: make all -j       (parallel checks after formatting)
+#        make all           (sequential, also works)
+all: fmt
+	$(MAKE) lint lint-md lint-harn fmt-harn test conformance
 
 # Format all code
 fmt:
