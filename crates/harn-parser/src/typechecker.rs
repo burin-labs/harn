@@ -532,7 +532,8 @@ impl TypeChecker {
             Node::UnaryOp { operand, .. } => {
                 self.check_node(operand, scope);
             }
-            Node::MethodCall { object, args, .. } => {
+            Node::MethodCall { object, args, .. }
+            | Node::OptionalMethodCall { object, args, .. } => {
                 self.check_node(object, scope);
                 for arg in args {
                     self.check_node(arg, scope);
@@ -544,6 +545,15 @@ impl TypeChecker {
             Node::SubscriptAccess { object, index } => {
                 self.check_node(object, scope);
                 self.check_node(index, scope);
+            }
+            Node::SliceAccess { object, start, end } => {
+                self.check_node(object, scope);
+                if let Some(s) = start {
+                    self.check_node(s, scope);
+                }
+                if let Some(e) = end {
+                    self.check_node(e, scope);
+                }
             }
 
             // Terminals — nothing to check
@@ -822,7 +832,20 @@ impl TypeChecker {
                     _ => None,
                 }
             }
-            Node::MethodCall { object, method, .. } => {
+            Node::SliceAccess { object, .. } => {
+                // Slicing a list returns the same list type; slicing a string returns string
+                let obj_type = self.infer_type(object, scope);
+                match &obj_type {
+                    Some(TypeExpr::List(_)) => obj_type,
+                    Some(TypeExpr::Named(n)) if n == "list" => obj_type,
+                    Some(TypeExpr::Named(n)) if n == "string" => {
+                        Some(TypeExpr::Named("string".into()))
+                    }
+                    _ => None,
+                }
+            }
+            Node::MethodCall { object, method, .. }
+            | Node::OptionalMethodCall { object, method, .. } => {
                 let obj_type = self.infer_type(object, scope);
                 let is_dict = matches!(&obj_type, Some(TypeExpr::Named(n)) if n == "dict")
                     || matches!(&obj_type, Some(TypeExpr::DictType(..)));

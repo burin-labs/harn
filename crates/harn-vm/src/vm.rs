@@ -845,28 +845,9 @@ impl Vm {
                         // Check closures in env
                         self.push_closure_frame(&closure, &args, &functions)?;
                         // Don't push result - frame will handle it on return
-                    } else if let Some(builtin) = self.builtins.get(name.as_ref()).cloned() {
-                        let result = builtin(&args, &mut self.output)?;
-                        self.stack.push(result);
-                    } else if let Some(async_builtin) =
-                        self.async_builtins.get(name.as_ref()).cloned()
-                    {
-                        let result = async_builtin(args).await?;
-                        self.stack.push(result);
-                    } else if let Some(bridge) = &self.bridge {
-                        // Bridge mode: delegate unknown builtins to the host
-                        let args_json: Vec<serde_json::Value> =
-                            args.iter().map(crate::llm::vm_value_to_json).collect();
-                        let result = bridge
-                            .call(
-                                "builtin_call",
-                                serde_json::json!({"name": name.as_ref(), "args": args_json}),
-                            )
-                            .await?;
-                        self.stack
-                            .push(crate::bridge::json_result_to_vm_value(&result));
                     } else {
-                        return Err(VmError::UndefinedBuiltin(name.to_string()));
+                        let result = self.call_named_builtin(&name, args).await?;
+                        self.stack.push(result);
                     }
                 }
                 VmValue::Closure(closure) => {
@@ -932,28 +913,8 @@ impl Vm {
                 // Not a closure — fall back to regular call behavior for builtins.
                 match callee {
                     VmValue::String(name) => {
-                        if let Some(builtin) = self.builtins.get(name.as_ref()).cloned() {
-                            let result = builtin(&args, &mut self.output)?;
-                            self.stack.push(result);
-                        } else if let Some(async_builtin) =
-                            self.async_builtins.get(name.as_ref()).cloned()
-                        {
-                            let result = async_builtin(args).await?;
-                            self.stack.push(result);
-                        } else if let Some(bridge) = &self.bridge {
-                            let args_json: Vec<serde_json::Value> =
-                                args.iter().map(crate::llm::vm_value_to_json).collect();
-                            let result = bridge
-                                .call(
-                                    "builtin_call",
-                                    serde_json::json!({"name": name.as_ref(), "args": args_json}),
-                                )
-                                .await?;
-                            self.stack
-                                .push(crate::bridge::json_result_to_vm_value(&result));
-                        } else {
-                            return Err(VmError::UndefinedBuiltin(name.to_string()));
-                        }
+                        let result = self.call_named_builtin(&name, args).await?;
+                        self.stack.push(result);
                     }
                     _ => {
                         return Err(VmError::TypeError(format!(
@@ -1038,6 +999,103 @@ impl Vm {
                         "cannot index into {} with {}",
                         obj.type_name(),
                         idx.type_name()
+                    )));
+                }
+            };
+            self.stack.push(result);
+        } else if op == Op::Slice as u8 {
+            let end_val = self.pop()?;
+            let start_val = self.pop()?;
+            let obj = self.pop()?;
+
+            let result = match &obj {
+                VmValue::List(items) => {
+                    let len = items.len() as i64;
+                    let start = match &start_val {
+                        VmValue::Nil => 0i64,
+                        VmValue::Int(i) => {
+                            if *i < 0 {
+                                (len + *i).max(0)
+                            } else {
+                                (*i).min(len)
+                            }
+                        }
+                        _ => {
+                            return Err(VmError::TypeError(format!(
+                                "slice start must be an integer, got {}",
+                                start_val.type_name()
+                            )));
+                        }
+                    };
+                    let end = match &end_val {
+                        VmValue::Nil => len,
+                        VmValue::Int(i) => {
+                            if *i < 0 {
+                                (len + *i).max(0)
+                            } else {
+                                (*i).min(len)
+                            }
+                        }
+                        _ => {
+                            return Err(VmError::TypeError(format!(
+                                "slice end must be an integer, got {}",
+                                end_val.type_name()
+                            )));
+                        }
+                    };
+                    if start >= end {
+                        VmValue::List(Rc::new(vec![]))
+                    } else {
+                        let sliced: Vec<VmValue> = items[start as usize..end as usize].to_vec();
+                        VmValue::List(Rc::new(sliced))
+                    }
+                }
+                VmValue::String(s) => {
+                    let chars: Vec<char> = s.chars().collect();
+                    let len = chars.len() as i64;
+                    let start = match &start_val {
+                        VmValue::Nil => 0i64,
+                        VmValue::Int(i) => {
+                            if *i < 0 {
+                                (len + *i).max(0)
+                            } else {
+                                (*i).min(len)
+                            }
+                        }
+                        _ => {
+                            return Err(VmError::TypeError(format!(
+                                "slice start must be an integer, got {}",
+                                start_val.type_name()
+                            )));
+                        }
+                    };
+                    let end = match &end_val {
+                        VmValue::Nil => len,
+                        VmValue::Int(i) => {
+                            if *i < 0 {
+                                (len + *i).max(0)
+                            } else {
+                                (*i).min(len)
+                            }
+                        }
+                        _ => {
+                            return Err(VmError::TypeError(format!(
+                                "slice end must be an integer, got {}",
+                                end_val.type_name()
+                            )));
+                        }
+                    };
+                    if start >= end {
+                        VmValue::String(Rc::from(String::new()))
+                    } else {
+                        let sliced: String = chars[start as usize..end as usize].iter().collect();
+                        VmValue::String(Rc::from(sliced))
+                    }
+                }
+                _ => {
+                    return Err(VmError::TypeError(format!(
+                        "cannot slice {}",
+                        obj.type_name()
                     )));
                 }
             };
@@ -1199,7 +1257,8 @@ impl Vm {
                     _ => {}
                 }
             }
-        } else if op == Op::MethodCall as u8 {
+        } else if op == Op::MethodCall as u8 || op == Op::MethodCallOpt as u8 {
+            let optional = op == Op::MethodCallOpt as u8;
             let frame = self.frames.last_mut().unwrap();
             let name_idx = frame.chunk.read_u16(frame.ip) as usize;
             frame.ip += 2;
@@ -1209,8 +1268,12 @@ impl Vm {
             let functions = frame.chunk.functions.clone();
             let args: Vec<VmValue> = self.stack.split_off(self.stack.len().saturating_sub(argc));
             let obj = self.pop()?;
-            let result = self.call_method(obj, &method, &args, &functions).await?;
-            self.stack.push(result);
+            if optional && matches!(obj, VmValue::Nil) {
+                self.stack.push(VmValue::Nil);
+            } else {
+                let result = self.call_method(obj, &method, &args, &functions).await?;
+                self.stack.push(result);
+            }
         } else if op == Op::Concat as u8 {
             let frame = self.frames.last_mut().unwrap();
             let count = frame.chunk.read_u16(frame.ip) as usize;
@@ -1229,26 +1292,9 @@ impl Vm {
                 VmValue::String(name) => {
                     if let Some(VmValue::Closure(closure)) = self.env.get(&name) {
                         self.push_closure_frame(&closure, &[value], &functions)?;
-                    } else if let Some(builtin) = self.builtins.get(name.as_ref()) {
-                        let result = builtin(&[value], &mut self.output)?;
-                        self.stack.push(result);
-                    } else if let Some(async_builtin) =
-                        self.async_builtins.get(name.as_ref()).cloned()
-                    {
-                        let result = async_builtin(vec![value]).await?;
-                        self.stack.push(result);
-                    } else if let Some(bridge) = &self.bridge {
-                        let args_json = vec![crate::llm::vm_value_to_json(&value)];
-                        let result = bridge
-                            .call(
-                                "builtin_call",
-                                serde_json::json!({"name": name.as_ref(), "args": args_json}),
-                            )
-                            .await?;
-                        self.stack
-                            .push(crate::bridge::json_result_to_vm_value(&result));
                     } else {
-                        return Err(VmError::UndefinedBuiltin(name.to_string()));
+                        let result = self.call_named_builtin(&name, vec![value]).await?;
+                        self.stack.push(result);
                     }
                 }
                 _ => {
@@ -1567,6 +1613,32 @@ impl Vm {
 
             result
         })
+    }
+
+    /// Resolve a named builtin: sync builtins → async builtins → bridge → error.
+    /// Used by Call, TailCall, and Pipe handlers to avoid duplicating this lookup.
+    async fn call_named_builtin(
+        &mut self,
+        name: &str,
+        args: Vec<VmValue>,
+    ) -> Result<VmValue, VmError> {
+        if let Some(builtin) = self.builtins.get(name).cloned() {
+            builtin(&args, &mut self.output)
+        } else if let Some(async_builtin) = self.async_builtins.get(name).cloned() {
+            async_builtin(args).await
+        } else if let Some(bridge) = &self.bridge {
+            let args_json: Vec<serde_json::Value> =
+                args.iter().map(crate::llm::vm_value_to_json).collect();
+            let result = bridge
+                .call(
+                    "builtin_call",
+                    serde_json::json!({"name": name, "args": args_json}),
+                )
+                .await?;
+            Ok(crate::bridge::json_result_to_vm_value(&result))
+        } else {
+            Err(VmError::UndefinedBuiltin(name.to_string()))
+        }
     }
 
     fn call_method<'a>(

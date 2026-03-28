@@ -73,7 +73,8 @@ impl Linter {
             Node::Identifier(name) => Some(name.clone()),
             Node::PropertyAccess { object, .. }
             | Node::OptionalPropertyAccess { object, .. }
-            | Node::SubscriptAccess { object, .. } => Self::root_var_name(object),
+            | Node::SubscriptAccess { object, .. }
+            | Node::SliceAccess { object, .. } => Self::root_var_name(object),
             _ => None,
         }
     }
@@ -182,7 +183,8 @@ impl Linter {
                 }
             }
 
-            Node::MethodCall { object, args, .. } => {
+            Node::MethodCall { object, args, .. }
+            | Node::OptionalMethodCall { object, args, .. } => {
                 self.lint_node(object);
                 for arg in args {
                     self.lint_node(arg);
@@ -196,6 +198,16 @@ impl Linter {
             Node::SubscriptAccess { object, index } => {
                 self.lint_node(object);
                 self.lint_node(index);
+            }
+
+            Node::SliceAccess { object, start, end } => {
+                self.lint_node(object);
+                if let Some(s) = start {
+                    self.lint_node(s);
+                }
+                if let Some(e) = end {
+                    self.lint_node(e);
+                }
             }
 
             Node::BinaryOp { op, left, right } => {

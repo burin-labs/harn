@@ -761,6 +761,28 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
     });
 
     // =========================================================================
+    // Prompt template rendering
+    // =========================================================================
+
+    vm.register_builtin("render", |args, _out| {
+        let path = args.first().map(|a| a.display()).unwrap_or_default();
+        let template = std::fs::read_to_string(&path).map_err(|e| {
+            VmError::Thrown(VmValue::String(Rc::from(format!(
+                "Failed to read template {path}: {e}"
+            ))))
+        })?;
+        if let Some(bindings) = args.get(1).and_then(|a| a.as_dict()) {
+            let mut result = template;
+            for (key, val) in bindings.iter() {
+                result = result.replace(&format!("{{{{{key}}}}}"), &val.display());
+            }
+            Ok(VmValue::String(Rc::from(result)))
+        } else {
+            Ok(VmValue::String(Rc::from(template)))
+        }
+    });
+
+    // =========================================================================
     // Logging builtins
     // =========================================================================
 

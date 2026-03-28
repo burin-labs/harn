@@ -1,0 +1,19 @@
+pipeline default() {
+  // Optional method call on nil returns nil
+  let x = nil
+  println(x?.split(","))
+  println(x?.contains("a"))
+  // Optional method call on non-nil works normally
+  let s = "hello world"
+  println(s?.split(" "))
+  println(s?.contains("world"))
+  // Chained optional method call
+  let d = nil
+  println(d?.keys())
+  // Optional method call on list
+  let items = [3, 1, 2]
+  println(items?.map({ v -> v }))
+  // Optional method call on dict
+  let m = {a: 1, b: 2}
+  println(m?.keys())
+}

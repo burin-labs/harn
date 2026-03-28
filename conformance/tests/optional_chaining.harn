@@ -17,4 +17,10 @@ pipeline default() {
   // Nil propagation through chain
   let empty = nil
   println(empty?.inner?.value)
+  // Optional chaining on non-dict types returns nil for unknown props
+  let n = 42
+  println(n?.foo)
+  let s = "hello"
+  println(s?.count)
+  println(s?.foo)
 }

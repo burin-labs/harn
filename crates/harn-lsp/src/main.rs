@@ -588,7 +588,7 @@ fn collect_symbols(snode: &SNode, symbols: &mut Vec<SymbolInfo>, scope_span: Opt
                 collect_symbols(a, symbols, scope_span);
             }
         }
-        Node::MethodCall { object, args, .. } => {
+        Node::MethodCall { object, args, .. } | Node::OptionalMethodCall { object, args, .. } => {
             collect_symbols(object, symbols, scope_span);
             for a in args {
                 collect_symbols(a, symbols, scope_span);
@@ -600,6 +600,15 @@ fn collect_symbols(snode: &SNode, symbols: &mut Vec<SymbolInfo>, scope_span: Opt
         Node::SubscriptAccess { object, index } => {
             collect_symbols(object, symbols, scope_span);
             collect_symbols(index, symbols, scope_span);
+        }
+        Node::SliceAccess { object, start, end } => {
+            collect_symbols(object, symbols, scope_span);
+            if let Some(s) = start {
+                collect_symbols(s, symbols, scope_span);
+            }
+            if let Some(e) = end {
+                collect_symbols(e, symbols, scope_span);
+            }
         }
         Node::Assignment { target, value, .. } => {
             collect_symbols(target, symbols, scope_span);
@@ -862,7 +871,7 @@ fn collect_references(snode: &SNode, target_name: &str, refs: &mut Vec<Span>) {
         Node::UnaryOp { operand, .. } => {
             collect_references(operand, target_name, refs);
         }
-        Node::MethodCall { object, args, .. } => {
+        Node::MethodCall { object, args, .. } | Node::OptionalMethodCall { object, args, .. } => {
             collect_references(object, target_name, refs);
             for a in args {
                 collect_references(a, target_name, refs);
@@ -874,6 +883,15 @@ fn collect_references(snode: &SNode, target_name: &str, refs: &mut Vec<Span>) {
         Node::SubscriptAccess { object, index } => {
             collect_references(object, target_name, refs);
             collect_references(index, target_name, refs);
+        }
+        Node::SliceAccess { object, start, end } => {
+            collect_references(object, target_name, refs);
+            if let Some(s) = start {
+                collect_references(s, target_name, refs);
+            }
+            if let Some(e) = end {
+                collect_references(e, target_name, refs);
+            }
         }
         Node::Assignment { target, value, .. } => {
             collect_references(target, target_name, refs);

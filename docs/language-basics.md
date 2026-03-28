@@ -130,9 +130,44 @@ Ordered by precedence (lowest to highest):
 | 8 | `+` `-` | Add, subtract, string/list concat |
 | 9 | `*` `/` | Multiply, divide |
 | 10 | `!` `-` | Unary not, negate |
-| 11 | `.` `[]` `()` | Member access, subscript, call |
+| 11 | `.` `?.` `[]` `[:]` `()` | Member access, optional chaining, subscript, slice, call |
 
 Division by zero returns `nil`. Integer division truncates.
+
+### Optional chaining (`?.`)
+
+Access properties or call methods on values that might be nil. Returns
+nil instead of erroring when the receiver is nil:
+
+```harn
+let user = nil
+println(user?.name)           // nil (no error)
+println(user?.greet("hi"))    // nil (method not called)
+
+let d = {name: "Alice"}
+println(d?.name)              // Alice
+```
+
+Chains propagate nil: `a?.b?.c` returns nil if any step is nil.
+
+### List and string slicing (`[start:end]`)
+
+Extract sublists or substrings using slice syntax:
+
+```harn
+let items = [10, 20, 30, 40, 50]
+println(items[1:3])   // [20, 30]
+println(items[:2])    // [10, 20]
+println(items[3:])    // [40, 50]
+println(items[-2:])   // [40, 50]
+
+let s = "hello world"
+println(s[0:5])       // hello
+println(s[-5:])       // world
+```
+
+Negative indices count from the end. Omit start for 0, omit end for
+length.
 
 ## Control flow
 

@@ -182,6 +182,7 @@ module.exports = grammar({
         $.method_call,
         $.property_access,
         $.subscript_expression,
+        $.slice_expression,
         $.parenthesized_expression,
         $.spawn_expression,
         $.parallel_expression,
@@ -221,7 +222,7 @@ module.exports = grammar({
         11,
         seq(
           field("object", $._expression),
-          ".",
+          choice(".", "?."),
           field("method", $.identifier),
           "(",
           optional($.argument_list),
@@ -230,10 +231,26 @@ module.exports = grammar({
       ),
 
     property_access: ($) =>
-      prec.left(11, seq(field("object", $._expression), ".", field("property", $.identifier))),
+      prec.left(
+        11,
+        seq(field("object", $._expression), choice(".", "?."), field("property", $.identifier))
+      ),
 
     subscript_expression: ($) =>
       prec.left(11, seq(field("object", $._expression), "[", $._expression, "]")),
+
+    slice_expression: ($) =>
+      prec.left(
+        11,
+        seq(
+          field("object", $._expression),
+          "[",
+          optional(field("start", $._expression)),
+          ":",
+          optional(field("end", $._expression)),
+          "]"
+        )
+      ),
 
     parenthesized_expression: ($) => seq("(", $._expression, ")"),
 

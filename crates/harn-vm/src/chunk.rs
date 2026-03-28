@@ -71,6 +71,8 @@ pub enum Op {
     BuildDict,
     /// Subscript access: stack has [object, index]. Pushes result.
     Subscript,
+    /// Slice access: stack has [object, start_or_nil, end_or_nil]. Pushes sublist/substring.
+    Slice,
 
     // --- Object operations ---
     /// Property access. arg: u16 = constant index (property name).
@@ -86,6 +88,9 @@ pub enum Op {
     SetSubscript,
     /// Method call. arg1: u16 = constant index (method name), arg2: u8 = arg count.
     MethodCall,
+    /// Optional method call (?.). Like MethodCall but returns nil if the
+    /// receiver is nil instead of dispatching. arg1: u16, arg2: u8.
+    MethodCallOpt,
 
     // --- String ---
     /// String concatenation of N parts. arg: u16 = part count.
@@ -271,8 +276,17 @@ impl Chunk {
 
     /// Emit a method call: op + u16 (method name) + u8 (arg count).
     pub fn emit_method_call(&mut self, name_idx: u16, arg_count: u8, line: u32) {
+        self.emit_method_call_inner(Op::MethodCall, name_idx, arg_count, line);
+    }
+
+    /// Emit an optional method call (?.) — returns nil if receiver is nil.
+    pub fn emit_method_call_opt(&mut self, name_idx: u16, arg_count: u8, line: u32) {
+        self.emit_method_call_inner(Op::MethodCallOpt, name_idx, arg_count, line);
+    }
+
+    fn emit_method_call_inner(&mut self, op: Op, name_idx: u16, arg_count: u8, line: u32) {
         let col = self.current_col;
-        self.code.push(Op::MethodCall as u8);
+        self.code.push(op as u8);
         self.code.push((name_idx >> 8) as u8);
         self.code.push((name_idx & 0xFF) as u8);
         self.code.push(arg_count);
@@ -427,6 +441,7 @@ impl Chunk {
                     out.push_str(&format!("BUILD_DICT {:>4}\n", count));
                 }
                 x if x == Op::Subscript as u8 => out.push_str("SUBSCRIPT\n"),
+                x if x == Op::Slice as u8 => out.push_str("SLICE\n"),
                 x if x == Op::GetProperty as u8 => {
                     let idx = self.read_u16(ip);
                     ip += 2;
@@ -466,6 +481,16 @@ impl Chunk {
                     ip += 1;
                     out.push_str(&format!(
                         "METHOD_CALL {:>4} ({}) argc={}\n",
+                        idx, self.constants[idx as usize], argc
+                    ));
+                }
+                x if x == Op::MethodCallOpt as u8 => {
+                    let idx = self.read_u16(ip);
+                    ip += 2;
+                    let argc = self.code[ip];
+                    ip += 1;
+                    out.push_str(&format!(
+                        "METHOD_CALL_OPT {:>4} ({}) argc={}\n",
                         idx, self.constants[idx as usize], argc
                     ));
                 }

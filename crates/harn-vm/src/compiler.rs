@@ -162,8 +162,14 @@ impl Compiler {
     fn compile_block(&mut self, stmts: &[SNode]) -> Result<(), CompileError> {
         for (i, snode) in stmts.iter().enumerate() {
             self.compile_node(snode)?;
-            // Pop intermediate expression results (keep last)
-            if i < stmts.len() - 1 {
+            let is_last = i == stmts.len() - 1;
+            if is_last {
+                // If the last statement doesn't produce a value, push nil
+                // so the block always leaves exactly one value on the stack.
+                if !Self::produces_value(&snode.node) {
+                    self.chunk.emit(Op::Nil, self.line);
+                }
+            } else {
                 // Only pop if the statement leaves a value on the stack
                 if Self::produces_value(&snode.node) {
                     self.chunk.emit(Op::Pop, self.line);
@@ -424,6 +430,20 @@ impl Compiler {
                     .emit_method_call(name_idx, args.len() as u8, self.line);
             }
 
+            Node::OptionalMethodCall {
+                object,
+                method,
+                args,
+            } => {
+                self.compile_node(object)?;
+                for arg in args {
+                    self.compile_node(arg)?;
+                }
+                let name_idx = self.chunk.add_constant(Constant::String(method.clone()));
+                self.chunk
+                    .emit_method_call_opt(name_idx, args.len() as u8, self.line);
+            }
+
             Node::PropertyAccess { object, property } => {
                 // Check if this is an enum variant construction: EnumName.Variant
                 if let Node::Identifier(name) = &object.node {
@@ -465,6 +485,21 @@ impl Compiler {
                 self.compile_node(object)?;
                 self.compile_node(index)?;
                 self.chunk.emit(Op::Subscript, self.line);
+            }
+
+            Node::SliceAccess { object, start, end } => {
+                self.compile_node(object)?;
+                if let Some(s) = start {
+                    self.compile_node(s)?;
+                } else {
+                    self.chunk.emit(Op::Nil, self.line);
+                }
+                if let Some(e) = end {
+                    self.compile_node(e)?;
+                } else {
+                    self.chunk.emit(Op::Nil, self.line);
+                }
+                self.chunk.emit(Op::Slice, self.line);
             }
 
             Node::IfElse {

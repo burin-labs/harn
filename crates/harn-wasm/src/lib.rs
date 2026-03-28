@@ -343,8 +343,21 @@ impl SyncInterpreter {
                 let arg_vals = arg_vals?;
                 self.eval_method(obj, method, &arg_vals)
             }
-            Node::PropertyAccess { object, property } => {
+            Node::OptionalMethodCall { object, method, args } => {
                 let obj = self.eval(object)?;
+                if matches!(obj, Val::Nil) {
+                    return Ok(Val::Nil);
+                }
+                let arg_vals: Result<Vec<_>, _> = args.iter().map(|a| self.eval(a)).collect();
+                let arg_vals = arg_vals?;
+                self.eval_method(obj, method, &arg_vals)
+            }
+            Node::PropertyAccess { object, property }
+            | Node::OptionalPropertyAccess { object, property } => {
+                let obj = self.eval(object)?;
+                if matches!((&obj, &node.node), (Val::Nil, Node::OptionalPropertyAccess { .. })) {
+                    return Ok(Val::Nil);
+                }
                 match &obj {
                     Val::Dict(map) => Ok(map.get(property).cloned().unwrap_or(Val::Nil)),
                     Val::List(items) => match property.as_str() {
@@ -371,6 +384,57 @@ impl SyncInterpreter {
                     }
                     (Val::Dict(map), _) => {
                         Ok(map.get(&idx.as_string()).cloned().unwrap_or(Val::Nil))
+                    }
+                    _ => Ok(Val::Nil),
+                }
+            }
+            Node::SliceAccess { object, start, end } => {
+                let obj = self.eval(object)?;
+                let start_val = match start {
+                    Some(s) => self.eval(s)?,
+                    None => Val::Nil,
+                };
+                let end_val = match end {
+                    Some(e) => self.eval(e)?,
+                    None => Val::Nil,
+                };
+                match &obj {
+                    Val::List(items) => {
+                        let len = items.len() as i64;
+                        let s = match &start_val {
+                            Val::Nil => 0,
+                            Val::Int(i) => if *i < 0 { (len + *i).max(0) } else { (*i).min(len) },
+                            _ => 0,
+                        };
+                        let e = match &end_val {
+                            Val::Nil => len,
+                            Val::Int(i) => if *i < 0 { (len + *i).max(0) } else { (*i).min(len) },
+                            _ => len,
+                        };
+                        if s >= e {
+                            Ok(Val::List(vec![]))
+                        } else {
+                            Ok(Val::List(items[s as usize..e as usize].to_vec()))
+                        }
+                    }
+                    Val::String(sv) => {
+                        let chars: Vec<char> = sv.chars().collect();
+                        let len = chars.len() as i64;
+                        let s = match &start_val {
+                            Val::Nil => 0,
+                            Val::Int(i) => if *i < 0 { (len + *i).max(0) } else { (*i).min(len) },
+                            _ => 0,
+                        };
+                        let e = match &end_val {
+                            Val::Nil => len,
+                            Val::Int(i) => if *i < 0 { (len + *i).max(0) } else { (*i).min(len) },
+                            _ => len,
+                        };
+                        if s >= e {
+                            Ok(Val::String(String::new()))
+                        } else {
+                            Ok(Val::String(chars[s as usize..e as usize].iter().collect()))
+                        }
                     }
                     _ => Ok(Val::Nil),
                 }

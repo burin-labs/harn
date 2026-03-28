@@ -1,0 +1,29 @@
+pipeline default() {
+  // Reassign var inside if block (was stack underflow bug)
+  var x = "hello"
+  if true {
+    x = "fixed"
+  }
+  println(x)
+  // Reassign with condition on var
+  var y = "initial"
+  if y != "final" {
+    y = "final"
+  }
+  println(y)
+  // Reassign with optional chaining init
+  let d = nil
+  var z = d?.type
+  if z != "tests" {
+    z = "tests"
+  }
+  println(z)
+  // Nested if reassignment
+  var w = 0
+  if true {
+    if true {
+      w = 42
+    }
+  }
+  println(w)
+}

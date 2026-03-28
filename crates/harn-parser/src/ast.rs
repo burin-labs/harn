@@ -177,6 +177,12 @@ pub enum Node {
         method: String,
         args: Vec<SNode>,
     },
+    /// Optional method call: `obj?.method(args)` — returns nil if obj is nil.
+    OptionalMethodCall {
+        object: Box<SNode>,
+        method: String,
+        args: Vec<SNode>,
+    },
     PropertyAccess {
         object: Box<SNode>,
         property: String,
@@ -189,6 +195,11 @@ pub enum Node {
     SubscriptAccess {
         object: Box<SNode>,
         index: Box<SNode>,
+    },
+    SliceAccess {
+        object: Box<SNode>,
+        start: Option<Box<SNode>>,
+        end: Option<Box<SNode>>,
     },
     BinaryOp {
         op: String,

@@ -1175,16 +1175,9 @@ impl Parser {
                     self.advance();
                     let args = self.parse_arg_list()?;
                     self.consume(&TokenKind::RParen, ")")?;
-                    // Optional method calls: obj?.method() — if obj is nil,
-                    // skip the call and push nil. Emit as property access +
-                    // call so we don't need a separate opcode.
                     if optional {
-                        // For now, optional method calls desugar to:
-                        // if obj != nil then obj.method(args) else nil
-                        // We emit it as a regular method call and let the VM
-                        // handle nil in the method dispatch.
                         expr = spanned(
-                            Node::MethodCall {
+                            Node::OptionalMethodCall {
                                 object: Box::new(expr),
                                 method: member,
                                 args,
@@ -1221,15 +1214,58 @@ impl Parser {
             } else if self.check(&TokenKind::LBracket) {
                 let start = expr.span;
                 self.advance();
-                let index = self.parse_expression()?;
-                self.consume(&TokenKind::RBracket, "]")?;
-                expr = spanned(
-                    Node::SubscriptAccess {
-                        object: Box::new(expr),
-                        index: Box::new(index),
-                    },
-                    Span::merge(start, self.prev_span()),
-                );
+
+                // Check for slice vs subscript:
+                // [:end] — slice with no start
+                // [start:end] or [start:] — slice with start
+                // [index] — normal subscript
+                if self.check(&TokenKind::Colon) {
+                    // [:end] or [:]
+                    self.advance(); // consume ':'
+                    let end_expr = if self.check(&TokenKind::RBracket) {
+                        None
+                    } else {
+                        Some(Box::new(self.parse_expression()?))
+                    };
+                    self.consume(&TokenKind::RBracket, "]")?;
+                    expr = spanned(
+                        Node::SliceAccess {
+                            object: Box::new(expr),
+                            start: None,
+                            end: end_expr,
+                        },
+                        Span::merge(start, self.prev_span()),
+                    );
+                } else {
+                    let index = self.parse_expression()?;
+                    if self.check(&TokenKind::Colon) {
+                        // [start:end] or [start:]
+                        self.advance(); // consume ':'
+                        let end_expr = if self.check(&TokenKind::RBracket) {
+                            None
+                        } else {
+                            Some(Box::new(self.parse_expression()?))
+                        };
+                        self.consume(&TokenKind::RBracket, "]")?;
+                        expr = spanned(
+                            Node::SliceAccess {
+                                object: Box::new(expr),
+                                start: Some(Box::new(index)),
+                                end: end_expr,
+                            },
+                            Span::merge(start, self.prev_span()),
+                        );
+                    } else {
+                        self.consume(&TokenKind::RBracket, "]")?;
+                        expr = spanned(
+                            Node::SubscriptAccess {
+                                object: Box::new(expr),
+                                index: Box::new(index),
+                            },
+                            Span::merge(start, self.prev_span()),
+                        );
+                    }
+                }
             } else if self.check(&TokenKind::LParen) && matches!(expr.node, Node::Identifier(_)) {
                 let start = expr.span;
                 self.advance();

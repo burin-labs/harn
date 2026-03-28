@@ -78,12 +78,39 @@ let data = json_extract(response)         // parse, stripping fences
 let name = json_extract(response, "name") // extract just one key
 ```
 
+## String functions
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `len(value)` | value: string, list, or dict | int | Length of string (chars), list (items), or dict (keys) |
+| `trim(str)` | str: string | string | Remove leading and trailing whitespace |
+| `lowercase(str)` | str: string | string | Convert to lowercase |
+| `uppercase(str)` | str: string | string | Convert to uppercase |
+| `split(str, sep)` | str: string, sep: string | list | Split string by separator |
+| `starts_with(str, prefix)` | str: string, prefix: string | bool | Check if string starts with prefix |
+| `ends_with(str, suffix)` | str: string, suffix: string | bool | Check if string ends with suffix |
+| `contains(str, substr)` | str: string, substr: string | bool | Check if string contains substring. Also works on lists |
+| `replace(str, old, new)` | str: string, old: string, new: string | string | Replace all occurrences |
+| `join(list, sep)` | list: list, sep: string | string | Join list elements with separator |
+| `substring(str, start, len?)` | str: string, start: int, len: int | string | Extract substring from start position |
+| `format(template, ...)` | template: string, args: any | string | Format string with `{}` placeholders |
+
+## Path functions
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `dirname(path)` | path: string | string | Directory component of path |
+| `basename(path)` | path: string | string | File name component of path |
+| `extname(path)` | path: string | string | File extension including dot (e.g., `.harn`) |
+| `path_join(parts...)` | parts: strings | string | Join path components |
+
 ## File I/O
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `read_file(path)` | path: string | string | Read entire file as UTF-8 string. Throws on failure |
 | `write_file(path, content)` | path: string, content: string | nil | Write string to file. Throws on failure |
+| `render(path, bindings?)` | path: string, bindings: dict | string | Read a template file and replace `{{key}}` placeholders with values from bindings dict. Without bindings, just reads the file |
 
 ## Environment and system
 

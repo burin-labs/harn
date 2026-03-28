@@ -567,6 +567,19 @@ impl Formatter {
                     .join(", ");
                 format!("{obj}.{method}({args_str})")
             }
+            Node::OptionalMethodCall {
+                object,
+                method,
+                args,
+            } => {
+                let obj = self.format_expr(object);
+                let args_str = args
+                    .iter()
+                    .map(|a| self.format_expr(a))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{obj}?.{method}({args_str})")
+            }
             Node::PropertyAccess { object, property } => {
                 let obj = self.format_expr(object);
                 format!("{obj}.{property}")
@@ -579,6 +592,18 @@ impl Formatter {
                 let obj = self.format_expr(object);
                 let idx = self.format_expr(index);
                 format!("{obj}[{idx}]")
+            }
+            Node::SliceAccess { object, start, end } => {
+                let obj = self.format_expr(object);
+                let s = start
+                    .as_ref()
+                    .map(|n| self.format_expr(n))
+                    .unwrap_or_default();
+                let e = end
+                    .as_ref()
+                    .map(|n| self.format_expr(n))
+                    .unwrap_or_default();
+                format!("{obj}[{s}:{e}]")
             }
             Node::Ternary {
                 condition,
@@ -1352,9 +1377,11 @@ fn is_simple_expr(node: &SNode) -> bool {
             | Node::UnaryOp { .. }
             | Node::FunctionCall { .. }
             | Node::MethodCall { .. }
+            | Node::OptionalMethodCall { .. }
             | Node::PropertyAccess { .. }
             | Node::OptionalPropertyAccess { .. }
             | Node::SubscriptAccess { .. }
+            | Node::SliceAccess { .. }
             | Node::Ternary { .. }
             | Node::Assignment { .. }
             | Node::ListLiteral(_)
