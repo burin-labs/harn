@@ -1,6 +1,6 @@
 pipeline test(task) {
   // Test mock LLM provider returns deterministic responses
-  let result = llm_call("hello world", nil, { provider: "mock" })
+  let result = llm_call("hello world", nil, {provider: "mock"})
   assert(contains(result, "Mock"))
   assert(contains(result, "2-word prompt"))
   log("mock llm works")

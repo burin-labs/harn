@@ -1,0 +1,30 @@
+pipeline default() {
+  // Close channel then iterate — should produce no items
+  let ch1 = channel("test1", 5)
+  close_channel(ch1)
+  var count = 0
+  for item in ch1 {
+    count = count + 1
+  }
+  println(count)
+  // Send items, close, then iterate — should drain all items
+  let ch2 = channel("test2", 5)
+  send(ch2, "a")
+  send(ch2, "b")
+  send(ch2, "c")
+  close_channel(ch2)
+  var items = []
+  for item in ch2 {
+    items = items + [item]
+  }
+  println(items)
+  // try_receive on empty channel returns nil
+  let ch3 = channel("test3", 5)
+  let result = try_receive(ch3)
+  println(result)
+  // send after close returns false
+  let ch4 = channel("test4", 5)
+  close_channel(ch4)
+  let sent = send(ch4, "too_late")
+  println(sent)
+}

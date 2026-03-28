@@ -323,9 +323,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
             if provider == "mock" {
                 let words: Vec<&str> = prompt.split_whitespace().collect();
                 for word in &words {
-                    let _ = tx_for_task
-                        .send(VmValue::String(Rc::from(*word)))
-                        .await;
+                    let _ = tx_for_task.send(VmValue::String(Rc::from(*word))).await;
                 }
                 closed_clone.store(true, std::sync::atomic::Ordering::Relaxed);
                 return;
@@ -848,7 +846,15 @@ async fn vm_call_llm_api(
     temperature: Option<f64>,
     native_tools: Option<&[serde_json::Value]>,
 ) -> Result<LlmResult, VmError> {
-    let client = reqwest::Client::new();
+    let llm_timeout = std::env::var("HARN_LLM_TIMEOUT")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(120);
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(30))
+        .timeout(std::time::Duration::from_secs(llm_timeout))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
 
     match provider {
         "openai" | "ollama" | "openrouter" => {
@@ -1066,7 +1072,11 @@ async fn vm_stream_llm(
     use reqwest_eventsource::{Event, EventSource};
     use tokio_stream::StreamExt;
 
-    let client = reqwest::Client::new();
+    // Streaming: only connect_timeout (no overall timeout — streams can run long)
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(30))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
 
     let request = match provider {
         "openai" | "ollama" | "openrouter" => {

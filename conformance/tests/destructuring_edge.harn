@@ -1,0 +1,39 @@
+pipeline default() {
+  // Empty dict pattern — just discards the value
+  let {} = {a: 1, b: 2}
+  println("empty_dict_ok")
+  // Empty list pattern — just discards the value
+  let [] = [1, 2, 3]
+  println("empty_list_ok")
+  // Dict destructure: missing key gives nil
+  let {missing} = {other: 1}
+  println(missing)
+  // List destructure: more bindings than elements gives nil
+  let [x, y, z] = [10, 20]
+  println(x)
+  println(y)
+  println(z)
+  // List rest with no remaining items
+  let [head, ...tail] = [99]
+  println(head)
+  println(tail)
+  // Dict rest with no remaining fields
+  let {only, ...extras} = {only: "yes"}
+  println(only)
+  println(extras)
+  // List rest with zero-length rest
+  let [a, b, ...rest] = [1, 2]
+  println(a)
+  println(b)
+  println(rest)
+  // Var destructuring allows reassignment
+  var {m, n} = {m: 1, n: 2}
+  m = 100
+  n = 200
+  println(m)
+  // For-in with list destructuring
+  let pairs = [[1, 2], [3, 4]]
+  for [first, second] in pairs {
+    println("${first}+${second}")
+  }
+}

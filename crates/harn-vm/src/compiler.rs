@@ -209,16 +209,12 @@ impl Compiler {
                 self.chunk.emit_u16(Op::GetVar, idx, self.line);
             }
 
-            Node::LetBinding {
-                pattern, value, ..
-            } => {
+            Node::LetBinding { pattern, value, .. } => {
                 self.compile_node(value)?;
                 self.compile_destructuring(pattern, false)?;
             }
 
-            Node::VarBinding {
-                pattern, value, ..
-            } => {
+            Node::VarBinding { pattern, value, .. } => {
                 self.compile_node(value)?;
                 self.compile_destructuring(pattern, true)?;
             }
@@ -1378,6 +1374,16 @@ impl Compiler {
             }
             BindingPattern::Dict(fields) => {
                 // Stack has the dict value.
+                // Emit runtime type check: __assert_dict(value)
+                self.chunk.emit(Op::Dup, self.line);
+                let assert_idx = self
+                    .chunk
+                    .add_constant(Constant::String("__assert_dict".into()));
+                self.chunk.emit_u16(Op::Constant, assert_idx, self.line);
+                self.chunk.emit(Op::Swap, self.line);
+                self.chunk.emit_u8(Op::Call, 1, self.line);
+                self.chunk.emit(Op::Pop, self.line); // discard nil result
+
                 // For each non-rest field: dup dict, push key string, subscript, define var.
                 // For rest field: dup dict, call __dict_rest builtin.
                 let non_rest: Vec<_> = fields.iter().filter(|f| !f.is_rest).collect();
@@ -1385,9 +1391,7 @@ impl Compiler {
 
                 for field in &non_rest {
                     self.chunk.emit(Op::Dup, self.line);
-                    let key_idx = self
-                        .chunk
-                        .add_constant(Constant::String(field.key.clone()));
+                    let key_idx = self.chunk.add_constant(Constant::String(field.key.clone()));
                     self.chunk.emit_u16(Op::Constant, key_idx, self.line);
                     self.chunk.emit(Op::Subscript, self.line);
                     let binding_name = field.alias.as_deref().unwrap_or(&field.key);
@@ -1408,9 +1412,7 @@ impl Compiler {
                     self.chunk.emit(Op::Swap, self.line);
                     // Build the exclusion keys list
                     for field in &non_rest {
-                        let key_idx = self
-                            .chunk
-                            .add_constant(Constant::String(field.key.clone()));
+                        let key_idx = self.chunk.add_constant(Constant::String(field.key.clone()));
                         self.chunk.emit_u16(Op::Constant, key_idx, self.line);
                     }
                     self.chunk
@@ -1418,9 +1420,7 @@ impl Compiler {
                     // Call __dict_rest(dict, keys_list) — 2 args
                     self.chunk.emit_u8(Op::Call, 2, self.line);
                     let rest_name = &rest.key;
-                    let rest_idx = self
-                        .chunk
-                        .add_constant(Constant::String(rest_name.clone()));
+                    let rest_idx = self.chunk.add_constant(Constant::String(rest_name.clone()));
                     self.chunk.emit_u16(def_op, rest_idx, self.line);
                 } else {
                     // Pop the source dict
@@ -1429,6 +1429,16 @@ impl Compiler {
             }
             BindingPattern::List(elements) => {
                 // Stack has the list value.
+                // Emit runtime type check: __assert_list(value)
+                self.chunk.emit(Op::Dup, self.line);
+                let assert_idx = self
+                    .chunk
+                    .add_constant(Constant::String("__assert_list".into()));
+                self.chunk.emit_u16(Op::Constant, assert_idx, self.line);
+                self.chunk.emit(Op::Swap, self.line);
+                self.chunk.emit_u8(Op::Call, 1, self.line);
+                self.chunk.emit(Op::Pop, self.line); // discard nil result
+
                 let non_rest: Vec<_> = elements.iter().filter(|e| !e.is_rest).collect();
                 let rest_elem = elements.iter().find(|e| e.is_rest);
 
@@ -1437,9 +1447,7 @@ impl Compiler {
                     let idx_const = self.chunk.add_constant(Constant::Int(i as i64));
                     self.chunk.emit_u16(Op::Constant, idx_const, self.line);
                     self.chunk.emit(Op::Subscript, self.line);
-                    let name_idx = self
-                        .chunk
-                        .add_constant(Constant::String(elem.name.clone()));
+                    let name_idx = self.chunk.add_constant(Constant::String(elem.name.clone()));
                     self.chunk.emit_u16(def_op, name_idx, self.line);
                 }
 
@@ -1453,9 +1461,8 @@ impl Compiler {
                     self.chunk.emit_u16(Op::Constant, start_idx, self.line);
                     self.chunk.emit(Op::Nil, self.line); // end = nil (to end)
                     self.chunk.emit(Op::Slice, self.line);
-                    let rest_name_idx = self
-                        .chunk
-                        .add_constant(Constant::String(rest.name.clone()));
+                    let rest_name_idx =
+                        self.chunk.add_constant(Constant::String(rest.name.clone()));
                     self.chunk.emit_u16(def_op, rest_name_idx, self.line);
                 } else {
                     // Pop the source list

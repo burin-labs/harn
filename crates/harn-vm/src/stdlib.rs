@@ -1635,6 +1635,30 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
     // Internal builtins (used by compiler-generated code)
     // =========================================================================
 
+    vm.register_builtin("__assert_dict", |args, _out| {
+        let val = args.first().cloned().unwrap_or(VmValue::Nil);
+        if matches!(val, VmValue::Dict(_)) {
+            Ok(VmValue::Nil)
+        } else {
+            Err(VmError::TypeError(format!(
+                "cannot destructure {} with {{...}} pattern — expected dict",
+                val.type_name()
+            )))
+        }
+    });
+
+    vm.register_builtin("__assert_list", |args, _out| {
+        let val = args.first().cloned().unwrap_or(VmValue::Nil);
+        if matches!(val, VmValue::List(_)) {
+            Ok(VmValue::Nil)
+        } else {
+            Err(VmError::TypeError(format!(
+                "cannot destructure {} with [...] pattern — expected list",
+                val.type_name()
+            )))
+        }
+    });
+
     vm.register_builtin("__dict_rest", |args, _out| {
         // __dict_rest(dict, keys_to_exclude) -> new dict without those keys
         let dict = args.first().cloned().unwrap_or(VmValue::Nil);

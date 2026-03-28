@@ -85,16 +85,9 @@ impl Linter {
             BindingPattern::Identifier(name) => vec![name.clone()],
             BindingPattern::Dict(fields) => fields
                 .iter()
-                .map(|f| {
-                    f.alias
-                        .as_deref()
-                        .unwrap_or(&f.key)
-                        .to_string()
-                })
+                .map(|f| f.alias.as_deref().unwrap_or(&f.key).to_string())
                 .collect(),
-            BindingPattern::List(elements) => {
-                elements.iter().map(|e| e.name.clone()).collect()
-            }
+            BindingPattern::List(elements) => elements.iter().map(|e| e.name.clone()).collect(),
         }
     }
 
@@ -185,16 +178,12 @@ impl Linter {
                 self.pop_scope();
             }
 
-            Node::LetBinding {
-                pattern, value, ..
-            } => {
+            Node::LetBinding { pattern, value, .. } => {
                 self.lint_node(value);
                 self.declare_pattern_variables(pattern, snode.span, false);
             }
 
-            Node::VarBinding {
-                pattern, value, ..
-            } => {
+            Node::VarBinding { pattern, value, .. } => {
                 self.lint_node(value);
                 self.declare_pattern_variables(pattern, snode.span, true);
             }

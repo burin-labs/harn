@@ -714,8 +714,7 @@ impl super::Vm {
                     }
                     super::IterState::Channel { receiver, closed } => {
                         let rx = receiver.clone();
-                        let is_closed =
-                            closed.load(std::sync::atomic::Ordering::Relaxed);
+                        let is_closed = closed.load(std::sync::atomic::Ordering::Relaxed);
                         let mut guard = rx.lock().await;
                         // If sender is closed, drain remaining items without blocking
                         let item = if is_closed {

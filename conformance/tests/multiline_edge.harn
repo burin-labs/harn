@@ -1,0 +1,31 @@
+pipeline default() {
+  // Multiline in closure
+  let f = { x -> x + 1
+    + 2
+    + 3 }
+  println(f(10))
+  // Multiline in match arm
+  let val = "hello"
+  match val {
+    "hello" -> {
+      let r = "a"
+        + "b"
+        + "c"
+      println(r)
+    }
+    _ -> { println("no") }
+  }
+  // Nested pipes with placeholder
+  let result = [1, 2, 3]
+    |> _.map({ x -> x * 2 })
+    |> _.filter({ x -> x > 2 })
+  println(result)
+  // Pipe placeholder in method args
+  let doubled = [1, 2, 3] |> _.map({ x -> x * 2 })
+  println(doubled)
+  // Multiline * and /
+  let calc = 10
+    * 2
+    + 5
+  println(calc)
+}

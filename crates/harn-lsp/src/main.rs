@@ -872,12 +872,7 @@ fn collect_references(snode: &SNode, target_name: &str, refs: &mut Vec<Span>) {
                 collect_references(s, target_name, refs);
             }
         }
-        Node::LetBinding {
-            pattern, value, ..
-        }
-        | Node::VarBinding {
-            pattern, value, ..
-        } => {
+        Node::LetBinding { pattern, value, .. } | Node::VarBinding { pattern, value, .. } => {
             if binding_pattern_names(pattern)
                 .iter()
                 .any(|n| n == target_name)

@@ -844,8 +844,8 @@ impl Vm {
         // Sandbox check: deny builtins blocked by --deny/--allow flags.
         if self.denied_builtins.contains(name) {
             return Err(VmError::Runtime(format!(
-                "Permission denied: builtin '{}' is not allowed in sandbox mode",
-                name
+                "Permission denied: builtin '{}' is not allowed in sandbox mode (use --allow {} to permit)",
+                name, name
             )));
         }
         if let Some(builtin) = self.builtins.get(name).cloned() {
@@ -1567,10 +1567,7 @@ push(xs, 3)
     fn test_sandbox_allowed_builtin_works() {
         // Denying "push" should not block "log"
         let denied: HashSet<String> = ["push".to_string()].into_iter().collect();
-        let result = run_harn_with_denied(
-            r#"pipeline t(task) { log("hello") }"#,
-            denied,
-        );
+        let result = run_harn_with_denied(r#"pipeline t(task) { log("hello") }"#, denied);
         let (output, _) = result.unwrap();
         assert_eq!(output.trim(), "[harn] hello");
     }
@@ -1578,11 +1575,51 @@ push(xs, 3)
     #[test]
     fn test_sandbox_empty_denied_set() {
         // With an empty denied set, everything should work.
-        let result = run_harn_with_denied(
-            r#"pipeline t(task) { log("ok") }"#,
-            HashSet::new(),
-        );
+        let result = run_harn_with_denied(r#"pipeline t(task) { log("ok") }"#, HashSet::new());
         let (output, _) = result.unwrap();
         assert_eq!(output.trim(), "[harn] ok");
+    }
+
+    #[test]
+    fn test_sandbox_propagates_to_spawn() {
+        // Denied builtins should propagate to spawned VMs.
+        let denied: HashSet<String> = ["push".to_string()].into_iter().collect();
+        let result = run_harn_with_denied(
+            r#"pipeline t(task) {
+let handle = spawn {
+  let xs = [1, 2]
+  push(xs, 3)
+}
+await(handle)
+}"#,
+            denied,
+        );
+        let err = result.unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("Permission denied"),
+            "expected permission denied in spawned VM, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_sandbox_propagates_to_parallel() {
+        // Denied builtins should propagate to parallel VMs.
+        let denied: HashSet<String> = ["push".to_string()].into_iter().collect();
+        let result = run_harn_with_denied(
+            r#"pipeline t(task) {
+let results = parallel(2) { i ->
+  let xs = [1, 2]
+  push(xs, 3)
+}
+}"#,
+            denied,
+        );
+        let err = result.unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("Permission denied"),
+            "expected permission denied in parallel VM, got: {msg}"
+        );
     }
 }

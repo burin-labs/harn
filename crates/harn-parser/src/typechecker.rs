@@ -327,15 +327,16 @@ impl TypeChecker {
                     if let Some(expected) = type_ann {
                         if let Some(actual) = &inferred {
                             if !self.types_compatible(expected, actual, scope) {
-                                self.error_at(
-                                    format!(
-                                        "Type mismatch: '{}' declared as {}, but assigned {}",
-                                        name,
-                                        format_type(expected),
-                                        format_type(actual)
-                                    ),
-                                    span,
+                                let mut msg = format!(
+                                    "Type mismatch: '{}' declared as {}, but assigned {}",
+                                    name,
+                                    format_type(expected),
+                                    format_type(actual)
                                 );
+                                if let Some(detail) = shape_mismatch_detail(expected, actual) {
+                                    msg.push_str(&format!(" ({})", detail));
+                                }
+                                self.error_at(msg, span);
                             }
                         }
                     }
@@ -356,15 +357,16 @@ impl TypeChecker {
                     if let Some(expected) = type_ann {
                         if let Some(actual) = &inferred {
                             if !self.types_compatible(expected, actual, scope) {
-                                self.error_at(
-                                    format!(
-                                        "Type mismatch: '{}' declared as {}, but assigned {}",
-                                        name,
-                                        format_type(expected),
-                                        format_type(actual)
-                                    ),
-                                    span,
+                                let mut msg = format!(
+                                    "Type mismatch: '{}' declared as {}, but assigned {}",
+                                    name,
+                                    format_type(expected),
+                                    format_type(actual)
                                 );
+                                if let Some(detail) = shape_mismatch_detail(expected, actual) {
+                                    msg.push_str(&format!(" ({})", detail));
+                                }
+                                self.error_at(msg, span);
                             }
                         }
                     }
@@ -1096,6 +1098,44 @@ fn infer_binary_op_type(op: &str, left: &InferredType, right: &InferredType) -> 
 }
 
 /// Format a type expression for display in error messages.
+/// Produce a detail string describing why a Shape type is incompatible with
+/// another Shape type — e.g. "missing field 'age' (int)" or "field 'name'
+/// has type int, expected string".  Returns `None` if both types are not shapes.
+pub fn shape_mismatch_detail(expected: &TypeExpr, actual: &TypeExpr) -> Option<String> {
+    if let (TypeExpr::Shape(ef), TypeExpr::Shape(af)) = (expected, actual) {
+        let mut details = Vec::new();
+        for field in ef {
+            if field.optional {
+                continue;
+            }
+            match af.iter().find(|f| f.name == field.name) {
+                None => details.push(format!(
+                    "missing field '{}' ({})",
+                    field.name,
+                    format_type(&field.type_expr)
+                )),
+                Some(actual_field) => {
+                    let e_str = format_type(&field.type_expr);
+                    let a_str = format_type(&actual_field.type_expr);
+                    if e_str != a_str {
+                        details.push(format!(
+                            "field '{}' has type {}, expected {}",
+                            field.name, a_str, e_str
+                        ));
+                    }
+                }
+            }
+        }
+        if details.is_empty() {
+            None
+        } else {
+            Some(details.join("; "))
+        }
+    } else {
+        None
+    }
+}
+
 pub fn format_type(ty: &TypeExpr) -> String {
     match ty {
         TypeExpr::Named(n) => n.clone(),
@@ -1402,5 +1442,35 @@ add("hello", 2) }"#,
 }"#,
         );
         assert!(errs.is_empty());
+    }
+
+    #[test]
+    fn test_shape_mismatch_detail_missing_field() {
+        let errs = errors(
+            r#"pipeline t(task) {
+  let x: {name: string, age: int} = {name: "hello"}
+}"#,
+        );
+        assert_eq!(errs.len(), 1);
+        assert!(
+            errs[0].contains("missing field 'age'"),
+            "expected detail about missing field, got: {}",
+            errs[0]
+        );
+    }
+
+    #[test]
+    fn test_shape_mismatch_detail_wrong_type() {
+        let errs = errors(
+            r#"pipeline t(task) {
+  let x: {name: string, age: int} = {name: 42, age: 10}
+}"#,
+        );
+        assert_eq!(errs.len(), 1);
+        assert!(
+            errs[0].contains("field 'name' has type int, expected string"),
+            "expected detail about wrong type, got: {}",
+            errs[0]
+        );
     }
 }
