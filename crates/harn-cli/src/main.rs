@@ -17,16 +17,18 @@ async fn main() {
     if args.len() < 2 {
         eprintln!("Usage: harn <command> [args]");
         eprintln!("Commands:");
-        eprintln!("  run <file.harn>        Execute a Harn file");
-        eprintln!("  check <file.harn>     Type-check and lint without executing");
+        eprintln!("  run [--trace] <file>   Execute a Harn file");
+        eprintln!("  check <file.harn>      Type-check and lint without executing");
         eprintln!("  lint <file.harn>       Lint a Harn file");
-        eprintln!("  fmt <file.harn>        Format a Harn file");
-        eprintln!("  test <file|dir>        Run test_* pipelines in file or directory");
+        eprintln!("  fmt [--check] <file>   Format a Harn file");
+        eprintln!("  test [path]            Run test_* pipelines (auto-discovers tests/)");
         eprintln!("  test conformance       Run conformance test suite");
         eprintln!("  init [name]            Scaffold a new Harn project");
         eprintln!("  add <name> --git <url> Add a dependency to harn.toml");
         eprintln!("  install                Install dependencies from harn.toml");
         eprintln!("  repl                   Interactive REPL");
+        eprintln!();
+        eprintln!("Test flags: --filter <pattern> --watch --record --replay --parallel");
         process::exit(1);
     }
 

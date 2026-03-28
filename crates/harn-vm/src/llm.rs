@@ -59,12 +59,15 @@ fn get_fixture_dir() -> String {
     LLM_FIXTURE_DIR.with(|v| v.borrow().clone())
 }
 
-/// Hash a request for fixture file naming.
+/// Hash a request for fixture file naming using canonical JSON serialization.
 fn fixture_hash(model: &str, messages: &[serde_json::Value], system: Option<&str>) -> String {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     model.hash(&mut hasher);
-    format!("{messages:?}").hash(&mut hasher);
+    // Use canonical JSON string (not Debug format) for stable hashing
+    serde_json::to_string(messages)
+        .unwrap_or_default()
+        .hash(&mut hasher);
     system.hash(&mut hasher);
     format!("{:016x}", hasher.finish())
 }
@@ -188,8 +191,10 @@ pub fn register_llm_builtins(vm: &mut Vm) {
             return Ok(vm_build_llm_result(&result, None));
         }
 
-        // Simple text response — return string for backward compat
-        if result.input_tokens == 0 && result.output_tokens == 0 && result.tool_calls.is_empty() {
+        // Backward compat: if no special options were used, return plain string
+        // This matches the old llm_call(prompt, system) two-arg API
+        let is_simple_call = tools_val.is_none() && messages_val.is_none();
+        if is_simple_call {
             return Ok(VmValue::String(Rc::from(result.text.as_str())));
         }
 
@@ -231,6 +236,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
         let mut consecutive_text_only = 0usize;
 
         for _iteration in 0..max_iterations {
+            let start = std::time::Instant::now();
             let result = vm_call_llm_full(
                 &provider,
                 &model,
@@ -248,6 +254,12 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                 None,
             )
             .await?;
+            trace_llm_call(LlmTraceEntry {
+                model: result.model.clone(),
+                input_tokens: result.input_tokens,
+                output_tokens: result.output_tokens,
+                duration_ms: start.elapsed().as_millis() as u64,
+            });
 
             let text = result.text.clone();
             total_text.push_str(&text);
@@ -679,6 +691,7 @@ fn vm_build_json_schema(params: Option<&BTreeMap<String, VmValue>>) -> serde_jso
         "type": "object",
         "properties": properties,
         "required": required,
+        "additionalProperties": false,
     })
 }
 
@@ -1077,22 +1090,34 @@ fn parse_anthropic_sse_chunk(data: &str) -> Option<String> {
 // =============================================================================
 
 /// Extract JSON from a string that may contain markdown fences.
+/// Looks for opening/closing fence pairs on their own lines to avoid matching
+/// embedded backticks within JSON content.
 fn extract_json(text: &str) -> &str {
     let trimmed = text.trim();
-    // Try to extract from ```json ... ``` fences
-    if let Some(start) = trimmed.find("```json") {
-        let after = &trimmed[start + 7..];
-        if let Some(end) = after.find("```") {
-            return after[..end].trim();
+
+    // Find ```json\n or ```\n at the start of a line, then the closing ``` on its own line
+    for fence_start in ["```json", "```"] {
+        if let Some(start) = trimmed.find(fence_start) {
+            let after_fence = &trimmed[start + fence_start.len()..];
+            // Skip to the next newline (end of opening fence line)
+            let content_start = after_fence.find('\n').map(|i| i + 1).unwrap_or(0);
+            let content = &after_fence[content_start..];
+            // Find closing ``` that appears at the start of a line
+            for (i, line) in content.lines().enumerate() {
+                if line.trim_start().starts_with("```") {
+                    // Return everything before this line
+                    let byte_offset: usize = content
+                        .lines()
+                        .take(i)
+                        .map(|l| l.len() + 1) // +1 for \n
+                        .sum();
+                    return content[..byte_offset].trim();
+                }
+            }
         }
     }
-    // Try to extract from ``` ... ``` fences
-    if let Some(start) = trimmed.find("```") {
-        let after = &trimmed[start + 3..];
-        if let Some(end) = after.find("```") {
-            return after[..end].trim();
-        }
-    }
+
+    // No fences found — try to find a JSON object/array directly
     trimmed
 }
 

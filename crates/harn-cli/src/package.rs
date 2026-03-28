@@ -183,6 +183,22 @@ pub fn install_packages() {
         return;
     }
 
+    // Check if any deps need git and verify it's available
+    let has_git_deps = manifest
+        .dependencies
+        .values()
+        .any(|d| d.git_url().is_some());
+    if has_git_deps
+        && process::Command::new("git")
+            .arg("--version")
+            .output()
+            .is_err()
+    {
+        eprintln!("Error: git is required to install git dependencies but was not found.");
+        eprintln!("Install git and ensure it's in your PATH.");
+        process::exit(1);
+    }
+
     let pkg_dir = PathBuf::from(PKG_DIR);
     if let Err(e) = fs::create_dir_all(&pkg_dir) {
         eprintln!("Failed to create {PKG_DIR}: {e}");
