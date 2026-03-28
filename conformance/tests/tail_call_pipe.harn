@@ -1,0 +1,10 @@
+pipeline default() {
+  fn process(n) {
+    if n <= 0 {
+      return "done"
+    }
+    return n - 1 |> process
+  }
+  // Would overflow without TCO
+  println(process(10000))
+}

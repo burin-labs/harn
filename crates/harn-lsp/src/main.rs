@@ -13,72 +13,144 @@ use tower_lsp::{Client, LanguageServer, LspService, Server};
 // Constants
 // ---------------------------------------------------------------------------
 
-/// Known builtin names for completion.
-const BUILTINS: &[&str] = &[
-    "log",
-    "print",
-    "println",
-    "type_of",
-    "to_string",
-    "to_int",
-    "to_float",
-    "json_stringify",
-    "json_parse",
-    "env",
-    "timestamp",
-    "sleep",
-    "read_file",
-    "write_file",
-    "exit",
-    "regex_match",
-    "regex_replace",
-    "http_get",
-    "http_post",
-    "llm_call",
-    "agent_loop",
-    "await",
-    "cancel",
-    "spawn",
-    "abs",
-    "min",
-    "max",
-    "floor",
-    "ceil",
-    "round",
-    "sqrt",
-    "pow",
-    "random",
-    "random_int",
-    "assert",
-    "assert_eq",
-    "assert_ne",
-    "file_exists",
-    "delete_file",
-    "list_dir",
-    "mkdir",
-    "path_join",
-    "copy_file",
-    "append_file",
-    "temp_dir",
-    "stat",
-    "exec",
-    "shell",
-    "date_now",
-    "date_format",
-    "date_parse",
-    "format",
-    "channel",
-    "send",
-    "receive",
-    "try_receive",
-    "close_channel",
-    "atomic",
-    "atomic_get",
-    "atomic_set",
-    "atomic_add",
-    "atomic_cas",
-    "select",
-    "prompt_user",
+/// Known builtin names with their signatures for completion.
+/// Each entry is (name, detail) where detail shows the parameter signature.
+const BUILTINS: &[(&str, &str)] = &[
+    // I/O
+    ("println", "println(msg) -> nil"),
+    ("print", "print(msg) -> nil"),
+    ("log", "log(msg) -> nil"),
+    // Type conversion
+    ("type_of", "type_of(value) -> string"),
+    ("to_string", "to_string(value) -> string"),
+    ("to_int", "to_int(value) -> int"),
+    ("to_float", "to_float(value) -> float"),
+    // JSON
+    ("json_parse", "json_parse(str) -> value"),
+    ("json_stringify", "json_stringify(value) -> string"),
+    ("json_validate", "json_validate(data, schema) -> bool"),
+    ("json_extract", "json_extract(text, key?) -> value"),
+    // File system
+    ("read_file", "read_file(path) -> string"),
+    ("write_file", "write_file(path, content) -> nil"),
+    ("file_exists", "file_exists(path) -> bool"),
+    ("delete_file", "delete_file(path) -> nil"),
+    ("list_dir", "list_dir(path) -> list"),
+    ("mkdir", "mkdir(path) -> nil"),
+    ("stat", "stat(path) -> dict"),
+    ("copy_file", "copy_file(src, dst) -> nil"),
+    ("append_file", "append_file(path, content) -> nil"),
+    ("path_join", "path_join(parts...) -> string"),
+    ("temp_dir", "temp_dir() -> string"),
+    // Process
+    ("exec", "exec(cmd, args...) -> dict"),
+    ("shell", "shell(cmd) -> dict"),
+    // Environment
+    ("env", "env(name) -> string"),
+    ("timestamp", "timestamp() -> float"),
+    ("exit", "exit(code) -> nil"),
+    // Regex
+    ("regex_match", "regex_match(pattern, text) -> list"),
+    (
+        "regex_replace",
+        "regex_replace(pattern, replacement, text) -> string",
+    ),
+    // HTTP
+    ("http_get", "http_get(url) -> dict"),
+    ("http_post", "http_post(url, body, headers?) -> dict"),
+    ("http_put", "http_put(url, body, headers?) -> dict"),
+    ("http_patch", "http_patch(url, body, headers?) -> dict"),
+    ("http_delete", "http_delete(url) -> dict"),
+    (
+        "http_request",
+        "http_request(method, url, options?) -> dict",
+    ),
+    // LLM
+    ("llm_call", "llm_call(prompt, system?, options?) -> string"),
+    (
+        "llm_stream",
+        "llm_stream(prompt, system?, options?) -> string",
+    ),
+    (
+        "agent_loop",
+        "agent_loop(prompt, system?, options?) -> string",
+    ),
+    // MCP
+    ("mcp_connect", "mcp_connect(command, args?) -> client"),
+    ("mcp_list_tools", "mcp_list_tools(client) -> list"),
+    ("mcp_call", "mcp_call(client, name, args?) -> value"),
+    ("mcp_server_info", "mcp_server_info(client) -> dict"),
+    ("mcp_disconnect", "mcp_disconnect(client) -> nil"),
+    // Concurrency
+    ("sleep", "sleep(duration) -> nil"),
+    ("channel", "channel(name?) -> channel"),
+    ("send", "send(ch, value) -> nil"),
+    ("receive", "receive(ch) -> value"),
+    ("try_receive", "try_receive(ch) -> value"),
+    ("close_channel", "close_channel(ch) -> nil"),
+    ("select", "select(channels...) -> value"),
+    ("atomic", "atomic(initial?) -> atomic"),
+    ("atomic_get", "atomic_get(a) -> value"),
+    ("atomic_set", "atomic_set(a, value) -> nil"),
+    ("atomic_add", "atomic_add(a, delta) -> value"),
+    ("atomic_cas", "atomic_cas(a, expected, new) -> bool"),
+    // Assertions
+    ("assert", "assert(condition, msg?) -> nil"),
+    ("assert_eq", "assert_eq(a, b, msg?) -> nil"),
+    ("assert_ne", "assert_ne(a, b, msg?) -> nil"),
+    // Math
+    ("abs", "abs(n) -> number"),
+    ("min", "min(a, b) -> number"),
+    ("max", "max(a, b) -> number"),
+    ("floor", "floor(n) -> int"),
+    ("ceil", "ceil(n) -> int"),
+    ("round", "round(n) -> int"),
+    ("sqrt", "sqrt(n) -> float"),
+    ("pow", "pow(base, exp) -> number"),
+    ("random", "random() -> float"),
+    ("random_int", "random_int(min, max) -> int"),
+    // String
+    ("format", "format(template, args...) -> string"),
+    ("trim", "trim(str) -> string"),
+    ("lowercase", "lowercase(str) -> string"),
+    ("uppercase", "uppercase(str) -> string"),
+    ("split", "split(str, sep) -> list"),
+    // Date/time
+    ("date_now", "date_now() -> string"),
+    ("date_format", "date_format(ts, fmt?) -> string"),
+    ("date_parse", "date_parse(str) -> int"),
+    // Logging
+    ("log_debug", "log_debug(msg) -> nil"),
+    ("log_info", "log_info(msg) -> nil"),
+    ("log_warn", "log_warn(msg) -> nil"),
+    ("log_error", "log_error(msg) -> nil"),
+    ("log_set_level", "log_set_level(level) -> nil"),
+    // Tracing
+    ("trace_start", "trace_start(name) -> span"),
+    ("trace_end", "trace_end(span) -> nil"),
+    ("trace_id", "trace_id() -> string"),
+    // Tool registry
+    ("tool_registry", "tool_registry() -> registry"),
+    (
+        "tool_add",
+        "tool_add(registry, name, desc, handler, params?) -> nil",
+    ),
+    ("tool_list", "tool_list(registry) -> list"),
+    ("tool_find", "tool_find(registry, name) -> dict"),
+    ("tool_describe", "tool_describe(registry) -> string"),
+    ("tool_remove", "tool_remove(registry, name) -> nil"),
+    ("tool_count", "tool_count(registry) -> int"),
+    ("tool_schema", "tool_schema(registry) -> dict"),
+    ("tool_prompt", "tool_prompt(registry) -> string"),
+    ("tool_parse_call", "tool_parse_call(registry, text) -> dict"),
+    (
+        "tool_format_result",
+        "tool_format_result(name, result) -> string",
+    ),
+    // User interaction
+    ("prompt_user", "prompt_user(msg) -> string"),
+    // Host interop
+    ("host_call", "host_call(name, args) -> value"),
 ];
 
 /// Known keywords for completion.
@@ -107,6 +179,8 @@ const KEYWORDS: &[&str] = &[
     "fn",
     "spawn",
     "while",
+    "break",
+    "continue",
     "interface",
     "pub",
     "from",
@@ -115,6 +189,7 @@ const KEYWORDS: &[&str] = &[
     "type",
     "guard",
     "deadline",
+    "yield",
     "mutex",
 ];
 
@@ -1336,11 +1411,11 @@ impl LanguageServer for HarnLsp {
         }
 
         // Add builtins
-        for name in BUILTINS {
+        for &(name, detail) in BUILTINS {
             items.push(CompletionItem {
                 label: name.to_string(),
                 kind: Some(CompletionItemKind::FUNCTION),
-                detail: Some("builtin".to_string()),
+                detail: Some(detail.to_string()),
                 ..Default::default()
             });
         }

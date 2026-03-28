@@ -186,6 +186,11 @@ pub struct Chunk {
     pub constants: Vec<Constant>,
     /// Source line numbers for each instruction (for error reporting).
     pub lines: Vec<u32>,
+    /// Source column numbers for each instruction (for error reporting).
+    /// Parallel to `lines`; 0 means no column info available.
+    pub columns: Vec<u32>,
+    /// Current column to use when emitting instructions (set by compiler).
+    current_col: u32,
     /// Compiled function bodies (for closures).
     pub functions: Vec<CompiledFunction>,
 }
@@ -204,8 +209,15 @@ impl Chunk {
             code: Vec::new(),
             constants: Vec::new(),
             lines: Vec::new(),
+            columns: Vec::new(),
+            current_col: 0,
             functions: Vec::new(),
         }
+    }
+
+    /// Set the current column for subsequent emit calls.
+    pub fn set_column(&mut self, col: u32) {
+        self.current_col = col;
     }
 
     /// Add a constant and return its index.
@@ -223,30 +235,40 @@ impl Chunk {
 
     /// Emit a single-byte instruction.
     pub fn emit(&mut self, op: Op, line: u32) {
+        let col = self.current_col;
         self.code.push(op as u8);
         self.lines.push(line);
+        self.columns.push(col);
     }
 
     /// Emit an instruction with a u16 argument.
     pub fn emit_u16(&mut self, op: Op, arg: u16, line: u32) {
+        let col = self.current_col;
         self.code.push(op as u8);
         self.code.push((arg >> 8) as u8);
         self.code.push((arg & 0xFF) as u8);
         self.lines.push(line);
         self.lines.push(line);
         self.lines.push(line);
+        self.columns.push(col);
+        self.columns.push(col);
+        self.columns.push(col);
     }
 
     /// Emit an instruction with a u8 argument.
     pub fn emit_u8(&mut self, op: Op, arg: u8, line: u32) {
+        let col = self.current_col;
         self.code.push(op as u8);
         self.code.push(arg);
         self.lines.push(line);
         self.lines.push(line);
+        self.columns.push(col);
+        self.columns.push(col);
     }
 
     /// Emit a method call: op + u16 (method name) + u8 (arg count).
     pub fn emit_method_call(&mut self, name_idx: u16, arg_count: u8, line: u32) {
+        let col = self.current_col;
         self.code.push(Op::MethodCall as u8);
         self.code.push((name_idx >> 8) as u8);
         self.code.push((name_idx & 0xFF) as u8);
@@ -255,6 +277,10 @@ impl Chunk {
         self.lines.push(line);
         self.lines.push(line);
         self.lines.push(line);
+        self.columns.push(col);
+        self.columns.push(col);
+        self.columns.push(col);
+        self.columns.push(col);
     }
 
     /// Current code offset (for jump patching).
@@ -264,6 +290,7 @@ impl Chunk {
 
     /// Emit a jump instruction with a placeholder offset. Returns the position to patch.
     pub fn emit_jump(&mut self, op: Op, line: u32) -> usize {
+        let col = self.current_col;
         self.code.push(op as u8);
         let patch_pos = self.code.len();
         self.code.push(0xFF);
@@ -271,6 +298,9 @@ impl Chunk {
         self.lines.push(line);
         self.lines.push(line);
         self.lines.push(line);
+        self.columns.push(col);
+        self.columns.push(col);
+        self.columns.push(col);
         patch_pos
     }
 

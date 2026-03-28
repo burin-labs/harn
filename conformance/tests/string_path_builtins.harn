@@ -1,0 +1,35 @@
+pipeline test(task) {
+  // starts_with
+  log(starts_with("hello world", "hello"))
+  log(starts_with("hello world", "world"))
+  // ends_with
+  log(ends_with("hello world", "world"))
+  log(ends_with("hello world", "hello"))
+  // contains (string)
+  log(contains("hello world", "lo wo"))
+  log(contains("hello world", "xyz"))
+  // contains (list)
+  log(contains([1, 2, 3], 2))
+  log(contains([1, 2, 3], 5))
+  // replace
+  log(replace("hello world", "world", "harn"))
+  // join
+  log(join(["a", "b", "c"], ", "))
+  log(join(["x"], "-"))
+  // len
+  log(len("hello"))
+  log(len([1, 2, 3]))
+  log(len({}))
+  // substring
+  log(substring("hello world", 0, 5))
+  log(substring("hello world", 6))
+  log(substring("hello world", 6, 3))
+  // dirname
+  log(dirname("/usr/local/bin/harn"))
+  // basename
+  log(basename("/usr/local/bin/harn"))
+  // extname
+  log(extname("file.txt"))
+  log(extname("archive.tar.gz"))
+  log(extname("noext"))
+}

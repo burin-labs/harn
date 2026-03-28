@@ -181,6 +181,16 @@ fn is_builtin(name: &str) -> bool {
             | "lowercase"
             | "uppercase"
             | "split"
+            | "starts_with"
+            | "ends_with"
+            | "contains"
+            | "replace"
+            | "join"
+            | "len"
+            | "substring"
+            | "dirname"
+            | "basename"
+            | "extname"
     )
 }
 

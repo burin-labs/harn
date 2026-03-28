@@ -659,6 +659,107 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
         Ok(VmValue::List(Rc::new(parts)))
     });
 
+    vm.register_builtin("starts_with", |args, _out| {
+        let s = args.first().map(|a| a.display()).unwrap_or_default();
+        let prefix = args.get(1).map(|a| a.display()).unwrap_or_default();
+        Ok(VmValue::Bool(s.starts_with(&prefix)))
+    });
+
+    vm.register_builtin("ends_with", |args, _out| {
+        let s = args.first().map(|a| a.display()).unwrap_or_default();
+        let suffix = args.get(1).map(|a| a.display()).unwrap_or_default();
+        Ok(VmValue::Bool(s.ends_with(&suffix)))
+    });
+
+    vm.register_builtin("contains", |args, _out| {
+        match args.first().unwrap_or(&VmValue::Nil) {
+            VmValue::String(s) => {
+                let substr = args.get(1).map(|a| a.display()).unwrap_or_default();
+                Ok(VmValue::Bool(s.contains(&substr)))
+            }
+            VmValue::List(items) => {
+                let target = args.get(1).unwrap_or(&VmValue::Nil);
+                Ok(VmValue::Bool(
+                    items.iter().any(|item| values_equal(item, target)),
+                ))
+            }
+            _ => Ok(VmValue::Bool(false)),
+        }
+    });
+
+    vm.register_builtin("replace", |args, _out| {
+        let s = args.first().map(|a| a.display()).unwrap_or_default();
+        let old = args.get(1).map(|a| a.display()).unwrap_or_default();
+        let new = args.get(2).map(|a| a.display()).unwrap_or_default();
+        Ok(VmValue::String(Rc::from(s.replace(&old, &new).as_str())))
+    });
+
+    vm.register_builtin("join", |args, _out| {
+        let sep = args.get(1).map(|a| a.display()).unwrap_or_default();
+        match args.first() {
+            Some(VmValue::List(items)) => {
+                let parts: Vec<String> = items.iter().map(|v| v.display()).collect();
+                Ok(VmValue::String(Rc::from(parts.join(&sep).as_str())))
+            }
+            _ => Ok(VmValue::String(Rc::from(""))),
+        }
+    });
+
+    vm.register_builtin("len", |args, _out| {
+        match args.first().unwrap_or(&VmValue::Nil) {
+            VmValue::String(s) => Ok(VmValue::Int(s.len() as i64)),
+            VmValue::List(items) => Ok(VmValue::Int(items.len() as i64)),
+            VmValue::Dict(map) => Ok(VmValue::Int(map.len() as i64)),
+            _ => Ok(VmValue::Int(0)),
+        }
+    });
+
+    vm.register_builtin("substring", |args, _out| {
+        let s = args.first().map(|a| a.display()).unwrap_or_default();
+        let start = args.get(1).and_then(|a| a.as_int()).unwrap_or(0) as usize;
+        let start = start.min(s.len());
+        match args.get(2).and_then(|a| a.as_int()) {
+            Some(length) => {
+                let length = (length as usize).min(s.len() - start);
+                Ok(VmValue::String(Rc::from(&s[start..start + length])))
+            }
+            None => Ok(VmValue::String(Rc::from(&s[start..]))),
+        }
+    });
+
+    // =========================================================================
+    // Path builtins
+    // =========================================================================
+
+    vm.register_builtin("dirname", |args, _out| {
+        let path = args.first().map(|a| a.display()).unwrap_or_default();
+        let p = std::path::Path::new(&path);
+        match p.parent() {
+            Some(parent) => Ok(VmValue::String(Rc::from(parent.to_string_lossy().as_ref()))),
+            None => Ok(VmValue::String(Rc::from(""))),
+        }
+    });
+
+    vm.register_builtin("basename", |args, _out| {
+        let path = args.first().map(|a| a.display()).unwrap_or_default();
+        let p = std::path::Path::new(&path);
+        match p.file_name() {
+            Some(name) => Ok(VmValue::String(Rc::from(name.to_string_lossy().as_ref()))),
+            None => Ok(VmValue::String(Rc::from(""))),
+        }
+    });
+
+    vm.register_builtin("extname", |args, _out| {
+        let path = args.first().map(|a| a.display()).unwrap_or_default();
+        let p = std::path::Path::new(&path);
+        match p.extension() {
+            Some(ext) => Ok(VmValue::String(Rc::from(
+                format!(".{}", ext.to_string_lossy()).as_str(),
+            ))),
+            None => Ok(VmValue::String(Rc::from(""))),
+        }
+    });
+
     // =========================================================================
     // Logging builtins
     // =========================================================================

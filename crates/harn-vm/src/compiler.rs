@@ -34,6 +34,7 @@ struct LoopContext {
 pub struct Compiler {
     chunk: Chunk,
     line: u32,
+    column: u32,
     /// Track enum type names so PropertyAccess on them can produce EnumVariant.
     enum_names: std::collections::HashSet<String>,
     /// Stack of active loop contexts for break/continue.
@@ -47,6 +48,7 @@ impl Compiler {
         Self {
             chunk: Chunk::new(),
             line: 1,
+            column: 1,
             enum_names: std::collections::HashSet::new(),
             loop_stack: Vec::new(),
             handler_depth: 0,
@@ -173,6 +175,8 @@ impl Compiler {
 
     fn compile_node(&mut self, snode: &SNode) -> Result<(), CompileError> {
         self.line = snode.span.line as u32;
+        self.column = snode.span.column as u32;
+        self.chunk.set_column(self.column);
         match &snode.node {
             Node::IntLiteral(n) => {
                 let idx = self.chunk.add_constant(Constant::Int(*n));
@@ -247,7 +251,9 @@ impl Compiler {
                         self.chunk.code.push(hi);
                         self.chunk.code.push(lo);
                         self.chunk.lines.push(self.line);
+                        self.chunk.columns.push(self.column);
                         self.chunk.lines.push(self.line);
+                        self.chunk.columns.push(self.column);
                     }
                 } else if let Node::SubscriptAccess { object, index } = &target.node {
                     // obj[idx] = value → SetSubscript
@@ -394,14 +400,18 @@ impl Compiler {
                         self.chunk.code.push(hi);
                         self.chunk.code.push(lo);
                         self.chunk.lines.push(self.line);
+                        self.chunk.columns.push(self.column);
                         self.chunk.lines.push(self.line);
+                        self.chunk.columns.push(self.column);
                         let fc = args.len() as u16;
                         let fhi = (fc >> 8) as u8;
                         let flo = fc as u8;
                         self.chunk.code.push(fhi);
                         self.chunk.code.push(flo);
                         self.chunk.lines.push(self.line);
+                        self.chunk.columns.push(self.column);
                         self.chunk.lines.push(self.line);
+                        self.chunk.columns.push(self.column);
                         return Ok(());
                     }
                 }
@@ -427,12 +437,16 @@ impl Compiler {
                         self.chunk.code.push(hi);
                         self.chunk.code.push(lo);
                         self.chunk.lines.push(self.line);
+                        self.chunk.columns.push(self.column);
                         self.chunk.lines.push(self.line);
+                        self.chunk.columns.push(self.column);
                         // 0 fields
                         self.chunk.code.push(0);
                         self.chunk.code.push(0);
                         self.chunk.lines.push(self.line);
+                        self.chunk.columns.push(self.column);
                         self.chunk.lines.push(self.line);
+                        self.chunk.columns.push(self.column);
                         return Ok(());
                     }
                 }
@@ -552,6 +566,20 @@ impl Compiler {
                         }
                         self.chunk
                             .emit_u8(Op::TailCall, args.len() as u8, self.line);
+                    } else if let Node::BinaryOp { op, left, right } = &val.node {
+                        if op == "|>" {
+                            // Tail pipe optimization: `return x |> f` becomes a tail call.
+                            // Compile left side (value) — inner pipes compile normally.
+                            self.compile_node(left)?;
+                            // Compile right side (callable reference).
+                            self.compile_node(right)?;
+                            // Stack is now [value, callable]. TailCall expects [callable, args...],
+                            // so swap to get [callable, value] then tail-call with 1 arg.
+                            self.chunk.emit(Op::Swap, self.line);
+                            self.chunk.emit_u8(Op::TailCall, 1, self.line);
+                        } else {
+                            self.compile_node(val)?;
+                        }
                     } else {
                         self.compile_node(val)?;
                     }
@@ -732,7 +760,9 @@ impl Compiler {
                             self.chunk.code.push(hi);
                             self.chunk.code.push(lo);
                             self.chunk.lines.push(self.line);
+                            self.chunk.columns.push(self.column);
                             self.chunk.lines.push(self.line);
+                            self.chunk.columns.push(self.column);
                             // Stack: [match_value, bool]
                             let skip = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
                             self.chunk.emit(Op::Pop, self.line); // pop bool
@@ -782,7 +812,9 @@ impl Compiler {
                             self.chunk.code.push(hi);
                             self.chunk.code.push(lo);
                             self.chunk.lines.push(self.line);
+                            self.chunk.columns.push(self.column);
                             self.chunk.lines.push(self.line);
+                            self.chunk.columns.push(self.column);
                             let skip = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
                             self.chunk.emit(Op::Pop, self.line); // pop bool
                             self.chunk.emit(Op::Pop, self.line); // pop match value
@@ -814,7 +846,9 @@ impl Compiler {
                             self.chunk.code.push(hi);
                             self.chunk.code.push(lo);
                             self.chunk.lines.push(self.line);
+                            self.chunk.columns.push(self.column);
                             self.chunk.lines.push(self.line);
+                            self.chunk.columns.push(self.column);
                             let skip = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
                             self.chunk.emit(Op::Pop, self.line); // pop bool
 
@@ -988,14 +1022,18 @@ impl Compiler {
                 self.chunk.code.push(hi);
                 self.chunk.code.push(lo);
                 self.chunk.lines.push(self.line);
+                self.chunk.columns.push(self.column);
                 self.chunk.lines.push(self.line);
+                self.chunk.columns.push(self.column);
                 let fc = args.len() as u16;
                 let fhi = (fc >> 8) as u8;
                 let flo = fc as u8;
                 self.chunk.code.push(fhi);
                 self.chunk.code.push(flo);
                 self.chunk.lines.push(self.line);
+                self.chunk.columns.push(self.column);
                 self.chunk.lines.push(self.line);
+                self.chunk.columns.push(self.column);
             }
 
             Node::StructConstruct {
@@ -1036,7 +1074,9 @@ impl Compiler {
                 self.chunk.code.push(hi);
                 self.chunk.code.push(lo);
                 self.chunk.lines.push(self.line);
+                self.chunk.columns.push(self.column);
                 self.chunk.lines.push(self.line);
+                self.chunk.columns.push(self.column);
             }
 
             // Declarations that only register metadata (no runtime effect needed for v1)
@@ -1081,7 +1121,9 @@ impl Compiler {
                 self.chunk.code.push(hi);
                 self.chunk.code.push(lo);
                 self.chunk.lines.push(self.line);
+                self.chunk.columns.push(self.column);
                 self.chunk.lines.push(self.line);
+                self.chunk.columns.push(self.column);
 
                 // 2. Compile try body
                 if body.is_empty() {
@@ -1156,7 +1198,9 @@ impl Compiler {
                 self.chunk.code.push(hi);
                 self.chunk.code.push(lo);
                 self.chunk.lines.push(self.line);
+                self.chunk.columns.push(self.column);
                 self.chunk.lines.push(self.line);
+                self.chunk.columns.push(self.column);
 
                 // Compile body
                 self.compile_block(body)?;
