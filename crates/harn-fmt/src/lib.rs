@@ -1121,6 +1121,10 @@ impl Formatter {
                 let te = format_type_expr(type_expr);
                 format!("type {name} = {te}")
             }
+            Node::Spread(inner) => {
+                let expr = self.format_expr(inner);
+                format!("...{expr}")
+            }
         }
     }
 
@@ -1143,6 +1147,11 @@ impl Formatter {
         entries
             .iter()
             .map(|e| {
+                // Spread entry: ...expr
+                if let Node::Spread(inner) = &e.value.node {
+                    let v = self.format_expr(inner);
+                    return format!("...{v}");
+                }
                 let k = self.format_dict_key(&e.key);
                 let v = self.format_expr(&e.value);
                 format!("{k}: {v}")

@@ -577,6 +577,10 @@ impl Linter {
                 }
             }
 
+            Node::Spread(inner) => {
+                self.lint_node(inner);
+            }
+
             // Leaf nodes and declarations that don't need recursion.
             Node::StringLiteral(_)
             | Node::IntLiteral(_)

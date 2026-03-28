@@ -1,0 +1,4 @@
+pipeline default() {
+  let response = "hello"
+  println(reponse)
+}

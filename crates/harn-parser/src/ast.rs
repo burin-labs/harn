@@ -247,6 +247,8 @@ pub enum Node {
     Identifier(String),
     ListLiteral(Vec<SNode>),
     DictLiteral(Vec<DictEntry>),
+    /// Spread expression `...expr` inside list/dict literals.
+    Spread(Box<SNode>),
 
     // Blocks
     Block(Vec<SNode>),

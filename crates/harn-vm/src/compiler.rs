@@ -681,20 +681,79 @@ impl Compiler {
             }
 
             Node::ListLiteral(elements) => {
-                for el in elements {
-                    self.compile_node(el)?;
+                let has_spread = elements.iter().any(|e| matches!(&e.node, Node::Spread(_)));
+                if !has_spread {
+                    for el in elements {
+                        self.compile_node(el)?;
+                    }
+                    self.chunk
+                        .emit_u16(Op::BuildList, elements.len() as u16, self.line);
+                } else {
+                    // Build with spreads: accumulate segments into lists and concat
+                    // Start with empty list
+                    self.chunk.emit_u16(Op::BuildList, 0, self.line);
+                    let mut pending = 0u16;
+                    for el in elements {
+                        if let Node::Spread(inner) = &el.node {
+                            // First, build list from pending non-spread elements
+                            if pending > 0 {
+                                self.chunk.emit_u16(Op::BuildList, pending, self.line);
+                                // Concat accumulated + pending segment
+                                self.chunk.emit(Op::Add, self.line);
+                                pending = 0;
+                            }
+                            // Concat with the spread expression
+                            self.compile_node(inner)?;
+                            self.chunk.emit(Op::Add, self.line);
+                        } else {
+                            self.compile_node(el)?;
+                            pending += 1;
+                        }
+                    }
+                    if pending > 0 {
+                        self.chunk.emit_u16(Op::BuildList, pending, self.line);
+                        self.chunk.emit(Op::Add, self.line);
+                    }
                 }
-                self.chunk
-                    .emit_u16(Op::BuildList, elements.len() as u16, self.line);
             }
 
             Node::DictLiteral(entries) => {
-                for entry in entries {
-                    self.compile_node(&entry.key)?;
-                    self.compile_node(&entry.value)?;
+                let has_spread = entries
+                    .iter()
+                    .any(|e| matches!(&e.value.node, Node::Spread(_)));
+                if !has_spread {
+                    for entry in entries {
+                        self.compile_node(&entry.key)?;
+                        self.compile_node(&entry.value)?;
+                    }
+                    self.chunk
+                        .emit_u16(Op::BuildDict, entries.len() as u16, self.line);
+                } else {
+                    // Build with spreads: use empty dict + Add for merging
+                    self.chunk.emit_u16(Op::BuildDict, 0, self.line);
+                    let mut pending = 0u16;
+                    for entry in entries {
+                        if let Node::Spread(inner) = &entry.value.node {
+                            // Flush pending entries
+                            if pending > 0 {
+                                self.chunk.emit_u16(Op::BuildDict, pending, self.line);
+                                self.chunk.emit(Op::Add, self.line);
+                                pending = 0;
+                            }
+                            // Merge spread dict via Add
+                            self.compile_node(inner)?;
+                            self.chunk.emit(Op::Add, self.line);
+                        } else {
+                            self.compile_node(&entry.key)?;
+                            self.compile_node(&entry.value)?;
+                            pending += 1;
+                        }
+                    }
+                    if pending > 0 {
+                        self.chunk.emit_u16(Op::BuildDict, pending, self.line);
+                        self.chunk.emit(Op::Add, self.line);
+                    }
                 }
-                self.chunk
-                    .emit_u16(Op::BuildDict, entries.len() as u16, self.line);
             }
 
             Node::InterpolatedString(segments) => {
@@ -937,6 +996,176 @@ impl Compiler {
                             self.chunk.emit(Op::Pop, self.line); // pop match value
                             self.compile_match_body(&arm.body)?;
                             end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
+                        }
+                        // Dict pattern: {key: literal, key: binding, ...}
+                        Node::DictLiteral(entries)
+                            if entries
+                                .iter()
+                                .all(|e| matches!(&e.key.node, Node::StringLiteral(_))) =>
+                        {
+                            // Check type is dict: dup, call type_of, compare "dict"
+                            self.chunk.emit(Op::Dup, self.line);
+                            let typeof_idx =
+                                self.chunk.add_constant(Constant::String("type_of".into()));
+                            self.chunk.emit_u16(Op::Constant, typeof_idx, self.line);
+                            self.chunk.emit(Op::Swap, self.line);
+                            self.chunk.emit_u8(Op::Call, 1, self.line);
+                            let dict_str = self.chunk.add_constant(Constant::String("dict".into()));
+                            self.chunk.emit_u16(Op::Constant, dict_str, self.line);
+                            self.chunk.emit(Op::Equal, self.line);
+                            let skip_type = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
+                            self.chunk.emit(Op::Pop, self.line); // pop bool
+
+                            // Check literal constraints
+                            let mut constraint_skips = Vec::new();
+                            let mut bindings = Vec::new();
+                            for entry in entries {
+                                if let Node::StringLiteral(key) = &entry.key.node {
+                                    match &entry.value.node {
+                                        // Literal value → constraint: dict[key] == value
+                                        Node::StringLiteral(_)
+                                        | Node::IntLiteral(_)
+                                        | Node::FloatLiteral(_)
+                                        | Node::BoolLiteral(_)
+                                        | Node::NilLiteral => {
+                                            self.chunk.emit(Op::Dup, self.line);
+                                            let key_idx = self
+                                                .chunk
+                                                .add_constant(Constant::String(key.clone()));
+                                            self.chunk.emit_u16(Op::Constant, key_idx, self.line);
+                                            self.chunk.emit(Op::Subscript, self.line);
+                                            self.compile_node(&entry.value)?;
+                                            self.chunk.emit(Op::Equal, self.line);
+                                            let skip =
+                                                self.chunk.emit_jump(Op::JumpIfFalse, self.line);
+                                            self.chunk.emit(Op::Pop, self.line); // pop bool
+                                            constraint_skips.push(skip);
+                                        }
+                                        // Identifier → binding: bind dict[key] to variable
+                                        Node::Identifier(binding) => {
+                                            bindings.push((key.clone(), binding.clone()));
+                                        }
+                                        _ => {
+                                            // Complex expression constraint
+                                            self.chunk.emit(Op::Dup, self.line);
+                                            let key_idx = self
+                                                .chunk
+                                                .add_constant(Constant::String(key.clone()));
+                                            self.chunk.emit_u16(Op::Constant, key_idx, self.line);
+                                            self.chunk.emit(Op::Subscript, self.line);
+                                            self.compile_node(&entry.value)?;
+                                            self.chunk.emit(Op::Equal, self.line);
+                                            let skip =
+                                                self.chunk.emit_jump(Op::JumpIfFalse, self.line);
+                                            self.chunk.emit(Op::Pop, self.line);
+                                            constraint_skips.push(skip);
+                                        }
+                                    }
+                                }
+                            }
+
+                            // All constraints passed — emit bindings
+                            for (key, binding) in &bindings {
+                                self.chunk.emit(Op::Dup, self.line);
+                                let key_idx =
+                                    self.chunk.add_constant(Constant::String(key.clone()));
+                                self.chunk.emit_u16(Op::Constant, key_idx, self.line);
+                                self.chunk.emit(Op::Subscript, self.line);
+                                let name_idx =
+                                    self.chunk.add_constant(Constant::String(binding.clone()));
+                                self.chunk.emit_u16(Op::DefLet, name_idx, self.line);
+                            }
+
+                            self.chunk.emit(Op::Pop, self.line); // pop match value
+                            self.compile_match_body(&arm.body)?;
+                            end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
+
+                            // All failures jump here: pop the false bool, leave match_value
+                            let fail_target = self.chunk.code.len();
+                            self.chunk.emit(Op::Pop, self.line); // pop bool
+                                                                 // Patch all failure jumps to the shared cleanup point
+                            for skip in constraint_skips {
+                                self.chunk.patch_jump_to(skip, fail_target);
+                            }
+                            self.chunk.patch_jump_to(skip_type, fail_target);
+                        }
+                        // List pattern: [literal, binding, ...]
+                        Node::ListLiteral(elements) => {
+                            // Check type is list: dup, call type_of, compare "list"
+                            self.chunk.emit(Op::Dup, self.line);
+                            let typeof_idx =
+                                self.chunk.add_constant(Constant::String("type_of".into()));
+                            self.chunk.emit_u16(Op::Constant, typeof_idx, self.line);
+                            self.chunk.emit(Op::Swap, self.line);
+                            self.chunk.emit_u8(Op::Call, 1, self.line);
+                            let list_str = self.chunk.add_constant(Constant::String("list".into()));
+                            self.chunk.emit_u16(Op::Constant, list_str, self.line);
+                            self.chunk.emit(Op::Equal, self.line);
+                            let skip_type = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
+                            self.chunk.emit(Op::Pop, self.line); // pop bool
+
+                            // Check length: dup, call len, compare >= elements.len()
+                            self.chunk.emit(Op::Dup, self.line);
+                            let len_idx = self.chunk.add_constant(Constant::String("len".into()));
+                            self.chunk.emit_u16(Op::Constant, len_idx, self.line);
+                            self.chunk.emit(Op::Swap, self.line);
+                            self.chunk.emit_u8(Op::Call, 1, self.line);
+                            let count = self
+                                .chunk
+                                .add_constant(Constant::Int(elements.len() as i64));
+                            self.chunk.emit_u16(Op::Constant, count, self.line);
+                            self.chunk.emit(Op::GreaterEqual, self.line);
+                            let skip_len = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
+                            self.chunk.emit(Op::Pop, self.line); // pop bool
+
+                            // Check literal constraints and collect bindings
+                            let mut constraint_skips = Vec::new();
+                            let mut bindings = Vec::new();
+                            for (i, elem) in elements.iter().enumerate() {
+                                match &elem.node {
+                                    Node::Identifier(name) if name != "_" => {
+                                        bindings.push((i, name.clone()));
+                                    }
+                                    Node::Identifier(_) => {} // wildcard _
+                                    // Literal constraint
+                                    _ => {
+                                        self.chunk.emit(Op::Dup, self.line);
+                                        let idx_const =
+                                            self.chunk.add_constant(Constant::Int(i as i64));
+                                        self.chunk.emit_u16(Op::Constant, idx_const, self.line);
+                                        self.chunk.emit(Op::Subscript, self.line);
+                                        self.compile_node(elem)?;
+                                        self.chunk.emit(Op::Equal, self.line);
+                                        let skip = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
+                                        self.chunk.emit(Op::Pop, self.line);
+                                        constraint_skips.push(skip);
+                                    }
+                                }
+                            }
+
+                            // Emit bindings
+                            for (i, name) in &bindings {
+                                self.chunk.emit(Op::Dup, self.line);
+                                let idx_const = self.chunk.add_constant(Constant::Int(*i as i64));
+                                self.chunk.emit_u16(Op::Constant, idx_const, self.line);
+                                self.chunk.emit(Op::Subscript, self.line);
+                                let name_idx =
+                                    self.chunk.add_constant(Constant::String(name.clone()));
+                                self.chunk.emit_u16(Op::DefLet, name_idx, self.line);
+                            }
+
+                            self.chunk.emit(Op::Pop, self.line); // pop match value
+                            self.compile_match_body(&arm.body)?;
+                            end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
+
+                            // All failures jump here: pop the false bool
+                            let fail_target = self.chunk.code.len();
+                            self.chunk.emit(Op::Pop, self.line); // pop bool
+                            for skip in constraint_skips {
+                                self.chunk.patch_jump_to(skip, fail_target);
+                            }
+                            self.chunk.patch_jump_to(skip_len, fail_target);
+                            self.chunk.patch_jump_to(skip_type, fail_target);
                         }
                         // Literal/expression pattern — compare with Equal
                         _ => {
@@ -1353,6 +1582,12 @@ impl Compiler {
                 self.chunk.emit_u16(Op::Closure, fn_idx as u16, self.line);
                 self.chunk.emit(Op::Spawn, self.line);
             }
+            Node::Spread(_) => {
+                return Err(CompileError {
+                    message: "spread (...) can only be used inside list or dict literals".into(),
+                    line: self.line,
+                });
+            }
         }
         Ok(())
     }
@@ -1490,7 +1725,8 @@ impl Compiler {
             | Node::Retry { .. }
             | Node::GuardStmt { .. }
             | Node::DeadlineBlock { .. }
-            | Node::MutexBlock { .. } => true,
+            | Node::MutexBlock { .. }
+            | Node::Spread(_) => true,
             // All other expressions produce values
             _ => true,
         }

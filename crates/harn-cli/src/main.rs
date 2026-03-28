@@ -29,6 +29,7 @@ async fn main() {
         eprintln!("  init [name]            Scaffold a new Harn project");
         eprintln!("  add <name> --git <url> Add a dependency to harn.toml");
         eprintln!("  install                Install dependencies from harn.toml");
+        eprintln!("  watch <file>           Watch for changes and re-run");
         eprintln!("  serve [--port N] <file> Serve a pipeline as an A2A agent over HTTP");
         eprintln!("  acp [pipeline.harn]    Start an ACP server on stdio");
         eprintln!("  repl                   Interactive REPL");
@@ -253,6 +254,14 @@ async fn main() {
         "acp" => {
             let pipeline = args.get(2).map(|s| s.as_str());
             acp::run_acp_server(pipeline).await;
+        }
+        "watch" => {
+            if args.len() < 3 {
+                eprintln!("Usage: harn watch <file.harn>");
+                process::exit(1);
+            }
+            let file = &args[2];
+            run_watch(file).await;
         }
         "repl" => run_repl().await,
         "install" => package::install_packages(),
@@ -494,6 +503,69 @@ fn build_denied_builtins(
             .collect()
     } else {
         std::collections::HashSet::new()
+    }
+}
+
+async fn run_watch(path: &str) {
+    use notify::{Event, EventKind, RecursiveMode, Watcher};
+
+    let abs_path = fs::canonicalize(path).unwrap_or_else(|e| {
+        eprintln!("Error: {e}");
+        process::exit(1);
+    });
+    let watch_dir = abs_path.parent().unwrap_or(Path::new("."));
+
+    // Initial run
+    eprintln!("\x1b[2m[watch] running {path}...\x1b[0m");
+    run_file(path, false, std::collections::HashSet::new()).await;
+
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<()>(1);
+    let _watcher = {
+        let tx = tx.clone();
+        let mut watcher = notify::recommended_watcher(move |res: Result<Event, _>| {
+            if let Ok(event) = res {
+                if matches!(
+                    event.kind,
+                    EventKind::Modify(_) | EventKind::Create(_) | EventKind::Remove(_)
+                ) {
+                    let has_harn = event
+                        .paths
+                        .iter()
+                        .any(|p| p.extension().is_some_and(|ext| ext == "harn"));
+                    if has_harn {
+                        let _ = tx.blocking_send(());
+                    }
+                }
+            }
+        })
+        .unwrap_or_else(|e| {
+            eprintln!("Error setting up file watcher: {e}");
+            process::exit(1);
+        });
+        watcher
+            .watch(watch_dir, RecursiveMode::Recursive)
+            .unwrap_or_else(|e| {
+                eprintln!("Error watching directory: {e}");
+                process::exit(1);
+            });
+        watcher // keep alive
+    };
+
+    eprintln!(
+        "\x1b[2m[watch] watching {} for .harn changes (ctrl-c to stop)\x1b[0m",
+        watch_dir.display()
+    );
+
+    // Debounce: wait for events, then re-run after a short pause
+    loop {
+        rx.recv().await;
+        // Drain any additional events within 200ms
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        while rx.try_recv().is_ok() {}
+
+        eprintln!();
+        eprintln!("\x1b[2m[watch] change detected, re-running {path}...\x1b[0m");
+        run_file(path, false, std::collections::HashSet::new()).await;
     }
 }
 

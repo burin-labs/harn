@@ -1,0 +1,24 @@
+pipeline default() {
+  // List spread: combine two lists
+  let a = [1, 2]
+  let b = [3, 4]
+  let combined = [...a, ...b, 5]
+  println(combined)
+  // Dict spread: merge dicts with override
+  let defaults = {color: "blue", size: "medium"}
+  let overrides = {size: "large", weight: "bold"}
+  let merged = {...defaults, ...overrides, extra: "yes"}
+  println(merged)
+  // List spread with empty list
+  let empty = []
+  let result = [...empty, 1, 2]
+  println(result)
+  // Dict spread: single source
+  let base = {x: 1, y: 2}
+  let copy = {...base}
+  println(copy)
+  // List spread in middle
+  let mid = [2, 3]
+  let full = [1, ...mid, 4]
+  println(full)
+}

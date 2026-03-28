@@ -328,6 +328,13 @@ impl Chunk {
         self.code[patch_pos + 1] = (target & 0xFF) as u8;
     }
 
+    /// Patch a jump to a specific target position.
+    pub fn patch_jump_to(&mut self, patch_pos: usize, target: usize) {
+        let target = target as u16;
+        self.code[patch_pos] = (target >> 8) as u8;
+        self.code[patch_pos + 1] = (target & 0xFF) as u8;
+    }
+
     /// Read a u16 argument at the given position.
     pub fn read_u16(&self, pos: usize) -> u16 {
         ((self.code[pos] as u16) << 8) | (self.code[pos + 1] as u16)

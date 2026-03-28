@@ -1487,7 +1487,27 @@ impl Parser {
         self.skip_newlines();
 
         while !self.is_at_end() && !self.check(&TokenKind::RBracket) {
-            elements.push(self.parse_expression()?);
+            // Check for spread: ...expr
+            if self.check(&TokenKind::Dot) {
+                let saved_pos = self.pos;
+                self.advance(); // first .
+                if self.check(&TokenKind::Dot) {
+                    self.advance(); // second .
+                    self.consume(&TokenKind::Dot, ".")?; // third .
+                    let spread_start = self.tokens[saved_pos].span;
+                    let expr = self.parse_expression()?;
+                    elements.push(spanned(
+                        Node::Spread(Box::new(expr)),
+                        Span::merge(spread_start, self.prev_span()),
+                    ));
+                } else {
+                    // Not a spread, restore and parse as expression
+                    self.pos = saved_pos;
+                    elements.push(self.parse_expression()?);
+                }
+            } else {
+                elements.push(self.parse_expression()?);
+            }
             self.skip_newlines();
             if self.check(&TokenKind::Comma) {
                 self.advance();
@@ -1585,6 +1605,36 @@ impl Parser {
         self.skip_newlines();
 
         while !self.is_at_end() && !self.check(&TokenKind::RBrace) {
+            // Check for spread: ...expr
+            if self.check(&TokenKind::Dot) {
+                let saved_pos = self.pos;
+                self.advance(); // first .
+                if self.check(&TokenKind::Dot) {
+                    self.advance(); // second .
+                    if self.check(&TokenKind::Dot) {
+                        self.advance(); // third .
+                        let spread_start = self.tokens[saved_pos].span;
+                        let expr = self.parse_expression()?;
+                        entries.push(DictEntry {
+                            key: spanned(Node::NilLiteral, spread_start),
+                            value: spanned(
+                                Node::Spread(Box::new(expr)),
+                                Span::merge(spread_start, self.prev_span()),
+                            ),
+                        });
+                        self.skip_newlines();
+                        if self.check(&TokenKind::Comma) {
+                            self.advance();
+                            self.skip_newlines();
+                        }
+                        continue;
+                    }
+                    // Not three dots — restore
+                    self.pos = saved_pos;
+                } else {
+                    self.pos = saved_pos;
+                }
+            }
             let key = if self.check(&TokenKind::LBracket) {
                 // Computed key: [expression]
                 self.advance();

@@ -689,6 +689,9 @@ fn collect_symbols(snode: &SNode, symbols: &mut Vec<SymbolInfo>, scope_span: Opt
                 collect_symbols(a, symbols, scope_span);
             }
         }
+        Node::Spread(inner) => {
+            collect_symbols(inner, symbols, scope_span);
+        }
         Node::OverrideDecl {
             name, params, body, ..
         } => {

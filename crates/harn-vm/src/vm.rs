@@ -863,6 +863,16 @@ impl Vm {
                 .await?;
             Ok(crate::bridge::json_result_to_vm_value(&result))
         } else {
+            let all_builtins = self
+                .builtins
+                .keys()
+                .chain(self.async_builtins.keys())
+                .map(|s| s.as_str());
+            if let Some(suggestion) = crate::value::closest_match(name, all_builtins) {
+                return Err(VmError::Runtime(format!(
+                    "Undefined builtin: {name} (did you mean `{suggestion}`?)"
+                )));
+            }
             Err(VmError::UndefinedBuiltin(name.to_string()))
         }
     }

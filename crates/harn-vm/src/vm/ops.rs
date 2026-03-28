@@ -45,7 +45,17 @@ impl super::Vm {
             };
             match self.env.get(&name) {
                 Some(val) => self.stack.push(val),
-                None => return Err(VmError::UndefinedVariable(name)),
+                None => {
+                    let all_vars = self.env.all_variables();
+                    if let Some(suggestion) =
+                        crate::value::closest_match(&name, all_vars.keys().map(|s| s.as_str()))
+                    {
+                        return Err(VmError::Runtime(format!(
+                            "Undefined variable: {name} (did you mean `{suggestion}`?)"
+                        )));
+                    }
+                    return Err(VmError::UndefinedVariable(name));
+                }
             }
         } else if op == Op::DefLet as u8 {
             let frame = self.frames.last_mut().unwrap();

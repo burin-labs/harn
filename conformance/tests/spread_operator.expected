@@ -1,0 +1,5 @@
+[1, 2, 3, 4, 5]
+{color: blue, extra: yes, size: large, weight: bold}
+[1, 2]
+{x: 1, y: 2}
+[1, 2, 3, 4]
