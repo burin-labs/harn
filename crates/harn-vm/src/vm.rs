@@ -84,6 +84,8 @@ pub struct Vm {
     source_file: Option<String>,
     /// Source text for error reporting.
     source_text: Option<String>,
+    /// Optional bridge for delegating unknown builtins in bridge mode.
+    bridge: Option<Rc<crate::bridge::HostBridge>>,
 }
 
 impl Vm {
@@ -109,7 +111,13 @@ impl Vm {
             imported_paths: Vec::new(),
             source_file: None,
             source_text: None,
+            bridge: None,
         }
+    }
+
+    /// Set the bridge for delegating unknown builtins in bridge mode.
+    pub fn set_bridge(&mut self, bridge: Rc<crate::bridge::HostBridge>) {
+        self.bridge = Some(bridge);
     }
 
     /// Set source info for error reporting (file path and source text).
@@ -352,6 +360,7 @@ impl Vm {
             imported_paths: Vec::new(),
             source_file: self.source_file.clone(),
             source_text: self.source_text.clone(),
+            bridge: self.bridge.clone(),
         }
     }
 
@@ -844,6 +853,18 @@ impl Vm {
                     {
                         let result = async_builtin(args).await?;
                         self.stack.push(result);
+                    } else if let Some(bridge) = &self.bridge {
+                        // Bridge mode: delegate unknown builtins to the host
+                        let args_json: Vec<serde_json::Value> =
+                            args.iter().map(crate::llm::vm_value_to_json).collect();
+                        let result = bridge
+                            .call(
+                                "builtin_call",
+                                serde_json::json!({"name": name.as_ref(), "args": args_json}),
+                            )
+                            .await?;
+                        self.stack
+                            .push(crate::bridge::json_result_to_vm_value(&result));
                     } else {
                         return Err(VmError::UndefinedBuiltin(name.to_string()));
                     }
@@ -919,6 +940,17 @@ impl Vm {
                         {
                             let result = async_builtin(args).await?;
                             self.stack.push(result);
+                        } else if let Some(bridge) = &self.bridge {
+                            let args_json: Vec<serde_json::Value> =
+                                args.iter().map(crate::llm::vm_value_to_json).collect();
+                            let result = bridge
+                                .call(
+                                    "builtin_call",
+                                    serde_json::json!({"name": name.as_ref(), "args": args_json}),
+                                )
+                                .await?;
+                            self.stack
+                                .push(crate::bridge::json_result_to_vm_value(&result));
                         } else {
                             return Err(VmError::UndefinedBuiltin(name.to_string()));
                         }
@@ -1113,6 +1145,12 @@ impl Vm {
                                 new_items[idx] = new_value;
                                 self.env
                                     .assign(&var_name, VmValue::List(Rc::new(new_items)))?;
+                            } else {
+                                return Err(VmError::Runtime(format!(
+                                    "Index {} out of bounds for list of length {}",
+                                    i,
+                                    items.len()
+                                )));
                             }
                         }
                     }
@@ -1164,6 +1202,16 @@ impl Vm {
                     {
                         let result = async_builtin(vec![value]).await?;
                         self.stack.push(result);
+                    } else if let Some(bridge) = &self.bridge {
+                        let args_json = vec![crate::llm::vm_value_to_json(&value)];
+                        let result = bridge
+                            .call(
+                                "builtin_call",
+                                serde_json::json!({"name": name.as_ref(), "args": args_json}),
+                            )
+                            .await?;
+                        self.stack
+                            .push(crate::bridge::json_result_to_vm_value(&result));
                     } else {
                         return Err(VmError::UndefinedBuiltin(name.to_string()));
                     }

@@ -519,6 +519,9 @@ async fn run_file_bridge(path: &str, arg_json: Option<&str>) {
             // Override with bridge builtins (llm_call, file I/O, etc.)
             harn_vm::bridge_builtins::register_bridge_builtins(&mut vm, bridge.clone());
 
+            // Set bridge for delegating unknown builtins to the host
+            vm.set_bridge(bridge.clone());
+
             vm.set_source_info(&path_owned, &source_owned);
             if let Some(p) = std::path::Path::new(&path_owned).parent() {
                 if !p.as_os_str().is_empty() {

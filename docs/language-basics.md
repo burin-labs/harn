@@ -276,6 +276,7 @@ nums[0]             // 1 (subscript access)
 ```
 
 Lists support `+` for concatenation: `[1, 2] + [3, 4]` yields `[1, 2, 3, 4]`.
+Assigning to an out-of-bounds index throws an error.
 
 ### Dicts
 
