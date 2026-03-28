@@ -487,7 +487,17 @@ async fn run_file_bridge(path: &str, arg_json: Option<&str>) {
     let chunk = match harn_vm::Compiler::new().compile(&program) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("error: compile error: {e}");
+            // Send error as JSON-RPC notification so the host can detect it
+            let msg = format!("compile error: {e}");
+            let notification = serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "error",
+                "params": {"message": msg},
+            });
+            println!(
+                "{}",
+                serde_json::to_string(&notification).unwrap_or_default()
+            );
             process::exit(1);
         }
     };

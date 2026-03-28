@@ -8,29 +8,36 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio::io::AsyncBufReadExt;
 use tokio::sync::{oneshot, Mutex};
 
 use crate::value::{VmError, VmValue};
 
+/// Default timeout for bridge calls (5 minutes).
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(300);
+
 /// A JSON-RPC 2.0 bridge to a host process over stdin/stdout.
 ///
 /// The bridge sends requests to the host on stdout and receives responses
 /// on stdin. A background task reads stdin and dispatches responses to
-/// waiting callers by request ID.
+/// waiting callers by request ID. All stdout writes are serialized through
+/// a mutex to prevent interleaving.
 pub struct HostBridge {
     next_id: AtomicU64,
     /// Pending request waiters, keyed by JSON-RPC id.
     pending: Arc<Mutex<HashMap<u64, oneshot::Sender<serde_json::Value>>>>,
     /// Whether the host has sent a cancel notification.
     cancelled: Arc<AtomicBool>,
+    /// Mutex protecting stdout writes to prevent interleaving.
+    stdout_lock: Arc<std::sync::Mutex<()>>,
 }
 
 // Default doesn't apply — new() spawns async tasks requiring a tokio LocalSet.
 #[allow(clippy::new_without_default)]
 impl HostBridge {
-    /// Create a new bridge and spawn the stdin reader + stdout writer tasks.
+    /// Create a new bridge and spawn the stdin reader task.
     ///
     /// Must be called within a tokio LocalSet (uses spawn_local for the
     /// stdin reader since it's single-threaded).
@@ -55,10 +62,10 @@ impl HostBridge {
 
                 let msg: serde_json::Value = match serde_json::from_str(&line) {
                     Ok(v) => v,
-                    Err(_) => continue,
+                    Err(_) => continue, // Skip malformed lines
                 };
 
-                // Check if this is a notification from the host
+                // Check if this is a notification from the host (no id)
                 if msg.get("id").is_none() {
                     if let Some(method) = msg["method"].as_str() {
                         if method == "cancel" {
@@ -76,21 +83,47 @@ impl HostBridge {
                     }
                 }
             }
+
+            // stdin closed — cancel any remaining pending requests by dropping senders
+            let mut pending = pending_clone.lock().await;
+            pending.clear();
         });
 
         Self {
             next_id: AtomicU64::new(1),
             pending,
             cancelled,
+            stdout_lock: Arc::new(std::sync::Mutex::new(())),
         }
     }
 
+    /// Write a complete JSON-RPC line to stdout, serialized through a mutex.
+    fn write_line(&self, line: &str) -> Result<(), VmError> {
+        let _guard = self.stdout_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let mut stdout = std::io::stdout().lock();
+        stdout
+            .write_all(line.as_bytes())
+            .map_err(|e| VmError::Runtime(format!("Bridge write error: {e}")))?;
+        stdout
+            .write_all(b"\n")
+            .map_err(|e| VmError::Runtime(format!("Bridge write error: {e}")))?;
+        stdout
+            .flush()
+            .map_err(|e| VmError::Runtime(format!("Bridge flush error: {e}")))?;
+        Ok(())
+    }
+
     /// Send a JSON-RPC request to the host and wait for the response.
+    /// Times out after 5 minutes to prevent deadlocks.
     pub async fn call(
         &self,
         method: &str,
         params: serde_json::Value,
     ) -> Result<serde_json::Value, VmError> {
+        if self.is_cancelled() {
+            return Err(VmError::Runtime("Bridge: operation cancelled".into()));
+        }
+
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
 
         let request = serde_json::json!({
@@ -107,26 +140,35 @@ impl HostBridge {
             pending.insert(id, tx);
         }
 
-        // Send the request directly to stdout
+        // Send the request (serialized through stdout mutex)
         let line = serde_json::to_string(&request)
             .map_err(|e| VmError::Runtime(format!("Bridge serialization error: {e}")))?;
-        {
-            let mut stdout = std::io::stdout().lock();
-            stdout
-                .write_all(line.as_bytes())
-                .map_err(|e| VmError::Runtime(format!("Bridge write error: {e}")))?;
-            stdout
-                .write_all(b"\n")
-                .map_err(|e| VmError::Runtime(format!("Bridge write error: {e}")))?;
-            stdout
-                .flush()
-                .map_err(|e| VmError::Runtime(format!("Bridge flush error: {e}")))?;
+        if let Err(e) = self.write_line(&line) {
+            // Clean up pending entry on write failure
+            let mut pending = self.pending.lock().await;
+            pending.remove(&id);
+            return Err(e);
         }
 
-        // Wait for the response
-        let response = rx.await.map_err(|_| {
-            VmError::Runtime("Bridge: host closed connection before responding".into())
-        })?;
+        // Wait for the response with timeout
+        let response = match tokio::time::timeout(DEFAULT_TIMEOUT, rx).await {
+            Ok(Ok(msg)) => msg,
+            Ok(Err(_)) => {
+                // Sender dropped — host closed or stdin reader exited
+                return Err(VmError::Runtime(
+                    "Bridge: host closed connection before responding".into(),
+                ));
+            }
+            Err(_) => {
+                // Timeout — clean up pending entry
+                let mut pending = self.pending.lock().await;
+                pending.remove(&id);
+                return Err(VmError::Runtime(format!(
+                    "Bridge: host did not respond to '{method}' within {}s",
+                    DEFAULT_TIMEOUT.as_secs()
+                )));
+            }
+        };
 
         // Check for JSON-RPC error
         if let Some(error) = response.get("error") {
@@ -135,12 +177,11 @@ impl HostBridge {
             return Err(VmError::Runtime(format!("Host error ({code}): {message}")));
         }
 
-        // Return the result
         Ok(response["result"].clone())
     }
 
     /// Send a JSON-RPC notification to the host (no response expected).
-    /// Writes directly to stdout (synchronous) to avoid buffering issues.
+    /// Serialized through the stdout mutex to prevent interleaving.
     pub fn notify(&self, method: &str, params: serde_json::Value) {
         let notification = serde_json::json!({
             "jsonrpc": "2.0",
@@ -148,10 +189,7 @@ impl HostBridge {
             "params": params,
         });
         if let Ok(line) = serde_json::to_string(&notification) {
-            let mut stdout = std::io::stdout().lock();
-            let _ = stdout.write_all(line.as_bytes());
-            let _ = stdout.write_all(b"\n");
-            let _ = stdout.flush();
+            let _ = self.write_line(&line);
         }
     }
 
@@ -299,5 +337,10 @@ mod tests {
         } else {
             panic!("Expected Dict");
         }
+    }
+
+    #[test]
+    fn test_timeout_duration() {
+        assert_eq!(DEFAULT_TIMEOUT.as_secs(), 300);
     }
 }
