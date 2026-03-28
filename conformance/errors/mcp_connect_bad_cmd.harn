@@ -1,0 +1,3 @@
+pipeline default() {
+  mcp_connect("nonexistent_mcp_server_binary_xyz")
+}

@@ -1,0 +1,12 @@
+pipeline default() {
+  let root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  let server_path = root + "/conformance/helpers/mcp_echo_server.py"
+  let client = mcp_connect("python3", [server_path])
+  // Call a tool that reports isError: true
+  try {
+    mcp_call(client, "fail")
+  } catch (e) {
+    println(e)
+  }
+  mcp_disconnect(client)
+}

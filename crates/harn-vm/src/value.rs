@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Arc;
 
 use crate::chunk::CompiledFunction;
+use crate::mcp::VmMcpClientHandle;
 
 /// An async builtin function for the VM.
 pub type VmAsyncBuiltinFn = Rc<
@@ -54,6 +55,7 @@ pub enum VmValue {
     TaskHandle(String),
     Channel(VmChannelHandle),
     Atomic(VmAtomicHandle),
+    McpClient(VmMcpClientHandle),
 }
 
 /// A compiled closure value.
@@ -189,6 +191,7 @@ impl VmValue {
             VmValue::TaskHandle(_) => true,
             VmValue::Channel(_) => true,
             VmValue::Atomic(_) => true,
+            VmValue::McpClient(_) => true,
         }
     }
 
@@ -208,6 +211,7 @@ impl VmValue {
             VmValue::TaskHandle(_) => "task_handle",
             VmValue::Channel(_) => "channel",
             VmValue::Atomic(_) => "atomic",
+            VmValue::McpClient(_) => "mcp_client",
         }
     }
 
@@ -272,6 +276,7 @@ impl VmValue {
             VmValue::TaskHandle(id) => format!("<task:{id}>"),
             VmValue::Channel(ch) => format!("<channel:{}>", ch.name),
             VmValue::Atomic(a) => format!("<atomic:{}>", a.value.load(Ordering::SeqCst)),
+            VmValue::McpClient(c) => format!("<mcp_client:{}>", c.name),
         }
     }
 

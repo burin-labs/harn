@@ -9,6 +9,7 @@ use crate::vm::Vm;
 
 use crate::http::register_http_builtins;
 use crate::llm::register_llm_builtins;
+use crate::mcp::register_mcp_builtins;
 
 /// Register standard builtins on a VM.
 pub fn register_vm_stdlib(vm: &mut Vm) {
@@ -1409,6 +1410,7 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
 
     register_http_builtins(vm);
     register_llm_builtins(vm);
+    register_mcp_builtins(vm);
 }
 
 // =============================================================================

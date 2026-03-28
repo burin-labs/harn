@@ -296,6 +296,17 @@ user.filter({ v -> type_of(v) == "int" })
 
 Computed keys use bracket syntax: `{[dynamic_key]: value}`.
 
+Quoted string keys are also supported for JSON compatibility:
+`{"content-type": "json"}`. The formatter normalizes simple quoted keys
+to unquoted form and non-identifier keys to computed key syntax.
+
+Keywords can be used as dict keys and property names: `{type: "read"}`,
+`op.type`.
+
+Dicts iterate in **sorted key order** (alphabetical). This means
+`for k in dict` is deterministic and reproducible, but does not preserve
+insertion order.
+
 ## Enums and structs
 
 ### Enums

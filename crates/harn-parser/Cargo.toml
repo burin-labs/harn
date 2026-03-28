@@ -2,6 +2,9 @@
 name = "harn-parser"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Parser, AST, and type checker for the Harn programming language"
 
 [dependencies]
 harn-lexer = { path = "../harn-lexer" }

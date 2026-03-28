@@ -14,6 +14,11 @@ exclude = ["crates/harn-wasm"]
 resolver = "2"
 
 [workspace.package]
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
-license = "MIT"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/burin-labs/harn"
+homepage = "https://github.com/burin-labs/harn"
+description = "A pipeline-oriented programming language for orchestrating AI coding agents"
+keywords = ["ai", "agents", "pipeline", "llm", "language"]
+categories = ["compilers", "command-line-utilities"]

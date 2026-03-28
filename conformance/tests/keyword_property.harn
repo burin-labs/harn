@@ -1,0 +1,9 @@
+pipeline default() {
+  let op = {type: "read_file", name: "test"}
+  println(op.type)
+  println(op.name)
+  let cfg = {match: "pattern", for: "user", enum: "status"}
+  println(cfg.match)
+  println(cfg.for)
+  println(cfg.enum)
+}

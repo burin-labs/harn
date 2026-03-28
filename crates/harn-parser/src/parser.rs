@@ -1169,7 +1169,7 @@ impl Parser {
             if self.check(&TokenKind::Dot) {
                 let start = expr.span;
                 self.advance();
-                let member = self.consume_identifier("member name")?;
+                let member = self.consume_identifier_or_keyword("member name")?;
                 if self.check(&TokenKind::LParen) {
                     self.advance();
                     let args = self.parse_arg_list()?;
@@ -1440,10 +1440,24 @@ impl Parser {
                 let k = self.parse_expression()?;
                 self.consume(&TokenKind::RBracket, "]")?;
                 k
-            } else {
-                // Static key: identifier -> string literal
+            } else if matches!(
+                self.current().map(|t| &t.kind),
+                Some(TokenKind::StringLiteral(_))
+            ) {
+                // Quoted string key: {"key": value}
                 let key_span = self.current_span();
-                let name = self.consume_identifier("dict key")?;
+                let name =
+                    if let Some(TokenKind::StringLiteral(s)) = self.current().map(|t| &t.kind) {
+                        s.clone()
+                    } else {
+                        unreachable!()
+                    };
+                self.advance();
+                spanned(Node::StringLiteral(name), key_span)
+            } else {
+                // Static key: identifier or keyword -> string literal
+                let key_span = self.current_span();
+                let name = self.consume_identifier_or_keyword("dict key")?;
                 spanned(Node::StringLiteral(name), key_span)
             };
             self.consume(&TokenKind::Colon, ":")?;
@@ -1665,6 +1679,65 @@ impl Parser {
         } else {
             Err(self.make_error(expected))
         }
+    }
+
+    /// Like `consume_identifier`, but also accepts keywords as identifiers.
+    /// Used for property access (e.g., `obj.type`) and dict keys where
+    /// keywords are valid member names.
+    fn consume_identifier_or_keyword(&mut self, expected: &str) -> Result<String, ParserError> {
+        self.skip_newlines();
+        let tok = self.current().ok_or_else(|| self.make_error(expected))?;
+        if let TokenKind::Identifier(name) = &tok.kind {
+            let name = name.clone();
+            self.advance();
+            return Ok(name);
+        }
+        // Accept any keyword token as an identifier
+        let name = match &tok.kind {
+            TokenKind::Pipeline => "pipeline",
+            TokenKind::Extends => "extends",
+            TokenKind::Override => "override",
+            TokenKind::Let => "let",
+            TokenKind::Var => "var",
+            TokenKind::If => "if",
+            TokenKind::Else => "else",
+            TokenKind::For => "for",
+            TokenKind::In => "in",
+            TokenKind::Match => "match",
+            TokenKind::Retry => "retry",
+            TokenKind::Parallel => "parallel",
+            TokenKind::ParallelMap => "parallel_map",
+            TokenKind::Return => "return",
+            TokenKind::Import => "import",
+            TokenKind::True => "true",
+            TokenKind::False => "false",
+            TokenKind::Nil => "nil",
+            TokenKind::Try => "try",
+            TokenKind::Catch => "catch",
+            TokenKind::Throw => "throw",
+            TokenKind::Fn => "fn",
+            TokenKind::Spawn => "spawn",
+            TokenKind::While => "while",
+            TokenKind::TypeKw => "type",
+            TokenKind::Enum => "enum",
+            TokenKind::Struct => "struct",
+            TokenKind::Interface => "interface",
+            TokenKind::Pub => "pub",
+            TokenKind::From => "from",
+            TokenKind::Thru => "thru",
+            TokenKind::Upto => "upto",
+            TokenKind::Guard => "guard",
+            TokenKind::Ask => "ask",
+            TokenKind::Deadline => "deadline",
+            TokenKind::Yield => "yield",
+            TokenKind::Mutex => "mutex",
+            TokenKind::Break => "break",
+            TokenKind::Continue => "continue",
+            _ => return Err(self.make_error(expected)),
+        };
+        let name = name.to_string();
+        self.advance();
+        Ok(name)
     }
 
     fn skip_newlines(&mut self) {

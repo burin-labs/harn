@@ -108,3 +108,38 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 |---|---|---|---|
 | `llm_call(prompt, system?, options?)` | prompt: string, system: string, options: dict | string | Single LLM request |
 | `agent_loop(prompt, system?, options?)` | prompt: string, system: string, options: dict | string | Multi-turn agent loop with `##DONE##` sentinel |
+
+## MCP (Model Context Protocol)
+
+Connect to external tool servers using the
+[Model Context Protocol](https://modelcontextprotocol.io). Supports stdio
+transport (spawns a child process).
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `mcp_connect(command, args?)` | command: string, args: list | mcp\_client | Spawn an MCP server and perform the initialize handshake |
+| `mcp_list_tools(client)` | client: mcp\_client | list | List available tools from the server |
+| `mcp_call(client, name, arguments?)` | client: mcp\_client, name: string, arguments: dict | string or list | Call a tool and return the result |
+| `mcp_server_info(client)` | client: mcp\_client | dict | Get connection info (`name`, `connected`) |
+| `mcp_disconnect(client)` | client: mcp\_client | nil | Kill the server process and release resources |
+
+Example:
+
+```harn
+let client = mcp_connect("npx", ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
+let tools = mcp_list_tools(client)
+println(tools)
+
+let result = mcp_call(client, "read_file", {"path": "/tmp/hello.txt"})
+println(result)
+
+mcp_disconnect(client)
+```
+
+Notes:
+
+- `mcp_call` returns a string when the tool produces a single text block,
+  a list of content dicts for multi-block results, or nil when empty.
+- If the tool reports `isError: true`, `mcp_call` throws the error text.
+- `mcp_connect` throws if the command cannot be spawned or the initialize
+  handshake fails.

@@ -1,0 +1,14 @@
+pipeline default() {
+  // Quoted string keys (JSON-style)
+  let d = {name: "Alice", age: 30}
+  println(d.name)
+  println(d.age)
+  // Mixed: quoted and unquoted
+  let mixed = {unquoted: 1, quoted: 2}
+  println(mixed.unquoted)
+  println(mixed.quoted)
+  // Quoted keys with special characters
+  let special = {["content-type"]: "json", ["x-api-key"]: "abc"}
+  println(special["content-type"])
+  println(special["x-api-key"])
+}
