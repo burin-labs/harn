@@ -35,6 +35,8 @@ struct TypeScope {
     interfaces: BTreeMap<String, Vec<InterfaceMethod>>,
     /// Struct declarations: name → field types.
     structs: BTreeMap<String, Vec<(String, InferredType)>>,
+    /// Generic type parameter names in scope (treated as compatible with any type).
+    generic_type_params: std::collections::BTreeSet<String>,
     parent: Option<Box<TypeScope>>,
 }
 
@@ -42,6 +44,8 @@ struct TypeScope {
 struct FnSignature {
     params: Vec<(String, InferredType)>,
     return_type: InferredType,
+    /// Generic type parameter names declared on the function.
+    type_param_names: Vec<String>,
 }
 
 impl TypeScope {
@@ -53,6 +57,7 @@ impl TypeScope {
             enums: BTreeMap::new(),
             interfaces: BTreeMap::new(),
             structs: BTreeMap::new(),
+            generic_type_params: std::collections::BTreeSet::new(),
             parent: None,
         }
     }
@@ -65,6 +70,7 @@ impl TypeScope {
             enums: BTreeMap::new(),
             interfaces: BTreeMap::new(),
             structs: BTreeMap::new(),
+            generic_type_params: std::collections::BTreeSet::new(),
             parent: Some(Box::new(self.clone())),
         }
     }
@@ -85,6 +91,14 @@ impl TypeScope {
         self.type_aliases
             .get(name)
             .or_else(|| self.parent.as_ref()?.resolve_type(name))
+    }
+
+    fn is_generic_type_param(&self, name: &str) -> bool {
+        self.generic_type_params.contains(name)
+            || self
+                .parent
+                .as_ref()
+                .is_some_and(|p| p.is_generic_type_param(name))
     }
 
     fn get_enum(&self, name: &str) -> Option<&Vec<String>> {
@@ -232,6 +246,7 @@ impl TypeChecker {
                 }
                 Node::FnDecl {
                     name,
+                    type_params,
                     params,
                     return_type,
                     body,
@@ -243,9 +258,10 @@ impl TypeChecker {
                             .map(|p| (p.name.clone(), p.type_expr.clone()))
                             .collect(),
                         return_type: return_type.clone(),
+                        type_param_names: type_params.iter().map(|tp| tp.name.clone()).collect(),
                     };
                     self.scope.define_fn(name, sig);
-                    self.check_fn_body(params, return_type, body);
+                    self.check_fn_body(type_params, params, return_type, body);
                 }
                 _ => {
                     let mut scope = self.scope.clone();
@@ -379,6 +395,7 @@ impl TypeChecker {
 
             Node::FnDecl {
                 name,
+                type_params,
                 params,
                 return_type,
                 body,
@@ -390,10 +407,11 @@ impl TypeChecker {
                         .map(|p| (p.name.clone(), p.type_expr.clone()))
                         .collect(),
                     return_type: return_type.clone(),
+                    type_param_names: type_params.iter().map(|tp| tp.name.clone()).collect(),
                 };
                 scope.define_fn(name, sig.clone());
                 scope.define_var(name, None);
-                self.check_fn_body(params, return_type, body);
+                self.check_fn_body(type_params, params, return_type, body);
             }
 
             Node::FunctionCall { name, args } => {
@@ -643,11 +661,17 @@ impl TypeChecker {
 
     fn check_fn_body(
         &mut self,
+        type_params: &[TypeParam],
         params: &[TypedParam],
         return_type: &Option<TypeExpr>,
         body: &[SNode],
     ) {
         let mut fn_scope = self.scope.child();
+        // Register generic type parameters so they are treated as compatible
+        // with any concrete type during type checking.
+        for tp in type_params {
+            fn_scope.generic_type_params.insert(tp.name.clone());
+        }
         for param in params {
             fn_scope.define_var(&param.name, param.type_expr.clone());
         }
@@ -794,13 +818,24 @@ impl TypeChecker {
                     span,
                 );
             }
+            // Build a scope that includes the function's generic type params
+            // so they are treated as compatible with any concrete type.
+            let call_scope = if sig.type_param_names.is_empty() {
+                scope.clone()
+            } else {
+                let mut s = scope.child();
+                for tp_name in &sig.type_param_names {
+                    s.generic_type_params.insert(tp_name.clone());
+                }
+                s
+            };
             for (i, (arg, (param_name, param_type))) in
                 args.iter().zip(sig.params.iter()).enumerate()
             {
                 if let Some(expected) = param_type {
                     let actual = self.infer_type(arg, scope);
                     if let Some(actual) = &actual {
-                        if !self.types_compatible(expected, actual, scope) {
+                        if !self.types_compatible(expected, actual, &call_scope) {
                             self.error_at(
                                 format!(
                                     "Argument {} ('{}'): expected {}, got {}",
@@ -1028,6 +1063,17 @@ impl TypeChecker {
 
     /// Check if two types are compatible (actual can be assigned to expected).
     fn types_compatible(&self, expected: &TypeExpr, actual: &TypeExpr, scope: &TypeScope) -> bool {
+        // Generic type parameters match anything.
+        if let TypeExpr::Named(name) = expected {
+            if scope.is_generic_type_param(name) {
+                return true;
+            }
+        }
+        if let TypeExpr::Named(name) = actual {
+            if scope.is_generic_type_param(name) {
+                return true;
+            }
+        }
         let expected = self.resolve_alias(expected, scope);
         let actual = self.resolve_alias(actual, scope);
 

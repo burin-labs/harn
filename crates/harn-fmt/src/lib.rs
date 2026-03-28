@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
 
 use harn_lexer::{Lexer, StringSegment, TokenKind};
-use harn_parser::{BindingPattern, Node, Parser, SNode, TypeExpr, TypedParam};
+use harn_parser::{
+    BindingPattern, Node, Parser, SNode, TypeExpr, TypeParam, TypedParam, WhereClause,
+};
 
 /// Format a binding pattern to a string.
 fn format_pattern(pattern: &BindingPattern) -> String {
@@ -232,8 +234,10 @@ impl Formatter {
             }
             Node::FnDecl {
                 name,
+                type_params,
                 params,
                 return_type,
+                where_clauses,
                 body,
                 is_pub,
             } => {
@@ -244,7 +248,11 @@ impl Formatter {
                     String::new()
                 };
                 let pub_prefix = if *is_pub { "pub " } else { "" };
-                self.writeln(&format!("{pub_prefix}fn {name}({params_str}){ret} {{"));
+                let generics = format_type_params(type_params);
+                let where_str = format_where_clauses(where_clauses);
+                self.writeln(&format!(
+                    "{pub_prefix}fn {name}{generics}({params_str}){ret}{where_str} {{"
+                ));
                 self.indent();
                 self.format_body(body, node_line);
                 self.dedent();
@@ -1063,8 +1071,10 @@ impl Formatter {
             Node::Pipeline { name, .. } => format!("/* pipeline {name} */"),
             Node::FnDecl {
                 name,
+                type_params,
                 params,
                 return_type,
+                where_clauses,
                 body,
                 is_pub,
             } => {
@@ -1075,7 +1085,10 @@ impl Formatter {
                     String::new()
                 };
                 let pub_prefix = if *is_pub { "pub " } else { "" };
-                let mut result = format!("{pub_prefix}fn {name}({params_str}){ret} {{\n");
+                let generics = format_type_params(type_params);
+                let where_str = format_where_clauses(where_clauses);
+                let mut result =
+                    format!("{pub_prefix}fn {name}{generics}({params_str}){ret}{where_str} {{\n");
                 let current_indent = self.indent + 1;
                 for n in body {
                     let indent_str = "  ".repeat(current_indent);
@@ -1234,8 +1247,10 @@ impl Formatter {
             }
             Node::FnDecl {
                 name,
+                type_params,
                 params,
                 return_type,
+                where_clauses,
                 body,
                 is_pub,
             } => {
@@ -1246,7 +1261,10 @@ impl Formatter {
                     String::new()
                 };
                 let pub_prefix = if *is_pub { "pub " } else { "" };
-                let mut result = format!("{pub_prefix}fn {name}({params_str}){ret} {{\n");
+                let generics = format_type_params(type_params);
+                let where_str = format_where_clauses(where_clauses);
+                let mut result =
+                    format!("{pub_prefix}fn {name}{generics}({params_str}){ret}{where_str} {{\n");
                 for n in body {
                     let indent_str = "  ".repeat(indent_level + 1);
                     let expr = self.format_expr_or_stmt(n, indent_level + 1);
@@ -1396,6 +1414,27 @@ fn format_type_expr(te: &TypeExpr) -> String {
                 .join(", ");
             format!("fn({}) -> {}", params_str, format_type_expr(return_type))
         }
+    }
+}
+
+fn format_type_params(type_params: &[TypeParam]) -> String {
+    if type_params.is_empty() {
+        String::new()
+    } else {
+        let names: Vec<&str> = type_params.iter().map(|tp| tp.name.as_str()).collect();
+        format!("<{}>", names.join(", "))
+    }
+}
+
+fn format_where_clauses(clauses: &[WhereClause]) -> String {
+    if clauses.is_empty() {
+        String::new()
+    } else {
+        let parts: Vec<String> = clauses
+            .iter()
+            .map(|c| format!("{}: {}", c.type_name, c.bound))
+            .collect();
+        format!(" where {}", parts.join(", "))
     }
 }
 

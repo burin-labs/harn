@@ -698,6 +698,15 @@ impl Parser {
         let start = self.current_span();
         self.consume(&TokenKind::Fn, "fn")?;
         let name = self.consume_identifier("function name")?;
+
+        // Optional generic type parameters: fn name<T, U>(...)
+        let type_params = if self.check(&TokenKind::Lt) {
+            self.advance(); // skip <
+            self.parse_type_param_list()?
+        } else {
+            Vec::new()
+        };
+
         self.consume(&TokenKind::LParen, "(")?;
         let params = self.parse_typed_param_list()?;
         self.consume(&TokenKind::RParen, ")")?;
@@ -708,14 +717,20 @@ impl Parser {
         } else {
             None
         };
+
+        // Optional where clause: where T: bound, U: bound
+        let where_clauses = self.parse_where_clauses()?;
+
         self.consume(&TokenKind::LBrace, "{")?;
         let body = self.parse_block()?;
         self.consume(&TokenKind::RBrace, "}")?;
         Ok(spanned(
             Node::FnDecl {
                 name,
+                type_params,
                 params,
                 return_type,
+                where_clauses,
                 body,
                 is_pub,
             },
@@ -1710,6 +1725,54 @@ impl Parser {
             }
         }
         Ok(params)
+    }
+
+    /// Parse a comma-separated list of type parameter names until `>`.
+    fn parse_type_param_list(&mut self) -> Result<Vec<TypeParam>, ParserError> {
+        let mut params = Vec::new();
+        self.skip_newlines();
+        while !self.is_at_end() && !self.check(&TokenKind::Gt) {
+            let name = self.consume_identifier("type parameter name")?;
+            params.push(TypeParam { name });
+            if self.check(&TokenKind::Comma) {
+                self.advance();
+                self.skip_newlines();
+            }
+        }
+        self.consume(&TokenKind::Gt, ">")?;
+        Ok(params)
+    }
+
+    /// Parse an optional `where T: bound, U: bound` clause.
+    /// Looks for an identifier "where" before `{`.
+    fn parse_where_clauses(&mut self) -> Result<Vec<WhereClause>, ParserError> {
+        // Check if the next identifier is "where"
+        if let Some(tok) = self.current() {
+            if let TokenKind::Identifier(ref id) = tok.kind {
+                if id == "where" {
+                    self.advance(); // skip "where"
+                    let mut clauses = Vec::new();
+                    loop {
+                        self.skip_newlines();
+                        // Stop if we hit `{` or EOF
+                        if self.check(&TokenKind::LBrace) || self.is_at_end() {
+                            break;
+                        }
+                        let type_name = self.consume_identifier("type parameter name")?;
+                        self.consume(&TokenKind::Colon, ":")?;
+                        let bound = self.consume_identifier("type bound")?;
+                        clauses.push(WhereClause { type_name, bound });
+                        if self.check(&TokenKind::Comma) {
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+                    return Ok(clauses);
+                }
+            }
+        }
+        Ok(Vec::new())
     }
 
     /// Try to parse an optional type annotation (`: type`).

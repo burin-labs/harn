@@ -108,8 +108,10 @@ pub enum Node {
     },
     FnDecl {
         name: String,
+        type_params: Vec<TypeParam>,
         params: Vec<TypedParam>,
         return_type: Option<TypeExpr>,
+        where_clauses: Vec<WhereClause>,
         body: Vec<SNode>,
         is_pub: bool,
     },
@@ -351,6 +353,19 @@ pub struct ListPatternElement {
     pub name: String,
     /// True for `...rest` (rest pattern).
     pub is_rest: bool,
+}
+
+/// A generic type parameter on a function or pipeline declaration.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TypeParam {
+    pub name: String,
+}
+
+/// A where-clause constraint on a generic type parameter.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WhereClause {
+    pub type_name: String,
+    pub bound: String,
 }
 
 /// A parameter with an optional type annotation.

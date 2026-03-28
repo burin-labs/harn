@@ -364,7 +364,7 @@ impl SyncInterpreter {
                     }
                 }
             }
-            Node::FnDecl { name, params, body } => {
+            Node::FnDecl { name, params, body, .. } => {
                 let closure = Val::Closure(params.clone(), body.clone(), self.env.clone());
                 self.env.define(name, closure, false);
                 Ok(Val::Nil)
