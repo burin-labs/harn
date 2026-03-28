@@ -1385,6 +1385,17 @@ fn format_type_expr(te: &TypeExpr) -> String {
         TypeExpr::DictType(k, v) => {
             format!("dict<{}, {}>", format_type_expr(k), format_type_expr(v))
         }
+        TypeExpr::FnType {
+            params,
+            return_type,
+        } => {
+            let params_str = params
+                .iter()
+                .map(format_type_expr)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("fn({}) -> {}", params_str, format_type_expr(return_type))
+        }
     }
 }
 

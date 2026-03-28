@@ -69,6 +69,8 @@ pub struct Capabilities {
     pub supports_step_in_targets_request: bool,
     pub supports_set_variable: bool,
     pub supports_conditional_breakpoints: bool,
+    pub supports_exception_breakpoint_filters: bool,
+    pub exception_breakpoint_filters: Vec<ExceptionBreakpointFilter>,
 }
 
 impl Default for Capabilities {
@@ -79,8 +81,22 @@ impl Default for Capabilities {
             supports_step_in_targets_request: false,
             supports_set_variable: false,
             supports_conditional_breakpoints: true,
+            supports_exception_breakpoint_filters: true,
+            exception_breakpoint_filters: vec![ExceptionBreakpointFilter {
+                filter: "all".to_string(),
+                label: "All Exceptions".to_string(),
+                default: false,
+            }],
         }
     }
+}
+
+/// DAP ExceptionBreakpointFilter for the initialize response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExceptionBreakpointFilter {
+    pub filter: String,
+    pub label: String,
+    pub default: bool,
 }
 
 /// DAP Breakpoint.

@@ -307,6 +307,11 @@ pub enum TypeExpr {
     List(Box<TypeExpr>),
     /// A dict type with key and value types: `dict<string, int>`.
     DictType(Box<TypeExpr>, Box<TypeExpr>),
+    /// A function type: `fn(int, string) -> bool`.
+    FnType {
+        params: Vec<TypeExpr>,
+        return_type: Box<TypeExpr>,
+    },
 }
 
 /// A field in a dict shape type.

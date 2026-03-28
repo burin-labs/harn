@@ -1,0 +1,8 @@
+pipeline default() {
+  fn apply(f: fn(int) -> int, x: int) -> int {
+    return f(x)
+  }
+  let double: fn(int) -> int = { x -> x * 2 }
+  println(apply(double, 5))
+  println(apply({ x -> x + 10 }, 3))
+}

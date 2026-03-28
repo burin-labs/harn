@@ -1764,6 +1764,28 @@ impl Parser {
                 return Ok(TypeExpr::Named(name));
             }
         }
+        // Function type: fn(T, U) -> R
+        if self.check(&TokenKind::Fn) {
+            self.advance(); // skip `fn`
+            self.consume(&TokenKind::LParen, "(")?;
+            let mut params = Vec::new();
+            self.skip_newlines();
+            while !self.is_at_end() && !self.check(&TokenKind::RParen) {
+                params.push(self.parse_type_expr()?);
+                self.skip_newlines();
+                if self.check(&TokenKind::Comma) {
+                    self.advance();
+                    self.skip_newlines();
+                }
+            }
+            self.consume(&TokenKind::RParen, ")")?;
+            self.consume(&TokenKind::Arrow, "->")?;
+            let return_type = self.parse_type_expr()?;
+            return Ok(TypeExpr::FnType {
+                params,
+                return_type: Box::new(return_type),
+            });
+        }
         let name = self.consume_identifier("type name")?;
         // Check for generic type parameters: list<int>, dict<string, int>
         if self.check(&TokenKind::Lt) {

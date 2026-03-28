@@ -858,7 +858,23 @@ impl TypeChecker {
                     Some(TypeExpr::Named("dict".into()))
                 }
             }
-            Node::Closure { .. } => Some(TypeExpr::Named("closure".into())),
+            Node::Closure { params, body } => {
+                // If all params are typed and we can infer a return type, produce FnType
+                let all_typed = params.iter().all(|p| p.type_expr.is_some());
+                if all_typed && !params.is_empty() {
+                    let param_types: Vec<TypeExpr> =
+                        params.iter().filter_map(|p| p.type_expr.clone()).collect();
+                    // Try to infer return type from last expression in body
+                    let ret = body.last().and_then(|last| self.infer_type(last, scope));
+                    if let Some(ret_type) = ret {
+                        return Some(TypeExpr::FnType {
+                            params: param_types,
+                            return_type: Box::new(ret_type),
+                        });
+                    }
+                }
+                Some(TypeExpr::Named("closure".into()))
+            }
 
             Node::Identifier(name) => scope.get_var(name).cloned().flatten(),
 
@@ -1058,6 +1074,27 @@ impl TypeChecker {
             }
             (TypeExpr::Named(n), TypeExpr::DictType(_, _)) if n == "dict" => true,
             (TypeExpr::DictType(_, _), TypeExpr::Named(n)) if n == "dict" => true,
+            // FnType compatibility: params match positionally and return types match
+            (
+                TypeExpr::FnType {
+                    params: ep,
+                    return_type: er,
+                },
+                TypeExpr::FnType {
+                    params: ap,
+                    return_type: ar,
+                },
+            ) => {
+                ep.len() == ap.len()
+                    && ep
+                        .iter()
+                        .zip(ap.iter())
+                        .all(|(e, a)| self.types_compatible(e, a, scope))
+                    && self.types_compatible(er, ar, scope)
+            }
+            // FnType is compatible with Named("closure") for backward compat
+            (TypeExpr::FnType { .. }, TypeExpr::Named(n)) if n == "closure" => true,
+            (TypeExpr::Named(n), TypeExpr::FnType { .. }) if n == "closure" => true,
             _ => false,
         }
     }
@@ -1202,6 +1239,17 @@ pub fn format_type(ty: &TypeExpr) -> String {
         }
         TypeExpr::List(inner) => format!("list<{}>", format_type(inner)),
         TypeExpr::DictType(k, v) => format!("dict<{}, {}>", format_type(k), format_type(v)),
+        TypeExpr::FnType {
+            params,
+            return_type,
+        } => {
+            let params_str = params
+                .iter()
+                .map(format_type)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("fn({}) -> {}", params_str, format_type(return_type))
+        }
     }
 }
 

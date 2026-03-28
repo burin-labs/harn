@@ -3,7 +3,8 @@ use std::collections::BTreeMap;
 use harn_lexer::Lexer;
 use harn_parser::Parser;
 use harn_vm::{
-    register_http_builtins, register_llm_builtins, register_vm_stdlib, Compiler, Vm, VmValue,
+    register_http_builtins, register_llm_builtins, register_vm_stdlib, Compiler, Vm, VmError,
+    VmValue,
 };
 use serde_json::json;
 
@@ -60,6 +61,8 @@ pub struct Debugger {
     runtime: tokio::runtime::Runtime,
     /// Next variable reference ID (start at 100 to avoid conflict with scope refs).
     next_var_ref: i64,
+    /// Whether to break on thrown exceptions.
+    break_on_exceptions: bool,
 }
 
 impl Debugger {
@@ -83,6 +86,7 @@ impl Debugger {
                 .enable_all()
                 .build()
                 .unwrap(),
+            break_on_exceptions: false,
         }
     }
 
@@ -108,6 +112,7 @@ impl Debugger {
             "scopes" => self.handle_scopes(&msg),
             "variables" => self.handle_variables(&msg),
             "evaluate" => self.handle_evaluate(&msg),
+            "setExceptionBreakpoints" => self.handle_set_exception_breakpoints(&msg),
             "disconnect" => self.handle_disconnect(&msg),
             _ => {
                 vec![DapResponse::success(
@@ -377,6 +382,40 @@ impl Debugger {
                     continue;
                 }
                 Err(e) => {
+                    // If exception breakpoints are enabled and this is a thrown
+                    // exception, pause instead of terminating.
+                    if self.break_on_exceptions && matches!(&e, VmError::Thrown(_)) {
+                        let error_msg = e.to_string();
+                        let state = self.vm.as_ref().unwrap().debug_state();
+                        self.stopped = true;
+                        self.current_line = state.line as i64;
+                        self.variables = state.variables;
+                        self.program_state = ProgramState::Stopped;
+
+                        let seq = self.next_seq();
+                        responses.push(DapResponse::event(
+                            seq,
+                            "output",
+                            Some(json!({
+                                "category": "stderr",
+                                "output": format!("Exception: {error_msg}\n"),
+                            })),
+                        ));
+
+                        let seq = self.next_seq();
+                        responses.push(DapResponse::event(
+                            seq,
+                            "stopped",
+                            Some(json!({
+                                "reason": "exception",
+                                "description": error_msg,
+                                "threadId": 1,
+                                "allThreadsStopped": true,
+                            })),
+                        ));
+                        return responses;
+                    }
+
                     let seq = self.next_seq();
                     responses.push(DapResponse::event(
                         seq,
@@ -653,22 +692,92 @@ impl Debugger {
             .and_then(|e| e.as_str())
             .unwrap_or("");
 
-        // Try to look up the expression as a variable name
-        let result = self
-            .variables
-            .get(expression)
-            .map(|v| v.display())
-            .unwrap_or_else(|| format!("<undefined: {expression}>"));
+        // context can be "watch", "repl", "hover", or "clipboard"
+        let _context = msg
+            .arguments
+            .as_ref()
+            .and_then(|a| a.get("context"))
+            .and_then(|c| c.as_str())
+            .unwrap_or("watch");
+
+        // Resolve the expression: supports "var" and "var.field.field..." dot-access
+        match self.resolve_expression(expression) {
+            Some(val) => {
+                let variable = self.make_variable(expression.to_string(), &val);
+                let seq = self.next_seq();
+                vec![DapResponse::success(
+                    seq,
+                    msg.seq,
+                    "evaluate",
+                    Some(json!({
+                        "result": variable.value,
+                        "type": variable.var_type,
+                        "variablesReference": variable.variables_reference,
+                    })),
+                )]
+            }
+            None => {
+                // Not a simple variable or dot-access lookup
+                let seq = self.next_seq();
+                vec![DapResponse {
+                    seq,
+                    msg_type: "response".to_string(),
+                    request_seq: Some(msg.seq),
+                    success: Some(false),
+                    command: Some("evaluate".to_string()),
+                    message: Some(format!(
+                        "Cannot evaluate '{expression}': only variable lookups and dot-access \
+                         property paths are supported in the debugger"
+                    )),
+                    body: None,
+                    event: None,
+                }]
+            }
+        }
+    }
+
+    /// Resolve an expression string against the current variable state.
+    /// Supports simple variable names ("x") and dot-access paths ("x.foo.bar").
+    fn resolve_expression(&self, expression: &str) -> Option<VmValue> {
+        let parts: Vec<&str> = expression.split('.').collect();
+        if parts.is_empty() || parts[0].is_empty() {
+            return None;
+        }
+
+        // Look up the root variable
+        let mut current = self.variables.get(parts[0])?.clone();
+
+        // Traverse dot-access path
+        for &field in &parts[1..] {
+            if field.is_empty() {
+                return None;
+            }
+            current = match &current {
+                VmValue::Dict(map) => map.get(field)?.clone(),
+                VmValue::StructInstance { fields, .. } => fields.get(field)?.clone(),
+                _ => return None,
+            };
+        }
+
+        Some(current)
+    }
+
+    fn handle_set_exception_breakpoints(&mut self, msg: &DapMessage) -> Vec<DapResponse> {
+        // Check if "all" filter is in the requested filters list
+        self.break_on_exceptions = msg
+            .arguments
+            .as_ref()
+            .and_then(|a| a.get("filters"))
+            .and_then(|f| f.as_array())
+            .map(|filters| filters.iter().any(|f| f.as_str() == Some("all")))
+            .unwrap_or(false);
 
         let seq = self.next_seq();
         vec![DapResponse::success(
             seq,
             msg.seq,
-            "evaluate",
-            Some(json!({
-                "result": result,
-                "variablesReference": 0,
-            })),
+            "setExceptionBreakpoints",
+            None,
         )]
     }
 
@@ -860,6 +969,153 @@ mod tests {
         assert_eq!(responses.len(), 1);
         let body = responses[0].body.as_ref().unwrap();
         assert_eq!(body["result"], "42");
+        assert_eq!(body["variablesReference"], 0);
+    }
+
+    #[test]
+    fn test_evaluate_dot_access() {
+        use std::rc::Rc;
+
+        let mut dbg = Debugger::new();
+        let mut inner = BTreeMap::new();
+        inner.insert("bar".to_string(), VmValue::Int(99));
+        dbg.variables
+            .insert("foo".to_string(), VmValue::Dict(Rc::new(inner)));
+
+        // "foo.bar" should resolve to 99
+        let responses = dbg.handle_message(make_request(
+            1,
+            "evaluate",
+            Some(json!({"expression": "foo.bar"})),
+        ));
+        assert_eq!(responses.len(), 1);
+        let body = responses[0].body.as_ref().unwrap();
+        assert_eq!(body["result"], "99");
+        assert_eq!(body["variablesReference"], 0);
+    }
+
+    #[test]
+    fn test_evaluate_nested_dot_access() {
+        use std::rc::Rc;
+
+        let mut dbg = Debugger::new();
+        let mut inner = BTreeMap::new();
+        inner.insert("c".to_string(), VmValue::String("deep".into()));
+        let mut outer = BTreeMap::new();
+        outer.insert("b".to_string(), VmValue::Dict(Rc::new(inner)));
+        dbg.variables
+            .insert("a".to_string(), VmValue::Dict(Rc::new(outer)));
+
+        let responses = dbg.handle_message(make_request(
+            1,
+            "evaluate",
+            Some(json!({"expression": "a.b.c"})),
+        ));
+        assert_eq!(responses.len(), 1);
+        let body = responses[0].body.as_ref().unwrap();
+        assert_eq!(body["result"], "deep");
+    }
+
+    #[test]
+    fn test_evaluate_complex_value_has_var_ref() {
+        use std::rc::Rc;
+
+        let mut dbg = Debugger::new();
+        let mut map = BTreeMap::new();
+        map.insert("key".to_string(), VmValue::Int(1));
+        dbg.variables
+            .insert("d".to_string(), VmValue::Dict(Rc::new(map)));
+
+        // Evaluating a dict should return a non-zero variablesReference
+        let responses = dbg.handle_message(make_request(
+            1,
+            "evaluate",
+            Some(json!({"expression": "d"})),
+        ));
+        assert_eq!(responses.len(), 1);
+        let body = responses[0].body.as_ref().unwrap();
+        assert!(body["variablesReference"].as_i64().unwrap() > 0);
+    }
+
+    #[test]
+    fn test_evaluate_undefined_returns_error() {
+        let mut dbg = Debugger::new();
+
+        let responses = dbg.handle_message(make_request(
+            1,
+            "evaluate",
+            Some(json!({"expression": "nonexistent"})),
+        ));
+        assert_eq!(responses.len(), 1);
+        assert_eq!(responses[0].success, Some(false));
+        assert!(responses[0]
+            .message
+            .as_ref()
+            .unwrap()
+            .contains("nonexistent"));
+    }
+
+    #[test]
+    fn test_evaluate_with_context() {
+        let mut dbg = Debugger::new();
+        dbg.variables.insert("x".to_string(), VmValue::Int(7));
+
+        // All contexts (watch, repl, hover) should work the same
+        for ctx in &["watch", "repl", "hover"] {
+            let responses = dbg.handle_message(make_request(
+                1,
+                "evaluate",
+                Some(json!({"expression": "x", "context": ctx})),
+            ));
+            assert_eq!(responses.len(), 1);
+            let body = responses[0].body.as_ref().unwrap();
+            assert_eq!(body["result"], "7");
+        }
+    }
+
+    #[test]
+    fn test_set_exception_breakpoints_enable() {
+        let mut dbg = Debugger::new();
+        assert!(!dbg.break_on_exceptions);
+
+        // Enable "all" exception breakpoints
+        let responses = dbg.handle_message(make_request(
+            1,
+            "setExceptionBreakpoints",
+            Some(json!({"filters": ["all"]})),
+        ));
+        assert_eq!(responses.len(), 1);
+        assert_eq!(responses[0].success, Some(true));
+        assert!(dbg.break_on_exceptions);
+    }
+
+    #[test]
+    fn test_set_exception_breakpoints_disable() {
+        let mut dbg = Debugger::new();
+        dbg.break_on_exceptions = true;
+
+        // Empty filters — disable
+        let responses = dbg.handle_message(make_request(
+            1,
+            "setExceptionBreakpoints",
+            Some(json!({"filters": []})),
+        ));
+        assert_eq!(responses.len(), 1);
+        assert_eq!(responses[0].success, Some(true));
+        assert!(!dbg.break_on_exceptions);
+    }
+
+    #[test]
+    fn test_initialize_has_exception_breakpoint_filters() {
+        let mut dbg = Debugger::new();
+        let responses = dbg.handle_message(make_request(1, "initialize", None));
+        let body = responses[0].body.as_ref().unwrap();
+        assert_eq!(body["supportsExceptionBreakpointFilters"], true);
+        let filters = body["exceptionBreakpointFilters"].as_array().unwrap();
+        assert_eq!(filters.len(), 1);
+        assert_eq!(filters[0]["filter"], "all");
+        assert_eq!(filters[0]["label"], "All Exceptions");
+        assert_eq!(filters[0]["default"], false);
     }
 
     #[test]
