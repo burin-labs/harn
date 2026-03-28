@@ -702,8 +702,16 @@ impl Compiler {
                                 self.chunk.emit(Op::Add, self.line);
                                 pending = 0;
                             }
-                            // Concat with the spread expression
+                            // Concat with the spread expression (with type check)
                             self.compile_node(inner)?;
+                            self.chunk.emit(Op::Dup, self.line);
+                            let assert_idx = self
+                                .chunk
+                                .add_constant(Constant::String("__assert_list".into()));
+                            self.chunk.emit_u16(Op::Constant, assert_idx, self.line);
+                            self.chunk.emit(Op::Swap, self.line);
+                            self.chunk.emit_u8(Op::Call, 1, self.line);
+                            self.chunk.emit(Op::Pop, self.line);
                             self.chunk.emit(Op::Add, self.line);
                         } else {
                             self.compile_node(el)?;
@@ -740,8 +748,16 @@ impl Compiler {
                                 self.chunk.emit(Op::Add, self.line);
                                 pending = 0;
                             }
-                            // Merge spread dict via Add
+                            // Merge spread dict via Add (with type check)
                             self.compile_node(inner)?;
+                            self.chunk.emit(Op::Dup, self.line);
+                            let assert_idx = self
+                                .chunk
+                                .add_constant(Constant::String("__assert_dict".into()));
+                            self.chunk.emit_u16(Op::Constant, assert_idx, self.line);
+                            self.chunk.emit(Op::Swap, self.line);
+                            self.chunk.emit_u8(Op::Call, 1, self.line);
+                            self.chunk.emit(Op::Pop, self.line);
                             self.chunk.emit(Op::Add, self.line);
                         } else {
                             self.compile_node(&entry.key)?;

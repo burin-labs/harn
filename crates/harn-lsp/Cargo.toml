@@ -11,9 +11,9 @@ name = "harn-lsp"
 path = "src/main.rs"
 
 [dependencies]
-harn-lexer = { path = "../harn-lexer", version = "0.3" }
-harn-parser = { path = "../harn-parser", version = "0.3" }
-harn-lint = { path = "../harn-lint", version = "0.3" }
+harn-lexer = { path = "../harn-lexer", version = "0.4" }
+harn-parser = { path = "../harn-parser", version = "0.4" }
+harn-lint = { path = "../harn-lint", version = "0.4" }
 tower-lsp = "0.20"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std"] }
 serde_json = "1"
