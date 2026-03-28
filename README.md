@@ -34,12 +34,17 @@ From a [GitHub release](https://github.com/burin-labs/harn/releases)
 curl -fsSL https://raw.githubusercontent.com/burin-labs/harn/main/install.sh | sh
 ```
 
+With Cargo (recommended for Rust users):
+
+```bash
+cargo install harn-cli
+```
+
 Or build from source:
 
 ```bash
 git clone https://github.com/burin-labs/harn.git
-cd harn && cargo build --release
-cp target/release/harn /usr/local/bin/
+cd harn && cargo install --path crates/harn-cli
 ```
 
 ### Create a project
@@ -328,6 +333,20 @@ error: undefined variable `reponse`
    |
    = help: did you mean `response`?
 ```
+
+### Editor support
+
+**VS Code** — syntax highlighting, hover, completions, go-to-definition,
+diagnostics, and linting:
+
+```bash
+cd editors/vscode
+npm install && npm run compile
+npx vsce package
+code --install-extension harn-lang-0.1.0.vsix
+```
+
+Or open `editors/vscode/` in VS Code and press F5 to launch a dev host.
 
 ## For language designers
 
