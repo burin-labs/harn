@@ -4,8 +4,8 @@
 /// They are only parsed/executed when a script does `import "std/<module>"`.
 pub fn get_stdlib_source(module: &str) -> Option<&'static str> {
     match module {
-        "text" => Some(include_str!("../../../stdlib/text.harn")),
-        "collections" => Some(include_str!("../../../stdlib/collections.harn")),
+        "text" => Some(include_str!("stdlib_text.harn")),
+        "collections" => Some(include_str!("stdlib_collections.harn")),
         _ => None,
     }
 }
