@@ -1,0 +1,30 @@
+pipeline test(task) {
+  // Basic type validation
+  let str_schema = {type: "string"}
+  println(json_validate("hello", str_schema))
+  let int_schema = {type: "int"}
+  println(json_validate(42, int_schema))
+  let float_schema = {type: "float"}
+  println(json_validate(3.14, float_schema))
+  let bool_schema = {type: "bool"}
+  println(json_validate(true, bool_schema))
+  let list_schema = {type: "list"}
+  println(json_validate([1, 2, 3], list_schema))
+  let dict_schema = {type: "dict"}
+  println(json_validate({name: "alice"}, dict_schema))
+  // Any type accepts anything
+  let any_schema = {type: "any"}
+  println(json_validate("whatever", any_schema))
+  println(json_validate(42, any_schema))
+  // Dict with required keys
+  let schema = {type: "dict", required: ["name", "age"], properties: {name: {type: "string"}, age: {type: "int"}}}
+  let data = {name: "alice", age: 30}
+  println(json_validate(data, schema))
+  // Nested dict validation
+  let nested_schema = {type: "dict", properties: {address: {type: "dict", required: ["city"], properties: {city: {type: "string"}}}}}
+  let nested_data = {address: {city: "NYC"}}
+  println(json_validate(nested_data, nested_schema))
+  // List items validation
+  let list_items_schema = {type: "list", items: {type: "int"}}
+  println(json_validate([1, 2, 3], list_items_schema))
+}

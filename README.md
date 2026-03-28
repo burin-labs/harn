@@ -271,6 +271,8 @@ pipeline default(task) {
 
 ## Documentation
 
+- [Why Harn?](docs/why-harn.md) — what problem Harn solves, how it compares, who it's for
+- [Cookbook](docs/cookbook.md) — practical patterns for agentic programming with working examples
 - [Language basics](docs/language-basics.md) — syntax, types, operators, control flow, functions, collections
 - [LLM calls and agent loops](docs/llm-and-agents.md) — providers, API keys, `llm_call`, `agent_loop`, persistent mode
 - [Concurrency](docs/concurrency.md) — `spawn`/`await`, `parallel`, `parallel_map`, channels, atomics, mutex, deadline

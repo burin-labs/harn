@@ -275,6 +275,19 @@ fn extract_content_text(result: &serde_json::Value) -> String {
     }
 }
 
+/// Connect to an MCP server by name, command, and args. This is the public
+/// entry point used by the CLI to auto-connect servers declared in `harn.toml`.
+pub async fn connect_mcp_server(
+    name: &str,
+    command: &str,
+    args: &[String],
+) -> Result<VmMcpClientHandle, VmError> {
+    let mut handle = mcp_connect_impl(command, args).await?;
+    // Override the name with the user-declared name from config
+    handle.name = name.to_string();
+    Ok(handle)
+}
+
 /// Register MCP builtins on a VM.
 pub fn register_mcp_builtins(vm: &mut Vm) {
     // mcp_connect(command, args?) -> McpClient

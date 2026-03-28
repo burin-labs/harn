@@ -16,6 +16,16 @@ pub struct Manifest {
     pub package: Option<PackageInfo>,
     #[serde(default)]
     pub dependencies: HashMap<String, Dependency>,
+    #[serde(default)]
+    pub mcp: Vec<McpServerConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct McpServerConfig {
+    pub name: String,
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -170,6 +180,22 @@ pub fn read_manifest() -> Manifest {
         Err(e) => {
             eprintln!("Failed to parse harn.toml: {e}");
             process::exit(1);
+        }
+    }
+}
+
+/// Try to read `harn.toml` from the directory containing the given file.
+/// Returns `None` if the file doesn't exist. Prints a warning and returns
+/// `None` on parse errors.
+pub fn try_read_manifest_for(harn_file: &std::path::Path) -> Option<Manifest> {
+    let dir = harn_file.parent().unwrap_or(std::path::Path::new("."));
+    let manifest_path = dir.join(MANIFEST);
+    let content = fs::read_to_string(&manifest_path).ok()?;
+    match toml::from_str::<Manifest>(&content) {
+        Ok(m) => Some(m),
+        Err(e) => {
+            eprintln!("warning: failed to parse {}: {e}", manifest_path.display());
+            None
         }
     }
 }

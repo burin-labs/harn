@@ -1,0 +1,4 @@
+pipeline default() {
+  let schema = {type: "string"}
+  json_validate(42, schema)
+}

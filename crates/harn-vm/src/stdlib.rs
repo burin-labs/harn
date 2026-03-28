@@ -1405,6 +1405,74 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
     });
 
     // =========================================================================
+    // JSON validation and extraction builtins
+    // =========================================================================
+
+    vm.register_builtin("json_validate", |args, _out| {
+        if args.len() < 2 {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "json_validate requires 2 arguments: data and schema",
+            ))));
+        }
+        let data = &args[0];
+        let schema = &args[1];
+        let schema_dict = match schema.as_dict() {
+            Some(d) => d,
+            None => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "json_validate: schema must be a dict",
+                ))));
+            }
+        };
+        let mut errors = Vec::new();
+        validate_value(data, schema_dict, "", &mut errors);
+        if errors.is_empty() {
+            Ok(VmValue::Bool(true))
+        } else {
+            Err(VmError::Thrown(VmValue::String(Rc::from(
+                errors.join("; "),
+            ))))
+        }
+    });
+
+    vm.register_builtin("json_extract", |args, _out| {
+        if args.is_empty() {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "json_extract requires at least 1 argument: text",
+            ))));
+        }
+        let text = args[0].display();
+        let key = args.get(1).map(|a| a.display());
+
+        // Extract JSON from text that may contain markdown code fences
+        let json_str = extract_json_from_text(&text);
+        let parsed = match serde_json::from_str::<serde_json::Value>(&json_str) {
+            Ok(jv) => json_to_vm_value(&jv),
+            Err(e) => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                    "json_extract: failed to parse JSON: {e}"
+                )))));
+            }
+        };
+
+        match key {
+            Some(k) => match &parsed {
+                VmValue::Dict(map) => match map.get(&k) {
+                    Some(val) => Ok(val.clone()),
+                    None => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                        "json_extract: key '{}' not found",
+                        k
+                    ))))),
+                },
+                _ => Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "json_extract: parsed value is not a dict, cannot extract key",
+                )))),
+            },
+            None => Ok(parsed),
+        }
+    });
+
+    // =========================================================================
     // HTTP and LLM builtins (registered from separate modules)
     // =========================================================================
 
@@ -1482,6 +1550,127 @@ pub(crate) fn json_to_vm_value(jv: &serde_json::Value) -> VmValue {
             VmValue::Dict(Rc::new(m))
         }
     }
+}
+
+// =============================================================================
+// Helper: validate a VmValue against a schema dict
+// =============================================================================
+
+fn validate_value(
+    value: &VmValue,
+    schema: &BTreeMap<String, VmValue>,
+    path: &str,
+    errors: &mut Vec<String>,
+) {
+    // Check "type" constraint
+    if let Some(VmValue::String(expected_type)) = schema.get("type") {
+        let actual_type = value.type_name();
+        let type_str: &str = expected_type;
+        if type_str != "any" && actual_type != type_str {
+            let location = if path.is_empty() {
+                "root".to_string()
+            } else {
+                path.to_string()
+            };
+            errors.push(format!(
+                "at {}: expected type '{}', got '{}'",
+                location, type_str, actual_type
+            ));
+            return; // No point checking further if type is wrong
+        }
+    }
+
+    // Check "required" keys (only for dicts)
+    if let Some(VmValue::List(required_keys)) = schema.get("required") {
+        if let VmValue::Dict(map) = value {
+            for key_val in required_keys.iter() {
+                let key = key_val.display();
+                if !map.contains_key(&key) {
+                    let location = if path.is_empty() {
+                        "root".to_string()
+                    } else {
+                        path.to_string()
+                    };
+                    errors.push(format!("at {}: missing required key '{}'", location, key));
+                }
+            }
+        }
+    }
+
+    // Check "properties" (only for dicts)
+    if let Some(VmValue::Dict(prop_schemas)) = schema.get("properties") {
+        if let VmValue::Dict(map) = value {
+            for (key, prop_schema) in prop_schemas.iter() {
+                if let Some(prop_value) = map.get(key) {
+                    if let Some(prop_schema_dict) = prop_schema.as_dict() {
+                        let child_path = if path.is_empty() {
+                            key.clone()
+                        } else {
+                            format!("{}.{}", path, key)
+                        };
+                        validate_value(prop_value, prop_schema_dict, &child_path, errors);
+                    }
+                }
+            }
+        }
+    }
+
+    // Check "items" (only for lists)
+    if let Some(VmValue::Dict(item_schema)) = schema.get("items") {
+        if let VmValue::List(items) = value {
+            for (i, item) in items.iter().enumerate() {
+                let child_path = if path.is_empty() {
+                    format!("[{}]", i)
+                } else {
+                    format!("{}[{}]", path, i)
+                };
+                validate_value(item, item_schema, &child_path, errors);
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Helper: extract JSON from text with possible markdown fences
+// =============================================================================
+
+fn extract_json_from_text(text: &str) -> String {
+    let trimmed = text.trim();
+
+    // Try to find ```json ... ``` or ``` ... ``` code fences
+    if let Some(start) = trimmed.find("```") {
+        let after_backticks = &trimmed[start + 3..];
+        // Skip optional language tag (e.g., "json")
+        let content_start = if let Some(nl) = after_backticks.find('\n') {
+            nl + 1
+        } else {
+            0
+        };
+        let content = &after_backticks[content_start..];
+        if let Some(end) = content.find("```") {
+            return content[..end].trim().to_string();
+        }
+    }
+
+    // No code fences found; try to find JSON object or array boundaries
+    // Look for first { or [ and last matching } or ]
+    if let Some(obj_start) = trimmed.find('{') {
+        if let Some(obj_end) = trimmed.rfind('}') {
+            if obj_end > obj_start {
+                return trimmed[obj_start..=obj_end].to_string();
+            }
+        }
+    }
+    if let Some(arr_start) = trimmed.find('[') {
+        if let Some(arr_end) = trimmed.rfind(']') {
+            if arr_end > arr_start {
+                return trimmed[arr_start..=arr_end].to_string();
+            }
+        }
+    }
+
+    // Fall back to trimmed text as-is
+    trimmed.to_string()
 }
 
 // =============================================================================

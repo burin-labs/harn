@@ -1,0 +1,26 @@
+pipeline test(task) {
+  // Extract from plain JSON
+  let data = json_extract("{\"name\": \"alice\", \"age\": 30}")
+  println(data.name)
+  println(data.age)
+  // Extract from markdown code fence
+  let fenced = "Here is the result:\n```json\n{\"color\": \"blue\"}\n```\nDone."
+  let result = json_extract(fenced)
+  println(result.color)
+  // Extract from code fence without language tag
+  let plain_fence = "```\n{\"x\": 42}\n```"
+  let result2 = json_extract(plain_fence)
+  println(result2.x)
+  // Extract with key parameter
+  let name = json_extract("{\"name\": \"bob\", \"age\": 25}", "name")
+  println(name)
+  let age = json_extract("{\"name\": \"bob\", \"age\": 25}", "age")
+  println(age)
+  // Extract JSON array
+  let arr = json_extract("[1, 2, 3]")
+  println(arr)
+  // Extract from text with surrounding prose
+  let prose = "The answer is {\"result\": true} as expected"
+  let extracted = json_extract(prose)
+  println(extracted.result)
+}

@@ -425,6 +425,13 @@ async fn run_file(path: &str, trace: bool) {
         }
     }
 
+    // Auto-connect MCP servers declared in harn.toml
+    if let Some(manifest) = package::try_read_manifest_for(Path::new(path)) {
+        if !manifest.mcp.is_empty() {
+            connect_mcp_servers(&manifest.mcp, &mut vm).await;
+        }
+    }
+
     match vm.execute(&chunk).await {
         Ok(_) => {
             let output = vm.output();
@@ -440,6 +447,35 @@ async fn run_file(path: &str, trace: bool) {
 
     if trace {
         print_trace_summary();
+    }
+}
+
+/// Connect to MCP servers declared in `harn.toml` and register them as
+/// `mcp.<name>` globals on the VM. Connection failures are warned but do
+/// not abort execution.
+async fn connect_mcp_servers(servers: &[package::McpServerConfig], vm: &mut harn_vm::Vm) {
+    use std::collections::BTreeMap;
+    use std::rc::Rc;
+
+    let mut mcp_dict: BTreeMap<String, harn_vm::VmValue> = BTreeMap::new();
+
+    for server in servers {
+        match harn_vm::connect_mcp_server(&server.name, &server.command, &server.args).await {
+            Ok(handle) => {
+                eprintln!("[harn] mcp: connected to '{}'", server.name);
+                mcp_dict.insert(server.name.clone(), harn_vm::VmValue::McpClient(handle));
+            }
+            Err(e) => {
+                eprintln!(
+                    "warning: mcp: failed to connect to '{}': {}",
+                    server.name, e
+                );
+            }
+        }
+    }
+
+    if !mcp_dict.is_empty() {
+        vm.set_global("mcp", harn_vm::VmValue::Dict(Rc::new(mcp_dict)));
     }
 }
 

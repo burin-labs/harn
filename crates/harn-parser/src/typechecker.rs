@@ -121,14 +121,14 @@ fn builtin_return_type(name: &str) -> InferredType {
         | "date_format" | "format" => Some(TypeExpr::Named("string".into())),
         "to_int" => Some(TypeExpr::Named("int".into())),
         "to_float" | "timestamp" | "date_parse" => Some(TypeExpr::Named("float".into())),
-        "file_exists" => Some(TypeExpr::Named("bool".into())),
+        "file_exists" | "json_validate" => Some(TypeExpr::Named("bool".into())),
         "list_dir" => Some(TypeExpr::Named("list".into())),
         "stat" | "exec" | "shell" | "date_now" => Some(TypeExpr::Named("dict".into())),
         "env" | "regex_match" => Some(TypeExpr::Union(vec![
             TypeExpr::Named("string".into()),
             TypeExpr::Named("nil".into()),
         ])),
-        "json_parse" => None, // could be any type
+        "json_parse" | "json_extract" => None, // could be any type
         _ => None,
     }
 }
@@ -175,6 +175,8 @@ fn is_builtin(name: &str) -> bool {
             | "date_format"
             | "date_parse"
             | "format"
+            | "json_validate"
+            | "json_extract"
     )
 }
 

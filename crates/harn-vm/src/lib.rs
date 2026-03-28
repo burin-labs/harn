@@ -15,7 +15,7 @@ pub use chunk::*;
 pub use compiler::*;
 pub use http::register_http_builtins;
 pub use llm::register_llm_builtins;
-pub use mcp::register_mcp_builtins;
+pub use mcp::{connect_mcp_server, register_mcp_builtins};
 pub use stdlib::register_vm_stdlib;
 pub use value::*;
 pub use vm::*;

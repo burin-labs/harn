@@ -25,6 +25,8 @@ Complete reference for all built-in functions available in Harn.
 |---|---|---|---|
 | `json_parse(str)` | str: string | value | Parse JSON string into Harn values. Throws on invalid JSON |
 | `json_stringify(value)` | value: any | string | Serialize Harn value to JSON. Closures and handles become `null` |
+| `json_validate(data, schema)` | data: any, schema: dict | bool | Validate data against a schema. Returns `true` if valid, throws with details if not |
+| `json_extract(text, key?)` | text: string, key: string (optional) | value | Extract JSON from text (strips markdown code fences). If key given, returns that key's value |
 
 Type mapping:
 
@@ -37,6 +39,44 @@ Type mapping:
 | null | nil |
 | array | list |
 | object | dict |
+
+### json_validate schema format
+
+The schema is a plain Harn dict (not JSON Schema). Supported keys:
+
+| Key | Type | Description |
+|---|---|---|
+| `type` | string | Expected type: `"string"`, `"int"`, `"float"`, `"bool"`, `"list"`, `"dict"`, `"any"` |
+| `required` | list | List of required key names (for dicts) |
+| `properties` | dict | Dict mapping property names to sub-schemas (for dicts) |
+| `items` | dict | Schema to validate each item against (for lists) |
+
+Example:
+
+```harn
+let schema = {
+  type: "dict",
+  required: ["name", "age"],
+  properties: {
+    name: {type: "string"},
+    age: {type: "int"},
+    tags: {type: "list", items: {type: "string"}}
+  }
+}
+json_validate(data, schema)  // throws if invalid
+```
+
+### json_extract
+
+Extracts JSON from LLM responses that may contain markdown code fences
+or surrounding prose. Handles `` ```json ... ``` ``, `` ``` ... ``` ``,
+and bare JSON with surrounding text.
+
+```harn
+let response = llm_call("Return JSON with name and age")
+let data = json_extract(response)         // parse, stripping fences
+let name = json_extract(response, "name") // extract just one key
+```
 
 ## File I/O
 
@@ -143,3 +183,48 @@ Notes:
 - If the tool reports `isError: true`, `mcp_call` throws the error text.
 - `mcp_connect` throws if the command cannot be spawned or the initialize
   handshake fails.
+
+### Auto-connecting MCP servers via harn.toml
+
+Instead of calling `mcp_connect` manually, you can declare MCP servers in
+`harn.toml`. They will be connected automatically before the pipeline executes
+and made available through the global `mcp` dict.
+
+Add a `[[mcp]]` entry for each server:
+
+```toml
+[[mcp]]
+name = "filesystem"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+
+[[mcp]]
+name = "github"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+```
+
+Each entry requires:
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | string | Identifier used to access the client (e.g., `mcp.filesystem`) |
+| `command` | string | Executable to spawn |
+| `args` | list of strings | Command-line arguments (default: empty) |
+
+The connected clients are available as properties on the `mcp` global dict:
+
+```harn
+pipeline default() {
+  let tools = mcp_list_tools(mcp.filesystem)
+  println(tools)
+
+  let result = mcp_call(mcp.github, "list_issues", {repo: "harn"})
+  println(result)
+}
+```
+
+If a server fails to connect, a warning is printed to stderr and that
+server is omitted from the `mcp` dict. Other servers still connect
+normally. The `mcp` global is only defined when at least one server
+connects successfully.

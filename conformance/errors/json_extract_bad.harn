@@ -1,0 +1,3 @@
+pipeline default() {
+  json_extract("not json at all")
+}
