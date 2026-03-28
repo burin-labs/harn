@@ -2,7 +2,7 @@ mod format;
 mod methods;
 mod ops;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
 use std::rc::Rc;
@@ -50,6 +50,18 @@ pub struct DebugState {
     pub frame_depth: usize,
 }
 
+/// Iterator state for for-in loops: either a pre-collected vec or an async channel.
+pub(crate) enum IterState {
+    Vec {
+        items: Vec<VmValue>,
+        idx: usize,
+    },
+    Channel {
+        receiver: std::sync::Arc<tokio::sync::Mutex<tokio::sync::mpsc::Receiver<VmValue>>>,
+        closed: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    },
+}
+
 /// The Harn bytecode virtual machine.
 pub struct Vm {
     pub(crate) stack: Vec<VmValue>,
@@ -58,7 +70,7 @@ pub struct Vm {
     pub(crate) builtins: BTreeMap<String, VmBuiltinFn>,
     pub(crate) async_builtins: BTreeMap<String, VmAsyncBuiltinFn>,
     /// Iterator state for for-in loops.
-    pub(crate) iterators: Vec<(Vec<VmValue>, usize)>,
+    pub(crate) iterators: Vec<IterState>,
     /// Call frame stack.
     pub(crate) frames: Vec<CallFrame>,
     /// Exception handler stack.
@@ -89,6 +101,8 @@ pub struct Vm {
     pub(crate) source_text: Option<String>,
     /// Optional bridge for delegating unknown builtins in bridge mode.
     pub(crate) bridge: Option<Rc<crate::bridge::HostBridge>>,
+    /// Builtins denied by sandbox mode (`--deny` / `--allow` flags).
+    pub(crate) denied_builtins: HashSet<String>,
 }
 
 impl Vm {
@@ -115,12 +129,19 @@ impl Vm {
             source_file: None,
             source_text: None,
             bridge: None,
+            denied_builtins: HashSet::new(),
         }
     }
 
     /// Set the bridge for delegating unknown builtins in bridge mode.
     pub fn set_bridge(&mut self, bridge: Rc<crate::bridge::HostBridge>) {
         self.bridge = Some(bridge);
+    }
+
+    /// Set builtins that are denied in sandbox mode.
+    /// When called, the given builtin names will produce a permission error.
+    pub fn set_denied_builtins(&mut self, denied: HashSet<String>) {
+        self.denied_builtins = denied;
     }
 
     /// Set source info for error reporting (file path and source text).
@@ -364,12 +385,20 @@ impl Vm {
             source_file: self.source_file.clone(),
             source_text: self.source_text.clone(),
             bridge: self.bridge.clone(),
+            denied_builtins: self.denied_builtins.clone(),
         }
     }
 
     /// Set the source directory for import resolution.
     pub fn set_source_dir(&mut self, dir: &std::path::Path) {
         self.source_dir = Some(dir.to_path_buf());
+    }
+
+    /// Return all registered builtin names (sync + async).
+    pub fn builtin_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.builtins.keys().cloned().collect();
+        names.extend(self.async_builtins.keys().cloned());
+        names
     }
 
     /// Set a global variable in the VM's environment.
@@ -812,6 +841,13 @@ impl Vm {
         name: &str,
         args: Vec<VmValue>,
     ) -> Result<VmValue, VmError> {
+        // Sandbox check: deny builtins blocked by --deny/--allow flags.
+        if self.denied_builtins.contains(name) {
+            return Err(VmError::Runtime(format!(
+                "Permission denied: builtin '{}' is not allowed in sandbox mode",
+                name
+            )));
+        }
         if let Some(builtin) = self.builtins.get(name).cloned() {
             builtin(&args, &mut self.output)
         } else if let Some(async_builtin) = self.async_builtins.get(name).cloned() {
@@ -1474,5 +1510,79 @@ try {
 }"#,
         );
         assert_eq!(out, "[harn] caught");
+    }
+
+    /// Helper that runs Harn source with a set of denied builtins.
+    fn run_harn_with_denied(
+        source: &str,
+        denied: HashSet<String>,
+    ) -> Result<(String, VmValue), VmError> {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let local = tokio::task::LocalSet::new();
+            local
+                .run_until(async {
+                    let mut lexer = Lexer::new(source);
+                    let tokens = lexer.tokenize().unwrap();
+                    let mut parser = Parser::new(tokens);
+                    let program = parser.parse().unwrap();
+                    let chunk = Compiler::new().compile(&program).unwrap();
+
+                    let mut vm = Vm::new();
+                    register_vm_stdlib(&mut vm);
+                    vm.set_denied_builtins(denied);
+                    let result = vm.execute(&chunk).await?;
+                    Ok((vm.output().to_string(), result))
+                })
+                .await
+        })
+    }
+
+    #[test]
+    fn test_sandbox_deny_builtin() {
+        let denied: HashSet<String> = ["push".to_string()].into_iter().collect();
+        let result = run_harn_with_denied(
+            r#"pipeline t(task) {
+let xs = [1, 2]
+push(xs, 3)
+}"#,
+            denied,
+        );
+        let err = result.unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("Permission denied"),
+            "expected permission denied, got: {msg}"
+        );
+        assert!(
+            msg.contains("push"),
+            "expected builtin name in error, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_sandbox_allowed_builtin_works() {
+        // Denying "push" should not block "log"
+        let denied: HashSet<String> = ["push".to_string()].into_iter().collect();
+        let result = run_harn_with_denied(
+            r#"pipeline t(task) { log("hello") }"#,
+            denied,
+        );
+        let (output, _) = result.unwrap();
+        assert_eq!(output.trim(), "[harn] hello");
+    }
+
+    #[test]
+    fn test_sandbox_empty_denied_set() {
+        // With an empty denied set, everything should work.
+        let result = run_harn_with_denied(
+            r#"pipeline t(task) { log("ok") }"#,
+            HashSet::new(),
+        );
+        let (output, _) = result.unwrap();
+        assert_eq!(output.trim(), "[harn] ok");
     }
 }

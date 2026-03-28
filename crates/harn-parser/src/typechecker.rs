@@ -294,57 +294,85 @@ impl TypeChecker {
         }
     }
 
+    /// Define variables from a destructuring pattern in the given scope (as unknown type).
+    fn define_pattern_vars(pattern: &BindingPattern, scope: &mut TypeScope) {
+        match pattern {
+            BindingPattern::Identifier(name) => {
+                scope.define_var(name, None);
+            }
+            BindingPattern::Dict(fields) => {
+                for field in fields {
+                    let name = field.alias.as_deref().unwrap_or(&field.key);
+                    scope.define_var(name, None);
+                }
+            }
+            BindingPattern::List(elements) => {
+                for elem in elements {
+                    scope.define_var(&elem.name, None);
+                }
+            }
+        }
+    }
+
     fn check_node(&mut self, snode: &SNode, scope: &mut TypeScope) {
         let span = snode.span;
         match &snode.node {
             Node::LetBinding {
-                name,
+                pattern,
                 type_ann,
                 value,
             } => {
                 let inferred = self.infer_type(value, scope);
-                if let Some(expected) = type_ann {
-                    if let Some(actual) = &inferred {
-                        if !self.types_compatible(expected, actual, scope) {
-                            self.error_at(
-                                format!(
-                                    "Type mismatch: '{}' declared as {}, but assigned {}",
-                                    name,
-                                    format_type(expected),
-                                    format_type(actual)
-                                ),
-                                span,
-                            );
+                if let BindingPattern::Identifier(name) = pattern {
+                    if let Some(expected) = type_ann {
+                        if let Some(actual) = &inferred {
+                            if !self.types_compatible(expected, actual, scope) {
+                                self.error_at(
+                                    format!(
+                                        "Type mismatch: '{}' declared as {}, but assigned {}",
+                                        name,
+                                        format_type(expected),
+                                        format_type(actual)
+                                    ),
+                                    span,
+                                );
+                            }
                         }
                     }
+                    let ty = type_ann.clone().or(inferred);
+                    scope.define_var(name, ty);
+                } else {
+                    Self::define_pattern_vars(pattern, scope);
                 }
-                let ty = type_ann.clone().or(inferred);
-                scope.define_var(name, ty);
             }
 
             Node::VarBinding {
-                name,
+                pattern,
                 type_ann,
                 value,
             } => {
                 let inferred = self.infer_type(value, scope);
-                if let Some(expected) = type_ann {
-                    if let Some(actual) = &inferred {
-                        if !self.types_compatible(expected, actual, scope) {
-                            self.error_at(
-                                format!(
-                                    "Type mismatch: '{}' declared as {}, but assigned {}",
-                                    name,
-                                    format_type(expected),
-                                    format_type(actual)
-                                ),
-                                span,
-                            );
+                if let BindingPattern::Identifier(name) = pattern {
+                    if let Some(expected) = type_ann {
+                        if let Some(actual) = &inferred {
+                            if !self.types_compatible(expected, actual, scope) {
+                                self.error_at(
+                                    format!(
+                                        "Type mismatch: '{}' declared as {}, but assigned {}",
+                                        name,
+                                        format_type(expected),
+                                        format_type(actual)
+                                    ),
+                                    span,
+                                );
+                            }
                         }
                     }
+                    let ty = type_ann.clone().or(inferred);
+                    scope.define_var(name, ty);
+                } else {
+                    Self::define_pattern_vars(pattern, scope);
                 }
-                let ty = type_ann.clone().or(inferred);
-                scope.define_var(name, ty);
             }
 
             Node::FnDecl {
@@ -385,21 +413,25 @@ impl TypeChecker {
             }
 
             Node::ForIn {
-                variable,
+                pattern,
                 iterable,
                 body,
             } => {
                 self.check_node(iterable, scope);
                 let mut loop_scope = scope.child();
-                // Infer loop variable type from iterable
-                let elem_type = match self.infer_type(iterable, scope) {
-                    Some(TypeExpr::List(inner)) => Some(*inner),
-                    Some(TypeExpr::Named(n)) if n == "string" => {
-                        Some(TypeExpr::Named("string".into()))
-                    }
-                    _ => None,
-                };
-                loop_scope.define_var(variable, elem_type);
+                if let BindingPattern::Identifier(variable) = pattern {
+                    // Infer loop variable type from iterable
+                    let elem_type = match self.infer_type(iterable, scope) {
+                        Some(TypeExpr::List(inner)) => Some(*inner),
+                        Some(TypeExpr::Named(n)) if n == "string" => {
+                            Some(TypeExpr::Named("string".into()))
+                        }
+                        _ => None,
+                    };
+                    loop_scope.define_var(variable, elem_type);
+                } else {
+                    Self::define_pattern_vars(pattern, &mut loop_scope);
+                }
                 self.check_block(body, &mut loop_scope);
             }
 

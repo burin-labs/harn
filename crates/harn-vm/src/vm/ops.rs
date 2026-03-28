@@ -663,33 +663,78 @@ impl super::Vm {
             }
         } else if op == Op::IterInit as u8 {
             let iterable = self.pop()?;
-            let items = match iterable {
-                VmValue::List(items) => (*items).clone(),
-                VmValue::Dict(map) => map
-                    .iter()
-                    .map(|(k, v)| {
-                        VmValue::Dict(Rc::new(BTreeMap::from([
-                            ("key".to_string(), VmValue::String(Rc::from(k.as_str()))),
-                            ("value".to_string(), v.clone()),
-                        ])))
-                    })
-                    .collect(),
-                _ => Vec::new(),
-            };
-            self.iterators.push((items, 0));
+            match iterable {
+                VmValue::List(items) => {
+                    self.iterators.push(super::IterState::Vec {
+                        items: (*items).clone(),
+                        idx: 0,
+                    });
+                }
+                VmValue::Dict(map) => {
+                    let items: Vec<VmValue> = map
+                        .iter()
+                        .map(|(k, v)| {
+                            VmValue::Dict(Rc::new(BTreeMap::from([
+                                ("key".to_string(), VmValue::String(Rc::from(k.as_str()))),
+                                ("value".to_string(), v.clone()),
+                            ])))
+                        })
+                        .collect();
+                    self.iterators.push(super::IterState::Vec { items, idx: 0 });
+                }
+                VmValue::Channel(ch) => {
+                    self.iterators.push(super::IterState::Channel {
+                        receiver: ch.receiver.clone(),
+                        closed: ch.closed.clone(),
+                    });
+                }
+                _ => {
+                    self.iterators.push(super::IterState::Vec {
+                        items: Vec::new(),
+                        idx: 0,
+                    });
+                }
+            }
         } else if op == Op::IterNext as u8 {
             let frame = self.frames.last_mut().unwrap();
             let target = frame.chunk.read_u16(frame.ip) as usize;
             frame.ip += 2;
-            if let Some((items, idx)) = self.iterators.last_mut() {
-                if *idx < items.len() {
-                    let item = items[*idx].clone();
-                    *idx += 1;
-                    self.stack.push(item);
-                } else {
-                    self.iterators.pop();
-                    let frame = self.frames.last_mut().unwrap();
-                    frame.ip = target;
+            if let Some(state) = self.iterators.last_mut() {
+                match state {
+                    super::IterState::Vec { items, idx } => {
+                        if *idx < items.len() {
+                            let item = items[*idx].clone();
+                            *idx += 1;
+                            self.stack.push(item);
+                        } else {
+                            self.iterators.pop();
+                            let frame = self.frames.last_mut().unwrap();
+                            frame.ip = target;
+                        }
+                    }
+                    super::IterState::Channel { receiver, closed } => {
+                        let rx = receiver.clone();
+                        let is_closed =
+                            closed.load(std::sync::atomic::Ordering::Relaxed);
+                        let mut guard = rx.lock().await;
+                        // If sender is closed, drain remaining items without blocking
+                        let item = if is_closed {
+                            guard.try_recv().ok()
+                        } else {
+                            guard.recv().await
+                        };
+                        match item {
+                            Some(val) => {
+                                self.stack.push(val);
+                            }
+                            None => {
+                                drop(guard);
+                                self.iterators.pop();
+                                let frame = self.frames.last_mut().unwrap();
+                                frame.ip = target;
+                            }
+                        }
+                    }
                 }
             } else {
                 let frame = self.frames.last_mut().unwrap();

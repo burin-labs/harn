@@ -241,16 +241,61 @@ impl SyncInterpreter {
         Ok(result)
     }
 
+    fn define_pattern(&mut self, pattern: &harn_parser::BindingPattern, val: Val, mutable: bool) {
+        match pattern {
+            harn_parser::BindingPattern::Identifier(name) => {
+                self.env.define(name, val, mutable);
+            }
+            harn_parser::BindingPattern::Dict(fields) => {
+                if let Val::Dict(ref map) = val {
+                    for field in fields {
+                        if field.is_rest {
+                            // Build rest dict excluding other field keys
+                            let exclude: std::collections::HashSet<&str> = fields
+                                .iter()
+                                .filter(|f| !f.is_rest)
+                                .map(|f| f.key.as_str())
+                                .collect();
+                            let rest: BTreeMap<String, Val> = map
+                                .iter()
+                                .filter(|(k, _)| !exclude.contains(k.as_str()))
+                                .map(|(k, v)| (k.clone(), v.clone()))
+                                .collect();
+                            self.env.define(&field.key, Val::Dict(rest), mutable);
+                        } else {
+                            let v = map.get(&field.key).cloned().unwrap_or(Val::Nil);
+                            let name = field.alias.as_deref().unwrap_or(&field.key);
+                            self.env.define(name, v, mutable);
+                        }
+                    }
+                }
+            }
+            harn_parser::BindingPattern::List(elements) => {
+                if let Val::List(ref items) = val {
+                    for (i, elem) in elements.iter().enumerate() {
+                        if elem.is_rest {
+                            let rest = items.get(i..).unwrap_or_default().to_vec();
+                            self.env.define(&elem.name, Val::List(rest), mutable);
+                        } else {
+                            let v = items.get(i).cloned().unwrap_or(Val::Nil);
+                            self.env.define(&elem.name, v, mutable);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     fn eval(&mut self, node: &Node) -> Result<Val, EvalStop> {
         match node {
-            Node::LetBinding { name, value } => {
+            Node::LetBinding { pattern, value, .. } => {
                 let val = self.eval(value)?;
-                self.env.define(name, val, false);
+                self.define_pattern(pattern, val, false);
                 Ok(Val::Nil)
             }
-            Node::VarBinding { name, value } => {
+            Node::VarBinding { pattern, value, .. } => {
                 let val = self.eval(value)?;
-                self.env.define(name, val, true);
+                self.define_pattern(pattern, val, true);
                 Ok(Val::Nil)
             }
             Node::Assignment { target, value, .. } => {
@@ -269,7 +314,7 @@ impl SyncInterpreter {
                     Ok(Val::Nil)
                 }
             }
-            Node::ForIn { variable, iterable, body } => {
+            Node::ForIn { pattern, iterable, body } => {
                 let iter_val = self.eval(iterable)?;
                 let items = match iter_val {
                     Val::List(items) => items,
@@ -285,7 +330,7 @@ impl SyncInterpreter {
                 self.env = self.env.child();
                 let mut result = Val::Nil;
                 for item in items {
-                    self.env.define(variable, item, true);
+                    self.define_pattern(pattern, item, true);
                     result = self.exec(body)?;
                 }
                 self.env = saved;

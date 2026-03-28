@@ -145,6 +145,12 @@ pub async fn run_tests(
     timeout_ms: u64,
     parallel: bool,
 ) -> TestSummary {
+    // Default LLM provider to "mock" in test mode unless explicitly set
+    let prev_provider = std::env::var("HARN_LLM_PROVIDER").ok();
+    if prev_provider.is_none() {
+        std::env::set_var("HARN_LLM_PROVIDER", "mock");
+    }
+
     let start = Instant::now();
     let mut all_results = Vec::new();
 
@@ -205,6 +211,12 @@ pub async fn run_tests(
                 }
             }
         }
+    }
+
+    // Restore previous HARN_LLM_PROVIDER state
+    match prev_provider {
+        Some(val) => std::env::set_var("HARN_LLM_PROVIDER", val),
+        None => std::env::remove_var("HARN_LLM_PROVIDER"),
     }
 
     let passed = all_results.iter().filter(|r| r.passed).count();

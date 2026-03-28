@@ -1,7 +1,42 @@
 use std::collections::BTreeMap;
 
 use harn_lexer::{Lexer, StringSegment, TokenKind};
-use harn_parser::{Node, Parser, SNode, TypeExpr, TypedParam};
+use harn_parser::{BindingPattern, Node, Parser, SNode, TypeExpr, TypedParam};
+
+/// Format a binding pattern to a string.
+fn format_pattern(pattern: &BindingPattern) -> String {
+    match pattern {
+        BindingPattern::Identifier(name) => name.clone(),
+        BindingPattern::Dict(fields) => {
+            let parts: Vec<String> = fields
+                .iter()
+                .map(|f| {
+                    if f.is_rest {
+                        format!("...{}", f.key)
+                    } else if let Some(alias) = &f.alias {
+                        format!("{}: {}", f.key, alias)
+                    } else {
+                        f.key.clone()
+                    }
+                })
+                .collect();
+            format!("{{{}}}", parts.join(", "))
+        }
+        BindingPattern::List(elements) => {
+            let parts: Vec<String> = elements
+                .iter()
+                .map(|e| {
+                    if e.is_rest {
+                        format!("...{}", e.name)
+                    } else {
+                        e.name.clone()
+                    }
+                })
+                .collect();
+            format!("[{}]", parts.join(", "))
+        }
+    }
+}
 
 /// Escape a string for embedding in double-quoted output.
 fn escape_string(s: &str) -> String {
@@ -176,22 +211,24 @@ impl Formatter {
                 self.writeln("}");
             }
             Node::LetBinding {
-                name,
+                pattern,
                 type_ann,
                 value,
             } => {
+                let pat = format_pattern(pattern);
                 let type_str = format_type_ann(type_ann);
                 let val = self.format_expr(value);
-                self.writeln(&format!("let {name}{type_str} = {val}"));
+                self.writeln(&format!("let {pat}{type_str} = {val}"));
             }
             Node::VarBinding {
-                name,
+                pattern,
                 type_ann,
                 value,
             } => {
+                let pat = format_pattern(pattern);
                 let type_str = format_type_ann(type_ann);
                 let val = self.format_expr(value);
-                self.writeln(&format!("var {name}{type_str} = {val}"));
+                self.writeln(&format!("var {pat}{type_str} = {val}"));
             }
             Node::FnDecl {
                 name,
@@ -244,12 +281,13 @@ impl Formatter {
                 }
             }
             Node::ForIn {
-                variable,
+                pattern,
                 iterable,
                 body,
             } => {
+                let pat = format_pattern(pattern);
                 let iter_str = self.format_expr(iterable);
-                self.writeln(&format!("for {variable} in {iter_str} {{"));
+                self.writeln(&format!("for {pat} in {iter_str} {{"));
                 self.indent();
                 self.format_body(body, node_line);
                 self.dedent();
@@ -889,12 +927,13 @@ impl Formatter {
                 result
             }
             Node::ForIn {
-                variable,
+                pattern,
                 iterable,
                 body,
             } => {
+                let pat = format_pattern(pattern);
                 let iter_str = self.format_expr(iterable);
-                let mut result = format!("for {variable} in {iter_str} {{\n");
+                let mut result = format!("for {pat} in {iter_str} {{\n");
                 let current_indent = self.indent + 1;
                 for n in body {
                     let indent_str = "  ".repeat(current_indent);
@@ -1051,22 +1090,24 @@ impl Formatter {
                 result
             }
             Node::LetBinding {
-                name,
+                pattern,
                 type_ann,
                 value,
             } => {
+                let pat = format_pattern(pattern);
                 let type_str = format_type_ann(type_ann);
                 let val = self.format_expr(value);
-                format!("let {name}{type_str} = {val}")
+                format!("let {pat}{type_str} = {val}")
             }
             Node::VarBinding {
-                name,
+                pattern,
                 type_ann,
                 value,
             } => {
+                let pat = format_pattern(pattern);
                 let type_str = format_type_ann(type_ann);
                 let val = self.format_expr(value);
-                format!("var {name}{type_str} = {val}")
+                format!("var {pat}{type_str} = {val}")
             }
             Node::ImportDecl { path } => format!("import \"{path}\""),
             Node::SelectiveImport { names, path } => {
@@ -1148,12 +1189,13 @@ impl Formatter {
                 result
             }
             Node::ForIn {
-                variable,
+                pattern,
                 iterable,
                 body,
             } => {
+                let pat = format_pattern(pattern);
                 let iter_str = self.format_expr(iterable);
-                let mut result = format!("for {variable} in {iter_str} {{\n");
+                let mut result = format!("for {pat} in {iter_str} {{\n");
                 for n in body {
                     let indent_str = "  ".repeat(indent_level + 1);
                     let expr = self.format_expr_or_stmt(n, indent_level + 1);
@@ -1209,22 +1251,24 @@ impl Formatter {
                 result
             }
             Node::LetBinding {
-                name,
+                pattern,
                 type_ann,
                 value,
             } => {
+                let pat = format_pattern(pattern);
                 let type_str = format_type_ann(type_ann);
                 let val = self.format_expr(value);
-                format!("let {name}{type_str} = {val}")
+                format!("let {pat}{type_str} = {val}")
             }
             Node::VarBinding {
-                name,
+                pattern,
                 type_ann,
                 value,
             } => {
+                let pat = format_pattern(pattern);
                 let type_str = format_type_ann(type_ann);
                 let val = self.format_expr(value);
-                format!("var {name}{type_str} = {val}")
+                format!("var {pat}{type_str} = {val}")
             }
             Node::TryCatch {
                 body,

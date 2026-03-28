@@ -1,5 +1,5 @@
 use harn_lexer::StringSegment;
-use harn_parser::{Node, SNode, TypedParam};
+use harn_parser::{BindingPattern, Node, SNode, TypedParam};
 
 use crate::chunk::{Chunk, CompiledFunction, Constant, Op};
 
@@ -209,16 +209,18 @@ impl Compiler {
                 self.chunk.emit_u16(Op::GetVar, idx, self.line);
             }
 
-            Node::LetBinding { name, value, .. } => {
+            Node::LetBinding {
+                pattern, value, ..
+            } => {
                 self.compile_node(value)?;
-                let idx = self.chunk.add_constant(Constant::String(name.clone()));
-                self.chunk.emit_u16(Op::DefLet, idx, self.line);
+                self.compile_destructuring(pattern, false)?;
             }
 
-            Node::VarBinding { name, value, .. } => {
+            Node::VarBinding {
+                pattern, value, ..
+            } => {
                 self.compile_node(value)?;
-                let idx = self.chunk.add_constant(Constant::String(name.clone()));
-                self.chunk.emit_u16(Op::DefVar, idx, self.line);
+                self.compile_destructuring(pattern, true)?;
             }
 
             Node::Assignment {
@@ -569,14 +571,12 @@ impl Compiler {
             }
 
             Node::ForIn {
-                variable,
+                pattern,
                 iterable,
                 body,
             } => {
                 // Compile iterable
                 self.compile_node(iterable)?;
-                // Variable name
-                let var_idx = self.chunk.add_constant(Constant::String(variable.clone()));
                 // Initialize iterator
                 self.chunk.emit(Op::IterInit, self.line);
                 let loop_start = self.chunk.current_offset();
@@ -588,8 +588,8 @@ impl Compiler {
                 });
                 // Try to get next item — jumps to end if exhausted
                 let exit_jump_pos = self.chunk.emit_jump(Op::IterNext, self.line);
-                // Define loop variable with current item (item is on stack from IterNext)
-                self.chunk.emit_u16(Op::DefVar, var_idx, self.line);
+                // Define loop variable(s) with current item (item is on stack from IterNext)
+                self.compile_destructuring(pattern, true)?;
                 // Compile body statements, popping all results
                 for sn in body {
                     self.compile_node(sn)?;
@@ -1356,6 +1356,111 @@ impl Compiler {
                 self.chunk.functions.push(func);
                 self.chunk.emit_u16(Op::Closure, fn_idx as u16, self.line);
                 self.chunk.emit(Op::Spawn, self.line);
+            }
+        }
+        Ok(())
+    }
+
+    /// Compile a destructuring binding pattern.
+    /// Expects the RHS value to already be on the stack.
+    /// After this, the value is consumed (popped) and each binding is defined.
+    fn compile_destructuring(
+        &mut self,
+        pattern: &BindingPattern,
+        is_mutable: bool,
+    ) -> Result<(), CompileError> {
+        let def_op = if is_mutable { Op::DefVar } else { Op::DefLet };
+        match pattern {
+            BindingPattern::Identifier(name) => {
+                // Simple case: just define the variable
+                let idx = self.chunk.add_constant(Constant::String(name.clone()));
+                self.chunk.emit_u16(def_op, idx, self.line);
+            }
+            BindingPattern::Dict(fields) => {
+                // Stack has the dict value.
+                // For each non-rest field: dup dict, push key string, subscript, define var.
+                // For rest field: dup dict, call __dict_rest builtin.
+                let non_rest: Vec<_> = fields.iter().filter(|f| !f.is_rest).collect();
+                let rest_field = fields.iter().find(|f| f.is_rest);
+
+                for field in &non_rest {
+                    self.chunk.emit(Op::Dup, self.line);
+                    let key_idx = self
+                        .chunk
+                        .add_constant(Constant::String(field.key.clone()));
+                    self.chunk.emit_u16(Op::Constant, key_idx, self.line);
+                    self.chunk.emit(Op::Subscript, self.line);
+                    let binding_name = field.alias.as_deref().unwrap_or(&field.key);
+                    let name_idx = self
+                        .chunk
+                        .add_constant(Constant::String(binding_name.to_string()));
+                    self.chunk.emit_u16(def_op, name_idx, self.line);
+                }
+
+                if let Some(rest) = rest_field {
+                    // Call the __dict_rest builtin: __dict_rest(dict, [keys_to_exclude])
+                    // Push function name
+                    let fn_idx = self
+                        .chunk
+                        .add_constant(Constant::String("__dict_rest".into()));
+                    self.chunk.emit_u16(Op::Constant, fn_idx, self.line);
+                    // Swap so dict is above function name: [fn, dict]
+                    self.chunk.emit(Op::Swap, self.line);
+                    // Build the exclusion keys list
+                    for field in &non_rest {
+                        let key_idx = self
+                            .chunk
+                            .add_constant(Constant::String(field.key.clone()));
+                        self.chunk.emit_u16(Op::Constant, key_idx, self.line);
+                    }
+                    self.chunk
+                        .emit_u16(Op::BuildList, non_rest.len() as u16, self.line);
+                    // Call __dict_rest(dict, keys_list) — 2 args
+                    self.chunk.emit_u8(Op::Call, 2, self.line);
+                    let rest_name = &rest.key;
+                    let rest_idx = self
+                        .chunk
+                        .add_constant(Constant::String(rest_name.clone()));
+                    self.chunk.emit_u16(def_op, rest_idx, self.line);
+                } else {
+                    // Pop the source dict
+                    self.chunk.emit(Op::Pop, self.line);
+                }
+            }
+            BindingPattern::List(elements) => {
+                // Stack has the list value.
+                let non_rest: Vec<_> = elements.iter().filter(|e| !e.is_rest).collect();
+                let rest_elem = elements.iter().find(|e| e.is_rest);
+
+                for (i, elem) in non_rest.iter().enumerate() {
+                    self.chunk.emit(Op::Dup, self.line);
+                    let idx_const = self.chunk.add_constant(Constant::Int(i as i64));
+                    self.chunk.emit_u16(Op::Constant, idx_const, self.line);
+                    self.chunk.emit(Op::Subscript, self.line);
+                    let name_idx = self
+                        .chunk
+                        .add_constant(Constant::String(elem.name.clone()));
+                    self.chunk.emit_u16(def_op, name_idx, self.line);
+                }
+
+                if let Some(rest) = rest_elem {
+                    // Slice the list from index non_rest.len() to end: list[n..]
+                    // Slice op takes: object, start, end on stack
+                    // self.chunk.emit(Op::Dup, self.line); -- list is still on stack
+                    let start_idx = self
+                        .chunk
+                        .add_constant(Constant::Int(non_rest.len() as i64));
+                    self.chunk.emit_u16(Op::Constant, start_idx, self.line);
+                    self.chunk.emit(Op::Nil, self.line); // end = nil (to end)
+                    self.chunk.emit(Op::Slice, self.line);
+                    let rest_name_idx = self
+                        .chunk
+                        .add_constant(Constant::String(rest.name.clone()));
+                    self.chunk.emit_u16(def_op, rest_name_idx, self.line);
+                } else {
+                    // Pop the source list
+                    self.chunk.emit(Op::Pop, self.line);
+                }
             }
         }
         Ok(())

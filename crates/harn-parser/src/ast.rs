@@ -39,12 +39,12 @@ pub enum Node {
         extends: Option<String>,
     },
     LetBinding {
-        name: String,
+        pattern: BindingPattern,
         type_ann: Option<TypeExpr>,
         value: Box<SNode>,
     },
     VarBinding {
-        name: String,
+        pattern: BindingPattern,
         type_ann: Option<TypeExpr>,
         value: Box<SNode>,
     },
@@ -81,7 +81,7 @@ pub enum Node {
         else_body: Option<Vec<SNode>>,
     },
     ForIn {
-        variable: String,
+        pattern: BindingPattern,
         iterable: Box<SNode>,
         body: Vec<SNode>,
     },
@@ -313,6 +313,37 @@ pub struct ShapeField {
     pub name: String,
     pub type_expr: TypeExpr,
     pub optional: bool,
+}
+
+/// A binding pattern for destructuring in let/var/for-in.
+#[derive(Debug, Clone, PartialEq)]
+pub enum BindingPattern {
+    /// Simple identifier: `let x = ...`
+    Identifier(String),
+    /// Dict destructuring: `let {name, age} = ...`
+    Dict(Vec<DictPatternField>),
+    /// List destructuring: `let [a, b] = ...`
+    List(Vec<ListPatternElement>),
+}
+
+/// A field in a dict destructuring pattern.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DictPatternField {
+    /// The dict key to extract.
+    pub key: String,
+    /// Renamed binding (if different from key), e.g. `{name: alias}`.
+    pub alias: Option<String>,
+    /// True for `...rest` (rest pattern).
+    pub is_rest: bool,
+}
+
+/// An element in a list destructuring pattern.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ListPatternElement {
+    /// The variable name to bind.
+    pub name: String,
+    /// True for `...rest` (rest pattern).
+    pub is_rest: bool,
 }
 
 /// A parameter with an optional type annotation.

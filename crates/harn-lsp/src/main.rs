@@ -295,6 +295,20 @@ fn build_symbol_table(program: &[SNode]) -> Vec<SymbolInfo> {
     symbols
 }
 
+/// Extract all variable names from a binding pattern.
+fn binding_pattern_names(pattern: &harn_parser::BindingPattern) -> Vec<String> {
+    match pattern {
+        harn_parser::BindingPattern::Identifier(name) => vec![name.clone()],
+        harn_parser::BindingPattern::Dict(fields) => fields
+            .iter()
+            .map(|f| f.alias.as_deref().unwrap_or(&f.key).to_string())
+            .collect(),
+        harn_parser::BindingPattern::List(elements) => {
+            elements.iter().map(|e| e.name.clone()).collect()
+        }
+    }
+}
+
 fn collect_symbols(snode: &SNode, symbols: &mut Vec<SymbolInfo>, scope_span: Option<Span>) {
     match &snode.node {
         Node::Pipeline {
@@ -371,33 +385,37 @@ fn collect_symbols(snode: &SNode, symbols: &mut Vec<SymbolInfo>, scope_span: Opt
             }
         }
         Node::LetBinding {
-            name,
+            pattern,
             type_ann,
             value,
         } => {
-            symbols.push(SymbolInfo {
-                name: name.clone(),
-                kind: HarnSymbolKind::Variable,
-                def_span: snode.span,
-                type_info: type_ann.clone().or_else(|| infer_literal_type(value)),
-                signature: None,
-                scope_span,
-            });
+            for name in binding_pattern_names(pattern) {
+                symbols.push(SymbolInfo {
+                    name,
+                    kind: HarnSymbolKind::Variable,
+                    def_span: snode.span,
+                    type_info: type_ann.clone().or_else(|| infer_literal_type(value)),
+                    signature: None,
+                    scope_span,
+                });
+            }
             collect_symbols(value, symbols, scope_span);
         }
         Node::VarBinding {
-            name,
+            pattern,
             type_ann,
             value,
         } => {
-            symbols.push(SymbolInfo {
-                name: name.clone(),
-                kind: HarnSymbolKind::Variable,
-                def_span: snode.span,
-                type_info: type_ann.clone().or_else(|| infer_literal_type(value)),
-                signature: None,
-                scope_span,
-            });
+            for name in binding_pattern_names(pattern) {
+                symbols.push(SymbolInfo {
+                    name,
+                    kind: HarnSymbolKind::Variable,
+                    def_span: snode.span,
+                    type_info: type_ann.clone().or_else(|| infer_literal_type(value)),
+                    signature: None,
+                    scope_span,
+                });
+            }
             collect_symbols(value, symbols, scope_span);
         }
         Node::EnumDecl { name, .. } => {
@@ -455,18 +473,20 @@ fn collect_symbols(snode: &SNode, symbols: &mut Vec<SymbolInfo>, scope_span: Opt
             });
         }
         Node::ForIn {
-            variable,
+            pattern,
             iterable,
             body,
         } => {
-            symbols.push(SymbolInfo {
-                name: variable.clone(),
-                kind: HarnSymbolKind::Variable,
-                def_span: snode.span,
-                type_info: None,
-                signature: None,
-                scope_span: Some(snode.span),
-            });
+            for name in binding_pattern_names(pattern) {
+                symbols.push(SymbolInfo {
+                    name,
+                    kind: HarnSymbolKind::Variable,
+                    def_span: snode.span,
+                    type_info: None,
+                    signature: None,
+                    scope_span: Some(snode.span),
+                });
+            }
             collect_symbols(iterable, symbols, scope_span);
             for s in body {
                 collect_symbols(s, symbols, Some(snode.span));
@@ -852,18 +872,29 @@ fn collect_references(snode: &SNode, target_name: &str, refs: &mut Vec<Span>) {
                 collect_references(s, target_name, refs);
             }
         }
-        Node::LetBinding { name, value, .. } | Node::VarBinding { name, value, .. } => {
-            if name == target_name {
+        Node::LetBinding {
+            pattern, value, ..
+        }
+        | Node::VarBinding {
+            pattern, value, ..
+        } => {
+            if binding_pattern_names(pattern)
+                .iter()
+                .any(|n| n == target_name)
+            {
                 refs.push(snode.span);
             }
             collect_references(value, target_name, refs);
         }
         Node::ForIn {
-            variable,
+            pattern,
             iterable,
             body,
         } => {
-            if variable == target_name {
+            if binding_pattern_names(pattern)
+                .iter()
+                .any(|n| n == target_name)
+            {
                 refs.push(snode.span);
             }
             collect_references(iterable, target_name, refs);

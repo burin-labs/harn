@@ -1,0 +1,11 @@
+pipeline default() {
+  // Use llm_stream with mock provider to test channel iteration
+  let stream = llm_stream("Say hello", nil, {provider: "mock"})
+  var chunks = []
+  for chunk in stream {
+    chunks = chunks + [chunk]
+  }
+  // Mock stream should produce at least one chunk
+  println(chunks.count > 0)
+  println(type_of(chunks[0]))
+}

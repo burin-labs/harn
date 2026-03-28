@@ -19,7 +19,8 @@ async fn main() {
     if args.len() < 2 {
         eprintln!("Usage: harn <command> [args]");
         eprintln!("Commands:");
-        eprintln!("  run [--trace] <file>   Execute a Harn file");
+        eprintln!("  run [--trace] [--deny <builtins>] [--allow <builtins>] <file>");
+        eprintln!("                         Execute a Harn file");
         eprintln!("  check <file.harn>      Type-check and lint without executing");
         eprintln!("  lint <file.harn>       Lint a Harn file");
         eprintln!("  fmt [--check] <file>   Format a Harn file");
@@ -57,11 +58,24 @@ async fn main() {
                 .windows(2)
                 .find(|w| w[0] == "--arg")
                 .map(|w| w[1].clone());
+            let deny_csv = args
+                .windows(2)
+                .find(|w| w[0] == "--deny")
+                .map(|w| w[1].clone());
+            let allow_csv = args
+                .windows(2)
+                .find(|w| w[0] == "--allow")
+                .map(|w| w[1].clone());
+
+            if deny_csv.is_some() && allow_csv.is_some() {
+                eprintln!("error: --deny and --allow cannot be used together");
+                process::exit(1);
+            }
 
             // Find the .harn file (skip flag values)
             let flag_vals: std::collections::HashSet<&str> = args
                 .windows(2)
-                .filter(|w| w[0] == "--arg")
+                .filter(|w| w[0] == "--arg" || w[0] == "--deny" || w[0] == "--allow")
                 .map(|w| w[1].as_str())
                 .collect();
             let file = args
@@ -69,16 +83,20 @@ async fn main() {
                 .skip(2)
                 .find(|a| !a.starts_with("--") && !flag_vals.contains(a.as_str()));
 
+            // Build the denied builtins set from --deny or --allow flags.
+            let denied: std::collections::HashSet<String> =
+                build_denied_builtins(deny_csv.as_deref(), allow_csv.as_deref());
+
             match file {
                 Some(f) => {
                     if bridge {
                         run_file_bridge(f, arg_json.as_deref()).await;
                     } else {
-                        run_file(f, trace).await;
+                        run_file(f, trace, denied).await;
                     }
                 }
                 None => {
-                    eprintln!("Usage: harn run [--trace] [--bridge --arg <json>] <file.harn>");
+                    eprintln!("Usage: harn run [--trace] [--deny <builtins>] [--allow <builtins>] <file.harn>");
                     process::exit(1);
                 }
             }
@@ -241,7 +259,7 @@ async fn main() {
         "add" => package::add_package(&args[2..]),
         _ => {
             if args[1].ends_with(".harn") {
-                run_file(&args[1], false).await;
+                run_file(&args[1], false, std::collections::HashSet::new()).await;
             } else {
                 eprintln!("Unknown command: {}", args[1]);
                 process::exit(1);
@@ -423,7 +441,63 @@ fn fmt_file(path: &str, check_mode: bool) {
     }
 }
 
-async fn run_file(path: &str, trace: bool) {
+/// Core builtins that are never denied, even when using `--allow`.
+const CORE_BUILTINS: &[&str] = &[
+    "println",
+    "print",
+    "log",
+    "type_of",
+    "to_string",
+    "to_int",
+    "to_float",
+    "len",
+    "assert",
+    "assert_eq",
+    "assert_ne",
+    "json_parse",
+    "json_stringify",
+];
+
+/// Build the set of denied builtin names from `--deny` or `--allow` flags.
+///
+/// - `--deny a,b,c` denies exactly those names.
+/// - `--allow a,b,c` denies everything *except* the listed names and the core builtins.
+fn build_denied_builtins(
+    deny_csv: Option<&str>,
+    allow_csv: Option<&str>,
+) -> std::collections::HashSet<String> {
+    if let Some(csv) = deny_csv {
+        csv.split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
+    } else if let Some(csv) = allow_csv {
+        // With --allow, we mark every registered stdlib builtin as denied
+        // *except* those in the allow list and the core builtins.
+        let allowed: std::collections::HashSet<String> = csv
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        let core: std::collections::HashSet<&str> = CORE_BUILTINS.iter().copied().collect();
+
+        // Create a temporary VM with stdlib registered to enumerate all builtin names.
+        let mut tmp = harn_vm::Vm::new();
+        harn_vm::register_vm_stdlib(&mut tmp);
+        harn_vm::register_http_builtins(&mut tmp);
+        harn_vm::register_llm_builtins(&mut tmp);
+        harn_vm::register_store_builtins(&mut tmp, std::path::Path::new("."));
+
+        tmp.builtin_names()
+            .into_iter()
+            .filter(|name| !allowed.contains(name) && !core.contains(name.as_str()))
+            .collect()
+    } else {
+        std::collections::HashSet::new()
+    }
+}
+
+async fn run_file(path: &str, trace: bool, denied_builtins: std::collections::HashSet<String>) {
     let (source, program) = parse_source_file(path);
 
     // Static type checking
@@ -456,6 +530,9 @@ async fn run_file(path: &str, trace: bool) {
         .unwrap_or(std::path::Path::new("."));
     harn_vm::register_store_builtins(&mut vm, store_base);
     vm.set_source_info(path, &source);
+    if !denied_builtins.is_empty() {
+        vm.set_denied_builtins(denied_builtins);
+    }
 
     if let Some(p) = std::path::Path::new(path).parent() {
         if !p.as_os_str().is_empty() {
@@ -470,18 +547,24 @@ async fn run_file(path: &str, trace: bool) {
         }
     }
 
-    match vm.execute(&chunk).await {
-        Ok(_) => {
-            let output = vm.output();
-            if !output.is_empty() {
-                io::stdout().write_all(output.as_bytes()).ok();
+    // Run inside a LocalSet so spawn_local works for concurrency builtins.
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            match vm.execute(&chunk).await {
+                Ok(_) => {
+                    let output = vm.output();
+                    if !output.is_empty() {
+                        io::stdout().write_all(output.as_bytes()).ok();
+                    }
+                }
+                Err(e) => {
+                    eprint!("{}", vm.format_runtime_error(&e));
+                    process::exit(1);
+                }
             }
-        }
-        Err(e) => {
-            eprint!("{}", vm.format_runtime_error(&e));
-            process::exit(1);
-        }
-    }
+        })
+        .await;
 
     if trace {
         print_trace_summary();

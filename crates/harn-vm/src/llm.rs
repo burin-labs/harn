@@ -319,6 +319,18 @@ pub fn register_llm_builtins(vm: &mut Vm) {
         let tx_for_task = tx_arc.clone();
 
         tokio::task::spawn_local(async move {
+            // Mock provider: send deterministic chunks without API call
+            if provider == "mock" {
+                let words: Vec<&str> = prompt.split_whitespace().collect();
+                for word in &words {
+                    let _ = tx_for_task
+                        .send(VmValue::String(Rc::from(*word)))
+                        .await;
+                }
+                closed_clone.store(true, std::sync::atomic::Ordering::Relaxed);
+                return;
+            }
+
             let result = vm_stream_llm(
                 &provider,
                 &model,
@@ -529,7 +541,10 @@ fn vm_resolve_provider(options: &Option<BTreeMap<String, VmValue>>) -> String {
         .as_ref()
         .and_then(|o| o.get("provider"))
         .map(|v| v.display())
-        .unwrap_or_else(|| "anthropic".to_string())
+        .unwrap_or_else(|| {
+            // In test mode (HARN_LLM_PROVIDER env var), use the specified provider
+            std::env::var("HARN_LLM_PROVIDER").unwrap_or_else(|_| "anthropic".to_string())
+        })
 }
 
 fn vm_resolve_model(options: &Option<BTreeMap<String, VmValue>>, provider: &str) -> String {

@@ -314,13 +314,17 @@ impl Parser {
     fn parse_let_binding(&mut self) -> Result<SNode, ParserError> {
         let start = self.current_span();
         self.consume(&TokenKind::Let, "let")?;
-        let name = self.consume_identifier("variable name")?;
-        let type_ann = self.try_parse_type_annotation()?;
+        let pattern = self.parse_binding_pattern()?;
+        let type_ann = if matches!(pattern, BindingPattern::Identifier(_)) {
+            self.try_parse_type_annotation()?
+        } else {
+            None
+        };
         self.consume(&TokenKind::Assign, "=")?;
         let value = self.parse_expression()?;
         Ok(spanned(
             Node::LetBinding {
-                name,
+                pattern,
                 type_ann,
                 value: Box::new(value),
             },
@@ -331,13 +335,17 @@ impl Parser {
     fn parse_var_binding(&mut self) -> Result<SNode, ParserError> {
         let start = self.current_span();
         self.consume(&TokenKind::Var, "var")?;
-        let name = self.consume_identifier("variable name")?;
-        let type_ann = self.try_parse_type_annotation()?;
+        let pattern = self.parse_binding_pattern()?;
+        let type_ann = if matches!(pattern, BindingPattern::Identifier(_)) {
+            self.try_parse_type_annotation()?
+        } else {
+            None
+        };
         self.consume(&TokenKind::Assign, "=")?;
         let value = self.parse_expression()?;
         Ok(spanned(
             Node::VarBinding {
-                name,
+                pattern,
                 type_ann,
                 value: Box::new(value),
             },
@@ -381,7 +389,7 @@ impl Parser {
     fn parse_for_in(&mut self) -> Result<SNode, ParserError> {
         let start = self.current_span();
         self.consume(&TokenKind::For, "for")?;
-        let variable = self.consume_identifier("loop variable")?;
+        let pattern = self.parse_binding_pattern()?;
         self.consume(&TokenKind::In, "in")?;
         let iterable = self.parse_expression()?;
         self.consume(&TokenKind::LBrace, "{")?;
@@ -389,12 +397,90 @@ impl Parser {
         self.consume(&TokenKind::RBrace, "}")?;
         Ok(spanned(
             Node::ForIn {
-                variable,
+                pattern,
                 iterable: Box::new(iterable),
                 body,
             },
             Span::merge(start, self.prev_span()),
         ))
+    }
+
+    /// Parse a binding pattern for let/var/for-in:
+    ///   identifier | { fields } | [ elements ]
+    fn parse_binding_pattern(&mut self) -> Result<BindingPattern, ParserError> {
+        self.skip_newlines();
+        if self.check(&TokenKind::LBrace) {
+            // Dict destructuring: { key, key: alias, ...rest }
+            self.advance(); // consume {
+            let mut fields = Vec::new();
+            while !self.is_at_end() && !self.check(&TokenKind::RBrace) {
+                // Check for rest pattern: ...ident
+                if self.check(&TokenKind::Dot) {
+                    // Consume three dots
+                    self.advance(); // .
+                    self.consume(&TokenKind::Dot, ".")?;
+                    self.consume(&TokenKind::Dot, ".")?;
+                    let name = self.consume_identifier("rest variable name")?;
+                    fields.push(DictPatternField {
+                        key: name,
+                        alias: None,
+                        is_rest: true,
+                    });
+                    // Rest must be last
+                    break;
+                }
+                let key = self.consume_identifier("field name")?;
+                let alias = if self.check(&TokenKind::Colon) {
+                    self.advance(); // consume :
+                    Some(self.consume_identifier("alias name")?)
+                } else {
+                    None
+                };
+                fields.push(DictPatternField {
+                    key,
+                    alias,
+                    is_rest: false,
+                });
+                if self.check(&TokenKind::Comma) {
+                    self.advance();
+                }
+            }
+            self.consume(&TokenKind::RBrace, "}")?;
+            Ok(BindingPattern::Dict(fields))
+        } else if self.check(&TokenKind::LBracket) {
+            // List destructuring: [ name, name, ...rest ]
+            self.advance(); // consume [
+            let mut elements = Vec::new();
+            while !self.is_at_end() && !self.check(&TokenKind::RBracket) {
+                // Check for rest pattern: ...ident
+                if self.check(&TokenKind::Dot) {
+                    self.advance(); // .
+                    self.consume(&TokenKind::Dot, ".")?;
+                    self.consume(&TokenKind::Dot, ".")?;
+                    let name = self.consume_identifier("rest variable name")?;
+                    elements.push(ListPatternElement {
+                        name,
+                        is_rest: true,
+                    });
+                    // Rest must be last
+                    break;
+                }
+                let name = self.consume_identifier("element name")?;
+                elements.push(ListPatternElement {
+                    name,
+                    is_rest: false,
+                });
+                if self.check(&TokenKind::Comma) {
+                    self.advance();
+                }
+            }
+            self.consume(&TokenKind::RBracket, "]")?;
+            Ok(BindingPattern::List(elements))
+        } else {
+            // Simple identifier
+            let name = self.consume_identifier("variable name or destructuring pattern")?;
+            Ok(BindingPattern::Identifier(name))
+        }
     }
 
     fn parse_match(&mut self) -> Result<SNode, ParserError> {

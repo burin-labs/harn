@@ -1,0 +1,47 @@
+pipeline default() {
+  // Dict destructuring
+  let {name, age} = {name: "Alice", age: 30}
+  println(name)
+  println(age)
+  // List destructuring
+  let [first, second, third] = [10, 20, 30]
+  println(first)
+  println(second)
+  println(third)
+  // Dict with rename
+  let {name: user_name} = {name: "Bob"}
+  println(user_name)
+  // List rest
+  let [head, ...tail] = [1, 2, 3, 4]
+  println(head)
+  println(tail)
+  // Dict rest
+  let {name: n, ...extras} = {name: "Carol", age: 25, role: "dev"}
+  println(n)
+  println(extras)
+  // For-in with destructuring
+  let entries = [{name: "X", val: 1}, {name: "Y", val: 2}]
+  for {name: label, val: v} in entries {
+    println("${label}=${v}")
+  }
+  // Var destructuring
+  var {x, y} = {x: 1, y: 2}
+  println(x + y)
+  x = 10
+  println(x)
+  // Function return destructuring
+  fn get_point() {
+    return {x: 42, y: 99}
+  }
+  let {x: px, y: py} = get_point()
+  println(px)
+  println(py)
+  // List destructuring from function
+  fn get_triple() {
+    return [100, 200, 300]
+  }
+  let [a, b, c] = get_triple()
+  println(a)
+  println(b)
+  println(c)
+}

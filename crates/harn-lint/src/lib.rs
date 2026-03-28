@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use harn_lexer::Span;
-use harn_parser::{Node, SNode};
+use harn_parser::{BindingPattern, Node, SNode};
 
 /// A lint diagnostic reported by the linter.
 #[derive(Debug)]
@@ -76,6 +76,37 @@ impl Linter {
             | Node::SubscriptAccess { object, .. }
             | Node::SliceAccess { object, .. } => Self::root_var_name(object),
             _ => None,
+        }
+    }
+
+    /// Extract all variable names from a binding pattern.
+    fn pattern_names(pattern: &BindingPattern) -> Vec<String> {
+        match pattern {
+            BindingPattern::Identifier(name) => vec![name.clone()],
+            BindingPattern::Dict(fields) => fields
+                .iter()
+                .map(|f| {
+                    f.alias
+                        .as_deref()
+                        .unwrap_or(&f.key)
+                        .to_string()
+                })
+                .collect(),
+            BindingPattern::List(elements) => {
+                elements.iter().map(|e| e.name.clone()).collect()
+            }
+        }
+    }
+
+    /// Declare all variables in a binding pattern.
+    fn declare_pattern_variables(
+        &mut self,
+        pattern: &BindingPattern,
+        span: Span,
+        is_mutable: bool,
+    ) {
+        for name in Self::pattern_names(pattern) {
+            self.declare_variable(&name, span, is_mutable);
         }
     }
 
@@ -154,14 +185,18 @@ impl Linter {
                 self.pop_scope();
             }
 
-            Node::LetBinding { name, value, .. } => {
+            Node::LetBinding {
+                pattern, value, ..
+            } => {
                 self.lint_node(value);
-                self.declare_variable(name, snode.span, false);
+                self.declare_pattern_variables(pattern, snode.span, false);
             }
 
-            Node::VarBinding { name, value, .. } => {
+            Node::VarBinding {
+                pattern, value, ..
+            } => {
                 self.lint_node(value);
-                self.declare_variable(name, snode.span, true);
+                self.declare_pattern_variables(pattern, snode.span, true);
             }
 
             Node::Assignment { target, value, .. } => {
@@ -312,7 +347,7 @@ impl Linter {
             }
 
             Node::ForIn {
-                variable,
+                pattern,
                 iterable,
                 body,
             } => {
@@ -327,10 +362,13 @@ impl Linter {
                     });
                 }
                 self.push_scope();
-                if let Some(scope) = self.scopes.last_mut() {
-                    scope.insert(variable.clone());
+                // Register all pattern variables in scope and mark as referenced
+                for name in Self::pattern_names(pattern) {
+                    if let Some(scope) = self.scopes.last_mut() {
+                        scope.insert(name.clone());
+                    }
+                    self.references.insert(name);
                 }
-                self.references.insert(variable.clone());
                 self.loop_depth += 1;
                 self.lint_block(body);
                 self.loop_depth -= 1;

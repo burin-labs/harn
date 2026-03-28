@@ -1631,6 +1631,39 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
     // HTTP and LLM builtins (registered from separate modules)
     // =========================================================================
 
+    // =========================================================================
+    // Internal builtins (used by compiler-generated code)
+    // =========================================================================
+
+    vm.register_builtin("__dict_rest", |args, _out| {
+        // __dict_rest(dict, keys_to_exclude) -> new dict without those keys
+        let dict = args.first().cloned().unwrap_or(VmValue::Nil);
+        let keys_list = args.get(1).cloned().unwrap_or(VmValue::Nil);
+        if let VmValue::Dict(map) = dict {
+            let exclude: std::collections::HashSet<String> = match keys_list {
+                VmValue::List(items) => items
+                    .iter()
+                    .filter_map(|v| {
+                        if let VmValue::String(s) = v {
+                            Some(s.to_string())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect(),
+                _ => std::collections::HashSet::new(),
+            };
+            let rest: BTreeMap<String, VmValue> = map
+                .iter()
+                .filter(|(k, _)| !exclude.contains(k.as_str()))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            Ok(VmValue::Dict(Rc::new(rest)))
+        } else {
+            Ok(VmValue::Nil)
+        }
+    });
+
     register_http_builtins(vm);
     register_llm_builtins(vm);
     register_mcp_builtins(vm);
