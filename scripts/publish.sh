@@ -40,7 +40,8 @@ publish_crate() {
     if cargo publish -p "$crate" $DRY_RUN 2>&1; then
       echo "  Published $crate"
       # Wait a bit between publishes to avoid rate limits
-      if [[ -z "$DRY_RUN" && "$crate" != "${CRATES[-1]}" ]]; then
+      local last_crate="${CRATES[${#CRATES[@]}-1]}"
+      if [[ -z "$DRY_RUN" && "$crate" != "$last_crate" ]]; then
         echo "  Waiting 15s before next crate..."
         sleep 15
       fi
