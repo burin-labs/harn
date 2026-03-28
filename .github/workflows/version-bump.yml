@@ -1,0 +1,66 @@
+name: Version Bump
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version bump type'
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    name: Bump version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Get current version
+        id: current
+        run: |
+          version=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Calculate new version
+        id: next
+        run: |
+          current="${{ steps.current.outputs.version }}"
+          IFS='.' read -r major minor patch <<< "$current"
+          case "${{ inputs.bump }}" in
+            major) major=$((major + 1)); minor=0; patch=0 ;;
+            minor) minor=$((minor + 1)); patch=0 ;;
+            patch) patch=$((patch + 1)) ;;
+          esac
+          echo "version=${major}.${minor}.${patch}" >> "$GITHUB_OUTPUT"
+
+      - name: Update version in Cargo.toml
+        run: |
+          sed -i 's/^version = ".*"/version = "${{ steps.next.outputs.version }}"/' Cargo.toml
+
+      - name: Update Cargo.lock
+        run: cargo check --workspace 2>/dev/null || cargo generate-lockfile
+
+      - name: Create pull request
+        uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7.0.11
+        with:
+          commit-message: "Bump version to ${{ steps.next.outputs.version }}"
+          title: "Bump version to v${{ steps.next.outputs.version }}"
+          body: |
+            Automated version bump: `${{ steps.current.outputs.version }}` → `${{ steps.next.outputs.version }}`
+
+            After merging, tag and push to trigger the release:
+            ```
+            git pull
+            git tag v${{ steps.next.outputs.version }}
+            git push origin v${{ steps.next.outputs.version }}
+            ```
+          branch: "version-bump/${{ steps.next.outputs.version }}"
+          delete-branch: true
