@@ -3,6 +3,7 @@ set -euo pipefail
 
 # Publish all harn crates to crates.io in dependency order.
 # Handles rate limiting with automatic retries.
+# Skips crates that are already published at the current version.
 #
 # Usage:
 #   ./scripts/publish.sh          # publish all crates
@@ -37,24 +38,39 @@ publish_crate() {
     echo ""
     echo "=== Publishing $crate (attempt $attempt/$max_attempts) ==="
 
-    if cargo publish -p "$crate" $DRY_RUN 2>&1; then
+    local output
+    output=$(cargo publish -p "$crate" $DRY_RUN 2>&1) && {
+      echo "$output"
       echo "  Published $crate"
-      # Wait a bit between publishes to avoid rate limits
       local last_crate="${CRATES[${#CRATES[@]}-1]}"
       if [[ -z "$DRY_RUN" && "$crate" != "$last_crate" ]]; then
         echo "  Waiting 15s before next crate..."
         sleep 15
       fi
       return 0
-    else
+    }
+
+    # Check if already published (not an error)
+    if echo "$output" | grep -q "already exists"; then
+      echo "  $crate already published, skipping"
+      return 0
+    fi
+
+    # Check if rate limited
+    if echo "$output" | grep -q "429\|Too Many Requests"; then
       if [[ $attempt -lt $max_attempts ]]; then
-        echo "  Rate limited or error. Waiting ${RETRY_DELAY}s before retry..."
+        echo "  Rate limited. Waiting ${RETRY_DELAY}s before retry..."
         sleep "$RETRY_DELAY"
       else
-        echo "  FAILED to publish $crate after $max_attempts attempts"
+        echo "  FAILED: still rate limited after $max_attempts attempts"
         return 1
       fi
+    else
+      echo "$output"
+      echo "  FAILED to publish $crate"
+      return 1
     fi
+
     attempt=$((attempt + 1))
   done
 }
