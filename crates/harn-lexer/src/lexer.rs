@@ -688,7 +688,9 @@ mod tests {
         let mut lexer = Lexer::new("42 3.14");
         let tokens = lexer.tokenize().unwrap();
         assert_eq!(tokens[0].kind, TokenKind::IntLiteral(42));
-        assert_eq!(tokens[1].kind, TokenKind::FloatLiteral(3.14));
+        #[allow(clippy::approx_constant)]
+        let expected = 3.14;
+        assert_eq!(tokens[1].kind, TokenKind::FloatLiteral(expected));
     }
 
     #[test]

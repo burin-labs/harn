@@ -529,7 +529,12 @@ async fn execute_chunk(
         bridge.stdout_lock.clone(),
         bridge.next_id_counter.fetch_add(10_000, Ordering::SeqCst),
     ));
-    vm.set_bridge(host_bridge);
+    vm.set_bridge(host_bridge.clone());
+
+    // Override the native text-only agent_loop with the tool-aware version.
+    // This allows agent_loop to execute tools via the ACP bridge (delegated
+    // to the editor/CLI which has the full tool infrastructure).
+    harn_vm::llm::register_agent_loop_with_bridge(&mut vm, host_bridge);
 
     match vm.execute(&chunk).await {
         Ok(_) => Ok(vm.output().to_string()),

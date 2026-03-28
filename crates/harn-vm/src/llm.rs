@@ -298,6 +298,623 @@ pub fn register_llm_builtins(vm: &mut Vm) {
         Ok(VmValue::String(Rc::from(total_text.as_str())))
     });
 
+    // Remaining builtins (llm_stream, conversation management)
+    register_llm_builtins_continued(vm);
+}
+
+// =============================================================================
+// Tool-aware agent_loop (used by ACP mode where host executes tools)
+// =============================================================================
+
+/// Built-in tool schemas for common agent tools. Maps short names
+/// (as used in Harn pipelines) to full OpenAI-compatible tool definitions.
+fn builtin_tool_schema(name: &str) -> Option<serde_json::Value> {
+    match name {
+        "read" | "read_file" => Some(serde_json::json!({
+            "name": "read_file",
+            "description": "Read the contents of a file. Use this to understand code before modifying it.",
+            "parameters": {
+                "path": {"type": "string", "description": "Relative file path to read"}
+            }
+        })),
+        "search" => Some(serde_json::json!({
+            "name": "search",
+            "description": "Search for a text pattern across project files. Returns matching lines with file paths.",
+            "parameters": {
+                "pattern": {"type": "string", "description": "Search pattern (regex supported)"},
+                "file_glob": {"type": "string", "description": "Optional glob to filter files (e.g. \"**/*.py\")"}
+            }
+        })),
+        "edit" => Some(serde_json::json!({
+            "name": "edit",
+            "description": "Edit a file. Actions: create (new file), patch (find/replace), insert_function, replace_body, add_import.",
+            "parameters": {
+                "action": {"type": "string", "description": "One of: create, patch, insert_function, replace_body, add_import"},
+                "path": {"type": "string", "description": "File path"},
+                "content": {"type": "string", "description": "For create: full file content. For patch: replacement text."},
+                "find": {"type": "string", "description": "For patch: text to find and replace"},
+                "name": {"type": "string", "description": "For insert_function/replace_body: function name"},
+                "overwrite": {"type": "boolean", "description": "For create: overwrite if file exists"}
+            }
+        })),
+        "run" | "exec" => Some(serde_json::json!({
+            "name": "run",
+            "description": "Execute a shell command and return its output.",
+            "parameters": {
+                "command": {"type": "string", "description": "Shell command to execute"}
+            }
+        })),
+        "outline" | "get_file_outline" => Some(serde_json::json!({
+            "name": "outline",
+            "description": "Get the structural outline of a file (function/class signatures).",
+            "parameters": {
+                "path": {"type": "string", "description": "File path to outline"}
+            }
+        })),
+        "web_search" => Some(serde_json::json!({
+            "name": "web_search",
+            "description": "Search the web for information.",
+            "parameters": {
+                "query": {"type": "string", "description": "Search query"}
+            }
+        })),
+        "web_fetch" => Some(serde_json::json!({
+            "name": "web_fetch",
+            "description": "Fetch content from a URL.",
+            "parameters": {
+                "url": {"type": "string", "description": "URL to fetch"}
+            }
+        })),
+        "lsp_hover" => Some(serde_json::json!({
+            "name": "lsp_hover",
+            "description": "Get type info and documentation for a symbol at a position.",
+            "parameters": {
+                "file": {"type": "string", "description": "File path"},
+                "line": {"type": "integer", "description": "Line number (1-based)"},
+                "col": {"type": "integer", "description": "Column number (1-based)"}
+            }
+        })),
+        "lsp_definition" => Some(serde_json::json!({
+            "name": "lsp_definition",
+            "description": "Jump to the definition of a symbol.",
+            "parameters": {
+                "file": {"type": "string", "description": "File path"},
+                "line": {"type": "integer", "description": "Line number (1-based)"},
+                "col": {"type": "integer", "description": "Column number (1-based)"}
+            }
+        })),
+        "lsp_references" => Some(serde_json::json!({
+            "name": "lsp_references",
+            "description": "Find all references to a symbol.",
+            "parameters": {
+                "file": {"type": "string", "description": "File path"},
+                "line": {"type": "integer", "description": "Line number (1-based)"},
+                "col": {"type": "integer", "description": "Column number (1-based)"}
+            }
+        })),
+        "list_directory" => Some(serde_json::json!({
+            "name": "list_directory",
+            "description": "List directory contents.",
+            "parameters": {
+                "path": {"type": "string", "description": "Directory path"}
+            }
+        })),
+        _ => None,
+    }
+}
+
+/// Convert a list of tool name strings (e.g. ["read", "search", "edit"]) into
+/// full tool definitions suitable for the LLM API.
+fn tool_names_to_schemas(names: &[String], provider: &str) -> Vec<serde_json::Value> {
+    let mut tools = Vec::new();
+    for name in names {
+        if let Some(schema) = builtin_tool_schema(name) {
+            let tool_name = schema["name"].as_str().unwrap_or(name);
+            let description = schema["description"].as_str().unwrap_or("");
+            let params = &schema["parameters"];
+            let input_schema = vm_build_json_schema_from_json(params);
+
+            match provider {
+                "openai" | "openrouter" => {
+                    tools.push(serde_json::json!({
+                        "type": "function",
+                        "function": {
+                            "name": tool_name,
+                            "description": description,
+                            "parameters": input_schema,
+                        }
+                    }));
+                }
+                _ => {
+                    // Anthropic format
+                    tools.push(serde_json::json!({
+                        "name": tool_name,
+                        "description": description,
+                        "input_schema": input_schema,
+                    }));
+                }
+            }
+        }
+    }
+    tools
+}
+
+/// Build a JSON Schema object from a parameters JSON value.
+fn vm_build_json_schema_from_json(params: &serde_json::Value) -> serde_json::Value {
+    let mut properties = serde_json::Map::new();
+    let mut required = Vec::new();
+
+    if let Some(obj) = params.as_object() {
+        for (name, type_val) in obj {
+            let type_str = type_val
+                .as_object()
+                .and_then(|o| o.get("type"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("string");
+            let desc = type_val
+                .as_object()
+                .and_then(|o| o.get("description"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+
+            let mut prop = serde_json::json!({"type": type_str});
+            if !desc.is_empty() {
+                prop["description"] = serde_json::json!(desc);
+            }
+            properties.insert(name.clone(), prop);
+
+            // First parameter is always required
+            if required.is_empty() {
+                required.push(serde_json::json!(name));
+            }
+        }
+    }
+
+    serde_json::json!({
+        "type": "object",
+        "properties": properties,
+        "required": required,
+    })
+}
+
+/// Build an assistant message with tool_calls for the conversation history.
+/// Format varies by provider (OpenAI vs Anthropic).
+fn build_assistant_tool_message(
+    text: &str,
+    tool_calls: &[serde_json::Value],
+    provider: &str,
+) -> serde_json::Value {
+    match provider {
+        "openai" | "openrouter" => {
+            // OpenAI format: assistant message with tool_calls array
+            let calls: Vec<serde_json::Value> = tool_calls
+                .iter()
+                .map(|tc| {
+                    serde_json::json!({
+                        "id": tc["id"],
+                        "type": "function",
+                        "function": {
+                            "name": tc["name"],
+                            "arguments": serde_json::to_string(&tc["arguments"]).unwrap_or_default(),
+                        }
+                    })
+                })
+                .collect();
+            let mut msg = serde_json::json!({
+                "role": "assistant",
+                "tool_calls": calls,
+            });
+            if !text.is_empty() {
+                msg["content"] = serde_json::json!(text);
+            }
+            msg
+        }
+        _ => {
+            // Anthropic format: content blocks with text and tool_use
+            let mut content = Vec::new();
+            if !text.is_empty() {
+                content.push(serde_json::json!({"type": "text", "text": text}));
+            }
+            for tc in tool_calls {
+                content.push(serde_json::json!({
+                    "type": "tool_use",
+                    "id": tc["id"],
+                    "name": tc["name"],
+                    "input": tc["arguments"],
+                }));
+            }
+            serde_json::json!({"role": "assistant", "content": content})
+        }
+    }
+}
+
+/// Build a tool result message for the conversation history.
+fn build_tool_result_message(
+    tool_call_id: &str,
+    result: &str,
+    provider: &str,
+) -> serde_json::Value {
+    match provider {
+        "openai" | "openrouter" => {
+            serde_json::json!({
+                "role": "tool",
+                "tool_call_id": tool_call_id,
+                "content": result,
+            })
+        }
+        _ => {
+            // Anthropic: tool_result inside a user message
+            serde_json::json!({
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": tool_call_id,
+                    "content": result,
+                }]
+            })
+        }
+    }
+}
+
+/// Resolve tools from any supported format:
+/// - String list: `["read", "search", "edit"]` → static schema lookup
+/// - tool_registry: `{_type: "tool_registry", tools: [...]}` → extract schemas
+/// - List of tool dicts: `[{name, description, parameters}, ...]` → use directly
+fn resolve_tools_for_agent(
+    val: &VmValue,
+    provider: &str,
+) -> Result<Option<Vec<serde_json::Value>>, VmError> {
+    match val {
+        VmValue::List(list) if list.is_empty() => Ok(None),
+        VmValue::List(list) => {
+            // Check if this is a list of strings or a list of dicts
+            if matches!(list.first(), Some(VmValue::String(_))) {
+                // String name list → static schema lookup
+                let names: Vec<String> = list.iter().map(|v| v.display()).collect();
+                let schemas = tool_names_to_schemas(&names, provider);
+                Ok(if schemas.is_empty() {
+                    None
+                } else {
+                    Some(schemas)
+                })
+            } else {
+                // List of tool definition dicts → use vm_tools_to_native
+                let schemas = vm_tools_to_native(val, provider)?;
+                Ok(if schemas.is_empty() {
+                    None
+                } else {
+                    Some(schemas)
+                })
+            }
+        }
+        VmValue::Dict(d)
+            if d.get("_type").map(|v| v.display()).as_deref() == Some("tool_registry") =>
+        {
+            // tool_registry object → extract tool schemas via vm_tools_to_native
+            let schemas = vm_tools_to_native(val, provider)?;
+            Ok(if schemas.is_empty() {
+                None
+            } else {
+                Some(schemas)
+            })
+        }
+        _ => Ok(None),
+    }
+}
+
+/// Register a tool-aware `agent_loop` that uses a bridge for tool execution.
+/// This overrides the native text-only agent_loop with one that can:
+/// 1. Pass tool definitions to the LLM
+/// 2. Execute tool calls via the bridge (delegated to host)
+/// 3. Feed tool results back into the conversation
+pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::HostBridge>) {
+    let b = bridge;
+    vm.register_async_builtin("agent_loop", move |args| {
+        let bridge = b.clone();
+        async move {
+            let prompt = args.first().map(|a| a.display()).unwrap_or_default();
+            let system = args.get(1).map(|a| a.display());
+            let options = args.get(2).and_then(|a| a.as_dict()).cloned();
+
+            let provider = vm_resolve_provider(&options);
+            let model = vm_resolve_model(&options, &provider);
+            let api_key = vm_resolve_api_key(&provider)?;
+            let max_iterations = opt_int(&options, "max_iterations").unwrap_or(25) as usize;
+            let persistent = opt_bool(&options, "persistent");
+            let max_nudges = opt_int(&options, "max_nudges").unwrap_or(5) as usize;
+            let custom_nudge = opt_str(&options, "nudge");
+            let max_tokens = opt_int(&options, "max_tokens").unwrap_or(8192);
+            let tool_format = opt_str(&options, "tool_format")
+                .unwrap_or_else(|| "text".to_string());
+
+            // Resolve tool definitions from options.tools.
+            // Accepts: string name list, tool_registry, or list of tool dicts.
+            let tools_val = options.as_ref().and_then(|o| o.get("tools")).cloned();
+            let tool_schemas = match &tools_val {
+                Some(val) => resolve_tools_for_agent(val, &provider)?,
+                None => None,
+            };
+            let has_tools = tool_schemas.as_ref().is_some_and(|t| !t.is_empty());
+
+            // Native format: pass tools via API. Text format: inject into prompt.
+            let native_tools = if has_tools && tool_format == "native" {
+                tool_schemas
+            } else {
+                None
+            };
+
+            let mut system_prompt = system.unwrap_or_default();
+
+            if has_tools && tool_format == "text" {
+                system_prompt.push_str(&build_text_tool_prompt(tools_val.as_ref()));
+            }
+
+            if persistent {
+                system_prompt.push_str(
+                    "\n\nIMPORTANT: You MUST keep working until the task is complete. \
+                     Do NOT stop to explain or summarize — take action with tools. \
+                     When you are done, output ##DONE## on its own line.",
+                );
+            }
+
+            let mut messages: Vec<serde_json::Value> = vec![serde_json::json!({
+                "role": "user",
+                "content": prompt,
+            })];
+
+            let mut total_text = String::new();
+            let mut consecutive_text_only = 0usize;
+
+            for iteration in 0..max_iterations {
+                let start = std::time::Instant::now();
+                let result = vm_call_llm_full(
+                    &provider,
+                    &model,
+                    &api_key,
+                    &messages,
+                    if system_prompt.is_empty() {
+                        None
+                    } else {
+                        Some(&system_prompt)
+                    },
+                    max_tokens,
+                    None,
+                    None,
+                    None,
+                    native_tools.as_deref(),
+                )
+                .await?;
+                trace_llm_call(LlmTraceEntry {
+                    model: result.model.clone(),
+                    input_tokens: result.input_tokens,
+                    output_tokens: result.output_tokens,
+                    duration_ms: start.elapsed().as_millis() as u64,
+                });
+
+                let text = result.text.clone();
+                total_text.push_str(&text);
+
+                // Collect tool calls from native API or text parsing
+                let tool_calls = if !result.tool_calls.is_empty() {
+                    result.tool_calls.clone()
+                } else if has_tools && tool_format == "text" {
+                    parse_text_tool_calls(&text)
+                } else {
+                    Vec::new()
+                };
+
+                // Handle tool calls
+                if !tool_calls.is_empty() {
+                    consecutive_text_only = 0;
+
+                    if tool_format == "native" {
+                        // Native: add assistant message with tool_calls metadata
+                        messages.push(build_assistant_tool_message(
+                            &text, &tool_calls, &provider,
+                        ));
+                    } else {
+                        // Text: add the raw assistant text (contains <tool_call> tags)
+                        messages.push(serde_json::json!({
+                            "role": "assistant",
+                            "content": text,
+                        }));
+                    }
+
+                    // Execute each tool call via the bridge
+                    let mut observations = String::new();
+                    for tc in &tool_calls {
+                        let tool_id = tc["id"].as_str().unwrap_or("");
+                        let tool_name = tc["name"].as_str().unwrap_or("");
+                        let tool_args = &tc["arguments"];
+
+                        eprintln!(
+                            "[agent_loop] iter={iteration} tool={tool_name} args={}",
+                            serde_json::to_string(tool_args).unwrap_or_default()
+                        );
+
+                        // Execute via bridge builtin_call
+                        let call_result = bridge
+                            .call(
+                                "builtin_call",
+                                serde_json::json!({
+                                    "name": tool_name,
+                                    "args": [tool_args],
+                                }),
+                            )
+                            .await;
+
+                        let result_text = match call_result {
+                            Ok(val) => {
+                                if let Some(s) = val.as_str() {
+                                    s.to_string()
+                                } else if val.is_null() {
+                                    "(no output)".to_string()
+                                } else {
+                                    serde_json::to_string_pretty(&val).unwrap_or_default()
+                                }
+                            }
+                            Err(e) => format!("Error: {e}"),
+                        };
+
+                        if tool_format == "native" {
+                            messages.push(build_tool_result_message(
+                                tool_id, &result_text, &provider,
+                            ));
+                        } else {
+                            observations.push_str(&format!(
+                                "<tool_result name=\"{tool_name}\">\n{result_text}\n</tool_result>\n\n"
+                            ));
+                        }
+                    }
+
+                    // Text format: send all observations as one user message
+                    if tool_format != "native" && !observations.is_empty() {
+                        messages.push(serde_json::json!({
+                            "role": "user",
+                            "content": observations.trim_end(),
+                        }));
+                    }
+
+                    continue; // Next iteration — LLM sees tool results
+                }
+
+                // Text-only response (no tool calls found)
+                messages.push(serde_json::json!({
+                    "role": "assistant",
+                    "content": text,
+                }));
+
+                if persistent && text.contains("##DONE##") {
+                    break;
+                }
+
+                if !persistent {
+                    break;
+                }
+
+                consecutive_text_only += 1;
+                if consecutive_text_only > max_nudges {
+                    eprintln!(
+                        "[agent_loop] max nudges ({max_nudges}) reached after {iteration} iterations"
+                    );
+                    break;
+                }
+
+                let nudge = custom_nudge.clone().unwrap_or_else(|| {
+                    "You have not used any tools yet. Use your tools to complete the task. \
+                     Read files, search, edit, and run commands as needed. \
+                     Only output ##DONE## when the task is fully complete and verified."
+                        .to_string()
+                });
+
+                messages.push(serde_json::json!({
+                    "role": "user",
+                    "content": nudge,
+                }));
+            }
+
+            Ok(VmValue::String(Rc::from(total_text.as_str())))
+        }
+    });
+}
+
+/// Build a text-based tool prompt to inject into the system prompt.
+/// This allows any model to use tools without native function calling.
+fn build_text_tool_prompt(tools_val: Option<&VmValue>) -> String {
+    let mut prompt = String::from("\n\n## Available tools\n");
+
+    let tool_list: Vec<String> = match tools_val {
+        Some(VmValue::List(list)) => list.iter().map(|v| v.display()).collect(),
+        Some(VmValue::Dict(d)) => {
+            // tool_registry — extract tool names from tools list
+            if let Some(VmValue::List(tools)) = d.get("tools") {
+                tools
+                    .iter()
+                    .filter_map(|v| {
+                        if let VmValue::Dict(td) = v {
+                            td.get("name").map(|n| n.display())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            }
+        }
+        _ => Vec::new(),
+    };
+
+    for name in &tool_list {
+        if let Some(schema) = builtin_tool_schema(name) {
+            let tool_name = schema["name"].as_str().unwrap_or(name);
+            let desc = schema["description"].as_str().unwrap_or("");
+            prompt.push_str(&format!("- **{tool_name}**: {desc}\n"));
+            if let Some(params) = schema["parameters"].as_object() {
+                for (pname, pval) in params {
+                    let ptype = pval
+                        .get("type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("string");
+                    let pdesc = pval
+                        .get("description")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    prompt.push_str(&format!("  - `{pname}` ({ptype}): {pdesc}\n"));
+                }
+            }
+        }
+    }
+
+    prompt.push_str(
+        "\n## How to use tools\n\
+         To call a tool, use this exact format:\n\
+         ```\n\
+         <tool_call>\n\
+         {\"name\": \"tool_name\", \"arguments\": {\"param\": \"value\"}}\n\
+         </tool_call>\n\
+         ```\n\
+         You can make multiple tool calls in one response.\n\
+         After each tool call, you will receive the result in a <tool_result> tag.\n\
+         ALWAYS use tools to read files before modifying them.\n",
+    );
+
+    prompt
+}
+
+/// Parse `<tool_call>` XML tags from LLM text response.
+fn parse_text_tool_calls(text: &str) -> Vec<serde_json::Value> {
+    let mut calls = Vec::new();
+    let mut search_from = 0;
+
+    while let Some(start_offset) = text[search_from..].find("<tool_call>") {
+        let content_start = search_from + start_offset + "<tool_call>".len();
+        if let Some(end_offset) = text[content_start..].find("</tool_call>") {
+            let content_end = content_start + end_offset;
+            let json_str = text[content_start..content_end].trim();
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(json_str) {
+                let name = parsed["name"].as_str().unwrap_or("").to_string();
+                let arguments = parsed
+                    .get("arguments")
+                    .cloned()
+                    .unwrap_or(serde_json::json!({}));
+                calls.push(serde_json::json!({
+                    "id": format!("tc_{}", calls.len()),
+                    "name": name,
+                    "arguments": arguments,
+                }));
+            }
+            search_from = content_end + "</tool_call>".len();
+        } else {
+            break;
+        }
+    }
+
+    calls
+}
+
+// Continue register_llm_builtins (llm_stream and conversation builtins)
+fn register_llm_builtins_continued(vm: &mut Vm) {
     // =========================================================================
     // llm_stream — SSE streaming
     // =========================================================================

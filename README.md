@@ -175,6 +175,37 @@ pipeline default(task) {
 }
 ```
 
+### Agent loops with tools
+
+`agent_loop` can execute tools during the conversation loop. Pass tool
+names as a string list to use built-in schemas, or provide a
+`tool_registry` or raw tool dicts. By default, tools are invoked via
+text-based `<tool_call>` XML tags, which works with any model. Set
+`tool_format: "native"` to use API-level function calling instead.
+
+```javascript
+pipeline default(task) {
+  let result = agent_loop(
+    task,
+    "You are a coding assistant. Use tools to complete the task.",
+    {
+      persistent: true,
+      tools: ["read_file", "search", "edit", "run"],
+      tool_format: "text",      // default; or "native" for function calling
+      max_iterations: 25
+    }
+  )
+  log(result)
+}
+```
+
+Built-in tool schemas: `read_file`, `search`, `edit`, `run`, `outline`,
+`web_search`, `web_fetch`, `lsp_hover`, `lsp_definition`,
+`lsp_references`, `list_directory`.
+
+In ACP/bridge mode, `register_agent_loop_with_bridge()` wires tool
+execution through the host so the editor or CLI handles the actual I/O.
+
 ### Parallel execution
 
 Run work concurrently without callbacks or async/await noise:

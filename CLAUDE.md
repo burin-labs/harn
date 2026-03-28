@@ -131,6 +131,22 @@ The checker tracks enums for match exhaustiveness warnings.
 Async builtins (HTTP, LLM, sleep, channels) are natively awaited in
 the execution loop.
 
+### agent_loop tool support
+
+`agent_loop` supports tool execution via text-based `<tool_call>` XML
+tags (default) or native function calling (`tool_format: "native"`).
+Tools can be passed as string name lists (e.g. `["read", "search",
+"edit"]`), `tool_registry` objects, or raw tool definition dicts.
+
+In ACP mode, `register_agent_loop_with_bridge()` (in `llm.rs`) overrides
+the native text-only `agent_loop` so that tool calls are executed via
+host delegation through the bridge. This is wired up in `acp.rs` during
+`execute_chunk`.
+
+Built-in tool schemas are available for: `read_file`, `search`, `edit`,
+`run`, `outline`, `web_search`, `web_fetch`, `lsp_hover`,
+`lsp_definition`, `lsp_references`, `list_directory`.
+
 ### Conformance tests
 
 Tests live in `conformance/tests/` and `conformance/errors/`. Each
