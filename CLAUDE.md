@@ -98,8 +98,8 @@ via `tokio::task::spawn_local` for `parallel`, `parallel_map`, and
   `builtin_call` JSON-RPC. Stdlib .harn files live in `stdlib/` at
   the repo root and are embedded via `include_str!`.
 - **harn-fmt** -- AST-based code formatter. Canonical 2-space indent style.
-- **harn-lint** -- Linter with 5 rules: unused-variable, unreachable-code,
-  mutable-never-reassigned, empty-block, shadow-variable.
+- **harn-lint** -- Linter with 6 rules: unused-variable, unused-parameter,
+  unreachable-code, mutable-never-reassigned, empty-block, shadow-variable.
 - **harn-cli** -- CLI entry point. Subcommands: `run`, `test`, `repl`,
   `version`, `fmt`, `lint`, `init`, `acp`, `serve`.
   `acp.rs` (ACP JSON-RPC server with builtin delegation,

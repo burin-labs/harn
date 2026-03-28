@@ -33,11 +33,18 @@ struct ImportInfo {
     span: Span,
 }
 
+/// A parameter declaration tracked during linting.
+struct ParamDeclaration {
+    name: String,
+    span: Span,
+}
+
 /// The linter walks the AST and collects diagnostics.
 struct Linter {
     diagnostics: Vec<LintDiagnostic>,
     scopes: Vec<HashSet<String>>,
     declarations: Vec<Declaration>,
+    param_declarations: Vec<ParamDeclaration>,
     references: HashSet<String>,
     assignments: HashSet<String>,
     imports: Vec<ImportInfo>,
@@ -51,6 +58,7 @@ impl Linter {
             diagnostics: Vec::new(),
             scopes: vec![HashSet::new()],
             declarations: Vec::new(),
+            param_declarations: Vec::new(),
             references: HashSet::new(),
             assignments: HashSet::new(),
             imports: Vec::new(),
@@ -134,6 +142,37 @@ impl Linter {
         });
     }
 
+    /// Declare a function/closure parameter in the current scope.
+    /// Tracked separately from variables for the `unused-parameter` lint rule.
+    fn declare_parameter(&mut self, name: &str, span: Span) {
+        if name == "_" {
+            return;
+        }
+
+        // Check shadowing against outer scopes (not current scope).
+        if self.scopes.len() > 1 {
+            let outer = &self.scopes[..self.scopes.len() - 1];
+            if outer.iter().any(|s| s.contains(name)) {
+                self.diagnostics.push(LintDiagnostic {
+                    rule: "shadow-variable",
+                    message: format!("variable `{name}` shadows a variable in an outer scope"),
+                    span,
+                    severity: LintSeverity::Warning,
+                    suggestion: Some(format!("consider renaming to avoid shadowing `{name}`")),
+                });
+            }
+        }
+
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.insert(name.to_string());
+        }
+
+        self.param_declarations.push(ParamDeclaration {
+            name: name.to_string(),
+            span,
+        });
+    }
+
     fn lint_program(&mut self, nodes: &[SNode]) {
         for node in nodes {
             self.lint_node(node);
@@ -171,7 +210,7 @@ impl Linter {
                 let saved_loop_depth = self.loop_depth;
                 self.loop_depth = 0; // Functions are a new scope
                 for p in params {
-                    self.declare_variable(&p.name, snode.span, false);
+                    self.declare_parameter(&p.name, snode.span);
                 }
                 self.lint_block(body);
                 self.loop_depth = saved_loop_depth;
@@ -462,7 +501,7 @@ impl Linter {
                 let saved_loop_depth = self.loop_depth;
                 self.loop_depth = 0; // Closures are a new scope — break/continue invalid
                 for p in params {
-                    self.declare_variable(&p.name, snode.span, false);
+                    self.declare_parameter(&p.name, snode.span);
                 }
                 self.lint_block(body);
                 self.loop_depth = saved_loop_depth;
@@ -668,6 +707,22 @@ impl Linter {
                 self.diagnostics.push(LintDiagnostic {
                     rule: "unused-variable",
                     message: format!("variable `{}` is declared but never used", decl.name),
+                    span: decl.span,
+                    severity: LintSeverity::Warning,
+                    suggestion: Some(format!("prefix with underscore: `_{}`", decl.name)),
+                });
+            }
+        }
+
+        // Rule: unused-parameter
+        for decl in &self.param_declarations {
+            if decl.name.starts_with('_') {
+                continue;
+            }
+            if !self.references.contains(&decl.name) {
+                self.diagnostics.push(LintDiagnostic {
+                    rule: "unused-parameter",
+                    message: format!("parameter `{}` is declared but never used", decl.name),
                     span: decl.span,
                     severity: LintSeverity::Warning,
                     suggestion: Some(format!("prefix with underscore: `_{}`", decl.name)),
@@ -931,8 +986,65 @@ pipeline default(task) {
 "#,
         );
         assert!(
-            has_rule(&diags, "unused-variable"),
-            "expected unused-variable for unused fn param, got: {diags:?}"
+            has_rule(&diags, "unused-parameter"),
+            "expected unused-parameter for unused fn param, got: {diags:?}"
+        );
+        // Should NOT trigger unused-variable (parameters are tracked separately).
+        assert!(
+            !has_rule(&diags, "unused-variable"),
+            "unused fn param should not trigger unused-variable: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_unused_closure_param() {
+        let diags = lint_source(
+            r#"
+pipeline default(task) {
+    let f = { x, y -> log(x) }
+    f(1, 2)
+}
+"#,
+        );
+        assert!(
+            has_rule(&diags, "unused-parameter"),
+            "expected unused-parameter for unused closure param, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_unused_param_underscore_prefix_ignored() {
+        let diags = lint_source(
+            r#"
+pipeline default(task) {
+    fn greet(name, _unused) {
+        log(name)
+    }
+    greet("hi", "there")
+}
+"#,
+        );
+        assert!(
+            !has_rule(&diags, "unused-parameter"),
+            "underscore-prefixed params should not trigger unused-parameter: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_used_fn_param_ok() {
+        let diags = lint_source(
+            r#"
+pipeline default(task) {
+    fn add(a, b) {
+        return a + b
+    }
+    log(add(1, 2))
+}
+"#,
+        );
+        assert!(
+            !has_rule(&diags, "unused-parameter"),
+            "used params should not trigger unused-parameter: {diags:?}"
         );
     }
 
