@@ -55,6 +55,10 @@ pub enum Op {
     // --- Functions ---
     /// Call a function/builtin. arg: u8 = arg count. Name is on stack below args.
     Call,
+    /// Tail call: like Call, but replaces the current frame instead of pushing
+    /// a new one. Used for `return f(x)` to enable tail call optimization.
+    /// For builtins, behaves like a regular Call (no frame to replace).
+    TailCall,
     /// Return from current function. Pops return value.
     Return,
     /// Create a closure. arg: u16 = chunk index in function table.
@@ -367,6 +371,11 @@ impl Chunk {
                     let argc = self.code[ip];
                     ip += 1;
                     out.push_str(&format!("CALL {:>4}\n", argc));
+                }
+                x if x == Op::TailCall as u8 => {
+                    let argc = self.code[ip];
+                    ip += 1;
+                    out.push_str(&format!("TAIL_CALL {:>4}\n", argc));
                 }
                 x if x == Op::Return as u8 => out.push_str("RETURN\n"),
                 x if x == Op::Closure as u8 => {

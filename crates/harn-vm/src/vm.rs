@@ -858,6 +858,80 @@ impl Vm {
                     )));
                 }
             }
+        } else if op == Op::TailCall as u8 {
+            let frame = self.frames.last_mut().unwrap();
+            let argc = frame.chunk.code[frame.ip] as usize;
+            frame.ip += 1;
+
+            let args: Vec<VmValue> = self.stack.split_off(self.stack.len().saturating_sub(argc));
+            let callee = self.pop()?;
+
+            // Resolve the callee to a closure (or fall through to builtin)
+            let resolved_closure = match &callee {
+                VmValue::Closure(cl) => Some(Rc::clone(cl)),
+                VmValue::String(name) => {
+                    if let Some(VmValue::Closure(cl)) = self.env.get(name) {
+                        Some(cl)
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            };
+
+            if let Some(closure) = resolved_closure {
+                // Tail call optimization: replace current frame instead of pushing.
+                // Pop the current frame and reuse its stack_base and saved_env.
+                let popped = self.frames.pop().unwrap();
+                let stack_base = popped.stack_base;
+                let parent_env = popped.saved_env;
+
+                // Clear this frame's stack data
+                self.stack.truncate(stack_base);
+
+                // Set up the callee's environment
+                let mut call_env = Self::merge_env_into_closure(&parent_env, &closure);
+                call_env.push_scope();
+                for (i, param) in closure.func.params.iter().enumerate() {
+                    let val = args.get(i).cloned().unwrap_or(VmValue::Nil);
+                    call_env.define(param, val, false);
+                }
+                self.env = call_env;
+
+                // Push replacement frame at the same stack depth
+                self.frames.push(CallFrame {
+                    chunk: closure.func.chunk.clone(),
+                    ip: 0,
+                    stack_base,
+                    saved_env: parent_env,
+                    fn_name: closure.func.name.clone(),
+                });
+                // Continue the loop — execution proceeds in the new frame
+            } else {
+                // Not a closure — fall back to regular call behavior for builtins.
+                match callee {
+                    VmValue::String(name) => {
+                        if let Some(builtin) = self.builtins.get(name.as_ref()).cloned() {
+                            let result = builtin(&args, &mut self.output)?;
+                            self.stack.push(result);
+                        } else if let Some(async_builtin) =
+                            self.async_builtins.get(name.as_ref()).cloned()
+                        {
+                            let result = async_builtin(args).await?;
+                            self.stack.push(result);
+                        } else {
+                            return Err(VmError::UndefinedBuiltin(name.to_string()));
+                        }
+                    }
+                    _ => {
+                        return Err(VmError::TypeError(format!(
+                            "Cannot call {}",
+                            callee.display()
+                        )));
+                    }
+                }
+                // Result is on stack; the following Return opcode will return it.
+            }
         } else if op == Op::Return as u8 {
             let val = self.pop().unwrap_or(VmValue::Nil);
             return Err(VmError::Return(val));

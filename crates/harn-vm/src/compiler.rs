@@ -542,7 +542,19 @@ impl Compiler {
 
             Node::ReturnStmt { value } => {
                 if let Some(val) = value {
-                    self.compile_node(val)?;
+                    // Tail call optimization: if returning a direct function call,
+                    // emit TailCall instead of Call to reuse the current frame.
+                    if let Node::FunctionCall { name, args } = &val.node {
+                        let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
+                        self.chunk.emit_u16(Op::Constant, name_idx, self.line);
+                        for arg in args {
+                            self.compile_node(arg)?;
+                        }
+                        self.chunk
+                            .emit_u8(Op::TailCall, args.len() as u8, self.line);
+                    } else {
+                        self.compile_node(val)?;
+                    }
                 } else {
                     self.chunk.emit(Op::Nil, self.line);
                 }
