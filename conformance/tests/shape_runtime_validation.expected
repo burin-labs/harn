@@ -1,0 +1,9 @@
+Alice is 30
+Bob is 25
+localhost
+example.com
+X:5
+Type error: parameter 'u': missing field 'age' (int)
+Type error: parameter 'u': field 'name' expected string, got int
+Type error: parameter 'd.user': missing field 'name' (string)
+Type error: parameter 'd': field 'user' expected dict or struct, got string

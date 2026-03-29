@@ -35,9 +35,19 @@ struct TypeScope {
     interfaces: BTreeMap<String, Vec<InterfaceMethod>>,
     /// Struct declarations: name → field types.
     structs: BTreeMap<String, Vec<(String, InferredType)>>,
+    /// Impl block methods: type_name → method signatures.
+    impl_methods: BTreeMap<String, Vec<ImplMethodSig>>,
     /// Generic type parameter names in scope (treated as compatible with any type).
     generic_type_params: std::collections::BTreeSet<String>,
     parent: Option<Box<TypeScope>>,
+}
+
+/// Method signature extracted from an impl block (for interface checking).
+#[derive(Debug, Clone)]
+struct ImplMethodSig {
+    name: String,
+    /// Number of parameters excluding `self`.
+    param_count: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -48,6 +58,8 @@ struct FnSignature {
     type_param_names: Vec<String>,
     /// Number of required parameters (those without defaults).
     required_params: usize,
+    /// Where-clause constraints: (type_param_name, interface_bound).
+    where_clauses: Vec<(String, String)>,
 }
 
 impl TypeScope {
@@ -59,6 +71,7 @@ impl TypeScope {
             enums: BTreeMap::new(),
             interfaces: BTreeMap::new(),
             structs: BTreeMap::new(),
+            impl_methods: BTreeMap::new(),
             generic_type_params: std::collections::BTreeSet::new(),
             parent: None,
         }
@@ -72,6 +85,7 @@ impl TypeScope {
             enums: BTreeMap::new(),
             interfaces: BTreeMap::new(),
             structs: BTreeMap::new(),
+            impl_methods: BTreeMap::new(),
             generic_type_params: std::collections::BTreeSet::new(),
             parent: Some(Box::new(self.clone())),
         }
@@ -109,11 +123,22 @@ impl TypeScope {
             .or_else(|| self.parent.as_ref()?.get_enum(name))
     }
 
-    #[allow(dead_code)]
     fn get_interface(&self, name: &str) -> Option<&Vec<InterfaceMethod>> {
         self.interfaces
             .get(name)
             .or_else(|| self.parent.as_ref()?.get_interface(name))
+    }
+
+    fn get_struct(&self, name: &str) -> Option<&Vec<(String, InferredType)>> {
+        self.structs
+            .get(name)
+            .or_else(|| self.parent.as_ref()?.get_struct(name))
+    }
+
+    fn get_impl_methods(&self, name: &str) -> Option<&Vec<ImplMethodSig>> {
+        self.impl_methods
+            .get(name)
+            .or_else(|| self.parent.as_ref()?.get_impl_methods(name))
     }
 
     fn define_var(&mut self, name: &str, ty: InferredType) {
@@ -153,9 +178,8 @@ fn builtin_return_type(name: &str) -> InferredType {
         "file_exists" | "json_validate" | "is_nan" | "is_infinite" | "set_contains" => {
             Some(TypeExpr::Named("bool".into()))
         }
-        "list_dir" | "mcp_list_tools" | "mcp_list_resources" | "mcp_list_prompts" | "to_list" => {
-            Some(TypeExpr::Named("list".into()))
-        }
+        "list_dir" | "mcp_list_tools" | "mcp_list_resources" | "mcp_list_prompts" | "to_list"
+        | "regex_captures" => Some(TypeExpr::Named("list".into())),
         "stat" | "exec" | "shell" | "date_now" | "agent_loop" | "llm_info" | "llm_usage"
         | "timer_start" | "metadata_get" | "mcp_server_info" | "mcp_get_prompt" => {
             Some(TypeExpr::Named("dict".into()))
@@ -196,6 +220,7 @@ fn is_builtin(name: &str) -> bool {
             | "exit"
             | "regex_match"
             | "regex_replace"
+            | "regex_captures"
             | "http_get"
             | "http_post"
             | "llm_call"
@@ -301,6 +326,7 @@ impl TypeChecker {
                     type_params,
                     params,
                     return_type,
+                    where_clauses,
                     body,
                     ..
                 } => {
@@ -314,6 +340,10 @@ impl TypeChecker {
                         return_type: return_type.clone(),
                         type_param_names: type_params.iter().map(|tp| tp.name.clone()).collect(),
                         required_params,
+                        where_clauses: where_clauses
+                            .iter()
+                            .map(|wc| (wc.type_name.clone(), wc.bound.clone()))
+                            .collect(),
                     };
                     self.scope.define_fn(name, sig);
                     self.check_fn_body(type_params, params, return_type, body);
@@ -353,6 +383,27 @@ impl TypeChecker {
                         .map(|f| (f.name.clone(), f.type_expr.clone()))
                         .collect();
                     scope.structs.insert(name.clone(), field_types);
+                }
+                Node::ImplBlock {
+                    type_name, methods, ..
+                } => {
+                    let sigs: Vec<ImplMethodSig> = methods
+                        .iter()
+                        .filter_map(|m| {
+                            if let Node::FnDecl { name, params, .. } = &m.node {
+                                // Exclude `self` from param count
+                                let param_count =
+                                    params.iter().filter(|p| p.name != "self").count();
+                                Some(ImplMethodSig {
+                                    name: name.clone(),
+                                    param_count,
+                                })
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+                    scope.impl_methods.insert(type_name.clone(), sigs);
                 }
                 _ => {}
             }
@@ -453,6 +504,7 @@ impl TypeChecker {
                 type_params,
                 params,
                 return_type,
+                where_clauses,
                 body,
                 ..
             } => {
@@ -465,6 +517,10 @@ impl TypeChecker {
                     return_type: return_type.clone(),
                     type_param_names: type_params.iter().map(|tp| tp.name.clone()).collect(),
                     required_params,
+                    where_clauses: where_clauses
+                        .iter()
+                        .map(|wc| (wc.type_name.clone(), wc.bound.clone()))
+                        .collect(),
                 };
                 scope.define_fn(name, sig.clone());
                 scope.define_var(name, None);
@@ -542,6 +598,11 @@ impl TypeChecker {
                 }
             }
 
+            Node::TryExpr { body } => {
+                let mut try_scope = scope.child();
+                self.check_block(body, &mut try_scope);
+            }
+
             Node::ReturnStmt {
                 value: Some(val), ..
             } => {
@@ -599,7 +660,25 @@ impl TypeChecker {
                 scope.interfaces.insert(name.clone(), methods.clone());
             }
 
-            Node::ImplBlock { methods, .. } => {
+            Node::ImplBlock {
+                type_name, methods, ..
+            } => {
+                // Register impl methods for interface satisfaction checking
+                let sigs: Vec<ImplMethodSig> = methods
+                    .iter()
+                    .filter_map(|m| {
+                        if let Node::FnDecl { name, params, .. } = &m.node {
+                            let param_count = params.iter().filter(|p| p.name != "self").count();
+                            Some(ImplMethodSig {
+                                name: name.clone(),
+                                param_count,
+                            })
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                scope.impl_methods.insert(type_name.clone(), sigs);
                 for method_sn in methods {
                     self.check_node(method_sn, scope);
                 }
@@ -803,6 +882,35 @@ impl TypeChecker {
     /// Check if a match expression on an enum's `.variant` property covers all variants.
     /// Extract narrowing info from nil-check conditions like `x != nil`.
     /// Returns (var_name, narrowed_type) where narrowed_type removes nil from a union.
+    /// Check if a type satisfies an interface (Go-style implicit satisfaction).
+    /// A type satisfies an interface if its impl block has all the required methods.
+    fn satisfies_interface(
+        &self,
+        type_name: &str,
+        interface_name: &str,
+        scope: &TypeScope,
+    ) -> bool {
+        let interface_methods = match scope.get_interface(interface_name) {
+            Some(methods) => methods,
+            None => return false,
+        };
+        let impl_methods = match scope.get_impl_methods(type_name) {
+            Some(methods) => methods,
+            None => return interface_methods.is_empty(),
+        };
+        interface_methods.iter().all(|iface_method| {
+            let iface_param_count = iface_method
+                .params
+                .iter()
+                .filter(|p| p.name != "self")
+                .count();
+            impl_methods.iter().any(|impl_method| {
+                impl_method.name == iface_method.name
+                    && impl_method.param_count == iface_param_count
+            })
+        })
+    }
+
     fn extract_nil_narrowing(
         condition: &SNode,
         scope: &TypeScope,
@@ -924,8 +1032,10 @@ impl TypeChecker {
 
     fn check_call(&mut self, name: &str, args: &[SNode], scope: &mut TypeScope, span: Span) {
         // Check against known function signatures
+        let has_spread = args.iter().any(|a| matches!(&a.node, Node::Spread(_)));
         if let Some(sig) = scope.get_fn(name).cloned() {
-            if !is_builtin(name)
+            if !has_spread
+                && !is_builtin(name)
                 && (args.len() < sig.required_params || args.len() > sig.params.len())
             {
                 let expected = if sig.required_params == sig.params.len() {
@@ -970,6 +1080,34 @@ impl TypeChecker {
                                     format_type(actual)
                                 ),
                                 arg.span,
+                            );
+                        }
+                    }
+                }
+            }
+            // Enforce where-clause constraints at call site
+            if !sig.where_clauses.is_empty() {
+                // Build mapping: type_param → concrete type from inferred args
+                let mut type_bindings: BTreeMap<String, String> = BTreeMap::new();
+                for (arg, (_param_name, param_type)) in args.iter().zip(sig.params.iter()) {
+                    if let Some(TypeExpr::Named(param_ty)) = param_type {
+                        if sig.type_param_names.contains(param_ty) {
+                            if let Some(TypeExpr::Named(concrete)) = self.infer_type(arg, scope) {
+                                type_bindings.entry(param_ty.clone()).or_insert(concrete);
+                            }
+                        }
+                    }
+                }
+                for (type_param, bound) in &sig.where_clauses {
+                    if let Some(concrete_type) = type_bindings.get(type_param) {
+                        if !self.satisfies_interface(concrete_type, bound, scope) {
+                            self.warning_at(
+                                format!(
+                                    "Type '{}' does not satisfy interface '{}': \
+                                     required by constraint `where {}: {}`",
+                                    concrete_type, bound, type_param, bound
+                                ),
+                                span,
                             );
                         }
                     }
@@ -1039,6 +1177,10 @@ impl TypeChecker {
             Node::Identifier(name) => scope.get_var(name).cloned().flatten(),
 
             Node::FunctionCall { name, .. } => {
+                // Struct constructor calls return the struct type
+                if scope.get_struct(name).is_some() {
+                    return Some(TypeExpr::Named(name.clone()));
+                }
                 // Check user-defined function return types
                 if let Some(sig) = scope.get_fn(name) {
                     return sig.return_type.clone();
@@ -1209,6 +1351,17 @@ impl TypeChecker {
         }
         let expected = self.resolve_alias(expected, scope);
         let actual = self.resolve_alias(actual, scope);
+
+        // Interface satisfaction: if expected is an interface name, check if actual type
+        // has all required methods (Go-style implicit satisfaction).
+        if let TypeExpr::Named(iface_name) = &expected {
+            if scope.get_interface(iface_name).is_some() {
+                if let TypeExpr::Named(type_name) = &actual {
+                    return self.satisfies_interface(type_name, iface_name, scope);
+                }
+                return false;
+            }
+        }
 
         match (&expected, &actual) {
             (TypeExpr::Named(a), TypeExpr::Named(b)) => a == b || (a == "float" && b == "int"),

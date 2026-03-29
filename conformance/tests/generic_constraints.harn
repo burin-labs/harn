@@ -1,0 +1,17 @@
+pipeline test(task) {
+  interface Greetable {
+    fn greet(self) -> string
+  }
+  struct Person {
+    name: string
+  }
+  impl Person {
+    fn greet(self) -> string {
+      return "Hello, I'm ${self.name}"
+    }
+  }
+  fn introduce<T>(item: T) where T: Greetable {
+    log(item.greet())
+  }
+  introduce(Person({name: "Alice"}))
+}

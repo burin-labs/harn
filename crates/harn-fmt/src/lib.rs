@@ -349,6 +349,13 @@ impl Formatter {
                 }
                 self.writeln("}");
             }
+            Node::TryExpr { body } => {
+                self.writeln("try {");
+                self.indent();
+                self.format_body(body, node_line);
+                self.dedent();
+                self.writeln("}");
+            }
             Node::ReturnStmt { value } => {
                 if let Some(val) = value {
                     let v = self.format_expr(val);
@@ -1053,6 +1060,21 @@ impl Formatter {
                         result.push('\n');
                     }
                 }
+                result.push_str(&close);
+                result.push('}');
+                result
+            }
+            Node::TryExpr { body } => {
+                let mut result = String::from("try {\n");
+                let current_indent = self.indent + 1;
+                for n in body {
+                    let indent_str = "  ".repeat(current_indent);
+                    let expr = self.format_expr_or_stmt(n, current_indent);
+                    result.push_str(&indent_str);
+                    result.push_str(&expr);
+                    result.push('\n');
+                }
+                let close = "  ".repeat(self.indent);
                 result.push_str(&close);
                 result.push('}');
                 result

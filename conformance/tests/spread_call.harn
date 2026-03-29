@@ -1,0 +1,20 @@
+pipeline test(task) {
+  fn add(a, b, c) {
+    return a + b + c
+  }
+  // Spread all args
+  let args = [1, 2, 3]
+  log(add(...args))
+  // Mixed: positional + spread
+  log(add(10, ...[20, 30]))
+  // Spread in builtin calls
+  let items = ["hello", " ", "world"]
+  log(join(items, ""))
+  // Spread with a variable holding a list
+  fn sum4(a, b, c, d) {
+    return a + b + c + d
+  }
+  let first = [100, 200]
+  let second = [300, 400]
+  log(sum4(...first, ...second))
+}

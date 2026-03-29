@@ -1,0 +1,22 @@
+pipeline test(task) {
+  // Basic capture groups
+  let caps = regex_captures("(\\w+)@(\\w+)", "user@host admin@server")
+  log(len(caps))
+  log(caps[0]["match"])
+  log(caps[0]["groups"])
+  log(caps[1]["match"])
+  log(caps[1]["groups"])
+  // Named capture groups
+  let named = regex_captures("(?P<name>\\w+):(?P<value>\\d+)", "foo:42 bar:99")
+  log(named[0]["name"])
+  log(named[0]["value"])
+  log(named[1]["name"])
+  log(named[1]["value"])
+  // No matches returns empty list
+  let none = regex_captures("(\\d+)", "no digits here")
+  log(none)
+  // Optional groups (non-matching)
+  let opt = regex_captures("(\\w+)(-(\\w+))?", "hello")
+  log(opt[0]["match"])
+  log(opt[0]["groups"])
+}

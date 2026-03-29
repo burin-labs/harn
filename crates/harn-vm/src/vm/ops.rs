@@ -219,6 +219,64 @@ impl super::Vm {
                     )));
                 }
             }
+        } else if op == Op::CallSpread as u8 {
+            let args_val = self.pop()?;
+            let callee = self.pop()?;
+            let args = match args_val {
+                VmValue::List(items) => (*items).clone(),
+                _ => {
+                    return Err(VmError::TypeError(
+                        "spread call requires list arguments".into(),
+                    ))
+                }
+            };
+            let functions = self.frames.last().unwrap().chunk.functions.clone();
+
+            match callee {
+                VmValue::String(name) => {
+                    if name.as_ref() == "await" {
+                        let task_id = args.first().and_then(|a| match a {
+                            VmValue::TaskHandle(id) => Some(id.clone()),
+                            _ => None,
+                        });
+                        if let Some(id) = task_id {
+                            if let Some(handle) = self.spawned_tasks.remove(&id) {
+                                let (result, task_output) = handle.await.map_err(|e| {
+                                    VmError::Runtime(format!("Task join error: {e}"))
+                                })??;
+                                self.output.push_str(&task_output);
+                                self.stack.push(result);
+                            } else {
+                                self.stack.push(VmValue::Nil);
+                            }
+                        } else {
+                            self.stack
+                                .push(args.into_iter().next().unwrap_or(VmValue::Nil));
+                        }
+                    } else if name.as_ref() == "cancel" {
+                        if let Some(VmValue::TaskHandle(id)) = args.first() {
+                            if let Some(handle) = self.spawned_tasks.remove(id) {
+                                handle.abort();
+                            }
+                        }
+                        self.stack.push(VmValue::Nil);
+                    } else if let Some(VmValue::Closure(closure)) = self.env.get(&name) {
+                        self.push_closure_frame(&closure, &args, &functions)?;
+                    } else {
+                        let result = self.call_named_builtin(&name, args).await?;
+                        self.stack.push(result);
+                    }
+                }
+                VmValue::Closure(closure) => {
+                    self.push_closure_frame(&closure, &args, &functions)?;
+                }
+                _ => {
+                    return Err(VmError::TypeError(format!(
+                        "Cannot call {}",
+                        callee.display()
+                    )));
+                }
+            }
         } else if op == Op::TailCall as u8 {
             let frame = self.frames.last_mut().unwrap();
             let argc = frame.chunk.code[frame.ip] as usize;
@@ -690,10 +748,11 @@ impl super::Vm {
                         return Err(VmError::Return(val));
                     }
                 }
-                _ => {
-                    return Err(VmError::TypeError(
-                        "? operator requires a Result value (Result.Ok or Result.Err)".into(),
-                    ));
+                other => {
+                    return Err(VmError::TypeError(format!(
+                        "? operator requires a Result value, got {}",
+                        other.type_name()
+                    )));
                 }
             }
         } else if op == Op::Dup as u8 {

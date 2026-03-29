@@ -300,6 +300,45 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
         Ok(VmValue::Nil)
     });
 
+    vm.register_builtin("regex_captures", |args, _out| {
+        if args.len() < 2 {
+            return Ok(VmValue::List(Rc::new(Vec::new())));
+        }
+        let pattern = args[0].display();
+        let text = args[1].display();
+        let re = get_cached_regex(&pattern)?;
+
+        let mut results: Vec<VmValue> = Vec::new();
+        for caps in re.captures_iter(&text) {
+            let mut dict = BTreeMap::new();
+
+            // "match" → full match (group 0)
+            dict.insert(
+                "match".to_string(),
+                VmValue::String(Rc::from(caps.get(0).map_or("", |m| m.as_str()))),
+            );
+
+            // "groups" → list of capture groups 1..n
+            let groups: Vec<VmValue> = (1..caps.len())
+                .map(|i| match caps.get(i) {
+                    Some(m) => VmValue::String(Rc::from(m.as_str())),
+                    None => VmValue::Nil,
+                })
+                .collect();
+            dict.insert("groups".to_string(), VmValue::List(Rc::new(groups)));
+
+            // Named groups as top-level dict keys
+            for name in re.capture_names().flatten() {
+                if let Some(m) = caps.name(name) {
+                    dict.insert(name.to_string(), VmValue::String(Rc::from(m.as_str())));
+                }
+            }
+
+            results.push(VmValue::Dict(Rc::new(dict)));
+        }
+        Ok(VmValue::List(Rc::new(results)))
+    });
+
     // --- Struct constructor helper ---
     vm.register_builtin("__make_struct", |args, _out| {
         let struct_name = args.first().map(|a| a.display()).unwrap_or_default();
@@ -2335,6 +2374,37 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
         }
     });
 
+    vm.register_builtin("__assert_shape", |args, _out| {
+        let val = args.first().cloned().unwrap_or(VmValue::Nil);
+        let param_name = match args.get(1) {
+            Some(VmValue::String(s)) => s.to_string(),
+            _ => "value".to_string(),
+        };
+        let spec = match args.get(2) {
+            Some(VmValue::String(s)) => s.to_string(),
+            _ => return Ok(VmValue::Nil),
+        };
+
+        // Extract fields from dict or struct instance
+        let fields: Option<&BTreeMap<String, VmValue>> = match &val {
+            VmValue::Dict(map) => Some(map.as_ref()),
+            VmValue::StructInstance { fields, .. } => Some(fields),
+            _ => None,
+        };
+        let fields = match fields {
+            Some(f) => f,
+            None => {
+                return Err(VmError::TypeError(format!(
+                    "parameter '{}': expected dict or struct, got {}",
+                    param_name,
+                    val.type_name()
+                )));
+            }
+        };
+
+        assert_shape_fields(fields, &param_name, &spec)
+    });
+
     vm.register_builtin("__dict_rest", |args, _out| {
         // __dict_rest(dict, keys_to_exclude) -> new dict without those keys
         let dict = args.first().cloned().unwrap_or(VmValue::Nil);
@@ -2367,6 +2437,151 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
     register_http_builtins(vm);
     register_llm_builtins(vm);
     register_mcp_builtins(vm);
+}
+
+// =============================================================================
+// Shape validation helpers (used by __assert_shape builtin)
+// =============================================================================
+
+/// Parse a shape spec string and validate fields against it.
+/// Spec format: `name:string,age:int,active:?bool,addr:{city:string,zip:string}`
+fn assert_shape_fields(
+    fields: &BTreeMap<String, VmValue>,
+    param_name: &str,
+    spec: &str,
+) -> Result<VmValue, VmError> {
+    let parsed = parse_shape_spec(spec);
+    for (field_name, type_spec, optional) in &parsed {
+        match fields.get(field_name.as_str()) {
+            None => {
+                if !optional {
+                    return Err(VmError::TypeError(format!(
+                        "parameter '{}': missing field '{}' ({})",
+                        param_name, field_name, type_spec
+                    )));
+                }
+            }
+            Some(val) => {
+                // Check if type_spec is a nested shape (starts with '{')
+                if type_spec.starts_with('{') && type_spec.ends_with('}') {
+                    // Nested shape: recursively validate
+                    let inner_spec = &type_spec[1..type_spec.len() - 1];
+                    let nested_fields: Option<&BTreeMap<String, VmValue>> = match val {
+                        VmValue::Dict(map) => Some(map.as_ref()),
+                        VmValue::StructInstance { fields, .. } => Some(fields),
+                        _ => None,
+                    };
+                    match nested_fields {
+                        Some(nf) => {
+                            let nested_param = format!("{}.{}", param_name, field_name);
+                            assert_shape_fields(nf, &nested_param, inner_spec)?;
+                        }
+                        None => {
+                            return Err(VmError::TypeError(format!(
+                                "parameter '{}': field '{}' expected dict or struct, got {}",
+                                param_name,
+                                field_name,
+                                val.type_name()
+                            )));
+                        }
+                    }
+                } else {
+                    // Simple type check
+                    let actual_type = val.type_name();
+                    if actual_type != type_spec.as_str() {
+                        return Err(VmError::TypeError(format!(
+                            "parameter '{}': field '{}' expected {}, got {}",
+                            param_name, field_name, type_spec, actual_type
+                        )));
+                    }
+                }
+            }
+        }
+    }
+    Ok(VmValue::Nil)
+}
+
+/// Parse a shape spec string into a list of (field_name, type_spec, optional).
+/// Handles balanced braces for nested shapes.
+fn parse_shape_spec(spec: &str) -> Vec<(String, String, bool)> {
+    let mut result = Vec::new();
+    let chars: Vec<char> = spec.chars().collect();
+    let len = chars.len();
+    let mut i = 0;
+
+    while i < len {
+        // Skip leading whitespace
+        while i < len && chars[i].is_whitespace() {
+            i += 1;
+        }
+        if i >= len {
+            break;
+        }
+
+        // Read field name (up to ':')
+        let name_start = i;
+        while i < len && chars[i] != ':' {
+            i += 1;
+        }
+        if i >= len {
+            break;
+        }
+        let field_name = chars[name_start..i]
+            .iter()
+            .collect::<String>()
+            .trim()
+            .to_string();
+        i += 1; // skip ':'
+
+        // Skip whitespace after ':'
+        while i < len && chars[i].is_whitespace() {
+            i += 1;
+        }
+
+        // Check for optional prefix '?'
+        let optional = if i < len && chars[i] == '?' {
+            i += 1;
+            true
+        } else {
+            false
+        };
+
+        // Read type spec, handling balanced braces
+        let type_start = i;
+        let mut brace_depth = 0;
+        while i < len {
+            match chars[i] {
+                '{' => {
+                    brace_depth += 1;
+                    i += 1;
+                }
+                '}' => {
+                    brace_depth -= 1;
+                    i += 1;
+                }
+                ',' if brace_depth == 0 => break,
+                _ => {
+                    i += 1;
+                }
+            }
+        }
+        let type_spec = chars[type_start..i]
+            .iter()
+            .collect::<String>()
+            .trim()
+            .to_string();
+
+        if !field_name.is_empty() && !type_spec.is_empty() {
+            result.push((field_name, type_spec, optional));
+        }
+
+        // Skip comma
+        if i < len && chars[i] == ',' {
+            i += 1;
+        }
+    }
+
+    result
 }
 
 // =============================================================================

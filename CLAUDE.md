@@ -82,6 +82,8 @@ via `tokio::task::spawn_local` for `parallel`, `parallel_map`, and
 - **harn-parser** -- AST definition (`ast.rs` with `SNode = Spanned<Node>`),
   recursive-descent parser (`parser.rs`), static type checker
   (`typechecker.rs`), diagnostic renderer (`diagnostic.rs`).
+  Supports interfaces, generic constraints (`where T: Interface`),
+  try-expressions, and spread arguments.
 - **harn-vm** -- The sole execution engine. Modular structure:
   `value.rs` (VmValue, VmEnv, errors), `chunk.rs` (opcodes, bytecode),
   `compiler.rs` (AST -> bytecode, pipe placeholder desugaring),
@@ -94,8 +96,9 @@ via `tokio::task::spawn_local` for `parallel`, `parallel_map`, and
   tool support returning `{status, text, iterations, duration_ms}`),
   `mcp.rs` (MCP client: tools, resources, and prompts),
   `bridge.rs` / `bridge_builtins.rs` (JSON-RPC host delegation).
-  45+ opcodes including TailCall, GetPropertyOpt, MethodCallOpt,
-  Slice, concurrency, imports, enums, and deadlines. In bridge mode,
+  50+ opcodes including TailCall, GetPropertyOpt, MethodCallOpt,
+  Slice, CallSpread, TryExpr, concurrency, imports, enums, interfaces,
+  and deadlines. In bridge mode,
   unknown builtins are automatically delegated to the host via
   `builtin_call` JSON-RPC. Stdlib .harn files live in `stdlib/` at
   the repo root and are embedded via `include_str!`.
@@ -129,8 +132,11 @@ for rustc-style diagnostic rendering.
 annotations are optional. Supports structural typing: dict literals
 with string keys infer `Shape` types, enabling compile-time checking
 of `{name: string, age: int}` shape annotations with width subtyping.
-Also supports `list<T>`, `dict<K, V>`, union types, and type aliases.
-The checker tracks enums for match exhaustiveness warnings.
+Also supports `list<T>`, `dict<K, V>`, union types, type aliases, and
+interfaces (implicit satisfaction checking). Shape annotations on
+function parameters are also validated at runtime. The checker tracks
+enums for match exhaustiveness warnings and interfaces for generic
+constraint (`where T: Interface`) enforcement.
 Union type narrowing removes `nil` from union types after `if x != nil`
 checks in the then-branch.
 
@@ -151,8 +157,33 @@ attaches methods to structs. Methods receive the instance as `self`
 and are called with dot syntax: `instance.method(args)`. Struct
 declarations produce constructor functions: `Point({x: 3, y: 4})`.
 
+**Interfaces**: `interface Name { fn method(self) -> Type }` declares
+method contracts. Structs satisfy interfaces implicitly (Go-style) if
+their impl block has all required methods. Used as parameter types and
+in `where T: Interface` generic constraints. The type checker verifies
+satisfaction at call sites.
+
+**Runtime shape validation**: Shape-annotated parameters
+(`fn f(x: {name: string})`) are validated at runtime, checking for
+missing fields and type mismatches. Works with dicts and struct
+instances.
+
+**Try-expression**: `try { expr }` without `catch` returns
+`Result.Ok(value)` or `Result.Err(error)`. Complement to `?` operator.
+
+**Spread in calls**: `f(...args)` expands a list into individual
+arguments. Supports mixed args: `f(a, ...list, b)`. Uses `CallSpread`
+opcode for runtime flattening.
+
+**Generic constraints**: `fn f<T>(x: T) where T: Interface` enforces
+that `T` satisfies the named interface. Checked at call sites with
+compile-time warnings.
+
 **Encoding/hashing builtins**: `base64_encode`, `base64_decode`,
 `sha256`, `md5`.
+
+**Regex builtins**: `regex_match`, `regex_replace`, `regex_captures`
+(capture groups with positional and named group support).
 
 ### agent_loop tool support
 

@@ -1,0 +1,66 @@
+pipeline default() {
+  // 1. Valid shape passes runtime check
+  fn show_user(u: {name: string, age: int}) -> string {
+    return u["name"] + " is " + to_string(u["age"])
+  }
+  println(show_user({name: "Alice", age: 30}))
+  // 2. Width subtyping: extra fields are allowed at runtime
+  println(show_user({name: "Bob", age: 25, role: "admin"}))
+  // 3. Optional fields: missing optional is fine
+  fn show_config(c: {host: string, port?: int}) -> string {
+    return c["host"]
+  }
+  println(show_config({host: "localhost"}))
+  println(show_config({host: "example.com", port: 8080}))
+  // 4. Nested shapes pass runtime check
+  fn show_nested(d: {user: {name: string}, count: int}) -> string {
+    return d["user"]["name"] + ":" + to_string(d["count"])
+  }
+  println(show_nested({user: {name: "X"}, count: 5}))
+  // 5. Dynamic value bypasses static checker — missing required field
+  fn make_bad_user() -> dict {
+    return {name: "NoAge"}
+  }
+  try {
+    show_user(make_bad_user())
+  } catch (e) {
+    println(e)
+  }
+  // 6. Dynamic value — wrong field type
+  fn make_wrong_type() -> dict {
+    return {name: 123, age: 30}
+  }
+  try {
+    show_user(make_wrong_type())
+  } catch (e) {
+    println(e)
+  }
+  // 7. Dynamic value — non-dict passed to shape param
+  fn make_string() -> dict {
+    // Type says dict but returns string at runtime
+    return json_decode("{}")
+  }
+  // Can't easily produce a non-dict from a dict-typed fn,
+  // so test with a function that returns any
+  fn accepts_shape(v: {x: int}) -> string {
+    return to_string(v["x"])
+  }
+  // 8. Nested shape missing field via dynamic dict
+  fn make_bad_nested() -> dict {
+    return {user: {}, count: 5}
+  }
+  try {
+    show_nested(make_bad_nested())
+  } catch (e) {
+    println(e)
+  }
+  // 9. Nested shape wrong type via dynamic dict
+  fn make_flat_nested() -> dict {
+    return {user: "flat", count: 5}
+  }
+  try {
+    show_nested(make_flat_nested())
+  } catch (e) {
+    println(e)
+  }
+}

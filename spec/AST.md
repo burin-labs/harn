@@ -92,6 +92,23 @@ impl Point {
 }
 ```
 
+### `interfaceDecl`
+
+```javascript
+interfaceDecl(name: String, methods: [InterfaceMethod])
+```
+
+An interface declaration listing required method signatures. Each
+`InterfaceMethod` has a name, parameter list (first must be `self`),
+and optional return type. Structs satisfy an interface implicitly if
+their `impl` block contains all required methods.
+
+```harn
+interface Displayable {
+  fn display(self) -> string
+}
+```
+
 ## Control flow
 
 ### `ifElse`
@@ -197,17 +214,38 @@ try {
 }
 ```
 
+### `tryExpr`
+
+```javascript
+tryExpr(body: [HarnNode])
+```
+
+A try-expression (no `catch` block). Evaluates the body and wraps the
+result in a `Result`: `Result.Ok(value)` on success, `Result.Err(error)`
+on thrown error.
+
+```harn
+let result = try { json_parse(raw_input) }
+```
+
 ### `fnDecl`
 
 ```javascript
-fnDecl(name: String, params: [String], body: [HarnNode])
+fnDecl(name: String, params: [String], body: [HarnNode],
+       generic_params: [String]?, where_clauses: [(String, String)]?)
 ```
 
-Named function declaration. Creates a closure value and binds it in the current scope.
+Named function declaration. Creates a closure value and binds it in the
+current scope. Optionally includes generic type parameters and `where`
+clauses for interface constraints.
 
 ```harn
 fn add(a, b) {
   return a + b
+}
+
+fn process<T>(item: T) where T: Displayable {
+  println(item.display())
 }
 ```
 
@@ -263,10 +301,16 @@ parallel_map(items) { item ->
 functionCall(name: String, args: [HarnNode])
 ```
 
-Calls a function or builtin by name.
+Calls a function or builtin by name. Arguments may include spread
+expressions (`...expr`), which are represented as `spreadArg(HarnNode)`
+nodes in the `args` list. At runtime, the `CallSpread` opcode flattens
+spread arguments into the argument list before invoking the function.
 
 ```harn
 read_file("config.json")
+
+let args = [1, 2, 3]
+add(...args)
 ```
 
 ### `methodCall`

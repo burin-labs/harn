@@ -1,0 +1,21 @@
+pipeline test(task) {
+  // Success wraps in Ok
+  let r1 = try {
+    42
+  }
+  log(r1)
+  // Error wraps in Err
+  let r2 = try {
+    throw "boom"
+  }
+  log(r2)
+  // Nested function errors caught
+  fn risky() {
+    throw "failed"
+  }
+  let r3 = try {
+    risky()
+  }
+  log(is_err(r3))
+  log(unwrap_err(r3))
+}

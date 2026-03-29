@@ -1,0 +1,26 @@
+pipeline test(task) {
+  interface Displayable {
+    fn display(self) -> string
+  }
+  struct Dog {
+    name: string
+  }
+  impl Dog {
+    fn display(self) -> string {
+      return "Dog: ${self.name}"
+    }
+  }
+  struct Cat {
+    name: string
+  }
+  impl Cat {
+    fn display(self) -> string {
+      return "Cat: ${self.name}"
+    }
+  }
+  fn show(item: Displayable) {
+    log(item.display())
+  }
+  show(Dog({name: "Rex"}))
+  show(Cat({name: "Whiskers"}))
+}

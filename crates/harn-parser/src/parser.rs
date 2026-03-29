@@ -706,9 +706,12 @@ impl Parser {
             None
         };
 
-        // Must have at least catch or finally
+        // If no catch or finally, this is a try-expression (returns Result)
         if !has_catch && finally_body.is_none() {
-            return Err(self.error("catch or finally block after try"));
+            return Ok(spanned(
+                Node::TryExpr { body },
+                Span::merge(start, self.prev_span()),
+            ));
         }
 
         Ok(spanned(
@@ -1637,6 +1640,7 @@ impl Parser {
             }
             TokenKind::Ask => self.parse_ask_expr(),
             TokenKind::Deadline => self.parse_deadline(),
+            TokenKind::Try => self.parse_try_catch(),
             _ => Err(self.error("expression")),
         }
     }
@@ -2089,7 +2093,27 @@ impl Parser {
         self.skip_newlines();
 
         while !self.is_at_end() && !self.check(&TokenKind::RParen) {
-            args.push(self.parse_expression()?);
+            // Check for spread: ...expr
+            if self.check(&TokenKind::Dot) {
+                let saved_pos = self.pos;
+                self.advance(); // first .
+                if self.check(&TokenKind::Dot) {
+                    self.advance(); // second .
+                    self.consume(&TokenKind::Dot, ".")?; // third .
+                    let spread_start = self.tokens[saved_pos].span;
+                    let expr = self.parse_expression()?;
+                    args.push(spanned(
+                        Node::Spread(Box::new(expr)),
+                        Span::merge(spread_start, self.prev_span()),
+                    ));
+                } else {
+                    // Not a spread, restore and parse as expression
+                    self.pos = saved_pos;
+                    args.push(self.parse_expression()?);
+                }
+            } else {
+                args.push(self.parse_expression()?);
+            }
             self.skip_newlines();
             if self.check(&TokenKind::Comma) {
                 self.advance();

@@ -368,6 +368,21 @@ impl SyncInterpreter {
                 }
                 result
             }
+            Node::TryExpr { body } => {
+                match self.exec(body) {
+                    Ok(v) => {
+                        let mut d = BTreeMap::new();
+                        d.insert("ok".into(), v);
+                        Ok(Val::Dict(d))
+                    }
+                    Err(EvalStop::Return(v)) => Err(EvalStop::Return(v)),
+                    Err(EvalStop::Error(e)) => {
+                        let mut d = BTreeMap::new();
+                        d.insert("err".into(), Val::String(e));
+                        Ok(Val::Dict(d))
+                    }
+                }
+            }
             Node::FnDecl { name, params, body, .. } => {
                 let closure = Val::Closure(params.clone(), body.clone(), self.env.clone());
                 self.env.define(name, closure, false);

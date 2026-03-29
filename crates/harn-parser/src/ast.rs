@@ -112,6 +112,10 @@ pub enum Node {
         catch_body: Vec<SNode>,
         finally_body: Option<Vec<SNode>>,
     },
+    /// Try expression: try { body } — returns Result.Ok(value) or Result.Err(error).
+    TryExpr {
+        body: Vec<SNode>,
+    },
     FnDecl {
         name: String,
         type_params: Vec<TypeParam>,

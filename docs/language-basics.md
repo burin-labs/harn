@@ -620,6 +620,161 @@ The first parameter must be `self`, which receives the struct instance.
 Methods are called with dot syntax on values constructed with the struct
 constructor.
 
+## Interfaces
+
+Interfaces let you define a contract: a set of methods that a type must
+have. Harn uses **implicit satisfaction**, just like Go. A struct satisfies
+an interface automatically if its `impl` block has all the required methods.
+You never write `implements` or `impl Interface for Type`.
+
+### Step 1: Define an interface
+
+An interface lists method signatures without bodies:
+
+```harn
+interface Displayable {
+  fn display(self) -> string
+}
+```
+
+This says: any type that has a `display(self) -> string` method counts as
+`Displayable`.
+
+### Step 2: Create structs with matching methods
+
+```harn
+struct Dog {
+  name: string
+  breed: string
+}
+
+impl Dog {
+  fn display(self) -> string {
+    return "${self.name} the ${self.breed}"
+  }
+}
+
+struct Cat {
+  name: string
+  indoor: bool
+}
+
+impl Cat {
+  fn display(self) -> string {
+    let status = if self.indoor { "indoor" } else { "outdoor" }
+    return "${self.name} (${status} cat)"
+  }
+}
+```
+
+Both `Dog` and `Cat` have a `display(self) -> string` method, so they
+both satisfy `Displayable`. No extra annotation is needed.
+
+### Step 3: Use the interface as a type
+
+Now you can write a function that accepts any `Displayable`:
+
+```harn
+fn introduce(animal: Displayable) {
+  println("Meet: " + animal.display())
+}
+
+let d = Dog({name: "Rex", breed: "Labrador"})
+let c = Cat({name: "Whiskers", indoor: true})
+
+introduce(d)  // Meet: Rex the Labrador
+introduce(c)  // Meet: Whiskers (indoor cat)
+```
+
+The type checker verifies at compile time that `Dog` and `Cat` satisfy
+`Displayable`. If a struct is missing a required method, you get a
+clear error at the call site.
+
+### Interfaces with multiple methods
+
+Interfaces can require more than one method:
+
+```harn
+interface Serializable {
+  fn serialize(self) -> string
+  fn byte_size(self) -> int
+}
+```
+
+A struct must implement all listed methods to satisfy the interface.
+
+### Generic constraints
+
+You can also use interfaces as constraints on generic type parameters:
+
+```harn
+fn log_item<T>(item: T) where T: Displayable {
+  println("[LOG] " + item.display())
+}
+```
+
+The `where T: Displayable` clause tells the type checker to verify that
+whatever concrete type is passed for `T` satisfies `Displayable`. If it
+does not, a compile-time warning is produced.
+
+## Spread in function calls
+
+The spread operator `...` expands a list into individual function
+arguments:
+
+```harn
+fn add(a, b, c) {
+  return a + b + c
+}
+
+let nums = [1, 2, 3]
+println(add(...nums))  // 6
+```
+
+You can mix regular arguments and spread arguments:
+
+```harn
+let rest = [2, 3]
+println(add(1, ...rest))  // 6
+```
+
+Spread works in method calls too:
+
+```harn
+let point = Point({x: 0, y: 0})
+let deltas = [10, 20]
+let moved = point.translate(...deltas)
+```
+
+## Try-expression
+
+The `try` keyword without a `catch` block is a try-expression. It
+evaluates its body and wraps the outcome in a `Result`:
+
+```harn
+let result = try { json_parse(raw_input) }
+// Result.Ok(parsed_data)  -- if parsing succeeds
+// Result.Err("invalid JSON: ...") -- if parsing throws
+```
+
+This is the complement of the `?` operator. Use `try` to enter
+Result-land (catching errors into `Result.Err`), and `?` to exit
+Result-land (propagating errors upward):
+
+```harn
+fn safe_divide(a, b) {
+  return try { a / b }
+}
+
+fn compute(x) {
+  let half = safe_divide(x, 2)?  // unwrap Ok or propagate Err
+  return Ok(half + 10)
+}
+```
+
+No `catch` or `finally` is needed. If a `catch` follows `try`, it is
+parsed as the traditional `try`/`catch` statement instead.
+
 ## Duration literals
 
 ```javascript

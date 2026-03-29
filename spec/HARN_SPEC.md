@@ -75,6 +75,8 @@ The following identifiers are reserved:
 | `enum` | `.enum` |
 | `struct` | `.struct` |
 | `impl` | `.impl` |
+| `interface` | `.interface` |
+| `where` | `.where` |
 
 ### Identifiers
 
@@ -189,7 +191,8 @@ before checking the expected token.
 ### Top-level
 
 ```ebnf
-program       ::= (import_decl | pipeline_decl | enum_decl | struct_decl | impl_block)*
+program       ::= (import_decl | pipeline_decl | enum_decl | struct_decl
+                   | impl_block | interface_decl)*
 import_decl   ::= 'import' STRING_LITERAL
                  | 'import' '{' IDENTIFIER (',' IDENTIFIER)* '}' 'from' STRING_LITERAL
 pipeline_decl ::= 'pipeline' IDENTIFIER '(' param_list ')' ('extends' IDENTIFIER)? '{' block '}'
@@ -200,6 +203,8 @@ enum_variant  ::= IDENTIFIER ('(' type_expr (',' type_expr)* ')')?
 struct_decl   ::= 'struct' IDENTIFIER '{' struct_field* '}'
 struct_field  ::= IDENTIFIER ':' type_expr
 impl_block    ::= 'impl' IDENTIFIER '{' fn_decl* '}'
+interface_decl ::= 'interface' IDENTIFIER '{' interface_method* '}'
+interface_method ::= 'fn' IDENTIFIER '(' param_list ')' ('->' type_expr)?
 ```
 
 #### Standard library modules
@@ -250,7 +255,13 @@ return_stmt    ::= 'return' expression?
 throw_stmt     ::= 'throw' expression
 override_decl  ::= 'override' IDENTIFIER '(' param_list ')' '{' block '}'
 try_catch      ::= 'try' '{' block '}' 'catch' ('(' IDENTIFIER ')')? '{' block '}'
-fn_decl        ::= 'fn' IDENTIFIER '(' param_list ')' ('->' type_expr)? '{' block '}'
+try_expr       ::= 'try' '{' block '}'
+fn_decl        ::= 'fn' IDENTIFIER generic_params? '(' fn_param_list ')' ('->' type_expr)? where_clause? '{' block '}'
+generic_params ::= '<' IDENTIFIER (',' IDENTIFIER)* '>'
+where_clause   ::= 'where' IDENTIFIER ':' IDENTIFIER (',' IDENTIFIER ':' IDENTIFIER)*
+
+fn_param_list  ::= (fn_param (',' fn_param)*)?
+fn_param       ::= IDENTIFIER (':' type_expr)? ('=' expression)?
 
 expression_statement ::= expression ('=' expression)?
 
@@ -309,6 +320,7 @@ primary ::= STRING_LITERAL
           | 'retry' ...
           | 'if' ...
           | 'spawn' '{' block '}'
+          | 'try' '{' block '}'              (* try-expression returning Result *)
 
 list_literal    ::= '[' (expression (',' expression)*)? ']'
 dict_or_closure ::= '{' '}'                              (* empty dict *)
@@ -318,7 +330,8 @@ dict_or_closure ::= '{' '}'                              (* empty dict *)
 
 dict_entries ::= dict_entry (',' dict_entry)*
 dict_entry   ::= (IDENTIFIER | '[' expression ']') ':' expression
-arg_list     ::= (expression (',' expression)*)?
+arg_list     ::= (arg_element (',' arg_element)*)?
+arg_element  ::= '...' expression | expression
 ```
 
 Dict keys written as bare identifiers are converted to string literals
@@ -928,6 +941,40 @@ let g = { a, b -> a + b }
 First-class values. When invoked, a child environment is created from the *captured*
 environment (not the call-site environment), and parameters are bound as immutable bindings.
 
+### Spread in function calls
+
+The spread operator `...` expands a list into individual function arguments.
+It can be used in both function calls and method calls:
+
+```harn
+fn add(a, b, c) {
+  return a + b + c
+}
+
+let args = [1, 2, 3]
+add(...args)           // equivalent to add(1, 2, 3)
+```
+
+Spread arguments can be mixed with regular arguments:
+
+```harn
+let rest = [2, 3]
+add(1, ...rest)        // equivalent to add(1, 2, 3)
+```
+
+Multiple spreads are allowed in a single call, and they can appear in any
+position:
+
+```harn
+let first = [1]
+let last = [3]
+add(...first, 2, ...last)   // equivalent to add(1, 2, 3)
+```
+
+At runtime the VM flattens all spread arguments into the argument list
+before invoking the function. If the total number of arguments does not
+match the function's parameter count, the usual arity error is produced.
+
 ### Return
 
 `return value` inside a function/closure unwinds execution via
@@ -1050,6 +1097,38 @@ match result {
 }
 ```
 
+### Try-expression
+
+The `try` keyword used without a `catch` block acts as a try-expression.
+It evaluates the body and wraps the result in a `Result`:
+
+- If the body succeeds, returns `Result.Ok(value)`.
+- If the body throws an error, returns `Result.Err(error)`.
+
+```harn
+let result = try { json_parse(raw_input) }
+// result is Result.Ok(parsed_data) or Result.Err("invalid JSON: ...")
+```
+
+The try-expression is the complement of the `?` operator: `try` enters
+Result-land by catching errors, while `?` exits Result-land by propagating
+errors. Together they form a complete error-handling pipeline:
+
+```harn
+fn safe_divide(a, b) {
+  let result = try { a / b }
+  return result
+}
+
+fn compute(x) {
+  let val = safe_divide(x, 2)?  // unwrap Ok or propagate Err
+  return Ok(val + 10)
+}
+```
+
+No `catch` or `finally` block is needed. If `catch` follows `try`, it is
+parsed as a `try`/`catch` statement instead.
+
 ### Result in pipelines
 
 The `?` operator works naturally in pipelines:
@@ -1147,6 +1226,79 @@ log(p2.x)                   // 13
 When `instance.method(args)` is called, the VM looks up methods registered
 by the `impl` block for the instance's struct type. The instance is
 automatically passed as the `self` argument.
+
+## Interfaces
+
+Interfaces define a set of method signatures that a struct type must
+implement. Harn uses Go-style implicit satisfaction: a struct satisfies
+an interface if its impl block contains all the required methods with
+compatible signatures. There is no `implements` keyword.
+
+### Interface declaration
+
+```harn
+interface Displayable {
+  fn display(self) -> string
+}
+
+interface Serializable {
+  fn serialize(self) -> string
+  fn byte_size(self) -> int
+}
+```
+
+Each method signature lists parameters (the first must be `self`) and an
+optional return type. The body is omitted -- interfaces only declare the
+shape of the methods.
+
+### Implicit satisfaction
+
+A struct satisfies an interface when its `impl` block has all the methods
+declared by the interface, with matching parameter counts:
+
+```harn
+struct Dog {
+  name: string
+}
+
+impl Dog {
+  fn display(self) -> string {
+    return "Dog(${self.name})"
+  }
+}
+```
+
+`Dog` satisfies `Displayable` because it has a `display(self) -> string`
+method. No extra annotation is needed.
+
+### Using interfaces as type annotations
+
+Interfaces can be used as parameter types. At compile time, the type
+checker verifies that any struct passed to such a parameter satisfies
+the interface:
+
+```harn
+fn show(item: Displayable) {
+  println(item.display())
+}
+
+let d = Dog({name: "Rex"})
+show(d)  // OK: Dog satisfies Displayable
+```
+
+### Generic constraints with interfaces
+
+Interfaces can be used as generic constraints via `where` clauses:
+
+```harn
+fn process<T>(item: T) where T: Displayable {
+  println(item.display())
+}
+```
+
+The type checker verifies at call sites that the concrete type passed
+for `T` satisfies `Displayable`. Passing a type that does not satisfy
+the constraint produces a compile-time warning.
 
 ## Type annotations
 
@@ -1269,7 +1421,28 @@ TypeError: parameter 'name' expected string, got int (42)
 The following types are enforced at runtime: `int`, `float`, `string`, `bool`,
 `list`, `dict`, `set`, `nil`, and `closure`. `int` and `float` are mutually
 compatible (passing an `int` to a `float` parameter is allowed, and vice versa).
-Union types and shape types are not checked at runtime.
+Union types are not checked at runtime.
+
+### Runtime shape validation
+
+Shape-annotated function parameters are validated at runtime. When a function
+parameter has a structural type annotation (e.g., `{name: string, age: int}`),
+the VM checks that the argument is a dict (or struct instance) with all
+required fields and that each field has the expected type.
+
+```harn
+fn process(user: {name: string, age: int}) {
+  println("${user.name} is ${user.age}")
+}
+
+process({name: "Alice", age: 30})     // OK
+process({name: "Alice"})              // Error: parameter 'user': missing field 'age' (int)
+process({name: "Alice", age: "old"})  // Error: parameter 'user': field 'age' expected int, got string
+```
+
+Shape validation works with both plain dicts and struct instances. Extra
+fields are allowed (width subtyping). Optional fields (declared with `?`)
+are not required to be present.
 
 ## Built-in methods
 
@@ -1363,6 +1536,29 @@ let md5hash = md5("hello")                  // hex string
 |---|---|
 | `regex_match(pattern, str)` | Returns match data if `str` matches `pattern`, or `nil` |
 | `regex_replace(pattern, str, replacement)` | Replaces all matches of `pattern` in `str` |
+| `regex_captures(pattern, str)` | Returns a list of capture group dicts for all matches |
+
+#### regex_captures
+
+`regex_captures(pattern, text)` finds all matches of `pattern` in `text`
+and returns a list of dicts, one per match. Each dict contains:
+
+- `match`: the full match string
+- `groups`: a list of positional capture group strings (from `(...)`)
+- Any named capture groups (from `(?P<name>...)`) as additional keys
+
+```harn
+let results = regex_captures("(\\w+)@(\\w+)", "alice@example bob@test")
+// results == [
+//   {match: "alice@example", groups: ["alice", "example"]},
+//   {match: "bob@test", groups: ["bob", "test"]}
+// ]
+
+let named = regex_captures("(?P<user>\\w+):(?P<role>\\w+)", "alice:admin")
+// named == [{match: "alice:admin", groups: ["alice", "admin"], user: "alice", role: "admin"}]
+```
+
+Returns an empty list if there are no matches.
 
 Regex patterns are compiled and cached internally using a thread-local
 cache. Repeated calls with the same pattern string reuse the compiled
@@ -1530,3 +1726,44 @@ The following environment variables configure runtime behavior:
 | `ANTHROPIC_API_KEY` | API key for the Anthropic provider. |
 | `OPENAI_API_KEY` | API key for the OpenAI provider. |
 | `OPENROUTER_API_KEY` | API key for the OpenRouter provider. |
+
+## Known limitations and future work
+
+The following are known limitations in the current implementation that may
+be addressed in future versions.
+
+### Type system
+
+- **Generic constraints on container types**: `where T: Interface` only
+  binds `T` when it appears directly as a parameter type
+  (`fn f<T>(x: T)`), not when nested inside containers
+  (`fn f<T>(items: list<T>)`). The constraint is silently skipped for
+  nested cases.
+- **Interface method signature checking**: Interface satisfaction checks
+  method names and parameter counts, but does not yet validate parameter
+  types or return types against the interface declaration.
+- **Definition-site generic checking**: Inside a generic function body,
+  type parameters are treated as compatible with any type. The checker
+  does not yet restrict method calls on `T` to only those declared in
+  the `where` clause interface.
+- **No runtime interface enforcement**: Interface satisfaction is checked
+  at compile-time only. Passing an untyped value to an interface-typed
+  parameter is not caught at runtime.
+
+### Runtime
+
+- **Shape validation does not check union types**: If a shape field has a
+  union type annotation (`field: string | nil`), runtime validation only
+  checks the base type name, not the full union.
+- **No runtime generic type checking**: `list<int>` annotations are
+  checked at compile-time but not at runtime. A `list<int>` parameter
+  accepts any list at runtime.
+
+### Syntax limitations
+
+- **No `impl Interface for Type` syntax**: Interface satisfaction is
+  always implicit. There is no way to explicitly declare that a type
+  implements an interface.
+- **Spread only in function calls**: `...args` works in list/dict
+  literals and function call arguments, but not in method call arguments
+  (method calls with spread fall back to regular dispatch).

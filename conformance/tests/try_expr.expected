@@ -1,0 +1,4 @@
+[harn] Result.Ok(42)
+[harn] Result.Err(boom)
+[harn] true
+[harn] failed

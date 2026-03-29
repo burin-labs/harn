@@ -201,10 +201,34 @@ impl Compiler {
     }
 
     /// Emit runtime type checks for parameters with type annotations.
-    /// For each param with a type annotation, emits CheckType(var_name, type_name).
+    /// For each param with a type annotation, emits CheckType(var_name, type_name)
+    /// or calls __assert_shape for shape types.
     fn emit_type_checks(&mut self, params: &[TypedParam]) {
         for param in params {
             if let Some(type_expr) = &param.type_expr {
+                // Handle shape types via __assert_shape builtin call
+                if let harn_parser::TypeExpr::Shape(fields) = type_expr {
+                    let spec = Self::shape_to_spec_string(fields);
+                    // Emit: __assert_shape(param_value, param_name, spec)
+                    let fn_idx = self
+                        .chunk
+                        .add_constant(Constant::String("__assert_shape".into()));
+                    self.chunk.emit_u16(Op::Constant, fn_idx, self.line);
+                    let var_idx = self
+                        .chunk
+                        .add_constant(Constant::String(param.name.clone()));
+                    self.chunk.emit_u16(Op::GetVar, var_idx, self.line);
+                    let name_idx = self
+                        .chunk
+                        .add_constant(Constant::String(param.name.clone()));
+                    self.chunk.emit_u16(Op::Constant, name_idx, self.line);
+                    let spec_idx = self.chunk.add_constant(Constant::String(spec));
+                    self.chunk.emit_u16(Op::Constant, spec_idx, self.line);
+                    self.chunk.emit_u8(Op::Call, 3, self.line);
+                    self.chunk.emit(Op::Pop, self.line);
+                    continue;
+                }
+
                 let type_name = Self::type_expr_to_runtime_name(type_expr);
                 if let Some(type_name) = type_name {
                     let var_idx = self
@@ -219,6 +243,38 @@ impl Compiler {
                     self.chunk.code.push(lo);
                 }
             }
+        }
+    }
+
+    /// Serialize a list of ShapeFields into a spec string for __assert_shape.
+    /// Format: `name:string,age:int,active:?bool,addr:{city:string,zip:string}`
+    fn shape_to_spec_string(fields: &[harn_parser::ShapeField]) -> String {
+        fields
+            .iter()
+            .map(|f| {
+                let opt = if f.optional { "?" } else { "" };
+                let type_str = Self::type_expr_to_spec(&f.type_expr);
+                format!("{}:{}{}", f.name, opt, type_str)
+            })
+            .collect::<Vec<_>>()
+            .join(",")
+    }
+
+    /// Convert a TypeExpr into a spec string fragment for shape validation.
+    fn type_expr_to_spec(type_expr: &harn_parser::TypeExpr) -> String {
+        match type_expr {
+            harn_parser::TypeExpr::Named(name) => name.clone(),
+            harn_parser::TypeExpr::Shape(fields) => {
+                let inner = Self::shape_to_spec_string(fields);
+                format!("{{{}}}", inner)
+            }
+            harn_parser::TypeExpr::List(_) => "list".to_string(),
+            harn_parser::TypeExpr::DictType(_, _) => "dict".to_string(),
+            harn_parser::TypeExpr::Union(_) => {
+                // Union types are not validated at runtime for shapes
+                "any".to_string()
+            }
+            harn_parser::TypeExpr::FnType { .. } => "closure".to_string(),
         }
     }
 
@@ -526,14 +582,50 @@ impl Compiler {
             }
 
             Node::FunctionCall { name, args } => {
+                let has_spread = args.iter().any(|a| matches!(&a.node, Node::Spread(_)));
                 // Push function name as string constant
                 let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
                 self.chunk.emit_u16(Op::Constant, name_idx, self.line);
-                // Push arguments
-                for arg in args {
-                    self.compile_node(arg)?;
+
+                if has_spread {
+                    // Build the args into a single list using the flush-and-concat
+                    // pattern (same as ListLiteral with spreads).
+                    self.chunk.emit_u16(Op::BuildList, 0, self.line);
+                    let mut pending = 0u16;
+                    for arg in args {
+                        if let Node::Spread(inner) = &arg.node {
+                            if pending > 0 {
+                                self.chunk.emit_u16(Op::BuildList, pending, self.line);
+                                self.chunk.emit(Op::Add, self.line);
+                                pending = 0;
+                            }
+                            self.compile_node(inner)?;
+                            self.chunk.emit(Op::Dup, self.line);
+                            let assert_idx = self
+                                .chunk
+                                .add_constant(Constant::String("__assert_list".into()));
+                            self.chunk.emit_u16(Op::Constant, assert_idx, self.line);
+                            self.chunk.emit(Op::Swap, self.line);
+                            self.chunk.emit_u8(Op::Call, 1, self.line);
+                            self.chunk.emit(Op::Pop, self.line);
+                            self.chunk.emit(Op::Add, self.line);
+                        } else {
+                            self.compile_node(arg)?;
+                            pending += 1;
+                        }
+                    }
+                    if pending > 0 {
+                        self.chunk.emit_u16(Op::BuildList, pending, self.line);
+                        self.chunk.emit(Op::Add, self.line);
+                    }
+                    self.chunk.emit(Op::CallSpread, self.line);
+                } else {
+                    // Push arguments normally
+                    for arg in args {
+                        self.compile_node(arg)?;
+                    }
+                    self.chunk.emit_u8(Op::Call, args.len() as u8, self.line);
                 }
-                self.chunk.emit_u8(Op::Call, args.len() as u8, self.line);
             }
 
             Node::MethodCall {
@@ -1792,6 +1884,44 @@ impl Compiler {
                 }
             }
 
+            Node::TryExpr { body } => {
+                // try { body } — returns Result.Ok(value) or Result.Err(error)
+
+                // 1. Set up try-catch handler (untyped)
+                self.handler_depth += 1;
+                let catch_jump = self.chunk.emit_jump(Op::TryCatchSetup, self.line);
+                let empty_type = self.chunk.add_constant(Constant::String(String::new()));
+                self.emit_type_name_extra(empty_type);
+
+                // 2. Compile try body (leaves value on stack)
+                self.compile_try_body(body)?;
+
+                // 3. PopHandler (success path)
+                self.handler_depth -= 1;
+                self.chunk.emit(Op::PopHandler, self.line);
+
+                // 4. Wrap in Result.Ok: push "Ok", swap, call Ok(value)
+                let ok_idx = self.chunk.add_constant(Constant::String("Ok".to_string()));
+                self.chunk.emit_u16(Op::Constant, ok_idx, self.line);
+                self.chunk.emit(Op::Swap, self.line);
+                self.chunk.emit_u8(Op::Call, 1, self.line);
+
+                // 5. Jump past error handler
+                let end_jump = self.chunk.emit_jump(Op::Jump, self.line);
+
+                // 6. Error handler: error value is on stack
+                self.chunk.patch_jump(catch_jump);
+
+                // 7. Wrap in Result.Err: push "Err", swap, call Err(error)
+                let err_idx = self.chunk.add_constant(Constant::String("Err".to_string()));
+                self.chunk.emit_u16(Op::Constant, err_idx, self.line);
+                self.chunk.emit(Op::Swap, self.line);
+                self.chunk.emit_u8(Op::Call, 1, self.line);
+
+                // 8. Patch end
+                self.chunk.patch_jump(end_jump);
+            }
+
             Node::Retry { count, body } => {
                 // Compile count expression into a mutable counter variable
                 self.compile_node(count)?;
@@ -2025,7 +2155,7 @@ impl Compiler {
             }
             Node::Spread(_) => {
                 return Err(CompileError {
-                    message: "spread (...) can only be used inside list or dict literals".into(),
+                    message: "spread (...) can only be used inside list literals, dict literals, or function call arguments".into(),
                     line: self.line,
                 });
             }
@@ -2165,6 +2295,7 @@ impl Compiler {
             | Node::ContinueStmt => false,
             // These compound nodes explicitly produce a value
             Node::TryCatch { .. }
+            | Node::TryExpr { .. }
             | Node::Retry { .. }
             | Node::GuardStmt { .. }
             | Node::DeadlineBlock { .. }

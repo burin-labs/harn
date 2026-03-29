@@ -94,6 +94,71 @@ retry 3 {
 - If all attempts fail, returns `nil`
 - `return` inside a retry block propagates out (not retried)
 
+## Try-expression
+
+The `try` keyword without a `catch` block acts as a try-expression. It
+evaluates the body and returns a `Result`:
+
+- On success: `Result.Ok(value)`
+- On error: `Result.Err(error)`
+
+```javascript
+let result = try { json_parse(raw_input) }
+```
+
+This is useful when you want to capture an error as a value rather than
+crashing or needing a full `try`/`catch`:
+
+```javascript
+let parsed = try { json_parse(input) }
+if is_err(parsed) {
+  println("Bad input, using defaults")
+  parsed = Ok({})
+}
+let data = unwrap(parsed)
+```
+
+The try-expression pairs naturally with the `?` operator. Use `try` to
+enter Result-land and `?` to propagate within it:
+
+```javascript
+fn fetch_json(url) {
+  let body = try { http_get(url) }
+  let text = unwrap(body)?
+  let data = try { json_parse(text) }
+  return data
+}
+```
+
+If a `catch` block follows `try`, it is parsed as the traditional
+`try`/`catch` statement -- not a try-expression.
+
+## Runtime shape validation errors
+
+When a function parameter has a structural type annotation (a shape like
+`{name: string, age: int}`), Harn validates the argument at runtime. If
+the argument is missing a required field or a field has the wrong type,
+a clear error is produced:
+
+```javascript
+fn process(user: {name: string, age: int}) {
+  println("${user.name} is ${user.age}")
+}
+
+process({name: "Alice"})
+// Error: parameter 'user': missing field 'age' (int)
+
+process({name: "Alice", age: "old"})
+// Error: parameter 'user': field 'age' expected int, got string
+```
+
+Shape validation works with both plain dicts and struct instances. Extra
+fields beyond those listed in the shape are allowed (width subtyping).
+
+This catches a common class of bugs where a dict is passed with missing or
+mistyped fields, giving you precise feedback about exactly which field is
+wrong.
+
 ## Result type
 
 The built-in `Result` enum provides an alternative to try/catch for

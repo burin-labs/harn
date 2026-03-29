@@ -597,6 +597,11 @@ fn collect_symbols(snode: &SNode, symbols: &mut Vec<SymbolInfo>, scope_span: Opt
                 }
             }
         }
+        Node::TryExpr { body } => {
+            for s in body {
+                collect_symbols(s, symbols, Some(snode.span));
+            }
+        }
         Node::Closure { params, body } => {
             for p in params {
                 symbols.push(SymbolInfo {
@@ -1065,6 +1070,11 @@ fn collect_references(snode: &SNode, target_name: &str, refs: &mut Vec<Span>) {
                 for s in fb {
                     collect_references(s, target_name, refs);
                 }
+            }
+        }
+        Node::TryExpr { body } => {
+            for s in body {
+                collect_references(s, target_name, refs);
             }
         }
         Node::MatchExpr { value, arms } => {

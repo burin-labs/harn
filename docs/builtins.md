@@ -19,6 +19,25 @@ Complete reference for all built-in functions available in Harn.
 | `to_int(value)` | value: any | int or nil | Parse/convert to integer. Floats truncate, bools become 0/1 |
 | `to_float(value)` | value: any | float or nil | Parse/convert to float |
 
+## Runtime shape validation
+
+Function parameters with structural type annotations (shapes) are validated
+at runtime. If a dict or struct argument is missing a required field or has
+the wrong field type, a descriptive error is thrown before the function
+body executes.
+
+```harn
+fn greet(u: {name: string, age: int}) {
+  println("${u.name} is ${u.age}")
+}
+
+greet({name: "Alice", age: 30})   // OK
+greet({name: "Alice"})            // Error: parameter 'u': missing field 'age' (int)
+```
+
+See [Error handling -- Runtime shape validation errors](error-handling.md#runtime-shape-validation-errors)
+for more details.
+
 ## Result
 
 Harn has a built-in `Result` type for representing success/failure values
@@ -225,6 +244,32 @@ let name = json_extract(response, "name") // extract just one key
 |---|---|---|---|
 | `regex_match(pattern, text)` | pattern: string, text: string | list or nil | Find all non-overlapping matches. Returns nil if no matches |
 | `regex_replace(pattern, replacement, text)` | pattern: string, replacement: string, text: string | string | Replace all matches. Throws on invalid regex |
+| `regex_captures(pattern, text)` | pattern: string, text: string | list | Find all matches with capture group details |
+
+### regex_captures
+
+Returns a list of dicts, one per match. Each dict contains:
+
+- `match` -- the full matched string
+- `groups` -- a list of positional capture group values (from `(...)`)
+- Named capture groups (from `(?P<name>...)`) appear as additional keys
+
+```harn
+let results = regex_captures("(\\w+)@(\\w+)", "alice@example bob@test")
+// [
+//   {match: "alice@example", groups: ["alice", "example"]},
+//   {match: "bob@test", groups: ["bob", "test"]}
+// ]
+```
+
+Named capture groups are added as top-level keys on each result dict:
+
+```harn
+let named = regex_captures("(?P<user>\\w+):(?P<role>\\w+)", "alice:admin")
+// [{match: "alice:admin", groups: ["alice", "admin"], user: "alice", role: "admin"}]
+```
+
+Returns an empty list if there are no matches. Throws on invalid regex.
 
 ## Encoding
 

@@ -462,6 +462,12 @@ impl Linter {
                 }
             }
 
+            Node::TryExpr { body } => {
+                self.push_scope();
+                self.lint_block(body);
+                self.pop_scope();
+            }
+
             Node::MatchExpr { value, arms } => {
                 self.lint_node(value);
                 // Rule: duplicate-match-arm (uses PartialEq on Node)
