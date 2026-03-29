@@ -663,13 +663,48 @@ impl Compiler {
                         return Ok(());
                     }
                 }
+                let has_spread = args.iter().any(|a| matches!(&a.node, Node::Spread(_)));
                 self.compile_node(object)?;
-                for arg in args {
-                    self.compile_node(arg)?;
-                }
                 let name_idx = self.chunk.add_constant(Constant::String(method.clone()));
-                self.chunk
-                    .emit_method_call(name_idx, args.len() as u8, self.line);
+                if has_spread {
+                    // Build args into a single list (same pattern as FunctionCall spread)
+                    self.chunk.emit_u16(Op::BuildList, 0, self.line);
+                    let mut pending = 0u16;
+                    for arg in args {
+                        if let Node::Spread(inner) = &arg.node {
+                            if pending > 0 {
+                                self.chunk.emit_u16(Op::BuildList, pending, self.line);
+                                self.chunk.emit(Op::Add, self.line);
+                                pending = 0;
+                            }
+                            self.compile_node(inner)?;
+                            self.chunk.emit(Op::Dup, self.line);
+                            let assert_idx = self
+                                .chunk
+                                .add_constant(Constant::String("__assert_list".into()));
+                            self.chunk.emit_u16(Op::Constant, assert_idx, self.line);
+                            self.chunk.emit(Op::Swap, self.line);
+                            self.chunk.emit_u8(Op::Call, 1, self.line);
+                            self.chunk.emit(Op::Pop, self.line);
+                            self.chunk.emit(Op::Add, self.line);
+                        } else {
+                            self.compile_node(arg)?;
+                            pending += 1;
+                        }
+                    }
+                    if pending > 0 {
+                        self.chunk.emit_u16(Op::BuildList, pending, self.line);
+                        self.chunk.emit(Op::Add, self.line);
+                    }
+                    self.chunk
+                        .emit_u16(Op::MethodCallSpread, name_idx, self.line);
+                } else {
+                    for arg in args {
+                        self.compile_node(arg)?;
+                    }
+                    self.chunk
+                        .emit_method_call(name_idx, args.len() as u8, self.line);
+                }
             }
 
             Node::OptionalMethodCall {

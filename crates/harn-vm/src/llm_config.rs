@@ -43,6 +43,15 @@ pub struct ProviderDef {
     pub healthcheck: Option<HealthcheckDef>,
     #[serde(default)]
     pub features: Vec<String>,
+    /// Fallback provider name to try if this provider fails.
+    #[serde(default)]
+    pub fallback: Option<String>,
+    /// Number of retries before falling back (default 0).
+    #[serde(default)]
+    pub retry_count: Option<u32>,
+    /// Delay between retries in milliseconds (default 1000).
+    #[serde(default)]
+    pub retry_delay_ms: Option<u64>,
 }
 
 impl Default for ProviderDef {
@@ -57,6 +66,9 @@ impl Default for ProviderDef {
             chat_endpoint: String::new(),
             healthcheck: None,
             features: Vec::new(),
+            fallback: None,
+            retry_count: None,
+            retry_delay_ms: None,
         }
     }
 }
@@ -143,15 +155,18 @@ pub fn load_config() -> &'static ProvidersConfig {
         // Try explicit env var path first
         if let Ok(path) = std::env::var("HARN_PROVIDERS_CONFIG") {
             match std::fs::read_to_string(&path) {
-                Ok(content) => {
-                    match toml::from_str::<ProvidersConfig>(&content) {
-                        Ok(config) => {
-                            eprintln!("[llm_config] Loaded {} providers, {} aliases from {}", config.providers.len(), config.aliases.len(), path);
-                            return config;
-                        }
-                        Err(e) => eprintln!("[llm_config] TOML parse error in {}: {}", path, e),
+                Ok(content) => match toml::from_str::<ProvidersConfig>(&content) {
+                    Ok(config) => {
+                        eprintln!(
+                            "[llm_config] Loaded {} providers, {} aliases from {}",
+                            config.providers.len(),
+                            config.aliases.len(),
+                            path
+                        );
+                        return config;
                     }
-                }
+                    Err(e) => eprintln!("[llm_config] TOML parse error in {}: {}", path, e),
+                },
                 Err(e) => eprintln!("[llm_config] Cannot read {}: {}", path, e),
             }
         }

@@ -172,6 +172,9 @@ pub enum Op {
     // --- Spread call ---
     /// Call with spread arguments. Stack: [callee, args_list] -> result.
     CallSpread,
+    /// Method call with spread arguments. Stack: [object, args_list] -> result.
+    /// Followed by 2 bytes for method name constant index.
+    MethodCallSpread,
 
     // --- Misc ---
     /// Duplicate top of stack.
@@ -599,6 +602,11 @@ impl Chunk {
                 x if x == Op::PopIterator as u8 => out.push_str("POP_ITERATOR\n"),
                 x if x == Op::TryUnwrap as u8 => out.push_str("TRY_UNWRAP\n"),
                 x if x == Op::CallSpread as u8 => out.push_str("CALL_SPREAD\n"),
+                x if x == Op::MethodCallSpread as u8 => {
+                    let idx = self.read_u16(ip + 1);
+                    ip += 2;
+                    out.push_str(&format!("METHOD_CALL_SPREAD {idx}\n"));
+                }
                 x if x == Op::Dup as u8 => out.push_str("DUP\n"),
                 x if x == Op::Swap as u8 => out.push_str("SWAP\n"),
                 _ => {

@@ -1,0 +1,21 @@
+pipeline test(task) {
+  // Generic constraint with container type: where T: Interface works inside list<T>
+  interface Printable {
+    fn label(self) -> string
+  }
+  struct Item {
+    name: string
+  }
+  impl Item {
+    fn label(self) -> string {
+      return self.name
+    }
+  }
+  fn show_all<T>(items: list<T>) where T: Printable {
+    for item in items {
+      log(item.label())
+    }
+  }
+  let items = [Item({name: "alpha"}), Item({name: "beta"})]
+  show_all(items)
+}

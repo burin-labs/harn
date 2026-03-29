@@ -1,6 +1,9 @@
 use std::collections::BTreeMap;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Instant;
+
+use crate::value::VmTaskHandle;
 
 use crate::chunk::{Constant, Op};
 use crate::value::{compare_values, values_equal, VmClosure, VmError, VmValue};
@@ -181,9 +184,10 @@ impl super::Vm {
                         });
                         if let Some(id) = task_id {
                             if let Some(handle) = self.spawned_tasks.remove(&id) {
-                                let (result, task_output) = handle.await.map_err(|e| {
-                                    VmError::Runtime(format!("Task join error: {e}"))
-                                })??;
+                                let (result, task_output) =
+                                    handle.handle.await.map_err(|e| {
+                                        VmError::Runtime(format!("Task join error: {e}"))
+                                    })??;
                                 self.output.push_str(&task_output);
                                 self.stack.push(result);
                             } else {
@@ -196,10 +200,87 @@ impl super::Vm {
                     } else if name.as_ref() == "cancel" {
                         if let Some(VmValue::TaskHandle(id)) = args.first() {
                             if let Some(handle) = self.spawned_tasks.remove(id) {
-                                handle.abort();
+                                handle.handle.abort();
                             }
                         }
                         self.stack.push(VmValue::Nil);
+                    } else if name.as_ref() == "cancel_graceful" {
+                        // Signal cancellation and wait for task to finish (with optional timeout)
+                        let task_id = args.first().and_then(|a| match a {
+                            VmValue::TaskHandle(id) => Some(id.clone()),
+                            _ => None,
+                        });
+                        let timeout_ms = args
+                            .get(1)
+                            .and_then(|a| match a {
+                                VmValue::Int(n) => Some(*n as u64),
+                                VmValue::Duration(ms) => Some(*ms),
+                                _ => None,
+                            })
+                            .unwrap_or(5000);
+                        if let Some(id) = task_id {
+                            if let Some(task) = self.spawned_tasks.remove(&id) {
+                                // Signal cancellation
+                                task.cancel_token
+                                    .store(true, std::sync::atomic::Ordering::SeqCst);
+                                // Wait with timeout
+                                let deadline = tokio::time::Instant::now()
+                                    + tokio::time::Duration::from_millis(timeout_ms);
+                                match tokio::time::timeout_at(deadline, task.handle).await {
+                                    Ok(Ok(Ok((result, output)))) => {
+                                        self.output.push_str(&output);
+                                        // Return Result.Ok(value)
+                                        self.stack.push(VmValue::EnumVariant {
+                                            enum_name: "Result".into(),
+                                            variant: "Ok".into(),
+                                            fields: vec![result],
+                                        });
+                                    }
+                                    Ok(Ok(Err(e))) => {
+                                        self.stack.push(VmValue::EnumVariant {
+                                            enum_name: "Result".into(),
+                                            variant: "Err".into(),
+                                            fields: vec![VmValue::String(Rc::from(e.to_string()))],
+                                        });
+                                    }
+                                    Ok(Err(e)) => {
+                                        self.stack.push(VmValue::EnumVariant {
+                                            enum_name: "Result".into(),
+                                            variant: "Err".into(),
+                                            fields: vec![VmValue::String(Rc::from(format!(
+                                                "Task join error: {e}"
+                                            )))],
+                                        });
+                                    }
+                                    Err(_) => {
+                                        // Timeout: force abort
+                                        self.stack.push(VmValue::EnumVariant {
+                                            enum_name: "Result".into(),
+                                            variant: "Err".into(),
+                                            fields: vec![VmValue::String(Rc::from(
+                                                "cancel_graceful: timeout, task forcefully aborted",
+                                            ))],
+                                        });
+                                    }
+                                }
+                            } else {
+                                self.stack.push(VmValue::EnumVariant {
+                                    enum_name: "Result".into(),
+                                    variant: "Ok".into(),
+                                    fields: vec![VmValue::Nil],
+                                });
+                            }
+                        } else {
+                            self.stack.push(VmValue::Nil);
+                        }
+                    } else if name.as_ref() == "is_cancelled" {
+                        // Check if the current task has been signaled for cancellation.
+                        let cancelled = self
+                            .cancel_token
+                            .as_ref()
+                            .map(|t| t.load(std::sync::atomic::Ordering::SeqCst))
+                            .unwrap_or(false);
+                        self.stack.push(VmValue::Bool(cancelled));
                     } else if let Some(VmValue::Closure(closure)) = self.env.get(&name) {
                         // Check closures in env
                         self.push_closure_frame(&closure, &args, &functions)?;
@@ -241,9 +322,10 @@ impl super::Vm {
                         });
                         if let Some(id) = task_id {
                             if let Some(handle) = self.spawned_tasks.remove(&id) {
-                                let (result, task_output) = handle.await.map_err(|e| {
-                                    VmError::Runtime(format!("Task join error: {e}"))
-                                })??;
+                                let (result, task_output) =
+                                    handle.handle.await.map_err(|e| {
+                                        VmError::Runtime(format!("Task join error: {e}"))
+                                    })??;
                                 self.output.push_str(&task_output);
                                 self.stack.push(result);
                             } else {
@@ -256,7 +338,7 @@ impl super::Vm {
                     } else if name.as_ref() == "cancel" {
                         if let Some(VmValue::TaskHandle(id)) = args.first() {
                             if let Some(handle) = self.spawned_tasks.remove(id) {
-                                handle.abort();
+                                handle.handle.abort();
                             }
                         }
                         self.stack.push(VmValue::Nil);
@@ -701,6 +783,24 @@ impl super::Vm {
                 let result = self.call_method(obj, &method, &args, &functions).await?;
                 self.stack.push(result);
             }
+        } else if op == Op::MethodCallSpread as u8 {
+            let frame = self.frames.last_mut().unwrap();
+            let name_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            let method = Self::const_string(&frame.chunk.constants[name_idx])?;
+            let functions = frame.chunk.functions.clone();
+            let args_val = self.pop()?;
+            let obj = self.pop()?;
+            let args = match args_val {
+                VmValue::List(items) => (*items).clone(),
+                _ => {
+                    return Err(VmError::TypeError(
+                        "spread method call requires list arguments".into(),
+                    ))
+                }
+            };
+            let result = self.call_method(obj, &method, &args, &functions).await?;
+            self.stack.push(result);
         } else if op == Op::Concat as u8 {
             let frame = self.frames.last_mut().unwrap();
             let count = frame.chunk.read_u16(frame.ip) as usize;
@@ -965,11 +1065,19 @@ impl super::Vm {
                 self.task_counter += 1;
                 let task_id = format!("vm_task_{}", self.task_counter);
                 let mut child = self.child_vm();
+                let cancel_token = Arc::new(std::sync::atomic::AtomicBool::new(false));
+                child.cancel_token = Some(cancel_token.clone());
                 let handle = tokio::task::spawn_local(async move {
                     let result = child.call_closure(&closure, &[], &[]).await?;
                     Ok((result, std::mem::take(&mut child.output)))
                 });
-                self.spawned_tasks.insert(task_id.clone(), handle);
+                self.spawned_tasks.insert(
+                    task_id.clone(),
+                    VmTaskHandle {
+                        handle,
+                        cancel_token,
+                    },
+                );
                 self.stack.push(VmValue::TaskHandle(task_id));
             } else {
                 self.stack.push(VmValue::Nil);

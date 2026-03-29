@@ -13,8 +13,15 @@ pub type VmAsyncBuiltinFn = Rc<
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<VmValue, VmError>>>>,
 >;
 
-/// A spawned async task handle.
-pub type VmTaskHandle = tokio::task::JoinHandle<Result<(VmValue, String), VmError>>;
+/// The raw join handle type for spawned tasks.
+pub type VmJoinHandle = tokio::task::JoinHandle<Result<(VmValue, String), VmError>>;
+
+/// A spawned async task handle with cancellation support.
+pub struct VmTaskHandle {
+    pub handle: VmJoinHandle,
+    /// Cooperative cancellation token. Set to true to request graceful shutdown.
+    pub cancel_token: Arc<AtomicBool>,
+}
 
 /// A channel handle for the VM (uses tokio mpsc).
 #[derive(Debug, Clone)]

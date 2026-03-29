@@ -1,0 +1,18 @@
+pipeline test(task) {
+  interface Stringable {
+    fn to_str(self) -> string
+  }
+  struct Name {
+    value: string
+  }
+  impl Name {
+    fn to_str(self) -> string {
+      return self.value
+    }
+  }
+  fn show(item: Stringable) -> string {
+    return item.to_str()
+  }
+  let n = Name({value: "hello"})
+  log(show(n))
+}

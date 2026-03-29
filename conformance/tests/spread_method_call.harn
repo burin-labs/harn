@@ -1,0 +1,22 @@
+pipeline test(task) {
+  // Spread in method calls: obj.method(...args) should work
+  struct Calculator {
+    base: int
+  }
+  impl Calculator {
+    fn add(self, a, b) {
+      return self.base + a + b
+    }
+    fn sum_three(self, x, y, z) {
+      return self.base + x + y + z
+    }
+  }
+  let calc = Calculator({base: 100})
+  let args = [1, 2]
+  log(calc.add(...args))
+  let more = [10, 20, 30]
+  log(calc.sum_three(...more))
+  // Mixed: regular args + spread
+  let pair = [5]
+  log(calc.add(3, ...pair))
+}

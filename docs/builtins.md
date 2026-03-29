@@ -320,10 +320,38 @@ println(md5("hello"))     // 5d41402abc4b2a76b9719d911017c592
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `http_get(url)` | url: string | string | GET request, returns response body |
-| `http_post(url, body, headers?)` | url: string, body: string, headers: dict (optional) | string | POST request with optional headers dict |
+| `http_get(url, options?)` | url: string, options: dict | dict | GET request |
+| `http_post(url, body, options?)` | url: string, body: string, options: dict | dict | POST request |
+| `http_put(url, body, options?)` | url: string, body: string, options: dict | dict | PUT request |
+| `http_patch(url, body, options?)` | url: string, body: string, options: dict | dict | PATCH request |
+| `http_delete(url, options?)` | url: string, options: dict | dict | DELETE request |
+| `http_request(method, url, options?)` | method: string, url: string, options: dict | dict | Generic HTTP request |
 
-Both throw on network errors.
+All HTTP functions return `{status: int, headers: dict, body: string, ok: bool}`.
+Options: `timeout` (ms), `retries`, `backoff` (ms), `headers` (dict),
+`auth` (string or `{bearer: "token"}` or `{basic: {user, password}}`),
+`follow_redirects` (bool), `max_redirects` (int), `body` (string).
+Throws on network errors.
+
+### Mock HTTP
+
+For testing pipelines that make HTTP calls without hitting real servers.
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `http_mock(method, url_pattern, response)` | method: string, url_pattern: string, response: dict | nil | Register a mock. Use `*` in url_pattern for glob matching |
+| `http_mock_clear()` | none | nil | Clear all mocks and recorded calls |
+| `http_mock_calls()` | none | list | Return list of `{method, url, body}` for all intercepted calls |
+
+```harn
+http_mock("GET", "https://api.example.com/users", {
+  status: 200,
+  body: "{\"users\": [\"alice\"]}",
+  headers: {}
+})
+let resp = http_get("https://api.example.com/users")
+assert_eq(resp.status, 200)
+```
 
 ## Interactive input
 
@@ -390,6 +418,10 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `llm_healthcheck(provider?)` | provider: string | dict | Validate API key. Returns `{valid, message, metadata}` |
 | `llm_providers()` | — | list | List all configured provider names |
 | `llm_config(provider?)` | provider: string | dict | Get provider config (base_url, auth_style, etc.) |
+| `llm_cost(model, input_tokens, output_tokens)` | model: string, input_tokens: int, output_tokens: int | float | Estimate USD cost from embedded pricing table |
+| `llm_session_cost()` | — | dict | Session totals: `{total_cost, input_tokens, output_tokens, call_count}` |
+| `llm_budget(max_cost)` | max_cost: float | nil | Set session budget in USD. LLM calls throw if exceeded |
+| `llm_budget_remaining()` | — | float or nil | Remaining budget (nil if no budget set) |
 
 ### Provider configuration
 

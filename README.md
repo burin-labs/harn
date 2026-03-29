@@ -427,3 +427,30 @@ Pre-commit hooks run `fmt` and `clippy` automatically. After cloning, set them u
 ```bash
 git config core.hooksPath .githooks
 ```
+
+### LLM provider configuration
+
+To use `llm_call` or `agent_loop`, set the appropriate API key:
+
+```bash
+export ANTHROPIC_API_KEY="sk-ant-..."    # Anthropic (Claude)
+export OPENAI_API_KEY="sk-..."           # OpenAI (GPT)
+export OPENROUTER_API_KEY="sk-or-..."    # OpenRouter
+```
+
+Provider endpoints, model aliases, and inference rules are configured via
+`~/.config/harn/providers.toml` (or set `HARN_PROVIDERS_CONFIG` to a
+custom path). Built-in defaults cover Anthropic, OpenAI, OpenRouter,
+HuggingFace, and Ollama. See [docs/builtins.md](docs/builtins.md#provider-configuration)
+for the full TOML format.
+
+To add a new provider (e.g. Gemini), just add a section to your
+`providers.toml`:
+
+```toml
+[providers.gemini]
+base_url = "https://generativelanguage.googleapis.com/v1beta"
+auth_style = "query"
+auth_env = "GEMINI_API_KEY"
+chat_endpoint = "/models/{model}:generateContent"
+```

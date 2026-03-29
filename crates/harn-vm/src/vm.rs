@@ -105,6 +105,8 @@ pub struct Vm {
     pub(crate) bridge: Option<Rc<crate::bridge::HostBridge>>,
     /// Builtins denied by sandbox mode (`--deny` / `--allow` flags).
     pub(crate) denied_builtins: HashSet<String>,
+    /// Cancellation token for cooperative graceful shutdown (set by parent).
+    pub(crate) cancel_token: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     /// Captured stack trace from the most recent error (fn_name, line, col).
     pub(crate) error_stack_trace: Vec<(String, usize, usize)>,
 }
@@ -134,6 +136,7 @@ impl Vm {
             source_text: None,
             bridge: None,
             denied_builtins: HashSet::new(),
+            cancel_token: None,
             error_stack_trace: Vec::new(),
         }
     }
@@ -392,6 +395,7 @@ impl Vm {
             source_text: self.source_text.clone(),
             bridge: self.bridge.clone(),
             denied_builtins: self.denied_builtins.clone(),
+            cancel_token: None,
             error_stack_trace: Vec::new(),
         }
     }

@@ -48,6 +48,10 @@ struct ImplMethodSig {
     name: String,
     /// Number of parameters excluding `self`.
     param_count: usize,
+    /// Parameter types (excluding `self`), None means untyped.
+    param_types: Vec<Option<TypeExpr>>,
+    /// Return type, None means untyped.
+    return_type: Option<TypeExpr>,
 }
 
 #[derive(Debug, Clone)]
@@ -390,13 +394,23 @@ impl TypeChecker {
                     let sigs: Vec<ImplMethodSig> = methods
                         .iter()
                         .filter_map(|m| {
-                            if let Node::FnDecl { name, params, .. } = &m.node {
-                                // Exclude `self` from param count
-                                let param_count =
-                                    params.iter().filter(|p| p.name != "self").count();
+                            if let Node::FnDecl {
+                                name,
+                                params,
+                                return_type,
+                                ..
+                            } = &m.node
+                            {
+                                let non_self: Vec<_> =
+                                    params.iter().filter(|p| p.name != "self").collect();
+                                let param_count = non_self.len();
+                                let param_types: Vec<Option<TypeExpr>> =
+                                    non_self.iter().map(|p| p.type_expr.clone()).collect();
                                 Some(ImplMethodSig {
                                     name: name.clone(),
                                     param_count,
+                                    param_types,
+                                    return_type: return_type.clone(),
                                 })
                             } else {
                                 None
@@ -667,11 +681,23 @@ impl TypeChecker {
                 let sigs: Vec<ImplMethodSig> = methods
                     .iter()
                     .filter_map(|m| {
-                        if let Node::FnDecl { name, params, .. } = &m.node {
-                            let param_count = params.iter().filter(|p| p.name != "self").count();
+                        if let Node::FnDecl {
+                            name,
+                            params,
+                            return_type,
+                            ..
+                        } = &m.node
+                        {
+                            let non_self: Vec<_> =
+                                params.iter().filter(|p| p.name != "self").collect();
+                            let param_count = non_self.len();
+                            let param_types: Vec<Option<TypeExpr>> =
+                                non_self.iter().map(|p| p.type_expr.clone()).collect();
                             Some(ImplMethodSig {
                                 name: name.clone(),
                                 param_count,
+                                param_types,
+                                return_type: return_type.clone(),
                             })
                         } else {
                             None
@@ -899,16 +925,70 @@ impl TypeChecker {
             None => return interface_methods.is_empty(),
         };
         interface_methods.iter().all(|iface_method| {
-            let iface_param_count = iface_method
+            let iface_params: Vec<_> = iface_method
                 .params
                 .iter()
                 .filter(|p| p.name != "self")
-                .count();
+                .collect();
+            let iface_param_count = iface_params.len();
             impl_methods.iter().any(|impl_method| {
-                impl_method.name == iface_method.name
-                    && impl_method.param_count == iface_param_count
+                if impl_method.name != iface_method.name
+                    || impl_method.param_count != iface_param_count
+                {
+                    return false;
+                }
+                // Check parameter types where both sides specify them
+                for (i, iface_param) in iface_params.iter().enumerate() {
+                    if let (Some(expected), Some(actual)) = (
+                        &iface_param.type_expr,
+                        impl_method.param_types.get(i).and_then(|t| t.as_ref()),
+                    ) {
+                        if !self.types_compatible(expected, actual, scope) {
+                            return false;
+                        }
+                    }
+                }
+                // Check return type where both sides specify it
+                if let (Some(expected_ret), Some(actual_ret)) =
+                    (&iface_method.return_type, &impl_method.return_type)
+                {
+                    if !self.types_compatible(expected_ret, actual_ret, scope) {
+                        return false;
+                    }
+                }
+                true
             })
         })
+    }
+
+    /// Recursively extract type parameter bindings from matching param/arg types.
+    /// E.g., param_type=list<T> + arg_type=list<Dog> → binds T=Dog.
+    fn extract_type_bindings(
+        param_type: &TypeExpr,
+        arg_type: &TypeExpr,
+        type_params: &std::collections::BTreeSet<String>,
+        bindings: &mut BTreeMap<String, String>,
+    ) {
+        match (param_type, arg_type) {
+            // Direct type param match: T → concrete
+            (TypeExpr::Named(param_name), TypeExpr::Named(concrete))
+                if type_params.contains(param_name) =>
+            {
+                bindings
+                    .entry(param_name.clone())
+                    .or_insert(concrete.clone());
+            }
+            // list<T> + list<Dog>
+            (TypeExpr::List(p_inner), TypeExpr::List(a_inner)) => {
+                Self::extract_type_bindings(p_inner, a_inner, type_params, bindings);
+            }
+            // dict<K, V> + dict<string, int>
+            (TypeExpr::DictType(pk, pv), TypeExpr::DictType(ak, av)) => {
+                Self::extract_type_bindings(pk, ak, type_params, bindings);
+                Self::extract_type_bindings(pv, av, type_params, bindings);
+            }
+            _ => {}
+        }
     }
 
     fn extract_nil_narrowing(
@@ -1087,14 +1167,20 @@ impl TypeChecker {
             }
             // Enforce where-clause constraints at call site
             if !sig.where_clauses.is_empty() {
-                // Build mapping: type_param → concrete type from inferred args
+                // Build mapping: type_param → concrete type from inferred args.
+                // Recursively walks Generic types so list<T> + list<Dog> binds T=Dog.
                 let mut type_bindings: BTreeMap<String, String> = BTreeMap::new();
+                let type_param_set: std::collections::BTreeSet<String> =
+                    sig.type_param_names.iter().cloned().collect();
                 for (arg, (_param_name, param_type)) in args.iter().zip(sig.params.iter()) {
-                    if let Some(TypeExpr::Named(param_ty)) = param_type {
-                        if sig.type_param_names.contains(param_ty) {
-                            if let Some(TypeExpr::Named(concrete)) = self.infer_type(arg, scope) {
-                                type_bindings.entry(param_ty.clone()).or_insert(concrete);
-                            }
+                    if let Some(param_ty) = param_type {
+                        if let Some(arg_ty) = self.infer_type(arg, scope) {
+                            Self::extract_type_bindings(
+                                param_ty,
+                                &arg_ty,
+                                &type_param_set,
+                                &mut type_bindings,
+                            );
                         }
                     }
                 }

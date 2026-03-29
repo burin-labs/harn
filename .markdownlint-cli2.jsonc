@@ -9,6 +9,8 @@
     },
     // Allow bare URLs (common in docs)
     "MD034": false,
+    // Allow duplicate headings in siblings (needed for CHANGELOG.md)
+    "MD024": { "siblings_only": true },
     // Tables: don't enforce padding style
     "MD060": false
   },

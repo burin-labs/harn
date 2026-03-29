@@ -1734,14 +1734,6 @@ be addressed in future versions.
 
 ### Type system
 
-- **Generic constraints on container types**: `where T: Interface` only
-  binds `T` when it appears directly as a parameter type
-  (`fn f<T>(x: T)`), not when nested inside containers
-  (`fn f<T>(items: list<T>)`). The constraint is silently skipped for
-  nested cases.
-- **Interface method signature checking**: Interface satisfaction checks
-  method names and parameter counts, but does not yet validate parameter
-  types or return types against the interface declaration.
 - **Definition-site generic checking**: Inside a generic function body,
   type parameters are treated as compatible with any type. The checker
   does not yet restrict method calls on `T` to only those declared in
@@ -1764,6 +1756,3 @@ be addressed in future versions.
 - **No `impl Interface for Type` syntax**: Interface satisfaction is
   always implicit. There is no way to explicitly declare that a type
   implements an interface.
-- **Spread only in function calls**: `...args` works in list/dict
-  literals and function call arguments, but not in method call arguments
-  (method calls with spread fall back to regular dispatch).

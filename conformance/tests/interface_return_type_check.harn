@@ -1,0 +1,19 @@
+pipeline test(task) {
+  interface Measurable {
+    fn size(self) -> int
+  }
+  struct Box {
+    width: int
+    height: int
+  }
+  impl Box {
+    fn size(self) -> int {
+      return self.width * self.height
+    }
+  }
+  fn measure(item: Measurable) -> int {
+    return item.size()
+  }
+  let b = Box({width: 3, height: 4})
+  log(measure(b))
+}
