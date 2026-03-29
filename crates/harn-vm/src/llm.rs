@@ -45,6 +45,23 @@ pub fn take_trace() -> Vec<LlmTraceEntry> {
     LLM_TRACE.with(|v| std::mem::take(&mut *v.borrow_mut()))
 }
 
+/// Summarize trace usage without consuming entries.
+pub fn peek_trace_summary() -> (i64, i64, i64, i64) {
+    LLM_TRACE.with(|v| {
+        let entries = v.borrow();
+        let mut input = 0i64;
+        let mut output = 0i64;
+        let mut duration = 0i64;
+        let count = entries.len() as i64;
+        for e in entries.iter() {
+            input += e.input_tokens;
+            output += e.output_tokens;
+            duration += e.duration_ms as i64;
+        }
+        (input, output, duration, count)
+    })
+}
+
 /// Set LLM replay mode (record/replay) and fixture directory.
 pub fn set_replay_mode(mode: LlmReplayMode, fixture_dir: &str) {
     LLM_REPLAY_MODE.with(|v| *v.borrow_mut() = mode);
@@ -234,8 +251,12 @@ pub fn register_llm_builtins(vm: &mut Vm) {
 
         let mut total_text = String::new();
         let mut consecutive_text_only = 0usize;
+        let mut total_iterations = 0usize;
+        let mut final_status = "done";
+        let loop_start = std::time::Instant::now();
 
-        for _iteration in 0..max_iterations {
+        for iteration in 0..max_iterations {
+            total_iterations = iteration + 1;
             let start = std::time::Instant::now();
             let result = vm_call_llm_full(
                 &provider,
@@ -279,6 +300,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
 
             consecutive_text_only += 1;
             if consecutive_text_only > max_nudges {
+                final_status = "stuck";
                 break;
             }
 
@@ -295,7 +317,13 @@ pub fn register_llm_builtins(vm: &mut Vm) {
             }));
         }
 
-        Ok(VmValue::String(Rc::from(total_text.as_str())))
+        let mut result_dict = BTreeMap::new();
+        result_dict.insert("status".to_string(), VmValue::String(Rc::from(final_status)));
+        result_dict.insert("text".to_string(), VmValue::String(Rc::from(total_text.as_str())));
+        result_dict.insert("iterations".to_string(), VmValue::Int(total_iterations as i64));
+        result_dict.insert("duration_ms".to_string(), VmValue::Int(loop_start.elapsed().as_millis() as i64));
+        result_dict.insert("tools_used".to_string(), VmValue::List(Rc::from(Vec::<VmValue>::new())));
+        Ok(VmValue::Dict(Rc::from(result_dict)))
     });
 
     // Remaining builtins (llm_stream, conversation management)
@@ -327,14 +355,14 @@ fn builtin_tool_schema(name: &str) -> Option<serde_json::Value> {
         })),
         "edit" => Some(serde_json::json!({
             "name": "edit",
-            "description": "Edit a file. Actions: create (new file), patch (find/replace), insert_function, replace_body, add_import.",
+            "description": "Create a file or make targeted edits. Use action=\"create\" with content for new/replacement files (set overwrite=true for existing). Use action=\"patch\" with old_string/new_string for precise find-and-replace.",
             "parameters": {
-                "action": {"type": "string", "description": "One of: create, patch, insert_function, replace_body, add_import"},
+                "action": {"type": "string", "description": "create (write full file) or patch (find/replace)"},
                 "path": {"type": "string", "description": "File path"},
-                "content": {"type": "string", "description": "For create: full file content. For patch: replacement text."},
-                "find": {"type": "string", "description": "For patch: text to find and replace"},
-                "name": {"type": "string", "description": "For insert_function/replace_body: function name"},
-                "overwrite": {"type": "boolean", "description": "For create: overwrite if file exists"}
+                "content": {"type": "string", "description": "Full file content (for create action)"},
+                "old_string": {"type": "string", "description": "For patch: exact text to find"},
+                "new_string": {"type": "string", "description": "For patch: replacement text"},
+                "overwrite": {"type": "boolean", "description": "Set true to overwrite existing file (for create action)"}
             }
         })),
         "run" | "exec" => Some(serde_json::json!({
@@ -602,6 +630,108 @@ fn resolve_tools_for_agent(
     }
 }
 
+/// Normalize tool call arguments before dispatch.
+/// Handles alias mapping so tool schemas and host implementations stay consistent
+/// regardless of which parameter names the model chooses.
+fn normalize_tool_args(name: &str, args: &serde_json::Value) -> serde_json::Value {
+    let mut obj = match args.as_object() {
+        Some(o) => o.clone(),
+        None => return args.clone(),
+    };
+
+    if name == "edit" {
+        // Normalize action aliases: mode, command → action
+        if !obj.contains_key("action") {
+            if let Some(v) = obj.remove("mode").or_else(|| obj.remove("command")) {
+                obj.insert("action".to_string(), v);
+            }
+        }
+
+        // For patch actions: normalize find→old_string, content→new_string
+        let action = obj
+            .get("action")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if action == "patch" || action == "replace" {
+            if !obj.contains_key("old_string") {
+                if let Some(v) = obj.remove("find") {
+                    obj.insert("old_string".to_string(), v);
+                }
+            }
+            if !obj.contains_key("new_string") {
+                if let Some(v) = obj.remove("content") {
+                    obj.insert("new_string".to_string(), v);
+                }
+            }
+        }
+
+        // Normalize file→path alias
+        if !obj.contains_key("path") {
+            if let Some(v) = obj.remove("file") {
+                obj.insert("path".to_string(), v);
+            }
+        }
+    }
+
+    serde_json::Value::Object(obj)
+}
+
+/// Handle read-only tools locally in the VM without bridging to the host.
+/// This reduces latency and split-brain for passive operations.
+fn handle_tool_locally(name: &str, args: &serde_json::Value) -> Option<String> {
+    match name {
+        "read_file" | "read" => {
+            let path = args
+                .get("path")
+                .or_else(|| args.get("name"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if path.is_empty() {
+                return Some("Error: missing path parameter".to_string());
+            }
+            match std::fs::read_to_string(path) {
+                Ok(content) => {
+                    // Add line numbers like the Swift read_file does
+                    let numbered: String = content
+                        .lines()
+                        .enumerate()
+                        .map(|(i, line)| format!("{}\t{}", i + 1, line))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    Some(numbered)
+                }
+                Err(e) => Some(format!("Error: cannot read file '{}': {}", path, e)),
+            }
+        }
+        "list_directory" => {
+            let path = args
+                .get("path")
+                .and_then(|v| v.as_str())
+                .unwrap_or(".");
+            match std::fs::read_dir(path) {
+                Ok(entries) => {
+                    let mut names: Vec<String> = entries
+                        .filter_map(|e| e.ok())
+                        .map(|e| {
+                            let name = e.file_name().to_string_lossy().to_string();
+                            if e.path().is_dir() {
+                                format!("{}/", name)
+                            } else {
+                                name
+                            }
+                        })
+                        .collect();
+                    names.sort();
+                    Some(names.join("\n"))
+                }
+                Err(e) => Some(format!("Error: cannot list directory '{}': {}", path, e)),
+            }
+        }
+        _ => None,
+    }
+}
+
 /// Register a tool-aware `agent_loop` that uses a bridge for tool execution.
 /// This overrides the native text-only agent_loop with one that can:
 /// 1. Pass tool definitions to the LLM
@@ -636,6 +766,13 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
             };
             let has_tools = tool_schemas.as_ref().is_some_and(|t| !t.is_empty());
 
+            eprintln!(
+                "[agent_loop] model={}/{} prompt_chars={} sys_chars={} has_tools={} format={}",
+                provider, model, prompt.len(),
+                system.as_ref().map_or(0, |s| s.len()),
+                has_tools, tool_format,
+            );
+
             // Native format: pass tools via API. Text format: inject into prompt.
             let native_tools = if has_tools && tool_format == "native" {
                 tool_schemas
@@ -645,8 +782,16 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
 
             let mut system_prompt = system.unwrap_or_default();
 
+            // Always inject tool schema for text-based tool calling.
+            // The schema lists tool names and parameters explicitly.
+            // If the system prompt already has ```call examples, skip the format
+            // instructions (the few-shot examples teach the format).
             if has_tools && tool_format == "text" {
-                system_prompt.push_str(&build_text_tool_prompt(tools_val.as_ref()));
+                let has_examples = system_prompt.contains("```call");
+                system_prompt.push_str(&build_text_tool_prompt(
+                    tools_val.as_ref(),
+                    !has_examples, // include format instructions only if no examples present
+                ));
             }
 
             if persistent {
@@ -664,8 +809,13 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
 
             let mut total_text = String::new();
             let mut consecutive_text_only = 0usize;
+            let mut all_tools_used: Vec<String> = Vec::new();
+            let mut total_iterations = 0usize;
+            let mut final_status = "done";
+            let loop_start = std::time::Instant::now();
 
             for iteration in 0..max_iterations {
+                total_iterations = iteration + 1;
                 let start = std::time::Instant::now();
                 let result = vm_call_llm_full(
                     &provider,
@@ -720,28 +870,37 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                         }));
                     }
 
-                    // Execute each tool call via the bridge
+                    // Execute each tool call
                     let mut observations = String::new();
+                    let mut tools_used_this_iter: Vec<String> = Vec::new();
                     for tc in &tool_calls {
                         let tool_id = tc["id"].as_str().unwrap_or("");
                         let tool_name = tc["name"].as_str().unwrap_or("");
-                        let tool_args = &tc["arguments"];
+                        let tool_args = normalize_tool_args(tool_name, &tc["arguments"]);
 
+                        tools_used_this_iter.push(tool_name.to_string());
                         eprintln!(
                             "[agent_loop] iter={iteration} tool={tool_name} args={}",
-                            serde_json::to_string(tool_args).unwrap_or_default()
+                            serde_json::to_string(&tool_args).unwrap_or_default()
                         );
 
-                        // Execute via bridge builtin_call
-                        let call_result = bridge
-                            .call(
-                                "builtin_call",
-                                serde_json::json!({
-                                    "name": tool_name,
-                                    "args": [tool_args],
-                                }),
-                            )
-                            .await;
+                        // Try local handling first (read_file, list_directory),
+                        // fall back to bridge for mutations and complex tools
+                        let call_result = if let Some(local_result) =
+                            handle_tool_locally(tool_name, &tool_args)
+                        {
+                            Ok(serde_json::Value::String(local_result))
+                        } else {
+                            bridge
+                                .call(
+                                    "builtin_call",
+                                    serde_json::json!({
+                                        "name": tool_name,
+                                        "args": [tool_args],
+                                    }),
+                                )
+                                .await
+                        };
 
                         let result_text = match call_result {
                             Ok(val) => {
@@ -766,6 +925,8 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                             ));
                         }
                     }
+
+                    all_tools_used.extend(tools_used_this_iter);
 
                     // Text format: send all observations as one user message
                     if tool_format != "native" && !observations.is_empty() {
@@ -797,14 +958,35 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                     eprintln!(
                         "[agent_loop] max nudges ({max_nudges}) reached after {iteration} iterations"
                     );
+                    final_status = "stuck";
                     break;
                 }
 
+                // Escalating nudge: more directive each time
                 let nudge = custom_nudge.clone().unwrap_or_else(|| {
-                    "You have not used any tools yet. Use your tools to complete the task. \
-                     Read files, search, edit, and run commands as needed. \
-                     Only output ##DONE## when the task is fully complete and verified."
-                        .to_string()
+                    if consecutive_text_only == 1 {
+                        "You must use tools to complete this task. \
+                         Use ```call blocks to invoke tools. Example:\n\
+                         ```call\n\
+                         read_file(path=\"relevant_file.py\")\n\
+                         ```\n\
+                         Start by reading a file relevant to the task."
+                            .to_string()
+                    } else if consecutive_text_only <= 3 {
+                        "STOP explaining and USE TOOLS NOW. \
+                         You have tools: read_file, search, edit, run. \
+                         Call them with ```call blocks. \
+                         If the task requires creating a file, use:\n\
+                         ```call\n\
+                         edit(action=\"create\", path=\"file.py\", content=\"\"\"your code\"\"\")\n\
+                         ```\n\
+                         Do NOT respond with text only — include a tool call."
+                            .to_string()
+                    } else {
+                        "FINAL WARNING: You MUST use a ```call block NOW or the task will fail. \
+                         Pick the single most important action and do it."
+                            .to_string()
+                    }
                 });
 
                 messages.push(serde_json::json!({
@@ -813,26 +995,125 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                 }));
             }
 
-            Ok(VmValue::String(Rc::from(total_text.as_str())))
+            // Return structured result for pipeline introspection.
+            // Pipelines can access result.text, result.status, etc.
+            let mut result_dict = BTreeMap::new();
+            result_dict.insert("status".to_string(), VmValue::String(Rc::from(final_status)));
+            result_dict.insert("text".to_string(), VmValue::String(Rc::from(total_text.as_str())));
+            result_dict.insert("iterations".to_string(), VmValue::Int(total_iterations as i64));
+            result_dict.insert("duration_ms".to_string(), VmValue::Int(loop_start.elapsed().as_millis() as i64));
+            result_dict.insert(
+                "tools_used".to_string(),
+                VmValue::List(Rc::from(
+                    all_tools_used.iter().map(|s| VmValue::String(Rc::from(s.as_str()))).collect::<Vec<_>>(),
+                )),
+            );
+            Ok(VmValue::Dict(Rc::from(result_dict)))
         }
     });
 }
 
-/// Build a text-based tool prompt to inject into the system prompt.
-/// This allows any model to use tools without native function calling.
-fn build_text_tool_prompt(tools_val: Option<&VmValue>) -> String {
-    let mut prompt = String::from("\n\n## Available tools\n");
+/// Extract (name, description, [(param_name, type, description)]) from a JSON tool schema.
+fn extract_tool_info(
+    schema: &serde_json::Value,
+) -> (String, String, Vec<(String, String, String)>) {
+    let name = schema["name"].as_str().unwrap_or("").to_string();
+    let desc = schema["description"].as_str().unwrap_or("").to_string();
+    let mut params = Vec::new();
+    if let Some(obj) = schema["parameters"].as_object() {
+        for (pname, pval) in obj {
+            let ptype = pval
+                .get("type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("string");
+            let type_str = match ptype {
+                "string" => "str",
+                "integer" => "int",
+                "boolean" => "bool",
+                other => other,
+            };
+            let pdesc = pval
+                .get("description")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            params.push((pname.clone(), type_str.to_string(), pdesc.to_string()));
+        }
+    }
+    (name, desc, params)
+}
 
-    let tool_list: Vec<String> = match tools_val {
-        Some(VmValue::List(list)) => list.iter().map(|v| v.display()).collect(),
+/// Extract parameter info from a Harn VmValue dict (tool_registry entry).
+fn extract_params_from_vm_dict(
+    td: &BTreeMap<String, VmValue>,
+) -> Vec<(String, String, String)> {
+    let mut params = Vec::new();
+    if let Some(VmValue::Dict(pd)) = td.get("parameters") {
+        for (pname, pval) in pd.iter() {
+            if let VmValue::Dict(pdef) = pval {
+                let ptype = pdef
+                    .get("type")
+                    .map(|v| v.display())
+                    .unwrap_or_else(|| "str".to_string());
+                let pdesc = pdef
+                    .get("description")
+                    .map(|v| v.display())
+                    .unwrap_or_default();
+                params.push((pname.clone(), ptype, pdesc));
+            } else {
+                // Simple string description
+                params.push((pname.clone(), "str".to_string(), pval.display()));
+            }
+        }
+    }
+    params
+}
+
+/// Build a text-based tool prompt to inject into the system prompt.
+/// Always includes tool schema (names + parameter definitions).
+/// Includes format instructions only if `include_format` is true
+/// (skipped when few-shot examples already demonstrate the format).
+fn build_text_tool_prompt(tools_val: Option<&VmValue>, include_format: bool) -> String {
+    let mut prompt = String::from("\n\n## Available tools\n\n");
+
+    // Collect tool schemas from any input format:
+    // - String list: look up builtin schema by name
+    // - tool_registry dict: extract inline schemas
+    // - List of tool dicts: use directly
+    type ToolSchema = (String, String, Vec<(String, String, String)>);
+    let schemas: Vec<ToolSchema> = match tools_val {
+        Some(VmValue::List(list)) => {
+            list.iter()
+                .filter_map(|v| match v {
+                    VmValue::String(name) => {
+                        builtin_tool_schema(name).map(|schema| extract_tool_info(&schema))
+                    }
+                    VmValue::Dict(td) => {
+                        let name = td.get("name")?.display();
+                        let desc = td
+                            .get("description")
+                            .map(|v| v.display())
+                            .unwrap_or_default();
+                        let params = extract_params_from_vm_dict(td);
+                        Some((name, desc, params))
+                    }
+                    _ => None,
+                })
+                .collect()
+        }
         Some(VmValue::Dict(d)) => {
-            // tool_registry — extract tool names from tools list
+            // tool_registry — extract from tools list
             if let Some(VmValue::List(tools)) = d.get("tools") {
                 tools
                     .iter()
                     .filter_map(|v| {
                         if let VmValue::Dict(td) = v {
-                            td.get("name").map(|n| n.display())
+                            let name = td.get("name")?.display();
+                            let desc = td
+                                .get("description")
+                                .map(|v| v.display())
+                                .unwrap_or_default();
+                            let params = extract_params_from_vm_dict(td);
+                            Some((name, desc, params))
                         } else {
                             None
                         }
@@ -845,72 +1126,240 @@ fn build_text_tool_prompt(tools_val: Option<&VmValue>) -> String {
         _ => Vec::new(),
     };
 
-    for name in &tool_list {
-        if let Some(schema) = builtin_tool_schema(name) {
-            let tool_name = schema["name"].as_str().unwrap_or(name);
-            let desc = schema["description"].as_str().unwrap_or("");
-            prompt.push_str(&format!("- **{tool_name}**: {desc}\n"));
-            if let Some(params) = schema["parameters"].as_object() {
-                for (pname, pval) in params {
-                    let ptype = pval
-                        .get("type")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("string");
-                    let pdesc = pval
-                        .get("description")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
-                    prompt.push_str(&format!("  - `{pname}` ({ptype}): {pdesc}\n"));
-                }
+    // Present tools as Python-like function signatures
+    for (tool_name, desc, params) in &schemas {
+        let sig = params
+            .iter()
+            .map(|(pname, ptype, _)| format!("{pname}: {ptype}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        prompt.push_str(&format!("### {tool_name}({sig})\n{desc}\n"));
+        for (pname, _, pdesc) in params {
+            if !pdesc.is_empty() {
+                prompt.push_str(&format!("- `{pname}`: {pdesc}\n"));
             }
         }
+        prompt.push('\n');
     }
 
-    prompt.push_str(
-        "\n## How to use tools\n\
-         To call a tool, use this exact format:\n\
-         ```\n\
-         <tool_call>\n\
-         {\"name\": \"tool_name\", \"arguments\": {\"param\": \"value\"}}\n\
-         </tool_call>\n\
-         ```\n\
-         You can make multiple tool calls in one response.\n\
-         After each tool call, you will receive the result in a <tool_result> tag.\n\
-         ALWAYS use tools to read files before modifying them.\n",
-    );
+    if include_format {
+        prompt.push_str(
+            "\n## How to use tools\n\
+             To call a tool, wrap it in a fenced code block with the `call` language tag:\n\
+             ````\n\
+             ```call\n\
+             tool_name(param=\"value\", param2=\"value2\")\n\
+             ```\n\
+             ````\n\
+             For multiline string values (like file content), use triple quotes:\n\
+             ````\n\
+             ```call\n\
+             edit(action=\"create\", path=\"file.py\", content=\"\"\"\n\
+             line 1\n\
+             line 2\n\
+             \"\"\")\n\
+             ```\n\
+             ````\n\
+             You can make multiple tool calls in one response (each in its own block).\n\
+             After each call, you will see the result in a <tool_result> tag.\n\
+             ALWAYS read files before modifying them.\n",
+        );
+    }
 
     prompt
 }
 
-/// Parse `<tool_call>` XML tags from LLM text response.
+/// Parse tool calls from LLM text response.
+/// Uses ```call blocks with Python-like function syntax:
+///   ```call
+///   tool_name(param="value", param2="value2")
+///   ```
 fn parse_text_tool_calls(text: &str) -> Vec<serde_json::Value> {
     let mut calls = Vec::new();
     let mut search_from = 0;
 
-    while let Some(start_offset) = text[search_from..].find("<tool_call>") {
-        let content_start = search_from + start_offset + "<tool_call>".len();
-        if let Some(end_offset) = text[content_start..].find("</tool_call>") {
-            let content_end = content_start + end_offset;
-            let json_str = text[content_start..content_end].trim();
-            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(json_str) {
-                let name = parsed["name"].as_str().unwrap_or("").to_string();
-                let arguments = parsed
-                    .get("arguments")
-                    .cloned()
-                    .unwrap_or(serde_json::json!({}));
-                calls.push(serde_json::json!({
-                    "id": format!("tc_{}", calls.len()),
-                    "name": name,
-                    "arguments": arguments,
-                }));
+    while let Some(start_offset) = text[search_from..].find("```call") {
+            let after_marker = search_from + start_offset + "```call".len();
+            // Skip newline after ```call
+            let content_start = if text.as_bytes().get(after_marker) == Some(&b'\n') {
+                after_marker + 1
+            } else {
+                after_marker
+            };
+            if let Some(end_offset) = text[content_start..].find("```") {
+                let content_end = content_start + end_offset;
+                let call_text = text[content_start..content_end].trim();
+                if let Some((name, arguments)) = parse_function_call_syntax(call_text) {
+                    calls.push(serde_json::json!({
+                        "id": format!("tc_{}", calls.len()),
+                        "name": name,
+                        "arguments": arguments,
+                    }));
+                }
+                search_from = content_end + "```".len();
+            } else {
+                break;
             }
-            search_from = content_end + "</tool_call>".len();
-        } else {
-            break;
+        }
+
+    calls
+}
+
+/// Infer the default parameter name for a positional argument.
+/// When the model writes `read_file("foo.py")` instead of `read_file(path="foo.py")`,
+/// this maps the positional value to the correct named parameter.
+fn default_param_name(tool_name: &str, position: usize) -> &'static str {
+    match (tool_name, position) {
+        ("read_file" | "read", 0) => "path",
+        ("search", 0) => "pattern",
+        ("search", 1) => "file_glob",
+        ("edit", 0) => "action",
+        ("edit", 1) => "path",
+        ("edit", 2) => "content",
+        ("run" | "exec", 0) => "command",
+        ("outline" | "get_file_outline", 0) => "path",
+        ("list_directory", 0) => "path",
+        ("web_search", 0) => "query",
+        ("web_fetch", 0) => "url",
+        ("lsp_hover" | "lsp_definition" | "lsp_references", 0) => "file",
+        ("lsp_hover" | "lsp_definition" | "lsp_references", 1) => "line",
+        ("lsp_hover" | "lsp_definition" | "lsp_references", 2) => "col",
+        _ => "arg",
+    }
+}
+
+/// Parse function-call syntax: `name(key="value", key2="value2")`
+/// Also handles positional args: `read_file("foo.py")` → `{path: "foo.py"}`
+fn parse_function_call_syntax(text: &str) -> Option<(String, serde_json::Value)> {
+    let text = text.trim();
+    let paren_start = text.find('(')?;
+    let name = text[..paren_start].trim().to_string();
+    if name.is_empty() {
+        return None;
+    }
+
+    let args_str = text[paren_start + 1..].strip_suffix(')');
+    let args_str = args_str?.trim();
+    if args_str.is_empty() {
+        return Some((name, serde_json::json!({})));
+    }
+
+    let mut args = serde_json::Map::new();
+    let mut positional_index = 0usize;
+    for part in split_call_args(args_str) {
+        let part = part.trim();
+        if let Some(eq_pos) = part.find('=') {
+            let key = part[..eq_pos].trim().to_string();
+            let val_str = part[eq_pos + 1..].trim();
+            let val = if val_str.starts_with("\"\"\"") && val_str.ends_with("\"\"\"") && val_str.len() >= 6
+            {
+                // Triple-quoted string: mostly raw, but process \" → " and \\ → \
+                // so models can include literal """ inside the block by writing \"\"\".
+                // Must be checked BEFORE single-quote to avoid stripping only 1 char.
+                let raw = &val_str[3..val_str.len() - 3];
+                let unescaped = raw.replace("\\\"", "\"").replace("\\\\", "\\");
+                serde_json::json!(unescaped)
+            } else if (val_str.starts_with('"') && val_str.ends_with('"'))
+                || (val_str.starts_with('\'') && val_str.ends_with('\''))
+            {
+                let inner = &val_str[1..val_str.len() - 1];
+                let unescaped = inner
+                    .replace("\\n", "\n")
+                    .replace("\\t", "\t")
+                    .replace("\\\"", "\"")
+                    .replace("\\'", "'")
+                    .replace("\\\\", "\\");
+                serde_json::json!(unescaped)
+            } else if val_str == "true" {
+                serde_json::json!(true)
+            } else if val_str == "false" {
+                serde_json::json!(false)
+            } else if let Ok(n) = val_str.parse::<i64>() {
+                serde_json::json!(n)
+            } else {
+                serde_json::json!(val_str)
+            };
+            args.insert(key, val);
+        } else if !part.is_empty() {
+            // Positional argument: infer parameter name from tool + position
+            let key = default_param_name(&name, positional_index).to_string();
+            let val = if part.starts_with("\"\"\"") && part.ends_with("\"\"\"") && part.len() >= 6 {
+                let raw = &part[3..part.len() - 3];
+                serde_json::json!(raw.replace("\\\"", "\"").replace("\\\\", "\\"))
+            } else if (part.starts_with('"') && part.ends_with('"'))
+                || (part.starts_with('\'') && part.ends_with('\''))
+            {
+                let inner = &part[1..part.len() - 1];
+                serde_json::json!(inner
+                    .replace("\\n", "\n")
+                    .replace("\\t", "\t")
+                    .replace("\\\"", "\"")
+                    .replace("\\'", "'")
+                    .replace("\\\\", "\\"))
+            } else {
+                serde_json::json!(part)
+            };
+            args.insert(key, val);
+            positional_index += 1;
         }
     }
 
-    calls
+    Some((name, serde_json::Value::Object(args)))
+}
+
+/// Split comma-separated arguments, respecting quoted strings.
+fn split_call_args(s: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut in_quote = false;
+    let mut quote_char = '"';
+    let mut in_triple = false;
+    let chars: Vec<char> = s.chars().collect();
+    let mut i = 0;
+
+    while i < chars.len() {
+        let ch = chars[i];
+        if !in_quote
+            && i + 2 < chars.len()
+            && chars[i] == '"'
+            && chars[i + 1] == '"'
+            && chars[i + 2] == '"'
+        {
+            if in_triple {
+                current.push_str("\"\"\"");
+                i += 3;
+                in_triple = false;
+                continue;
+            }
+            current.push_str("\"\"\"");
+            i += 3;
+            in_triple = true;
+            continue;
+        }
+        if in_triple {
+            current.push(ch);
+            i += 1;
+            continue;
+        }
+        if !in_quote && (ch == '"' || ch == '\'') {
+            in_quote = true;
+            quote_char = ch;
+            current.push(ch);
+        } else if in_quote && ch == quote_char && (i == 0 || chars[i - 1] != '\\') {
+            in_quote = false;
+            current.push(ch);
+        } else if !in_quote && ch == ',' {
+            parts.push(current.trim().to_string());
+            current = String::new();
+        } else {
+            current.push(ch);
+        }
+        i += 1;
+    }
+    if !current.trim().is_empty() {
+        parts.push(current.trim().to_string());
+    }
+    parts
 }
 
 // Continue register_llm_builtins (llm_stream and conversation builtins)

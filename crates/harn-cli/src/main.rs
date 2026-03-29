@@ -496,6 +496,7 @@ fn build_denied_builtins(
         harn_vm::register_http_builtins(&mut tmp);
         harn_vm::register_llm_builtins(&mut tmp);
         harn_vm::register_store_builtins(&mut tmp, std::path::Path::new("."));
+        harn_vm::register_metadata_builtins(&mut tmp, std::path::Path::new("."));
 
         tmp.builtin_names()
             .into_iter()
@@ -601,6 +602,7 @@ async fn run_file(path: &str, trace: bool, denied_builtins: std::collections::Ha
         .parent()
         .unwrap_or(std::path::Path::new("."));
     harn_vm::register_store_builtins(&mut vm, store_base);
+    harn_vm::register_metadata_builtins(&mut vm, store_base);
     vm.set_source_info(path, &source);
     if !denied_builtins.is_empty() {
         vm.set_denied_builtins(denied_builtins);
@@ -750,6 +752,7 @@ async fn run_file_bridge(path: &str, arg_json: Option<&str>) {
                 .parent()
                 .unwrap_or(std::path::Path::new("."));
             harn_vm::register_store_builtins(&mut vm, store_base);
+            harn_vm::register_metadata_builtins(&mut vm, store_base);
 
             // Override with bridge builtins (llm_call, file I/O, etc.)
             harn_vm::bridge_builtins::register_bridge_builtins(&mut vm, bridge.clone());
@@ -843,6 +846,7 @@ async fn execute(source: &str, source_path: Option<&Path>) -> Result<String, Str
                 .and_then(|p| p.parent())
                 .unwrap_or(std::path::Path::new("."));
             harn_vm::register_store_builtins(&mut vm, store_base);
+            harn_vm::register_metadata_builtins(&mut vm, store_base);
             if let Some(path) = source_path {
                 if let Some(parent) = path.parent() {
                     if !parent.as_os_str().is_empty() {

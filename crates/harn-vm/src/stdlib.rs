@@ -971,6 +971,93 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
     });
 
     // =========================================================================
+    // LLM introspection builtins
+    // =========================================================================
+
+    vm.register_builtin("llm_info", |_args, _out| {
+        let provider = std::env::var("HARN_LLM_PROVIDER").unwrap_or_default();
+        let model = std::env::var("HARN_LLM_MODEL").unwrap_or_default();
+        let api_key_set = std::env::var("HARN_API_KEY")
+            .or_else(|_| std::env::var("OPENROUTER_API_KEY"))
+            .or_else(|_| std::env::var("ANTHROPIC_API_KEY"))
+            .is_ok();
+        let mut info = BTreeMap::new();
+        info.insert("provider".to_string(), VmValue::String(Rc::from(provider.as_str())));
+        info.insert("model".to_string(), VmValue::String(Rc::from(model.as_str())));
+        info.insert("api_key_set".to_string(), VmValue::Bool(api_key_set));
+        Ok(VmValue::Dict(Rc::new(info)))
+    });
+
+    vm.register_builtin("llm_usage", |_args, _out| {
+        let (total_input, total_output, total_duration, call_count) =
+            crate::llm::peek_trace_summary();
+        let mut usage = BTreeMap::new();
+        usage.insert("input_tokens".to_string(), VmValue::Int(total_input));
+        usage.insert("output_tokens".to_string(), VmValue::Int(total_output));
+        usage.insert("total_duration_ms".to_string(), VmValue::Int(total_duration));
+        usage.insert("call_count".to_string(), VmValue::Int(call_count));
+        Ok(VmValue::Dict(Rc::new(usage)))
+    });
+
+    // =========================================================================
+    // Timer builtins
+    // =========================================================================
+
+    vm.register_builtin("timer_start", |args, _out| {
+        let name = args.first().map(|a| a.display()).unwrap_or_else(|| "default".to_string());
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64;
+        let mut timer = BTreeMap::new();
+        timer.insert("name".to_string(), VmValue::String(Rc::from(name.as_str())));
+        timer.insert("start_ms".to_string(), VmValue::Int(now_ms));
+        Ok(VmValue::Dict(Rc::new(timer)))
+    });
+
+    vm.register_builtin("timer_end", |args, out| {
+        let timer = match args.first() {
+            Some(VmValue::Dict(d)) => d,
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "timer_end: argument must be a timer dict from timer_start",
+                ))));
+            }
+        };
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64;
+        let start_ms = timer.get("start_ms").and_then(|v| v.as_int()).unwrap_or(now_ms);
+        let elapsed = now_ms - start_ms;
+        let name = timer.get("name").map(|v| v.display()).unwrap_or_default();
+        out.push_str(&format!("[timer] {name}: {elapsed}ms\n"));
+        Ok(VmValue::Int(elapsed))
+    });
+
+    vm.register_builtin("elapsed", |_args, _out| {
+        // Milliseconds since process start (approximated via monotonic clock).
+        // Uses a stable epoch: first call anchors to 0.
+        static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+        let start = START.get_or_init(std::time::Instant::now);
+        Ok(VmValue::Int(start.elapsed().as_millis() as i64))
+    });
+
+    vm.register_builtin("log_json", |args, out| {
+        let key = args.first().map(|a| a.display()).unwrap_or_default();
+        let value = args.get(1).cloned().unwrap_or(VmValue::Nil);
+        let json_val = vm_value_to_json_fragment(&value);
+        let ts = vm_format_timestamp_utc();
+        out.push_str(&format!(
+            "{{\"ts\":{},\"key\":{},\"value\":{}}}\n",
+            vm_escape_json_str_quoted(&ts),
+            vm_escape_json_str_quoted(&key),
+            json_val,
+        ));
+        Ok(VmValue::Nil)
+    });
+
+    // =========================================================================
     // Tool registry builtins
     // =========================================================================
 

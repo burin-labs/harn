@@ -85,6 +85,7 @@ pub async fn run_test_file(
                 harn_vm::register_llm_builtins(&mut vm);
                 let store_base = path.parent().unwrap_or(std::path::Path::new("."));
                 harn_vm::register_store_builtins(&mut vm, store_base);
+                harn_vm::register_metadata_builtins(&mut vm, store_base);
                 vm.set_source_info(&path_str, &source);
                 if let Some(parent) = path.parent() {
                     if !parent.as_os_str().is_empty() {

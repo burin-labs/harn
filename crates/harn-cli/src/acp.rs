@@ -495,6 +495,7 @@ async fn execute_chunk(
     harn_vm::register_llm_builtins(&mut vm);
     let store_base = source_path.and_then(|p| p.parent()).unwrap_or(cwd);
     harn_vm::register_store_builtins(&mut vm, store_base);
+    harn_vm::register_metadata_builtins(&mut vm, store_base);
 
     if let Some(path) = source_path {
         let path_str = path.to_string_lossy();

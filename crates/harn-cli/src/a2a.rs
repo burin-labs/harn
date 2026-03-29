@@ -150,6 +150,7 @@ async fn execute_pipeline(path: &str, task_text: &str) -> Result<String, String>
             harn_vm::register_llm_builtins(&mut vm);
             let store_base = Path::new(&path_owned).parent().unwrap_or(Path::new("."));
             harn_vm::register_store_builtins(&mut vm, store_base);
+            harn_vm::register_metadata_builtins(&mut vm, store_base);
             vm.set_source_info(&path_owned, &source_owned);
 
             if let Some(p) = Path::new(&path_owned).parent() {
