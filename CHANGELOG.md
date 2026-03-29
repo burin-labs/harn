@@ -8,11 +8,13 @@ All notable changes to Harn are documented in this file.
 
 - **`harn.toml` check config**: New `[check]` section with `strict` (warnings
   become errors) and `disable_rules` (skip specific lint rules). Example:
+
   ```toml
   [check]
   strict = true
   disable_rules = ["shadow-variable", "unused-parameter"]
   ```
+
 - **"Did you mean?" suggestions**: Levenshtein-based fuzzy matching for:
   - Linter `undefined-function` rule suggests closest known function
   - Shape validation suggests closest field name on missing fields
