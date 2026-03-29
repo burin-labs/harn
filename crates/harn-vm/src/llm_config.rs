@@ -142,10 +142,17 @@ pub fn load_config() -> &'static ProvidersConfig {
     CONFIG.get_or_init(|| {
         // Try explicit env var path first
         if let Ok(path) = std::env::var("HARN_PROVIDERS_CONFIG") {
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                if let Ok(config) = toml::from_str::<ProvidersConfig>(&content) {
-                    return config;
+            match std::fs::read_to_string(&path) {
+                Ok(content) => {
+                    match toml::from_str::<ProvidersConfig>(&content) {
+                        Ok(config) => {
+                            eprintln!("[llm_config] Loaded {} providers, {} aliases from {}", config.providers.len(), config.aliases.len(), path);
+                            return config;
+                        }
+                        Err(e) => eprintln!("[llm_config] TOML parse error in {}: {}", path, e),
+                    }
                 }
+                Err(e) => eprintln!("[llm_config] Cannot read {}: {}", path, e),
             }
         }
         // Try ~/.config/harn/providers.toml
