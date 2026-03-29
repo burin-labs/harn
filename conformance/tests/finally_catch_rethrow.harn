@@ -1,0 +1,17 @@
+pipeline test(task) {
+  var cleanup_ran = false
+
+  try {
+    try {
+      throw "inner"
+    } catch (e) {
+      throw "rethrown"
+    } finally {
+      cleanup_ran = true
+    }
+  } catch (e) {
+    log("outer: ${e}")
+  }
+
+  log("cleanup_ran: ${cleanup_ran}")
+}

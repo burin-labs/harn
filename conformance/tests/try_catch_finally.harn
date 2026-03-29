@@ -1,0 +1,14 @@
+pipeline test(task) {
+  var cleanup_ran = false
+
+  try {
+    log("try body")
+    throw "oops"
+  } catch (e) {
+    log("caught: ${e}")
+  } finally {
+    cleanup_ran = true
+  }
+
+  log("cleanup_ran: ${cleanup_ran}")
+}

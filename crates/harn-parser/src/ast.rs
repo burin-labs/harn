@@ -105,6 +105,7 @@ pub enum Node {
         error_var: Option<String>,
         error_type: Option<TypeExpr>,
         catch_body: Vec<SNode>,
+        finally_body: Option<Vec<SNode>>,
     },
     FnDecl {
         name: String,
@@ -167,6 +168,12 @@ pub enum Node {
         list: Box<SNode>,
         variable: String,
         body: Vec<SNode>,
+    },
+
+    SelectExpr {
+        cases: Vec<SelectCase>,
+        timeout: Option<(Box<SNode>, Vec<SNode>)>,
+        default_body: Option<Vec<SNode>>,
     },
 
     // Expressions
@@ -263,6 +270,13 @@ pub enum Node {
 #[derive(Debug, Clone, PartialEq)]
 pub struct MatchArm {
     pub pattern: SNode,
+    pub body: Vec<SNode>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SelectCase {
+    pub variable: String,
+    pub channel: Box<SNode>,
     pub body: Vec<SNode>,
 }
 
@@ -368,11 +382,12 @@ pub struct WhereClause {
     pub bound: String,
 }
 
-/// A parameter with an optional type annotation.
+/// A parameter with an optional type annotation and optional default value.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypedParam {
     pub name: String,
     pub type_expr: Option<TypeExpr>,
+    pub default_value: Option<Box<SNode>>,
 }
 
 impl TypedParam {
@@ -381,6 +396,7 @@ impl TypedParam {
         Self {
             name: name.into(),
             type_expr: None,
+            default_value: None,
         }
     }
 
@@ -389,11 +405,17 @@ impl TypedParam {
         Self {
             name: name.into(),
             type_expr: Some(type_expr),
+            default_value: None,
         }
     }
 
     /// Extract just the names from a list of typed params.
     pub fn names(params: &[TypedParam]) -> Vec<String> {
         params.iter().map(|p| p.name.clone()).collect()
+    }
+
+    /// Return the index of the first parameter with a default value, or None.
+    pub fn default_start(params: &[TypedParam]) -> Option<usize> {
+        params.iter().position(|p| p.default_value.is_some())
     }
 }

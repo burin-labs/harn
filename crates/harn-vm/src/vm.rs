@@ -21,6 +21,8 @@ pub(crate) struct CallFrame {
     pub(crate) saved_env: VmEnv,
     /// Function name for stack traces (empty for top-level pipeline).
     pub(crate) fn_name: String,
+    /// Number of arguments actually passed by the caller (for default arg support).
+    pub(crate) argc: usize,
 }
 
 /// Exception handler for try/catch.
@@ -334,6 +336,7 @@ impl Vm {
             stack_base: self.stack.len(),
             saved_env: self.env.clone(),
             fn_name: String::new(),
+            argc: 0,
         });
     }
 
@@ -654,13 +657,21 @@ impl Vm {
     }
 
     async fn run_chunk(&mut self, chunk: &Chunk) -> Result<VmValue, VmError> {
-        // Push initial frame
+        self.run_chunk_with_argc(chunk, 0).await
+    }
+
+    async fn run_chunk_with_argc(
+        &mut self,
+        chunk: &Chunk,
+        argc: usize,
+    ) -> Result<VmValue, VmError> {
         self.frames.push(CallFrame {
             chunk: chunk.clone(),
             ip: 0,
             stack_base: self.stack.len(),
             saved_env: self.env.clone(),
             fn_name: String::new(),
+            argc,
         });
 
         loop {
@@ -765,9 +776,18 @@ impl Vm {
         let mut call_env = Self::merge_env_into_closure(&saved_env, closure);
         call_env.push_scope();
 
+        let default_start = closure
+            .func
+            .default_start
+            .unwrap_or(closure.func.params.len());
         for (i, param) in closure.func.params.iter().enumerate() {
-            let val = args.get(i).cloned().unwrap_or(VmValue::Nil);
-            call_env.define(param, val, false);
+            if i < args.len() {
+                call_env.define(param, args[i].clone(), false);
+            } else if i < default_start {
+                // Required param not provided — define as nil (backward compat)
+                call_env.define(param, VmValue::Nil, false);
+            }
+            // else: has default, not provided — preamble will DefLet it
         }
 
         self.env = call_env;
@@ -778,6 +798,7 @@ impl Vm {
             stack_base: self.stack.len(),
             saved_env,
             fn_name: closure.func.name.clone(),
+            argc: args.len(),
         });
 
         Ok(())
@@ -816,13 +837,22 @@ impl Vm {
             let mut call_env = Self::merge_env_into_closure(&saved_env, closure);
             call_env.push_scope();
 
+            let default_start = closure
+                .func
+                .default_start
+                .unwrap_or(closure.func.params.len());
             for (i, param) in closure.func.params.iter().enumerate() {
-                let val = args.get(i).cloned().unwrap_or(VmValue::Nil);
-                call_env.define(param, val, false);
+                if i < args.len() {
+                    call_env.define(param, args[i].clone(), false);
+                } else if i < default_start {
+                    call_env.define(param, VmValue::Nil, false);
+                }
+                // else: has default, preamble will DefLet
             }
 
             self.env = call_env;
-            let result = self.run_chunk(&closure.func.chunk).await;
+            let argc = args.len();
+            let result = self.run_chunk_with_argc(&closure.func.chunk, argc).await;
 
             self.env = saved_env;
             self.frames = saved_frames;

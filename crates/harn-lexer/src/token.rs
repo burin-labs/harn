@@ -96,6 +96,7 @@ pub enum TokenKind {
     Try,
     Catch,
     Throw,
+    Finally,
     Fn,
     Spawn,
     While,
@@ -114,6 +115,7 @@ pub enum TokenKind {
     Mutex,
     Break,
     Continue,
+    Select,
 
     // Literals
     Identifier(String),
@@ -199,6 +201,7 @@ impl fmt::Display for TokenKind {
             TokenKind::Try => write!(f, "try"),
             TokenKind::Catch => write!(f, "catch"),
             TokenKind::Throw => write!(f, "throw"),
+            TokenKind::Finally => write!(f, "finally"),
             TokenKind::Fn => write!(f, "fn"),
             TokenKind::Spawn => write!(f, "spawn"),
             TokenKind::While => write!(f, "while"),
@@ -217,6 +220,7 @@ impl fmt::Display for TokenKind {
             TokenKind::Mutex => write!(f, "mutex"),
             TokenKind::Break => write!(f, "break"),
             TokenKind::Continue => write!(f, "continue"),
+            TokenKind::Select => write!(f, "select"),
             TokenKind::Identifier(s) => write!(f, "id({s})"),
             TokenKind::StringLiteral(s) => write!(f, "str({s})"),
             TokenKind::InterpolatedString(_) => write!(f, "istr(...)"),

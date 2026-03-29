@@ -425,6 +425,7 @@ impl Linter {
                 body,
                 error_var,
                 catch_body,
+                finally_body,
                 ..
             } => {
                 if body.is_empty() {
@@ -448,6 +449,11 @@ impl Linter {
                 }
                 self.lint_block(catch_body);
                 self.pop_scope();
+                if let Some(fb) = finally_body {
+                    self.push_scope();
+                    self.lint_block(fb);
+                    self.pop_scope();
+                }
             }
 
             Node::MatchExpr { value, arms } => {
@@ -613,6 +619,33 @@ impl Linter {
                 for entry in fields {
                     self.lint_node(&entry.key);
                     self.lint_node(&entry.value);
+                }
+            }
+
+            Node::SelectExpr {
+                cases,
+                timeout,
+                default_body,
+            } => {
+                for case in cases {
+                    self.lint_node(&case.channel);
+                    self.push_scope();
+                    if let Some(scope) = self.scopes.last_mut() {
+                        scope.insert(case.variable.clone());
+                    }
+                    self.lint_block(&case.body);
+                    self.pop_scope();
+                }
+                if let Some((dur, body)) = timeout {
+                    self.lint_node(dur);
+                    self.push_scope();
+                    self.lint_block(body);
+                    self.pop_scope();
+                }
+                if let Some(body) = default_body {
+                    self.push_scope();
+                    self.lint_block(body);
+                    self.pop_scope();
                 }
             }
 

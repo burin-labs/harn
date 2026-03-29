@@ -46,6 +46,8 @@ struct FnSignature {
     return_type: InferredType,
     /// Generic type parameter names declared on the function.
     type_param_names: Vec<String>,
+    /// Number of required parameters (those without defaults).
+    required_params: usize,
 }
 
 impl TypeScope {
@@ -252,6 +254,10 @@ impl TypeChecker {
                     body,
                     ..
                 } => {
+                    let required_params = params
+                        .iter()
+                        .filter(|p| p.default_value.is_none())
+                        .count();
                     let sig = FnSignature {
                         params: params
                             .iter()
@@ -259,6 +265,7 @@ impl TypeChecker {
                             .collect(),
                         return_type: return_type.clone(),
                         type_param_names: type_params.iter().map(|tp| tp.name.clone()).collect(),
+                        required_params,
                     };
                     self.scope.define_fn(name, sig);
                     self.check_fn_body(type_params, params, return_type, body);
@@ -401,6 +408,10 @@ impl TypeChecker {
                 body,
                 ..
             } => {
+                let required_params = params
+                    .iter()
+                    .filter(|p| p.default_value.is_none())
+                    .count();
                 let sig = FnSignature {
                     params: params
                         .iter()
@@ -408,6 +419,7 @@ impl TypeChecker {
                         .collect(),
                     return_type: return_type.clone(),
                     type_param_names: type_params.iter().map(|tp| tp.name.clone()).collect(),
+                    required_params,
                 };
                 scope.define_fn(name, sig.clone());
                 scope.define_var(name, None);
@@ -465,6 +477,7 @@ impl TypeChecker {
                 body,
                 error_var,
                 catch_body,
+                finally_body,
                 ..
             } => {
                 let mut try_scope = scope.child();
@@ -474,6 +487,10 @@ impl TypeChecker {
                     catch_scope.define_var(var, None);
                 }
                 self.check_block(catch_body, &mut catch_scope);
+                if let Some(fb) = finally_body {
+                    let mut finally_scope = scope.child();
+                    self.check_block(fb, &mut finally_scope);
+                }
             }
 
             Node::ReturnStmt {
@@ -674,6 +691,9 @@ impl TypeChecker {
         }
         for param in params {
             fn_scope.define_var(&param.name, param.type_expr.clone());
+            if let Some(default) = &param.default_value {
+                self.check_node(default, &mut fn_scope);
+            }
         }
         self.check_block(body, &mut fn_scope);
 
@@ -807,12 +827,19 @@ impl TypeChecker {
     fn check_call(&mut self, name: &str, args: &[SNode], scope: &mut TypeScope, span: Span) {
         // Check against known function signatures
         if let Some(sig) = scope.get_fn(name).cloned() {
-            if args.len() != sig.params.len() && !is_builtin(name) {
+            if !is_builtin(name)
+                && (args.len() < sig.required_params || args.len() > sig.params.len())
+            {
+                let expected = if sig.required_params == sig.params.len() {
+                    format!("{}", sig.params.len())
+                } else {
+                    format!("{}-{}", sig.required_params, sig.params.len())
+                };
                 self.warning_at(
                     format!(
                         "Function '{}' expects {} arguments, got {}",
                         name,
-                        sig.params.len(),
+                        expected,
                         args.len()
                     ),
                     span,

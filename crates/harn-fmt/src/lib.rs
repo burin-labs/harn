@@ -322,22 +322,31 @@ impl Formatter {
                 error_var,
                 error_type,
                 catch_body,
+                finally_body,
             } => {
                 self.writeln("try {");
                 self.indent();
                 self.format_body(body, node_line);
                 self.dedent();
-                let catch_param = match (error_var, error_type) {
-                    (Some(var), Some(ty)) => {
-                        format!(" ({var}: {})", format_type_expr(ty))
-                    }
-                    (Some(var), None) => format!(" ({var})"),
-                    _ => String::new(),
-                };
-                self.writeln(&format!("}} catch{catch_param} {{"));
-                self.indent();
-                self.format_body(catch_body, node_line);
-                self.dedent();
+                if !catch_body.is_empty() || error_var.is_some() {
+                    let catch_param = match (error_var, error_type) {
+                        (Some(var), Some(ty)) => {
+                            format!(" ({var}: {})", format_type_expr(ty))
+                        }
+                        (Some(var), None) => format!(" ({var})"),
+                        _ => String::new(),
+                    };
+                    self.writeln(&format!("}} catch{catch_param} {{"));
+                    self.indent();
+                    self.format_body(catch_body, node_line);
+                    self.dedent();
+                }
+                if let Some(fb) = finally_body {
+                    self.writeln("} finally {");
+                    self.indent();
+                    self.format_body(fb, node_line);
+                    self.dedent();
+                }
                 self.writeln("}");
             }
             Node::ReturnStmt { value } => {
@@ -992,6 +1001,7 @@ impl Formatter {
                 error_var,
                 error_type,
                 catch_body,
+                finally_body,
             } => {
                 let mut result = String::from("try {\n");
                 let current_indent = self.indent + 1;
@@ -1003,21 +1013,34 @@ impl Formatter {
                     result.push('\n');
                 }
                 let close = "  ".repeat(self.indent);
-                let catch_param = match (error_var, error_type) {
-                    (Some(var), Some(ty)) => {
-                        format!(" ({var}: {})", format_type_expr(ty))
+                if !catch_body.is_empty() || error_var.is_some() {
+                    let catch_param = match (error_var, error_type) {
+                        (Some(var), Some(ty)) => {
+                            format!(" ({var}: {})", format_type_expr(ty))
+                        }
+                        (Some(var), None) => format!(" ({var})"),
+                        _ => String::new(),
+                    };
+                    result.push_str(&close);
+                    result.push_str(&format!("}} catch{catch_param} {{\n"));
+                    for n in catch_body {
+                        let indent_str = "  ".repeat(current_indent);
+                        let expr = self.format_expr_or_stmt(n, current_indent);
+                        result.push_str(&indent_str);
+                        result.push_str(&expr);
+                        result.push('\n');
                     }
-                    (Some(var), None) => format!(" ({var})"),
-                    _ => String::new(),
-                };
-                result.push_str(&close);
-                result.push_str(&format!("}} catch{catch_param} {{\n"));
-                for n in catch_body {
-                    let indent_str = "  ".repeat(current_indent);
-                    let expr = self.format_expr_or_stmt(n, current_indent);
-                    result.push_str(&indent_str);
-                    result.push_str(&expr);
-                    result.push('\n');
+                }
+                if let Some(fb) = finally_body {
+                    result.push_str(&close);
+                    result.push_str("} finally {\n");
+                    for n in fb {
+                        let indent_str = "  ".repeat(current_indent);
+                        let expr = self.format_expr_or_stmt(n, current_indent);
+                        result.push_str(&indent_str);
+                        result.push_str(&expr);
+                        result.push('\n');
+                    }
                 }
                 result.push_str(&close);
                 result.push('}');
@@ -1133,6 +1156,59 @@ impl Formatter {
             Node::TypeDecl { name, type_expr } => {
                 let te = format_type_expr(type_expr);
                 format!("type {name} = {te}")
+            }
+            Node::SelectExpr {
+                cases,
+                timeout,
+                default_body,
+            } => {
+                let mut result = String::from("select {\n");
+                let current_indent = self.indent + 1;
+                for case in cases {
+                    let indent_str = "  ".repeat(current_indent);
+                    let ch = self.format_expr(&case.channel);
+                    result.push_str(&format!("{indent_str}{} from {ch} {{\n", case.variable));
+                    for n in &case.body {
+                        let inner = "  ".repeat(current_indent + 1);
+                        let expr = self.format_expr_or_stmt(n, current_indent + 1);
+                        result.push_str(&inner);
+                        result.push_str(&expr);
+                        result.push('\n');
+                    }
+                    result.push_str(&indent_str);
+                    result.push_str("}\n");
+                }
+                if let Some((dur, body)) = timeout {
+                    let indent_str = "  ".repeat(current_indent);
+                    let d = self.format_expr(dur);
+                    result.push_str(&format!("{indent_str}timeout {d} {{\n"));
+                    for n in body {
+                        let inner = "  ".repeat(current_indent + 1);
+                        let expr = self.format_expr_or_stmt(n, current_indent + 1);
+                        result.push_str(&inner);
+                        result.push_str(&expr);
+                        result.push('\n');
+                    }
+                    result.push_str(&indent_str);
+                    result.push_str("}\n");
+                }
+                if let Some(body) = default_body {
+                    let indent_str = "  ".repeat(current_indent);
+                    result.push_str(&format!("{indent_str}default {{\n"));
+                    for n in body {
+                        let inner = "  ".repeat(current_indent + 1);
+                        let expr = self.format_expr_or_stmt(n, current_indent + 1);
+                        result.push_str(&inner);
+                        result.push_str(&expr);
+                        result.push('\n');
+                    }
+                    result.push_str(&indent_str);
+                    result.push_str("}\n");
+                }
+                let close = "  ".repeat(self.indent);
+                result.push_str(&close);
+                result.push('}');
+                result
             }
             Node::Spread(inner) => {
                 let expr = self.format_expr(inner);
@@ -1302,6 +1378,7 @@ impl Formatter {
                 error_var,
                 error_type,
                 catch_body,
+                finally_body,
             } => {
                 let mut result = String::from("try {\n");
                 for n in body {
@@ -1312,21 +1389,34 @@ impl Formatter {
                     result.push('\n');
                 }
                 let close = "  ".repeat(indent_level);
-                let catch_param = match (error_var, error_type) {
-                    (Some(var), Some(ty)) => {
-                        format!(" ({var}: {})", format_type_expr(ty))
+                if !catch_body.is_empty() || error_var.is_some() {
+                    let catch_param = match (error_var, error_type) {
+                        (Some(var), Some(ty)) => {
+                            format!(" ({var}: {})", format_type_expr(ty))
+                        }
+                        (Some(var), None) => format!(" ({var})"),
+                        _ => String::new(),
+                    };
+                    result.push_str(&close);
+                    result.push_str(&format!("}} catch{catch_param} {{\n"));
+                    for n in catch_body {
+                        let indent_str = "  ".repeat(indent_level + 1);
+                        let expr = self.format_expr_or_stmt(n, indent_level + 1);
+                        result.push_str(&indent_str);
+                        result.push_str(&expr);
+                        result.push('\n');
                     }
-                    (Some(var), None) => format!(" ({var})"),
-                    _ => String::new(),
-                };
-                result.push_str(&close);
-                result.push_str(&format!("}} catch{catch_param} {{\n"));
-                for n in catch_body {
-                    let indent_str = "  ".repeat(indent_level + 1);
-                    let expr = self.format_expr_or_stmt(n, indent_level + 1);
-                    result.push_str(&indent_str);
-                    result.push_str(&expr);
-                    result.push('\n');
+                }
+                if let Some(fb) = finally_body {
+                    result.push_str(&close);
+                    result.push_str("} finally {\n");
+                    for n in fb {
+                        let indent_str = "  ".repeat(indent_level + 1);
+                        let expr = self.format_expr_or_stmt(n, indent_level + 1);
+                        result.push_str(&indent_str);
+                        result.push_str(&expr);
+                        result.push('\n');
+                    }
                 }
                 result.push_str(&close);
                 result.push('}');
@@ -1438,15 +1528,25 @@ fn format_where_clauses(clauses: &[WhereClause]) -> String {
     }
 }
 
+/// Format an expression inline for use in parameter defaults.
+fn format_inline_expr(node: &SNode) -> String {
+    let fmt = Formatter::new(BTreeMap::new());
+    fmt.format_expr(node)
+}
+
 fn format_typed_params(params: &[TypedParam]) -> String {
     params
         .iter()
         .map(|p| {
-            if let Some(te) = &p.type_expr {
+            let mut s = if let Some(te) = &p.type_expr {
                 format!("{}: {}", p.name, format_type_expr(te))
             } else {
                 p.name.clone()
+            };
+            if let Some(default) = &p.default_value {
+                s.push_str(&format!(" = {}", format_inline_expr(default)));
             }
+            s
         })
         .collect::<Vec<_>>()
         .join(", ")

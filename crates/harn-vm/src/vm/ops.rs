@@ -253,19 +253,29 @@ impl super::Vm {
                 // Set up the callee's environment
                 let mut call_env = Self::merge_env_into_closure(&parent_env, &closure);
                 call_env.push_scope();
+                let default_start = closure
+                    .func
+                    .default_start
+                    .unwrap_or(closure.func.params.len());
                 for (i, param) in closure.func.params.iter().enumerate() {
-                    let val = args.get(i).cloned().unwrap_or(VmValue::Nil);
-                    call_env.define(param, val, false);
+                    if i < args.len() {
+                        call_env.define(param, args[i].clone(), false);
+                    } else if i < default_start {
+                        call_env.define(param, VmValue::Nil, false);
+                    }
+                    // else: has default, preamble will DefLet
                 }
                 self.env = call_env;
 
                 // Push replacement frame at the same stack depth
+                let argc = args.len();
                 self.frames.push(CallFrame {
                     chunk: closure.func.chunk.clone(),
                     ip: 0,
                     stack_base,
                     saved_env: parent_env,
                     fn_name: closure.func.name.clone(),
+                    argc,
                 });
                 // Continue the loop — execution proceeds in the new frame
             } else {
@@ -912,6 +922,13 @@ impl super::Vm {
             // Push the value back (we only peeked conceptually), then push the bool
             self.stack.push(val);
             self.stack.push(VmValue::Bool(matches));
+        } else if op == Op::GetArgc as u8 {
+            let argc = self
+                .frames
+                .last()
+                .map(|f| f.argc)
+                .unwrap_or(0);
+            self.stack.push(VmValue::Int(argc as i64));
         } else {
             return Err(VmError::InvalidInstruction(op));
         }

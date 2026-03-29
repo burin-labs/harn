@@ -1,0 +1,13 @@
+pipeline test(task) {
+  let ch1 = channel("ch1")
+
+  // Don't send anything — default should fire
+  select {
+    msg from ch1 {
+      log("got: ${msg}")
+    }
+    default {
+      log("nothing ready")
+    }
+  }
+}

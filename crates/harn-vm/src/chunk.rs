@@ -154,6 +154,10 @@ pub enum Op {
     /// Pop the top iterator from the iterator stack (cleanup on break from for-in).
     PopIterator,
 
+    // --- Defaults ---
+    /// Push the number of arguments passed to the current function call.
+    GetArgc,
+
     // --- Misc ---
     /// Duplicate top of stack.
     Dup,
@@ -208,6 +212,8 @@ pub struct Chunk {
 pub struct CompiledFunction {
     pub name: String,
     pub params: Vec<String>,
+    /// Index of the first parameter with a default value, or None if all required.
+    pub default_start: Option<usize>,
     pub chunk: Chunk,
 }
 

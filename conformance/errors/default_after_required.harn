@@ -1,0 +1,3 @@
+fn bad(x = 10, y) {
+  log(x + y)
+}

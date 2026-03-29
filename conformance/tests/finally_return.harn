@@ -1,0 +1,18 @@
+pipeline test(task) {
+  // Test that return inside try-finally runs the finally block
+  // and correctly returns the value.
+  fn get_value() {
+    var result = 0
+    try {
+      result = 42
+      return result
+    } finally {
+      // This should run before the return completes.
+      // We can verify by logging from within finally.
+      log("finally ran")
+    }
+  }
+
+  let v = get_value()
+  log("result: ${v}")
+}

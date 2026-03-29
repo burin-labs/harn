@@ -1,0 +1,9 @@
+pipeline test(task) {
+  // Test that defaults work when called through method dispatch
+  let items = [1, 2, 3]
+  fn transform(x, multiplier = 10) {
+    return x * multiplier
+  }
+  log(items.map({ x -> transform(x) }))
+  log(items.map({ x -> transform(x, 5) }))
+}

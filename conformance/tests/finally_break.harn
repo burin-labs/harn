@@ -1,0 +1,16 @@
+pipeline test(task) {
+  var cleanup_count = 0
+
+  for i in 0 upto 5 {
+    try {
+      if i == 2 {
+        break
+      }
+      log("i: ${i}")
+    } finally {
+      cleanup_count = cleanup_count + 1
+    }
+  }
+
+  log("cleanup_count: ${cleanup_count}")
+}

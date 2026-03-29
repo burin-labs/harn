@@ -1,0 +1,15 @@
+pipeline test(task) {
+  fn process(items = [1, 2, 3]) {
+    return items.map({ x -> x * 2 })
+  }
+
+  log(process())
+  log(process([10, 20]))
+
+  fn config(opts = {host: "localhost", port: 8080}) {
+    return "${opts.host}:${opts.port}"
+  }
+
+  log(config())
+  log(config({host: "example.com", port: 3000}))
+}

@@ -1,0 +1,11 @@
+pipeline test(task) {
+  var cleanup_ran = false
+
+  try {
+    log("try body")
+  } finally {
+    cleanup_ran = true
+  }
+
+  log("cleanup_ran: ${cleanup_ran}")
+}

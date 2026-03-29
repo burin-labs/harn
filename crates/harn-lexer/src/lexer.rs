@@ -532,6 +532,7 @@ impl Lexer {
             "try" => TokenKind::Try,
             "catch" => TokenKind::Catch,
             "throw" => TokenKind::Throw,
+            "finally" => TokenKind::Finally,
             "fn" => TokenKind::Fn,
             "spawn" => TokenKind::Spawn,
             "while" => TokenKind::While,
@@ -550,6 +551,7 @@ impl Lexer {
             "mutex" => TokenKind::Mutex,
             "break" => TokenKind::Break,
             "continue" => TokenKind::Continue,
+            "select" => TokenKind::Select,
             _ => TokenKind::Identifier(ident),
         };
 

@@ -1,0 +1,10 @@
+pipeline test(task) {
+  fn show(x, y = "default") {
+    log(y)
+  }
+
+  // Explicit nil should NOT trigger the default
+  show("a", nil)
+  // Omitting should trigger the default
+  show("a")
+}

@@ -496,6 +496,7 @@ fn collect_symbols(snode: &SNode, symbols: &mut Vec<SymbolInfo>, scope_span: Opt
             body,
             error_var,
             catch_body,
+            finally_body,
             ..
         } => {
             for s in body {
@@ -513,6 +514,11 @@ fn collect_symbols(snode: &SNode, symbols: &mut Vec<SymbolInfo>, scope_span: Opt
             }
             for s in catch_body {
                 collect_symbols(s, symbols, Some(snode.span));
+            }
+            if let Some(fb) = finally_body {
+                for s in fb {
+                    collect_symbols(s, symbols, Some(snode.span));
+                }
             }
         }
         Node::Closure { params, body } => {
@@ -691,6 +697,37 @@ fn collect_symbols(snode: &SNode, symbols: &mut Vec<SymbolInfo>, scope_span: Opt
         }
         Node::Spread(inner) => {
             collect_symbols(inner, symbols, scope_span);
+        }
+        Node::SelectExpr {
+            cases,
+            timeout,
+            default_body,
+        } => {
+            for case in cases {
+                collect_symbols(&case.channel, symbols, scope_span);
+                symbols.push(SymbolInfo {
+                    name: case.variable.clone(),
+                    kind: HarnSymbolKind::Variable,
+                    def_span: snode.span,
+                    type_info: None,
+                    signature: None,
+                    scope_span: Some(snode.span),
+                });
+                for s in &case.body {
+                    collect_symbols(s, symbols, Some(snode.span));
+                }
+            }
+            if let Some((dur, body)) = timeout {
+                collect_symbols(dur, symbols, scope_span);
+                for s in body {
+                    collect_symbols(s, symbols, Some(snode.span));
+                }
+            }
+            if let Some(body) = default_body {
+                for s in body {
+                    collect_symbols(s, symbols, Some(snode.span));
+                }
+            }
         }
         Node::OverrideDecl {
             name, params, body, ..
@@ -931,6 +968,7 @@ fn collect_references(snode: &SNode, target_name: &str, refs: &mut Vec<Span>) {
             body,
             error_var,
             catch_body,
+            finally_body,
             ..
         } => {
             for s in body {
@@ -943,6 +981,11 @@ fn collect_references(snode: &SNode, target_name: &str, refs: &mut Vec<Span>) {
             }
             for s in catch_body {
                 collect_references(s, target_name, refs);
+            }
+            if let Some(fb) = finally_body {
+                for s in fb {
+                    collect_references(s, target_name, refs);
+                }
             }
         }
         Node::MatchExpr { value, arms } => {
@@ -1347,6 +1390,8 @@ fn token_kind_to_semantic(kind: &TokenKind) -> Option<u32> {
         | TokenKind::Try
         | TokenKind::Catch
         | TokenKind::Throw
+        | TokenKind::Finally
+        | TokenKind::Select
         | TokenKind::Fn
         | TokenKind::Spawn
         | TokenKind::While

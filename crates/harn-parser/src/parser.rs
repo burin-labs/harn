@@ -130,6 +130,7 @@ impl Parser {
                     | TokenKind::Fn
                     | TokenKind::Pub
                     | TokenKind::Try
+                    | TokenKind::Select
                     | TokenKind::Pipeline
                     | TokenKind::Import
                     | TokenKind::Parallel
@@ -278,6 +279,7 @@ impl Parser {
             TokenKind::Throw => self.parse_throw(),
             TokenKind::Override => self.parse_override(),
             TokenKind::Try => self.parse_try_catch(),
+            TokenKind::Select => self.parse_select(),
             TokenKind::Fn => self.parse_fn_decl_with_pub(false),
             TokenKind::Pub => {
                 self.advance(); // consume 'pub'
@@ -668,27 +670,123 @@ impl Parser {
         let body = self.parse_block()?;
         self.consume(&TokenKind::RBrace, "}")?;
         self.skip_newlines();
-        self.consume(&TokenKind::Catch, "catch")?;
 
-        let (error_var, error_type) = if self.check(&TokenKind::LParen) {
+        // Parse optional catch block
+        let has_catch = self.check(&TokenKind::Catch);
+        let (error_var, error_type, catch_body) = if has_catch {
             self.advance();
-            let name = self.consume_identifier("error variable")?;
-            let ty = self.try_parse_type_annotation()?;
-            self.consume(&TokenKind::RParen, ")")?;
-            (Some(name), ty)
+            let (ev, et) = if self.check(&TokenKind::LParen) {
+                self.advance();
+                let name = self.consume_identifier("error variable")?;
+                let ty = self.try_parse_type_annotation()?;
+                self.consume(&TokenKind::RParen, ")")?;
+                (Some(name), ty)
+            } else {
+                (None, None)
+            };
+            self.consume(&TokenKind::LBrace, "{")?;
+            let cb = self.parse_block()?;
+            self.consume(&TokenKind::RBrace, "}")?;
+            (ev, et, cb)
         } else {
-            (None, None)
+            (None, None, Vec::new())
         };
 
-        self.consume(&TokenKind::LBrace, "{")?;
-        let catch_body = self.parse_block()?;
-        self.consume(&TokenKind::RBrace, "}")?;
+        self.skip_newlines();
+
+        // Parse optional finally block
+        let finally_body = if self.check(&TokenKind::Finally) {
+            self.advance();
+            self.consume(&TokenKind::LBrace, "{")?;
+            let fb = self.parse_block()?;
+            self.consume(&TokenKind::RBrace, "}")?;
+            Some(fb)
+        } else {
+            None
+        };
+
+        // Must have at least catch or finally
+        if !has_catch && finally_body.is_none() {
+            return Err(self.error("catch or finally block after try"));
+        }
+
         Ok(spanned(
             Node::TryCatch {
                 body,
                 error_var,
                 error_type,
                 catch_body,
+                finally_body,
+            },
+            Span::merge(start, self.prev_span()),
+        ))
+    }
+
+    fn parse_select(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
+        self.consume(&TokenKind::Select, "select")?;
+        self.consume(&TokenKind::LBrace, "{")?;
+        self.skip_newlines();
+
+        let mut cases = Vec::new();
+        let mut timeout = None;
+        let mut default_body = None;
+
+        while !self.is_at_end() && !self.check(&TokenKind::RBrace) {
+            self.skip_newlines();
+            // Check for "timeout" (contextual keyword)
+            if let Some(tok) = self.current() {
+                if let TokenKind::Identifier(ref id) = tok.kind {
+                    if id == "timeout" {
+                        self.advance();
+                        let duration = self.parse_expression()?;
+                        self.consume(&TokenKind::LBrace, "{")?;
+                        let body = self.parse_block()?;
+                        self.consume(&TokenKind::RBrace, "}")?;
+                        timeout = Some((Box::new(duration), body));
+                        self.skip_newlines();
+                        continue;
+                    }
+                    if id == "default" {
+                        self.advance();
+                        self.consume(&TokenKind::LBrace, "{")?;
+                        let body = self.parse_block()?;
+                        self.consume(&TokenKind::RBrace, "}")?;
+                        default_body = Some(body);
+                        self.skip_newlines();
+                        continue;
+                    }
+                }
+            }
+            // Regular case: variable from channel { body }
+            let variable = self.consume_identifier("select case variable")?;
+            self.consume(&TokenKind::From, "from")?;
+            let channel = self.parse_expression()?;
+            self.consume(&TokenKind::LBrace, "{")?;
+            let body = self.parse_block()?;
+            self.consume(&TokenKind::RBrace, "}")?;
+            cases.push(SelectCase {
+                variable,
+                channel: Box::new(channel),
+                body,
+            });
+            self.skip_newlines();
+        }
+
+        self.consume(&TokenKind::RBrace, "}")?;
+
+        if cases.is_empty() && timeout.is_none() && default_body.is_none() {
+            return Err(self.error("at least one select case"));
+        }
+        if timeout.is_some() && default_body.is_some() {
+            return Err(self.error("select cannot have both timeout and default"));
+        }
+
+        Ok(spanned(
+            Node::SelectExpr {
+                cases,
+                timeout,
+                default_body,
             },
             Span::merge(start, self.prev_span()),
         ))
@@ -1601,18 +1699,7 @@ impl Parser {
 
     /// Parse typed params until we see ->. Handles: `x`, `x: int`, `x, y`, `x: int, y: string`.
     fn parse_typed_param_list_until_arrow(&mut self) -> Result<Vec<TypedParam>, ParserError> {
-        let mut params = Vec::new();
-        self.skip_newlines();
-        while !self.is_at_end() && !self.check(&TokenKind::Arrow) {
-            let name = self.consume_identifier("parameter name")?;
-            let type_expr = self.try_parse_type_annotation()?;
-            params.push(TypedParam { name, type_expr });
-            if self.check(&TokenKind::Comma) {
-                self.advance();
-                self.skip_newlines();
-            }
-        }
-        Ok(params)
+        self.parse_typed_params_until(|tok| tok == &TokenKind::Arrow)
     }
 
     fn parse_dict_literal(&mut self, start: Span) -> Result<SNode, ParserError> {
@@ -1712,13 +1799,46 @@ impl Parser {
 
     /// Parse typed parameter list (for fn declarations).
     fn parse_typed_param_list(&mut self) -> Result<Vec<TypedParam>, ParserError> {
+        self.parse_typed_params_until(|tok| tok == &TokenKind::RParen)
+    }
+
+    /// Shared implementation: parse typed params with optional defaults until
+    /// a terminator token is reached.
+    fn parse_typed_params_until(
+        &mut self,
+        is_terminator: impl Fn(&TokenKind) -> bool,
+    ) -> Result<Vec<TypedParam>, ParserError> {
         let mut params = Vec::new();
+        let mut seen_default = false;
         self.skip_newlines();
 
-        while !self.is_at_end() && !self.check(&TokenKind::RParen) {
+        while !self.is_at_end() {
+            if let Some(tok) = self.current() {
+                if is_terminator(&tok.kind) {
+                    break;
+                }
+            } else {
+                break;
+            }
             let name = self.consume_identifier("parameter name")?;
             let type_expr = self.try_parse_type_annotation()?;
-            params.push(TypedParam { name, type_expr });
+            let default_value = if self.check(&TokenKind::Assign) {
+                self.advance();
+                seen_default = true;
+                Some(Box::new(self.parse_expression()?))
+            } else {
+                if seen_default {
+                    return Err(self.error(
+                        "Required parameter cannot follow a parameter with a default value",
+                    ));
+                }
+                None
+            };
+            params.push(TypedParam {
+                name,
+                type_expr,
+                default_value,
+            });
             if self.check(&TokenKind::Comma) {
                 self.advance();
                 self.skip_newlines();

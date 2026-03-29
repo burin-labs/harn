@@ -11,6 +11,50 @@ use crate::http::register_http_builtins;
 use crate::llm::register_llm_builtins;
 use crate::mcp::register_mcp_builtins;
 
+/// Build a select result dict with the given index, value, and channel name.
+fn select_result(index: usize, value: VmValue, channel_name: &str) -> VmValue {
+    let mut result = BTreeMap::new();
+    result.insert("index".to_string(), VmValue::Int(index as i64));
+    result.insert("value".to_string(), value);
+    result.insert(
+        "channel".to_string(),
+        VmValue::String(Rc::from(channel_name)),
+    );
+    VmValue::Dict(Rc::new(result))
+}
+
+/// Build a select result dict indicating no channel was ready (index = -1).
+fn select_none() -> VmValue {
+    let mut result = BTreeMap::new();
+    result.insert("index".to_string(), VmValue::Int(-1));
+    result.insert("value".to_string(), VmValue::Nil);
+    result.insert("channel".to_string(), VmValue::Nil);
+    VmValue::Dict(Rc::new(result))
+}
+
+/// Try to receive from a list of channels (non-blocking).
+/// Returns Some((index, value, channel_name)) if a message was received,
+/// or None. Sets all_closed to true if all channels are disconnected.
+fn try_poll_channels(channels: &[VmValue]) -> (Option<(usize, VmValue, String)>, bool) {
+    let mut all_closed = true;
+    for (i, ch_val) in channels.iter().enumerate() {
+        if let VmValue::Channel(ch) = ch_val {
+            if let Ok(mut rx) = ch.receiver.try_lock() {
+                match rx.try_recv() {
+                    Ok(val) => return (Some((i, val, ch.name.clone())), false),
+                    Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
+                        all_closed = false;
+                    }
+                    Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {}
+                }
+            } else {
+                all_closed = false;
+            }
+        }
+    }
+    (None, all_closed)
+}
+
 /// Register standard builtins on a VM.
 pub fn register_vm_stdlib(vm: &mut Vm) {
     vm.register_builtin("log", |args, out| {
@@ -1511,51 +1555,113 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
         }
     });
 
-    // select(channel1, channel2, ...)
+    // select(channel1, channel2, ...) — blocking multiplexed receive (variadic)
     vm.register_async_builtin("select", |args| async move {
         if args.is_empty() {
             return Err(VmError::Thrown(VmValue::String(Rc::from(
                 "select: requires at least one channel",
             ))));
         }
-
-        let mut channels: Vec<&VmChannelHandle> = Vec::new();
         for arg in &args {
-            if let VmValue::Channel(ch) = arg {
-                channels.push(ch);
-            } else {
+            if !matches!(arg, VmValue::Channel(_)) {
                 return Err(VmError::Thrown(VmValue::String(Rc::from(
                     "select: all arguments must be channels",
                 ))));
             }
         }
-
         loop {
-            let mut all_closed = true;
-            for (i, ch) in channels.iter().enumerate() {
-                if let Ok(mut rx) = ch.receiver.try_lock() {
-                    match rx.try_recv() {
-                        Ok(val) => {
-                            let mut result = BTreeMap::new();
-                            result.insert("index".to_string(), VmValue::Int(i as i64));
-                            result.insert("value".to_string(), val);
-                            result.insert(
-                                "channel".to_string(),
-                                VmValue::String(Rc::from(ch.name.as_str())),
-                            );
-                            return Ok(VmValue::Dict(Rc::new(result)));
-                        }
-                        Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
-                            all_closed = false;
-                        }
-                        Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {}
-                    }
-                }
+            let (found, all_closed) = try_poll_channels(&args);
+            if let Some((i, val, name)) = found {
+                return Ok(select_result(i, val, &name));
             }
             if all_closed {
-                return Ok(VmValue::Nil);
+                return Ok(select_none());
             }
-            tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
+            tokio::task::yield_now().await;
+        }
+    });
+
+    // __select_timeout(channel_list, timeout_ms) — select with timeout
+    vm.register_async_builtin("__select_timeout", |args| async move {
+        if args.len() < 2 {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "__select_timeout: requires channel list and timeout",
+            ))));
+        }
+        let channels = match &args[0] {
+            VmValue::List(items) => (**items).clone(),
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "__select_timeout: first argument must be a list of channels",
+                ))));
+            }
+        };
+        let timeout_ms = match &args[1] {
+            VmValue::Int(n) => (*n).max(0) as u64,
+            VmValue::Duration(ms) => *ms,
+            _ => 5000,
+        };
+        let deadline = tokio::time::Instant::now()
+            + tokio::time::Duration::from_millis(timeout_ms);
+        loop {
+            let (found, all_closed) = try_poll_channels(&channels);
+            if let Some((i, val, name)) = found {
+                return Ok(select_result(i, val, &name));
+            }
+            if all_closed || tokio::time::Instant::now() >= deadline {
+                return Ok(select_none());
+            }
+            tokio::task::yield_now().await;
+        }
+    });
+
+    // __select_try(channel_list) — non-blocking select (for default case)
+    vm.register_async_builtin("__select_try", |args| async move {
+        if args.is_empty() {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "__select_try: requires channel list",
+            ))));
+        }
+        let channels = match &args[0] {
+            VmValue::List(items) => (**items).clone(),
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "__select_try: first argument must be a list of channels",
+                ))));
+            }
+        };
+        let (found, _) = try_poll_channels(&channels);
+        if let Some((i, val, name)) = found {
+            Ok(select_result(i, val, &name))
+        } else {
+            Ok(select_none())
+        }
+    });
+
+    // __select_list(channel_list) — blocking select from a list of channels
+    vm.register_async_builtin("__select_list", |args| async move {
+        if args.is_empty() {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "__select_list: requires channel list",
+            ))));
+        }
+        let channels = match &args[0] {
+            VmValue::List(items) => (**items).clone(),
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "__select_list: first argument must be a list of channels",
+                ))));
+            }
+        };
+        loop {
+            let (found, all_closed) = try_poll_channels(&channels);
+            if let Some((i, val, name)) = found {
+                return Ok(select_result(i, val, &name));
+            }
+            if all_closed {
+                return Ok(select_none());
+            }
+            tokio::task::yield_now().await;
         }
     });
 

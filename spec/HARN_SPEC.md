@@ -763,6 +763,58 @@ are accepted. Buffered items can still be received.
 Non-blocking receive. Returns the next value from the channel, or `nil` if
 the channel is empty (regardless of whether it is closed).
 
+### select
+
+Multiplexes across multiple channels, executing the body of whichever
+channel receives a value first:
+
+```harn
+select {
+  msg from ch1 {
+    log("ch1: ${msg}")
+  }
+  msg from ch2 {
+    log("ch2: ${msg}")
+  }
+}
+```
+
+Each case binds the received value to a variable (`msg`) and executes the
+corresponding body. Only one case fires per select.
+
+#### timeout case
+
+```harn
+select {
+  msg from ch1 { handle(msg) }
+  timeout 5s {
+    log("timed out")
+  }
+}
+```
+
+If no channel produces a value within the duration, the timeout body runs.
+
+#### default case (non-blocking)
+
+```harn
+select {
+  msg from ch1 { handle(msg) }
+  default {
+    log("nothing ready")
+  }
+}
+```
+
+If no channel has a value immediately available, the default body runs
+without blocking. `timeout` and `default` are mutually exclusive.
+
+#### select() builtin
+
+The statement form desugars to the `select(ch1, ch2, ...)` async builtin,
+which returns `{index, value, channel}`. The builtin can be called directly
+for dynamic channel lists.
+
 ## Error model
 
 ### throw
@@ -774,13 +826,15 @@ throw expression
 Evaluates the expression and throws it as `HarnRuntimeError.thrownError(value)`.
 Any value can be thrown (strings, dicts, etc.).
 
-### try/catch
+### try/catch/finally
 
 ```harn
 try {
   // body
 } catch (e) {
   // handler
+} finally {
+  // cleanup — always runs
 }
 ```
 
@@ -792,6 +846,23 @@ If the body throws:
 `return` inside a `try` block propagates out of the enclosing pipeline (is not caught).
 
 The error variable `(e)` is optional: `catch { ... }` is valid without it.
+
+### finally
+
+The `finally` block is optional and runs regardless of whether the try body
+succeeds, throws, or the catch body re-throws. Supported forms:
+
+```harn
+try { ... } catch (e) { ... } finally { ... }
+try { ... } finally { ... }
+try { ... } catch (e) { ... }
+```
+
+`return`, `break`, and `continue` inside a try body with a finally block will
+execute the finally block before the control flow transfer completes.
+
+The finally block's return value is discarded — the overall expression value
+comes from the try or catch body.
 
 ## Functions and closures
 
@@ -805,6 +876,31 @@ fn name(param1, param2) {
 
 Declares a named function. Equivalent to `let name = { param1, param2 -> ... }`.
 The function captures the lexical scope at definition time.
+
+### Default parameters
+
+Parameters may have default values using `= expr`. Required parameters must
+come before optional (defaulted) parameters. Defaults are evaluated fresh at
+each call site (not memoized at definition time). Any expression is valid as
+a default — not just literals.
+
+```harn
+fn greet(name, greeting = "hello") {
+  log("${greeting}, ${name}!")
+}
+greet("world")           // "hello, world!"
+greet("world", "hi")     // "hi, world!"
+
+fn config(host = "localhost", port = 8080, debug = false) {
+  // all params optional
+}
+
+let add = { x, y = 10 -> x + y }  // closures support defaults too
+```
+
+Explicit `nil` counts as a provided argument (does NOT trigger the default).
+Arguments are positional — fill left to right, only trailing defaults can
+be omitted.
 
 ### Closures
 

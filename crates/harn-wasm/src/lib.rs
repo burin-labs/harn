@@ -352,8 +352,8 @@ impl SyncInterpreter {
                 let val = self.eval(value)?;
                 Err(EvalStop::Error(format!("Thrown: {}", val.as_string())))
             }
-            Node::TryCatch { body, error_var, catch_body } => {
-                match self.exec(body) {
+            Node::TryCatch { body, error_var, catch_body, finally_body, .. } => {
+                let result = match self.exec(body) {
                     Ok(v) => Ok(v),
                     Err(EvalStop::Return(v)) => Err(EvalStop::Return(v)),
                     Err(EvalStop::Error(e)) => {
@@ -362,7 +362,11 @@ impl SyncInterpreter {
                         }
                         self.exec(catch_body)
                     }
+                };
+                if let Some(fb) = finally_body {
+                    let _ = self.exec(fb);
                 }
+                result
             }
             Node::FnDecl { name, params, body, .. } => {
                 let closure = Val::Closure(params.clone(), body.clone(), self.env.clone());
