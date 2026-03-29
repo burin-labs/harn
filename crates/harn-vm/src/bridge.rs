@@ -320,12 +320,11 @@ mod tests {
     fn test_json_result_to_vm_value_dict() {
         let val = serde_json::json!({"name": "test", "count": 42});
         let vm_val = json_result_to_vm_value(&val);
-        if let VmValue::Dict(d) = &vm_val {
-            assert_eq!(d.get("name").unwrap().display(), "test");
-            assert_eq!(d.get("count").unwrap().display(), "42");
-        } else {
-            panic!("Expected Dict, got {:?}", vm_val);
-        }
+        let VmValue::Dict(d) = &vm_val else {
+            unreachable!("Expected Dict, got {:?}", vm_val);
+        };
+        assert_eq!(d.get("name").unwrap().display(), "test");
+        assert_eq!(d.get("count").unwrap().display(), "42");
     }
 
     #[test]
@@ -346,16 +345,14 @@ mod tests {
             "output_tokens": 50,
         });
         let vm_val = json_result_to_vm_value(&val);
-        if let VmValue::Dict(d) = &vm_val {
-            assert_eq!(d.get("text").unwrap().display(), "response");
-            if let VmValue::List(list) = d.get("tool_calls").unwrap() {
-                assert_eq!(list.len(), 1);
-            } else {
-                panic!("Expected List for tool_calls");
-            }
-        } else {
-            panic!("Expected Dict");
-        }
+        let VmValue::Dict(d) = &vm_val else {
+            unreachable!("Expected Dict, got {:?}", vm_val);
+        };
+        assert_eq!(d.get("text").unwrap().display(), "response");
+        let VmValue::List(list) = d.get("tool_calls").unwrap() else {
+            unreachable!("Expected List for tool_calls");
+        };
+        assert_eq!(list.len(), 1);
     }
 
     #[test]

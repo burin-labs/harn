@@ -367,8 +367,9 @@ error: undefined variable `reponse`
 
 ### Editor support
 
-**VS Code** — syntax highlighting, hover, completions, go-to-definition,
-diagnostics, and linting:
+**VS Code** — syntax highlighting, hover, completions, signature help,
+go-to-definition, references, rename, workspace symbols, diagnostics,
+and linting:
 
 ```bash
 cd editors/vscode
@@ -395,10 +396,10 @@ The codebase is organized as a Cargo workspace:
 | `harn-parser` | Parser, spanned AST (`SNode`), type checker, diagnostic renderer |
 | `harn-vm` | Bytecode compiler, VM, and all builtin functions |
 | `harn-fmt` | Opinionated code formatter |
-| `harn-lint` | Linter with 5 rules |
+| `harn-lint` | Linter with 6 rules |
 | `harn-cli` | CLI: `run`, `test`, `repl`, `init`, `fmt`, `lint`, `version`, `acp`, `serve` |
-| `harn-lsp` | Language Server Protocol |
-| `harn-dap` | Debug Adapter Protocol |
+| `harn-lsp` | LSP: completion, hover, signature help, go-to-def, rename, workspace symbols |
+| `harn-dap` | DAP: breakpoints (conditional), stepping, variable inspection, expression eval |
 | `harn-wasm` | WASM target (built separately with wasm-pack) |
 
 The [language specification](spec/HARN_SPEC.md) is the authoritative reference.

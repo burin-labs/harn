@@ -85,12 +85,14 @@ via `tokio::task::spawn_local` for `parallel`, `parallel_map`, and
 - **harn-vm** -- The sole execution engine. Modular structure:
   `value.rs` (VmValue, VmEnv, errors), `chunk.rs` (opcodes, bytecode),
   `compiler.rs` (AST -> bytecode, pipe placeholder desugaring),
-  `vm.rs` (async execution loop), `stdlib.rs` (95+ builtin functions),
+  `vm.rs` (async execution loop), `stdlib.rs` (100+ builtin functions),
   `stdlib_modules.rs` (embedded std/text, std/collections .harn modules),
   `store.rs` (persistent key-value store backed by .harn/store.json),
+  `metadata.rs` (project metadata store for `.burin/metadata/` shards),
   `http.rs` (HTTP client with retries),
-  `llm.rs` (LLM calls for Anthropic/OpenAI/Ollama),
-  `mcp.rs` (MCP client for external tool servers),
+  `llm.rs` (LLM calls for Anthropic/OpenAI/Ollama, agent_loop with
+  tool support returning `{status, text, iterations, duration_ms}`),
+  `mcp.rs` (MCP client: tools, resources, and prompts),
   `bridge.rs` / `bridge_builtins.rs` (JSON-RPC host delegation).
   45+ opcodes including TailCall, GetPropertyOpt, MethodCallOpt,
   Slice, concurrency, imports, enums, and deadlines. In bridge mode,
@@ -105,8 +107,14 @@ via `tokio::task::spawn_local` for `parallel`, `parallel_map`, and
   `acp.rs` (ACP JSON-RPC server with builtin delegation,
   `terminal/*` and `fs/*` support),
   `a2a.rs` (Agent-to-Agent HTTP server with Agent Card).
-- **harn-lsp** -- Language Server Protocol implementation.
-- **harn-dap** -- Debug Adapter Protocol implementation.
+- **harn-lsp** -- Language Server Protocol implementation. Features:
+  completion, hover, go-to-definition, references, rename, document
+  symbols, workspace symbols, signature help, semantic tokens, code
+  actions (quick-fix for lint warnings).
+- **harn-dap** -- Debug Adapter Protocol implementation. Supports
+  breakpoints (including conditional), stepping, variable inspection,
+  expression evaluation (dot-access, subscripts, len/type_of),
+  exception breakpoints.
 - **harn-wasm** -- WASM target (excluded from workspace, built with
   wasm-pack). Contains its own minimal sync interpreter for browser use.
 
@@ -133,10 +141,14 @@ the execution loop.
 
 ### agent_loop tool support
 
-`agent_loop` supports tool execution via text-based `<tool_call>` XML
-tags (default) or native function calling (`tool_format: "native"`).
+`agent_loop` returns a dict `{status, text, iterations, duration_ms,
+tools_used}`. It supports tool execution via text-based `<tool_call>`
+XML tags (default) or native function calling (`tool_format: "native"`).
 Tools can be passed as string name lists (e.g. `["read", "search",
 "edit"]`), `tool_registry` objects, or raw tool definition dicts.
+Tool arguments are normalized before dispatch (`normalize_tool_args`),
+and read-only tools (`read_file`, `list_directory`) are handled locally
+in the VM via `handle_tool_locally` to reduce bridge latency.
 
 In ACP mode, `register_agent_loop_with_bridge()` (in `llm.rs`) overrides
 the native text-only `agent_loop` so that tool calls are executed via

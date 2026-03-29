@@ -35,6 +35,12 @@ enum ProgramState {
     Terminated,
 }
 
+/// A segment in an expression path for evaluation.
+enum PathSegment {
+    Field(String),
+    Index(i64),
+}
+
 /// The debug adapter implementation.
 pub struct Debugger {
     seq: i64,
@@ -737,25 +743,126 @@ impl Debugger {
     }
 
     /// Resolve an expression string against the current variable state.
-    /// Supports simple variable names ("x") and dot-access paths ("x.foo.bar").
+    /// Supports: variable names ("x"), dot-access ("x.foo.bar"),
+    /// subscript access ("x[0]", "x[\"key\"]"), len(x), type_of(x).
     fn resolve_expression(&self, expression: &str) -> Option<VmValue> {
-        let parts: Vec<&str> = expression.split('.').collect();
-        if parts.is_empty() || parts[0].is_empty() {
-            return None;
+        let expr = expression.trim();
+
+        // Handle len(expr) and type_of(expr)
+        if let Some(inner) = expr.strip_prefix("len(").and_then(|s| s.strip_suffix(')')) {
+            let val = self.resolve_expression(inner)?;
+            return match &val {
+                VmValue::String(s) => Some(VmValue::Int(s.len() as i64)),
+                VmValue::List(l) => Some(VmValue::Int(l.len() as i64)),
+                VmValue::Dict(d) => Some(VmValue::Int(d.len() as i64)),
+                _ => None,
+            };
+        }
+        if let Some(inner) = expr
+            .strip_prefix("type_of(")
+            .and_then(|s| s.strip_suffix(')'))
+        {
+            let val = self.resolve_expression(inner)?;
+            let type_name = match &val {
+                VmValue::Int(_) => "int",
+                VmValue::Float(_) => "float",
+                VmValue::String(_) => "string",
+                VmValue::Bool(_) => "bool",
+                VmValue::Nil => "nil",
+                VmValue::List(_) => "list",
+                VmValue::Dict(_) => "dict",
+                _ => "unknown",
+            };
+            return Some(VmValue::String(std::rc::Rc::from(type_name)));
         }
 
-        // Look up the root variable
-        let mut current = self.variables.get(parts[0])?.clone();
-
-        // Traverse dot-access path
-        for &field in &parts[1..] {
-            if field.is_empty() {
-                return None;
+        // Tokenize into segments: identifiers, [subscript], .field
+        let mut segments = Vec::new();
+        let mut chars = expr.chars().peekable();
+        // First segment: variable name
+        let mut name = String::new();
+        while let Some(&c) = chars.peek() {
+            if c.is_alphanumeric() || c == '_' {
+                name.push(c);
+                chars.next();
+            } else {
+                break;
             }
-            current = match &current {
-                VmValue::Dict(map) => map.get(field)?.clone(),
-                VmValue::StructInstance { fields, .. } => fields.get(field)?.clone(),
+        }
+        if name.is_empty() {
+            return None;
+        }
+        segments.push(PathSegment::Field(name));
+
+        // Remaining: .field or [subscript]
+        while let Some(&c) = chars.peek() {
+            match c {
+                '.' => {
+                    chars.next();
+                    let mut field = String::new();
+                    while let Some(&c) = chars.peek() {
+                        if c.is_alphanumeric() || c == '_' {
+                            field.push(c);
+                            chars.next();
+                        } else {
+                            break;
+                        }
+                    }
+                    if field.is_empty() {
+                        return None;
+                    }
+                    segments.push(PathSegment::Field(field));
+                }
+                '[' => {
+                    chars.next();
+                    let mut idx = String::new();
+                    while let Some(&c) = chars.peek() {
+                        if c == ']' {
+                            chars.next();
+                            break;
+                        }
+                        idx.push(c);
+                        chars.next();
+                    }
+                    let idx = idx.trim().trim_matches('"').trim_matches('\'');
+                    if let Ok(n) = idx.parse::<i64>() {
+                        segments.push(PathSegment::Index(n));
+                    } else {
+                        segments.push(PathSegment::Field(idx.to_string()));
+                    }
+                }
                 _ => return None,
+            }
+        }
+
+        // Resolve
+        let root_name = match &segments[0] {
+            PathSegment::Field(n) => n.as_str(),
+            _ => return None,
+        };
+        let mut current = self.variables.get(root_name)?.clone();
+
+        for seg in &segments[1..] {
+            current = match seg {
+                PathSegment::Field(f) => match &current {
+                    VmValue::Dict(map) => map.get(f.as_str())?.clone(),
+                    VmValue::StructInstance { fields, .. } => fields.get(f.as_str())?.clone(),
+                    _ => return None,
+                },
+                PathSegment::Index(i) => match &current {
+                    VmValue::List(list) => {
+                        let idx = if *i < 0 {
+                            (list.len() as i64 + i) as usize
+                        } else {
+                            *i as usize
+                        };
+                        list.get(idx)?.clone()
+                    }
+                    VmValue::Dict(map) => {
+                        map.get(&i.to_string())?.clone()
+                    }
+                    _ => return None,
+                },
             };
         }
 

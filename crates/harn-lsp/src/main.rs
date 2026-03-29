@@ -79,6 +79,13 @@ const BUILTINS: &[(&str, &str)] = &[
     ("mcp_connect", "mcp_connect(command, args?) -> client"),
     ("mcp_list_tools", "mcp_list_tools(client) -> list"),
     ("mcp_call", "mcp_call(client, name, args?) -> value"),
+    ("mcp_list_resources", "mcp_list_resources(client) -> list"),
+    ("mcp_read_resource", "mcp_read_resource(client, uri) -> string"),
+    ("mcp_list_prompts", "mcp_list_prompts(client) -> list"),
+    (
+        "mcp_get_prompt",
+        "mcp_get_prompt(client, name, args?) -> dict",
+    ),
     ("mcp_server_info", "mcp_server_info(client) -> dict"),
     ("mcp_disconnect", "mcp_disconnect(client) -> nil"),
     // Concurrency
@@ -1876,6 +1883,12 @@ impl LanguageServer for HarnLsp {
                         },
                     ),
                 ),
+                signature_help_provider: Some(SignatureHelpOptions {
+                    trigger_characters: Some(vec!["(".to_string(), ",".to_string()]),
+                    retrigger_characters: Some(vec![")".to_string()]),
+                    work_done_progress_options: Default::default(),
+                }),
+                workspace_symbol_provider: Some(OneOf::Left(true)),
                 code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
                 rename_provider: Some(OneOf::Left(true)),
                 ..Default::default()
@@ -2331,6 +2344,161 @@ impl LanguageServer for HarnLsp {
     }
 
     // -----------------------------------------------------------------------
+    // Signature help (shows parameter info as you type)
+    // -----------------------------------------------------------------------
+    async fn signature_help(
+        &self,
+        params: SignatureHelpParams,
+    ) -> Result<Option<SignatureHelp>> {
+        let uri = &params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+
+        let source = {
+            let docs = self.documents.lock().unwrap();
+            match docs.get(uri) {
+                Some(s) => s.source.clone(),
+                None => return Ok(None),
+            }
+        };
+
+        let lines: Vec<&str> = source.lines().collect();
+        let line = match lines.get(position.line as usize) {
+            Some(l) => *l,
+            None => return Ok(None),
+        };
+        let col = position.character as usize;
+        let prefix = if col <= line.len() {
+            &line[..col]
+        } else {
+            line
+        };
+
+        // Walk backwards to find the matching `(` and the function name
+        let mut depth = 0i32;
+        let mut comma_count = 0u32;
+        let mut open_paren_pos = None;
+        for (i, ch) in prefix.char_indices().rev() {
+            match ch {
+                ')' => depth += 1,
+                '(' => {
+                    if depth == 0 {
+                        open_paren_pos = Some(i);
+                        break;
+                    }
+                    depth -= 1;
+                }
+                ',' if depth == 0 => comma_count += 1,
+                _ => {}
+            }
+        }
+
+        let paren_pos = match open_paren_pos {
+            Some(p) => p,
+            None => return Ok(None),
+        };
+
+        // Extract function name before the `(`
+        let before = &prefix[..paren_pos];
+        let name: String = before
+            .chars()
+            .rev()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect();
+
+        if name.is_empty() {
+            return Ok(None);
+        }
+
+        // Look up in BUILTINS
+        let sig_str = match BUILTINS.iter().find(|(n, _)| *n == name.as_str()) {
+            Some((_, sig)) => *sig,
+            None => return Ok(None),
+        };
+
+        // Parse parameters from "name(param1, param2, ...) -> ret"
+        let params_str = sig_str
+            .split('(')
+            .nth(1)
+            .and_then(|s| s.split(')').next())
+            .unwrap_or("");
+
+        let params_list: Vec<ParameterInformation> = if params_str.is_empty() {
+            vec![]
+        } else {
+            params_str
+                .split(',')
+                .map(|p| ParameterInformation {
+                    label: ParameterLabel::Simple(p.trim().to_string()),
+                    documentation: None,
+                })
+                .collect()
+        };
+
+        Ok(Some(SignatureHelp {
+            signatures: vec![SignatureInformation {
+                label: sig_str.to_string(),
+                documentation: builtin_doc(&name).map(|d| {
+                    Documentation::MarkupContent(MarkupContent {
+                        kind: MarkupKind::Markdown,
+                        value: d,
+                    })
+                }),
+                parameters: Some(params_list),
+                active_parameter: Some(comma_count),
+            }],
+            active_signature: Some(0),
+            active_parameter: Some(comma_count),
+        }))
+    }
+
+    // -----------------------------------------------------------------------
+    // Workspace symbol search (cross-file pipeline/function search)
+    // -----------------------------------------------------------------------
+    async fn symbol(
+        &self,
+        params: WorkspaceSymbolParams,
+    ) -> Result<Option<Vec<SymbolInformation>>> {
+        let query = params.query.to_lowercase();
+        let docs = self.documents.lock().unwrap();
+        let mut results = Vec::new();
+
+        for (uri, state) in docs.iter() {
+            for sym in &state.symbols {
+                let kind = match sym.kind {
+                    HarnSymbolKind::Pipeline => SymbolKind::FUNCTION,
+                    HarnSymbolKind::Function => SymbolKind::FUNCTION,
+                    HarnSymbolKind::Variable => SymbolKind::VARIABLE,
+                    HarnSymbolKind::Enum => SymbolKind::ENUM,
+                    HarnSymbolKind::Struct => SymbolKind::STRUCT,
+                    HarnSymbolKind::Parameter => continue,
+                };
+                let name_lower = sym.name.to_lowercase();
+                if !query.is_empty() && !name_lower.contains(&query) {
+                    continue;
+                }
+                let range = span_to_full_range(&sym.def_span, &state.source);
+                #[allow(deprecated)]
+                results.push(SymbolInformation {
+                    name: sym.name.clone(),
+                    kind,
+                    tags: None,
+                    deprecated: None,
+                    location: Location {
+                        uri: uri.clone(),
+                        range,
+                    },
+                    container_name: None,
+                });
+            }
+        }
+
+        Ok(Some(results))
+    }
+
+    // -----------------------------------------------------------------------
     // Code actions (quick-fix for lint diagnostics)
     // -----------------------------------------------------------------------
     async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
@@ -2756,6 +2924,15 @@ fn builtin_doc(name: &str) -> Option<String> {
         "metadata_refresh_hashes" => "**metadata_refresh_hashes()** → nil — Recompute content hashes",
         "compute_content_hash" => "**compute_content_hash(dir)** → string — Hash of directory contents for staleness detection",
         "invalidate_facts" => "**invalidate_facts(dir)** → nil — Mark cached facts as stale",
+        "mcp_connect" => "**mcp_connect(command, args?)** → mcp_client — Spawn an MCP server and connect",
+        "mcp_list_tools" => "**mcp_list_tools(client)** → list — List available tools from MCP server",
+        "mcp_call" => "**mcp_call(client, name, arguments?)** → string | list — Call an MCP tool",
+        "mcp_list_resources" => "**mcp_list_resources(client)** → list — List resources from MCP server",
+        "mcp_read_resource" => "**mcp_read_resource(client, uri)** → string | list — Read a resource by URI",
+        "mcp_list_prompts" => "**mcp_list_prompts(client)** → list — List prompts from MCP server",
+        "mcp_get_prompt" => "**mcp_get_prompt(client, name, arguments?)** → dict — Get a prompt with optional arguments",
+        "mcp_server_info" => "**mcp_server_info(client)** → dict — Server info: `{name, connected}`",
+        "mcp_disconnect" => "**mcp_disconnect(client)** → nil — Disconnect and kill MCP server process",
         _ => return None,
     };
     Some(doc.to_string())

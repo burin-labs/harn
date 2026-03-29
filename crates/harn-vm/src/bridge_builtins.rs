@@ -126,14 +126,8 @@ pub fn register_bridge_builtins(vm: &mut Vm, bridge: Rc<HostBridge>) {
                 params["system"] = serde_json::json!(sys);
             }
             if let Some(opts) = options {
-                let mut opts_json = vm_value_dict_to_json(&opts);
-                // Ensure persistent flag is set for agent_loop
-                if opts_json.get("persistent").is_none() {
-                    opts_json["persistent"] = serde_json::json!(true);
-                }
+                let opts_json = vm_value_dict_to_json(&opts);
                 params["options"] = opts_json;
-            } else {
-                params["options"] = serde_json::json!({"persistent": true});
             }
 
             let result = bridge.call("agent_loop", params).await?;

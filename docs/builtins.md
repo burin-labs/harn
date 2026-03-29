@@ -277,6 +277,10 @@ transport (spawns a child process).
 | `mcp_connect(command, args?)` | command: string, args: list | mcp\_client | Spawn an MCP server and perform the initialize handshake |
 | `mcp_list_tools(client)` | client: mcp\_client | list | List available tools from the server |
 | `mcp_call(client, name, arguments?)` | client: mcp\_client, name: string, arguments: dict | string or list | Call a tool and return the result |
+| `mcp_list_resources(client)` | client: mcp\_client | list | List available resources from the server |
+| `mcp_read_resource(client, uri)` | client: mcp\_client, uri: string | string or list | Read a resource by URI |
+| `mcp_list_prompts(client)` | client: mcp\_client | list | List available prompts from the server |
+| `mcp_get_prompt(client, name, arguments?)` | client: mcp\_client, name: string, arguments: dict | dict | Get a prompt with optional arguments |
 | `mcp_server_info(client)` | client: mcp\_client | dict | Get connection info (`name`, `connected`) |
 | `mcp_disconnect(client)` | client: mcp\_client | nil | Kill the server process and release resources |
 

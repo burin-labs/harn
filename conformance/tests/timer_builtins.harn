@@ -1,0 +1,15 @@
+pipeline test(task) {
+  let t = timer_start("my_timer")
+  assert_eq(t.name, "my_timer")
+  assert(t.start_ms > 0)
+  let ms = timer_end(t)
+  assert(ms >= 0)
+  log("timer ok")
+
+  // elapsed returns monotonic ms since first call
+  let e1 = elapsed()
+  let e2 = elapsed()
+  assert(e1 >= 0)
+  assert(e2 >= e1)
+  log("elapsed ok")
+}

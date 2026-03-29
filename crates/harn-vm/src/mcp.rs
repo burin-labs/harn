@@ -445,6 +445,143 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         }
         Ok(VmValue::Nil)
     });
+
+    // mcp_list_resources(client) -> list of resource dicts
+    vm.register_async_builtin("mcp_list_resources", |args| async move {
+        let client = match args.first() {
+            Some(VmValue::McpClient(c)) => c.clone(),
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "mcp_list_resources: argument must be an MCP client",
+                ))));
+            }
+        };
+
+        let result = client
+            .call("resources/list", serde_json::json!({}))
+            .await?;
+
+        let resources = result
+            .get("resources")
+            .and_then(|r| r.as_array())
+            .cloned()
+            .unwrap_or_default();
+
+        let vm_resources: Vec<VmValue> = resources.iter().map(json_to_vm_value).collect();
+        Ok(VmValue::List(Rc::new(vm_resources)))
+    });
+
+    // mcp_read_resource(client, uri) -> string | list
+    vm.register_async_builtin("mcp_read_resource", |args| async move {
+        let client = match args.first() {
+            Some(VmValue::McpClient(c)) => c.clone(),
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "mcp_read_resource: first argument must be an MCP client",
+                ))));
+            }
+        };
+
+        let uri = args.get(1).map(|a| a.display()).unwrap_or_default();
+        if uri.is_empty() {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "mcp_read_resource: URI is required",
+            ))));
+        }
+
+        let result = client
+            .call("resources/read", serde_json::json!({ "uri": uri }))
+            .await?;
+
+        // Extract content blocks
+        let contents = result
+            .get("contents")
+            .and_then(|c| c.as_array())
+            .cloned()
+            .unwrap_or_default();
+
+        // Single text block → return as string
+        if contents.len() == 1 {
+            if let Some(text) = contents[0].get("text").and_then(|t| t.as_str()) {
+                return Ok(VmValue::String(Rc::from(text)));
+            }
+        }
+
+        if contents.is_empty() {
+            Ok(VmValue::Nil)
+        } else {
+            Ok(VmValue::List(Rc::new(
+                contents.iter().map(json_to_vm_value).collect(),
+            )))
+        }
+    });
+
+    // mcp_list_prompts(client) -> list of prompt dicts
+    vm.register_async_builtin("mcp_list_prompts", |args| async move {
+        let client = match args.first() {
+            Some(VmValue::McpClient(c)) => c.clone(),
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "mcp_list_prompts: argument must be an MCP client",
+                ))));
+            }
+        };
+
+        let result = client
+            .call("prompts/list", serde_json::json!({}))
+            .await?;
+
+        let prompts = result
+            .get("prompts")
+            .and_then(|p| p.as_array())
+            .cloned()
+            .unwrap_or_default();
+
+        let vm_prompts: Vec<VmValue> = prompts.iter().map(json_to_vm_value).collect();
+        Ok(VmValue::List(Rc::new(vm_prompts)))
+    });
+
+    // mcp_get_prompt(client, name, arguments?) -> dict
+    vm.register_async_builtin("mcp_get_prompt", |args| async move {
+        let client = match args.first() {
+            Some(VmValue::McpClient(c)) => c.clone(),
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "mcp_get_prompt: first argument must be an MCP client",
+                ))));
+            }
+        };
+
+        let name = args.get(1).map(|a| a.display()).unwrap_or_default();
+        if name.is_empty() {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "mcp_get_prompt: prompt name is required",
+            ))));
+        }
+
+        let arguments = match args.get(2) {
+            Some(VmValue::Dict(d)) => {
+                let obj: serde_json::Map<String, serde_json::Value> = d
+                    .iter()
+                    .map(|(k, v)| (k.clone(), vm_value_to_serde(v)))
+                    .collect();
+                serde_json::Value::Object(obj)
+            }
+            _ => serde_json::json!({}),
+        };
+
+        let result = client
+            .call(
+                "prompts/get",
+                serde_json::json!({
+                    "name": name,
+                    "arguments": arguments,
+                }),
+            )
+            .await?;
+
+        Ok(json_to_vm_value(&result))
+    });
 }
 
 #[cfg(test)]

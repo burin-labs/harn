@@ -1,0 +1,14 @@
+pipeline test(task) {
+  let info = llm_info()
+  assert_eq(type_of(info), "dict")
+  // api_key_set should be bool regardless of env
+  assert(type_of(info.api_key_set) == "bool")
+  log("llm_info ok")
+
+  let usage = llm_usage()
+  assert_eq(usage.input_tokens, 0)
+  assert_eq(usage.output_tokens, 0)
+  assert_eq(usage.call_count, 0)
+  assert_eq(usage.total_duration_ms, 0)
+  log("llm_usage ok")
+}

@@ -140,11 +140,17 @@ fn builtin_return_type(name: &str) -> InferredType {
         "to_int" | "timer_end" | "elapsed" => Some(TypeExpr::Named("int".into())),
         "to_float" | "timestamp" | "date_parse" => Some(TypeExpr::Named("float".into())),
         "file_exists" | "json_validate" => Some(TypeExpr::Named("bool".into())),
-        "list_dir" => Some(TypeExpr::Named("list".into())),
+        "list_dir" | "mcp_list_tools" | "mcp_list_resources" | "mcp_list_prompts" => {
+            Some(TypeExpr::Named("list".into()))
+        }
         "stat" | "exec" | "shell" | "date_now" | "agent_loop" | "llm_info" | "llm_usage"
-        | "timer_start" | "metadata_get" => Some(TypeExpr::Named("dict".into())),
+        | "timer_start" | "metadata_get" | "mcp_server_info" | "mcp_get_prompt" => {
+            Some(TypeExpr::Named("dict".into()))
+        }
         "metadata_set" | "metadata_save" | "metadata_refresh_hashes"
-        | "invalidate_facts" | "log_json" => Some(TypeExpr::Named("nil".into())),
+        | "invalidate_facts" | "log_json" | "mcp_disconnect" => {
+            Some(TypeExpr::Named("nil".into()))
+        }
         "env" | "regex_match" => Some(TypeExpr::Union(vec![
             TypeExpr::Named("string".into()),
             TypeExpr::Named("nil".into()),
