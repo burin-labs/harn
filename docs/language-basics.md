@@ -166,7 +166,7 @@ Ordered by precedence (lowest to highest):
 | 8 | `+` `-` | Add, subtract, string/list concat |
 | 9 | `*` `/` | Multiply, divide |
 | 10 | `!` `-` | Unary not, negate |
-| 11 | `.` `?.` `[]` `[:]` `()` | Member access, optional chaining, subscript, slice, call |
+| 11 | `.` `?.` `[]` `[:]` `()` `?` | Member access, optional chaining, subscript, slice, call, try |
 
 Division by zero returns `nil`. Integer division truncates.
 
@@ -204,6 +204,37 @@ println(s[-5:])       // world
 
 Negative indices count from the end. Omit start for 0, omit end for
 length.
+
+### Try operator (`?`)
+
+The postfix `?` operator works with `Result` values (`Ok` / `Err`). It
+unwraps `Ok` values and propagates `Err` values by returning early from
+the enclosing function:
+
+```harn
+fn divide(a, b) {
+  if b == 0 {
+    return Err("division by zero")
+  }
+  return Ok(a / b)
+}
+
+fn compute(x) {
+  let result = divide(x, 2)?   // unwraps Ok, or returns Err early
+  return Ok(result + 10)
+}
+
+fn compute_zero(x) {
+  let result = divide(x, 0)?   // divide returns Err, ? propagates it
+  return Ok(result + 10)
+}
+
+log(compute(20))       // Result.Ok(20)
+log(compute_zero(20))  // Result.Err(division by zero)
+```
+
+Multiple `?` calls can be chained in a single function to build
+pipelines that short-circuit on the first error.
 
 ## Control flow
 
@@ -552,6 +583,42 @@ struct Point {
 let p = {x: 10, y: 20}
 log(p.x)
 ```
+
+Structs can also be constructed with the struct name as a constructor,
+which tags the value with the struct type:
+
+```javascript
+let p = Point({x: 10, y: 20})
+log(p.x)  // 10
+```
+
+### Impl blocks
+
+Add methods to a struct with `impl`:
+
+```javascript
+struct Point {
+  x: int
+  y: int
+}
+
+impl Point {
+  fn distance(self) {
+    return sqrt(self.x * self.x + self.y * self.y)
+  }
+  fn translate(self, dx, dy) {
+    return Point({x: self.x + dx, y: self.y + dy})
+  }
+}
+
+let p = Point({x: 3, y: 4})
+log(p.distance())       // 5.0
+log(p.translate(10, 20)) // Point({x: 13, y: 24})
+```
+
+The first parameter must be `self`, which receives the struct instance.
+Methods are called with dot syntax on values constructed with the struct
+constructor.
 
 ## Duration literals
 

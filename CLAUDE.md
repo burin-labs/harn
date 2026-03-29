@@ -131,6 +131,8 @@ with string keys infer `Shape` types, enabling compile-time checking
 of `{name: string, age: int}` shape annotations with width subtyping.
 Also supports `list<T>`, `dict<K, V>`, union types, and type aliases.
 The checker tracks enums for match exhaustiveness warnings.
+Union type narrowing removes `nil` from union types after `if x != nil`
+checks in the then-branch.
 
 **VM concurrency model**: The VM is async (runs inside a tokio
 `LocalSet`). `spawn` creates real async tasks via
@@ -138,6 +140,19 @@ The checker tracks enums for match exhaustiveness warnings.
 `parallel`/`parallel_map` fork child VMs for true concurrent execution.
 Async builtins (HTTP, LLM, sleep, channels) are natively awaited in
 the execution loop.
+
+**Result type**: Built-in `Result` enum with `Ok(value)` and
+`Err(error)` variants. Postfix `?` operator unwraps `Ok` or propagates
+`Err` from the current function. Helpers: `is_ok`, `is_err`, `unwrap`,
+`unwrap_or`, `unwrap_err`.
+
+**Impl blocks**: `impl TypeName { fn method(self, ...) { ... } }`
+attaches methods to structs. Methods receive the instance as `self`
+and are called with dot syntax: `instance.method(args)`. Struct
+declarations produce constructor functions: `Point({x: 3, y: 4})`.
+
+**Encoding/hashing builtins**: `base64_encode`, `base64_decode`,
+`sha256`, `md5`.
 
 ### agent_loop tool support
 

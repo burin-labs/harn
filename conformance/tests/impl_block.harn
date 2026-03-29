@@ -1,0 +1,23 @@
+pipeline test(task) {
+  struct Point {
+    x: int
+    y: int
+  }
+  impl Point {
+    fn distance(self) {
+      return sqrt(self.x * self.x + self.y * self.y)
+    }
+    fn translate(self, dx, dy) {
+      return Point({x: self.x + dx, y: self.y + dy})
+    }
+    fn to_string(self) {
+      return "(${self.x}, ${self.y})"
+    }
+  }
+  let p = Point({x: 3, y: 4})
+  log(p.distance())
+  log(p.to_string())
+  let p2 = p.translate(10, 20)
+  log(p2.x)
+  log(p2.y)
+}

@@ -14,25 +14,23 @@ impl super::Vm {
         // Error header
         out.push_str(&format!("error: {error_msg}\n"));
 
-        // Get the error location from the top frame (line, column)
-        let frames: Vec<(&str, usize, usize)> = self
-            .frames
-            .iter()
-            .map(|f| {
-                let idx = if f.ip > 0 { f.ip - 1 } else { 0 };
-                let line = if idx < f.chunk.lines.len() {
-                    f.chunk.lines[idx] as usize
-                } else {
-                    0
-                };
-                let col = if idx < f.chunk.columns.len() {
-                    f.chunk.columns[idx] as usize
-                } else {
-                    0
-                };
-                (f.fn_name.as_str(), line, col)
-            })
-            .collect();
+        // Prefer captured stack trace (taken before unwinding), else use live frames
+        let frames: Vec<(&str, usize, usize)> = if !self.error_stack_trace.is_empty() {
+            self.error_stack_trace
+                .iter()
+                .map(|(name, line, col)| (name.as_str(), *line, *col))
+                .collect()
+        } else {
+            self.frames
+                .iter()
+                .map(|f| {
+                    let idx = if f.ip > 0 { f.ip - 1 } else { 0 };
+                    let line = f.chunk.lines.get(idx).copied().unwrap_or(0) as usize;
+                    let col = f.chunk.columns.get(idx).copied().unwrap_or(0) as usize;
+                    (f.fn_name.as_str(), line, col)
+                })
+                .collect()
+        };
 
         if let Some((_name, line, col)) = frames.last() {
             let line = *line;

@@ -533,6 +533,21 @@ fn collect_symbols(snode: &SNode, symbols: &mut Vec<SymbolInfo>, scope_span: Opt
                 scope_span,
             });
         }
+        Node::ImplBlock {
+            type_name, methods, ..
+        } => {
+            symbols.push(SymbolInfo {
+                name: type_name.clone(),
+                kind: HarnSymbolKind::Struct,
+                def_span: snode.span,
+                type_info: None,
+                signature: Some(format!("impl {type_name}")),
+                scope_span,
+            });
+            for m in methods {
+                collect_symbols(m, symbols, Some(snode.span));
+            }
+        }
         Node::ForIn {
             pattern,
             iterable,
@@ -668,6 +683,9 @@ fn collect_symbols(snode: &SNode, symbols: &mut Vec<SymbolInfo>, scope_span: Opt
             collect_symbols(right, symbols, scope_span);
         }
         Node::UnaryOp { operand, .. } => {
+            collect_symbols(operand, symbols, scope_span);
+        }
+        Node::TryOperator { operand } => {
             collect_symbols(operand, symbols, scope_span);
         }
         Node::FunctionCall { args, .. } => {
@@ -1460,6 +1478,7 @@ fn token_kind_to_semantic(kind: &TokenKind) -> Option<u32> {
         | TokenKind::Enum
         | TokenKind::Struct
         | TokenKind::Interface
+        | TokenKind::Impl
         | TokenKind::Pub
         | TokenKind::From
         | TokenKind::Thru

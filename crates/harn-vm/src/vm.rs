@@ -105,6 +105,8 @@ pub struct Vm {
     pub(crate) bridge: Option<Rc<crate::bridge::HostBridge>>,
     /// Builtins denied by sandbox mode (`--deny` / `--allow` flags).
     pub(crate) denied_builtins: HashSet<String>,
+    /// Captured stack trace from the most recent error (fn_name, line, col).
+    pub(crate) error_stack_trace: Vec<(String, usize, usize)>,
 }
 
 impl Vm {
@@ -132,6 +134,7 @@ impl Vm {
             source_text: None,
             bridge: None,
             denied_builtins: HashSet::new(),
+            error_stack_trace: Vec::new(),
         }
     }
 
@@ -389,6 +392,7 @@ impl Vm {
             source_text: self.source_text.clone(),
             bridge: self.bridge.clone(),
             denied_builtins: self.denied_builtins.clone(),
+            error_stack_trace: Vec::new(),
         }
     }
 
@@ -736,14 +740,34 @@ impl Vm {
                     }
                 }
                 Err(e) => {
+                    // Capture stack trace before error handling unwinds frames
+                    if self.error_stack_trace.is_empty() {
+                        self.error_stack_trace = self.capture_stack_trace();
+                    }
                     match self.handle_error(e) {
-                        Ok(None) => continue, // Handler found, continue
+                        Ok(None) => {
+                            self.error_stack_trace.clear();
+                            continue; // Handler found, continue
+                        }
                         Ok(Some(val)) => return Ok(val),
                         Err(e) => return Err(e), // No handler, propagate
                     }
                 }
             }
         }
+    }
+
+    /// Capture the current call stack as (fn_name, line, col) tuples.
+    fn capture_stack_trace(&self) -> Vec<(String, usize, usize)> {
+        self.frames
+            .iter()
+            .map(|f| {
+                let idx = if f.ip > 0 { f.ip - 1 } else { 0 };
+                let line = f.chunk.lines.get(idx).copied().unwrap_or(0) as usize;
+                let col = f.chunk.columns.get(idx).copied().unwrap_or(0) as usize;
+                (f.fn_name.clone(), line, col)
+            })
+            .collect()
     }
 
     const MAX_FRAMES: usize = 512;

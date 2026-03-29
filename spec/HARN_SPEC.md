@@ -72,6 +72,9 @@ The following identifiers are reserved:
 | `fn` | `.fnKw` |
 | `spawn` | `.spawnKw` |
 | `while` | `.whileKw` |
+| `enum` | `.enum` |
+| `struct` | `.struct` |
+| `impl` | `.impl` |
 
 ### Identifiers
 
@@ -154,7 +157,7 @@ Multi-line strings do not support interpolation.
 | `/` | `.slash` | Division |
 | `<` | `.lt` | Less than |
 | `>` | `.gt` | Greater than |
-| `?` | `.question` | Ternary |
+| `?` | `.question` | Ternary / Result propagation |
 
 ### Delimiters
 
@@ -186,12 +189,17 @@ before checking the expected token.
 ### Top-level
 
 ```ebnf
-program       ::= (import_decl | pipeline_decl)*
+program       ::= (import_decl | pipeline_decl | enum_decl | struct_decl | impl_block)*
 import_decl   ::= 'import' STRING_LITERAL
                  | 'import' '{' IDENTIFIER (',' IDENTIFIER)* '}' 'from' STRING_LITERAL
 pipeline_decl ::= 'pipeline' IDENTIFIER '(' param_list ')' ('extends' IDENTIFIER)? '{' block '}'
 param_list    ::= (IDENTIFIER (',' IDENTIFIER)*)?
 block         ::= statement*
+enum_decl     ::= 'enum' IDENTIFIER '{' enum_variant (',' enum_variant)* '}'
+enum_variant  ::= IDENTIFIER ('(' type_expr (',' type_expr)* ')')?
+struct_decl   ::= 'struct' IDENTIFIER '{' struct_field* '}'
+struct_field  ::= IDENTIFIER ':' type_expr
+impl_block    ::= 'impl' IDENTIFIER '{' fn_decl* '}'
 ```
 
 #### Standard library modules
@@ -224,6 +232,9 @@ statement ::= let_binding
             | override_decl
             | try_catch
             | fn_decl
+            | enum_decl
+            | struct_decl
+            | impl_block
             | expression_statement
 
 let_binding    ::= 'let' binding_pattern (':' type_expr)? '=' expression
@@ -274,10 +285,11 @@ comparison       ::= additive (('<' | '>' | '<=' | '>=') additive)*
 additive         ::= multiplicative (('+' | '-') multiplicative)*
 multiplicative   ::= unary (('*' | '/') unary)*
 unary            ::= ('!' | '-') unary | postfix
-postfix          ::= primary (member_access | subscript_access | call)*
+postfix          ::= primary (member_access | subscript_access | call | try_unwrap)*
 member_access    ::= '.' IDENTIFIER ('(' arg_list ')')?
 subscript_access ::= '[' expression ']'
 call             ::= '(' arg_list ')'    (* only if postfix base is an identifier *)
+try_unwrap       ::= '?'                 (* Result propagation: unwrap Ok or return Err *)
 ```
 
 ### Primary expressions
@@ -329,7 +341,7 @@ From lowest to highest binding:
 | 8 | `+` `-` | Left | Additive |
 | 9 | `*` `/` | Left | Multiplicative |
 | 10 | `!` `-` (unary) | Right (prefix) | Unary |
-| 11 | `.` `[]` `()` | Left | Postfix (member, subscript, call) |
+| 11 | `.` `[]` `()` `?` | Left | Postfix (member, subscript, call, try-unwrap) |
 
 ### Multiline expressions
 
@@ -553,6 +565,8 @@ Non-pipeline top-level statements (fn declarations, let bindings) are executed i
 | `dict` | `{key: value}` | String-keyed map |
 | `set` | `set(1, 2, 3)` | Unordered collection of unique values |
 | `closure` | `{ x -> x + 1 }` | First-class function with captured environment |
+| `enum` | `Color.Red` | Enum variant, optionally with associated data |
+| `struct` | `Point({x: 3, y: 4})` | Struct instance with named fields |
 | `taskHandle` | (from `spawn`) | Opaque handle to an async task |
 
 ### Truthiness
@@ -920,6 +934,220 @@ environment (not the call-site environment), and parameters are bound as immutab
 `HarnRuntimeError.returnValue`. The closure invocation catches this and returns the value.
 `return` inside a pipeline terminates the pipeline.
 
+## Enums
+
+Enums define a type with a fixed set of named variants, each optionally
+carrying associated data.
+
+### Enum declaration
+
+```harn
+enum Color {
+  Red,
+  Green,
+  Blue
+}
+
+enum Shape {
+  Circle(float),
+  Rectangle(float, float)
+}
+```
+
+Variants without data are simple tags. Variants with data carry positional
+fields specified in parentheses.
+
+### Enum construction
+
+Variants are constructed using dot syntax on the enum name:
+
+```harn
+let c = Color.Red
+let s = Shape.Circle(5.0)
+let r = Shape.Rectangle(3.0, 4.0)
+```
+
+### Pattern matching on enums
+
+Enum variants are matched using `EnumName.Variant(binding)` patterns in
+`match` expressions:
+
+```harn
+match s {
+  Shape.Circle(radius) -> { log("circle r=${radius}") }
+  Shape.Rectangle(w, h) -> { log("rect ${w}x${h}") }
+}
+```
+
+The type checker warns when a `match` on an enum is not exhaustive (i.e.,
+does not cover all variants).
+
+### Built-in Result enum
+
+Harn provides a built-in `Result` enum with two variants:
+
+- `Result.Ok(value)` -- represents a successful result
+- `Result.Err(error)` -- represents an error
+
+Shorthand constructor functions `Ok(value)` and `Err(value)` are available
+as builtins, equivalent to `Result.Ok(value)` and `Result.Err(value)`.
+
+```harn
+let ok = Ok(42)
+let err = Err("something failed")
+
+// Equivalent long form:
+let ok2 = Result.Ok(42)
+let err2 = Result.Err("oops")
+```
+
+### Result helper functions
+
+| Function | Description |
+|---|---|
+| `is_ok(r)` | Returns `true` if `r` is `Result.Ok` |
+| `is_err(r)` | Returns `true` if `r` is `Result.Err` |
+| `unwrap(r)` | Returns the `Ok` value, throws if `r` is `Err` |
+| `unwrap_or(r, default)` | Returns the `Ok` value, or `default` if `r` is `Err` |
+| `unwrap_err(r)` | Returns the `Err` value, throws if `r` is `Ok` |
+
+### The `?` operator (Result propagation)
+
+The postfix `?` operator unwraps a `Result.Ok` value or propagates a
+`Result.Err` from the current function. It is a postfix operator with the
+same precedence as `.`, `[]`, and `()`.
+
+```harn
+fn divide(a, b) {
+  if b == 0 {
+    return Err("division by zero")
+  }
+  return Ok(a / b)
+}
+
+fn compute(x) {
+  let result = divide(x, 2)?   // unwraps Ok, or returns Err early
+  return Ok(result + 10)
+}
+
+let r1 = compute(20)   // Result.Ok(20)
+let r2 = compute(0)    // would propagate Err from divide
+```
+
+The `?` operator requires its operand to be a `Result` value. Applying `?`
+to a non-Result value produces a type error at runtime.
+
+Disambiguation: when the parser sees `expr?`, it distinguishes between the
+postfix `?` (Result propagation) and the ternary `? :` operator by checking
+whether the token following `?` could start a ternary branch expression.
+
+### Pattern matching on Result
+
+```harn
+match result {
+  Result.Ok(val) -> { log("success: ${val}") }
+  Result.Err(err) -> { log("error: ${err}") }
+}
+```
+
+### Result in pipelines
+
+The `?` operator works naturally in pipelines:
+
+```harn
+fn fetch_and_parse(url) {
+  let response = http_get(url)?
+  let data = json_parse(response)?
+  return Ok(data)
+}
+```
+
+## Structs
+
+Structs define named record types with typed fields.
+
+### Struct declaration
+
+```harn
+struct Point {
+  x: int
+  y: int
+}
+
+struct User {
+  name: string
+  age: int
+}
+```
+
+Fields are declared with `name: type` syntax, one per line.
+
+### Struct construction
+
+Declaring a struct produces a constructor function with the same name as
+the struct. The constructor takes a dict argument with the field values:
+
+```harn
+let p = Point({x: 3, y: 4})
+let u = User({name: "Alice", age: 30})
+```
+
+### Field access
+
+Struct fields are accessed with dot syntax, the same as dict property
+access:
+
+```harn
+log(p.x)    // 3
+log(u.name) // "Alice"
+```
+
+## Impl blocks
+
+Impl blocks attach methods to a struct type.
+
+### Syntax
+
+```harn
+impl TypeName {
+  fn method_name(self, args...) {
+    // body -- self refers to the struct instance
+  }
+}
+```
+
+The first parameter of each method must be `self`, which receives the
+struct instance the method is called on.
+
+### Method calls
+
+Methods are called using dot syntax on struct instances:
+
+```harn
+struct Point {
+  x: int
+  y: int
+}
+
+impl Point {
+  fn distance(self) {
+    return sqrt(self.x * self.x + self.y * self.y)
+  }
+  fn translate(self, dx, dy) {
+    return Point({x: self.x + dx, y: self.y + dy})
+  }
+}
+
+let p = Point({x: 3, y: 4})
+log(p.distance())           // 5.0
+let p2 = p.translate(10, 20)
+log(p2.x)                   // 13
+```
+
+When `instance.method(args)` is called, the VM looks up methods registered
+by the `impl` block for the instance's struct type. The instance is
+automatically passed as the `self` argument.
+
 ## Type annotations
 
 Harn has an optional, gradual type system. Type annotations are checked at compile time
@@ -1008,6 +1236,25 @@ fn add(a: int, b: int) -> int {
 - Shape-to-`dict<K, V>`: all field values must be compatible with `V`.
 - Type errors are reported at compile time and halt execution.
 
+### Union type narrowing
+
+The type checker narrows union types after nil checks. When a condition
+like `x != nil` guards an `if` branch, the type of `x` is narrowed within
+the then-branch by removing `nil` from the union:
+
+```harn
+fn greet(name: string | nil) -> string {
+  if name != nil {
+    // name is narrowed to `string` here
+    return "hello " + name
+  }
+  return "hello stranger"
+}
+```
+
+This avoids false type errors when accessing a value that has been
+confirmed non-nil by a conditional check.
+
 ### Runtime parameter type enforcement
 
 In addition to compile-time checking, function parameters with type annotations
@@ -1094,6 +1341,34 @@ equality.
 
 Sets are iterable with `for ... in` and support `len()`.
 
+### Encoding and hashing builtins
+
+| Function | Description |
+|---|---|
+| `base64_encode(str)` | Returns the base64-encoded version of `str` |
+| `base64_decode(str)` | Returns the decoded string from a base64-encoded `str` |
+| `sha256(str)` | Returns the hex-encoded SHA-256 hash of `str` |
+| `md5(str)` | Returns the hex-encoded MD5 hash of `str` |
+
+```harn
+let encoded = base64_encode("hello world")  // "aGVsbG8gd29ybGQ="
+let decoded = base64_decode(encoded)        // "hello world"
+let hash = sha256("hello")                  // hex string
+let md5hash = md5("hello")                  // hex string
+```
+
+### Regex builtins
+
+| Function | Description |
+|---|---|
+| `regex_match(pattern, str)` | Returns match data if `str` matches `pattern`, or `nil` |
+| `regex_replace(pattern, str, replacement)` | Replaces all matches of `pattern` in `str` |
+
+Regex patterns are compiled and cached internally using a thread-local
+cache. Repeated calls with the same pattern string reuse the compiled
+regex, avoiding recompilation overhead. This is a performance optimization
+with no API-visible change.
+
 ## Method-style builtins
 
 If `obj.method(args)` is called and `obj` is an identifier, the interpreter first checks
@@ -1112,6 +1387,22 @@ and `negative_knowledge.record(...)`.
 | `returnValue(value?)` | Internal: used to implement `return` (not a user-facing error) |
 | `retryExhausted` | All retry attempts failed |
 | `thrownError(value)` | User-thrown error via `throw` |
+
+### Stack traces
+
+Runtime errors include a full call stack trace showing the chain of
+function calls that led to the error. The stack trace lists each frame
+with its function name, source file, line number, and column:
+
+```text
+Error: division by zero
+  at divide (script.harn:3:5)
+  at compute (script.harn:8:18)
+  at default (script.harn:12:10)
+```
+
+Stack traces are captured at the point of the error before unwinding, so
+they accurately reflect the call chain at the time of failure.
 
 ## Persistent store
 

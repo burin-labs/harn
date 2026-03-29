@@ -552,6 +552,7 @@ impl Lexer {
             "break" => TokenKind::Break,
             "continue" => TokenKind::Continue,
             "select" => TokenKind::Select,
+            "impl" => TokenKind::Impl,
             _ => TokenKind::Identifier(ident),
         };
 

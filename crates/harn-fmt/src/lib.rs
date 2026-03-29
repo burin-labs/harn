@@ -421,6 +421,13 @@ impl Formatter {
                 self.dedent();
                 self.writeln("}");
             }
+            Node::ImplBlock { type_name, methods } => {
+                self.writeln(&format!("impl {type_name} {{"));
+                self.indent();
+                self.format_body(methods, node_line);
+                self.dedent();
+                self.writeln("}");
+            }
             Node::Parallel {
                 count,
                 variable,
@@ -606,6 +613,10 @@ impl Formatter {
             Node::UnaryOp { op, operand } => {
                 let expr = self.format_expr(operand);
                 format!("{op}{expr}")
+            }
+            Node::TryOperator { operand } => {
+                let expr = self.format_expr(operand);
+                format!("{expr}?")
             }
             Node::FunctionCall { name, args } => {
                 let args_str = args
@@ -1152,6 +1163,7 @@ impl Formatter {
             Node::EnumDecl { name, .. } => format!("/* enum {name} */"),
             Node::StructDecl { name, .. } => format!("/* struct {name} */"),
             Node::InterfaceDecl { name, .. } => format!("/* interface {name} */"),
+            Node::ImplBlock { type_name, .. } => format!("/* impl {type_name} */"),
             Node::OverrideDecl { name, .. } => format!("/* override {name} */"),
             Node::TypeDecl { name, type_expr } => {
                 let te = format_type_expr(type_expr);
@@ -1610,6 +1622,7 @@ fn is_simple_expr(node: &SNode) -> bool {
             | Node::DictLiteral(_)
             | Node::RangeExpr { .. }
             | Node::EnumConstruct { .. }
+            | Node::TryOperator { .. }
             | Node::ReturnStmt { .. }
             | Node::BreakStmt
             | Node::ContinueStmt

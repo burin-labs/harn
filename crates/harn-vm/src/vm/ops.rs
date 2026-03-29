@@ -673,6 +673,29 @@ impl super::Vm {
                     )));
                 }
             }
+        } else if op == Op::TryUnwrap as u8 {
+            // Try-unwrap: if Result.Ok(v) → push v, if Result.Err(e) → return Result.Err(e)
+            let val = self.pop()?;
+            match &val {
+                VmValue::EnumVariant {
+                    enum_name,
+                    variant,
+                    fields,
+                } if enum_name == "Result" => {
+                    if variant == "Ok" {
+                        self.stack
+                            .push(fields.first().cloned().unwrap_or(VmValue::Nil));
+                    } else {
+                        // Err variant: return it from current function
+                        return Err(VmError::Return(val));
+                    }
+                }
+                _ => {
+                    return Err(VmError::TypeError(
+                        "? operator requires a Result value (Result.Ok or Result.Err)".into(),
+                    ));
+                }
+            }
         } else if op == Op::Dup as u8 {
             let val = self.peek()?.clone();
             self.stack.push(val);

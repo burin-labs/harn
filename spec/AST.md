@@ -73,6 +73,25 @@ Imports another `.harn` file by path.
 import "shared/common.harn"
 ```
 
+### `implBlock`
+
+```javascript
+implBlock(type_name: String, methods: [HarnNode])
+```
+
+An impl block that attaches methods to a struct type. Each entry in
+`methods` is a `fnDecl` whose first parameter is `self`.
+
+```harn
+impl Point {
+  fn distance(self, other) {
+    let dx = self.x - other.x
+    let dy = self.y - other.y
+    return sqrt(dx * dx + dy * dy)
+  }
+}
+```
+
 ## Control flow
 
 ### `ifElse`
@@ -350,6 +369,22 @@ Throws a value as an error.
 ```harn
 throw "something went wrong"
 throw {code: 404, msg: "not found"}
+```
+
+### `tryOperator`
+
+```javascript
+tryOperator(operand: HarnNode)
+```
+
+Postfix `?` operator for `Result` unwrapping. If the operand evaluates
+to `Result.Ok(v)`, the expression produces `v`. If it evaluates to
+`Result.Err(e)`, the error is propagated (returned) from the enclosing
+function.
+
+```harn
+let value = might_fail()?
+let parsed = parse(input)?
 ```
 
 ## Literals

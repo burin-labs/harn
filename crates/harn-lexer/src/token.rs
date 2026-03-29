@@ -116,6 +116,7 @@ pub enum TokenKind {
     Break,
     Continue,
     Select,
+    Impl,
 
     // Literals
     Identifier(String),
@@ -221,6 +222,7 @@ impl fmt::Display for TokenKind {
             TokenKind::Break => write!(f, "break"),
             TokenKind::Continue => write!(f, "continue"),
             TokenKind::Select => write!(f, "select"),
+            TokenKind::Impl => write!(f, "impl"),
             TokenKind::Identifier(s) => write!(f, "id({s})"),
             TokenKind::StringLiteral(s) => write!(f, "str({s})"),
             TokenKind::InterpolatedString(_) => write!(f, "istr(...)"),

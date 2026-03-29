@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::io::BufRead;
 use std::rc::Rc;
@@ -6,6 +7,31 @@ use std::sync::Arc;
 
 use crate::value::{values_equal, VmAtomicHandle, VmChannelHandle, VmError, VmValue};
 use crate::vm::Vm;
+
+// Thread-local regex cache to avoid recompiling patterns on every call.
+thread_local! {
+    static REGEX_CACHE: RefCell<Vec<(String, regex::Regex)>> = const { RefCell::new(Vec::new()) };
+}
+
+fn get_cached_regex(pattern: &str) -> Result<regex::Regex, VmError> {
+    REGEX_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        // Check if pattern is already cached
+        if let Some(pos) = cache.iter().position(|(p, _)| p == pattern) {
+            return Ok(cache[pos].1.clone());
+        }
+        // Compile and cache
+        let re = regex::Regex::new(pattern).map_err(|e| {
+            VmError::Thrown(VmValue::String(Rc::from(format!("Invalid regex: {e}"))))
+        })?;
+        cache.push((pattern.to_string(), re.clone()));
+        // Evict oldest if cache grows too large
+        if cache.len() > 64 {
+            cache.remove(0);
+        }
+        Ok(re)
+    })
+}
 
 use crate::http::register_http_builtins;
 use crate::llm::register_llm_builtins;
@@ -99,6 +125,91 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
         }
     });
 
+    // --- Result type helpers ---
+    vm.register_builtin("Ok", |args, _out| {
+        let val = args.first().cloned().unwrap_or(VmValue::Nil);
+        Ok(VmValue::EnumVariant {
+            enum_name: "Result".into(),
+            variant: "Ok".into(),
+            fields: vec![val],
+        })
+    });
+    vm.register_builtin("Err", |args, _out| {
+        let val = args.first().cloned().unwrap_or(VmValue::Nil);
+        Ok(VmValue::EnumVariant {
+            enum_name: "Result".into(),
+            variant: "Err".into(),
+            fields: vec![val],
+        })
+    });
+    vm.register_builtin("is_ok", |args, _out| {
+        let val = args.first().unwrap_or(&VmValue::Nil);
+        Ok(VmValue::Bool(matches!(
+            val,
+            VmValue::EnumVariant { enum_name, variant, .. }
+            if enum_name == "Result" && variant == "Ok"
+        )))
+    });
+    vm.register_builtin("is_err", |args, _out| {
+        let val = args.first().unwrap_or(&VmValue::Nil);
+        Ok(VmValue::Bool(matches!(
+            val,
+            VmValue::EnumVariant { enum_name, variant, .. }
+            if enum_name == "Result" && variant == "Err"
+        )))
+    });
+    vm.register_builtin("unwrap", |args, _out| {
+        let val = args.first().unwrap_or(&VmValue::Nil);
+        match val {
+            VmValue::EnumVariant {
+                enum_name,
+                variant,
+                fields,
+            } if enum_name == "Result" && variant == "Ok" => {
+                Ok(fields.first().cloned().unwrap_or(VmValue::Nil))
+            }
+            VmValue::EnumVariant {
+                enum_name,
+                variant,
+                fields,
+            } if enum_name == "Result" && variant == "Err" => {
+                let msg = fields.first().map(|f| f.display()).unwrap_or_default();
+                Err(VmError::Runtime(format!("unwrap called on Err: {msg}")))
+            }
+            _ => Ok(val.clone()),
+        }
+    });
+    vm.register_builtin("unwrap_or", |args, _out| {
+        let val = args.first().unwrap_or(&VmValue::Nil);
+        let default = args.get(1).cloned().unwrap_or(VmValue::Nil);
+        match val {
+            VmValue::EnumVariant {
+                enum_name,
+                variant,
+                fields,
+            } if enum_name == "Result" && variant == "Ok" => {
+                Ok(fields.first().cloned().unwrap_or(VmValue::Nil))
+            }
+            VmValue::EnumVariant {
+                enum_name, variant, ..
+            } if enum_name == "Result" && variant == "Err" => Ok(default),
+            _ => Ok(val.clone()),
+        }
+    });
+    vm.register_builtin("unwrap_err", |args, _out| {
+        let val = args.first().unwrap_or(&VmValue::Nil);
+        match val {
+            VmValue::EnumVariant {
+                enum_name,
+                variant,
+                fields,
+            } if enum_name == "Result" && variant == "Err" => {
+                Ok(fields.first().cloned().unwrap_or(VmValue::Nil))
+            }
+            _ => Err(VmError::Runtime("unwrap_err called on non-Err".into())),
+        }
+    });
+
     vm.register_builtin("json_stringify", |args, _out| {
         let val = args.first().unwrap_or(&VmValue::Nil);
         Ok(VmValue::String(Rc::from(vm_value_to_json(val))))
@@ -163,9 +274,7 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
         if args.len() >= 2 {
             let pattern = args[0].display();
             let text = args[1].display();
-            let re = regex::Regex::new(&pattern).map_err(|e| {
-                VmError::Thrown(VmValue::String(Rc::from(format!("Invalid regex: {e}"))))
-            })?;
+            let re = get_cached_regex(&pattern)?;
             let matches: Vec<VmValue> = re
                 .find_iter(&text)
                 .map(|m| VmValue::String(Rc::from(m.as_str())))
@@ -183,14 +292,61 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
             let pattern = args[0].display();
             let replacement = args[1].display();
             let text = args[2].display();
-            let re = regex::Regex::new(&pattern).map_err(|e| {
-                VmError::Thrown(VmValue::String(Rc::from(format!("Invalid regex: {e}"))))
-            })?;
+            let re = get_cached_regex(&pattern)?;
             return Ok(VmValue::String(Rc::from(
                 re.replace_all(&text, replacement.as_str()).into_owned(),
             )));
         }
         Ok(VmValue::Nil)
+    });
+
+    // --- Struct constructor helper ---
+    vm.register_builtin("__make_struct", |args, _out| {
+        let struct_name = args.first().map(|a| a.display()).unwrap_or_default();
+        let fields_dict = args.get(1).cloned().unwrap_or(VmValue::Nil);
+        match fields_dict {
+            VmValue::Dict(d) => Ok(VmValue::StructInstance {
+                struct_name,
+                fields: (*d).clone(),
+            }),
+            _ => Ok(VmValue::StructInstance {
+                struct_name,
+                fields: BTreeMap::new(),
+            }),
+        }
+    });
+
+    // --- Encoding builtins ---
+    vm.register_builtin("base64_encode", |args, _out| {
+        let val = args.first().map(|a| a.display()).unwrap_or_default();
+        use base64::Engine;
+        Ok(VmValue::String(Rc::from(
+            base64::engine::general_purpose::STANDARD.encode(val.as_bytes()),
+        )))
+    });
+    vm.register_builtin("base64_decode", |args, _out| {
+        let val = args.first().map(|a| a.display()).unwrap_or_default();
+        use base64::Engine;
+        match base64::engine::general_purpose::STANDARD.decode(val.as_bytes()) {
+            Ok(bytes) => Ok(VmValue::String(Rc::from(
+                String::from_utf8_lossy(&bytes).into_owned(),
+            ))),
+            Err(e) => Err(VmError::Runtime(format!("base64 decode error: {e}"))),
+        }
+    });
+
+    // --- Crypto/hash builtins ---
+    vm.register_builtin("sha256", |args, _out| {
+        use sha2::Digest;
+        let val = args.first().map(|a| a.display()).unwrap_or_default();
+        let hash = sha2::Sha256::digest(val.as_bytes());
+        Ok(VmValue::String(Rc::from(format!("{hash:x}"))))
+    });
+    vm.register_builtin("md5", |args, _out| {
+        use md5::Digest;
+        let val = args.first().map(|a| a.display()).unwrap_or_default();
+        let hash = md5::Md5::digest(val.as_bytes());
+        Ok(VmValue::String(Rc::from(format!("{hash:x}"))))
     });
 
     vm.register_builtin("prompt_user", |args, out| {

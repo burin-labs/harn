@@ -1,0 +1,31 @@
+pipeline test(task) {
+  // Ok and Err constructors
+  let ok_val = Ok(42)
+  let err_val = Err("something failed")
+  log(ok_val)
+  log(err_val)
+  // is_ok / is_err
+  log(is_ok(ok_val))
+  log(is_err(ok_val))
+  log(is_ok(err_val))
+  log(is_err(err_val))
+  // unwrap
+  log(unwrap(ok_val))
+  log(unwrap_or(err_val, "default"))
+  // unwrap_err
+  log(unwrap_err(err_val))
+  // Result.Ok and Result.Err enum construction
+  let r = Result.Ok("hello")
+  log(r)
+  let e = Result.Err("oops")
+  log(e)
+  // Pattern matching on Result
+  match r {
+    Result.Ok(val) -> { log("ok: ${val}") }
+    Result.Err(err) -> { log("err: ${err}") }
+  }
+  match e {
+    Result.Ok(val) -> { log("ok: ${val}") }
+    Result.Err(err) -> { log("err: ${err}") }
+  }
+}

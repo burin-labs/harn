@@ -482,6 +482,10 @@ impl TypeChecker {
             } => {
                 self.check_node(condition, scope);
                 let mut then_scope = scope.child();
+                // Narrow union types after nil checks: if x != nil, narrow x
+                if let Some((var_name, narrowed)) = Self::extract_nil_narrowing(condition, scope) {
+                    then_scope.define_var(&var_name, narrowed);
+                }
                 self.check_block(then_body, &mut then_scope);
                 if let Some(else_body) = else_body {
                     let mut else_scope = scope.child();
@@ -593,6 +597,16 @@ impl TypeChecker {
 
             Node::InterfaceDecl { name, methods } => {
                 scope.interfaces.insert(name.clone(), methods.clone());
+            }
+
+            Node::ImplBlock { methods, .. } => {
+                for method_sn in methods {
+                    self.check_node(method_sn, scope);
+                }
+            }
+
+            Node::TryOperator { operand } => {
+                self.check_node(operand, scope);
             }
 
             Node::MatchExpr { value, arms } => {
@@ -787,6 +801,45 @@ impl TypeChecker {
     }
 
     /// Check if a match expression on an enum's `.variant` property covers all variants.
+    /// Extract narrowing info from nil-check conditions like `x != nil`.
+    /// Returns (var_name, narrowed_type) where narrowed_type removes nil from a union.
+    fn extract_nil_narrowing(
+        condition: &SNode,
+        scope: &TypeScope,
+    ) -> Option<(String, InferredType)> {
+        if let Node::BinaryOp { op, left, right } = &condition.node {
+            if op == "!=" {
+                // Check for `x != nil` or `nil != x`
+                let (var_node, nil_node) = if matches!(right.node, Node::NilLiteral) {
+                    (left, right)
+                } else if matches!(left.node, Node::NilLiteral) {
+                    (right, left)
+                } else {
+                    return None;
+                };
+                let _ = nil_node;
+                if let Node::Identifier(name) = &var_node.node {
+                    // Look up the variable's type and narrow it
+                    if let Some(Some(TypeExpr::Union(members))) = scope.get_var(name) {
+                        let narrowed: Vec<TypeExpr> = members
+                            .iter()
+                            .filter(|m| !matches!(m, TypeExpr::Named(n) if n == "nil"))
+                            .cloned()
+                            .collect();
+                        return if narrowed.len() == 1 {
+                            Some((name.clone(), Some(narrowed.into_iter().next().unwrap())))
+                        } else if narrowed.is_empty() {
+                            None
+                        } else {
+                            Some((name.clone(), Some(TypeExpr::Union(narrowed))))
+                        };
+                    }
+                }
+            }
+        }
+        None
+    }
+
     fn check_match_exhaustiveness(
         &mut self,
         value: &SNode,
@@ -1125,6 +1178,14 @@ impl TypeChecker {
                     "to_string" => Some(TypeExpr::Named("string".into())),
                     "to_int" => Some(TypeExpr::Named("int".into())),
                     "to_float" => Some(TypeExpr::Named("float".into())),
+                    _ => None,
+                }
+            }
+
+            // TryOperator on Result<T, E> produces T
+            Node::TryOperator { operand } => {
+                match self.infer_type(operand, scope) {
+                    Some(TypeExpr::Named(name)) if name == "Result" => None, // unknown inner type
                     _ => None,
                 }
             }

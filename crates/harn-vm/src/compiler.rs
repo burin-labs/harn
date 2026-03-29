@@ -69,6 +69,8 @@ impl Compiler {
         // Pre-scan the entire program for enum declarations (including inside pipelines)
         // so we can recognize EnumName.Variant as enum construction.
         Self::collect_enum_names(program, &mut self.enum_names);
+        // Built-in Result enum is always available
+        self.enum_names.insert("Result".to_string());
 
         // Compile all top-level non-pipeline declarations first (fn, enum, etc.)
         for sn in program {
@@ -1562,12 +1564,101 @@ impl Compiler {
                 self.chunk.columns.push(self.column);
             }
 
+            Node::TryOperator { operand } => {
+                self.compile_node(operand)?;
+                self.chunk.emit(Op::TryUnwrap, self.line);
+            }
+
+            Node::ImplBlock { type_name, methods } => {
+                // Compile each method as a closure and store in __impl_TypeName dict.
+                // Build key-value pairs on stack, then BuildDict.
+                for method_sn in methods {
+                    if let Node::FnDecl {
+                        name, params, body, ..
+                    } = &method_sn.node
+                    {
+                        // Method name key
+                        let key_idx = self.chunk.add_constant(Constant::String(name.clone()));
+                        self.chunk.emit_u16(Op::Constant, key_idx, self.line);
+
+                        // Compile method body as closure
+                        let mut fn_compiler = Compiler::new();
+                        fn_compiler.enum_names = self.enum_names.clone();
+                        fn_compiler.emit_default_preamble(params)?;
+                        fn_compiler.emit_type_checks(params);
+                        fn_compiler.compile_block(body)?;
+                        fn_compiler.chunk.emit(Op::Nil, self.line);
+                        fn_compiler.chunk.emit(Op::Return, self.line);
+
+                        let func = CompiledFunction {
+                            name: format!("{}.{}", type_name, name),
+                            params: TypedParam::names(params),
+                            default_start: TypedParam::default_start(params),
+                            chunk: fn_compiler.chunk,
+                        };
+                        let fn_idx = self.chunk.functions.len();
+                        self.chunk.functions.push(func);
+                        self.chunk.emit_u16(Op::Closure, fn_idx as u16, self.line);
+                    }
+                }
+                let method_count = methods
+                    .iter()
+                    .filter(|m| matches!(m.node, Node::FnDecl { .. }))
+                    .count();
+                self.chunk
+                    .emit_u16(Op::BuildDict, method_count as u16, self.line);
+                let impl_name = format!("__impl_{}", type_name);
+                let name_idx = self.chunk.add_constant(Constant::String(impl_name));
+                self.chunk.emit_u16(Op::DefLet, name_idx, self.line);
+            }
+
+            Node::StructDecl { name, .. } => {
+                // Compile a constructor function: StructName({field: val, ...}) -> StructInstance
+                let mut fn_compiler = Compiler::new();
+                fn_compiler.enum_names = self.enum_names.clone();
+                let params = vec![TypedParam::untyped("__fields")];
+                fn_compiler.emit_default_preamble(&params)?;
+
+                // Call __make_struct(struct_name, fields_dict) to tag the dict
+                let make_idx = fn_compiler
+                    .chunk
+                    .add_constant(Constant::String("__make_struct".into()));
+                fn_compiler
+                    .chunk
+                    .emit_u16(Op::Constant, make_idx, self.line);
+                let sname_idx = fn_compiler
+                    .chunk
+                    .add_constant(Constant::String(name.clone()));
+                fn_compiler
+                    .chunk
+                    .emit_u16(Op::Constant, sname_idx, self.line);
+                let fields_idx = fn_compiler
+                    .chunk
+                    .add_constant(Constant::String("__fields".into()));
+                fn_compiler
+                    .chunk
+                    .emit_u16(Op::GetVar, fields_idx, self.line);
+                fn_compiler.chunk.emit_u8(Op::Call, 2, self.line);
+                fn_compiler.chunk.emit(Op::Return, self.line);
+
+                let func = CompiledFunction {
+                    name: name.clone(),
+                    params: TypedParam::names(&params),
+                    default_start: None,
+                    chunk: fn_compiler.chunk,
+                };
+                let fn_idx = self.chunk.functions.len();
+                self.chunk.functions.push(func);
+                self.chunk.emit_u16(Op::Closure, fn_idx as u16, self.line);
+                let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
+                self.chunk.emit_u16(Op::DefLet, name_idx, self.line);
+            }
+
             // Declarations that only register metadata (no runtime effect needed for v1)
             Node::Pipeline { .. }
             | Node::OverrideDecl { .. }
             | Node::TypeDecl { .. }
             | Node::EnumDecl { .. }
-            | Node::StructDecl { .. }
             | Node::InterfaceDecl { .. } => {
                 self.chunk.emit(Op::Nil, self.line);
             }
@@ -2067,6 +2158,8 @@ impl Compiler {
             | Node::Assignment { .. }
             | Node::ReturnStmt { .. }
             | Node::FnDecl { .. }
+            | Node::ImplBlock { .. }
+            | Node::StructDecl { .. }
             | Node::ThrowStmt { .. }
             | Node::BreakStmt
             | Node::ContinueStmt => false,

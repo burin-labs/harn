@@ -295,6 +295,7 @@ impl Parser {
             TokenKind::Enum => self.parse_enum_decl(),
             TokenKind::Struct => self.parse_struct_decl(),
             TokenKind::Interface => self.parse_interface_decl(),
+            TokenKind::Impl => self.parse_impl_block(),
             TokenKind::Guard => self.parse_guard(),
             TokenKind::Deadline => self.parse_deadline(),
             TokenKind::Yield => self.parse_yield(),
@@ -956,6 +957,31 @@ impl Parser {
         ))
     }
 
+    fn parse_impl_block(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
+        self.consume(&TokenKind::Impl, "impl")?;
+        let type_name = self.consume_identifier("type name")?;
+        self.consume(&TokenKind::LBrace, "{")?;
+        self.skip_newlines();
+
+        let mut methods = Vec::new();
+        while !self.is_at_end() && !self.check(&TokenKind::RBrace) {
+            let is_pub = self.check(&TokenKind::Pub);
+            if is_pub {
+                self.advance();
+            }
+            let method = self.parse_fn_decl_with_pub(is_pub)?;
+            methods.push(method);
+            self.skip_newlines();
+        }
+
+        self.consume(&TokenKind::RBrace, "}")?;
+        Ok(spanned(
+            Node::ImplBlock { type_name, methods },
+            Span::merge(start, self.prev_span()),
+        ))
+    }
+
     fn parse_guard(&mut self) -> Result<SNode, ParserError> {
         let start = self.current_span();
         self.consume(&TokenKind::Guard, "guard")?;
@@ -1478,6 +1504,40 @@ impl Parser {
                         Span::merge(start, self.prev_span()),
                     );
                 }
+            } else if self.check(&TokenKind::Question) {
+                // Distinguish postfix try operator (expr?) from ternary (expr ? a : b).
+                // If the token after ? could start a ternary branch, leave it for parse_ternary.
+                let next_pos = self.pos + 1;
+                let is_ternary = self.tokens.get(next_pos).is_some_and(|t| {
+                    matches!(
+                        t.kind,
+                        TokenKind::Identifier(_)
+                            | TokenKind::IntLiteral(_)
+                            | TokenKind::FloatLiteral(_)
+                            | TokenKind::StringLiteral(_)
+                            | TokenKind::InterpolatedString(_)
+                            | TokenKind::True
+                            | TokenKind::False
+                            | TokenKind::Nil
+                            | TokenKind::LParen
+                            | TokenKind::LBracket
+                            | TokenKind::LBrace
+                            | TokenKind::Not
+                            | TokenKind::Minus
+                            | TokenKind::Fn
+                    )
+                });
+                if is_ternary {
+                    break;
+                }
+                let start = expr.span;
+                self.advance(); // consume ?
+                expr = spanned(
+                    Node::TryOperator {
+                        operand: Box::new(expr),
+                    },
+                    Span::merge(start, self.prev_span()),
+                );
             } else {
                 break;
             }
@@ -2152,6 +2212,7 @@ impl Parser {
             TokenKind::Mutex => "mutex",
             TokenKind::Break => "break",
             TokenKind::Continue => "continue",
+            TokenKind::Impl => "impl",
             _ => return Err(self.make_error(expected)),
         };
         let name = name.to_string();

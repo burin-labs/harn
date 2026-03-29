@@ -1,0 +1,13 @@
+pipeline test(task) {
+  // base64 encode/decode
+  let encoded = base64_encode("hello world")
+  log(encoded)
+  let decoded = base64_decode(encoded)
+  log(decoded)
+  // sha256
+  let hash = sha256("hello")
+  log(hash)
+  // md5
+  let md = md5("hello")
+  log(md)
+}

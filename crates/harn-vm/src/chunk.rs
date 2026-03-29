@@ -165,6 +165,10 @@ pub enum Op {
     /// Throws a TypeError if the variable's type doesn't match.
     CheckType,
 
+    // --- Result try operator ---
+    /// Try-unwrap: if top is Result.Ok(v), replace with v. If Result.Err(e), return it.
+    TryUnwrap,
+
     // --- Misc ---
     /// Duplicate top of stack.
     Dup,
@@ -589,6 +593,7 @@ impl Chunk {
                     ));
                 }
                 x if x == Op::PopIterator as u8 => out.push_str("POP_ITERATOR\n"),
+                x if x == Op::TryUnwrap as u8 => out.push_str("TRY_UNWRAP\n"),
                 x if x == Op::Dup as u8 => out.push_str("DUP\n"),
                 x if x == Op::Swap as u8 => out.push_str("SWAP\n"),
                 _ => {

@@ -217,6 +217,12 @@ impl Linter {
                 self.pop_scope();
             }
 
+            Node::ImplBlock { methods, .. } => {
+                for method in methods {
+                    self.lint_node(method);
+                }
+            }
+
             Node::LetBinding { pattern, value, .. } => {
                 self.lint_node(value);
                 self.declare_pattern_variables(pattern, snode.span, false);
@@ -670,6 +676,10 @@ impl Linter {
 
             Node::Spread(inner) => {
                 self.lint_node(inner);
+            }
+
+            Node::TryOperator { operand } => {
+                self.lint_node(operand);
             }
 
             // Leaf nodes and declarations that don't need recursion.

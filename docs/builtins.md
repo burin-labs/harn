@@ -19,6 +19,37 @@ Complete reference for all built-in functions available in Harn.
 | `to_int(value)` | value: any | int or nil | Parse/convert to integer. Floats truncate, bools become 0/1 |
 | `to_float(value)` | value: any | float or nil | Parse/convert to float |
 
+## Result
+
+Harn has a built-in `Result` type for representing success/failure values
+without exceptions. `Ok` and `Err` create `Result.Ok` and `Result.Err`
+enum variants respectively. When called on a non-Result value, `unwrap`
+and `unwrap_or` pass the value through unchanged.
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `Ok(value)` | value: any | Result.Ok | Create a Result.Ok value |
+| `Err(value)` | value: any | Result.Err | Create a Result.Err value |
+| `is_ok(result)` | result: any | bool | Returns true if value is Result.Ok |
+| `is_err(result)` | result: any | bool | Returns true if value is Result.Err |
+| `unwrap(result)` | result: any | any | Extract Ok value. Throws on Err. Non-Result values pass through |
+| `unwrap_or(result, default)` | result: any, default: any | any | Extract Ok value. Returns default on Err. Non-Result values pass through |
+| `unwrap_err(result)` | result: any | any | Extract Err value. Throws on non-Err |
+
+Example:
+
+```harn
+let good = Ok(42)
+let bad = Err("something went wrong")
+
+println(is_ok(good))             // true
+println(is_err(bad))             // true
+
+println(unwrap(good))            // 42
+println(unwrap_or(bad, 0))       // 0
+println(unwrap_err(bad))         // something went wrong
+```
+
 ## JSON
 
 | Function | Parameters | Returns | Description |
@@ -194,6 +225,35 @@ let name = json_extract(response, "name") // extract just one key
 |---|---|---|---|
 | `regex_match(pattern, text)` | pattern: string, text: string | list or nil | Find all non-overlapping matches. Returns nil if no matches |
 | `regex_replace(pattern, replacement, text)` | pattern: string, replacement: string, text: string | string | Replace all matches. Throws on invalid regex |
+
+## Encoding
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `base64_encode(string)` | string: string | string | Base64 encode a string (standard alphabet with padding) |
+| `base64_decode(string)` | string: string | string | Base64 decode a string. Throws on invalid input |
+
+Example:
+
+```harn
+let encoded = base64_encode("Hello, World!")
+println(encoded)                  // SGVsbG8sIFdvcmxkIQ==
+println(base64_decode(encoded))   // Hello, World!
+```
+
+## Hashing
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `sha256(string)` | string: string | string | SHA-256 hash, returned as a lowercase hex-encoded string |
+| `md5(string)` | string: string | string | MD5 hash, returned as a lowercase hex-encoded string |
+
+Example:
+
+```harn
+println(sha256("hello"))  // 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
+println(md5("hello"))     // 5d41402abc4b2a76b9719d911017c592
+```
 
 ## Date/Time
 

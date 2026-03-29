@@ -473,6 +473,19 @@ impl super::Vm {
                     }
                     _ => Ok(VmValue::Nil),
                 },
+                VmValue::StructInstance { struct_name, .. } => {
+                    // Look up __impl_TypeName in env for impl block methods
+                    let impl_key = format!("__impl_{}", struct_name);
+                    if let Some(VmValue::Dict(impl_dict)) = self.env.get(&impl_key) {
+                        if let Some(VmValue::Closure(closure)) = impl_dict.get(method) {
+                            // Call method with self (the struct) as first argument
+                            let mut full_args = vec![obj.clone()];
+                            full_args.extend_from_slice(args);
+                            return self.call_closure(closure, &full_args, functions).await;
+                        }
+                    }
+                    Ok(VmValue::Nil)
+                }
                 _ => Ok(VmValue::Nil),
             }
         })

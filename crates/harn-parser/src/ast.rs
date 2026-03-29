@@ -73,6 +73,11 @@ pub enum Node {
         name: String,
         methods: Vec<InterfaceMethod>,
     },
+    /// Impl block: impl TypeName { fn method(self, ...) { ... } ... }
+    ImplBlock {
+        type_name: String,
+        methods: Vec<SNode>,
+    },
 
     // Control flow
     IfElse {
@@ -258,6 +263,10 @@ pub enum Node {
     DictLiteral(Vec<DictEntry>),
     /// Spread expression `...expr` inside list/dict literals.
     Spread(Box<SNode>),
+    /// Try operator: expr? — unwraps Result.Ok or propagates Result.Err.
+    TryOperator {
+        operand: Box<SNode>,
+    },
 
     // Blocks
     Block(Vec<SNode>),

@@ -1,0 +1,29 @@
+pipeline test(task) {
+  fn divide(a, b) {
+    if b == 0 {
+      return Err("division by zero")
+    }
+    return Ok(a / b)
+  }
+  fn compute(x) {
+    let result = divide(x, 2)?
+    return Ok(result + 10)
+  }
+  fn compute_fail(x) {
+    let result = divide(x, 0)?
+    return Ok(result + 10)
+  }
+  // Success path: ? unwraps Ok
+  let r1 = compute(20)
+  log(r1)
+  // Error path: ? propagates Err
+  let r2 = compute_fail(20)
+  log(r2)
+  // Chained ?
+  fn chain() {
+    let a = divide(100, 5)?
+    let b = divide(a, 2)?
+    return Ok(b)
+  }
+  log(chain())
+}
