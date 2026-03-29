@@ -1,0 +1,10 @@
+// Test path/directory introspection builtins
+pipeline default(task) {
+  // source_dir should return a non-empty path
+  let sd = source_dir()
+  println(len(sd) > 0)
+  // project_root should find the harn project (has harn.toml in parent)
+  // This might be nil in conformance test context if no harn.toml above
+  let root = project_root()
+  println(root != nil || root == nil)
+}

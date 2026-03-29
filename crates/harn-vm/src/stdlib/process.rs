@@ -1,8 +1,24 @@
+use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
+
+thread_local! {
+    static VM_SOURCE_DIR: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+}
+
+/// Set the source directory for the current thread (called by VM on file execution).
+pub(crate) fn set_thread_source_dir(dir: &std::path::Path) {
+    VM_SOURCE_DIR.with(|sd| *sd.borrow_mut() = Some(dir.to_path_buf()));
+}
+
+/// Reset thread-local process state (for test isolation).
+pub(crate) fn reset_process_state() {
+    VM_SOURCE_DIR.with(|sd| *sd.borrow_mut() = None);
+}
 
 pub(crate) fn register_process_builtins(vm: &mut Vm) {
     vm.register_builtin("env", |args, _out| {
@@ -73,6 +89,121 @@ pub(crate) fn register_process_builtins(vm: &mut Vm) {
         static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
         let start = START.get_or_init(std::time::Instant::now);
         Ok(VmValue::Int(start.elapsed().as_millis() as i64))
+    });
+
+    // --- System attributes for prompt building ---
+
+    vm.register_builtin("username", |_args, _out| {
+        let user = std::env::var("USER")
+            .or_else(|_| std::env::var("USERNAME"))
+            .unwrap_or_default();
+        Ok(VmValue::String(Rc::from(user)))
+    });
+
+    vm.register_builtin("hostname", |_args, _out| {
+        let name = std::env::var("HOSTNAME")
+            .or_else(|_| std::env::var("COMPUTERNAME"))
+            .or_else(|_| {
+                std::process::Command::new("hostname")
+                    .output()
+                    .ok()
+                    .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                    .ok_or(std::env::VarError::NotPresent)
+            })
+            .unwrap_or_default();
+        Ok(VmValue::String(Rc::from(name)))
+    });
+
+    vm.register_builtin("platform", |_args, _out| {
+        let os = if cfg!(target_os = "macos") {
+            "darwin"
+        } else if cfg!(target_os = "linux") {
+            "linux"
+        } else if cfg!(target_os = "windows") {
+            "windows"
+        } else {
+            std::env::consts::OS
+        };
+        Ok(VmValue::String(Rc::from(os)))
+    });
+
+    vm.register_builtin("arch", |_args, _out| {
+        Ok(VmValue::String(Rc::from(std::env::consts::ARCH)))
+    });
+
+    vm.register_builtin("home_dir", |_args, _out| {
+        let home = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .unwrap_or_default();
+        Ok(VmValue::String(Rc::from(home)))
+    });
+
+    vm.register_builtin("pid", |_args, _out| {
+        Ok(VmValue::Int(std::process::id() as i64))
+    });
+
+    // --- Path / directory introspection ---
+
+    vm.register_builtin("date_iso", |_args, _out| {
+        use crate::stdlib::datetime::vm_civil_from_timestamp;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default();
+        let total_secs = now.as_secs();
+        let millis = now.subsec_millis();
+        let (y, m, d, hour, minute, second, _) = vm_civil_from_timestamp(total_secs);
+        Ok(VmValue::String(Rc::from(format!(
+            "{y:04}-{m:02}-{d:02}T{hour:02}:{minute:02}:{second:02}.{millis:03}Z"
+        ))))
+    });
+
+    vm.register_builtin("cwd", |_args, _out| {
+        let dir = std::env::current_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
+        Ok(VmValue::String(Rc::from(dir)))
+    });
+}
+
+/// Find the project root by walking up from a base directory looking for harn.toml.
+pub(crate) fn find_project_root(base: &std::path::Path) -> Option<std::path::PathBuf> {
+    let mut dir = base.to_path_buf();
+    loop {
+        if dir.join("harn.toml").exists() {
+            return Some(dir);
+        }
+        if !dir.pop() {
+            return None;
+        }
+    }
+}
+
+/// Register builtins that depend on source directory context.
+pub(crate) fn register_path_builtins(vm: &mut Vm) {
+    vm.register_builtin("source_dir", |_args, _out| {
+        let dir = VM_SOURCE_DIR.with(|sd| sd.borrow().clone());
+        match dir {
+            Some(d) => Ok(VmValue::String(Rc::from(d.to_string_lossy().to_string()))),
+            None => {
+                let cwd = std::env::current_dir()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                Ok(VmValue::String(Rc::from(cwd)))
+            }
+        }
+    });
+
+    vm.register_builtin("project_root", |_args, _out| {
+        let base = VM_SOURCE_DIR
+            .with(|sd| sd.borrow().clone())
+            .or_else(|| std::env::current_dir().ok())
+            .unwrap_or_else(|| PathBuf::from("."));
+        match find_project_root(&base) {
+            Some(root) => Ok(VmValue::String(Rc::from(
+                root.to_string_lossy().to_string(),
+            ))),
+            None => Ok(VmValue::Nil),
+        }
     });
 }
 

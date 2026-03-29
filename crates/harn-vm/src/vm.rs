@@ -400,9 +400,10 @@ impl Vm {
         }
     }
 
-    /// Set the source directory for import resolution.
+    /// Set the source directory for import resolution and introspection.
     pub fn set_source_dir(&mut self, dir: &std::path::Path) {
         self.source_dir = Some(dir.to_path_buf());
+        crate::stdlib::set_thread_source_dir(dir);
     }
 
     /// Return all registered builtin names (sync + async).

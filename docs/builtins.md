@@ -204,6 +204,63 @@ let name = json_extract(response, "name") // extract just one key
 | `substring(str, start, len?)` | str: string, start: int, len: int | string | Extract substring from start position |
 | `format(template, ...)` | template: string, args: any | string | Format string with `{}` placeholders |
 
+### String methods (dot syntax)
+
+These are called on string values with dot notation: `"hello".uppercase()`.
+
+| Method | Parameters | Returns | Description |
+|---|---|---|---|
+| `.trim()` | none | string | Remove leading/trailing whitespace |
+| `.trim_start()` | none | string | Remove leading whitespace only |
+| `.trim_end()` | none | string | Remove trailing whitespace only |
+| `.lines()` | none | list | Split string by newlines |
+| `.char_at(index)` | index: int | string or nil | Character at index (nil if out of bounds) |
+| `.index_of(substr)` | substr: string | int | First character offset of substring (-1 if not found) |
+| `.last_index_of(substr)` | substr: string | int | Last character offset of substring (-1 if not found) |
+| `.len()` | none | int | Character count |
+| `.chars()` | none | list | List of single-character strings |
+| `.reverse()` | none | string | Reversed string |
+| `.repeat(n)` | n: int | string | Repeat n times |
+| `.pad_left(width, char?)` | width: int, char: string | string | Pad to width with char (default space) |
+| `.pad_right(width, char?)` | width: int, char: string | string | Pad to width with char (default space) |
+
+### List methods (dot syntax)
+
+| Method | Parameters | Returns | Description |
+|---|---|---|---|
+| `.map(fn)` | fn: closure | list | Transform each element |
+| `.filter(fn)` | fn: closure | list | Keep elements where fn returns truthy |
+| `.reduce(init, fn)` | init: any, fn: closure | any | Fold with accumulator |
+| `.find(fn)` | fn: closure | any or nil | First element matching predicate |
+| `.find_index(fn)` | fn: closure | int | Index of first match (-1 if not found) |
+| `.any(fn)` | fn: closure | bool | True if any element matches |
+| `.all(fn)` / `.every(fn)` | fn: closure | bool | True if all elements match |
+| `.none(fn?)` | fn: closure | bool | True if no elements match (no arg: checks emptiness) |
+| `.first(n?)` | n: int (optional) | any or list | First element, or first n elements |
+| `.last(n?)` | n: int (optional) | any or list | Last element, or last n elements |
+| `.partition(fn)` | fn: closure | list | Split into `[[truthy], [falsy]]` |
+| `.group_by(fn)` | fn: closure | dict | Group into dict keyed by fn result |
+| `.sort()` / `.sort_by(fn)` | fn: closure (optional) | list | Sort (natural or by key function) |
+| `.min()` / `.max()` | none | any | Minimum/maximum value |
+| `.min_by(fn)` / `.max_by(fn)` | fn: closure | any | Min/max by key function |
+| `.chunk(size)` | size: int | list | Split into chunks of size |
+| `.each_cons(size)` | size: int | list | Sliding windows of size |
+| `.compact()` | none | list | Remove nil values |
+| `.unique()` | none | list | Remove duplicates |
+| `.flatten()` | none | list | Flatten one level of nesting |
+| `.flat_map(fn)` | fn: closure | list | Map then flatten |
+| `.tally()` | none | dict | Frequency count: `{value: count}` |
+| `.zip(other)` | other: list | list | Pair elements from two lists |
+| `.enumerate()` | none | list | List of `{index, value}` dicts |
+| `.take(n)` / `.skip(n)` | n: int | list | First/remaining n elements |
+| `.sum()` | none | int or float | Sum of numeric values |
+| `.join(sep?)` | sep: string | string | Join to string |
+| `.reverse()` | none | list | Reversed list |
+| `.push(item)` / `.pop()` | item: any | list | New list with item added/removed (immutable) |
+| `.contains(item)` | item: any | bool | Check if list contains item |
+| `.index_of(item)` | item: any | int | Index of item (-1 if not found) |
+| `.slice(start, end?)` | start: int, end: int | list | Slice with negative index support |
+
 ## Path functions
 
 | Function | Parameters | Returns | Description |
@@ -235,8 +292,20 @@ let name = json_extract(response, "name") // extract just one key
 |---|---|---|---|
 | `env(name)` | name: string | string or nil | Read environment variable |
 | `timestamp()` | none | float | Unix timestamp in seconds with sub-second precision |
-| `exec(cmd, args...)` | cmd: string, args: strings | dict | Execute external command. Returns `{stdout, stderr, status, success}`. Throws if command cannot be spawned |
+| `elapsed()` | none | int | Milliseconds since VM startup |
+| `exec(cmd, args...)` | cmd: string, args: strings | dict | Execute external command. Returns `{stdout, stderr, status, success}` |
+| `shell(cmd)` | cmd: string | dict | Execute command via shell. Returns `{stdout, stderr, status, success}` |
 | `exit(code)` | code: int (default 0) | never | Terminate the process |
+| `username()` | none | string | Current OS username |
+| `hostname()` | none | string | Machine hostname |
+| `platform()` | none | string | OS name: `"darwin"`, `"linux"`, or `"windows"` |
+| `arch()` | none | string | CPU architecture (e.g., `"aarch64"`, `"x86_64"`) |
+| `home_dir()` | none | string | User's home directory path |
+| `pid()` | none | int | Current process ID |
+| `cwd()` | none | string | Current working directory |
+| `source_dir()` | none | string | Directory of the currently-executing `.harn` file (falls back to cwd) |
+| `project_root()` | none | string or nil | Nearest ancestor directory containing `harn.toml` |
+| `date_iso()` | none | string | Current UTC time in ISO 8601 format (e.g., `"2026-03-29T14:30:00.123Z"`) |
 
 ## Regular expressions
 

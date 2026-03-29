@@ -1,0 +1,22 @@
+// Test system attribute builtins
+pipeline default(task) {
+  // username should return a non-empty string
+  let user = username()
+  println(len(user) > 0)
+  // platform should be one of the known values
+  let plat = platform()
+  println(plat == "darwin" || plat == "linux" || plat == "windows")
+  // arch should be non-empty
+  println(len(arch()) > 0)
+  // home_dir should be non-empty
+  println(len(home_dir()) > 0)
+  // pid should be a positive integer
+  println(pid() > 0)
+  // cwd should be non-empty
+  println(len(cwd()) > 0)
+  // date_iso should return ISO 8601 format
+  let iso = date_iso()
+  println(len(iso) > 20)
+  println(contains(iso, "T"))
+  println(ends_with(iso, "Z"))
+}

@@ -140,13 +140,28 @@ impl Linter {
             "glob_files",
             "mkdir",
             "remove_file",
-            // Process
+            // Process & system
             "exec",
+            "shell",
             "exit",
+            "elapsed",
+            "timestamp",
+            "username",
+            "hostname",
+            "platform",
+            "arch",
+            "home_dir",
+            "pid",
+            "cwd",
+            "source_dir",
+            "project_root",
             // DateTime
             "date_now",
             "date_format",
             "date_parse",
+            "date_iso",
+            // Scan
+            "scan_directory",
             // Regex
             "regex_match",
             "regex_replace",

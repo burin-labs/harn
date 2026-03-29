@@ -27,6 +27,9 @@ use crate::vm::Vm;
 
 // Re-export helpers used by other modules in harn-vm
 pub(crate) use json::json_to_vm_value;
+pub(crate) fn set_thread_source_dir(dir: &std::path::Path) {
+    process::set_thread_source_dir(dir);
+}
 
 /// Register all standard builtins on a VM.
 pub fn register_vm_stdlib(vm: &mut Vm) {
@@ -37,6 +40,7 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
     json::register_json_builtins(vm);
     fs::register_fs_builtins(vm);
     process::register_process_builtins(vm);
+    process::register_path_builtins(vm);
     datetime::register_datetime_builtins(vm);
     regex::register_regex_builtins(vm);
     crypto::register_crypto_builtins(vm);
@@ -52,7 +56,8 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
     register_mcp_builtins(vm);
 }
 
-/// Reset thread-local stdlib state (logging, tracing). Call between test runs.
+/// Reset thread-local stdlib state (logging, tracing, source dir). Call between test runs.
 pub fn reset_stdlib_state() {
     logging::reset_logging_state();
+    process::reset_process_state();
 }

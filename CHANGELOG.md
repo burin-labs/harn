@@ -2,6 +2,39 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.4.15
+
+### Added
+
+- **System introspection builtins**: `username()`, `hostname()`, `platform()`,
+  `arch()`, `home_dir()`, `pid()`, `cwd()`, `date_iso()` for building
+  dynamic system prompts and understanding execution context
+- **Path introspection**: `source_dir()` returns the directory of the
+  currently-executing .harn file; `project_root()` walks up to find
+  the nearest `harn.toml` (returns nil if not found)
+- **`std/async` stdlib module**: `wait_for(timeout_ms, interval_ms, predicate)`,
+  `retry_until(max_attempts, predicate)`, `retry_with_backoff(max_attempts,
+  base_ms, predicate)` — all return `Result` (Ok on success, Err on timeout)
+- **New string methods**: `trim_start()`, `trim_end()`, `lines()`,
+  `char_at(index)`, `last_index_of(substr)`, `len()` (method form)
+- **New list methods (Ruby-inspired)**: `none(predicate?)`, `every(pred)`
+  (alias for `all`), `find_index(pred)`, `first(n?)`, `last(n?)`,
+  `partition(pred)`, `group_by(key_fn)`, `chunk(size)` / `each_slice(size)`,
+  `min_by(key_fn)`, `max_by(key_fn)`, `compact()`, `each_cons(size)` /
+  `sliding_window(size)`, `tally()`
+
+### Fixed
+
+- `index_of()` and `last_index_of()` now return character offsets (not byte
+  offsets), consistent with `substring()`, `char_at()`, and `len()`
+- Added missing builtins (`shell`, `elapsed`, `timestamp`, `scan_directory`,
+  and all new v0.4.15 builtins) to linter's `undefined-function` known list
+
+### Changed
+
+- `all` list method now also responds to `every` and `all?` aliases
+- Thread-local source directory tracking for `source_dir()` / `project_root()`
+
 ## v0.4.14
 
 ### Fixed

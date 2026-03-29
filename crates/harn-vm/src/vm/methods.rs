@@ -54,9 +54,11 @@ impl super::Vm {
                     }
                     "index_of" => {
                         let needle = args.first().map(|a| a.display()).unwrap_or_default();
-                        Ok(VmValue::Int(
-                            s.find(&needle).map(|i| i as i64).unwrap_or(-1),
-                        ))
+                        // Return char offset, not byte offset
+                        let idx = s
+                            .find(&needle)
+                            .map(|byte_pos| s[..byte_pos].chars().count() as i64);
+                        Ok(VmValue::Int(idx.unwrap_or(-1)))
                     }
                     "chars" => Ok(VmValue::List(Rc::new(
                         s.chars()
@@ -102,6 +104,28 @@ impl super::Vm {
                             Ok(VmValue::String(Rc::from(format!("{s}{padding}"))))
                         }
                     }
+                    "trim_start" => Ok(VmValue::String(Rc::from(s.trim_start()))),
+                    "trim_end" => Ok(VmValue::String(Rc::from(s.trim_end()))),
+                    "lines" => Ok(VmValue::List(Rc::new(
+                        s.lines().map(|l| VmValue::String(Rc::from(l))).collect(),
+                    ))),
+                    "char_at" => {
+                        let idx = args.first().and_then(|a| a.as_int()).unwrap_or(0);
+                        let chars: Vec<char> = s.chars().collect();
+                        if idx >= 0 && (idx as usize) < chars.len() {
+                            Ok(VmValue::String(Rc::from(chars[idx as usize].to_string())))
+                        } else {
+                            Ok(VmValue::Nil)
+                        }
+                    }
+                    "last_index_of" => {
+                        let needle = args.first().map(|a| a.display()).unwrap_or_default();
+                        let idx = s
+                            .rfind(&needle)
+                            .map(|byte_pos| s[..byte_pos].chars().count() as i64);
+                        Ok(VmValue::Int(idx.unwrap_or(-1)))
+                    }
+                    "len" => Ok(VmValue::Int(s.chars().count() as i64)),
                     _ => Ok(VmValue::Nil),
                 },
                 VmValue::List(items) => match method {
@@ -179,7 +203,7 @@ impl super::Vm {
                             Ok(VmValue::Bool(false))
                         }
                     }
-                    "all" => {
+                    "all" | "every" | "all?" => {
                         if let Some(VmValue::Closure(closure)) = args.first() {
                             for item in items.iter() {
                                 let result = self
@@ -399,6 +423,183 @@ impl super::Vm {
                         let mut new_list: Vec<VmValue> = items.iter().cloned().collect();
                         new_list.pop();
                         Ok(VmValue::List(Rc::new(new_list)))
+                    }
+                    // --- Ruby-inspired additions ---
+                    "none" | "none?" => {
+                        if let Some(VmValue::Closure(closure)) = args.first() {
+                            for item in items.iter() {
+                                let result = self
+                                    .call_closure(closure, &[item.clone()], functions)
+                                    .await?;
+                                if result.is_truthy() {
+                                    return Ok(VmValue::Bool(false));
+                                }
+                            }
+                            Ok(VmValue::Bool(true))
+                        } else {
+                            // No predicate: check if list is empty
+                            Ok(VmValue::Bool(items.is_empty()))
+                        }
+                    }
+                    "find_index" => {
+                        if let Some(VmValue::Closure(closure)) = args.first() {
+                            for (i, item) in items.iter().enumerate() {
+                                let result = self
+                                    .call_closure(closure, &[item.clone()], functions)
+                                    .await?;
+                                if result.is_truthy() {
+                                    return Ok(VmValue::Int(i as i64));
+                                }
+                            }
+                        }
+                        Ok(VmValue::Int(-1))
+                    }
+                    "first" => {
+                        let n = args.first().and_then(|a| a.as_int());
+                        match n {
+                            Some(count) => Ok(VmValue::List(Rc::new(
+                                items.iter().take(count.max(0) as usize).cloned().collect(),
+                            ))),
+                            None => Ok(items.first().cloned().unwrap_or(VmValue::Nil)),
+                        }
+                    }
+                    "last" => {
+                        let n = args.first().and_then(|a| a.as_int());
+                        match n {
+                            Some(count) => {
+                                let count = count.max(0) as usize;
+                                let skip = items.len().saturating_sub(count);
+                                Ok(VmValue::List(Rc::new(
+                                    items.iter().skip(skip).cloned().collect(),
+                                )))
+                            }
+                            None => Ok(items.last().cloned().unwrap_or(VmValue::Nil)),
+                        }
+                    }
+                    "partition" => {
+                        if let Some(VmValue::Closure(closure)) = args.first() {
+                            let mut truthy = Vec::new();
+                            let mut falsy = Vec::new();
+                            for item in items.iter() {
+                                let result = self
+                                    .call_closure(closure, &[item.clone()], functions)
+                                    .await?;
+                                if result.is_truthy() {
+                                    truthy.push(item.clone());
+                                } else {
+                                    falsy.push(item.clone());
+                                }
+                            }
+                            Ok(VmValue::List(Rc::new(vec![
+                                VmValue::List(Rc::new(truthy)),
+                                VmValue::List(Rc::new(falsy)),
+                            ])))
+                        } else {
+                            Ok(VmValue::Nil)
+                        }
+                    }
+                    "group_by" => {
+                        if let Some(VmValue::Closure(closure)) = args.first() {
+                            let mut groups: BTreeMap<String, Vec<VmValue>> = BTreeMap::new();
+                            for item in items.iter() {
+                                let key = self
+                                    .call_closure(closure, &[item.clone()], functions)
+                                    .await?;
+                                let key_str = key.display();
+                                groups.entry(key_str).or_default().push(item.clone());
+                            }
+                            let result: BTreeMap<String, VmValue> = groups
+                                .into_iter()
+                                .map(|(k, v)| (k, VmValue::List(Rc::new(v))))
+                                .collect();
+                            Ok(VmValue::Dict(Rc::new(result)))
+                        } else {
+                            Ok(VmValue::Nil)
+                        }
+                    }
+                    "chunk" | "each_slice" => {
+                        let size =
+                            args.first().and_then(|a| a.as_int()).unwrap_or(1).max(1) as usize;
+                        let chunks: Vec<VmValue> = items
+                            .chunks(size)
+                            .map(|c| VmValue::List(Rc::new(c.to_vec())))
+                            .collect();
+                        Ok(VmValue::List(Rc::new(chunks)))
+                    }
+                    "min_by" => {
+                        if items.is_empty() {
+                            return Ok(VmValue::Nil);
+                        }
+                        if let Some(VmValue::Closure(closure)) = args.first() {
+                            let mut best = items[0].clone();
+                            let mut best_key = self
+                                .call_closure(closure, &[best.clone()], functions)
+                                .await?;
+                            for item in &items[1..] {
+                                let key = self
+                                    .call_closure(closure, &[item.clone()], functions)
+                                    .await?;
+                                if compare_values(&key, &best_key) < 0 {
+                                    best = item.clone();
+                                    best_key = key;
+                                }
+                            }
+                            Ok(best)
+                        } else {
+                            Ok(VmValue::Nil)
+                        }
+                    }
+                    "max_by" => {
+                        if items.is_empty() {
+                            return Ok(VmValue::Nil);
+                        }
+                        if let Some(VmValue::Closure(closure)) = args.first() {
+                            let mut best = items[0].clone();
+                            let mut best_key = self
+                                .call_closure(closure, &[best.clone()], functions)
+                                .await?;
+                            for item in &items[1..] {
+                                let key = self
+                                    .call_closure(closure, &[item.clone()], functions)
+                                    .await?;
+                                if compare_values(&key, &best_key) > 0 {
+                                    best = item.clone();
+                                    best_key = key;
+                                }
+                            }
+                            Ok(best)
+                        } else {
+                            Ok(VmValue::Nil)
+                        }
+                    }
+                    "compact" => {
+                        let result: Vec<VmValue> = items
+                            .iter()
+                            .filter(|v| !matches!(v, VmValue::Nil))
+                            .cloned()
+                            .collect();
+                        Ok(VmValue::List(Rc::new(result)))
+                    }
+                    "each_cons" | "sliding_window" => {
+                        let size =
+                            args.first().and_then(|a| a.as_int()).unwrap_or(2).max(1) as usize;
+                        if size > items.len() {
+                            return Ok(VmValue::List(Rc::new(Vec::new())));
+                        }
+                        let windows: Vec<VmValue> = items
+                            .windows(size)
+                            .map(|w| VmValue::List(Rc::new(w.to_vec())))
+                            .collect();
+                        Ok(VmValue::List(Rc::new(windows)))
+                    }
+                    "tally" => {
+                        let mut counts: BTreeMap<String, VmValue> = BTreeMap::new();
+                        for item in items.iter() {
+                            let key = item.display();
+                            let current = counts.get(&key).and_then(|v| v.as_int()).unwrap_or(0);
+                            counts.insert(key, VmValue::Int(current + 1));
+                        }
+                        Ok(VmValue::Dict(Rc::new(counts)))
                     }
                     _ => Ok(VmValue::Nil),
                 },

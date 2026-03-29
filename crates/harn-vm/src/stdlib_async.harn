@@ -1,0 +1,63 @@
+// std/async — Async utilities: polling, waiting, retrying.
+
+// wait_for(timeout_ms, interval_ms, predicate) -> Result
+// Repeatedly calls predicate() with interval_ms sleep between attempts.
+// Returns Ok(value) with the first truthy return value, or Err("timeout").
+//
+// Example:
+//   import { wait_for } from "std/async"
+//   let result = wait_for(5000, 500, { -> metadata_get("status") == "ready" })
+pub fn wait_for(timeout_ms, interval_ms, predicate) {
+  let deadline = timestamp() * 1000 + timeout_ms
+  let interval = interval_ms
+  if interval <= 0 {
+    interval = 100
+  }
+  while timestamp() * 1000 < deadline {
+    let value = predicate()
+    if value {
+      return Ok(value)
+    }
+    sleep(interval)
+  }
+  // One final check after deadline
+  let value = predicate()
+  if value {
+    return Ok(value)
+  }
+  return Err("timeout")
+}
+
+// retry_until(max_attempts, predicate) -> Result
+// Calls predicate() up to max_attempts times with no delay.
+// Returns Ok(value) on first truthy result, or Err("exhausted").
+pub fn retry_until(max_attempts, predicate) {
+  var i = 0
+  while i < max_attempts {
+    let value = predicate()
+    if value {
+      return Ok(value)
+    }
+    i = i + 1
+  }
+  return Err("exhausted")
+}
+
+// retry_with_backoff(max_attempts, base_ms, predicate) -> Result
+// Calls predicate() with exponential backoff (base_ms * 2^attempt).
+// Returns Ok(value) on first truthy result, or Err("exhausted").
+pub fn retry_with_backoff(max_attempts, base_ms, predicate) {
+  var attempt = 0
+  while attempt < max_attempts {
+    let value = predicate()
+    if value {
+      return Ok(value)
+    }
+    attempt = attempt + 1
+    if attempt < max_attempts {
+      let delay = base_ms * pow(2, attempt - 1)
+      sleep(delay)
+    }
+  }
+  return Err("exhausted")
+}
