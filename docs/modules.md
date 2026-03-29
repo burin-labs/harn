@@ -77,6 +77,9 @@ Import them with the `std/` prefix:
 ```javascript
 import "std/text"
 import "std/collections"
+import "std/math"
+import "std/path"
+import "std/json"
 ```
 
 ### std/text
@@ -102,6 +105,75 @@ Collection utilities and store helpers:
 | `filter_nil(dict)` | Remove entries where value is nil, empty string, or "null" |
 | `store_stale(key, max_age_seconds)` | Check if a store key's timestamp is stale |
 | `store_refresh(key)` | Update a store key's timestamp to now |
+
+### std/math
+
+Extended math utilities:
+
+| Function | Description |
+|---|---|
+| `clamp(value, lo, hi)` | Clamp a value between min and max |
+| `lerp(a, b, t)` | Linear interpolation between a and b by t (0..1) |
+| `map_range(value, in_lo, in_hi, out_lo, out_hi)` | Map a value from one range to another |
+| `deg_to_rad(degrees)` | Convert degrees to radians |
+| `rad_to_deg(radians)` | Convert radians to degrees |
+| `sum(items)` | Sum a list of numbers |
+| `avg(items)` | Average of a list of numbers (returns 0 for empty lists) |
+
+```javascript
+import "std/math"
+
+log(clamp(150, 0, 100))         // 100
+log(lerp(0, 10, 0.5))           // 5
+log(map_range(50, 0, 100, 0, 1)) // 0.5
+log(sum([1, 2, 3, 4]))          // 10
+log(avg([10, 20, 30]))          // 20
+```
+
+### std/path
+
+Path manipulation utilities:
+
+| Function | Description |
+|---|---|
+| `ext(path)` | Get the file extension without the dot |
+| `stem(path)` | Get the filename without extension |
+| `normalize(path)` | Normalize path separators (backslash to forward slash) |
+| `is_absolute(path)` | Check if a path is absolute |
+| `list_files(dir)` | List files in a directory (one level) |
+| `list_dirs(dir)` | List subdirectories in a directory |
+
+```javascript
+import "std/path"
+
+log(ext("main.harn"))          // "harn"
+log(stem("/src/main.harn"))    // "main"
+log(is_absolute("/usr/bin"))   // true
+
+let files = list_files("src")
+let dirs = list_dirs(".")
+```
+
+### std/json
+
+JSON utility patterns:
+
+| Function | Description |
+|---|---|
+| `pretty(value)` | Pretty-print a value as indented JSON |
+| `safe_parse(text)` | Safely parse JSON, returning nil on failure instead of throwing |
+| `merge(a, b)` | Shallow-merge two dicts (keys in b override keys in a) |
+| `pick(data, keys)` | Pick specific keys from a dict |
+| `omit(data, keys)` | Omit specific keys from a dict |
+
+```javascript
+import "std/json"
+
+let data = safe_parse("{\"x\": 1}")   // {x: 1}, or nil on bad input
+let merged = merge({a: 1}, {b: 2})    // {a: 1, b: 2}
+let subset = pick({a: 1, b: 2, c: 3}, ["a", "c"])  // {a: 1, c: 3}
+let rest = omit({a: 1, b: 2, c: 3}, ["b"])          // {a: 1, c: 3}
+```
 
 ### Selective imports
 

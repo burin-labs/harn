@@ -431,3 +431,85 @@ Respond with ONLY a JSON array of objects, each with "step" (string) and
   }
 }
 ```
+
+## 11. Sets for deduplication and membership testing
+
+Use sets to track processed items and avoid duplicates. Sets provide
+O(1)-style membership testing via `set_contains` and are immutable --
+operations like `set_add` return a new set.
+
+```javascript
+pipeline default(task) {
+  let urls = [
+    "https://example.com/a",
+    "https://example.com/b",
+    "https://example.com/a",
+    "https://example.com/c",
+    "https://example.com/b"
+  ]
+
+  // Deduplicate with set(), then convert back to a list
+  let unique_urls = to_list(set(urls))
+  log("${len(unique_urls)} unique URLs out of ${len(urls)} total")
+
+  // Track which URLs have been processed
+  var visited = set()
+
+  for url in unique_urls {
+    if !set_contains(visited, url) {
+      log("Processing: ${url}")
+      visited = set_add(visited, url)
+    }
+  }
+
+  // Set operations: find overlap between two batches
+  let batch_a = set("task-1", "task-2", "task-3")
+  let batch_b = set("task-2", "task-3", "task-4")
+
+  let already_done = set_intersect(batch_a, batch_b)
+  let new_work = set_difference(batch_b, batch_a)
+
+  log("Overlap: ${len(already_done)}, New: ${len(new_work)}")
+}
+```
+
+## 12. Typed functions with runtime enforcement
+
+Add type annotations to function parameters for automatic runtime
+validation. When a caller passes a value of the wrong type, the VM
+throws a `TypeError` before the function body executes.
+
+```javascript
+pipeline default(task) {
+  fn summarize(text: string, max_words: int) -> string {
+    let words = text.split(" ")
+    if words.count <= max_words {
+      return text
+    }
+    let truncated = words.slice(0, max_words)
+    return join(truncated, " ") + "..."
+  }
+
+  log(summarize("The quick brown fox jumps over the lazy dog", 5))
+
+  // Catch type errors gracefully
+  try {
+    summarize(42, "not a number")
+  } catch (e) {
+    log("Caught: ${e}")
+    // -> TypeError: parameter 'text' expected string, got int (42)
+  }
+
+  // Works with all primitive types: string, int, float, bool, list, dict, set
+  fn process_batch(items: list, verbose: bool) {
+    for item in items {
+      if verbose {
+        log("Processing: ${item}")
+      }
+    }
+    log("Done: ${len(items)} items")
+  }
+
+  process_batch(["a", "b", "c"], true)
+}
+```

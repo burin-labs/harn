@@ -16,26 +16,14 @@ use harn_parser::{DiagnosticSeverity, Parser, TypeChecker};
 async fn main() {
     let args: Vec<String> = env::args().collect();
 
-    if args.len() < 2 {
-        eprintln!("Usage: harn <command> [args]");
-        eprintln!("Commands:");
-        eprintln!("  run [--trace] [--deny <builtins>] [--allow <builtins>] <file>");
-        eprintln!("                         Execute a Harn file");
-        eprintln!("  check <file.harn>      Type-check and lint without executing");
-        eprintln!("  lint <file.harn>       Lint a Harn file");
-        eprintln!("  fmt [--check] <file>   Format a Harn file");
-        eprintln!("  test [path]            Run test_* pipelines (auto-discovers tests/)");
-        eprintln!("  test conformance       Run conformance test suite");
-        eprintln!("  init [name]            Scaffold a new Harn project");
-        eprintln!("  add <name> --git <url> Add a dependency to harn.toml");
-        eprintln!("  install                Install dependencies from harn.toml");
-        eprintln!("  watch <file>           Watch for changes and re-run");
-        eprintln!("  serve [--port N] <file> Serve a pipeline as an A2A agent over HTTP");
-        eprintln!("  acp [pipeline.harn]    Start an ACP server on stdio");
-        eprintln!("  repl                   Interactive REPL");
-        eprintln!();
-        eprintln!("Test flags: --filter <pattern> --watch --record --replay --parallel");
-        process::exit(1);
+    if args.len() < 2
+        || matches!(
+            args.get(1).map(|s| s.as_str()),
+            Some("help" | "--help" | "-h")
+        )
+    {
+        print_help();
+        process::exit(if args.len() < 2 { 1 } else { 0 });
     }
 
     match args[1].as_str() {
@@ -270,7 +258,12 @@ async fn main() {
             if args[1].ends_with(".harn") {
                 run_file(&args[1], false, std::collections::HashSet::new()).await;
             } else {
-                eprintln!("Unknown command: {}", args[1]);
+                eprintln!(
+                    "\x1b[31merror:\x1b[0m unknown command \x1b[1m{}\x1b[0m",
+                    args[1]
+                );
+                eprintln!();
+                eprintln!("Run \x1b[36mharn help\x1b[0m for a list of commands.");
                 process::exit(1);
             }
         }
@@ -278,6 +271,52 @@ async fn main() {
 }
 
 /// Parse a .harn file, returning (source, AST). Exits on error.
+fn print_help() {
+    let v = env!("CARGO_PKG_VERSION");
+    println!("\x1b[1;36mharn\x1b[0m v{v} — the agent harness language\n");
+    println!("\x1b[1;33mUSAGE:\x1b[0m");
+    println!("    harn <command> [options]\n");
+    println!("\x1b[1;33mCOMMANDS:\x1b[0m");
+    println!("    \x1b[1;32mrun\x1b[0m <file>             Execute a .harn file");
+    println!(
+        "    \x1b[1;32mtest\x1b[0m [path]            Run test_* pipelines (auto-discovers tests/)"
+    );
+    println!(
+        "    \x1b[1;32mrepl\x1b[0m                   Interactive REPL with syntax highlighting"
+    );
+    println!("    \x1b[1;32minit\x1b[0m [name]            Scaffold a new project with harn.toml");
+    println!("    \x1b[1;32mfmt\x1b[0m [--check] <file>   Format source code");
+    println!("    \x1b[1;32mlint\x1b[0m <file>             Lint for common issues");
+    println!("    \x1b[1;32mcheck\x1b[0m <file>            Type-check without executing");
+    println!("    \x1b[1;32mwatch\x1b[0m <file>            Watch for changes and re-run");
+    println!("    \x1b[1;32mserve\x1b[0m [--port N] <file> Serve as an A2A agent over HTTP");
+    println!("    \x1b[1;32macp\x1b[0m [file]              Start ACP server on stdio");
+    println!("    \x1b[1;32madd\x1b[0m <name> --git <url>  Add a dependency to harn.toml");
+    println!("    \x1b[1;32minstall\x1b[0m                 Install dependencies from harn.toml");
+    println!("    \x1b[1;32mversion\x1b[0m                 Show version info");
+    println!("    \x1b[1;32mhelp\x1b[0m                    Show this help");
+    println!();
+    println!("\x1b[1;33mRUN OPTIONS:\x1b[0m");
+    println!("    --trace              Print LLM trace summary after execution");
+    println!("    --deny <builtins>    Deny specific builtins (comma-separated)");
+    println!("    --allow <builtins>   Allow only specific builtins (comma-separated)");
+    println!("    --sandbox            Restrict file/network access");
+    println!();
+    println!("\x1b[1;33mTEST OPTIONS:\x1b[0m");
+    println!("    --filter <pattern>   Only run tests matching pattern");
+    println!("    --watch              Re-run tests on file changes");
+    println!("    --parallel           Run tests concurrently");
+    println!("    --record / --replay  Record or replay LLM fixtures");
+    println!();
+    println!("\x1b[1;33mEXAMPLES:\x1b[0m");
+    println!("    harn run main.harn");
+    println!("    harn test tests/");
+    println!("    harn init my-project");
+    println!("    harn fmt --check src/");
+    println!();
+    println!("Docs: \x1b[4;36mhttps://github.com/burin-labs/harn\x1b[0m");
+}
+
 fn parse_source_file(path: &str) -> (String, Vec<harn_parser::SNode>) {
     let source = match fs::read_to_string(path) {
         Ok(s) => s,

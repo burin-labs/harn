@@ -68,6 +68,19 @@ Supported type expressions: `int`, `float`, `string`, `bool`, `nil`, `list`,
 `list<T>`, `dict`, `dict<K, V>`, union types (`string | nil`), and structural
 shape types (`{name: string, age: int}`).
 
+Parameter type annotations for primitive types (`int`, `float`, `string`,
+`bool`, `list`, `dict`, `set`, `nil`, `closure`) are enforced at runtime.
+Calling a function with the wrong type produces a `TypeError`:
+
+```harn
+fn add(a: int, b: int) -> int {
+  return a + b
+}
+
+add("hello", "world")
+// TypeError: parameter 'a' expected int, got string (hello)
+```
+
 ### Structural types (shapes)
 
 Shape types describe the expected fields of a dict. The type checker verifies
@@ -463,6 +476,51 @@ Keywords can be used as dict keys and property names: `{type: "read"}`,
 Dicts iterate in **sorted key order** (alphabetical). This means
 `for k in dict` is deterministic and reproducible, but does not preserve
 insertion order.
+
+### Sets
+
+Sets are unordered collections of unique values. Duplicates are
+automatically removed.
+
+```javascript
+let s = set(1, 2, 3)          // create from individual values
+let s2 = set([4, 5, 5, 6])   // create from a list (deduplicates)
+let tags = set("a", "b", "c") // works with any value type
+```
+
+Set operations are provided as builtin functions:
+
+```javascript
+let a = set(1, 2, 3)
+let b = set(3, 4, 5)
+
+set_contains(a, 2)       // true
+set_contains(a, 99)      // false
+
+set_union(a, b)          // set(1, 2, 3, 4, 5)
+set_intersect(a, b)      // set(3)
+set_difference(a, b)     // set(1, 2) -- items in a but not in b
+
+set_add(a, 4)            // set(1, 2, 3, 4)
+set_remove(a, 2)         // set(1, 3)
+```
+
+Sets support iteration with `for..in`:
+
+```javascript
+var sum = 0
+for item in set(10, 20, 30) {
+  sum = sum + item
+}
+log(sum)  // 60
+```
+
+Convert a set to a list with `to_list()`:
+
+```javascript
+let items = to_list(set(10, 20))
+type_of(items)  // "list"
+```
 
 ## Enums and structs
 

@@ -551,6 +551,7 @@ Non-pipeline top-level statements (fn declarations, let bindings) are executed i
 | `nil` | `nil` | Null value |
 | `list` | `[1, 2, 3]` | Ordered collection |
 | `dict` | `{key: value}` | String-keyed map |
+| `set` | `set(1, 2, 3)` | Unordered collection of unique values |
 | `closure` | `{ x -> x + 1 }` | First-class function with captured environment |
 | `taskHandle` | (from `spawn`) | Opaque handle to an async task |
 
@@ -565,6 +566,7 @@ Non-pipeline top-level statements (fn declarations, let bindings) are executed i
 | `string("")` | No |
 | `list([])` | No |
 | `dict([:])` | No |
+| `set()` (empty) | No |
 | Everything else | Yes |
 
 ### Equality
@@ -1006,6 +1008,22 @@ fn add(a: int, b: int) -> int {
 - Shape-to-`dict<K, V>`: all field values must be compatible with `V`.
 - Type errors are reported at compile time and halt execution.
 
+### Runtime parameter type enforcement
+
+In addition to compile-time checking, function parameters with type annotations
+are enforced at runtime. When a function is called, the VM verifies that each
+annotated parameter matches its declared type before executing the function body.
+If the types do not match, a `TypeError` is thrown:
+
+```text
+TypeError: parameter 'name' expected string, got int (42)
+```
+
+The following types are enforced at runtime: `int`, `float`, `string`, `bool`,
+`list`, `dict`, `set`, `nil`, and `closure`. `int` and `float` are mutually
+compatible (passing an `int` to a `float` parameter is allowed, and vice versa).
+Union types and shape types are not checked at runtime.
+
 ## Built-in methods
 
 ### String methods
@@ -1056,6 +1074,25 @@ fn add(a: int, b: int) -> int {
 ### Dict property access
 
 `dict.name` returns the value for key `"name"`, or `nil` if absent.
+
+### Set builtins
+
+Sets are created with the `set()` builtin and are immutable -- mutation
+operations return a new set. Sets deduplicate values using structural
+equality.
+
+| Function | Signature | Returns |
+|---|---|---|
+| `set(...)` | values or a list | set -- deduplicated |
+| `set_add(s, value)` | set, value | set -- with value added |
+| `set_remove(s, value)` | set, value | set -- with value removed |
+| `set_contains(s, value)` | set, value | bool |
+| `set_union(a, b)` | set, set | set -- all items from both |
+| `set_intersect(a, b)` | set, set | set -- items in both |
+| `set_difference(a, b)` | set, set | set -- items in a but not b |
+| `to_list(s)` | set | list -- convert set to list |
+
+Sets are iterable with `for ... in` and support `len()`.
 
 ## Method-style builtins
 
