@@ -51,3 +51,8 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
     register_llm_builtins(vm);
     register_mcp_builtins(vm);
 }
+
+/// Reset thread-local stdlib state (logging, tracing). Call between test runs.
+pub fn reset_stdlib_state() {
+    logging::reset_logging_state();
+}

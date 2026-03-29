@@ -56,6 +56,9 @@ pub async fn run_test_file(
     let mut results = Vec::new();
 
     for test_name in &test_names {
+        // Reset thread-local state to prevent leaking between tests
+        harn_vm::reset_thread_local_state();
+
         let start = Instant::now();
 
         // Compile the test pipeline via the VM compiler

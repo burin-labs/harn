@@ -39,6 +39,8 @@ pub struct Compiler {
     column: u32,
     /// Track enum type names so PropertyAccess on them can produce EnumVariant.
     enum_names: std::collections::HashSet<String>,
+    /// Track interface names → method names for runtime enforcement.
+    interface_methods: std::collections::HashMap<String, Vec<String>>,
     /// Stack of active loop contexts for break/continue.
     loop_stack: Vec<LoopContext>,
     /// Current depth of exception handlers (for cleanup on break/continue).
@@ -56,6 +58,7 @@ impl Compiler {
             line: 1,
             column: 1,
             enum_names: std::collections::HashSet::new(),
+            interface_methods: std::collections::HashMap::new(),
             loop_stack: Vec::new(),
             handler_depth: 0,
             finally_bodies: Vec::new(),
@@ -71,6 +74,7 @@ impl Compiler {
         Self::collect_enum_names(program, &mut self.enum_names);
         // Built-in Result enum is always available
         self.enum_names.insert("Result".to_string());
+        Self::collect_interface_methods(program, &mut self.interface_methods);
 
         // Compile all top-level non-pipeline declarations first (fn, enum, etc.)
         for sn in program {
@@ -114,6 +118,7 @@ impl Compiler {
         pipeline_name: &str,
     ) -> Result<Chunk, CompileError> {
         Self::collect_enum_names(program, &mut self.enum_names);
+        Self::collect_interface_methods(program, &mut self.interface_methods);
 
         for sn in program {
             if matches!(
@@ -229,6 +234,32 @@ impl Compiler {
                     continue;
                 }
 
+                // Check if this is an interface type — emit __assert_interface
+                if let harn_parser::TypeExpr::Named(name) = type_expr {
+                    if let Some(methods) = self.interface_methods.get(name) {
+                        let fn_idx = self
+                            .chunk
+                            .add_constant(Constant::String("__assert_interface".into()));
+                        self.chunk.emit_u16(Op::Constant, fn_idx, self.line);
+                        let var_idx = self
+                            .chunk
+                            .add_constant(Constant::String(param.name.clone()));
+                        self.chunk.emit_u16(Op::GetVar, var_idx, self.line);
+                        let name_idx = self
+                            .chunk
+                            .add_constant(Constant::String(param.name.clone()));
+                        self.chunk.emit_u16(Op::Constant, name_idx, self.line);
+                        let iface_idx = self.chunk.add_constant(Constant::String(name.clone()));
+                        self.chunk.emit_u16(Op::Constant, iface_idx, self.line);
+                        let methods_str = methods.join(",");
+                        let methods_idx = self.chunk.add_constant(Constant::String(methods_str));
+                        self.chunk.emit_u16(Op::Constant, methods_idx, self.line);
+                        self.chunk.emit_u8(Op::Call, 4, self.line);
+                        self.chunk.emit(Op::Pop, self.line);
+                        continue;
+                    }
+                }
+
                 let type_name = Self::type_expr_to_runtime_name(type_expr);
                 if let Some(type_name) = type_name {
                     let var_idx = self
@@ -270,9 +301,13 @@ impl Compiler {
             }
             harn_parser::TypeExpr::List(_) => "list".to_string(),
             harn_parser::TypeExpr::DictType(_, _) => "dict".to_string(),
-            harn_parser::TypeExpr::Union(_) => {
-                // Union types are not validated at runtime for shapes
-                "any".to_string()
+            harn_parser::TypeExpr::Union(members) => {
+                // Serialize union as "type1|type2|type3" for runtime validation
+                members
+                    .iter()
+                    .map(Self::type_expr_to_spec)
+                    .collect::<Vec<_>>()
+                    .join("|")
             }
             harn_parser::TypeExpr::FnType { .. } => "closure".to_string(),
         }
@@ -2422,6 +2457,28 @@ impl Compiler {
                 }
                 Node::Block(stmts) => {
                     Self::collect_enum_names(stmts, names);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn collect_interface_methods(
+        nodes: &[SNode],
+        interfaces: &mut std::collections::HashMap<String, Vec<String>>,
+    ) {
+        for sn in nodes {
+            match &sn.node {
+                Node::InterfaceDecl { name, methods } => {
+                    let method_names: Vec<String> =
+                        methods.iter().map(|m| m.name.clone()).collect();
+                    interfaces.insert(name.clone(), method_names);
+                }
+                Node::Pipeline { body, .. } | Node::FnDecl { body, .. } => {
+                    Self::collect_interface_methods(body, interfaces);
+                }
+                Node::Block(stmts) => {
+                    Self::collect_interface_methods(stmts, interfaces);
                 }
                 _ => {}
             }

@@ -135,17 +135,17 @@ async fn main() {
         }
         "fmt" => {
             let check_mode = args.iter().any(|a| a == "--check");
-            let file = args
+            let targets: Vec<&str> = args
                 .iter()
                 .skip(2)
-                .find(|a| a.ends_with(".harn") || !a.starts_with("--"));
-            match file {
-                Some(f) => commands::check::fmt_file(f, check_mode),
-                None => {
-                    eprintln!("Usage: harn fmt [--check] <file.harn>");
-                    process::exit(1);
-                }
+                .filter(|a| !a.starts_with("--"))
+                .map(|s| s.as_str())
+                .collect();
+            if targets.is_empty() {
+                eprintln!("Usage: harn fmt [--check] <file.harn|dir> [...]");
+                process::exit(1);
             }
+            commands::check::fmt_targets(&targets, check_mode);
         }
         "test" => {
             // Parse test flags
@@ -281,11 +281,41 @@ async fn main() {
         }
         "watch" => {
             if args.len() < 3 {
-                eprintln!("Usage: harn watch <file.harn>");
+                eprintln!("Usage: harn watch [--deny <builtins>] [--allow <builtins>] <file.harn>");
                 process::exit(1);
             }
-            let file = &args[2];
-            commands::run::run_watch(file).await;
+            let deny_csv = args
+                .windows(2)
+                .find(|w| w[0] == "--deny")
+                .map(|w| w[1].clone());
+            let allow_csv = args
+                .windows(2)
+                .find(|w| w[0] == "--allow")
+                .map(|w| w[1].clone());
+            let flag_vals: std::collections::HashSet<&str> = args
+                .windows(2)
+                .filter(|w| w[0] == "--deny" || w[0] == "--allow")
+                .map(|w| w[1].as_str())
+                .collect();
+            let file = args
+                .iter()
+                .skip(2)
+                .find(|a| !a.starts_with("--") && !flag_vals.contains(a.as_str()));
+            match file {
+                Some(f) => {
+                    let denied = commands::run::build_denied_builtins(
+                        deny_csv.as_deref(),
+                        allow_csv.as_deref(),
+                    );
+                    commands::run::run_watch(f, denied).await;
+                }
+                None => {
+                    eprintln!(
+                        "Usage: harn watch [--deny <builtins>] [--allow <builtins>] <file.harn>"
+                    );
+                    process::exit(1);
+                }
+            }
         }
         "repl" => commands::repl::run_repl().await,
         "install" => package::install_packages(),
@@ -320,7 +350,9 @@ fn print_help() {
         "    \x1b[1;32mrepl\x1b[0m                   Interactive REPL with syntax highlighting"
     );
     println!("    \x1b[1;32minit\x1b[0m [name]            Scaffold a new project with harn.toml");
-    println!("    \x1b[1;32mfmt\x1b[0m [--check] <file>   Format source code");
+    println!(
+        "    \x1b[1;32mfmt\x1b[0m [--check] <files..> Format source code (files or directories)"
+    );
     println!("    \x1b[1;32mlint\x1b[0m <file>             Lint for common issues");
     println!("    \x1b[1;32mcheck\x1b[0m <file>            Type-check without executing");
     println!("    \x1b[1;32mwatch\x1b[0m <file>            Watch for changes and re-run");

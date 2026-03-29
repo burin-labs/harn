@@ -29,6 +29,12 @@ thread_local! {
     static HTTP_MOCK_CALLS: RefCell<Vec<HttpMockCall>> = const { RefCell::new(Vec::new()) };
 }
 
+/// Reset thread-local HTTP mock state. Call between test runs.
+pub fn reset_http_state() {
+    HTTP_MOCKS.with(|m| m.borrow_mut().clear());
+    HTTP_MOCK_CALLS.with(|c| c.borrow_mut().clear());
+}
+
 /// Check if a URL matches a mock pattern (exact or glob with `*`).
 fn url_matches(pattern: &str, url: &str) -> bool {
     if pattern == "*" {
@@ -37,12 +43,34 @@ fn url_matches(pattern: &str, url: &str) -> bool {
     if !pattern.contains('*') {
         return pattern == url;
     }
-    // Simple glob: split on `*` and check prefix/suffix containment
+    // Multi-glob: split on `*` and check that all segments appear in order
     let parts: Vec<&str> = pattern.split('*').collect();
-    if parts.len() == 2 {
-        return url.starts_with(parts[0]) && url.ends_with(parts[1]);
+    let mut remaining = url;
+    for (i, part) in parts.iter().enumerate() {
+        if part.is_empty() {
+            continue;
+        }
+        if i == 0 {
+            // First segment must be a prefix
+            if !remaining.starts_with(part) {
+                return false;
+            }
+            remaining = &remaining[part.len()..];
+        } else if i == parts.len() - 1 {
+            // Last segment must be a suffix
+            if !remaining.ends_with(part) {
+                return false;
+            }
+            remaining = "";
+        } else {
+            // Middle segments must appear somewhere in the remaining string
+            match remaining.find(part) {
+                Some(pos) => remaining = &remaining[pos + part.len()..],
+                None => return false,
+            }
+        }
     }
-    pattern == url
+    true
 }
 
 /// Register HTTP builtins on a VM.
@@ -73,7 +101,7 @@ pub fn register_http_builtins(vm: &mut Vm) {
             Some(VmValue::Dict(d)) => (**d).clone(),
             _ => BTreeMap::new(),
         };
-        options.insert("body".to_string(), VmValue::String(Rc::from(body.as_str())));
+        options.insert("body".to_string(), VmValue::String(Rc::from(body)));
         vm_execute_http_request("POST", &url, &options).await
     });
 
@@ -89,7 +117,7 @@ pub fn register_http_builtins(vm: &mut Vm) {
             Some(VmValue::Dict(d)) => (**d).clone(),
             _ => BTreeMap::new(),
         };
-        options.insert("body".to_string(), VmValue::String(Rc::from(body.as_str())));
+        options.insert("body".to_string(), VmValue::String(Rc::from(body)));
         vm_execute_http_request("PUT", &url, &options).await
     });
 
@@ -105,7 +133,7 @@ pub fn register_http_builtins(vm: &mut Vm) {
             Some(VmValue::Dict(d)) => (**d).clone(),
             _ => BTreeMap::new(),
         };
-        options.insert("body".to_string(), VmValue::String(Rc::from(body.as_str())));
+        options.insert("body".to_string(), VmValue::String(Rc::from(body)));
         vm_execute_http_request("PATCH", &url, &options).await
     });
 
@@ -267,7 +295,7 @@ async fn vm_execute_http_request(
         let mut result = BTreeMap::new();
         result.insert("status".to_string(), VmValue::Int(status));
         result.insert("headers".to_string(), VmValue::Dict(Rc::new(headers)));
-        result.insert("body".to_string(), VmValue::String(Rc::from(body.as_str())));
+        result.insert("body".to_string(), VmValue::String(Rc::from(body)));
         result.insert(
             "ok".to_string(),
             VmValue::Bool((200..300).contains(&(status as u16))),
@@ -421,10 +449,7 @@ async fn vm_execute_http_request(
                 let mut result = BTreeMap::new();
                 result.insert("status".to_string(), VmValue::Int(status));
                 result.insert("headers".to_string(), VmValue::Dict(Rc::new(resp_headers)));
-                result.insert(
-                    "body".to_string(),
-                    VmValue::String(Rc::from(body_text.as_str())),
-                );
+                result.insert("body".to_string(), VmValue::String(Rc::from(body_text)));
                 result.insert("ok".to_string(), VmValue::Bool(ok));
                 return Ok(VmValue::Dict(Rc::new(result)));
             }

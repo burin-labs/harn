@@ -50,6 +50,10 @@ struct Linter {
     imports: Vec<ImportInfo>,
     /// Track whether we are inside a loop (for break/continue validation).
     loop_depth: usize,
+    /// Track all declared/known function names for undefined-function detection.
+    known_functions: HashSet<String>,
+    /// Track function call sites for undefined-function checking.
+    function_calls: Vec<(String, Span)>,
 }
 
 impl Linter {
@@ -63,7 +67,197 @@ impl Linter {
             assignments: HashSet::new(),
             imports: Vec::new(),
             loop_depth: 0,
+            known_functions: Self::builtin_names(),
+            function_calls: Vec::new(),
         }
+    }
+
+    /// Return set of known builtin function names (stdlib + internal).
+    fn builtin_names() -> HashSet<String> {
+        [
+            // IO
+            "println",
+            "print",
+            "log",
+            "log_debug",
+            "log_info",
+            "log_warn",
+            "log_error",
+            "log_level",
+            "env",
+            // Types
+            "type_of",
+            "to_string",
+            "to_int",
+            "to_float",
+            "len",
+            "to_list",
+            "Ok",
+            "Err",
+            "is_ok",
+            "is_err",
+            "unwrap",
+            "unwrap_or",
+            "unwrap_err",
+            // Math
+            "abs",
+            "min",
+            "max",
+            "floor",
+            "ceil",
+            "round",
+            "pow",
+            "sqrt",
+            "random",
+            "random_int",
+            "pi",
+            "e",
+            // Strings
+            "format",
+            "trim",
+            "lowercase",
+            "uppercase",
+            "split",
+            "starts_with",
+            "ends_with",
+            "contains",
+            "replace",
+            "join",
+            "substring",
+            "dirname",
+            "basename",
+            "extname",
+            "render",
+            // JSON
+            "json_parse",
+            "json_stringify",
+            // FS
+            "read_file",
+            "write_file",
+            "append_file",
+            "file_exists",
+            "list_dir",
+            "glob_files",
+            "mkdir",
+            "remove_file",
+            // Process
+            "exec",
+            "exit",
+            // DateTime
+            "date_now",
+            "date_format",
+            "date_parse",
+            // Regex
+            "regex_match",
+            "regex_replace",
+            "regex_captures",
+            // Crypto
+            "base64_encode",
+            "base64_decode",
+            "sha256",
+            "md5",
+            // Sets
+            "set",
+            "set_add",
+            "set_remove",
+            "set_contains",
+            "set_union",
+            "set_intersection",
+            "set_difference",
+            // Testing
+            "assert",
+            "assert_eq",
+            "assert_ne",
+            // Concurrency
+            "channel",
+            "close_channel",
+            "try_receive",
+            "sleep",
+            "send",
+            "receive",
+            "select",
+            "atomic",
+            "atomic_get",
+            "atomic_set",
+            "atomic_add",
+            "atomic_cas",
+            "timer_start",
+            "timer_end",
+            "__select_timeout",
+            "__select_try",
+            "__select_list",
+            // Tracing
+            "trace_start",
+            "trace_end",
+            "trace_id",
+            "llm_info",
+            "llm_usage",
+            // Shapes (internal)
+            "__assert_dict",
+            "__assert_list",
+            "__assert_shape",
+            "__dict_rest",
+            "__make_struct",
+            "__assert_interface",
+            // HTTP
+            "http_get",
+            "http_post",
+            "http_put",
+            "http_patch",
+            "http_delete",
+            "http_request",
+            "http_mock",
+            "http_mock_clear",
+            "http_mock_calls",
+            // LLM
+            "llm_call",
+            "agent_loop",
+            "llm_stream",
+            "conversation_new",
+            "conversation_add_user",
+            "conversation_add_assistant",
+            "conversation_add_tool_result",
+            "llm_resolve_model",
+            "llm_infer_provider",
+            "llm_model_tier",
+            "llm_healthcheck",
+            "llm_providers",
+            "llm_config",
+            "llm_cost",
+            "llm_session_cost",
+            "llm_budget",
+            "llm_budget_remaining",
+            // MCP
+            "mcp_connect",
+            "mcp_list_tools",
+            "mcp_call_tool",
+            "mcp_list_resources",
+            "mcp_read_resource",
+            "mcp_list_prompts",
+            "mcp_get_prompt",
+            // Store
+            "store_get",
+            "store_set",
+            "store_delete",
+            "store_keys",
+            "store_clear",
+            // Metadata
+            "metadata_set",
+            "metadata_get",
+            "metadata_delete",
+            "metadata_list",
+            "metadata_search",
+            "metadata_hash",
+            // Tools
+            "tool_registry",
+            "tool_schemas",
+            // Cancel
+            "cancel_graceful",
+            "is_cancelled",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
     }
 
     fn push_scope(&mut self) {
@@ -184,18 +378,14 @@ impl Linter {
             Node::Pipeline {
                 params, body, name, ..
             } => {
+                self.known_functions.insert(name.clone());
                 self.push_scope();
-                // Pipeline params are implicitly "used" -- don't report them.
                 for p in params {
                     if let Some(scope) = self.scopes.last_mut() {
                         scope.insert(p.clone());
                     }
-                    // Mark pipeline params as referenced so they are never
-                    // flagged as unused.
                     self.references.insert(p.clone());
                 }
-                // The pipeline name itself is a declaration in the outer scope,
-                // but we don't lint pipeline names as unused.
                 self.references.insert(name.clone());
                 self.lint_block(body);
                 self.pop_scope();
@@ -204,7 +394,7 @@ impl Linter {
             Node::FnDecl {
                 name, params, body, ..
             } => {
-                // The function name itself is referenced (callable).
+                self.known_functions.insert(name.clone());
                 self.references.insert(name.clone());
                 self.push_scope();
                 let saved_loop_depth = self.loop_depth;
@@ -247,6 +437,7 @@ impl Linter {
 
             Node::FunctionCall { name, args } => {
                 self.references.insert(name.clone());
+                self.function_calls.push((name.clone(), snode.span));
                 for arg in args {
                     self.lint_node(arg);
                 }
@@ -688,6 +879,22 @@ impl Linter {
                 self.lint_node(operand);
             }
 
+            Node::StructDecl { name, .. } => {
+                self.known_functions.insert(name.clone());
+            }
+            Node::EnumDecl { name, .. } => {
+                self.known_functions.insert(name.clone());
+            }
+            Node::SelectiveImport { names, .. } => {
+                for name in names {
+                    self.known_functions.insert(name.clone());
+                }
+                self.imports.push(ImportInfo {
+                    names: names.clone(),
+                    span: snode.span,
+                });
+            }
+
             // Leaf nodes and declarations that don't need recursion.
             Node::StringLiteral(_)
             | Node::IntLiteral(_)
@@ -696,8 +903,6 @@ impl Linter {
             | Node::NilLiteral
             | Node::DurationLiteral(_)
             | Node::ImportDecl { .. }
-            | Node::EnumDecl { .. }
-            | Node::StructDecl { .. }
             | Node::InterfaceDecl { .. }
             | Node::OverrideDecl { .. }
             | Node::TypeDecl { .. }
@@ -722,13 +927,6 @@ impl Linter {
                         )),
                     });
                 }
-            }
-
-            Node::SelectiveImport { names, .. } => {
-                self.imports.push(ImportInfo {
-                    names: names.clone(),
-                    span: snode.span,
-                });
             }
         }
     }
@@ -830,6 +1028,32 @@ impl Linter {
                     suggestion: Some("use `let` instead of `var`".to_string()),
                 });
             }
+        }
+
+        // Also add variables that hold closures as known functions
+        // (let-bound identifiers that are referenced as function calls)
+        let all_vars: HashSet<String> = self.declarations.iter().map(|d| d.name.clone()).collect();
+
+        // Rule: undefined-function
+        for (name, span) in &self.function_calls {
+            if self.known_functions.contains(name) {
+                continue;
+            }
+            // Skip if it's a known variable (could be a closure)
+            if all_vars.contains(name) {
+                continue;
+            }
+            // Skip internal names starting with __
+            if name.starts_with("__") {
+                continue;
+            }
+            self.diagnostics.push(LintDiagnostic {
+                rule: "undefined-function",
+                message: format!("function `{name}` is not defined"),
+                span: *span,
+                severity: LintSeverity::Warning,
+                suggestion: Some(format!("check the spelling or import `{name}`")),
+            });
         }
     }
 }

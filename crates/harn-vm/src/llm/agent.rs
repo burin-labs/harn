@@ -281,7 +281,7 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
             // Pipelines can access result.text, result.status, etc.
             let mut result_dict = BTreeMap::new();
             result_dict.insert("status".to_string(), VmValue::String(Rc::from(final_status)));
-            result_dict.insert("text".to_string(), VmValue::String(Rc::from(total_text.as_str())));
+            result_dict.insert("text".to_string(), VmValue::String(Rc::from(total_text)));
             result_dict.insert("iterations".to_string(), VmValue::Int(total_iterations as i64));
             result_dict.insert("duration_ms".to_string(), VmValue::Int(loop_start.elapsed().as_millis() as i64));
             result_dict.insert(

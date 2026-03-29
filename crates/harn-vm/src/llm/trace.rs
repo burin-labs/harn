@@ -45,6 +45,12 @@ pub fn peek_trace_summary() -> (i64, i64, i64, i64) {
     })
 }
 
+/// Reset thread-local trace state. Call between test runs.
+pub(crate) fn reset_trace_state() {
+    LLM_TRACE.with(|v| v.borrow_mut().clear());
+    LLM_TRACING_ENABLED.with(|v| *v.borrow_mut() = false);
+}
+
 pub(crate) fn trace_llm_call(entry: LlmTraceEntry) {
     LLM_TRACING_ENABLED.with(|enabled| {
         if *enabled.borrow() {

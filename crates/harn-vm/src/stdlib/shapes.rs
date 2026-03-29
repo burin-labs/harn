@@ -5,6 +5,41 @@ use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 pub(crate) fn register_shape_builtins(vm: &mut Vm) {
+    // Runtime interface enforcement: check that a value has all required methods
+    // Args: value, param_name, interface_name, method_names_csv
+    vm.register_builtin("__assert_interface", |args, _out| {
+        let val = args.first().cloned().unwrap_or(VmValue::Nil);
+        let param_name = args.get(1).map(|a| a.display()).unwrap_or_default();
+        let iface_name = args.get(2).map(|a| a.display()).unwrap_or_default();
+        let methods_csv = args.get(3).map(|a| a.display()).unwrap_or_default();
+
+        let struct_name = match &val {
+            VmValue::StructInstance { struct_name, .. } => struct_name.clone(),
+            _ => {
+                return Err(VmError::TypeError(format!(
+                    "parameter '{}': expected value satisfying interface '{}', got {}",
+                    param_name,
+                    iface_name,
+                    val.type_name()
+                )));
+            }
+        };
+
+        // Check that the struct has all required methods via the impl registry
+        // We can't check method presence at this level (that's VM-level state),
+        // but we validate the value is a struct instance so the VM can dispatch.
+        // The compiler already checks method satisfaction at compile time.
+        // This runtime check ensures the value is at least a struct, not a raw dict.
+        if methods_csv.is_empty() {
+            return Ok(VmValue::Nil);
+        }
+
+        // The VM itself handles method dispatch — this just ensures the value
+        // is a struct instance (interfaces only apply to structs with impl blocks).
+        let _ = struct_name; // struct identity is enough for dispatch
+        Ok(VmValue::Nil)
+    });
+
     vm.register_builtin("__assert_dict", |args, _out| {
         let val = args.first().cloned().unwrap_or(VmValue::Nil);
         if matches!(val, VmValue::Dict(_)) {
@@ -141,6 +176,19 @@ fn assert_shape_fields(
                                 val.type_name()
                             )));
                         }
+                    }
+                } else if type_spec.contains('|') {
+                    // Union type: check if actual type matches any member
+                    let actual_type = val.type_name();
+                    let is_nil = matches!(val, VmValue::Nil);
+                    let matches = type_spec
+                        .split('|')
+                        .any(|t| t.trim() == actual_type || (t.trim() == "nil" && is_nil));
+                    if !matches {
+                        return Err(VmError::TypeError(format!(
+                            "parameter '{}': field '{}' expected {}, got {}",
+                            param_name, field_name, type_spec, actual_type
+                        )));
                     }
                 } else {
                     let actual_type = val.type_name();

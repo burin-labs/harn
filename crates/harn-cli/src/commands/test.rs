@@ -151,6 +151,9 @@ pub(crate) async fn run_conformance_tests(
                     }
                 };
 
+                // Reset thread-local state between conformance tests
+                harn_vm::reset_thread_local_state();
+
                 let start = std::time::Instant::now();
                 let result = tokio::time::timeout(
                     std::time::Duration::from_millis(timeout_ms),
@@ -213,6 +216,9 @@ pub(crate) async fn run_conformance_tests(
                         continue;
                     }
                 };
+
+                // Reset thread-local state between conformance tests
+                harn_vm::reset_thread_local_state();
 
                 let start = std::time::Instant::now();
                 let result = tokio::time::timeout(

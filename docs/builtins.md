@@ -305,8 +305,8 @@ println(md5("hello"))     // 5d41402abc4b2a76b9719d911017c592
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `date_now()` | none | dict | Current UTC datetime as dict with `year`, `month`, `day`, `hour`, `minute`, `second`, `weekday`, and `timestamp` fields |
-| `date_parse(str)` | str: string | float | Parse a datetime string (e.g., `"2024-01-15 10:30:00"`) into a Unix timestamp. Extracts numeric components from the string. Throws if fewer than 3 parts (year, month, day) |
-| `date_format(dt, format?)` | dt: float, int, or dict; format: string (default `"%Y-%m-%d %H:%M:%S"`) | string | Format a timestamp or date dict as a string. Supports `%Y`, `%m`, `%d`, `%H`, `%M`, `%S` placeholders |
+| `date_parse(str)` | str: string | float | Parse a datetime string (e.g., `"2024-01-15 10:30:00"`) into a Unix timestamp. Extracts numeric components from the string. Throws if fewer than 3 parts (year, month, day). Validates month (1-12), day (1-31), hour (0-23), minute (0-59), second (0-59) |
+| `date_format(dt, format?)` | dt: float, int, or dict; format: string (default `"%Y-%m-%d %H:%M:%S"`) | string | Format a timestamp or date dict as a string. Supports `%Y`, `%m`, `%d`, `%H`, `%M`, `%S` placeholders. Throws for negative timestamps |
 
 ## Testing
 
@@ -339,7 +339,7 @@ For testing pipelines that make HTTP calls without hitting real servers.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `http_mock(method, url_pattern, response)` | method: string, url_pattern: string, response: dict | nil | Register a mock. Use `*` in url_pattern for glob matching |
+| `http_mock(method, url_pattern, response)` | method: string, url_pattern: string, response: dict | nil | Register a mock. Use `*` in url_pattern for glob matching (supports multiple `*` wildcards, e.g., `https://api.example.com/*/items/*`) |
 | `http_mock_clear()` | none | nil | Clear all mocks and recorded calls |
 | `http_mock_calls()` | none | list | Return list of `{method, url, body}` for all intercepted calls |
 

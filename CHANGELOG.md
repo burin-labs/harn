@@ -2,6 +2,55 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.4.14
+
+### Fixed
+
+- `len()` now returns character count for strings (was byte count),
+  consistent with `substring()` which uses character indexing
+- `date_format` rejects negative timestamps with an error instead of
+  panicking via unsigned integer overflow
+- `date_parse` validates month (1-12), day (1-31), hour (0-23),
+  minute (0-59), second (0-59) ranges
+- `select`/`__select_timeout`/`__select_list` use 1ms sleep instead
+  of `yield_now()` busy-loop, reducing CPU usage when no channels are ready
+- Thread-local state (LLM budget/cost, trace stack, log level, HTTP mocks)
+  is now reset between test runs for proper isolation
+- `trace_end` verifies span ID matches before popping the trace stack
+- `run_watch` (`harn watch`) now respects `--deny` and `--allow` flags
+- `http_mock` URL matching supports multi-`*` glob patterns
+  (e.g., `https://api.example.com/*/items/*`)
+- Removed unnecessary `.as_str()` in `Rc::from()` calls throughout
+  the codebase (~30 occurrences), eliminating intermediate allocations
+
+### Added
+
+- **Definition-site generic checking**: inside generic function bodies,
+  method calls on constrained type parameters (`where T: Interface`)
+  are validated against the bound interface's methods
+- **Runtime interface enforcement**: function parameters typed as
+  interfaces are now checked at runtime (not just compile-time)
+- **Shape validation for union type fields**: shape annotations like
+  `{value: string | int}` now validate the field's type at runtime
+- **Undefined function linter rule**: `undefined-function` warns on
+  calls to functions not declared in the current file or builtins
+- **Multi-file `harn fmt`**: the `fmt` command now accepts multiple
+  files and directories (e.g., `harn fmt src/ tests/`)
+- `reset_thread_local_state()` public API for test harness isolation
+- `scan_directory(path?, pattern?)` builtin for native filesystem enumeration
+  with glob support, depth limiting, and mtime tracking
+- Real `metadata_stale()` implementation comparing stored structure/content
+  hashes against filesystem state (was previously a no-op)
+- `metadata_refresh_hashes()` now recomputes and stores structure hashes
+- Conformance tests for all fixed bugs
+
+### Changed
+
+- DRY: extracted `ResolvedProvider` helper for shared provider config
+  resolution between `stream.rs` and `api.rs`
+- Simplified `Makefile` `fmt-harn` target to use directory argument
+- SSE streaming (`llm_stream`) refactored to use `ResolvedProvider`
+
 ## v0.4.13
 
 ### Added

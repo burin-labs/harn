@@ -251,7 +251,7 @@ pub(crate) fn register_concurrency_builtins(vm: &mut Vm) {
             if all_closed {
                 return Ok(select_none());
             }
-            tokio::task::yield_now().await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
         }
     });
 
@@ -283,7 +283,7 @@ pub(crate) fn register_concurrency_builtins(vm: &mut Vm) {
             if all_closed || tokio::time::Instant::now() >= deadline {
                 return Ok(select_none());
             }
-            tokio::task::yield_now().await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
         }
     });
 
@@ -331,7 +331,7 @@ pub(crate) fn register_concurrency_builtins(vm: &mut Vm) {
             if all_closed {
                 return Ok(select_none());
             }
-            tokio::task::yield_now().await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
         }
     });
 
@@ -347,7 +347,7 @@ pub(crate) fn register_concurrency_builtins(vm: &mut Vm) {
             .unwrap_or_default()
             .as_millis() as i64;
         let mut timer = BTreeMap::new();
-        timer.insert("name".to_string(), VmValue::String(Rc::from(name.as_str())));
+        timer.insert("name".to_string(), VmValue::String(Rc::from(name)));
         timer.insert("start_ms".to_string(), VmValue::Int(now_ms));
         Ok(VmValue::Dict(Rc::new(timer)))
     });

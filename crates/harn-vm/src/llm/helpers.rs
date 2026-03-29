@@ -130,6 +130,61 @@ pub(crate) fn vm_resolve_api_key(provider: &str) -> Result<String, VmError> {
 }
 
 // =============================================================================
+// Resolved provider config (shared between api.rs and stream.rs)
+// =============================================================================
+
+pub(crate) struct ResolvedProvider<'a> {
+    pub pdef: Option<&'a crate::llm_config::ProviderDef>,
+    pub is_anthropic_style: bool,
+    pub base_url: String,
+    pub endpoint: &'a str,
+}
+
+impl<'a> ResolvedProvider<'a> {
+    pub fn resolve(provider: &str) -> ResolvedProvider<'static> {
+        let pdef = crate::llm_config::provider_config(provider);
+        let is_anthropic_style = pdef
+            .map(|p| p.chat_endpoint.contains("/messages"))
+            .unwrap_or(provider == "anthropic");
+        let (default_base, default_endpoint) = if is_anthropic_style {
+            ("https://api.anthropic.com/v1", "/messages")
+        } else {
+            ("https://api.openai.com/v1", "/chat/completions")
+        };
+        let base_url = pdef
+            .map(crate::llm_config::resolve_base_url)
+            .unwrap_or_else(|| default_base.to_string());
+        let endpoint = pdef
+            .map(|p| p.chat_endpoint.as_str())
+            .unwrap_or(default_endpoint);
+        ResolvedProvider {
+            pdef,
+            is_anthropic_style,
+            base_url,
+            endpoint,
+        }
+    }
+
+    pub fn url(&self) -> String {
+        format!("{}{}", self.base_url, self.endpoint)
+    }
+
+    pub fn apply_headers(
+        &self,
+        mut req: reqwest::RequestBuilder,
+        api_key: &str,
+    ) -> reqwest::RequestBuilder {
+        req = super::api::apply_auth_headers(req, api_key, self.pdef);
+        if let Some(p) = self.pdef {
+            for (k, v) in &p.extra_headers {
+                req = req.header(k.as_str(), v.as_str());
+            }
+        }
+        req
+    }
+}
+
+// =============================================================================
 // Convert VmValue messages to JSON for API calls
 // =============================================================================
 
@@ -184,14 +239,8 @@ pub(crate) fn vm_add_role_message(args: &[VmValue], role: &str) -> Result<VmValu
     let content = args.get(1).map(|a| a.display()).unwrap_or_default();
 
     let mut msg = BTreeMap::new();
-    msg.insert(
-        "role".to_string(),
-        VmValue::String(Rc::from(role.to_string().as_str())),
-    );
-    msg.insert(
-        "content".to_string(),
-        VmValue::String(Rc::from(content.as_str())),
-    );
+    msg.insert("role".to_string(), VmValue::String(Rc::from(role)));
+    msg.insert("content".to_string(), VmValue::String(Rc::from(content)));
 
     let mut new_messages = messages;
     new_messages.push(VmValue::Dict(Rc::new(msg)));

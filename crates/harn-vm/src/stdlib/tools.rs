@@ -55,7 +55,7 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
         tool_entry.insert("name".to_string(), VmValue::String(Rc::from(name.as_str())));
         tool_entry.insert(
             "description".to_string(),
-            VmValue::String(Rc::from(description.as_str())),
+            VmValue::String(Rc::from(description)),
         );
         tool_entry.insert("handler".to_string(), handler);
         tool_entry.insert("parameters".to_string(), parameters);
@@ -180,7 +180,7 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
             lines.push(format!("- {name}({params}): {desc}"));
         }
 
-        Ok(VmValue::String(Rc::from(lines.join("\n").as_str())))
+        Ok(VmValue::String(Rc::from(lines.join("\n"))))
     });
 
     vm.register_builtin("tool_remove", |args, _out| {
@@ -271,10 +271,10 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
                     vm_build_input_schema(entry.get("parameters"), components.as_ref());
 
                 let mut tool_def = BTreeMap::new();
-                tool_def.insert("name".to_string(), VmValue::String(Rc::from(name.as_str())));
+                tool_def.insert("name".to_string(), VmValue::String(Rc::from(name)));
                 tool_def.insert(
                     "description".to_string(),
-                    VmValue::String(Rc::from(description.as_str())),
+                    VmValue::String(Rc::from(description)),
                 );
                 tool_def.insert("inputSchema".to_string(), input_schema);
                 tool_schemas.push(VmValue::Dict(Rc::new(tool_def)));

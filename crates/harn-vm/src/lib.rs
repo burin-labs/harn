@@ -17,11 +17,19 @@ mod vm;
 
 pub use chunk::*;
 pub use compiler::*;
-pub use http::register_http_builtins;
+pub use http::{register_http_builtins, reset_http_state};
 pub use llm::register_llm_builtins;
 pub use mcp::{connect_mcp_server, register_mcp_builtins};
-pub use metadata::register_metadata_builtins;
+pub use metadata::{register_metadata_builtins, register_scan_builtins};
 pub use stdlib::register_vm_stdlib;
 pub use store::register_store_builtins;
 pub use value::*;
 pub use vm::*;
+
+/// Reset all thread-local state that can leak between test runs.
+/// Call this before each test execution for proper isolation.
+pub fn reset_thread_local_state() {
+    llm::reset_llm_state();
+    http::reset_http_state();
+    stdlib::reset_stdlib_state();
+}

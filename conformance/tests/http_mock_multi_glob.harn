@@ -1,0 +1,9 @@
+// Test http_mock with multi-* glob patterns
+pipeline default(task) {
+  // Setup mock with multi-glob
+  http_mock("GET", "https://api.example.com/*/items/*", {status: 200, body: "matched"})
+  let r = http_get("https://api.example.com/users/items/123")
+  println(r.body)
+  println(r.status)
+  http_mock_clear()
+}

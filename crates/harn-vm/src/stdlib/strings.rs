@@ -19,7 +19,7 @@ pub(crate) fn register_string_builtins(vm: &mut Vm) {
             rest = &rest[pos + 2..];
         }
         result.push_str(rest);
-        Ok(VmValue::String(Rc::from(result.as_str())))
+        Ok(VmValue::String(Rc::from(result)))
     });
 
     vm.register_builtin("trim", |args, _out| {
@@ -29,12 +29,12 @@ pub(crate) fn register_string_builtins(vm: &mut Vm) {
 
     vm.register_builtin("lowercase", |args, _out| {
         let s = args.first().map(|a| a.display()).unwrap_or_default();
-        Ok(VmValue::String(Rc::from(s.to_lowercase().as_str())))
+        Ok(VmValue::String(Rc::from(s.to_lowercase())))
     });
 
     vm.register_builtin("uppercase", |args, _out| {
         let s = args.first().map(|a| a.display()).unwrap_or_default();
-        Ok(VmValue::String(Rc::from(s.to_uppercase().as_str())))
+        Ok(VmValue::String(Rc::from(s.to_uppercase())))
     });
 
     vm.register_builtin("split", |args, _out| {
@@ -82,7 +82,7 @@ pub(crate) fn register_string_builtins(vm: &mut Vm) {
         let s = args.first().map(|a| a.display()).unwrap_or_default();
         let old = args.get(1).map(|a| a.display()).unwrap_or_default();
         let new = args.get(2).map(|a| a.display()).unwrap_or_default();
-        Ok(VmValue::String(Rc::from(s.replace(&old, &new).as_str())))
+        Ok(VmValue::String(Rc::from(s.replace(&old, &new))))
     });
 
     vm.register_builtin("join", |args, _out| {
@@ -90,7 +90,7 @@ pub(crate) fn register_string_builtins(vm: &mut Vm) {
         match args.first() {
             Some(VmValue::List(items)) => {
                 let parts: Vec<String> = items.iter().map(|v| v.display()).collect();
-                Ok(VmValue::String(Rc::from(parts.join(&sep).as_str())))
+                Ok(VmValue::String(Rc::from(parts.join(&sep))))
             }
             _ => Ok(VmValue::String(Rc::from(""))),
         }
@@ -138,9 +138,10 @@ pub(crate) fn register_string_builtins(vm: &mut Vm) {
         let path = args.first().map(|a| a.display()).unwrap_or_default();
         let p = std::path::Path::new(&path);
         match p.extension() {
-            Some(ext) => Ok(VmValue::String(Rc::from(
-                format!(".{}", ext.to_string_lossy()).as_str(),
-            ))),
+            Some(ext) => Ok(VmValue::String(Rc::from(format!(
+                ".{}",
+                ext.to_string_lossy()
+            )))),
             None => Ok(VmValue::String(Rc::from(""))),
         }
     });

@@ -91,12 +91,56 @@ pub(crate) fn lint_file(path: &str) {
     }
 }
 
-pub(crate) fn fmt_file(path: &str, check_mode: bool) {
+/// Format one or more files or directories. Accepts multiple targets.
+pub(crate) fn fmt_targets(targets: &[&str], check_mode: bool) {
+    let mut files = Vec::new();
+    for target in targets {
+        let path = std::path::Path::new(target);
+        if path.is_dir() {
+            collect_harn_files(path, &mut files);
+        } else {
+            files.push(path.to_path_buf());
+        }
+    }
+    if files.is_empty() {
+        eprintln!("No .harn files found");
+        process::exit(1);
+    }
+    let mut has_error = false;
+    for file in &files {
+        let path_str = file.to_string_lossy();
+        if !fmt_file_inner(&path_str, check_mode) {
+            has_error = true;
+        }
+    }
+    if has_error {
+        process::exit(1);
+    }
+}
+
+/// Recursively collect .harn files in a directory.
+fn collect_harn_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        let mut entries: Vec<_> = entries.filter_map(|e| e.ok()).collect();
+        entries.sort_by_key(|e| e.path());
+        for entry in entries {
+            let path = entry.path();
+            if path.is_dir() {
+                collect_harn_files(&path, out);
+            } else if path.extension().is_some_and(|ext| ext == "harn") {
+                out.push(path);
+            }
+        }
+    }
+}
+
+/// Format a single file. Returns true on success, false on error.
+fn fmt_file_inner(path: &str, check_mode: bool) -> bool {
     let source = match std::fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("Error reading {path}: {e}");
-            process::exit(1);
+            return false;
         }
     };
 
@@ -104,25 +148,23 @@ pub(crate) fn fmt_file(path: &str, check_mode: bool) {
         Ok(f) => f,
         Err(e) => {
             eprintln!("{path}: {e}");
-            process::exit(1);
+            return false;
         }
     };
 
     if check_mode {
         if source != formatted {
             eprintln!("{path}: would be reformatted");
-            process::exit(1);
+            return false;
         }
-        println!("{path}: ok");
     } else if source != formatted {
         match std::fs::write(path, &formatted) {
             Ok(()) => println!("formatted {path}"),
             Err(e) => {
                 eprintln!("Error writing {path}: {e}");
-                process::exit(1);
+                return false;
             }
         }
-    } else {
-        println!("{path}: already formatted");
     }
+    true
 }

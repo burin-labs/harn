@@ -342,52 +342,251 @@ pub fn register_metadata_builtins(vm: &mut Vm, base_dir: &Path) {
         Ok(VmValue::Nil)
     });
 
-    // metadata_stale(project) -> {any_stale: bool, tier1: [], tier2: []}
-    // In standalone mode, compare stored hashes against filesystem.
-    // Returns empty (no stale) since we don't track hashes natively yet.
-    vm.register_builtin("metadata_stale", |_args, _out| {
-        let mut m = BTreeMap::new();
-        m.insert("any_stale".to_string(), VmValue::Bool(false));
-        m.insert("tier1".to_string(), VmValue::List(Rc::new(vec![])));
-        m.insert("tier2".to_string(), VmValue::List(Rc::new(vec![])));
-        Ok(VmValue::Dict(Rc::new(m)))
-    });
+    // metadata_stale(project) -> {any_stale: bool, tier1: [dirs], tier2: [dirs]}
+    // Compare stored structureHash/contentHash against current filesystem state.
+    let s = Rc::clone(&state);
+    let base2 = base_dir.to_path_buf();
+    vm.register_builtin("metadata_stale", move |_args, _out| {
+        s.borrow_mut().ensure_loaded();
+        let state = s.borrow();
+        let mut tier1_stale: Vec<VmValue> = Vec::new();
+        let mut tier2_stale: Vec<VmValue> = Vec::new();
 
-    // metadata_refresh_hashes() -> nil
-    vm.register_builtin("metadata_refresh_hashes", |_args, _out| Ok(VmValue::Nil));
-
-    // compute_content_hash(dir) -> string
-    // Simple hash of file list in directory for staleness tracking
-    let base = base_dir.to_path_buf();
-    vm.register_builtin("compute_content_hash", move |args, _out| {
-        let dir = args.first().map(|a| a.display()).unwrap_or_default();
-        let full_dir = base.join(&dir);
-        let mut entries: Vec<String> = Vec::new();
-        if let Ok(rd) = std::fs::read_dir(&full_dir) {
-            for entry in rd.flatten() {
-                if let Ok(meta) = entry.metadata() {
-                    let name = entry.file_name().to_string_lossy().to_string();
-                    entries.push(format!("{}:{}", name, meta.len()));
+        for (dir, meta) in &state.entries {
+            let full_dir = if dir.is_empty() {
+                base2.clone()
+            } else {
+                base2.join(dir)
+            };
+            // Tier 1: structureHash — file list + sizes
+            if let Some(stored_hash) = meta
+                .namespaces
+                .get("classification")
+                .and_then(|ns| ns.get("structureHash"))
+                .and_then(|v| v.as_str())
+            {
+                let current_hash = compute_structure_hash(&full_dir);
+                if current_hash != stored_hash {
+                    tier1_stale.push(VmValue::String(Rc::from(dir.as_str())));
+                    continue; // If structure changed, skip tier2 check
+                }
+            }
+            // Tier 2: contentHash — file content digest
+            if let Some(stored_hash) = meta
+                .namespaces
+                .get("classification")
+                .and_then(|ns| ns.get("contentHash"))
+                .and_then(|v| v.as_str())
+            {
+                let current_hash = compute_content_hash_for_dir(&full_dir);
+                if current_hash != stored_hash {
+                    tier2_stale.push(VmValue::String(Rc::from(dir.as_str())));
                 }
             }
         }
-        entries.sort();
-        // Simple hash: join and take a prefix
-        let joined = entries.join("|");
-        let hash = format!("{:x}", md5_simple(joined.as_bytes()));
-        Ok(VmValue::String(Rc::from(hash.as_str())))
+
+        let any_stale = !tier1_stale.is_empty() || !tier2_stale.is_empty();
+        let mut m = BTreeMap::new();
+        m.insert("any_stale".to_string(), VmValue::Bool(any_stale));
+        m.insert("tier1".to_string(), VmValue::List(Rc::new(tier1_stale)));
+        m.insert("tier2".to_string(), VmValue::List(Rc::new(tier2_stale)));
+        Ok(VmValue::Dict(Rc::new(m)))
     });
 
-    // invalidate_facts(dir) -> nil (no-op in standalone)
+    // metadata_refresh_hashes(project) -> nil
+    // Recompute and store structureHash for all directories.
+    let s = Rc::clone(&state);
+    let base3 = base_dir.to_path_buf();
+    vm.register_builtin("metadata_refresh_hashes", move |_args, _out| {
+        let mut state = s.borrow_mut();
+        state.ensure_loaded();
+        let dirs: Vec<String> = state.entries.keys().cloned().collect();
+        for dir in dirs {
+            let full_dir = if dir.is_empty() {
+                base3.clone()
+            } else {
+                base3.join(&dir)
+            };
+            let hash = compute_structure_hash(&full_dir);
+            let entry = state.entries.entry(dir).or_default();
+            let ns = entry
+                .namespaces
+                .entry("classification".to_string())
+                .or_default();
+            ns.insert("structureHash".to_string(), serde_json::Value::String(hash));
+        }
+        state.dirty = true;
+        Ok(VmValue::Nil)
+    });
+
+    // compute_content_hash(dir) -> string
+    // Hash of file list + sizes + mtimes in directory for staleness tracking
+    let base = base_dir.to_path_buf();
+    vm.register_builtin("compute_content_hash", move |args, _out| {
+        let dir = args.first().map(|a| a.display()).unwrap_or_default();
+        let full_dir = if dir.is_empty() {
+            base.clone()
+        } else {
+            base.join(&dir)
+        };
+        let hash = compute_content_hash_for_dir(&full_dir);
+        Ok(VmValue::String(Rc::from(hash)))
+    });
+
+    // invalidate_facts(dir) -> nil (no-op — facts live in metadata namespace now)
     vm.register_builtin("invalidate_facts", |_args, _out| Ok(VmValue::Nil));
+
+    // Also register scan builtins (scan_directory)
+    register_scan_builtins(vm, base_dir);
 }
 
-/// Simple hash (not crypto-grade, just for staleness detection).
-fn md5_simple(data: &[u8]) -> u64 {
+/// Compute structure hash for a directory (file names + sizes).
+fn compute_structure_hash(dir: &Path) -> String {
+    let mut entries: Vec<String> = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for entry in rd.flatten() {
+            if let Ok(meta) = entry.metadata() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                entries.push(format!("{}:{}", name, meta.len()));
+            }
+        }
+    }
+    entries.sort();
+    let joined = entries.join("|");
+    format!("{:x}", fnv_hash(joined.as_bytes()))
+}
+
+/// Compute content hash for a directory (file names + sizes + mtimes).
+fn compute_content_hash_for_dir(dir: &Path) -> String {
+    let mut entries: Vec<String> = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for entry in rd.flatten() {
+            if let Ok(meta) = entry.metadata() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                let mtime = meta
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                entries.push(format!("{}:{}:{}", name, meta.len(), mtime));
+            }
+        }
+    }
+    entries.sort();
+    let joined = entries.join("|");
+    format!("{:x}", fnv_hash(joined.as_bytes()))
+}
+
+/// FNV-1a hash (not crypto-grade, just for staleness detection).
+fn fnv_hash(data: &[u8]) -> u64 {
     let mut hash: u64 = 0xcbf29ce484222325;
     for &byte in data {
         hash ^= byte as u64;
         hash = hash.wrapping_mul(0x100000001b3);
     }
     hash
+}
+
+/// Register scan_directory builtin: native Rust file enumeration.
+pub fn register_scan_builtins(vm: &mut Vm, base_dir: &Path) {
+    let base = base_dir.to_path_buf();
+    // scan_directory(path?, pattern?) -> [{path, size, modified, is_dir}, ...]
+    vm.register_builtin("scan_directory", move |args, _out| {
+        let rel_dir = args.first().map(|a| a.display()).unwrap_or_default();
+        let pattern = args.get(1).and_then(|a| {
+            if matches!(a, VmValue::Nil) {
+                None
+            } else {
+                Some(a.display())
+            }
+        });
+        let full_dir = if rel_dir.is_empty() {
+            base.clone()
+        } else {
+            base.join(&rel_dir)
+        };
+        let mut results: Vec<VmValue> = Vec::new();
+        scan_dir_recursive(&full_dir, &base, &pattern, &mut results, 0, 5);
+        Ok(VmValue::List(Rc::new(results)))
+    });
+}
+
+fn scan_dir_recursive(
+    dir: &Path,
+    base: &Path,
+    pattern: &Option<String>,
+    results: &mut Vec<VmValue>,
+    depth: usize,
+    max_depth: usize,
+) {
+    if depth > max_depth {
+        return;
+    }
+    let rd = match std::fs::read_dir(dir) {
+        Ok(rd) => rd,
+        Err(_) => return,
+    };
+    for entry in rd.flatten() {
+        let meta = match entry.metadata() {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        let name = entry.file_name().to_string_lossy().to_string();
+        // Skip hidden files and .burin directory
+        if name.starts_with('.') {
+            continue;
+        }
+        let rel_path = entry
+            .path()
+            .strip_prefix(base)
+            .unwrap_or(entry.path().as_path())
+            .to_string_lossy()
+            .to_string();
+        // Apply glob-like pattern filter
+        if let Some(pat) = pattern {
+            if !glob_match(pat, &rel_path) {
+                if meta.is_dir() {
+                    scan_dir_recursive(&entry.path(), base, pattern, results, depth + 1, max_depth);
+                }
+                continue;
+            }
+        }
+        let mtime = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        let mut m = BTreeMap::new();
+        m.insert("path".to_string(), VmValue::String(Rc::from(rel_path)));
+        m.insert("size".to_string(), VmValue::Int(meta.len() as i64));
+        m.insert("modified".to_string(), VmValue::Int(mtime));
+        m.insert("is_dir".to_string(), VmValue::Bool(meta.is_dir()));
+        results.push(VmValue::Dict(Rc::new(m)));
+        if meta.is_dir() {
+            scan_dir_recursive(&entry.path(), base, pattern, results, depth + 1, max_depth);
+        }
+    }
+}
+
+/// Simple glob matching (supports * and ** patterns).
+fn glob_match(pattern: &str, path: &str) -> bool {
+    if pattern.contains("**") {
+        let parts: Vec<&str> = pattern.split("**").collect();
+        if parts.len() == 2 {
+            let prefix = parts[0].trim_end_matches('/');
+            let suffix = parts[1].trim_start_matches('/');
+            let prefix_ok = prefix.is_empty() || path.starts_with(prefix);
+            let suffix_ok = suffix.is_empty() || path.ends_with(suffix);
+            return prefix_ok && suffix_ok;
+        }
+    }
+    if pattern.contains('*') {
+        let parts: Vec<&str> = pattern.split('*').collect();
+        if parts.len() == 2 {
+            return path.starts_with(parts[0]) && path.ends_with(parts[1]);
+        }
+    }
+    path.contains(pattern)
 }

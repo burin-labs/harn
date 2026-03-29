@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use crate::llm_config;
 use crate::value::{VmError, VmValue};
 
 use super::helpers::vm_value_dict_to_json;
@@ -178,21 +177,10 @@ async fn vm_call_llm_api(
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
 
-    // Resolve provider config for base URL and auth
-    let pdef = llm_config::provider_config(provider);
-    let is_anthropic_style = pdef
-        .map(|p| p.chat_endpoint.contains("/messages"))
-        .unwrap_or(provider == "anthropic");
+    let resolved = super::helpers::ResolvedProvider::resolve(provider);
 
-    if is_anthropic_style {
-        // Anthropic-style API (system as top-level field, content blocks response)
-        let base_url = pdef
-            .map(llm_config::resolve_base_url)
-            .unwrap_or_else(|| "https://api.anthropic.com/v1".to_string());
-        let endpoint = pdef
-            .map(|p| p.chat_endpoint.as_str())
-            .unwrap_or("/messages");
-
+    // Build request body based on API style
+    let body = if resolved.is_anthropic_style {
         let mut body = serde_json::json!({
             "model": model,
             "messages": messages,
@@ -204,42 +192,71 @@ async fn vm_call_llm_api(
         if let Some(temp) = temperature {
             body["temperature"] = serde_json::json!(temp);
         }
-
-        // Native tool use for Anthropic
         if let Some(tools) = native_tools {
             if !tools.is_empty() {
                 body["tools"] = serde_json::json!(tools);
             }
         }
+        body
+    } else {
+        let mut msgs = Vec::new();
+        if let Some(sys) = system {
+            msgs.push(serde_json::json!({"role": "system", "content": sys}));
+        }
+        msgs.extend(messages.iter().cloned());
 
-        let mut req = client
-            .post(format!("{base_url}{endpoint}"))
-            .header("Content-Type", "application/json")
-            .json(&body);
-
-        // Apply auth from config
-        req = apply_auth_headers(req, api_key, pdef);
-
-        // Apply extra headers from config
-        if let Some(p) = pdef {
-            for (k, v) in &p.extra_headers {
-                req = req.header(k.as_str(), v.as_str());
+        let mut body = serde_json::json!({
+            "model": model,
+            "messages": msgs,
+            "max_tokens": max_tokens,
+        });
+        if let Some(temp) = temperature {
+            body["temperature"] = serde_json::json!(temp);
+        }
+        if response_format == Some("json") {
+            if let Some(schema) = json_schema {
+                let schema_json = vm_value_dict_to_json(schema);
+                body["response_format"] = serde_json::json!({
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "response",
+                        "schema": schema_json,
+                        "strict": true,
+                    }
+                });
+            } else {
+                body["response_format"] = serde_json::json!({"type": "json_object"});
             }
         }
+        if let Some(tools) = native_tools {
+            if !tools.is_empty() {
+                body["tools"] = serde_json::json!(tools);
+            }
+        }
+        body
+    };
 
-        let response = req.send().await.map_err(|e| {
-            VmError::Thrown(VmValue::String(Rc::from(format!(
-                "{provider} API error: {e}"
-            ))))
-        })?;
+    // Send request
+    let req = client
+        .post(resolved.url())
+        .header("Content-Type", "application/json")
+        .json(&body);
+    let req = resolved.apply_headers(req, api_key);
 
-        let json: serde_json::Value = response.json().await.map_err(|e| {
-            VmError::Thrown(VmValue::String(Rc::from(format!(
-                "{provider} response parse error: {e}"
-            ))))
-        })?;
+    let response = req.send().await.map_err(|e| {
+        VmError::Thrown(VmValue::String(Rc::from(format!(
+            "{provider} API error: {e}"
+        ))))
+    })?;
 
-        // Extract text and tool_use blocks from Anthropic response
+    let json: serde_json::Value = response.json().await.map_err(|e| {
+        VmError::Thrown(VmValue::String(Rc::from(format!(
+            "{provider} response parse error: {e}"
+        ))))
+    })?;
+
+    // Parse response based on API style
+    if resolved.is_anthropic_style {
         let mut text = String::new();
         let mut tool_calls = Vec::new();
 
@@ -285,81 +302,6 @@ async fn vm_call_llm_api(
             model: model.to_string(),
         })
     } else {
-        // OpenAI-compatible API (system as message, choices response)
-        let base_url = pdef
-            .map(llm_config::resolve_base_url)
-            .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
-        let endpoint = pdef
-            .map(|p| p.chat_endpoint.as_str())
-            .unwrap_or("/chat/completions");
-
-        let mut msgs = Vec::new();
-        if let Some(sys) = system {
-            msgs.push(serde_json::json!({"role": "system", "content": sys}));
-        }
-        msgs.extend(messages.iter().cloned());
-
-        let mut body = serde_json::json!({
-            "model": model,
-            "messages": msgs,
-            "max_tokens": max_tokens,
-        });
-
-        if let Some(temp) = temperature {
-            body["temperature"] = serde_json::json!(temp);
-        }
-
-        // Structured output for OpenAI
-        if response_format == Some("json") {
-            if let Some(schema) = json_schema {
-                let schema_json = vm_value_dict_to_json(schema);
-                body["response_format"] = serde_json::json!({
-                    "type": "json_schema",
-                    "json_schema": {
-                        "name": "response",
-                        "schema": schema_json,
-                        "strict": true,
-                    }
-                });
-            } else {
-                body["response_format"] = serde_json::json!({"type": "json_object"});
-            }
-        }
-
-        // Native tool use
-        if let Some(tools) = native_tools {
-            if !tools.is_empty() {
-                body["tools"] = serde_json::json!(tools);
-            }
-        }
-
-        let mut req = client
-            .post(format!("{base_url}{endpoint}"))
-            .header("Content-Type", "application/json")
-            .json(&body);
-
-        // Apply auth from config
-        req = apply_auth_headers(req, api_key, pdef);
-
-        // Apply extra headers from config
-        if let Some(p) = pdef {
-            for (k, v) in &p.extra_headers {
-                req = req.header(k.as_str(), v.as_str());
-            }
-        }
-
-        let response = req.send().await.map_err(|e| {
-            VmError::Thrown(VmValue::String(Rc::from(format!(
-                "{provider} API error: {e}"
-            ))))
-        })?;
-
-        let json: serde_json::Value = response.json().await.map_err(|e| {
-            VmError::Thrown(VmValue::String(Rc::from(format!(
-                "{provider} response parse error: {e}"
-            ))))
-        })?;
-
         if let Some(err) = json["error"]["message"].as_str() {
             return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
                 "{provider} API error: {err}"
@@ -371,7 +313,6 @@ async fn vm_call_llm_api(
             .unwrap_or("")
             .to_string();
 
-        // Extract tool calls from OpenAI format
         let mut tool_calls = Vec::new();
         if let Some(calls) = json["choices"][0]["message"]["tool_calls"].as_array() {
             for call in calls {
@@ -405,7 +346,7 @@ async fn vm_call_llm_api(
 pub(crate) fn apply_auth_headers(
     req: reqwest::RequestBuilder,
     api_key: &str,
-    pdef: Option<&llm_config::ProviderDef>,
+    pdef: Option<&crate::llm_config::ProviderDef>,
 ) -> reqwest::RequestBuilder {
     if api_key.is_empty() {
         return req;

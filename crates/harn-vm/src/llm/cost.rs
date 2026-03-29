@@ -14,6 +14,12 @@ thread_local! {
     static LLM_ACCUMULATED_COST: RefCell<f64> = const { RefCell::new(0.0) };
 }
 
+/// Reset thread-local cost state. Call between test runs to avoid leaking.
+pub(crate) fn reset_cost_state() {
+    LLM_BUDGET.with(|b| *b.borrow_mut() = None);
+    LLM_ACCUMULATED_COST.with(|a| *a.borrow_mut() = 0.0);
+}
+
 /// Pricing per million tokens (input, output) in USD.
 fn model_pricing(model: &str) -> Option<(f64, f64)> {
     // Prices per million tokens as of early 2026

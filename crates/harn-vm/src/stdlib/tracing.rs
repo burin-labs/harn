@@ -38,15 +38,9 @@ pub(crate) fn register_tracing_builtins(vm: &mut Vm) {
         });
 
         let mut span = BTreeMap::new();
-        span.insert(
-            "trace_id".to_string(),
-            VmValue::String(Rc::from(trace_id.as_str())),
-        );
-        span.insert(
-            "span_id".to_string(),
-            VmValue::String(Rc::from(span_id.as_str())),
-        );
-        span.insert("name".to_string(), VmValue::String(Rc::from(name.as_str())));
+        span.insert("trace_id".to_string(), VmValue::String(Rc::from(trace_id)));
+        span.insert("span_id".to_string(), VmValue::String(Rc::from(span_id)));
+        span.insert("name".to_string(), VmValue::String(Rc::from(name)));
         span.insert("start_ms".to_string(), VmValue::Int(start_ms));
         Ok(VmValue::Dict(Rc::new(span)))
     });
@@ -79,21 +73,21 @@ pub(crate) fn register_tracing_builtins(vm: &mut Vm) {
         let span_id = span.get("span_id").map(|v| v.display()).unwrap_or_default();
 
         VM_TRACE_STACK.with(|stack| {
-            stack.borrow_mut().pop();
+            let mut s = stack.borrow_mut();
+            // Only pop if the top of the stack matches this span
+            if let Some(top) = s.last() {
+                if top.span_id == span_id {
+                    s.pop();
+                }
+            }
         });
 
         let level_num = 1_u8;
         if level_num >= VM_MIN_LOG_LEVEL.load(Ordering::Relaxed) {
             let mut fields = BTreeMap::new();
-            fields.insert(
-                "trace_id".to_string(),
-                VmValue::String(Rc::from(trace_id.as_str())),
-            );
-            fields.insert(
-                "span_id".to_string(),
-                VmValue::String(Rc::from(span_id.as_str())),
-            );
-            fields.insert("name".to_string(), VmValue::String(Rc::from(name.as_str())));
+            fields.insert("trace_id".to_string(), VmValue::String(Rc::from(trace_id)));
+            fields.insert("span_id".to_string(), VmValue::String(Rc::from(span_id)));
+            fields.insert("name".to_string(), VmValue::String(Rc::from(name)));
             fields.insert("duration_ms".to_string(), VmValue::Int(duration_ms));
             let line = vm_build_log_line("info", "span_end", Some(&fields));
             out.push_str(&line);
@@ -105,7 +99,7 @@ pub(crate) fn register_tracing_builtins(vm: &mut Vm) {
     vm.register_builtin("trace_id", |_args, _out| {
         let id = VM_TRACE_STACK.with(|stack| stack.borrow().last().map(|t| t.trace_id.clone()));
         match id {
-            Some(trace_id) => Ok(VmValue::String(Rc::from(trace_id.as_str()))),
+            Some(trace_id) => Ok(VmValue::String(Rc::from(trace_id))),
             None => Ok(VmValue::Nil),
         }
     });
@@ -120,14 +114,8 @@ pub(crate) fn register_tracing_builtins(vm: &mut Vm) {
             .or_else(|_| std::env::var("ANTHROPIC_API_KEY"))
             .is_ok();
         let mut info = BTreeMap::new();
-        info.insert(
-            "provider".to_string(),
-            VmValue::String(Rc::from(provider.as_str())),
-        );
-        info.insert(
-            "model".to_string(),
-            VmValue::String(Rc::from(model.as_str())),
-        );
+        info.insert("provider".to_string(), VmValue::String(Rc::from(provider)));
+        info.insert("model".to_string(), VmValue::String(Rc::from(model)));
         info.insert("api_key_set".to_string(), VmValue::Bool(api_key_set));
         Ok(VmValue::Dict(Rc::new(info)))
     });

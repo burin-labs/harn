@@ -90,7 +90,7 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
             let entry =
                 entry.map_err(|e| VmError::Thrown(VmValue::String(Rc::from(e.to_string()))))?;
             let name = entry.file_name().to_string_lossy().to_string();
-            result.push(VmValue::String(Rc::from(name.as_str())));
+            result.push(VmValue::String(Rc::from(name)));
         }
         result.sort_by_key(|a| a.display());
         Ok(VmValue::List(Rc::new(result)))

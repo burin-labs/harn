@@ -26,11 +26,8 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
         let content = args.get(2).map(|a| a.display()).unwrap_or_default();
 
         let mut msg = BTreeMap::new();
-        msg.insert("role".to_string(), VmValue::String(Rc::from(role.as_str())));
-        msg.insert(
-            "content".to_string(),
-            VmValue::String(Rc::from(content.as_str())),
-        );
+        msg.insert("role".to_string(), VmValue::String(Rc::from(role)));
+        msg.insert("content".to_string(), VmValue::String(Rc::from(content)));
 
         let mut new_messages = messages;
         new_messages.push(VmValue::Dict(Rc::new(msg)));
@@ -63,11 +60,11 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
         msg.insert("role".to_string(), VmValue::String(Rc::from("tool_result")));
         msg.insert(
             "tool_use_id".to_string(),
-            VmValue::String(Rc::from(tool_use_id.as_str())),
+            VmValue::String(Rc::from(tool_use_id)),
         );
         msg.insert(
             "content".to_string(),
-            VmValue::String(Rc::from(result_content.as_str())),
+            VmValue::String(Rc::from(result_content)),
         );
 
         let mut new_messages = messages;

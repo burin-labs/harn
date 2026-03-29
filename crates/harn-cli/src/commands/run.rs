@@ -297,7 +297,7 @@ pub(crate) async fn run_file_bridge(path: &str, arg_json: Option<&str>) {
     process::exit(exit_code);
 }
 
-pub(crate) async fn run_watch(path: &str) {
+pub(crate) async fn run_watch(path: &str, denied_builtins: HashSet<String>) {
     use notify::{Event, EventKind, RecursiveMode, Watcher};
 
     let abs_path = std::fs::canonicalize(path).unwrap_or_else(|e| {
@@ -308,7 +308,7 @@ pub(crate) async fn run_watch(path: &str) {
 
     // Initial run
     eprintln!("\x1b[2m[watch] running {path}...\x1b[0m");
-    run_file(path, false, HashSet::new()).await;
+    run_file(path, false, denied_builtins.clone()).await;
 
     let (tx, mut rx) = tokio::sync::mpsc::channel::<()>(1);
     let _watcher = {
@@ -356,6 +356,6 @@ pub(crate) async fn run_watch(path: &str) {
 
         eprintln!();
         eprintln!("\x1b[2m[watch] change detected, re-running {path}...\x1b[0m");
-        run_file(path, false, HashSet::new()).await;
+        run_file(path, false, denied_builtins.clone()).await;
     }
 }

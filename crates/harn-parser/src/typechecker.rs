@@ -39,6 +39,9 @@ struct TypeScope {
     impl_methods: BTreeMap<String, Vec<ImplMethodSig>>,
     /// Generic type parameter names in scope (treated as compatible with any type).
     generic_type_params: std::collections::BTreeSet<String>,
+    /// Where-clause constraints: type_param → interface_bound.
+    /// Used for definition-site checking of generic function bodies.
+    where_constraints: BTreeMap<String, String>,
     parent: Option<Box<TypeScope>>,
 }
 
@@ -77,6 +80,7 @@ impl TypeScope {
             structs: BTreeMap::new(),
             impl_methods: BTreeMap::new(),
             generic_type_params: std::collections::BTreeSet::new(),
+            where_constraints: BTreeMap::new(),
             parent: None,
         }
     }
@@ -91,6 +95,7 @@ impl TypeScope {
             structs: BTreeMap::new(),
             impl_methods: BTreeMap::new(),
             generic_type_params: std::collections::BTreeSet::new(),
+            where_constraints: BTreeMap::new(),
             parent: Some(Box::new(self.clone())),
         }
     }
@@ -119,6 +124,17 @@ impl TypeScope {
                 .parent
                 .as_ref()
                 .is_some_and(|p| p.is_generic_type_param(name))
+    }
+
+    fn get_where_constraint(&self, type_param: &str) -> Option<&str> {
+        self.where_constraints
+            .get(type_param)
+            .map(|s| s.as_str())
+            .or_else(|| {
+                self.parent
+                    .as_ref()
+                    .and_then(|p| p.get_where_constraint(type_param))
+            })
     }
 
     fn get_enum(&self, name: &str) -> Option<&Vec<String>> {
@@ -350,7 +366,7 @@ impl TypeChecker {
                             .collect(),
                     };
                     self.scope.define_fn(name, sig);
-                    self.check_fn_body(type_params, params, return_type, body);
+                    self.check_fn_body(type_params, params, return_type, body, where_clauses);
                 }
                 _ => {
                     let mut scope = self.scope.clone();
@@ -538,7 +554,7 @@ impl TypeChecker {
                 };
                 scope.define_fn(name, sig.clone());
                 scope.define_var(name, None);
-                self.check_fn_body(type_params, params, return_type, body);
+                self.check_fn_body(type_params, params, return_type, body, where_clauses);
             }
 
             Node::FunctionCall { name, args } => {
@@ -811,11 +827,42 @@ impl TypeChecker {
             Node::UnaryOp { operand, .. } => {
                 self.check_node(operand, scope);
             }
-            Node::MethodCall { object, args, .. }
-            | Node::OptionalMethodCall { object, args, .. } => {
+            Node::MethodCall {
+                object,
+                method,
+                args,
+                ..
+            }
+            | Node::OptionalMethodCall {
+                object,
+                method,
+                args,
+                ..
+            } => {
                 self.check_node(object, scope);
                 for arg in args {
                     self.check_node(arg, scope);
+                }
+                // Definition-site generic checking: if the object's type is a
+                // constrained generic param (where T: Interface), verify the
+                // method exists in the bound interface.
+                if let Some(TypeExpr::Named(type_name)) = self.infer_type(object, scope) {
+                    if scope.is_generic_type_param(&type_name) {
+                        if let Some(iface_name) = scope.get_where_constraint(&type_name) {
+                            if let Some(iface_methods) = scope.get_interface(iface_name) {
+                                let has_method = iface_methods.iter().any(|m| m.name == *method);
+                                if !has_method {
+                                    self.warning_at(
+                                        format!(
+                                            "Method '{}' not found in interface '{}' (constraint on '{}')",
+                                            method, iface_name, type_name
+                                        ),
+                                        span,
+                                    );
+                                }
+                            }
+                        }
+                    }
                 }
             }
             Node::PropertyAccess { object, .. } | Node::OptionalPropertyAccess { object, .. } => {
@@ -846,12 +893,19 @@ impl TypeChecker {
         params: &[TypedParam],
         return_type: &Option<TypeExpr>,
         body: &[SNode],
+        where_clauses: &[WhereClause],
     ) {
         let mut fn_scope = self.scope.child();
         // Register generic type parameters so they are treated as compatible
         // with any concrete type during type checking.
         for tp in type_params {
             fn_scope.generic_type_params.insert(tp.name.clone());
+        }
+        // Store where-clause constraints for definition-site checking
+        for wc in where_clauses {
+            fn_scope
+                .where_constraints
+                .insert(wc.type_name.clone(), wc.bound.clone());
         }
         for param in params {
             fn_scope.define_var(&param.name, param.type_expr.clone());

@@ -171,7 +171,7 @@ pub fn register_store_builtins(vm: &mut Vm, base_dir: &Path) {
         let keys = s.borrow_mut().list();
         Ok(VmValue::List(Rc::new(
             keys.into_iter()
-                .map(|k| VmValue::String(Rc::from(k.as_str())))
+                .map(|k| VmValue::String(Rc::from(k)))
                 .collect(),
         )))
     });

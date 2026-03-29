@@ -15,6 +15,12 @@ thread_local! {
     pub(crate) static VM_TRACE_STACK: std::cell::RefCell<Vec<VmTraceContext>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
+/// Reset thread-local logging state. Call between test runs.
+pub(crate) fn reset_logging_state() {
+    VM_MIN_LOG_LEVEL.store(0, std::sync::atomic::Ordering::Relaxed);
+    VM_TRACE_STACK.with(|s| s.borrow_mut().clear());
+}
+
 pub(crate) fn vm_level_to_u8(level: &str) -> Option<u8> {
     match level {
         "debug" => Some(0),

@@ -1,0 +1,8 @@
+// Test that date_format rejects negative timestamps
+pipeline default(task) {
+  let r = try {
+    date_format(-1000, "%Y-%m-%d")
+  }
+  println(is_err(r))
+  println(unwrap_err(r))
+}

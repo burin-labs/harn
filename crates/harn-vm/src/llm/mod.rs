@@ -48,6 +48,12 @@ pub use self::helpers::vm_value_to_json;
 pub use self::mock::{set_replay_mode, LlmReplayMode};
 pub use self::trace::{enable_tracing, peek_trace_summary, take_trace, LlmTraceEntry};
 
+/// Reset all thread-local LLM state (cost, trace, mock). Call between test runs.
+pub fn reset_llm_state() {
+    cost::reset_cost_state();
+    trace::reset_trace_state();
+}
+
 /// Register LLM builtins on a VM.
 pub fn register_llm_builtins(vm: &mut Vm) {
     // =========================================================================
@@ -126,7 +132,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
         // This matches the old llm_call(prompt, system) two-arg API
         let is_simple_call = tools_val.is_none() && messages_val.is_none();
         if is_simple_call {
-            return Ok(VmValue::String(Rc::from(result.text.as_str())));
+            return Ok(VmValue::String(Rc::from(result.text)));
         }
 
         Ok(vm_build_llm_result(&result, None))
@@ -236,10 +242,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
             "status".to_string(),
             VmValue::String(Rc::from(final_status)),
         );
-        result_dict.insert(
-            "text".to_string(),
-            VmValue::String(Rc::from(total_text.as_str())),
-        );
+        result_dict.insert("text".to_string(), VmValue::String(Rc::from(total_text)));
         result_dict.insert(
             "iterations".to_string(),
             VmValue::Int(total_iterations as i64),

@@ -1,0 +1,9 @@
+// Test shape validation with union type fields
+pipeline default(task) {
+  fn process(data: {name: string, value: string | int}) {
+    println(data.name)
+    println(data.value)
+  }
+  process({name: "test", value: 42})
+  process({name: "test2", value: "hello"})
+}

@@ -43,6 +43,11 @@ pub(crate) fn register_datetime_builtins(vm: &mut Vm) {
             .map(|a| a.display())
             .unwrap_or_else(|| "%Y-%m-%d %H:%M:%S".to_string());
 
+        if ts < 0.0 {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "date_format: negative timestamps (pre-epoch dates) are not supported",
+            ))));
+        }
         let (y, m, d, hour, minute, second, _dow) = vm_civil_from_timestamp(ts as u64);
 
         let result = fmt
@@ -53,7 +58,7 @@ pub(crate) fn register_datetime_builtins(vm: &mut Vm) {
             .replace("%M", &format!("{minute:02}"))
             .replace("%S", &format!("{second:02}"));
 
-        Ok(VmValue::String(Rc::from(result.as_str())))
+        Ok(VmValue::String(Rc::from(result)))
     });
 
     vm.register_builtin("date_parse", |args, _out| {
@@ -66,9 +71,34 @@ pub(crate) fn register_datetime_builtins(vm: &mut Vm) {
             )))));
         }
         let (y, m, d) = (parts[0], parts[1], parts[2]);
+        if !(1..=12).contains(&m) {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                "Invalid month: {m} (must be 1-12)"
+            )))));
+        }
+        if !(1..=31).contains(&d) {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                "Invalid day: {d} (must be 1-31)"
+            )))));
+        }
         let hour = parts.get(3).copied().unwrap_or(0);
+        if !(0..=23).contains(&hour) {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                "Invalid hour: {hour} (must be 0-23)"
+            )))));
+        }
         let minute = parts.get(4).copied().unwrap_or(0);
+        if !(0..=59).contains(&minute) {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                "Invalid minute: {minute} (must be 0-59)"
+            )))));
+        }
         let second = parts.get(5).copied().unwrap_or(0);
+        if !(0..=59).contains(&second) {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                "Invalid second: {second} (must be 0-59)"
+            )))));
+        }
 
         let (y_adj, m_adj) = if m <= 2 {
             (y - 1, (m + 9) as u64)

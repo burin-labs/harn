@@ -1,0 +1,13 @@
+// Test that len() counts characters, not bytes, for Unicode strings
+pipeline default(task) {
+  let ascii = "hello"
+  println(len(ascii))
+  // Multi-byte Unicode: "café" is 4 characters but 5 bytes
+  let unicode = "café"
+  println(len(unicode))
+  // Emoji: one character, multiple bytes
+  let emoji = "🎉"
+  println(len(emoji))
+  // Empty string
+  println(len(""))
+}

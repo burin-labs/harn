@@ -12,27 +12,25 @@ use super::helpers::vm_resolve_api_key;
 pub(crate) fn register_config_builtins(vm: &mut Vm) {
     vm.register_builtin("llm_infer_provider", |args, _out| {
         let model_id = args.first().map(|a| a.display()).unwrap_or_default();
-        Ok(VmValue::String(Rc::from(
-            llm_config::infer_provider(&model_id).as_str(),
-        )))
+        Ok(VmValue::String(Rc::from(llm_config::infer_provider(
+            &model_id,
+        ))))
     });
 
     vm.register_builtin("llm_model_tier", |args, _out| {
         let model_id = args.first().map(|a| a.display()).unwrap_or_default();
-        Ok(VmValue::String(Rc::from(
-            llm_config::model_tier(&model_id).as_str(),
-        )))
+        Ok(VmValue::String(Rc::from(llm_config::model_tier(&model_id))))
     });
 
     vm.register_builtin("llm_resolve_model", |args, _out| {
         let alias = args.first().map(|a| a.display()).unwrap_or_default();
         let (id, provider) = llm_config::resolve_model(&alias);
         let mut dict = BTreeMap::new();
-        dict.insert("id".to_string(), VmValue::String(Rc::from(id.as_str())));
+        dict.insert("id".to_string(), VmValue::String(Rc::from(id)));
         dict.insert(
             "provider".to_string(),
             provider
-                .map(|p| VmValue::String(Rc::from(p.as_str())))
+                .map(|p| VmValue::String(Rc::from(p)))
                 .unwrap_or(VmValue::Nil),
         );
         Ok(VmValue::Dict(Rc::new(dict)))
@@ -42,7 +40,7 @@ pub(crate) fn register_config_builtins(vm: &mut Vm) {
         let names = llm_config::provider_names();
         let list: Vec<VmValue> = names
             .into_iter()
-            .map(|n| VmValue::String(Rc::from(n.as_str())))
+            .map(|n| VmValue::String(Rc::from(n)))
             .collect();
         Ok(VmValue::List(Rc::new(list)))
     });
@@ -144,13 +142,10 @@ pub(crate) fn register_config_builtins(vm: &mut Vm) {
                 };
                 let mut dict = BTreeMap::new();
                 dict.insert("valid".to_string(), VmValue::Bool(valid));
-                dict.insert(
-                    "message".to_string(),
-                    VmValue::String(Rc::from(message.as_str())),
-                );
+                dict.insert("message".to_string(), VmValue::String(Rc::from(message)));
                 let mut meta = BTreeMap::new();
                 meta.insert("status".to_string(), VmValue::Int(status as i64));
-                meta.insert("url".to_string(), VmValue::String(Rc::from(url.as_str())));
+                meta.insert("url".to_string(), VmValue::String(Rc::from(url)));
                 dict.insert("metadata".to_string(), VmValue::Dict(Rc::new(meta)));
                 Ok(VmValue::Dict(Rc::new(dict)))
             }
