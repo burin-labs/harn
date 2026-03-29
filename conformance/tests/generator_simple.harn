@@ -2,12 +2,10 @@ pipeline test(task) {
   fn gen() {
     yield 42
   }
-
   let g = gen()
   let r1 = g.next()
   println(r1.value)
   println(r1.done)
-
   let r2 = g.next()
   println(r2.value)
   println(r2.done)
