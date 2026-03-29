@@ -214,6 +214,118 @@ fn print_trace_summary() {
     );
 }
 
+/// Run a .harn file as an MCP server over stdio.
+///
+/// The pipeline should return a tool_registry value. The CLI then starts an
+/// MCP server loop that exposes those tools to any MCP client (Claude Desktop,
+/// Cursor, etc.).
+pub(crate) async fn run_file_mcp_serve(path: &str) {
+    let (source, program) = crate::parse_source_file(path);
+
+    let type_diagnostics = harn_parser::TypeChecker::new().check(&program);
+    for diag in &type_diagnostics {
+        if diag.severity == DiagnosticSeverity::Error {
+            eprintln!("error: {}", diag.message);
+            process::exit(1);
+        }
+    }
+
+    let chunk = match harn_vm::Compiler::new().compile(&program) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("error: compile error: {e}");
+            process::exit(1);
+        }
+    };
+
+    let mut vm = harn_vm::Vm::new();
+    harn_vm::register_vm_stdlib(&mut vm);
+    let source_parent = std::path::Path::new(path)
+        .parent()
+        .unwrap_or(std::path::Path::new("."));
+    let project_root = harn_vm::stdlib::process::find_project_root(source_parent);
+    let store_base = project_root.as_deref().unwrap_or(source_parent);
+    harn_vm::register_store_builtins(&mut vm, store_base);
+    harn_vm::register_metadata_builtins(&mut vm, store_base);
+    let pipeline_name = std::path::Path::new(path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("default");
+    harn_vm::register_checkpoint_builtins(&mut vm, store_base, pipeline_name);
+    vm.set_source_info(path, &source);
+    if let Some(ref root) = project_root {
+        vm.set_project_root(root);
+    }
+    if let Some(p) = std::path::Path::new(path).parent() {
+        if !p.as_os_str().is_empty() {
+            vm.set_source_dir(p);
+        }
+    }
+
+    // Auto-connect MCP client servers declared in harn.toml
+    if let Some(manifest) = package::try_read_manifest_for(Path::new(path)) {
+        if !manifest.mcp.is_empty() {
+            connect_mcp_servers(&manifest.mcp, &mut vm).await;
+        }
+    }
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            // Execute the pipeline — it should call mcp_serve(registry)
+            match vm.execute(&chunk).await {
+                Ok(_) => {}
+                Err(e) => {
+                    eprint!("{}", vm.format_runtime_error(&e));
+                    process::exit(1);
+                }
+            }
+
+            // Any print/println output goes to stderr (stdout is MCP transport)
+            let output = vm.output();
+            if !output.is_empty() {
+                eprint!("{output}");
+            }
+
+            // Retrieve the registry that mcp_serve() captured
+            let registry = match harn_vm::take_mcp_serve_registry() {
+                Some(r) => r,
+                None => {
+                    eprintln!("error: pipeline did not call mcp_serve(registry)");
+                    eprintln!("hint: call mcp_serve(tools) at the end of your pipeline");
+                    process::exit(1);
+                }
+            };
+
+            let tools = match harn_vm::tool_registry_to_mcp_tools(&registry) {
+                Ok(t) => t,
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    process::exit(1);
+                }
+            };
+
+            let server_name = std::path::Path::new(path)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("harn")
+                .to_string();
+
+            eprintln!(
+                "[harn] mcp-serve: serving {} tool{} as '{server_name}'",
+                tools.len(),
+                if tools.len() == 1 { "" } else { "s" }
+            );
+
+            let server = harn_vm::McpServer::new(server_name, tools);
+            if let Err(e) = server.run(&mut vm).await {
+                eprintln!("error: MCP server error: {e}");
+                process::exit(1);
+            }
+        })
+        .await;
+}
+
 pub(crate) async fn run_file_bridge(path: &str, arg_json: Option<&str>) {
     let (_source, program) = parse_source_file(path);
 

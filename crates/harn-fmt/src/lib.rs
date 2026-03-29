@@ -749,34 +749,15 @@ impl Formatter {
                 let kw = if *inclusive { "thru" } else { "upto" };
                 format!("{s} {kw} {e}")
             }
-            Node::Closure { params, body } => {
-                let params_str = format_typed_params(params);
-                if body.len() == 1 && is_simple_expr(&body[0]) {
-                    let expr = self.format_expr(&body[0]);
-                    if params.is_empty() {
-                        format!("{{ {expr} }}")
-                    } else {
-                        format!("{{ {params_str} -> {expr} }}")
-                    }
+            Node::Closure {
+                params,
+                body,
+                fn_syntax,
+            } => {
+                if *fn_syntax {
+                    self.format_fn_closure(params, body)
                 } else {
-                    let mut result = String::new();
-                    if params.is_empty() {
-                        result.push_str("{\n");
-                    } else {
-                        result.push_str(&format!("{{ {params_str} ->\n"));
-                    }
-                    let current_indent = self.indent + 1;
-                    for n in body {
-                        let indent_str = "  ".repeat(current_indent);
-                        let expr = self.format_expr_or_stmt(n, current_indent);
-                        result.push_str(&indent_str);
-                        result.push_str(&expr);
-                        result.push('\n');
-                    }
-                    let close_indent = "  ".repeat(self.indent);
-                    result.push_str(&close_indent);
-                    result.push('}');
-                    result
+                    self.format_arrow_closure(params, body)
                 }
             }
             Node::EnumConstruct {
@@ -1280,6 +1261,61 @@ impl Formatter {
                 let expr = self.format_expr(inner);
                 format!("...{expr}")
             }
+        }
+    }
+
+    /// Format a closure using arrow syntax: `{ params -> body }`
+    fn format_arrow_closure(&self, params: &[TypedParam], body: &[SNode]) -> String {
+        let params_str = format_typed_params(params);
+        if body.len() == 1 && is_simple_expr(&body[0]) {
+            let expr = self.format_expr(&body[0]);
+            if params.is_empty() {
+                format!("{{ {expr} }}")
+            } else {
+                format!("{{ {params_str} -> {expr} }}")
+            }
+        } else {
+            let mut result = String::new();
+            if params.is_empty() {
+                result.push_str("{\n");
+            } else {
+                result.push_str(&format!("{{ {params_str} ->\n"));
+            }
+            let current_indent = self.indent + 1;
+            for n in body {
+                let indent_str = "  ".repeat(current_indent);
+                let expr = self.format_expr_or_stmt(n, current_indent);
+                result.push_str(&indent_str);
+                result.push_str(&expr);
+                result.push('\n');
+            }
+            let close_indent = "  ".repeat(self.indent);
+            result.push_str(&close_indent);
+            result.push('}');
+            result
+        }
+    }
+
+    /// Format a closure using fn syntax: `fn(params) { body }`
+    fn format_fn_closure(&self, params: &[TypedParam], body: &[SNode]) -> String {
+        let params_str = format_typed_params(params);
+        if body.len() == 1 && is_simple_expr(&body[0]) {
+            let expr = self.format_expr(&body[0]);
+            format!("fn({params_str}) {{ {expr} }}")
+        } else {
+            let mut result = format!("fn({params_str}) {{\n");
+            let current_indent = self.indent + 1;
+            for n in body {
+                let indent_str = "  ".repeat(current_indent);
+                let expr = self.format_expr_or_stmt(n, current_indent);
+                result.push_str(&indent_str);
+                result.push_str(&expr);
+                result.push('\n');
+            }
+            let close_indent = "  ".repeat(self.indent);
+            result.push_str(&close_indent);
+            result.push('}');
+            result
         }
     }
 

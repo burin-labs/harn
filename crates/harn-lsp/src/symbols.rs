@@ -283,7 +283,7 @@ fn collect_symbols(snode: &SNode, symbols: &mut Vec<SymbolInfo>, scope_span: Opt
                 collect_symbols(s, symbols, Some(snode.span));
             }
         }
-        Node::Closure { params, body } => {
+        Node::Closure { params, body, .. } => {
             for p in params {
                 symbols.push(SymbolInfo {
                     name: p.name.clone(),

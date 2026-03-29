@@ -32,8 +32,8 @@ pipeline default() {
   }
   try {
     show_user(make_wrong_type())
-  } catch (e) {
-    println(e)
+  } catch (e2) {
+    println(e2)
   }
   // 7. Dynamic value — non-dict passed to shape param
   fn make_string() -> dict {
@@ -51,8 +51,8 @@ pipeline default() {
   }
   try {
     show_nested(make_bad_nested())
-  } catch (e) {
-    println(e)
+  } catch (e3) {
+    println(e3)
   }
   // 9. Nested shape wrong type via dynamic dict
   fn make_flat_nested() -> dict {
@@ -60,7 +60,7 @@ pipeline default() {
   }
   try {
     show_nested(make_flat_nested())
-  } catch (e) {
-    println(e)
+  } catch (e4) {
+    println(e4)
   }
 }

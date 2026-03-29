@@ -1,38 +1,30 @@
 pipeline test(task) {
   // Test checkpoint builtins for resilient pipeline execution.
-
   // Initially no checkpoint exists
   let val = checkpoint_get("step1")
   assert(val == nil, "checkpoint_get should return nil for missing key")
-
   // Set a checkpoint
   checkpoint("step1", {status: "done", count: 42})
-
   // Read it back
   let saved = checkpoint_get("step1")
   assert(saved != nil, "checkpoint_get should return saved value")
   assert(saved.status == "done", "should preserve string field")
   assert(saved.count == 42, "should preserve int field")
-
   // Overwrite
   checkpoint("step1", "completed")
   let updated = checkpoint_get("step1")
   assert(updated == "completed", "checkpoint should overwrite")
-
   // List checkpoints
   let keys = checkpoint_list()
   assert(len(keys) == 1, "should have 1 checkpoint key")
   assert(keys[0] == "step1", "key should be step1")
-
   // Multiple checkpoints
   checkpoint("step2", true)
   let keys2 = checkpoint_list()
   assert(len(keys2) == 2, "should have 2 checkpoint keys")
-
   // Clear all
   checkpoint_clear()
   let after_clear = checkpoint_get("step1")
   assert(after_clear == nil, "should be nil after clear")
-
   log("checkpoint tests passed")
 }

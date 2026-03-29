@@ -432,9 +432,7 @@ impl Vm {
 
     /// Get the project root directory, falling back to source_dir.
     pub fn project_root(&self) -> Option<&std::path::Path> {
-        self.project_root
-            .as_deref()
-            .or(self.source_dir.as_deref())
+        self.project_root.as_deref().or(self.source_dir.as_deref())
     }
 
     /// Return all registered builtin names (sync + async).
@@ -445,8 +443,9 @@ impl Vm {
     }
 
     /// Set a global variable in the VM's environment.
+    /// Globals are defined before user code runs, so collisions are not possible.
     pub fn set_global(&mut self, name: &str, value: VmValue) {
-        self.env.define(name, value, false);
+        let _ = self.env.define(name, value, false);
     }
 
     /// Execute an import, reading and running the file's declarations.
@@ -599,7 +598,7 @@ impl Vm {
                             env: self.env.clone(),
                         };
                         self.env
-                            .define(name, VmValue::Closure(Rc::new(closure)), false);
+                            .define(name, VmValue::Closure(Rc::new(closure)), false)?;
                     }
                     harn_parser::Node::ImportDecl { path: sub_path } => {
                         let old_dir = self.source_dir.clone();
@@ -814,7 +813,7 @@ impl Vm {
         for scope in &caller_env.scopes {
             for (name, (val, mutable)) in &scope.vars {
                 if call_env.get(name).is_none() {
-                    call_env.define(name, val.clone(), *mutable);
+                    let _ = call_env.define(name, val.clone(), *mutable);
                 }
             }
         }
@@ -842,12 +841,10 @@ impl Vm {
             .unwrap_or(closure.func.params.len());
         for (i, param) in closure.func.params.iter().enumerate() {
             if i < args.len() {
-                call_env.define(param, args[i].clone(), false);
+                let _ = call_env.define(param, args[i].clone(), false);
             } else if i < default_start {
-                // Required param not provided — define as nil (backward compat)
-                call_env.define(param, VmValue::Nil, false);
+                let _ = call_env.define(param, VmValue::Nil, false);
             }
-            // else: has default, not provided — preamble will DefLet it
         }
 
         self.env = call_env;
@@ -886,9 +883,9 @@ impl Vm {
             .unwrap_or(closure.func.params.len());
         for (i, param) in closure.func.params.iter().enumerate() {
             if i < args.len() {
-                call_env.define(param, args[i].clone(), false);
+                let _ = call_env.define(param, args[i].clone(), false);
             } else if i < default_start {
-                call_env.define(param, VmValue::Nil, false);
+                let _ = call_env.define(param, VmValue::Nil, false);
             }
         }
         child.env = call_env;
@@ -947,11 +944,10 @@ impl Vm {
                 .unwrap_or(closure.func.params.len());
             for (i, param) in closure.func.params.iter().enumerate() {
                 if i < args.len() {
-                    call_env.define(param, args[i].clone(), false);
+                    let _ = call_env.define(param, args[i].clone(), false);
                 } else if i < default_start {
-                    call_env.define(param, VmValue::Nil, false);
+                    let _ = call_env.define(param, VmValue::Nil, false);
                 }
-                // else: has default, preamble will DefLet
             }
 
             self.env = call_env;
@@ -966,6 +962,17 @@ impl Vm {
 
             result
         })
+    }
+
+    /// Public wrapper for `call_closure`, used by the MCP server to invoke
+    /// tool handler closures from outside the VM execution loop.
+    pub async fn call_closure_pub(
+        &mut self,
+        closure: &VmClosure,
+        args: &[VmValue],
+        functions: &[CompiledFunction],
+    ) -> Result<VmValue, VmError> {
+        self.call_closure(closure, args, functions).await
     }
 
     /// Resolve a named builtin: sync builtins → async builtins → bridge → error.
@@ -1547,8 +1554,8 @@ try {
         log("inner caught: " + e)
         throw "outer"
     }
-} catch(e) {
-    log("outer caught: " + e)
+} catch(e2) {
+    log("outer caught: " + e2)
 }
 }"#,
         );

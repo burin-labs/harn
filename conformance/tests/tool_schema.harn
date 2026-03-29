@@ -1,8 +1,8 @@
 pipeline default() {
   // Create registry with tools
-  let tools = tool_registry()
-  let tools = tool_add(tools, "search", "Search the web", { query -> return "results for: " + query }, {query: "string"})
-  let tools = tool_add(tools, "calculate", "Evaluate math", { _expr -> return "42" }, {expression: "string", precision: "int"})
+  var tools = tool_registry()
+  tools = tool_add(tools, "search", "Search the web", { query -> return "results for: " + query }, {query: "string"})
+  tools = tool_add(tools, "calculate", "Evaluate math", { _expr -> return "42" }, {expression: "string", precision: "int"})
   // Test tool_schema generates OpenAPI-like schema
   let schema = tool_schema(tools)
   println(schema.schema_version)

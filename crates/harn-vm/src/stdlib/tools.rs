@@ -331,10 +331,7 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
             }
         };
 
-        let handler = config
-            .get("handler")
-            .cloned()
-            .unwrap_or(VmValue::Nil);
+        let handler = config.get("handler").cloned().unwrap_or(VmValue::Nil);
 
         let parameters = config
             .get("params")

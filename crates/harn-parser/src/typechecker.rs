@@ -1297,7 +1297,7 @@ impl TypeChecker {
                     Some(TypeExpr::Named("dict".into()))
                 }
             }
-            Node::Closure { params, body } => {
+            Node::Closure { params, body, .. } => {
                 // If all params are typed and we can infer a return type, produce FnType
                 let all_typed = params.iter().all(|p| p.type_expr.is_some());
                 if all_typed && !params.is_empty() {

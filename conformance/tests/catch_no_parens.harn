@@ -9,8 +9,8 @@ pipeline default(task) {
   // catch (e) { ... } should also still work
   try {
     throw "another error"
-  } catch (e) {
-    println("also caught: " + e)
+  } catch (e2) {
+    println("also caught: " + e2)
   }
   // catch without variable should work too
   try {

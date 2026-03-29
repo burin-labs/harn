@@ -1,0 +1,4 @@
+pipeline test(task) {
+  // mcp_serve should reject non-registry arguments
+  mcp_serve("not a registry")
+}

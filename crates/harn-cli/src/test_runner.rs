@@ -89,9 +89,7 @@ pub async fn run_test_file(
                 let store_base = project_root.as_deref().unwrap_or(source_parent);
                 harn_vm::register_store_builtins(&mut vm, store_base);
                 harn_vm::register_metadata_builtins(&mut vm, store_base);
-                let pipeline_name = path.file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("test");
+                let pipeline_name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("test");
                 harn_vm::register_checkpoint_builtins(&mut vm, store_base, pipeline_name);
                 vm.set_source_info(&path_str, &source);
                 if let Some(parent) = path.parent() {

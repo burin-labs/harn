@@ -402,12 +402,7 @@ impl AcpBridge {
     }
 
     /// Send a structured `session/update` with progress phase, message, and data.
-    fn send_progress(
-        &self,
-        phase: &str,
-        message: &str,
-        data: Option<serde_json::Value>,
-    ) {
+    fn send_progress(&self, phase: &str, message: &str, data: Option<serde_json::Value>) {
         let mut update = serde_json::json!({
             "sessionUpdate": "progress",
             "phase": phase,
@@ -426,12 +421,7 @@ impl AcpBridge {
     }
 
     /// Send a structured `session/update` with log level, message, and fields.
-    fn send_log(
-        &self,
-        level: &str,
-        message: &str,
-        fields: Option<serde_json::Value>,
-    ) {
+    fn send_log(&self, level: &str, message: &str, fields: Option<serde_json::Value>) {
         let mut update = serde_json::json!({
             "sessionUpdate": "log",
             "level": level,

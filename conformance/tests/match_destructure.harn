@@ -25,8 +25,8 @@ pipeline default() {
   }
   // List pattern: first arm fails, second matches
   match [5, 6] {
-    [1, x] -> { println("one") }
-    [5, x] -> { println("five:" + to_string(x)) }
+    [1, w] -> { println("one") }
+    [5, w] -> { println("five:" + to_string(w)) }
     _ -> { println("no match") }
   }
   // List pattern: non-list falls to wildcard

@@ -557,6 +557,7 @@ impl Compiler {
                                     default_value: None,
                                 }],
                                 body: vec![replaced],
+                                fn_syntax: false,
                             });
                             self.compile_node(&closure_node)?;
                         } else {
@@ -1185,7 +1186,7 @@ impl Compiler {
                 self.chunk.emit_u16(Op::DefLet, name_idx, self.line);
             }
 
-            Node::Closure { params, body } => {
+            Node::Closure { params, body, .. } => {
                 let mut fn_compiler = Compiler::new();
                 fn_compiler.enum_names = self.enum_names.clone();
                 fn_compiler.emit_default_preamble(params)?;

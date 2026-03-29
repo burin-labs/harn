@@ -11,7 +11,7 @@ pipeline test(task) {
   try {
     let _r = http_request("GET", "", {timeout: 100})
     println("unexpected success")
-  } catch (e) {
+  } catch (e2) {
     println("caught_empty_url")
   }
   println("http_builtins_ok")

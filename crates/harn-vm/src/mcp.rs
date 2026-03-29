@@ -227,7 +227,7 @@ async fn mcp_connect_impl(command: &str, args: &[String]) -> Result<VmMcpClientH
 }
 
 /// Convert a VmValue to serde_json::Value for MCP tool call arguments.
-fn vm_value_to_serde(val: &VmValue) -> serde_json::Value {
+pub(crate) fn vm_value_to_serde(val: &VmValue) -> serde_json::Value {
     match val {
         VmValue::String(s) => serde_json::Value::String(s.to_string()),
         VmValue::Int(n) => serde_json::json!(*n),

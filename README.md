@@ -113,12 +113,12 @@ call them:
 
 ```javascript
 pipeline default(task) {
-  let tools = tool_registry()
-  let tools = tool_add(tools, "search", "Search the web", { query ->
+  var tools = tool_registry()
+  tools = tool_add(tools, "search", "Search the web", { query ->
     return http_get("https://api.search.com?q=" + query).body
   }, {query: "string"})
 
-  let tools = tool_add(tools, "calculate", "Evaluate math", { expr ->
+  tools = tool_add(tools, "calculate", "Evaluate math", { expr ->
     return shell("echo '" + expr + "' | bc").stdout
   }, {expression: "string"})
 

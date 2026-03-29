@@ -127,10 +127,18 @@ impl VmEnv {
         None
     }
 
-    pub fn define(&mut self, name: &str, value: VmValue, mutable: bool) {
+    pub fn define(&mut self, name: &str, value: VmValue, mutable: bool) -> Result<(), VmError> {
         if let Some(scope) = self.scopes.last_mut() {
+            if let Some((_, existing_mutable)) = scope.vars.get(name) {
+                if !existing_mutable && !mutable {
+                    return Err(VmError::Runtime(format!(
+                        "Cannot redeclare immutable variable '{name}' in the same scope (use 'var' for mutable bindings)"
+                    )));
+                }
+            }
             scope.vars.insert(name.to_string(), (value, mutable));
         }
+        Ok(())
     }
 
     pub fn all_variables(&self) -> BTreeMap<String, VmValue> {

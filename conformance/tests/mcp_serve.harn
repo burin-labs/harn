@@ -1,0 +1,11 @@
+pipeline test(task) {
+  // mcp_serve should accept a tool_registry and store it.
+  // We can't test the full MCP server loop in conformance tests
+  // (it blocks on stdin), but we can verify it accepts valid input.
+  var tools = tool_registry()
+  tools = tool_define(tools, "echo", "Echo input back", {params: {text: "string"}, handler: { args -> args.text }})
+  // mcp_serve stores the registry and returns nil
+  let result = mcp_serve(tools)
+  assert(result == nil, "mcp_serve should return nil")
+  log("mcp_serve accepted tool_registry")
+}

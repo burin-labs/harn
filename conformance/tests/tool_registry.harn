@@ -1,11 +1,11 @@
 pipeline default() {
   // Create registry
-  let tools = tool_registry()
+  var tools = tool_registry()
   println(type_of(tools))
   println(tool_count(tools))
   // Add tools with closure handlers
-  let tools = tool_add(tools, "greet", "Greet a person", { name -> return "Hello, " + name + "!" }, {name: "string"})
-  let tools = tool_add(tools, "add", "Add two numbers", { a, b -> return a + b }, {a: "int", b: "int"})
+  tools = tool_add(tools, "greet", "Greet a person", { name -> return "Hello, " + name + "!" }, {name: "string"})
+  tools = tool_add(tools, "add", "Add two numbers", { a, b -> return a + b }, {a: "int", b: "int"})
   println(tool_count(tools))
   // List tools (no handlers exposed)
   let list = tool_list(tools)
@@ -27,7 +27,7 @@ pipeline default() {
   let desc = tool_describe(tools)
   println(desc)
   // Remove a tool
-  let tools = tool_remove(tools, "greet")
+  tools = tool_remove(tools, "greet")
   println(tool_count(tools))
   println("tool_registry_ok")
 }

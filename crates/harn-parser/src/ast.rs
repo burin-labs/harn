@@ -282,6 +282,9 @@ pub enum Node {
     Closure {
         params: Vec<TypedParam>,
         body: Vec<SNode>,
+        /// When true, this closure was written as `fn(params) { body }`.
+        /// The formatter preserves this distinction.
+        fn_syntax: bool,
     },
 }
 

@@ -38,13 +38,13 @@ system prompt that describes them, then let the LLM call tools in a loop.
 
 ```javascript
 pipeline default(task) {
-  let tools = tool_registry()
+  var tools = tool_registry()
 
-  let tools = tool_add(tools, "read", "Read a file from disk", { path ->
+  tools = tool_add(tools, "read", "Read a file from disk", { path ->
     return read_file(path)
   }, {path: "string"})
 
-  let tools = tool_add(tools, "search", "Search code for a pattern", { query ->
+  tools = tool_add(tools, "search", "Search code for a pattern", { query ->
     let result = shell("grep -r '" + query + "' src/ || true")
     return result.stdout
   }, {query: "string"})

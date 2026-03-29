@@ -56,11 +56,9 @@ impl CheckpointState {
         let json = serde_json::to_string_pretty(&serde_json::Value::Object(obj))
             .map_err(|e| format!("checkpoint save error: {e}"))?;
         if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("checkpoint mkdir error: {e}"))?;
+            std::fs::create_dir_all(parent).map_err(|e| format!("checkpoint mkdir error: {e}"))?;
         }
-        std::fs::write(&self.path, json)
-            .map_err(|e| format!("checkpoint write error: {e}"))?;
+        std::fs::write(&self.path, json).map_err(|e| format!("checkpoint write error: {e}"))?;
         Ok(())
     }
 
@@ -81,8 +79,7 @@ impl CheckpointState {
     fn clear(&mut self) -> Result<(), String> {
         self.data.clear();
         if self.path.exists() {
-            std::fs::remove_file(&self.path)
-                .map_err(|e| format!("checkpoint clear error: {e}"))?;
+            std::fs::remove_file(&self.path).map_err(|e| format!("checkpoint clear error: {e}"))?;
         }
         Ok(())
     }

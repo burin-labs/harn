@@ -1,28 +1,17 @@
 pipeline test(task) {
   // Test agent() edge cases
-
   // Agent with no config
   let a1 = agent("minimal", {})
   assert(a1._type == "agent", "empty config should still be agent")
   assert(a1.name == "minimal", "should have name")
-
   // Agent config with no system prompt — system defaults to nil
   let cfg = agent_config(a1, "do something")
   assert(cfg.system == nil, "system should be nil when not provided")
   assert(cfg.prompt == "do something", "prompt should be set")
-
   // Agent with all options
-  let a2 = agent("full", {
-    system: "You are helpful",
-    provider: "mock",
-    model: "test",
-    max_iterations: 3,
-    tool_format: "native",
-    tools: ["read_file"],
-  })
+  let a2 = agent("full", {system: "You are helpful", provider: "mock", model: "test", max_iterations: 3, tool_format: "native", tools: ["read_file"]})
   let cfg2 = agent_config(a2, "test")
   assert(cfg2.options.provider == "mock")
   assert(cfg2.options.tool_format == "native")
-
   log("agent edge case tests passed")
 }

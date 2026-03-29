@@ -1,0 +1,33 @@
+// MCP Server Example
+//
+// Run with: harn mcp-serve examples/mcp_server.harn
+//
+// This exposes two tools over MCP stdio transport:
+//   - greet: Returns a greeting for a given name
+//   - add: Adds two numbers together
+//
+// Configure in Claude Desktop (claude_desktop_config.json):
+// {
+//   "mcpServers": {
+//     "harn-demo": {
+//       "command": "harn",
+//       "args": ["mcp-serve", "examples/mcp_server.harn"]
+//     }
+//   }
+// }
+
+pipeline main(task) {
+  var tools = tool_registry()
+
+  tools = tool_define(tools, "greet", "Greet someone by name", {
+    params: { name: "string" },
+    handler: { args -> "Hello, " + args.name + "! Welcome to Harn." }
+  })
+
+  tools = tool_define(tools, "add", "Add two numbers together", {
+    params: { a: "number", b: "number" },
+    handler: { args -> to_string(args.a + args.b) }
+  })
+
+  mcp_serve(tools)
+}

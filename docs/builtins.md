@@ -668,3 +668,57 @@ If a server fails to connect, a warning is printed to stderr and that
 server is omitted from the `mcp` dict. Other servers still connect
 normally. The `mcp` global is only defined when at least one server
 connects successfully.
+
+### MCP Server Mode
+
+Harn pipelines can expose themselves as MCP tools using `harn mcp-serve`.
+The pipeline defines tools with `tool_registry()` + `tool_define()` and
+returns the registry. The CLI then serves those tools over stdio using
+the MCP protocol, making them callable by Claude Desktop, Cursor, or any
+MCP client.
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `tool_registry()` | — | dict | Create an empty tool registry |
+| `tool_define(registry, name, description, config)` | registry: dict, name: string, description: string, config: dict | dict | Add a tool to the registry |
+
+Example (`agent.harn`):
+
+```harn
+pipeline main(task) {
+  var tools = tool_registry()
+
+  tools = tool_define(tools, "greet", "Greet someone by name", {
+    params: { name: "string" },
+    handler: { args -> "Hello, " + args.name + "!" }
+  })
+
+  mcp_serve(tools)
+}
+```
+
+Run as an MCP server:
+
+```bash
+harn mcp-serve agent.harn
+```
+
+Configure in Claude Desktop (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "my-agent": {
+      "command": "harn",
+      "args": ["mcp-serve", "agent.harn"]
+    }
+  }
+}
+```
+
+Notes:
+
+- The pipeline must return a `tool_registry` value.
+- All `print`/`println` output goes to stderr (stdout is the MCP transport).
+- The server supports the `2024-11-05` MCP protocol version over stdio.
+- Tool handlers receive arguments as a dict and should return a string result.

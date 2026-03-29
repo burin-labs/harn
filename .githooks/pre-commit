@@ -1,8 +1,10 @@
 #!/bin/sh
 set -e
 
-echo "=== Pre-commit: checking formatting ==="
-cargo fmt --all -- --check
+echo "=== Pre-commit: auto-formatting ==="
+cargo fmt --all
+# Re-stage any files that were reformatted
+git diff --name-only | xargs -r git add
 echo "    Formatting OK."
 
 echo "=== Pre-commit: running clippy ==="

@@ -24,6 +24,7 @@ mod types;
 use crate::http::register_http_builtins;
 use crate::llm::register_llm_builtins;
 use crate::mcp::register_mcp_builtins;
+use crate::mcp_server::register_mcp_server_builtins;
 use crate::vm::Vm;
 
 // Re-export helpers used by other modules in harn-vm
@@ -66,6 +67,7 @@ pub fn register_agent_stdlib(vm: &mut Vm) {
     register_http_builtins(vm);
     register_llm_builtins(vm);
     register_mcp_builtins(vm);
+    register_mcp_server_builtins(vm);
 }
 
 /// Register all standard builtins on a VM (core + io + agent).

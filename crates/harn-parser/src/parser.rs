@@ -1676,8 +1676,31 @@ impl Parser {
             TokenKind::Ask => self.parse_ask_expr(),
             TokenKind::Deadline => self.parse_deadline(),
             TokenKind::Try => self.parse_try_catch(),
+            TokenKind::Fn => self.parse_fn_expr(),
             _ => Err(self.error("expression")),
         }
+    }
+
+    /// Parse an anonymous function expression: `fn(params) { body }`
+    /// Produces a Closure node with `fn_syntax: true` so the formatter
+    /// can round-trip the original syntax.
+    fn parse_fn_expr(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
+        self.consume(&TokenKind::Fn, "fn")?;
+        self.consume(&TokenKind::LParen, "(")?;
+        let params = self.parse_typed_param_list()?;
+        self.consume(&TokenKind::RParen, ")")?;
+        self.consume(&TokenKind::LBrace, "{")?;
+        let body = self.parse_block()?;
+        self.consume(&TokenKind::RBrace, "}")?;
+        Ok(spanned(
+            Node::Closure {
+                params,
+                body,
+                fn_syntax: true,
+            },
+            Span::merge(start, self.prev_span()),
+        ))
     }
 
     fn parse_spawn_expr(&mut self) -> Result<SNode, ParserError> {
@@ -1791,7 +1814,11 @@ impl Parser {
         let body = self.parse_block()?;
         self.consume(&TokenKind::RBrace, "}")?;
         Ok(spanned(
-            Node::Closure { params, body },
+            Node::Closure {
+                params,
+                body,
+                fn_syntax: false,
+            },
             Span::merge(start, self.prev_span()),
         ))
     }

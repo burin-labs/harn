@@ -38,14 +38,16 @@ pub fn parse_cells(response) {
   var block_lang = nil
   var current_lines = []
 
+  var trimmed = ""
+  var lang_part = ""
   for line in lines {
-    let trimmed = trim(line)
+    trimmed = trim(line)
     if starts_with(trimmed, "```") && in_block {
       cells = cells + [{type: block_type, lang: block_lang, code: join(current_lines, "\n")}]
       in_block = false
       current_lines = []
     } else if starts_with(trimmed, "```") && !in_block {
-      let lang_part = trim(substring(trimmed, 3))
+      lang_part = trim(substring(trimmed, 3))
       if lang_part == "call" || starts_with(lang_part, "call ") {
         block_type = "call"
         if starts_with(lang_part, "call ") {

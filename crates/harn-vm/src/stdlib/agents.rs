@@ -26,10 +26,7 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
         };
 
         let mut agent = config;
-        agent.insert(
-            "_type".to_string(),
-            VmValue::String(Rc::from("agent")),
-        );
+        agent.insert("_type".to_string(), VmValue::String(Rc::from("agent")));
         agent.insert("name".to_string(), VmValue::String(Rc::from(name)));
 
         Ok(VmValue::Dict(Rc::new(agent)))

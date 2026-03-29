@@ -91,6 +91,8 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
     ),
     ("mcp_server_info", "mcp_server_info(client) -> dict"),
     ("mcp_disconnect", "mcp_disconnect(client) -> nil"),
+    // MCP server
+    ("mcp_serve", "mcp_serve(registry) -> nil"),
     // Conversation management
     ("conversation", "conversation() -> list"),
     ("add_message", "add_message(conv, role, content) -> list"),
@@ -470,6 +472,8 @@ pub(crate) fn builtin_doc(name: &str) -> Option<String> {
         "mcp_get_prompt" => "**mcp_get_prompt(client, name, arguments?)** → dict — Get a prompt with optional arguments",
         "mcp_server_info" => "**mcp_server_info(client)** → dict — Server info: `{name, connected}`",
         "mcp_disconnect" => "**mcp_disconnect(client)** → nil — Disconnect and kill MCP server process",
+        // MCP server
+        "mcp_serve" => "**mcp_serve(registry)** → nil — Serve a tool registry as an MCP server over stdio (used with `harn mcp-serve`)",
         // Conversation management
         "conversation" => "**conversation()** → list — Create an empty conversation message list",
         "add_message" => "**add_message(conv, role, content)** → list — Add a message with given role to conversation",

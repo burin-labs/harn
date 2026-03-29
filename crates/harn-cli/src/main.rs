@@ -287,6 +287,16 @@ async fn main() {
             let pipeline = args.get(2).map(|s| s.as_str());
             acp::run_acp_server(pipeline).await;
         }
+        "mcp-serve" => {
+            let file = args.iter().skip(2).find(|a| !a.starts_with("--"));
+            match file {
+                Some(f) => commands::run::run_file_mcp_serve(f).await,
+                None => {
+                    eprintln!("Usage: harn mcp-serve <file.harn>");
+                    process::exit(1);
+                }
+            }
+        }
         "watch" => {
             if args.len() < 3 {
                 eprintln!("Usage: harn watch [--deny <builtins>] [--allow <builtins>] <file.harn>");
@@ -366,6 +376,7 @@ fn print_help() {
     println!("    \x1b[1;32mwatch\x1b[0m <file>            Watch for changes and re-run");
     println!("    \x1b[1;32mserve\x1b[0m [--port N] <file> Serve as an A2A agent over HTTP");
     println!("    \x1b[1;32macp\x1b[0m [file]              Start ACP server on stdio");
+    println!("    \x1b[1;32mmcp-serve\x1b[0m <file>        Serve tools as MCP server on stdio");
     println!("    \x1b[1;32madd\x1b[0m <name> --git <url>  Add a dependency to harn.toml");
     println!("    \x1b[1;32minstall\x1b[0m                 Install dependencies from harn.toml");
     println!("    \x1b[1;32mversion\x1b[0m                 Show version info");

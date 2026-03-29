@@ -1,0 +1,20 @@
+pipeline test(task) {
+  // Anonymous function expression: fn(params) { body }
+  let double = fn(x) { return x * 2 }
+  assert(double(5) == 10, "fn expr basic")
+  // Multi-param
+  let add = fn(a, b) { return a + b }
+  assert(add(3, 4) == 7, "fn expr multi-param")
+  // As dict value (call via variable)
+  let config = {handler: fn(name) { return "hello " + name }}
+  let h = config.handler
+  assert(h("world") == "hello world", "fn expr in dict")
+  // As function argument
+  let items = [1, 2, 3]
+  let doubled = items.map(fn(x) { return x * 2 })
+  assert(doubled == [2, 4, 6], "fn expr as argument")
+  // Implicit return (last expression)
+  let square = fn(x) { x * x }
+  assert(square(4) == 16, "fn expr implicit return")
+  log("fn_expr tests passed")
+}

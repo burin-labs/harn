@@ -66,14 +66,14 @@ impl super::Vm {
             frame.ip += 2;
             let name = Self::const_string(&frame.chunk.constants[idx])?;
             let val = self.pop()?;
-            self.env.define(&name, val, false);
+            self.env.define(&name, val, false)?;
         } else if op == Op::DefVar as u8 {
             let frame = self.frames.last_mut().unwrap();
             let idx = frame.chunk.read_u16(frame.ip) as usize;
             frame.ip += 2;
             let name = Self::const_string(&frame.chunk.constants[idx])?;
             let val = self.pop()?;
-            self.env.define(&name, val, true);
+            self.env.define(&name, val, true)?;
         } else if op == Op::SetVar as u8 {
             let frame = self.frames.last_mut().unwrap();
             let idx = frame.chunk.read_u16(frame.ip) as usize;
@@ -424,9 +424,9 @@ impl super::Vm {
                     .unwrap_or(closure.func.params.len());
                 for (i, param) in closure.func.params.iter().enumerate() {
                     if i < args.len() {
-                        call_env.define(param, args[i].clone(), false);
+                        call_env.define(param, args[i].clone(), false)?;
                     } else if i < default_start {
-                        call_env.define(param, VmValue::Nil, false);
+                        call_env.define(param, VmValue::Nil, false)?;
                     }
                     // else: has default, preamble will DefLet
                 }

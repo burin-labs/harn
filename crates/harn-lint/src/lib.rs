@@ -263,6 +263,9 @@ impl Linter {
             // LLM
             "llm_call",
             "agent_loop",
+            "agent",
+            "agent_name",
+            "agent_config",
             "llm_stream",
             "conversation_new",
             "conversation_add_user",
@@ -289,6 +292,7 @@ impl Linter {
             "mcp_list_prompts",
             "mcp_get_prompt",
             "mcp_server_info",
+            "mcp_serve",
             // IO extras
             "log_json",
             "prompt_user",
@@ -314,6 +318,11 @@ impl Linter {
             "store_clear",
             "store_list",
             "store_save",
+            // Checkpoint
+            "checkpoint",
+            "checkpoint_get",
+            "checkpoint_clear",
+            "checkpoint_list",
             // Metadata
             "metadata_set",
             "metadata_get",
@@ -336,6 +345,7 @@ impl Linter {
             "tool_remove",
             "tool_count",
             "tool_schema",
+            "tool_define",
             "tool_parse_call",
             "tool_format_result",
             "tool_prompt",
@@ -418,7 +428,26 @@ impl Linter {
             return;
         }
 
-        // Check shadowing against outer scopes (not current scope).
+        // Check same-scope redeclaration of immutable binding.
+        if !is_mutable {
+            if let Some(scope) = self.scopes.last() {
+                if scope.contains(name) {
+                    self.diagnostics.push(LintDiagnostic {
+                        rule: "shadow-variable",
+                        message: format!(
+                            "cannot redeclare immutable variable `{name}` in the same scope"
+                        ),
+                        span,
+                        severity: LintSeverity::Warning,
+                        suggestion: Some(format!(
+                            "use `var {name}` for a mutable binding, or choose a different name"
+                        )),
+                    });
+                }
+            }
+        }
+
+        // Check shadowing against outer scopes.
         if self.scopes.len() > 1 {
             let outer = &self.scopes[..self.scopes.len() - 1];
             if outer.iter().any(|s| s.contains(name)) {
@@ -812,7 +841,7 @@ impl Linter {
                 self.pop_scope();
             }
 
-            Node::Closure { params, body } => {
+            Node::Closure { params, body, .. } => {
                 self.push_scope();
                 let saved_loop_depth = self.loop_depth;
                 self.loop_depth = 0; // Closures are a new scope — break/continue invalid

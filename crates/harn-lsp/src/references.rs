@@ -235,7 +235,7 @@ fn collect_references(snode: &SNode, target_name: &str, refs: &mut Vec<Span>) {
                 collect_references(s, target_name, refs);
             }
         }
-        Node::Closure { body, params } => {
+        Node::Closure { body, params, .. } => {
             for p in params {
                 if p.name == target_name {
                     refs.push(snode.span);
