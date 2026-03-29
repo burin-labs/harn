@@ -5,7 +5,6 @@ pipeline test(task) {
   let ms = timer_end(t)
   assert(ms >= 0)
   log("timer ok")
-
   // elapsed returns monotonic ms since first call
   let e1 = elapsed()
   let e2 = elapsed()

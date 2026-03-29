@@ -923,11 +923,7 @@ impl super::Vm {
             self.stack.push(val);
             self.stack.push(VmValue::Bool(matches));
         } else if op == Op::GetArgc as u8 {
-            let argc = self
-                .frames
-                .last()
-                .map(|f| f.argc)
-                .unwrap_or(0);
+            let argc = self.frames.last().map(|f| f.argc).unwrap_or(0);
             self.stack.push(VmValue::Int(argc as i64));
         } else {
             return Err(VmError::InvalidInstruction(op));

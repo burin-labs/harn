@@ -457,9 +457,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
             }
         };
 
-        let result = client
-            .call("resources/list", serde_json::json!({}))
-            .await?;
+        let result = client.call("resources/list", serde_json::json!({})).await?;
 
         let resources = result
             .get("resources")
@@ -527,9 +525,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
             }
         };
 
-        let result = client
-            .call("prompts/list", serde_json::json!({}))
-            .await?;
+        let result = client.call("prompts/list", serde_json::json!({})).await?;
 
         let prompts = result
             .get("prompts")

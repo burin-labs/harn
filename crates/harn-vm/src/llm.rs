@@ -318,11 +318,26 @@ pub fn register_llm_builtins(vm: &mut Vm) {
         }
 
         let mut result_dict = BTreeMap::new();
-        result_dict.insert("status".to_string(), VmValue::String(Rc::from(final_status)));
-        result_dict.insert("text".to_string(), VmValue::String(Rc::from(total_text.as_str())));
-        result_dict.insert("iterations".to_string(), VmValue::Int(total_iterations as i64));
-        result_dict.insert("duration_ms".to_string(), VmValue::Int(loop_start.elapsed().as_millis() as i64));
-        result_dict.insert("tools_used".to_string(), VmValue::List(Rc::from(Vec::<VmValue>::new())));
+        result_dict.insert(
+            "status".to_string(),
+            VmValue::String(Rc::from(final_status)),
+        );
+        result_dict.insert(
+            "text".to_string(),
+            VmValue::String(Rc::from(total_text.as_str())),
+        );
+        result_dict.insert(
+            "iterations".to_string(),
+            VmValue::Int(total_iterations as i64),
+        );
+        result_dict.insert(
+            "duration_ms".to_string(),
+            VmValue::Int(loop_start.elapsed().as_millis() as i64),
+        );
+        result_dict.insert(
+            "tools_used".to_string(),
+            VmValue::List(Rc::from(Vec::<VmValue>::new())),
+        );
         Ok(VmValue::Dict(Rc::from(result_dict)))
     });
 
@@ -705,10 +720,7 @@ fn handle_tool_locally(name: &str, args: &serde_json::Value) -> Option<String> {
             }
         }
         "list_directory" => {
-            let path = args
-                .get("path")
-                .and_then(|v| v.as_str())
-                .unwrap_or(".");
+            let path = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
             match std::fs::read_dir(path) {
                 Ok(entries) => {
                     let mut names: Vec<String> = entries
@@ -1043,9 +1055,7 @@ fn extract_tool_info(
 }
 
 /// Extract parameter info from a Harn VmValue dict (tool_registry entry).
-fn extract_params_from_vm_dict(
-    td: &BTreeMap<String, VmValue>,
-) -> Vec<(String, String, String)> {
+fn extract_params_from_vm_dict(td: &BTreeMap<String, VmValue>) -> Vec<(String, String, String)> {
     let mut params = Vec::new();
     if let Some(VmValue::Dict(pd)) = td.get("parameters") {
         for (pname, pval) in pd.iter() {
@@ -1081,25 +1091,24 @@ fn build_text_tool_prompt(tools_val: Option<&VmValue>, include_format: bool) -> 
     // - List of tool dicts: use directly
     type ToolSchema = (String, String, Vec<(String, String, String)>);
     let schemas: Vec<ToolSchema> = match tools_val {
-        Some(VmValue::List(list)) => {
-            list.iter()
-                .filter_map(|v| match v {
-                    VmValue::String(name) => {
-                        builtin_tool_schema(name).map(|schema| extract_tool_info(&schema))
-                    }
-                    VmValue::Dict(td) => {
-                        let name = td.get("name")?.display();
-                        let desc = td
-                            .get("description")
-                            .map(|v| v.display())
-                            .unwrap_or_default();
-                        let params = extract_params_from_vm_dict(td);
-                        Some((name, desc, params))
-                    }
-                    _ => None,
-                })
-                .collect()
-        }
+        Some(VmValue::List(list)) => list
+            .iter()
+            .filter_map(|v| match v {
+                VmValue::String(name) => {
+                    builtin_tool_schema(name).map(|schema| extract_tool_info(&schema))
+                }
+                VmValue::Dict(td) => {
+                    let name = td.get("name")?.display();
+                    let desc = td
+                        .get("description")
+                        .map(|v| v.display())
+                        .unwrap_or_default();
+                    let params = extract_params_from_vm_dict(td);
+                    Some((name, desc, params))
+                }
+                _ => None,
+            })
+            .collect(),
         Some(VmValue::Dict(d)) => {
             // tool_registry — extract from tools list
             if let Some(VmValue::List(tools)) = d.get("tools") {
@@ -1179,28 +1188,28 @@ fn parse_text_tool_calls(text: &str) -> Vec<serde_json::Value> {
     let mut search_from = 0;
 
     while let Some(start_offset) = text[search_from..].find("```call") {
-            let after_marker = search_from + start_offset + "```call".len();
-            // Skip newline after ```call
-            let content_start = if text.as_bytes().get(after_marker) == Some(&b'\n') {
-                after_marker + 1
-            } else {
-                after_marker
-            };
-            if let Some(end_offset) = text[content_start..].find("```") {
-                let content_end = content_start + end_offset;
-                let call_text = text[content_start..content_end].trim();
-                if let Some((name, arguments)) = parse_function_call_syntax(call_text) {
-                    calls.push(serde_json::json!({
-                        "id": format!("tc_{}", calls.len()),
-                        "name": name,
-                        "arguments": arguments,
-                    }));
-                }
-                search_from = content_end + "```".len();
-            } else {
-                break;
+        let after_marker = search_from + start_offset + "```call".len();
+        // Skip newline after ```call
+        let content_start = if text.as_bytes().get(after_marker) == Some(&b'\n') {
+            after_marker + 1
+        } else {
+            after_marker
+        };
+        if let Some(end_offset) = text[content_start..].find("```") {
+            let content_end = content_start + end_offset;
+            let call_text = text[content_start..content_end].trim();
+            if let Some((name, arguments)) = parse_function_call_syntax(call_text) {
+                calls.push(serde_json::json!({
+                    "id": format!("tc_{}", calls.len()),
+                    "name": name,
+                    "arguments": arguments,
+                }));
             }
+            search_from = content_end + "```".len();
+        } else {
+            break;
         }
+    }
 
     calls
 }
@@ -1251,7 +1260,9 @@ fn parse_function_call_syntax(text: &str) -> Option<(String, serde_json::Value)>
         if let Some(eq_pos) = part.find('=') {
             let key = part[..eq_pos].trim().to_string();
             let val_str = part[eq_pos + 1..].trim();
-            let val = if val_str.starts_with("\"\"\"") && val_str.ends_with("\"\"\"") && val_str.len() >= 6
+            let val = if val_str.starts_with("\"\"\"")
+                && val_str.ends_with("\"\"\"")
+                && val_str.len() >= 6
             {
                 // Triple-quoted string: mostly raw, but process \" → " and \\ → \
                 // so models can include literal """ inside the block by writing \"\"\".

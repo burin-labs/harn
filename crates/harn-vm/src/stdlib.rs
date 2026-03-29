@@ -982,8 +982,14 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
             .or_else(|_| std::env::var("ANTHROPIC_API_KEY"))
             .is_ok();
         let mut info = BTreeMap::new();
-        info.insert("provider".to_string(), VmValue::String(Rc::from(provider.as_str())));
-        info.insert("model".to_string(), VmValue::String(Rc::from(model.as_str())));
+        info.insert(
+            "provider".to_string(),
+            VmValue::String(Rc::from(provider.as_str())),
+        );
+        info.insert(
+            "model".to_string(),
+            VmValue::String(Rc::from(model.as_str())),
+        );
         info.insert("api_key_set".to_string(), VmValue::Bool(api_key_set));
         Ok(VmValue::Dict(Rc::new(info)))
     });
@@ -994,7 +1000,10 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
         let mut usage = BTreeMap::new();
         usage.insert("input_tokens".to_string(), VmValue::Int(total_input));
         usage.insert("output_tokens".to_string(), VmValue::Int(total_output));
-        usage.insert("total_duration_ms".to_string(), VmValue::Int(total_duration));
+        usage.insert(
+            "total_duration_ms".to_string(),
+            VmValue::Int(total_duration),
+        );
         usage.insert("call_count".to_string(), VmValue::Int(call_count));
         Ok(VmValue::Dict(Rc::new(usage)))
     });
@@ -1004,7 +1013,10 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
     // =========================================================================
 
     vm.register_builtin("timer_start", |args, _out| {
-        let name = args.first().map(|a| a.display()).unwrap_or_else(|| "default".to_string());
+        let name = args
+            .first()
+            .map(|a| a.display())
+            .unwrap_or_else(|| "default".to_string());
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -1028,7 +1040,10 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as i64;
-        let start_ms = timer.get("start_ms").and_then(|v| v.as_int()).unwrap_or(now_ms);
+        let start_ms = timer
+            .get("start_ms")
+            .and_then(|v| v.as_int())
+            .unwrap_or(now_ms);
         let elapsed = now_ms - start_ms;
         let name = timer.get("name").map(|v| v.display()).unwrap_or_default();
         out.push_str(&format!("[timer] {name}: {elapsed}ms\n"));
@@ -1688,8 +1703,7 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
             VmValue::Duration(ms) => *ms,
             _ => 5000,
         };
-        let deadline = tokio::time::Instant::now()
-            + tokio::time::Duration::from_millis(timeout_ms);
+        let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_millis(timeout_ms);
         loop {
             let (found, all_closed) = try_poll_channels(&channels);
             if let Some((i, val, name)) = found {

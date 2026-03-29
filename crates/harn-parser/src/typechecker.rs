@@ -132,11 +132,19 @@ fn builtin_return_type(name: &str) -> InferredType {
         | "delete_file" | "mkdir" | "copy_file" | "append_file" => {
             Some(TypeExpr::Named("nil".into()))
         }
-        "type_of" | "to_string" | "json_stringify" | "read_file" | "http_get" | "http_post"
-        | "llm_call" | "regex_replace" | "path_join" | "temp_dir"
-        | "date_format" | "format" | "compute_content_hash" => {
-            Some(TypeExpr::Named("string".into()))
-        }
+        "type_of"
+        | "to_string"
+        | "json_stringify"
+        | "read_file"
+        | "http_get"
+        | "http_post"
+        | "llm_call"
+        | "regex_replace"
+        | "path_join"
+        | "temp_dir"
+        | "date_format"
+        | "format"
+        | "compute_content_hash" => Some(TypeExpr::Named("string".into())),
         "to_int" | "timer_end" | "elapsed" => Some(TypeExpr::Named("int".into())),
         "to_float" | "timestamp" | "date_parse" => Some(TypeExpr::Named("float".into())),
         "file_exists" | "json_validate" => Some(TypeExpr::Named("bool".into())),
@@ -147,10 +155,12 @@ fn builtin_return_type(name: &str) -> InferredType {
         | "timer_start" | "metadata_get" | "mcp_server_info" | "mcp_get_prompt" => {
             Some(TypeExpr::Named("dict".into()))
         }
-        "metadata_set" | "metadata_save" | "metadata_refresh_hashes"
-        | "invalidate_facts" | "log_json" | "mcp_disconnect" => {
-            Some(TypeExpr::Named("nil".into()))
-        }
+        "metadata_set"
+        | "metadata_save"
+        | "metadata_refresh_hashes"
+        | "invalidate_facts"
+        | "log_json"
+        | "mcp_disconnect" => Some(TypeExpr::Named("nil".into())),
         "env" | "regex_match" => Some(TypeExpr::Union(vec![
             TypeExpr::Named("string".into()),
             TypeExpr::Named("nil".into()),
@@ -265,10 +275,8 @@ impl TypeChecker {
                     body,
                     ..
                 } => {
-                    let required_params = params
-                        .iter()
-                        .filter(|p| p.default_value.is_none())
-                        .count();
+                    let required_params =
+                        params.iter().filter(|p| p.default_value.is_none()).count();
                     let sig = FnSignature {
                         params: params
                             .iter()
@@ -419,10 +427,7 @@ impl TypeChecker {
                 body,
                 ..
             } => {
-                let required_params = params
-                    .iter()
-                    .filter(|p| p.default_value.is_none())
-                    .count();
+                let required_params = params.iter().filter(|p| p.default_value.is_none()).count();
                 let sig = FnSignature {
                     params: params
                         .iter()

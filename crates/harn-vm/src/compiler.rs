@@ -175,9 +175,7 @@ impl Compiler {
         for (i, param) in params.iter().enumerate() {
             if let Some(default_expr) = &param.default_value {
                 self.chunk.emit(Op::GetArgc, self.line);
-                let threshold_idx = self
-                    .chunk
-                    .add_constant(Constant::Int((i + 1) as i64));
+                let threshold_idx = self.chunk.add_constant(Constant::Int((i + 1) as i64));
                 self.chunk.emit_u16(Op::Constant, threshold_idx, self.line);
                 // argc >= (i+1) means arg was provided
                 self.chunk.emit(Op::GreaterEqual, self.line);
@@ -249,10 +247,7 @@ impl Compiler {
     }
 
     /// Compile rethrow pattern: save error to temp var, run finally, re-throw.
-    fn compile_rethrow_with_finally(
-        &mut self,
-        finally_body: &[SNode],
-    ) -> Result<(), CompileError> {
+    fn compile_rethrow_with_finally(&mut self, finally_body: &[SNode]) -> Result<(), CompileError> {
         // Error is on the stack from the handler
         self.temp_counter += 1;
         let temp_name = format!("__finally_err_{}__", self.temp_counter);
@@ -727,24 +722,21 @@ impl Compiler {
                     }
                     self.temp_counter += 1;
                     let temp_name = format!("__return_val_{}__", self.temp_counter);
-                    let save_idx =
-                        self.chunk.add_constant(Constant::String(temp_name.clone()));
+                    let save_idx = self.chunk.add_constant(Constant::String(temp_name.clone()));
                     self.chunk.emit_u16(Op::DefVar, save_idx, self.line);
                     // Emit all pending finallys (innermost first = reverse order)
                     let finallys: Vec<_> = self.finally_bodies.iter().rev().cloned().collect();
                     for fb in &finallys {
                         self.compile_finally_inline(fb)?;
                     }
-                    let restore_idx =
-                        self.chunk.add_constant(Constant::String(temp_name));
+                    let restore_idx = self.chunk.add_constant(Constant::String(temp_name));
                     self.chunk.emit_u16(Op::GetVar, restore_idx, self.line);
                     self.chunk.emit(Op::Return, self.line);
                 } else {
                     // No pending finally — original behavior with tail call optimization
                     if let Some(val) = value {
                         if let Node::FunctionCall { name, args } = &val.node {
-                            let name_idx =
-                                self.chunk.add_constant(Constant::String(name.clone()));
+                            let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
                             self.chunk.emit_u16(Op::Constant, name_idx, self.line);
                             for arg in args {
                                 self.compile_node(arg)?;
@@ -1597,8 +1589,7 @@ impl Compiler {
                     // 5. Inner try around catch body (so finally runs if catch throws)
                     self.handler_depth += 1;
                     let rethrow_jump = self.chunk.emit_jump(Op::TryCatchSetup, self.line);
-                    let empty_type =
-                        self.chunk.add_constant(Constant::String(String::new()));
+                    let empty_type = self.chunk.add_constant(Constant::String(String::new()));
                     self.emit_type_name_extra(empty_type);
 
                     // 6. Compile catch body
@@ -1627,8 +1618,7 @@ impl Compiler {
                     // 1. TryCatchSetup to error path
                     self.handler_depth += 1;
                     let error_jump = self.chunk.emit_jump(Op::TryCatchSetup, self.line);
-                    let empty_type =
-                        self.chunk.add_constant(Constant::String(String::new()));
+                    let empty_type = self.chunk.add_constant(Constant::String(String::new()));
                     self.emit_type_name_extra(empty_type);
 
                     // 2. Compile try body
@@ -1867,9 +1857,7 @@ impl Compiler {
                         .chunk
                         .add_constant(Constant::String(result_name.clone()));
                     self.chunk.emit_u16(Op::GetVar, get_r, self.line);
-                    let idx_prop = self
-                        .chunk
-                        .add_constant(Constant::String("index".into()));
+                    let idx_prop = self.chunk.add_constant(Constant::String("index".into()));
                     self.chunk.emit_u16(Op::GetProperty, idx_prop, self.line);
                     let case_i = self.chunk.add_constant(Constant::Int(i as i64));
                     self.chunk.emit_u16(Op::Constant, case_i, self.line);
@@ -1882,9 +1870,7 @@ impl Compiler {
                         .chunk
                         .add_constant(Constant::String(result_name.clone()));
                     self.chunk.emit_u16(Op::GetVar, get_r2, self.line);
-                    let val_prop = self
-                        .chunk
-                        .add_constant(Constant::String("value".into()));
+                    let val_prop = self.chunk.add_constant(Constant::String("value".into()));
                     self.chunk.emit_u16(Op::GetProperty, val_prop, self.line);
                     let var_idx = self
                         .chunk

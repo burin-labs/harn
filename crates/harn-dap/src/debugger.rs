@@ -858,9 +858,7 @@ impl Debugger {
                         };
                         list.get(idx)?.clone()
                     }
-                    VmValue::Dict(map) => {
-                        map.get(&i.to_string())?.clone()
-                    }
+                    VmValue::Dict(map) => map.get(&i.to_string())?.clone(),
                     _ => return None,
                 },
             };

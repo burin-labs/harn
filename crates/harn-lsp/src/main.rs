@@ -80,7 +80,10 @@ const BUILTINS: &[(&str, &str)] = &[
     ("mcp_list_tools", "mcp_list_tools(client) -> list"),
     ("mcp_call", "mcp_call(client, name, args?) -> value"),
     ("mcp_list_resources", "mcp_list_resources(client) -> list"),
-    ("mcp_read_resource", "mcp_read_resource(client, uri) -> string"),
+    (
+        "mcp_read_resource",
+        "mcp_read_resource(client, uri) -> string",
+    ),
     ("mcp_list_prompts", "mcp_list_prompts(client) -> list"),
     (
         "mcp_get_prompt",
@@ -2346,10 +2349,7 @@ impl LanguageServer for HarnLsp {
     // -----------------------------------------------------------------------
     // Signature help (shows parameter info as you type)
     // -----------------------------------------------------------------------
-    async fn signature_help(
-        &self,
-        params: SignatureHelpParams,
-    ) -> Result<Option<SignatureHelp>> {
+    async fn signature_help(&self, params: SignatureHelpParams) -> Result<Option<SignatureHelp>> {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
