@@ -19,3 +19,5 @@ tokio-stream = "0.1"
 base64 = "0.22"
 sha2 = "0.10"
 md-5 = "0.10"
+toml = "0.8"
+serde = { version = "1", features = ["derive"] }

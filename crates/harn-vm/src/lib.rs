@@ -6,6 +6,7 @@ mod chunk;
 mod compiler;
 mod http;
 pub mod llm;
+pub mod llm_config;
 pub mod mcp;
 pub mod metadata;
 pub mod stdlib;

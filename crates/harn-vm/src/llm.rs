@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use crate::llm_config;
 use crate::stdlib::json_to_vm_value;
 use crate::value::{VmChannelHandle, VmError, VmValue};
 use crate::vm::Vm;
@@ -1504,6 +1505,212 @@ fn register_llm_builtins_continued(vm: &mut Vm) {
         new_messages.push(VmValue::Dict(Rc::new(msg)));
         Ok(VmValue::List(Rc::new(new_messages)))
     });
+
+    // =========================================================================
+    // Config-based builtins
+    // =========================================================================
+
+    vm.register_builtin("llm_infer_provider", |args, _out| {
+        let model_id = args.first().map(|a| a.display()).unwrap_or_default();
+        Ok(VmValue::String(Rc::from(
+            llm_config::infer_provider(&model_id).as_str(),
+        )))
+    });
+
+    vm.register_builtin("llm_model_tier", |args, _out| {
+        let model_id = args.first().map(|a| a.display()).unwrap_or_default();
+        Ok(VmValue::String(Rc::from(
+            llm_config::model_tier(&model_id).as_str(),
+        )))
+    });
+
+    vm.register_builtin("llm_resolve_model", |args, _out| {
+        let alias = args.first().map(|a| a.display()).unwrap_or_default();
+        let (id, provider) = llm_config::resolve_model(&alias);
+        let mut dict = BTreeMap::new();
+        dict.insert("id".to_string(), VmValue::String(Rc::from(id.as_str())));
+        dict.insert(
+            "provider".to_string(),
+            provider
+                .map(|p| VmValue::String(Rc::from(p.as_str())))
+                .unwrap_or(VmValue::Nil),
+        );
+        Ok(VmValue::Dict(Rc::new(dict)))
+    });
+
+    vm.register_builtin("llm_providers", |_args, _out| {
+        let names = llm_config::provider_names();
+        let list: Vec<VmValue> = names
+            .into_iter()
+            .map(|n| VmValue::String(Rc::from(n.as_str())))
+            .collect();
+        Ok(VmValue::List(Rc::new(list)))
+    });
+
+    vm.register_builtin("llm_config", |args, _out| {
+        let provider_name = args.first().map(|a| a.display());
+        match provider_name {
+            Some(name) => {
+                if let Some(pdef) = llm_config::provider_config(&name) {
+                    Ok(provider_def_to_vm_value(pdef))
+                } else {
+                    Ok(VmValue::Nil)
+                }
+            }
+            None => {
+                // Return all providers as a dict
+                let mut dict = BTreeMap::new();
+                for name in llm_config::provider_names() {
+                    if let Some(pdef) = llm_config::provider_config(&name) {
+                        dict.insert(name, provider_def_to_vm_value(pdef));
+                    }
+                }
+                Ok(VmValue::Dict(Rc::new(dict)))
+            }
+        }
+    });
+
+    vm.register_async_builtin("llm_healthcheck", |args| async move {
+        let provider_name = args
+            .first()
+            .map(|a| a.display())
+            .unwrap_or_else(|| "anthropic".to_string());
+
+        let api_key = vm_resolve_api_key(&provider_name).unwrap_or_default();
+
+        let pdef = match llm_config::provider_config(&provider_name) {
+            Some(p) => p,
+            None => {
+                return Ok(healthcheck_result(
+                    false,
+                    &format!("Unknown provider: {provider_name}"),
+                ));
+            }
+        };
+
+        let hc = match &pdef.healthcheck {
+            Some(h) => h,
+            None => {
+                return Ok(healthcheck_result(
+                    false,
+                    &format!("No healthcheck configured for {provider_name}"),
+                ));
+            }
+        };
+
+        // Build URL
+        let url = if let Some(absolute_url) = &hc.url {
+            absolute_url.clone()
+        } else {
+            let base = llm_config::resolve_base_url(pdef);
+            let path = hc.path.as_deref().unwrap_or("");
+            format!("{base}{path}")
+        };
+
+        let client = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .timeout(std::time::Duration::from_secs(15))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+
+        let mut req = match hc.method.to_uppercase().as_str() {
+            "POST" => {
+                let mut r = client.post(&url).header("Content-Type", "application/json");
+                if let Some(body) = &hc.body {
+                    r = r.body(body.clone());
+                }
+                r
+            }
+            _ => client.get(&url),
+        };
+
+        // Apply auth
+        req = apply_auth_headers(req, &api_key, Some(pdef));
+        if let Some(p) = llm_config::provider_config(&provider_name) {
+            for (k, v) in &p.extra_headers {
+                req = req.header(k.as_str(), v.as_str());
+            }
+        }
+
+        match req.send().await {
+            Ok(response) => {
+                let status = response.status().as_u16();
+                let valid = response.status().is_success();
+                let body_text = response.text().await.unwrap_or_default();
+                let message = if valid {
+                    format!("{provider_name} is reachable (HTTP {status})")
+                } else {
+                    format!("{provider_name} returned HTTP {status}: {body_text}")
+                };
+                let mut dict = BTreeMap::new();
+                dict.insert("valid".to_string(), VmValue::Bool(valid));
+                dict.insert(
+                    "message".to_string(),
+                    VmValue::String(Rc::from(message.as_str())),
+                );
+                let mut meta = BTreeMap::new();
+                meta.insert("status".to_string(), VmValue::Int(status as i64));
+                meta.insert("url".to_string(), VmValue::String(Rc::from(url.as_str())));
+                dict.insert("metadata".to_string(), VmValue::Dict(Rc::new(meta)));
+                Ok(VmValue::Dict(Rc::new(dict)))
+            }
+            Err(e) => Ok(healthcheck_result(
+                false,
+                &format!("{provider_name} healthcheck failed: {e}"),
+            )),
+        }
+    });
+}
+
+/// Convert a ProviderDef to a VmValue dict for the llm_config builtin.
+fn provider_def_to_vm_value(pdef: &llm_config::ProviderDef) -> VmValue {
+    let mut dict = BTreeMap::new();
+    dict.insert(
+        "base_url".to_string(),
+        VmValue::String(Rc::from(pdef.base_url.as_str())),
+    );
+    dict.insert(
+        "auth_style".to_string(),
+        VmValue::String(Rc::from(pdef.auth_style.as_str())),
+    );
+    dict.insert(
+        "chat_endpoint".to_string(),
+        VmValue::String(Rc::from(pdef.chat_endpoint.as_str())),
+    );
+    if let Some(header) = &pdef.auth_header {
+        dict.insert(
+            "auth_header".to_string(),
+            VmValue::String(Rc::from(header.as_str())),
+        );
+    }
+    if !pdef.extra_headers.is_empty() {
+        let mut headers = BTreeMap::new();
+        for (k, v) in &pdef.extra_headers {
+            headers.insert(k.clone(), VmValue::String(Rc::from(v.as_str())));
+        }
+        dict.insert("extra_headers".to_string(), VmValue::Dict(Rc::new(headers)));
+    }
+    if !pdef.features.is_empty() {
+        let features: Vec<VmValue> = pdef
+            .features
+            .iter()
+            .map(|f| VmValue::String(Rc::from(f.as_str())))
+            .collect();
+        dict.insert("features".to_string(), VmValue::List(Rc::new(features)));
+    }
+    VmValue::Dict(Rc::new(dict))
+}
+
+/// Build a healthcheck result dict.
+fn healthcheck_result(valid: bool, message: &str) -> VmValue {
+    let mut dict = BTreeMap::new();
+    dict.insert("valid".to_string(), VmValue::Bool(valid));
+    dict.insert("message".to_string(), VmValue::String(Rc::from(message)));
+    dict.insert(
+        "metadata".to_string(),
+        VmValue::Dict(Rc::new(BTreeMap::new())),
+    );
+    VmValue::Dict(Rc::new(dict))
 }
 
 // =============================================================================
@@ -1612,49 +1819,91 @@ fn opt_bool(options: &Option<BTreeMap<String, VmValue>>, key: &str) -> bool {
 // =============================================================================
 
 fn vm_resolve_provider(options: &Option<BTreeMap<String, VmValue>>) -> String {
-    options
+    // Explicit option wins
+    if let Some(p) = options
         .as_ref()
         .and_then(|o| o.get("provider"))
         .map(|v| v.display())
-        .unwrap_or_else(|| {
-            // In test mode (HARN_LLM_PROVIDER env var), use the specified provider
-            std::env::var("HARN_LLM_PROVIDER").unwrap_or_else(|_| "anthropic".to_string())
-        })
-}
-
-fn vm_resolve_model(options: &Option<BTreeMap<String, VmValue>>, provider: &str) -> String {
-    options
+    {
+        return p;
+    }
+    // Env var next
+    if let Ok(p) = std::env::var("HARN_LLM_PROVIDER") {
+        return p;
+    }
+    // Try to infer from model
+    if let Some(m) = options
         .as_ref()
         .and_then(|o| o.get("model"))
         .map(|v| v.display())
-        .or_else(|| std::env::var("HARN_LLM_MODEL").ok())
-        .unwrap_or_else(|| match provider {
-            "openai" => "gpt-4o".to_string(),
-            "ollama" => "llama3.2".to_string(),
-            "openrouter" => "anthropic/claude-sonnet-4-20250514".to_string(),
-            _ => "claude-sonnet-4-20250514".to_string(),
-        })
+    {
+        return llm_config::infer_provider(&m);
+    }
+    if let Ok(m) = std::env::var("HARN_LLM_MODEL") {
+        return llm_config::infer_provider(&m);
+    }
+    "anthropic".to_string()
+}
+
+fn vm_resolve_model(options: &Option<BTreeMap<String, VmValue>>, provider: &str) -> String {
+    let raw = options
+        .as_ref()
+        .and_then(|o| o.get("model"))
+        .map(|v| v.display())
+        .or_else(|| std::env::var("HARN_LLM_MODEL").ok());
+
+    if let Some(raw) = raw {
+        let (resolved, _) = llm_config::resolve_model(&raw);
+        return resolved;
+    }
+    // Default model per provider
+    match provider {
+        "openai" => "gpt-4o".to_string(),
+        "ollama" => "llama3.2".to_string(),
+        "openrouter" => "anthropic/claude-sonnet-4-20250514".to_string(),
+        _ => "claude-sonnet-4-20250514".to_string(),
+    }
 }
 
 fn vm_resolve_api_key(provider: &str) -> Result<String, VmError> {
-    match provider {
-        "mock" | "ollama" => Ok(String::new()),
-        "openai" => std::env::var("OPENAI_API_KEY").map_err(|_| {
-            VmError::Thrown(VmValue::String(Rc::from(
-                "Missing API key: set OPENAI_API_KEY environment variable",
-            )))
-        }),
-        "openrouter" => std::env::var("OPENROUTER_API_KEY").map_err(|_| {
-            VmError::Thrown(VmValue::String(Rc::from(
-                "Missing API key: set OPENROUTER_API_KEY environment variable",
-            )))
-        }),
-        _ => std::env::var("ANTHROPIC_API_KEY").map_err(|_| {
-            VmError::Thrown(VmValue::String(Rc::from(
-                "Missing API key: set ANTHROPIC_API_KEY environment variable",
-            )))
-        }),
+    if provider == "mock" {
+        return Ok(String::new());
     }
+
+    if let Some(pdef) = llm_config::provider_config(provider) {
+        if pdef.auth_style == "none" {
+            return Ok(String::new());
+        }
+        match &pdef.auth_env {
+            llm_config::AuthEnv::Single(env) => {
+                return std::env::var(env).map_err(|_| {
+                    VmError::Thrown(VmValue::String(Rc::from(format!(
+                        "Missing API key: set {env} environment variable"
+                    ))))
+                });
+            }
+            llm_config::AuthEnv::Multiple(envs) => {
+                for env in envs {
+                    if let Ok(val) = std::env::var(env) {
+                        if !val.is_empty() {
+                            return Ok(val);
+                        }
+                    }
+                }
+                return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                    "Missing API key: set one of {} environment variables",
+                    envs.join(", ")
+                )))));
+            }
+            llm_config::AuthEnv::None => return Ok(String::new()),
+        }
+    }
+    // Fallback for unknown providers
+    std::env::var("ANTHROPIC_API_KEY").map_err(|_| {
+        VmError::Thrown(VmValue::String(Rc::from(
+            "Missing API key: set ANTHROPIC_API_KEY environment variable",
+        )))
+    })
 }
 
 // =============================================================================
@@ -1934,203 +2183,251 @@ async fn vm_call_llm_api(
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
 
-    match provider {
-        "openai" | "ollama" | "openrouter" => {
-            let base_url = match provider {
-                "ollama" => std::env::var("OLLAMA_HOST")
-                    .unwrap_or_else(|_| "http://localhost:11434".to_string()),
-                "openrouter" => "https://openrouter.ai/api".to_string(),
-                _ => "https://api.openai.com".to_string(),
-            };
+    // Resolve provider config for base URL and auth
+    let pdef = llm_config::provider_config(provider);
+    let is_anthropic_style = pdef
+        .map(|p| p.chat_endpoint.contains("/messages"))
+        .unwrap_or(provider == "anthropic");
 
-            let mut msgs = Vec::new();
-            if let Some(sys) = system {
-                msgs.push(serde_json::json!({"role": "system", "content": sys}));
+    if is_anthropic_style {
+        // Anthropic-style API (system as top-level field, content blocks response)
+        let base_url = pdef
+            .map(llm_config::resolve_base_url)
+            .unwrap_or_else(|| "https://api.anthropic.com/v1".to_string());
+        let endpoint = pdef
+            .map(|p| p.chat_endpoint.as_str())
+            .unwrap_or("/messages");
+
+        let mut body = serde_json::json!({
+            "model": model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+        });
+        if let Some(sys) = system {
+            body["system"] = serde_json::json!(sys);
+        }
+        if let Some(temp) = temperature {
+            body["temperature"] = serde_json::json!(temp);
+        }
+
+        // Native tool use for Anthropic
+        if let Some(tools) = native_tools {
+            if !tools.is_empty() {
+                body["tools"] = serde_json::json!(tools);
             }
-            msgs.extend(messages.iter().cloned());
+        }
 
-            let mut body = serde_json::json!({
-                "model": model,
-                "messages": msgs,
-                "max_tokens": max_tokens,
-            });
+        let mut req = client
+            .post(format!("{base_url}{endpoint}"))
+            .header("Content-Type", "application/json")
+            .json(&body);
 
-            if let Some(temp) = temperature {
-                body["temperature"] = serde_json::json!(temp);
+        // Apply auth from config
+        req = apply_auth_headers(req, api_key, pdef);
+
+        // Apply extra headers from config
+        if let Some(p) = pdef {
+            for (k, v) in &p.extra_headers {
+                req = req.header(k.as_str(), v.as_str());
             }
+        }
 
-            // Structured output for OpenAI
-            if response_format == Some("json") {
-                if let Some(schema) = json_schema {
-                    // OpenAI structured output with JSON schema
-                    let schema_json = vm_value_dict_to_json(schema);
-                    body["response_format"] = serde_json::json!({
-                        "type": "json_schema",
-                        "json_schema": {
-                            "name": "response",
-                            "schema": schema_json,
-                            "strict": true,
+        let response = req.send().await.map_err(|e| {
+            VmError::Thrown(VmValue::String(Rc::from(format!(
+                "{provider} API error: {e}"
+            ))))
+        })?;
+
+        let json: serde_json::Value = response.json().await.map_err(|e| {
+            VmError::Thrown(VmValue::String(Rc::from(format!(
+                "{provider} response parse error: {e}"
+            ))))
+        })?;
+
+        // Extract text and tool_use blocks from Anthropic response
+        let mut text = String::new();
+        let mut tool_calls = Vec::new();
+
+        if let Some(content) = json["content"].as_array() {
+            for block in content {
+                match block["type"].as_str() {
+                    Some("text") => {
+                        if let Some(t) = block["text"].as_str() {
+                            text.push_str(t);
                         }
-                    });
-                } else {
-                    body["response_format"] = serde_json::json!({"type": "json_object"});
+                    }
+                    Some("tool_use") => {
+                        let name = block["name"].as_str().unwrap_or("").to_string();
+                        let id = block["id"].as_str().unwrap_or("").to_string();
+                        let input = block["input"].clone();
+                        tool_calls.push(serde_json::json!({
+                            "id": id,
+                            "name": name,
+                            "arguments": input,
+                        }));
+                    }
+                    _ => {}
                 }
             }
+        }
 
-            // Native tool use for OpenAI
-            if let Some(tools) = native_tools {
-                if !tools.is_empty() {
-                    body["tools"] = serde_json::json!(tools);
-                }
-            }
-
-            let mut req = client
-                .post(format!("{base_url}/v1/chat/completions"))
-                .header("Content-Type", "application/json")
-                .json(&body);
-
-            if !api_key.is_empty() {
-                req = req.header("Authorization", format!("Bearer {api_key}"));
-            }
-
-            let response = req.send().await.map_err(|e| {
-                VmError::Thrown(VmValue::String(Rc::from(format!(
-                    "{provider} API error: {e}"
-                ))))
-            })?;
-
-            let json: serde_json::Value = response.json().await.map_err(|e| {
-                VmError::Thrown(VmValue::String(Rc::from(format!(
-                    "{provider} response parse error: {e}"
-                ))))
-            })?;
-
+        if text.is_empty() && tool_calls.is_empty() {
             if let Some(err) = json["error"]["message"].as_str() {
                 return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
                     "{provider} API error: {err}"
                 )))));
             }
-
-            let text = json["choices"][0]["message"]["content"]
-                .as_str()
-                .unwrap_or("")
-                .to_string();
-
-            // Extract tool calls from OpenAI format
-            let mut tool_calls = Vec::new();
-            if let Some(calls) = json["choices"][0]["message"]["tool_calls"].as_array() {
-                for call in calls {
-                    let name = call["function"]["name"].as_str().unwrap_or("").to_string();
-                    let args_str = call["function"]["arguments"].as_str().unwrap_or("{}");
-                    let arguments: serde_json::Value =
-                        serde_json::from_str(args_str).unwrap_or(serde_json::json!({}));
-                    let id = call["id"].as_str().unwrap_or("").to_string();
-                    tool_calls.push(serde_json::json!({
-                        "id": id,
-                        "name": name,
-                        "arguments": arguments,
-                    }));
-                }
-            }
-
-            let input_tokens = json["usage"]["prompt_tokens"].as_i64().unwrap_or(0);
-            let output_tokens = json["usage"]["completion_tokens"].as_i64().unwrap_or(0);
-
-            Ok(LlmResult {
-                text,
-                tool_calls,
-                input_tokens,
-                output_tokens,
-                model: model.to_string(),
-            })
         }
-        _ => {
-            // Anthropic
-            let mut body = serde_json::json!({
-                "model": model,
-                "messages": messages,
-                "max_tokens": max_tokens,
-            });
-            if let Some(sys) = system {
-                body["system"] = serde_json::json!(sys);
-            }
-            if let Some(temp) = temperature {
-                body["temperature"] = serde_json::json!(temp);
-            }
 
-            // Native tool use for Anthropic
-            if let Some(tools) = native_tools {
-                if !tools.is_empty() {
-                    body["tools"] = serde_json::json!(tools);
-                }
-            }
+        let input_tokens = json["usage"]["input_tokens"].as_i64().unwrap_or(0);
+        let output_tokens = json["usage"]["output_tokens"].as_i64().unwrap_or(0);
 
-            let response = client
-                .post("https://api.anthropic.com/v1/messages")
-                .header("x-api-key", api_key)
-                .header("anthropic-version", "2023-06-01")
-                .header("Content-Type", "application/json")
-                .json(&body)
-                .send()
-                .await
-                .map_err(|e| {
-                    VmError::Thrown(VmValue::String(Rc::from(format!(
-                        "Anthropic API error: {e}"
-                    ))))
-                })?;
+        Ok(LlmResult {
+            text,
+            tool_calls,
+            input_tokens,
+            output_tokens,
+            model: model.to_string(),
+        })
+    } else {
+        // OpenAI-compatible API (system as message, choices response)
+        let base_url = pdef
+            .map(llm_config::resolve_base_url)
+            .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
+        let endpoint = pdef
+            .map(|p| p.chat_endpoint.as_str())
+            .unwrap_or("/chat/completions");
 
-            let json: serde_json::Value = response.json().await.map_err(|e| {
-                VmError::Thrown(VmValue::String(Rc::from(format!(
-                    "Anthropic response parse error: {e}"
-                ))))
-            })?;
+        let mut msgs = Vec::new();
+        if let Some(sys) = system {
+            msgs.push(serde_json::json!({"role": "system", "content": sys}));
+        }
+        msgs.extend(messages.iter().cloned());
 
-            // Extract text and tool_use blocks from Anthropic response
-            let mut text = String::new();
-            let mut tool_calls = Vec::new();
+        let mut body = serde_json::json!({
+            "model": model,
+            "messages": msgs,
+            "max_tokens": max_tokens,
+        });
 
-            if let Some(content) = json["content"].as_array() {
-                for block in content {
-                    match block["type"].as_str() {
-                        Some("text") => {
-                            if let Some(t) = block["text"].as_str() {
-                                text.push_str(t);
-                            }
-                        }
-                        Some("tool_use") => {
-                            let name = block["name"].as_str().unwrap_or("").to_string();
-                            let id = block["id"].as_str().unwrap_or("").to_string();
-                            let input = block["input"].clone();
-                            tool_calls.push(serde_json::json!({
-                                "id": id,
-                                "name": name,
-                                "arguments": input,
-                            }));
-                        }
-                        _ => {}
+        if let Some(temp) = temperature {
+            body["temperature"] = serde_json::json!(temp);
+        }
+
+        // Structured output for OpenAI
+        if response_format == Some("json") {
+            if let Some(schema) = json_schema {
+                let schema_json = vm_value_dict_to_json(schema);
+                body["response_format"] = serde_json::json!({
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "response",
+                        "schema": schema_json,
+                        "strict": true,
                     }
-                }
+                });
+            } else {
+                body["response_format"] = serde_json::json!({"type": "json_object"});
             }
-
-            if text.is_empty() && tool_calls.is_empty() {
-                if let Some(err) = json["error"]["message"].as_str() {
-                    return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                        "Anthropic API error: {err}"
-                    )))));
-                }
-            }
-
-            let input_tokens = json["usage"]["input_tokens"].as_i64().unwrap_or(0);
-            let output_tokens = json["usage"]["output_tokens"].as_i64().unwrap_or(0);
-
-            Ok(LlmResult {
-                text,
-                tool_calls,
-                input_tokens,
-                output_tokens,
-                model: model.to_string(),
-            })
         }
+
+        // Native tool use
+        if let Some(tools) = native_tools {
+            if !tools.is_empty() {
+                body["tools"] = serde_json::json!(tools);
+            }
+        }
+
+        let mut req = client
+            .post(format!("{base_url}{endpoint}"))
+            .header("Content-Type", "application/json")
+            .json(&body);
+
+        // Apply auth from config
+        req = apply_auth_headers(req, api_key, pdef);
+
+        // Apply extra headers from config
+        if let Some(p) = pdef {
+            for (k, v) in &p.extra_headers {
+                req = req.header(k.as_str(), v.as_str());
+            }
+        }
+
+        let response = req.send().await.map_err(|e| {
+            VmError::Thrown(VmValue::String(Rc::from(format!(
+                "{provider} API error: {e}"
+            ))))
+        })?;
+
+        let json: serde_json::Value = response.json().await.map_err(|e| {
+            VmError::Thrown(VmValue::String(Rc::from(format!(
+                "{provider} response parse error: {e}"
+            ))))
+        })?;
+
+        if let Some(err) = json["error"]["message"].as_str() {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                "{provider} API error: {err}"
+            )))));
+        }
+
+        let text = json["choices"][0]["message"]["content"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
+
+        // Extract tool calls from OpenAI format
+        let mut tool_calls = Vec::new();
+        if let Some(calls) = json["choices"][0]["message"]["tool_calls"].as_array() {
+            for call in calls {
+                let name = call["function"]["name"].as_str().unwrap_or("").to_string();
+                let args_str = call["function"]["arguments"].as_str().unwrap_or("{}");
+                let arguments: serde_json::Value =
+                    serde_json::from_str(args_str).unwrap_or(serde_json::json!({}));
+                let id = call["id"].as_str().unwrap_or("").to_string();
+                tool_calls.push(serde_json::json!({
+                    "id": id,
+                    "name": name,
+                    "arguments": arguments,
+                }));
+            }
+        }
+
+        let input_tokens = json["usage"]["prompt_tokens"].as_i64().unwrap_or(0);
+        let output_tokens = json["usage"]["completion_tokens"].as_i64().unwrap_or(0);
+
+        Ok(LlmResult {
+            text,
+            tool_calls,
+            input_tokens,
+            output_tokens,
+            model: model.to_string(),
+        })
+    }
+}
+
+/// Apply auth headers to a request based on provider config.
+fn apply_auth_headers(
+    req: reqwest::RequestBuilder,
+    api_key: &str,
+    pdef: Option<&llm_config::ProviderDef>,
+) -> reqwest::RequestBuilder {
+    if api_key.is_empty() {
+        return req;
+    }
+    if let Some(p) = pdef {
+        match p.auth_style.as_str() {
+            "header" => {
+                let header_name = p.auth_header.as_deref().unwrap_or("x-api-key");
+                req.header(header_name, api_key)
+            }
+            "bearer" => req.header("Authorization", format!("Bearer {api_key}")),
+            "none" => req,
+            _ => req.header("Authorization", format!("Bearer {api_key}")),
+        }
+    } else {
+        // Unknown provider: default to bearer
+        req.header("Authorization", format!("Bearer {api_key}"))
     }
 }
 
@@ -2156,58 +2453,73 @@ async fn vm_stream_llm(
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
 
-    let request = match provider {
-        "openai" | "ollama" | "openrouter" => {
-            let base_url = match provider {
-                "ollama" => std::env::var("OLLAMA_HOST")
-                    .unwrap_or_else(|_| "http://localhost:11434".to_string()),
-                "openrouter" => "https://openrouter.ai/api".to_string(),
-                _ => "https://api.openai.com".to_string(),
-            };
+    let pdef = llm_config::provider_config(provider);
+    let is_anthropic = pdef
+        .map(|p| p.chat_endpoint.contains("/messages"))
+        .unwrap_or(provider == "anthropic");
 
-            let mut msgs = Vec::new();
-            if let Some(sys) = system {
-                msgs.push(serde_json::json!({"role": "system", "content": sys}));
-            }
-            msgs.push(serde_json::json!({"role": "user", "content": prompt}));
+    let request = if is_anthropic {
+        let base_url = pdef
+            .map(llm_config::resolve_base_url)
+            .unwrap_or_else(|| "https://api.anthropic.com/v1".to_string());
+        let endpoint = pdef
+            .map(|p| p.chat_endpoint.as_str())
+            .unwrap_or("/messages");
 
-            let body = serde_json::json!({
-                "model": model,
-                "messages": msgs,
-                "max_tokens": max_tokens,
-                "stream": true,
-            });
-
-            let mut req = client
-                .post(format!("{base_url}/v1/chat/completions"))
-                .header("Content-Type", "application/json")
-                .json(&body);
-            if !api_key.is_empty() {
-                req = req.header("Authorization", format!("Bearer {api_key}"));
-            }
-            req
+        let mut body = serde_json::json!({
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": max_tokens,
+            "stream": true,
+        });
+        if let Some(sys) = system {
+            body["system"] = serde_json::json!(sys);
         }
-        _ => {
-            let mut body = serde_json::json!({
-                "model": model,
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": max_tokens,
-                "stream": true,
-            });
-            if let Some(sys) = system {
-                body["system"] = serde_json::json!(sys);
-            }
 
-            client
-                .post("https://api.anthropic.com/v1/messages")
-                .header("x-api-key", api_key)
-                .header("anthropic-version", "2023-06-01")
-                .header("Content-Type", "application/json")
-                .json(&body)
+        let mut req = client
+            .post(format!("{base_url}{endpoint}"))
+            .header("Content-Type", "application/json")
+            .json(&body);
+        req = apply_auth_headers(req, api_key, pdef);
+        if let Some(p) = pdef {
+            for (k, v) in &p.extra_headers {
+                req = req.header(k.as_str(), v.as_str());
+            }
         }
+        req
+    } else {
+        let base_url = pdef
+            .map(llm_config::resolve_base_url)
+            .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
+        let endpoint = pdef
+            .map(|p| p.chat_endpoint.as_str())
+            .unwrap_or("/chat/completions");
+
+        let mut msgs = Vec::new();
+        if let Some(sys) = system {
+            msgs.push(serde_json::json!({"role": "system", "content": sys}));
+        }
+        msgs.push(serde_json::json!({"role": "user", "content": prompt}));
+
+        let body = serde_json::json!({
+            "model": model,
+            "messages": msgs,
+            "max_tokens": max_tokens,
+            "stream": true,
+        });
+
+        let mut req = client
+            .post(format!("{base_url}{endpoint}"))
+            .header("Content-Type", "application/json")
+            .json(&body);
+        req = apply_auth_headers(req, api_key, pdef);
+        if let Some(p) = pdef {
+            for (k, v) in &p.extra_headers {
+                req = req.header(k.as_str(), v.as_str());
+            }
+        }
+        req
     };
-
-    let is_anthropic = !matches!(provider, "openai" | "ollama" | "openrouter");
 
     let mut es = EventSource::new(request).map_err(|e| {
         VmError::Thrown(VmValue::String(Rc::from(format!(

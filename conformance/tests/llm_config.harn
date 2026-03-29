@@ -1,0 +1,27 @@
+pipeline test(task) {
+  // Test model tier detection
+  let tier1 = llm_model_tier("claude-sonnet-4-20250514")
+  assert_eq(tier1, "frontier")
+  let tier2 = llm_model_tier("gpt-4o")
+  assert_eq(tier2, "frontier")
+  let tier3 = llm_model_tier("Qwen3.5-9B")
+  assert_eq(tier3, "small")
+  let tier4 = llm_model_tier("deepseek-v3")
+  assert_eq(tier4, "mid")
+  // Test provider inference
+  let p1 = llm_infer_provider("claude-sonnet-4-20250514")
+  assert_eq(p1, "anthropic")
+  let p2 = llm_infer_provider("gpt-4o")
+  assert_eq(p2, "openai")
+  let p3 = llm_infer_provider("qwen/qwen3-coder")
+  assert_eq(p3, "openrouter")
+  let p4 = llm_infer_provider("llama3.2:latest")
+  assert_eq(p4, "ollama")
+  // Test providers list
+  let providers = llm_providers()
+  assert(len(providers) >= 5)
+  // Test config access
+  let anthropic_config = llm_config("anthropic")
+  assert_eq(anthropic_config?.auth_style, "header")
+  log("All llm_config tests passed")
+}
