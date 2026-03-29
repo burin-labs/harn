@@ -149,10 +149,22 @@ fn assert_shape_fields(
         match fields.get(field_name.as_str()) {
             None => {
                 if !optional {
-                    return Err(VmError::TypeError(format!(
-                        "parameter '{}': missing field '{}' ({})",
-                        param_name, field_name, type_spec
-                    )));
+                    // Look for a close match among actual keys
+                    let actual_keys: Vec<&str> = fields.keys().map(|k| k.as_str()).collect();
+                    let max_dist = if field_name.len() <= 4 { 1 } else { 2 };
+                    let suggestion = find_closest_field(field_name, &actual_keys, max_dist);
+                    let msg = if let Some(closest) = suggestion {
+                        format!(
+                            "parameter '{}': missing field '{}' ({}), did you mean '{}'?",
+                            param_name, field_name, type_spec, closest
+                        )
+                    } else {
+                        format!(
+                            "parameter '{}': missing field '{}' ({})",
+                            param_name, field_name, type_spec
+                        )
+                    };
+                    return Err(VmError::TypeError(msg));
                 }
             }
             Some(val) => {
@@ -203,6 +215,35 @@ fn assert_shape_fields(
         }
     }
     Ok(VmValue::Nil)
+}
+
+/// Compute the Levenshtein edit distance between two strings.
+fn edit_distance(a: &str, b: &str) -> usize {
+    let a_chars: Vec<char> = a.chars().collect();
+    let b_chars: Vec<char> = b.chars().collect();
+    let n = b_chars.len();
+    // Use single-row DP to avoid clippy needless_range_loop warnings.
+    let mut prev = (0..=n).collect::<Vec<_>>();
+    let mut curr = vec![0; n + 1];
+    for (i, ac) in a_chars.iter().enumerate() {
+        curr[0] = i + 1;
+        for (j, bc) in b_chars.iter().enumerate() {
+            let cost = if ac == bc { 0 } else { 1 };
+            curr[j + 1] = (prev[j + 1] + 1).min(curr[j] + 1).min(prev[j] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[n]
+}
+
+/// Find the closest match to `name` among `candidates`, within `max_dist` edits.
+fn find_closest_field<'a>(name: &str, candidates: &[&'a str], max_dist: usize) -> Option<&'a str> {
+    candidates
+        .iter()
+        .copied()
+        .filter(|c| c.len().abs_diff(name.len()) <= max_dist)
+        .min_by_key(|c| edit_distance(name, c))
+        .filter(|c| edit_distance(name, c) <= max_dist && *c != name)
 }
 
 /// Parse a shape spec string into a list of (field_name, type_spec, optional).

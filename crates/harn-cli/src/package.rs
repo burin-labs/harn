@@ -18,6 +18,16 @@ pub struct Manifest {
     pub dependencies: HashMap<String, Dependency>,
     #[serde(default)]
     pub mcp: Vec<McpServerConfig>,
+    #[serde(default)]
+    pub check: CheckConfig,
+}
+
+#[derive(Debug, Default, Clone, Deserialize)]
+pub struct CheckConfig {
+    #[serde(default)]
+    pub strict: bool,
+    #[serde(default)]
+    pub disable_rules: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -198,6 +208,33 @@ pub fn try_read_manifest_for(harn_file: &std::path::Path) -> Option<Manifest> {
             None
         }
     }
+}
+
+/// Load the `[check]` config from the nearest `harn.toml`.
+/// First checks the directory of the given harn file (if any),
+/// then walks up from the current working directory.
+pub fn load_check_config(harn_file: Option<&std::path::Path>) -> CheckConfig {
+    if let Some(path) = harn_file {
+        if let Some(manifest) = try_read_manifest_for(path) {
+            return manifest.check;
+        }
+    }
+    // Walk up from CWD
+    let mut dir = std::env::current_dir().unwrap_or_default();
+    loop {
+        let manifest_path = dir.join(MANIFEST);
+        if manifest_path.exists() {
+            if let Ok(content) = fs::read_to_string(&manifest_path) {
+                if let Ok(manifest) = toml::from_str::<Manifest>(&content) {
+                    return manifest.check;
+                }
+            }
+        }
+        if !dir.pop() {
+            break;
+        }
+    }
+    CheckConfig::default()
 }
 
 /// `harn install` — install all dependencies from harn.toml.

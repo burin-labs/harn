@@ -1,0 +1,23 @@
+// Test std/json module functions
+import { safe_parse, merge, pick, omit } from "std/json"
+
+pipeline default(task) {
+  // safe_parse: valid JSON
+  let data = safe_parse("{\"name\":\"test\",\"value\":42}")
+  println(data.name)
+  println(data.value)
+  // safe_parse: invalid JSON returns nil
+  let bad = safe_parse("not json {{{")
+  println(bad)
+  // merge: combine two dicts
+  let merged = merge({a: 1, b: 2}, {b: 3, c: 4})
+  println(merged.a)
+  println(merged.b)
+  println(merged.c)
+  // pick: select specific keys
+  let picked = pick({a: 1, b: 2, c: 3}, ["a", "c"])
+  println(json_stringify(picked))
+  // omit: remove specific keys
+  let omitted = omit({a: 1, b: 2, c: 3}, ["b"])
+  println(json_stringify(omitted))
+}

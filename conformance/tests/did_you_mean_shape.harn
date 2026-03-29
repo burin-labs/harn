@@ -1,0 +1,14 @@
+// Test "did you mean" suggestions on shape validation errors
+pipeline default(task) {
+  fn process(data: {name: string, email: string}) {
+    println(data.name)
+  }
+  // Pass dict with typo: "emial" instead of "email"
+  let result = try {
+    process({name: "test", emial: "foo@bar.com"})
+  }
+  println(is_err(result))
+  // The error should mention "email" as a suggestion
+  let msg = unwrap_err(result)
+  println(contains(msg, "email"))
+}

@@ -9,6 +9,7 @@ pub struct TypeDiagnostic {
     pub message: String,
     pub severity: DiagnosticSeverity,
     pub span: Option<Span>,
+    pub help: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1585,6 +1586,17 @@ impl TypeChecker {
             message,
             severity: DiagnosticSeverity::Error,
             span: Some(span),
+            help: None,
+        });
+    }
+
+    #[allow(dead_code)]
+    fn error_at_with_help(&mut self, message: String, span: Span, help: String) {
+        self.diagnostics.push(TypeDiagnostic {
+            message,
+            severity: DiagnosticSeverity::Error,
+            span: Some(span),
+            help: Some(help),
         });
     }
 
@@ -1593,6 +1605,17 @@ impl TypeChecker {
             message,
             severity: DiagnosticSeverity::Warning,
             span: Some(span),
+            help: None,
+        });
+    }
+
+    #[allow(dead_code)]
+    fn warning_at_with_help(&mut self, message: String, span: Span, help: String) {
+        self.diagnostics.push(TypeDiagnostic {
+            message,
+            severity: DiagnosticSeverity::Warning,
+            span: Some(span),
+            help: Some(help),
         });
     }
 }

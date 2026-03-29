@@ -74,12 +74,15 @@ pub(crate) async fn run_conformance_tests(
     filter: Option<&str>,
     junit_path: Option<&str>,
     timeout_ms: u64,
+    verbose: bool,
 ) {
     let dir_path = PathBuf::from(dir);
     if !dir_path.exists() {
         eprintln!("Directory not found: {dir}");
         process::exit(1);
     }
+
+    let suite_start = std::time::Instant::now();
 
     let mut passed = 0;
     let mut failed = 0;
@@ -166,20 +169,40 @@ pub(crate) async fn run_conformance_tests(
                     Ok(Ok(output)) => {
                         let actual = output.trim_end().to_string();
                         if actual == expected {
-                            println!("  \x1b[32mPASS\x1b[0m  {rel_path}");
+                            if verbose {
+                                println!("  \x1b[32mPASS\x1b[0m  {rel_path} ({duration_ms} ms)");
+                            } else {
+                                println!("  \x1b[32mPASS\x1b[0m  {rel_path}");
+                            }
                             junit_results.push((rel_path, true, String::new(), duration_ms));
                             passed += 1;
                         } else {
-                            println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
+                            if verbose {
+                                println!("  \x1b[31mFAIL\x1b[0m  {rel_path} ({duration_ms} ms)");
+                            } else {
+                                println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
+                            }
                             let diff = simple_diff(&expected, &actual);
-                            let msg = format!("{rel_path}:\n{diff}");
+                            let msg = if verbose {
+                                format!(
+                                    "{rel_path}:\n  expected:\n    {}\n  actual:\n    {}\n  diff:\n{diff}",
+                                    expected.lines().collect::<Vec<_>>().join("\n    "),
+                                    actual.lines().collect::<Vec<_>>().join("\n    "),
+                                )
+                            } else {
+                                format!("{rel_path}:\n{diff}")
+                            };
                             errors.push(msg.clone());
                             junit_results.push((rel_path, false, msg, duration_ms));
                             failed += 1;
                         }
                     }
                     Ok(Err(e)) => {
-                        println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
+                        if verbose {
+                            println!("  \x1b[31mFAIL\x1b[0m  {rel_path} ({duration_ms} ms)");
+                        } else {
+                            println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
+                        }
                         let msg = format!("{rel_path}: runtime error: {e}");
                         errors.push(msg.clone());
                         junit_results.push((rel_path, false, msg, duration_ms));
@@ -230,12 +253,20 @@ pub(crate) async fn run_conformance_tests(
 
                 match result {
                     Ok(Err(ref err)) if err.contains(&expected_error) => {
-                        println!("  \x1b[32mPASS\x1b[0m  {rel_path}");
+                        if verbose {
+                            println!("  \x1b[32mPASS\x1b[0m  {rel_path} ({duration_ms} ms)");
+                        } else {
+                            println!("  \x1b[32mPASS\x1b[0m  {rel_path}");
+                        }
                         junit_results.push((rel_path, true, String::new(), duration_ms));
                         passed += 1;
                     }
                     Ok(Err(err)) => {
-                        println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
+                        if verbose {
+                            println!("  \x1b[31mFAIL\x1b[0m  {rel_path} ({duration_ms} ms)");
+                        } else {
+                            println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
+                        }
                         let msg = format!(
                             "{rel_path}:\n  expected error containing: {expected_error}\n  actual error: {err}"
                         );
@@ -264,6 +295,8 @@ pub(crate) async fn run_conformance_tests(
         }
     }
 
+    let total_duration_ms = suite_start.elapsed().as_millis() as u64;
+
     println!();
     if failed > 0 {
         println!(
@@ -275,6 +308,24 @@ pub(crate) async fn run_conformance_tests(
             "\x1b[32m{passed} passed, {failed} failed, {} total\x1b[0m",
             passed + failed
         );
+    }
+
+    // Verbose timing summary
+    if verbose {
+        println!();
+        println!("Total time: {total_duration_ms} ms");
+
+        // Show slowest 5 tests
+        let mut by_time: Vec<&(String, bool, String, u64)> = junit_results.iter().collect();
+        by_time.sort_by(|a, b| b.3.cmp(&a.3));
+        let top_n = by_time.len().min(5);
+        if top_n > 0 {
+            println!();
+            println!("Slowest {top_n} tests:");
+            for entry in &by_time[..top_n] {
+                println!("  {} ms  {}", entry.3, entry.0);
+            }
+        }
     }
 
     if let Some(path) = junit_path {
@@ -413,7 +464,7 @@ pub(crate) async fn run_watch_tests(
                 // Debounce: drain any queued events
                 while rx.recv_timeout(Duration::from_millis(100)).is_ok() {}
 
-                println!("\n\x1b[2m─── file changed, re-running tests ───\x1b[0m\n");
+                println!("\n\x1b[2m--- file changed, re-running tests ---\x1b[0m\n");
                 let summary = test_runner::run_tests(&path, filter, timeout_ms, parallel).await;
                 print_test_results(&summary);
             }

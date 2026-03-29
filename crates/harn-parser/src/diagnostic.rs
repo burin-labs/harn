@@ -1,5 +1,35 @@
 use harn_lexer::Span;
 
+/// Compute the Levenshtein edit distance between two strings.
+pub fn edit_distance(a: &str, b: &str) -> usize {
+    let a_chars: Vec<char> = a.chars().collect();
+    let b_chars: Vec<char> = b.chars().collect();
+    let n = b_chars.len();
+    let mut prev = (0..=n).collect::<Vec<_>>();
+    let mut curr = vec![0; n + 1];
+    for (i, ac) in a_chars.iter().enumerate() {
+        curr[0] = i + 1;
+        for (j, bc) in b_chars.iter().enumerate() {
+            let cost = if ac == bc { 0 } else { 1 };
+            curr[j + 1] = (prev[j + 1] + 1).min(curr[j] + 1).min(prev[j] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[n]
+}
+
+/// Find the closest match to `name` among `candidates`, within `max_dist` edits.
+pub fn find_closest_match<'a>(
+    name: &str,
+    candidates: impl Iterator<Item = &'a str>,
+    max_dist: usize,
+) -> Option<&'a str> {
+    candidates
+        .filter(|c| c.len().abs_diff(name.len()) <= max_dist)
+        .min_by_key(|c| edit_distance(name, c))
+        .filter(|c| edit_distance(name, c) <= max_dist && *c != name)
+}
+
 /// Render a Rust-style diagnostic message.
 ///
 /// Example output:

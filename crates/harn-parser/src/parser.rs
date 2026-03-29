@@ -677,11 +677,19 @@ impl Parser {
         let (error_var, error_type, catch_body) = if has_catch {
             self.advance();
             let (ev, et) = if self.check(&TokenKind::LParen) {
+                // catch (e) { ... } or catch (e: Type) { ... }
                 self.advance();
                 let name = self.consume_identifier("error variable")?;
                 let ty = self.try_parse_type_annotation()?;
                 self.consume(&TokenKind::RParen, ")")?;
                 (Some(name), ty)
+            } else if matches!(
+                self.current().map(|t| &t.kind),
+                Some(TokenKind::Identifier(_))
+            ) {
+                // catch e { ... } (no parens)
+                let name = self.consume_identifier("error variable")?;
+                (Some(name), None)
             } else {
                 (None, None)
             };

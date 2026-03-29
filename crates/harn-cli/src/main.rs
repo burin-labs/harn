@@ -113,7 +113,10 @@ async fn main() {
                 .skip(2)
                 .find(|a| a.ends_with(".harn") || !a.starts_with("--"));
             match file {
-                Some(f) => commands::check::check_file(f),
+                Some(f) => {
+                    let config = package::load_check_config(Some(std::path::Path::new(f.as_str())));
+                    commands::check::check_file(f, &config);
+                }
                 None => {
                     eprintln!("Usage: harn check <file.harn>");
                     process::exit(1);
@@ -126,7 +129,10 @@ async fn main() {
                 .skip(2)
                 .find(|a| a.ends_with(".harn") || !a.starts_with("--"));
             match file {
-                Some(f) => commands::check::lint_file(f),
+                Some(f) => {
+                    let config = package::load_check_config(Some(std::path::Path::new(f.as_str())));
+                    commands::check::lint_file(f, &config);
+                }
                 None => {
                     eprintln!("Usage: harn lint <file.harn>");
                     process::exit(1);
@@ -164,6 +170,7 @@ async fn main() {
                 .unwrap_or(30_000);
             let parallel = args.iter().any(|a| a == "--parallel");
             let watch = args.iter().any(|a| a == "--watch");
+            let verbose = args.iter().any(|a| a == "--verbose" || a == "-v");
             let record = args.iter().any(|a| a == "--record");
             let replay = args.iter().any(|a| a == "--replay");
 
@@ -187,7 +194,7 @@ async fn main() {
                     w[0].starts_with("--")
                         && !matches!(
                             w[0].as_str(),
-                            "--parallel" | "--watch" | "--record" | "--replay"
+                            "--parallel" | "--watch" | "--verbose" | "-v" | "--record" | "--replay"
                         )
                 })
                 .map(|w| w[1].as_str())
@@ -205,6 +212,7 @@ async fn main() {
                         filter.as_deref(),
                         junit_path.as_deref(),
                         timeout_ms,
+                        verbose,
                     )
                     .await;
                 } else if watch {
@@ -373,6 +381,7 @@ fn print_help() {
     println!("    --filter <pattern>   Only run tests matching pattern");
     println!("    --watch              Re-run tests on file changes");
     println!("    --parallel           Run tests concurrently");
+    println!("    --verbose / -v       Show per-test timing and detailed failures");
     println!("    --record / --replay  Record or replay LLM fixtures");
     println!();
     println!("\x1b[1;33mEXAMPLES:\x1b[0m");

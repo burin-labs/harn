@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use harn_lexer::{Span, StringSegment};
+use harn_parser::diagnostic::find_closest_match;
 use harn_parser::{BindingPattern, Node, SNode};
 
 /// A lint diagnostic reported by the linter.
@@ -1067,12 +1068,19 @@ impl Linter {
             if name.starts_with("__") {
                 continue;
             }
+            let suggestion = if let Some(closest) =
+                find_closest_match(name, self.known_functions.iter().map(|s| s.as_str()), 2)
+            {
+                format!("did you mean `{closest}`?")
+            } else {
+                format!("check the spelling or import `{name}`")
+            };
             self.diagnostics.push(LintDiagnostic {
                 rule: "undefined-function",
                 message: format!("function `{name}` is not defined"),
                 span: *span,
                 severity: LintSeverity::Warning,
-                suggestion: Some(format!("check the spelling or import `{name}`")),
+                suggestion: Some(suggestion),
             });
         }
     }
@@ -1080,10 +1088,23 @@ impl Linter {
 
 /// Lint an AST program and return all diagnostics.
 pub fn lint(program: &[SNode]) -> Vec<LintDiagnostic> {
+    lint_with_config(program, &[])
+}
+
+/// Lint an AST program, filtering out diagnostics for disabled rules.
+pub fn lint_with_config(program: &[SNode], disabled_rules: &[String]) -> Vec<LintDiagnostic> {
     let mut linter = Linter::new();
     linter.lint_program(program);
     linter.finalize();
-    linter.diagnostics
+    if disabled_rules.is_empty() {
+        linter.diagnostics
+    } else {
+        linter
+            .diagnostics
+            .into_iter()
+            .filter(|d| !disabled_rules.iter().any(|r| r == d.rule))
+            .collect()
+    }
 }
 
 #[cfg(test)]

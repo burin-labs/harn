@@ -1,0 +1,21 @@
+// Test catch without parentheses around error variable
+pipeline default(task) {
+  // catch e { ... } should work (no parens required)
+  try {
+    throw "test error"
+  } catch (e) {
+    println("caught: " + e)
+  }
+  // catch (e) { ... } should also still work
+  try {
+    throw "another error"
+  } catch (e) {
+    println("also caught: " + e)
+  }
+  // catch without variable should work too
+  try {
+    throw "ignored"
+  } catch {
+    println("caught without var")
+  }
+}

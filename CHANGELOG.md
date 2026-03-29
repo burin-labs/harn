@@ -2,6 +2,32 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.4.17
+
+### Added
+
+- **`harn.toml` check config**: New `[check]` section with `strict` (warnings
+  become errors) and `disable_rules` (skip specific lint rules). Example:
+  ```toml
+  [check]
+  strict = true
+  disable_rules = ["shadow-variable", "unused-parameter"]
+  ```
+- **"Did you mean?" suggestions**: Levenshtein-based fuzzy matching for:
+  - Linter `undefined-function` rule suggests closest known function
+  - Shape validation suggests closest field name on missing fields
+- **`harn test --verbose`**: Per-test timing display, slowest-tests summary
+- **`catch e {` without parens**: `catch e { ... }` now works alongside
+  `catch (e) { ... }` — the parentheses are optional
+- **Fixed `std/json` module**: Rewrote `safe_parse`, `merge`, `pick`, `omit`
+  to use correct Harn syntax (was using unsupported `catch e` and `{..spread}`)
+
+### Changed
+
+- `TypeDiagnostic` now carries optional `help` text for richer error output
+- Conformance tests: 230 total (3 new: catch_no_parens, stdlib_json,
+  did_you_mean_shape)
+
 ## v0.4.16
 
 ### Added
