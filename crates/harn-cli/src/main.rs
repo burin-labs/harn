@@ -484,13 +484,21 @@ pub(crate) async fn execute(source: &str, source_path: Option<&Path>) -> Result<
         .run_until(async {
             let mut vm = harn_vm::Vm::new();
             harn_vm::register_vm_stdlib(&mut vm);
-            harn_vm::register_http_builtins(&mut vm);
-            harn_vm::register_llm_builtins(&mut vm);
-            let store_base = source_path
+            let source_parent = source_path
                 .and_then(|p| p.parent())
                 .unwrap_or(std::path::Path::new("."));
+            let project_root = harn_vm::stdlib::process::find_project_root(source_parent);
+            let store_base = project_root.as_deref().unwrap_or(source_parent);
             harn_vm::register_store_builtins(&mut vm, store_base);
             harn_vm::register_metadata_builtins(&mut vm, store_base);
+            let pipeline_name = source_path
+                .and_then(|p| p.file_stem())
+                .and_then(|s| s.to_str())
+                .unwrap_or("default");
+            harn_vm::register_checkpoint_builtins(&mut vm, store_base, pipeline_name);
+            if let Some(ref root) = project_root {
+                vm.set_project_root(root);
+            }
             if let Some(path) = source_path {
                 if let Some(parent) = path.parent() {
                     if !parent.as_os_str().is_empty() {

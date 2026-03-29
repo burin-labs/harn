@@ -1,0 +1,4 @@
+pipeline test(task) {
+  // agent_config with non-agent should error
+  agent_config({name: "fake"}, "test")
+}

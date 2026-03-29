@@ -222,12 +222,32 @@ impl HostBridge {
         self.notify("output", serde_json::json!({"text": text}));
     }
 
-    /// Send a progress notification.
-    pub fn send_progress(&self, phase: &str, message: &str) {
-        self.notify(
-            "progress",
-            serde_json::json!({"phase": phase, "message": message}),
-        );
+    /// Send a progress notification with optional structured data payload.
+    pub fn send_progress(
+        &self,
+        phase: &str,
+        message: &str,
+        data: Option<serde_json::Value>,
+    ) {
+        let mut payload = serde_json::json!({"phase": phase, "message": message});
+        if let Some(d) = data {
+            payload["data"] = d;
+        }
+        self.notify("progress", payload);
+    }
+
+    /// Send a structured log notification.
+    pub fn send_log(
+        &self,
+        level: &str,
+        message: &str,
+        fields: Option<serde_json::Value>,
+    ) {
+        let mut payload = serde_json::json!({"level": level, "message": message});
+        if let Some(f) = fields {
+            payload["fields"] = f;
+        }
+        self.notify("log", payload);
     }
 }
 

@@ -115,6 +115,9 @@ pub struct Vm {
     /// Yield channel sender for generator execution. When set, `Op::Yield`
     /// sends values through this channel instead of being a no-op.
     pub(crate) yield_sender: Option<tokio::sync::mpsc::Sender<VmValue>>,
+    /// Project root directory (detected via harn.toml).
+    /// Used as base directory for metadata, store, and checkpoint operations.
+    pub(crate) project_root: Option<std::path::PathBuf>,
 }
 
 impl Vm {
@@ -145,6 +148,7 @@ impl Vm {
             cancel_token: None,
             error_stack_trace: Vec::new(),
             yield_sender: None,
+            project_root: None,
         }
     }
 
@@ -396,7 +400,7 @@ impl Vm {
             step_frame_depth: 0,
             stopped: false,
             last_line: 0,
-            source_dir: None,
+            source_dir: self.source_dir.clone(),
             imported_paths: Vec::new(),
             source_file: self.source_file.clone(),
             source_text: self.source_text.clone(),
@@ -405,13 +409,32 @@ impl Vm {
             cancel_token: None,
             error_stack_trace: Vec::new(),
             yield_sender: None,
+            project_root: self.project_root.clone(),
         }
     }
 
     /// Set the source directory for import resolution and introspection.
+    /// Also auto-detects the project root if not already set.
     pub fn set_source_dir(&mut self, dir: &std::path::Path) {
         self.source_dir = Some(dir.to_path_buf());
         crate::stdlib::set_thread_source_dir(dir);
+        // Auto-detect project root if not explicitly set.
+        if self.project_root.is_none() {
+            self.project_root = crate::stdlib::process::find_project_root(dir);
+        }
+    }
+
+    /// Explicitly set the project root directory.
+    /// Used by ACP/CLI to override auto-detection.
+    pub fn set_project_root(&mut self, root: &std::path::Path) {
+        self.project_root = Some(root.to_path_buf());
+    }
+
+    /// Get the project root directory, falling back to source_dir.
+    pub fn project_root(&self) -> Option<&std::path::Path> {
+        self.project_root
+            .as_deref()
+            .or(self.source_dir.as_deref())
     }
 
     /// Return all registered builtin names (sync + async).

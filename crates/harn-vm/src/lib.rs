@@ -2,6 +2,7 @@
 
 pub mod bridge;
 pub mod bridge_builtins;
+pub mod checkpoint;
 mod chunk;
 mod compiler;
 mod http;
@@ -21,7 +22,8 @@ pub use http::{register_http_builtins, reset_http_state};
 pub use llm::register_llm_builtins;
 pub use mcp::{connect_mcp_server, register_mcp_builtins};
 pub use metadata::{register_metadata_builtins, register_scan_builtins};
-pub use stdlib::register_vm_stdlib;
+pub use stdlib::{register_agent_stdlib, register_core_stdlib, register_io_stdlib, register_vm_stdlib};
+pub use checkpoint::register_checkpoint_builtins;
 pub use store::register_store_builtins;
 pub use value::*;
 pub use vm::*;

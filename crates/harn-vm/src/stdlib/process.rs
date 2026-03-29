@@ -166,7 +166,7 @@ pub(crate) fn register_process_builtins(vm: &mut Vm) {
 }
 
 /// Find the project root by walking up from a base directory looking for harn.toml.
-pub(crate) fn find_project_root(base: &std::path::Path) -> Option<std::path::PathBuf> {
+pub fn find_project_root(base: &std::path::Path) -> Option<std::path::PathBuf> {
     let mut dir = base.to_path_buf();
     loop {
         if dir.join("harn.toml").exists() {

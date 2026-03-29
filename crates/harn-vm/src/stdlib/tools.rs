@@ -300,6 +300,77 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
         Ok(VmValue::Dict(Rc::new(schema)))
     });
 
+    // tool_define(registry, name, description, config) -> registry
+    // config is {params: {name: {type, description, required?, default?}}, handler: fn}
+    vm.register_builtin("tool_define", |args, _out| {
+        if args.len() < 4 {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "tool_define: requires registry, name, description, and config dict",
+            ))));
+        }
+
+        let registry = match &args[0] {
+            VmValue::Dict(map) => (**map).clone(),
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "tool_define: first argument must be a tool registry",
+                ))));
+            }
+        };
+        vm_validate_registry("tool_define", &registry)?;
+
+        let name = args[1].display();
+        let description = args[2].display();
+
+        let config = match &args[3] {
+            VmValue::Dict(map) => map,
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "tool_define: config must be a dict with params and handler",
+                ))));
+            }
+        };
+
+        let handler = config
+            .get("handler")
+            .cloned()
+            .unwrap_or(VmValue::Nil);
+
+        let parameters = config
+            .get("params")
+            .cloned()
+            .unwrap_or(VmValue::Dict(Rc::new(BTreeMap::new())));
+
+        let mut tool_entry = BTreeMap::new();
+        tool_entry.insert("name".to_string(), VmValue::String(Rc::from(name.as_str())));
+        tool_entry.insert(
+            "description".to_string(),
+            VmValue::String(Rc::from(description)),
+        );
+        tool_entry.insert("handler".to_string(), handler);
+        tool_entry.insert("parameters".to_string(), parameters);
+
+        let mut tools: Vec<VmValue> = match registry.get("tools") {
+            Some(VmValue::List(list)) => list
+                .iter()
+                .filter(|t| {
+                    if let VmValue::Dict(e) = t {
+                        e.get("name").map(|v| v.display()).as_deref() != Some(name.as_str())
+                    } else {
+                        true
+                    }
+                })
+                .cloned()
+                .collect(),
+            _ => Vec::new(),
+        };
+        tools.push(VmValue::Dict(Rc::new(tool_entry)));
+
+        let mut new_registry = registry;
+        new_registry.insert("tools".to_string(), VmValue::List(Rc::new(tools)));
+        Ok(VmValue::Dict(Rc::new(new_registry)))
+    });
+
     vm.register_builtin("tool_parse_call", |args, _out| {
         let text = args.first().map(|a| a.display()).unwrap_or_default();
 

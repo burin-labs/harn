@@ -51,8 +51,6 @@ pub(crate) fn build_denied_builtins(
         // Create a temporary VM with stdlib registered to enumerate all builtin names.
         let mut tmp = harn_vm::Vm::new();
         harn_vm::register_vm_stdlib(&mut tmp);
-        harn_vm::register_http_builtins(&mut tmp);
-        harn_vm::register_llm_builtins(&mut tmp);
         harn_vm::register_store_builtins(&mut tmp, std::path::Path::new("."));
         harn_vm::register_metadata_builtins(&mut tmp, std::path::Path::new("."));
 
@@ -91,16 +89,26 @@ pub(crate) async fn run_file(path: &str, trace: bool, denied_builtins: HashSet<S
 
     let mut vm = harn_vm::Vm::new();
     harn_vm::register_vm_stdlib(&mut vm);
-    harn_vm::register_http_builtins(&mut vm);
-    harn_vm::register_llm_builtins(&mut vm);
-    let store_base = std::path::Path::new(path)
+    let source_parent = std::path::Path::new(path)
         .parent()
         .unwrap_or(std::path::Path::new("."));
+    // Use project root (harn.toml) for metadata/store, falling back to source dir.
+    let project_root = harn_vm::stdlib::process::find_project_root(source_parent);
+    let store_base = project_root.as_deref().unwrap_or(source_parent);
     harn_vm::register_store_builtins(&mut vm, store_base);
     harn_vm::register_metadata_builtins(&mut vm, store_base);
+    // Register checkpoint builtins — pipeline name derived from source file.
+    let pipeline_name = std::path::Path::new(path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("default");
+    harn_vm::register_checkpoint_builtins(&mut vm, store_base, pipeline_name);
     vm.set_source_info(path, &source);
     if !denied_builtins.is_empty() {
         vm.set_denied_builtins(denied_builtins);
+    }
+    if let Some(ref root) = project_root {
+        vm.set_project_root(root);
     }
 
     if let Some(p) = std::path::Path::new(path).parent() {
@@ -243,11 +251,16 @@ pub(crate) async fn run_file_bridge(path: &str, arg_json: Option<&str>) {
             harn_vm::register_vm_stdlib(&mut vm);
 
             // Register store builtins (before bridge so host can override)
-            let store_base = std::path::Path::new(&path_owned)
+            let source_parent = std::path::Path::new(&path_owned)
                 .parent()
                 .unwrap_or(std::path::Path::new("."));
+            let project_root = harn_vm::stdlib::process::find_project_root(source_parent);
+            let store_base = project_root.as_deref().unwrap_or(source_parent);
             harn_vm::register_store_builtins(&mut vm, store_base);
             harn_vm::register_metadata_builtins(&mut vm, store_base);
+            if let Some(ref root) = project_root {
+                vm.set_project_root(root);
+            }
 
             // Override with bridge builtins (llm_call, file I/O, etc.)
             harn_vm::bridge_builtins::register_bridge_builtins(&mut vm, bridge.clone());

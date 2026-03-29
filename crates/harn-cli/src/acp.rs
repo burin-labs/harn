@@ -401,6 +401,54 @@ impl AcpBridge {
         );
     }
 
+    /// Send a structured `session/update` with progress phase, message, and data.
+    fn send_progress(
+        &self,
+        phase: &str,
+        message: &str,
+        data: Option<serde_json::Value>,
+    ) {
+        let mut update = serde_json::json!({
+            "sessionUpdate": "progress",
+            "phase": phase,
+            "message": message,
+        });
+        if let Some(d) = data {
+            update["data"] = d;
+        }
+        self.send_notification(
+            "session/update",
+            serde_json::json!({
+                "sessionId": self.session_id,
+                "update": update,
+            }),
+        );
+    }
+
+    /// Send a structured `session/update` with log level, message, and fields.
+    fn send_log(
+        &self,
+        level: &str,
+        message: &str,
+        fields: Option<serde_json::Value>,
+    ) {
+        let mut update = serde_json::json!({
+            "sessionUpdate": "log",
+            "level": level,
+            "message": message,
+        });
+        if let Some(f) = fields {
+            update["fields"] = f;
+        }
+        self.send_notification(
+            "session/update",
+            serde_json::json!({
+                "sessionId": self.session_id,
+                "update": update,
+            }),
+        );
+    }
+
     /// Send a JSON-RPC request to the client and await the response.
     async fn call_client(
         &self,
@@ -491,12 +539,21 @@ async fn execute_chunk(
 ) -> Result<String, String> {
     let mut vm = harn_vm::Vm::new();
     harn_vm::register_vm_stdlib(&mut vm);
-    harn_vm::register_http_builtins(&mut vm);
-    harn_vm::register_llm_builtins(&mut vm);
-    let store_base = source_path.and_then(|p| p.parent()).unwrap_or(cwd);
+    // Use project root (harn.toml) for metadata/store, falling back to cwd.
+    let source_parent = source_path.and_then(|p| p.parent()).unwrap_or(cwd);
+    let project_root = harn_vm::stdlib::process::find_project_root(source_parent)
+        .or_else(|| harn_vm::stdlib::process::find_project_root(cwd));
+    let store_base = project_root.as_deref().unwrap_or(cwd);
     harn_vm::register_store_builtins(&mut vm, store_base);
-    // Metadata uses project root (cwd) so .burin/metadata/ is in the right place
-    harn_vm::register_metadata_builtins(&mut vm, cwd);
+    harn_vm::register_metadata_builtins(&mut vm, store_base);
+    let pipeline_name = source_path
+        .and_then(|p| p.file_stem())
+        .and_then(|s| s.to_str())
+        .unwrap_or("acp");
+    harn_vm::register_checkpoint_builtins(&mut vm, store_base, pipeline_name);
+    if let Some(ref root) = project_root {
+        vm.set_project_root(root);
+    }
 
     if let Some(path) = source_path {
         let path_str = path.to_string_lossy();
@@ -628,12 +685,14 @@ fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Rc<AcpBridge>) {
         let lvl = level.strip_prefix("log_").unwrap_or(level).to_string();
         vm.register_builtin(level, move |args, _out| {
             let msg = args.first().map(|a| a.display()).unwrap_or_default();
-            let fields = args.get(1).map(|a| a.display()).unwrap_or_default();
-            if fields.is_empty() {
-                b.send_update(&format!("[{lvl}] {msg}\n"));
-            } else {
-                b.send_update(&format!("[{lvl}] {msg} {fields}\n"));
-            }
+            let fields = args.get(1).and_then(|a| {
+                if matches!(a, harn_vm::VmValue::Nil) {
+                    None
+                } else {
+                    Some(harn_vm::llm::vm_value_to_json(a))
+                }
+            });
+            b.send_log(&lvl, &msg, fields);
             Ok(harn_vm::VmValue::Nil)
         });
     }
@@ -644,7 +703,14 @@ fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Rc<AcpBridge>) {
     vm.register_builtin("progress", move |args, _out| {
         let phase = args.first().map(|a| a.display()).unwrap_or_default();
         let message = args.get(1).map(|a| a.display()).unwrap_or_default();
-        b.send_update(&format!("[{phase}] {message}\n"));
+        let data = args.get(2).and_then(|a| {
+            if matches!(a, harn_vm::VmValue::Nil) {
+                None
+            } else {
+                Some(harn_vm::llm::vm_value_to_json(a))
+            }
+        });
+        b.send_progress(&phase, &message, data);
         Ok(harn_vm::VmValue::Nil)
     });
 

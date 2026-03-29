@@ -1,0 +1,35 @@
+pipeline test(task) {
+  // Test tool_define builtin for ergonomic tool registration.
+
+  let registry = tool_registry()
+
+  let registry = tool_define(registry, "search_code", "Search for code patterns", {
+    params: {
+      query: "string",
+      path: "string",
+    },
+    handler: { args -> "found: " + args.query },
+  })
+
+  let registry = tool_define(registry, "read_file", "Read file contents", {
+    params: {
+      path: "string",
+    },
+    handler: { args -> "content of " + args.path },
+  })
+
+  // Verify tools registered
+  assert(tool_count(registry) == 2, "should have 2 tools")
+
+  // Find specific tool
+  let search = tool_find(registry, "search_code")
+  assert(search != nil, "should find search_code tool")
+  assert(search.name == "search_code", "tool name should match")
+  assert(search.description == "Search for code patterns", "description should match")
+
+  // Tool list
+  let tools = tool_list(registry)
+  assert(len(tools) == 2, "tool_list should return 2 tools")
+
+  log("tool_define tests passed")
+}

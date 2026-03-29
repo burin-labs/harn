@@ -1,0 +1,5 @@
+pipeline test(task) {
+  // tool_define with non-dict config should error
+  let r = tool_registry()
+  tool_define(r, "test", "description", "not a dict")
+}

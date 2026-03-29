@@ -1,0 +1,6 @@
+pipeline test(task) {
+  // Test progress builtin in standalone mode.
+  progress("scan", "Scanning files")
+  progress("enrich", "Enriching directory", {current: 3, total: 10})
+  log("done")
+}

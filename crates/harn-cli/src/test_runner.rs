@@ -84,11 +84,15 @@ pub async fn run_test_file(
             local.run_until(async {
                 let mut vm = harn_vm::Vm::new();
                 harn_vm::register_vm_stdlib(&mut vm);
-                harn_vm::register_http_builtins(&mut vm);
-                harn_vm::register_llm_builtins(&mut vm);
-                let store_base = path.parent().unwrap_or(std::path::Path::new("."));
+                let source_parent = path.parent().unwrap_or(std::path::Path::new("."));
+                let project_root = harn_vm::stdlib::process::find_project_root(source_parent);
+                let store_base = project_root.as_deref().unwrap_or(source_parent);
                 harn_vm::register_store_builtins(&mut vm, store_base);
                 harn_vm::register_metadata_builtins(&mut vm, store_base);
+                let pipeline_name = path.file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("test");
+                harn_vm::register_checkpoint_builtins(&mut vm, store_base, pipeline_name);
                 vm.set_source_info(&path_str, &source);
                 if let Some(parent) = path.parent() {
                     if !parent.as_os_str().is_empty() {

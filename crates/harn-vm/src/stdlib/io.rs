@@ -71,6 +71,15 @@ pub(crate) fn register_io_builtins(vm: &mut Vm) {
         }
     });
 
+    // progress(phase, message, data?) — standalone mode writes structured log line.
+    // In bridge/ACP mode, this is overridden to emit structured notifications.
+    vm.register_builtin("progress", |args, out| {
+        let phase = args.first().map(|a| a.display()).unwrap_or_default();
+        let message = args.get(1).map(|a| a.display()).unwrap_or_default();
+        out.push_str(&format!("[{phase}] {message}\n"));
+        Ok(VmValue::Nil)
+    });
+
     vm.register_builtin("log_json", |args, out| {
         let key = args.first().map(|a| a.display()).unwrap_or_default();
         let value = args.get(1).cloned().unwrap_or(VmValue::Nil);

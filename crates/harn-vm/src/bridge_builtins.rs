@@ -56,7 +56,15 @@ pub fn register_bridge_builtins(vm: &mut Vm, bridge: Rc<HostBridge>) {
     vm.register_builtin("progress", move |args, _out| {
         let phase = args.first().map(|a| a.display()).unwrap_or_default();
         let message = args.get(1).map(|a| a.display()).unwrap_or_default();
-        b.send_progress(&phase, &message);
+        // Optional third argument: structured data payload (dict).
+        let data = args.get(2).and_then(|a| {
+            if matches!(a, VmValue::Nil) {
+                None
+            } else {
+                Some(crate::llm::vm_value_to_json(a))
+            }
+        });
+        b.send_progress(&phase, &message, data);
         Ok(VmValue::Nil)
     });
 
@@ -67,18 +75,21 @@ pub fn register_bridge_builtins(vm: &mut Vm, bridge: Rc<HostBridge>) {
         Ok(VmValue::Nil)
     });
 
-    // Override structured logging builtins to send via bridge
+    // Override structured logging builtins to send via bridge.
+    // Emits a structured "log" notification with level, message, and optional fields.
     for level in ["log_debug", "log_info", "log_warn", "log_error"] {
         let b = bridge.clone();
         let lvl = level.strip_prefix("log_").unwrap_or(level).to_string();
         vm.register_builtin(level, move |args, _out| {
             let msg = args.first().map(|a| a.display()).unwrap_or_default();
-            let fields = args.get(1).map(|a| a.display()).unwrap_or_default();
-            if fields.is_empty() {
-                b.send_output(&format!("[{lvl}] {msg}\n"));
-            } else {
-                b.send_output(&format!("[{lvl}] {msg} {fields}\n"));
-            }
+            let fields = args.get(1).and_then(|a| {
+                if matches!(a, VmValue::Nil) {
+                    None
+                } else {
+                    Some(crate::llm::vm_value_to_json(a))
+                }
+            });
+            b.send_log(&lvl, &msg, fields);
             Ok(VmValue::Nil)
         });
     }

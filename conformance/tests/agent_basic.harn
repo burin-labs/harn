@@ -1,0 +1,32 @@
+pipeline test(task) {
+  // Test agent() and agent_config() builtins.
+
+  let classifier = agent("classifier", {
+    system: "You classify code directories",
+    provider: "mock",
+    model: "test-model",
+    max_iterations: 5,
+    tools: ["read_file", "search"],
+  })
+
+  // Check agent dict shape
+  assert(classifier._type == "agent", "should be agent type")
+  assert(classifier.name == "classifier", "should have name")
+  assert(classifier.system == "You classify code directories", "should have system")
+  assert(classifier.provider == "mock", "should have provider")
+  assert(classifier.max_iterations == 5, "should have max_iterations")
+
+  // Test agent_name
+  let name = agent_name(classifier)
+  assert(name == "classifier", "agent_name should return name")
+
+  // Test agent_config
+  let cfg = agent_config(classifier, "Classify src/models")
+  assert(cfg.prompt == "Classify src/models", "should have prompt")
+  assert(cfg.system == "You classify code directories", "should have system")
+  assert(cfg.options.provider == "mock", "should have provider in options")
+  assert(cfg.options.model == "test-model", "should have model in options")
+  assert(cfg.options.max_iterations == 5, "should have max_iterations in options")
+
+  log("agent tests passed")
+}
