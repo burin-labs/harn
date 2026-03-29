@@ -93,6 +93,50 @@ let name = json_extract(response, "name") // extract just one key
 | `random()` | none | float | Random float in [0, 1) |
 | `random_int(min, max)` | min: int, max: int | int | Random integer in [min, max] inclusive |
 
+### Trigonometry
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `sin(n)` | n: float | float | Sine (radians) |
+| `cos(n)` | n: float | float | Cosine (radians) |
+| `tan(n)` | n: float | float | Tangent (radians) |
+| `asin(n)` | n: float | float | Inverse sine |
+| `acos(n)` | n: float | float | Inverse cosine |
+| `atan(n)` | n: float | float | Inverse tangent |
+| `atan2(y, x)` | y: float, x: float | float | Two-argument inverse tangent |
+
+### Logarithms and exponentials
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `log2(n)` | n: float | float | Base-2 logarithm |
+| `log10(n)` | n: float | float | Base-10 logarithm |
+| `ln(n)` | n: float | float | Natural logarithm |
+| `exp(n)` | n: float | float | Euler's number raised to the power n |
+
+### Constants and utilities
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `pi()` | none | float | The constant pi (3.14159...) |
+| `e()` | none | float | Euler's number (2.71828...) |
+| `sign(n)` | n: int or float | int | Sign of a number: -1, 0, or 1 |
+| `is_nan(n)` | n: float | bool | Check if value is NaN |
+| `is_infinite(n)` | n: float | bool | Check if value is infinite |
+
+## Sets
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `set(items?)` | items: list (optional) | set | Create a new set, optionally from a list |
+| `set_add(s, value)` | s: set, value: any | set | Add a value to a set, returns new set |
+| `set_remove(s, value)` | s: set, value: any | set | Remove a value from a set, returns new set |
+| `set_contains(s, value)` | s: set, value: any | bool | Check if set contains a value |
+| `set_union(a, b)` | a: set, b: set | set | Union of two sets |
+| `set_intersect(a, b)` | a: set, b: set | set | Intersection of two sets |
+| `set_difference(a, b)` | a: set, b: set | set | Difference of two sets (elements in a but not in b) |
+| `to_list(s)` | s: set | list | Convert a set to a sorted list |
+
 ## String functions
 
 | Function | Parameters | Returns | Description |

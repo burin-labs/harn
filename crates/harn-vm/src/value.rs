@@ -56,6 +56,7 @@ pub enum VmValue {
     Channel(VmChannelHandle),
     Atomic(VmAtomicHandle),
     McpClient(VmMcpClientHandle),
+    Set(Rc<Vec<VmValue>>),
 }
 
 /// A compiled closure value.
@@ -235,6 +236,7 @@ impl VmValue {
             VmValue::Channel(_) => true,
             VmValue::Atomic(_) => true,
             VmValue::McpClient(_) => true,
+            VmValue::Set(s) => !s.is_empty(),
         }
     }
 
@@ -255,6 +257,7 @@ impl VmValue {
             VmValue::Channel(_) => "channel",
             VmValue::Atomic(_) => "atomic",
             VmValue::McpClient(_) => "mcp_client",
+            VmValue::Set(_) => "set",
         }
     }
 
@@ -320,6 +323,10 @@ impl VmValue {
             VmValue::Channel(ch) => format!("<channel:{}>", ch.name),
             VmValue::Atomic(a) => format!("<atomic:{}>", a.value.load(Ordering::SeqCst)),
             VmValue::McpClient(c) => format!("<mcp_client:{}>", c.name),
+            VmValue::Set(items) => {
+                let inner: Vec<String> = items.iter().map(|i| i.display()).collect();
+                format!("set({})", inner.join(", "))
+            }
         }
     }
 
@@ -400,6 +407,9 @@ pub fn values_equal(a: &VmValue, b: &VmValue) -> bool {
                     .iter()
                     .zip(b_f.iter())
                     .all(|((k1, v1), (k2, v2))| k1 == k2 && values_equal(v1, v2))
+        }
+        (VmValue::Set(a), VmValue::Set(b)) => {
+            a.len() == b.len() && a.iter().all(|x| b.iter().any(|y| values_equal(x, y)))
         }
         _ => false,
     }

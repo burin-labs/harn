@@ -198,6 +198,40 @@ impl Compiler {
         Ok(())
     }
 
+    /// Emit runtime type checks for parameters with type annotations.
+    /// For each param with a type annotation, emits CheckType(var_name, type_name).
+    fn emit_type_checks(&mut self, params: &[TypedParam]) {
+        for param in params {
+            if let Some(type_expr) = &param.type_expr {
+                let type_name = Self::type_expr_to_runtime_name(type_expr);
+                if let Some(type_name) = type_name {
+                    let var_idx = self
+                        .chunk
+                        .add_constant(Constant::String(param.name.clone()));
+                    let type_idx = self.chunk.add_constant(Constant::String(type_name));
+                    self.chunk.emit_u16(Op::CheckType, var_idx, self.line);
+                    // Emit the type name index as two extra bytes
+                    let hi = (type_idx >> 8) as u8;
+                    let lo = type_idx as u8;
+                    self.chunk.code.push(hi);
+                    self.chunk.code.push(lo);
+                }
+            }
+        }
+    }
+
+    /// Convert a TypeExpr to a runtime type name string for CheckType.
+    fn type_expr_to_runtime_name(type_expr: &harn_parser::TypeExpr) -> Option<String> {
+        match type_expr {
+            harn_parser::TypeExpr::Named(name) => match name.as_str() {
+                "int" | "float" | "string" | "bool" | "list" | "dict" | "set" | "nil"
+                | "closure" => Some(name.clone()),
+                _ => None, // Unknown types are not checked at runtime
+            },
+            _ => None, // Union types, shapes, etc. are not checked at runtime
+        }
+    }
+
     /// Emit the extra u16 type name index after a TryCatchSetup jump.
     fn emit_type_name_extra(&mut self, type_name_idx: u16) {
         let hi = (type_name_idx >> 8) as u8;
@@ -966,6 +1000,7 @@ impl Compiler {
                 let mut fn_compiler = Compiler::new();
                 fn_compiler.enum_names = self.enum_names.clone();
                 fn_compiler.emit_default_preamble(params)?;
+                fn_compiler.emit_type_checks(params);
                 fn_compiler.compile_block(body)?;
                 fn_compiler.chunk.emit(Op::Nil, self.line);
                 fn_compiler.chunk.emit(Op::Return, self.line);
@@ -988,6 +1023,7 @@ impl Compiler {
                 let mut fn_compiler = Compiler::new();
                 fn_compiler.enum_names = self.enum_names.clone();
                 fn_compiler.emit_default_preamble(params)?;
+                fn_compiler.emit_type_checks(params);
                 fn_compiler.compile_block(body)?;
                 // If block didn't end with return, the last value is on the stack
                 fn_compiler.chunk.emit(Op::Return, self.line);

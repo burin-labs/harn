@@ -1,0 +1,57 @@
+pipeline test(task) {
+  // Create sets
+  let s = set(1, 2, 3)
+  assert_eq(len(s), 3)
+  assert_eq(type_of(s), "set")
+  // Deduplication
+  let s2 = set(1, 1, 2, 2, 3)
+  assert_eq(len(s2), 3)
+  // From list
+  let s3 = set([4, 5, 5, 6])
+  assert_eq(len(s3), 3)
+  // set_contains
+  assert(set_contains(s, 1))
+  assert(set_contains(s, 2))
+  assert(!set_contains(s, 99))
+  // set_add
+  let s4 = set_add(s, 4)
+  assert_eq(len(s4), 4)
+  assert(set_contains(s4, 4))
+  // Adding duplicate doesn't increase size
+  let s5 = set_add(s, 1)
+  assert_eq(len(s5), 3)
+  // set_remove
+  let s6 = set_remove(s, 2)
+  assert_eq(len(s6), 2)
+  assert(!set_contains(s6, 2))
+  // set_union
+  let a = set(1, 2, 3)
+  let b = set(3, 4, 5)
+  let u = set_union(a, b)
+  assert_eq(len(u), 5)
+  // set_intersect
+  let i = set_intersect(a, b)
+  assert_eq(len(i), 1)
+  assert(set_contains(i, 3))
+  // set_difference
+  let d = set_difference(a, b)
+  assert_eq(len(d), 2)
+  assert(set_contains(d, 1))
+  assert(set_contains(d, 2))
+  assert(!set_contains(d, 3))
+  // to_list
+  let l = to_list(set(10, 20))
+  assert_eq(type_of(l), "list")
+  assert_eq(len(l), 2)
+  // Iteration
+  var sum = 0
+  for item in set(10, 20, 30) {
+    sum = sum + item
+  }
+  assert_eq(sum, 60)
+  // String sets
+  let tags = set("a", "b", "c")
+  assert(set_contains(tags, "b"))
+  assert(!set_contains(tags, "z"))
+  log("set ok")
+}

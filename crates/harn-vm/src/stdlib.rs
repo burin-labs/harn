@@ -321,6 +321,318 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
         Ok(VmValue::Nil)
     });
 
+    // --- Trigonometric and transcendental math ---
+
+    vm.register_builtin("sin", |args, _out| {
+        let n = match args.first().unwrap_or(&VmValue::Nil) {
+            VmValue::Float(n) => *n,
+            VmValue::Int(n) => *n as f64,
+            _ => return Ok(VmValue::Nil),
+        };
+        Ok(VmValue::Float(n.sin()))
+    });
+
+    vm.register_builtin("cos", |args, _out| {
+        let n = match args.first().unwrap_or(&VmValue::Nil) {
+            VmValue::Float(n) => *n,
+            VmValue::Int(n) => *n as f64,
+            _ => return Ok(VmValue::Nil),
+        };
+        Ok(VmValue::Float(n.cos()))
+    });
+
+    vm.register_builtin("tan", |args, _out| {
+        let n = match args.first().unwrap_or(&VmValue::Nil) {
+            VmValue::Float(n) => *n,
+            VmValue::Int(n) => *n as f64,
+            _ => return Ok(VmValue::Nil),
+        };
+        Ok(VmValue::Float(n.tan()))
+    });
+
+    vm.register_builtin("asin", |args, _out| {
+        let n = match args.first().unwrap_or(&VmValue::Nil) {
+            VmValue::Float(n) => *n,
+            VmValue::Int(n) => *n as f64,
+            _ => return Ok(VmValue::Nil),
+        };
+        Ok(VmValue::Float(n.asin()))
+    });
+
+    vm.register_builtin("acos", |args, _out| {
+        let n = match args.first().unwrap_or(&VmValue::Nil) {
+            VmValue::Float(n) => *n,
+            VmValue::Int(n) => *n as f64,
+            _ => return Ok(VmValue::Nil),
+        };
+        Ok(VmValue::Float(n.acos()))
+    });
+
+    vm.register_builtin("atan", |args, _out| {
+        let n = match args.first().unwrap_or(&VmValue::Nil) {
+            VmValue::Float(n) => *n,
+            VmValue::Int(n) => *n as f64,
+            _ => return Ok(VmValue::Nil),
+        };
+        Ok(VmValue::Float(n.atan()))
+    });
+
+    vm.register_builtin("atan2", |args, _out| {
+        if args.len() >= 2 {
+            let y = match &args[0] {
+                VmValue::Float(n) => *n,
+                VmValue::Int(n) => *n as f64,
+                _ => return Ok(VmValue::Nil),
+            };
+            let x = match &args[1] {
+                VmValue::Float(n) => *n,
+                VmValue::Int(n) => *n as f64,
+                _ => return Ok(VmValue::Nil),
+            };
+            Ok(VmValue::Float(y.atan2(x)))
+        } else {
+            Ok(VmValue::Nil)
+        }
+    });
+
+    vm.register_builtin("log2", |args, _out| {
+        let n = match args.first().unwrap_or(&VmValue::Nil) {
+            VmValue::Float(n) => *n,
+            VmValue::Int(n) => *n as f64,
+            _ => return Ok(VmValue::Nil),
+        };
+        Ok(VmValue::Float(n.log2()))
+    });
+
+    vm.register_builtin("log10", |args, _out| {
+        let n = match args.first().unwrap_or(&VmValue::Nil) {
+            VmValue::Float(n) => *n,
+            VmValue::Int(n) => *n as f64,
+            _ => return Ok(VmValue::Nil),
+        };
+        Ok(VmValue::Float(n.log10()))
+    });
+
+    vm.register_builtin("ln", |args, _out| {
+        let n = match args.first().unwrap_or(&VmValue::Nil) {
+            VmValue::Float(n) => *n,
+            VmValue::Int(n) => *n as f64,
+            _ => return Ok(VmValue::Nil),
+        };
+        Ok(VmValue::Float(n.ln()))
+    });
+
+    vm.register_builtin("exp", |args, _out| {
+        let n = match args.first().unwrap_or(&VmValue::Nil) {
+            VmValue::Float(n) => *n,
+            VmValue::Int(n) => *n as f64,
+            _ => return Ok(VmValue::Nil),
+        };
+        Ok(VmValue::Float(n.exp()))
+    });
+
+    vm.register_builtin("sign", |args, _out| {
+        match args.first().unwrap_or(&VmValue::Nil) {
+            VmValue::Int(n) => Ok(VmValue::Int(n.signum())),
+            VmValue::Float(n) => {
+                if n.is_nan() {
+                    Ok(VmValue::Float(f64::NAN))
+                } else if *n == 0.0 {
+                    Ok(VmValue::Int(0))
+                } else if *n > 0.0 {
+                    Ok(VmValue::Int(1))
+                } else {
+                    Ok(VmValue::Int(-1))
+                }
+            }
+            _ => Ok(VmValue::Nil),
+        }
+    });
+
+    vm.register_builtin("pi", |_args, _out| Ok(VmValue::Float(std::f64::consts::PI)));
+
+    vm.register_builtin("e", |_args, _out| Ok(VmValue::Float(std::f64::consts::E)));
+
+    vm.register_builtin("is_nan", |args, _out| {
+        match args.first().unwrap_or(&VmValue::Nil) {
+            VmValue::Float(n) => Ok(VmValue::Bool(n.is_nan())),
+            _ => Ok(VmValue::Bool(false)),
+        }
+    });
+
+    vm.register_builtin("is_infinite", |args, _out| {
+        match args.first().unwrap_or(&VmValue::Nil) {
+            VmValue::Float(n) => Ok(VmValue::Bool(n.is_infinite())),
+            _ => Ok(VmValue::Bool(false)),
+        }
+    });
+
+    // --- Set builtins ---
+
+    // set(...items) or set(list) -> Set
+    vm.register_builtin("set", |args, _out| {
+        let mut items: Vec<VmValue> = Vec::new();
+        for arg in args {
+            match arg {
+                VmValue::List(list) => {
+                    for v in list.iter() {
+                        if !items.iter().any(|x| values_equal(x, v)) {
+                            items.push(v.clone());
+                        }
+                    }
+                }
+                VmValue::Set(s) => {
+                    for v in s.iter() {
+                        if !items.iter().any(|x| values_equal(x, v)) {
+                            items.push(v.clone());
+                        }
+                    }
+                }
+                other => {
+                    if !items.iter().any(|x| values_equal(x, other)) {
+                        items.push(other.clone());
+                    }
+                }
+            }
+        }
+        Ok(VmValue::Set(Rc::new(items)))
+    });
+
+    // set_add(s, value) -> new Set
+    vm.register_builtin("set_add", |args, _out| {
+        let s = match args.first() {
+            Some(VmValue::Set(s)) => s.clone(),
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "set_add: first argument must be a set",
+                ))));
+            }
+        };
+        let val = args.get(1).cloned().unwrap_or(VmValue::Nil);
+        let mut items: Vec<VmValue> = (*s).clone();
+        if !items.iter().any(|x| values_equal(x, &val)) {
+            items.push(val);
+        }
+        Ok(VmValue::Set(Rc::new(items)))
+    });
+
+    // set_remove(s, value) -> new Set
+    vm.register_builtin("set_remove", |args, _out| {
+        let s = match args.first() {
+            Some(VmValue::Set(s)) => s.clone(),
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "set_remove: first argument must be a set",
+                ))));
+            }
+        };
+        let val = args.get(1).cloned().unwrap_or(VmValue::Nil);
+        let items: Vec<VmValue> = s
+            .iter()
+            .filter(|x| !values_equal(x, &val))
+            .cloned()
+            .collect();
+        Ok(VmValue::Set(Rc::new(items)))
+    });
+
+    // set_contains(s, value) -> bool
+    vm.register_builtin("set_contains", |args, _out| {
+        let s = match args.first() {
+            Some(VmValue::Set(s)) => s,
+            _ => return Ok(VmValue::Bool(false)),
+        };
+        let val = args.get(1).unwrap_or(&VmValue::Nil);
+        Ok(VmValue::Bool(s.iter().any(|x| values_equal(x, val))))
+    });
+
+    // set_union(a, b) -> Set
+    vm.register_builtin("set_union", |args, _out| {
+        let a = match args.first() {
+            Some(VmValue::Set(s)) => s,
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "set_union: arguments must be sets",
+                ))));
+            }
+        };
+        let b = match args.get(1) {
+            Some(VmValue::Set(s)) => s,
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "set_union: arguments must be sets",
+                ))));
+            }
+        };
+        let mut items: Vec<VmValue> = (**a).clone();
+        for v in b.iter() {
+            if !items.iter().any(|x| values_equal(x, v)) {
+                items.push(v.clone());
+            }
+        }
+        Ok(VmValue::Set(Rc::new(items)))
+    });
+
+    // set_intersect(a, b) -> Set
+    vm.register_builtin("set_intersect", |args, _out| {
+        let a = match args.first() {
+            Some(VmValue::Set(s)) => s,
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "set_intersect: arguments must be sets",
+                ))));
+            }
+        };
+        let b = match args.get(1) {
+            Some(VmValue::Set(s)) => s,
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "set_intersect: arguments must be sets",
+                ))));
+            }
+        };
+        let items: Vec<VmValue> = a
+            .iter()
+            .filter(|x| b.iter().any(|y| values_equal(x, y)))
+            .cloned()
+            .collect();
+        Ok(VmValue::Set(Rc::new(items)))
+    });
+
+    // set_difference(a, b) -> Set (items in a but not in b)
+    vm.register_builtin("set_difference", |args, _out| {
+        let a = match args.first() {
+            Some(VmValue::Set(s)) => s,
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "set_difference: arguments must be sets",
+                ))));
+            }
+        };
+        let b = match args.get(1) {
+            Some(VmValue::Set(s)) => s,
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "set_difference: arguments must be sets",
+                ))));
+            }
+        };
+        let items: Vec<VmValue> = a
+            .iter()
+            .filter(|x| !b.iter().any(|y| values_equal(x, y)))
+            .cloned()
+            .collect();
+        Ok(VmValue::Set(Rc::new(items)))
+    });
+
+    // to_list(set) -> list (also works for other types)
+    vm.register_builtin("to_list", |args, _out| {
+        match args.first().unwrap_or(&VmValue::Nil) {
+            VmValue::Set(s) => Ok(VmValue::List(Rc::new(s.to_vec()))),
+            VmValue::List(l) => Ok(VmValue::List(l.clone())),
+            other => Ok(VmValue::List(Rc::new(vec![other.clone()]))),
+        }
+    });
+
     // --- Assert builtins ---
 
     vm.register_builtin("assert", |args, _out| {
@@ -754,6 +1066,7 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
             VmValue::String(s) => Ok(VmValue::Int(s.len() as i64)),
             VmValue::List(items) => Ok(VmValue::Int(items.len() as i64)),
             VmValue::Dict(map) => Ok(VmValue::Int(map.len() as i64)),
+            VmValue::Set(s) => Ok(VmValue::Int(s.len() as i64)),
             _ => Ok(VmValue::Int(0)),
         }
     });
@@ -1941,6 +2254,10 @@ pub(crate) fn vm_value_to_json(val: &VmValue) -> String {
                 .map(|(k, v)| format!("{}:{}", escape_json_string_vm(k), vm_value_to_json(v)))
                 .collect();
             format!("{{{}}}", inner.join(","))
+        }
+        VmValue::Set(items) => {
+            let inner: Vec<String> = items.iter().map(vm_value_to_json).collect();
+            format!("[{}]", inner.join(","))
         }
         _ => "null".to_string(),
     }

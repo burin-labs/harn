@@ -158,6 +158,13 @@ pub enum Op {
     /// Push the number of arguments passed to the current function call.
     GetArgc,
 
+    // --- Type checking ---
+    /// Runtime type check on a variable.
+    /// arg1: u16 = constant index (variable name),
+    /// arg2: u16 = constant index (expected type name).
+    /// Throws a TypeError if the variable's type doesn't match.
+    CheckType,
+
     // --- Misc ---
     /// Duplicate top of stack.
     Dup,

@@ -6,6 +6,9 @@ pub fn get_stdlib_source(module: &str) -> Option<&'static str> {
     match module {
         "text" => Some(include_str!("stdlib_text.harn")),
         "collections" => Some(include_str!("stdlib_collections.harn")),
+        "math" => Some(include_str!("stdlib_math.harn")),
+        "path" => Some(include_str!("stdlib_path.harn")),
+        "json" => Some(include_str!("stdlib_json.harn")),
         _ => None,
     }
 }

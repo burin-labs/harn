@@ -145,10 +145,15 @@ fn builtin_return_type(name: &str) -> InferredType {
         | "date_format"
         | "format"
         | "compute_content_hash" => Some(TypeExpr::Named("string".into())),
-        "to_int" | "timer_end" | "elapsed" => Some(TypeExpr::Named("int".into())),
-        "to_float" | "timestamp" | "date_parse" => Some(TypeExpr::Named("float".into())),
-        "file_exists" | "json_validate" => Some(TypeExpr::Named("bool".into())),
-        "list_dir" | "mcp_list_tools" | "mcp_list_resources" | "mcp_list_prompts" => {
+        "to_int" | "timer_end" | "elapsed" | "sign" => Some(TypeExpr::Named("int".into())),
+        "to_float" | "timestamp" | "date_parse" | "sin" | "cos" | "tan" | "asin" | "acos"
+        | "atan" | "atan2" | "log2" | "log10" | "ln" | "exp" | "pi" | "e" => {
+            Some(TypeExpr::Named("float".into()))
+        }
+        "file_exists" | "json_validate" | "is_nan" | "is_infinite" | "set_contains" => {
+            Some(TypeExpr::Named("bool".into()))
+        }
+        "list_dir" | "mcp_list_tools" | "mcp_list_resources" | "mcp_list_prompts" | "to_list" => {
             Some(TypeExpr::Named("list".into()))
         }
         "stat" | "exec" | "shell" | "date_now" | "agent_loop" | "llm_info" | "llm_usage"
@@ -228,6 +233,30 @@ fn is_builtin(name: &str) -> bool {
             | "dirname"
             | "basename"
             | "extname"
+            | "sin"
+            | "cos"
+            | "tan"
+            | "asin"
+            | "acos"
+            | "atan"
+            | "atan2"
+            | "log2"
+            | "log10"
+            | "ln"
+            | "exp"
+            | "pi"
+            | "e"
+            | "sign"
+            | "is_nan"
+            | "is_infinite"
+            | "set"
+            | "set_add"
+            | "set_remove"
+            | "set_contains"
+            | "set_union"
+            | "set_intersect"
+            | "set_difference"
+            | "to_list"
     )
 }
 

@@ -1,0 +1,42 @@
+// std/math — Extended math utilities
+//
+// Import with: import "std/math"
+
+/// Clamp a value between min and max.
+fn clamp(value, lo, hi) {
+  if value < lo { return lo }
+  if value > hi { return hi }
+  return value
+}
+
+/// Linear interpolation between a and b by t (0..1).
+fn lerp(a, b, t) {
+  return a + (b - a) * t
+}
+
+/// Map a value from one range to another.
+fn map_range(value, in_lo, in_hi, out_lo, out_hi) {
+  let t = (value - in_lo) / (in_hi - in_lo)
+  return lerp(out_lo, out_hi, t)
+}
+
+/// Convert degrees to radians.
+fn deg_to_rad(degrees) {
+  return degrees * pi() / 180
+}
+
+/// Convert radians to degrees.
+fn rad_to_deg(radians) {
+  return radians * 180 / pi()
+}
+
+/// Sum a list of numbers.
+fn sum(items) {
+  return items.reduce(0, { acc, x -> acc + x })
+}
+
+/// Average of a list of numbers.
+fn avg(items) {
+  if len(items) == 0 { return 0 }
+  return sum(items) / len(items)
+}

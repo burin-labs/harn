@@ -1323,7 +1323,19 @@ pipeline test_add(task) {
 }
 "#;
 
+    // harn.toml
+    let project_name = name.unwrap_or("my-project");
+    let manifest_content = format!(
+        r#"[package]
+name = "{project_name}"
+version = "0.1.0"
+
+[dependencies]
+"#
+    );
+
     // Write files (don't overwrite existing)
+    write_if_new(&dir.join("harn.toml"), &manifest_content);
     write_if_new(&dir.join("main.harn"), main_content);
     write_if_new(&dir.join("lib/helpers.harn"), helpers_content);
     write_if_new(&dir.join("tests/test_main.harn"), test_content);
