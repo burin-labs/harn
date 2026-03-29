@@ -88,30 +88,6 @@ pub fn register_bridge_builtins(vm: &mut Vm, bridge: Rc<HostBridge>) {
     // =========================================================================
 
     let b = bridge.clone();
-    vm.register_async_builtin("llm_call", move |args| {
-        let bridge = b.clone();
-        async move {
-            let prompt = args.first().map(|a| a.display()).unwrap_or_default();
-            let system = args.get(1).map(|a| a.display());
-            let options = args.get(2).and_then(|a| a.as_dict()).cloned();
-
-            let mut params = serde_json::json!({
-                "prompt": prompt,
-            });
-            if let Some(sys) = system {
-                params["system"] = serde_json::json!(sys);
-            }
-            if let Some(opts) = options {
-                let opts_json = vm_value_dict_to_json(&opts);
-                params["options"] = opts_json;
-            }
-
-            let result = bridge.call("llm_call", params).await?;
-            Ok(json_result_to_vm_value(&result))
-        }
-    });
-
-    let b = bridge.clone();
     vm.register_async_builtin("agent_loop", move |args| {
         let bridge = b.clone();
         async move {
@@ -136,24 +112,6 @@ pub fn register_bridge_builtins(vm: &mut Vm, bridge: Rc<HostBridge>) {
     });
 
     // llm_stream in bridge mode: delegate to host, return the text result
-    // (streaming happens between host and LLM, not between host and VM)
-    let b = bridge.clone();
-    vm.register_async_builtin("llm_stream", move |args| {
-        let bridge = b.clone();
-        async move {
-            let prompt = args.first().map(|a| a.display()).unwrap_or_default();
-            let system = args.get(1).map(|a| a.display());
-
-            let mut params = serde_json::json!({"prompt": prompt});
-            if let Some(sys) = system {
-                params["system"] = serde_json::json!(sys);
-            }
-
-            let result = bridge.call("llm_call", params).await?;
-            Ok(json_result_to_vm_value(&result))
-        }
-    });
-
     // =========================================================================
     // File I/O builtins — delegate to host via tool_execute
     // =========================================================================
