@@ -8,12 +8,12 @@
 //   import { wait_for } from "std/async"
 //   let result = wait_for(5000, 500, { -> metadata_get("status") == "ready" })
 pub fn wait_for(timeout_ms, interval_ms, predicate) {
-  let deadline = timestamp() * 1000 + timeout_ms
+  let end_time = timestamp() * 1000 + timeout_ms
   let interval = interval_ms
   if interval <= 0 {
     interval = 100
   }
-  while timestamp() * 1000 < deadline {
+  while timestamp() * 1000 < end_time {
     let value = predicate()
     if value {
       return Ok(value)

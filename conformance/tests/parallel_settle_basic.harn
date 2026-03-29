@@ -1,0 +1,18 @@
+pipeline test(task) {
+  let items = [1, 2, 3]
+  let outcome = parallel_settle(items) { item ->
+    if item == 2 {
+      throw "boom"
+    }
+    item * 10
+  }
+  log(outcome.succeeded)
+  log(outcome.failed)
+  for r in outcome.results {
+    if is_ok(r) {
+      log(unwrap(r))
+    } else {
+      log(unwrap_err(r))
+    }
+  }
+}

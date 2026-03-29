@@ -2,6 +2,20 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.4.19
+
+### Fixed
+
+- `std/async` module: renamed `deadline` variable to `end_time` — `deadline`
+  is a reserved keyword in Harn, so `wait_for`, `retry_with_backoff`, and
+  `circuit_call` were all broken at import time
+- Fixed `generator_simple.harn` conformance test formatting
+- Fixed ACP metadata base path to use project root
+
+### Added
+
+- `parallel_settle` conformance test
+
 ## v0.4.18
 
 ### Added
