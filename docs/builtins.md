@@ -384,6 +384,46 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `agent_loop(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Multi-turn agent loop with `##DONE##` sentinel. Returns `{status, text, iterations, duration_ms, tools_used}` |
 | `llm_info()` | — | dict | Current LLM config: `{provider, model, api_key_set}` |
 | `llm_usage()` | — | dict | Cumulative usage: `{input_tokens, output_tokens, total_duration_ms, call_count}` |
+| `llm_resolve_model(alias)` | alias: string | dict | Resolve model alias to `{id, provider}` via providers.toml |
+| `llm_infer_provider(model_id)` | model_id: string | string | Infer provider from model ID (e.g. `"claude-*"` → `"anthropic"`) |
+| `llm_model_tier(model_id)` | model_id: string | string | Get capability tier: `"small"`, `"mid"`, or `"frontier"` |
+| `llm_healthcheck(provider?)` | provider: string | dict | Validate API key. Returns `{valid, message, metadata}` |
+| `llm_providers()` | — | list | List all configured provider names |
+| `llm_config(provider?)` | provider: string | dict | Get provider config (base_url, auth_style, etc.) |
+
+### Provider configuration
+
+LLM provider endpoints, model aliases, inference rules, and default parameters
+are configured via a TOML file. The VM searches for config in this order:
+
+1. `HARN_PROVIDERS_CONFIG` env var (explicit path)
+2. `~/.config/harn/providers.toml`
+3. Built-in defaults (Anthropic, OpenAI, OpenRouter, HuggingFace, Ollama)
+
+See `harn init` to generate a default config file, or create one manually:
+
+```toml
+[providers.anthropic]
+base_url = "https://api.anthropic.com/v1"
+auth_style = "header"
+auth_header = "x-api-key"
+auth_env = "ANTHROPIC_API_KEY"
+chat_endpoint = "/messages"
+
+[aliases]
+sonnet = { id = "claude-sonnet-4-20250514", provider = "anthropic" }
+
+[[inference_rules]]
+pattern = "claude-*"
+provider = "anthropic"
+
+[[tier_rules]]
+pattern = "claude-*"
+tier = "frontier"
+
+[model_defaults."qwen/*"]
+temperature = 0.3
+```
 
 ## Timers
 
