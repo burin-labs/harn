@@ -222,6 +222,19 @@ fn collect_references(snode: &SNode, target_name: &str, refs: &mut Vec<Span>) {
                 collect_references(s, target_name, refs);
             }
         }
+        Node::ParallelSettle {
+            list,
+            body,
+            variable,
+        } => {
+            collect_references(list, target_name, refs);
+            if variable == target_name {
+                refs.push(snode.span);
+            }
+            for s in body {
+                collect_references(s, target_name, refs);
+            }
+        }
         Node::Closure { body, params } => {
             for p in params {
                 if p.name == target_name {

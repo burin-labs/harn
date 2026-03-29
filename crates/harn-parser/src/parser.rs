@@ -135,6 +135,7 @@ impl Parser {
                     | TokenKind::Import
                     | TokenKind::Parallel
                     | TokenKind::ParallelMap
+                    | TokenKind::ParallelSettle
                     | TokenKind::Enum
                     | TokenKind::Struct
                     | TokenKind::Interface
@@ -275,6 +276,7 @@ impl Parser {
             TokenKind::While => self.parse_while_loop(),
             TokenKind::Parallel => self.parse_parallel(),
             TokenKind::ParallelMap => self.parse_parallel_map(),
+            TokenKind::ParallelSettle => self.parse_parallel_settle(),
             TokenKind::Return => self.parse_return(),
             TokenKind::Throw => self.parse_throw(),
             TokenKind::Override => self.parse_override(),
@@ -610,6 +612,30 @@ impl Parser {
         self.consume(&TokenKind::RBrace, "}")?;
         Ok(spanned(
             Node::ParallelMap {
+                list: Box::new(list),
+                variable,
+                body,
+            },
+            Span::merge(start, self.prev_span()),
+        ))
+    }
+
+    fn parse_parallel_settle(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
+        self.consume(&TokenKind::ParallelSettle, "parallel_settle")?;
+        self.consume(&TokenKind::LParen, "(")?;
+        let list = self.parse_expression()?;
+        self.consume(&TokenKind::RParen, ")")?;
+        self.consume(&TokenKind::LBrace, "{")?;
+
+        self.skip_newlines();
+        let variable = self.consume_identifier("settle variable")?;
+        self.consume(&TokenKind::Arrow, "->")?;
+
+        let body = self.parse_block()?;
+        self.consume(&TokenKind::RBrace, "}")?;
+        Ok(spanned(
+            Node::ParallelSettle {
                 list: Box::new(list),
                 variable,
                 body,
@@ -1635,6 +1661,7 @@ impl Parser {
             TokenKind::LBrace => self.parse_dict_or_closure(),
             TokenKind::Parallel => self.parse_parallel(),
             TokenKind::ParallelMap => self.parse_parallel_map(),
+            TokenKind::ParallelSettle => self.parse_parallel_settle(),
             TokenKind::Retry => self.parse_retry(),
             TokenKind::If => self.parse_if_else(),
             TokenKind::Spawn => self.parse_spawn_expr(),
@@ -2218,6 +2245,7 @@ impl Parser {
             TokenKind::Retry => "retry",
             TokenKind::Parallel => "parallel",
             TokenKind::ParallelMap => "parallel_map",
+            TokenKind::ParallelSettle => "parallel_settle",
             TokenKind::Return => "return",
             TokenKind::Import => "import",
             TokenKind::True => "true",

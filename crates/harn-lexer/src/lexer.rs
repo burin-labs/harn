@@ -524,6 +524,7 @@ impl Lexer {
             "retry" => TokenKind::Retry,
             "parallel" => TokenKind::Parallel,
             "parallel_map" => TokenKind::ParallelMap,
+            "parallel_settle" => TokenKind::ParallelSettle,
             "return" => TokenKind::Return,
             "import" => TokenKind::Import,
             "true" => TokenKind::True,

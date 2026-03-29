@@ -16,14 +16,22 @@ static TASK_COUNTER: AtomicU64 = AtomicU64::new(1);
 // Task state tracking
 // ---------------------------------------------------------------------------
 
-/// The lifecycle states of an A2A task.
+/// The lifecycle states of an A2A task, aligned with the A2A protocol spec v0.3.
+/// See: https://a2a-protocol.org/latest/specification/
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
 enum TaskStatus {
     Submitted,
     Working,
     Completed,
     Failed,
     Cancelled,
+    /// The remote agent rejected the task (e.g., unsupported capability).
+    Rejected,
+    /// The agent needs additional input from the caller to continue.
+    InputRequired,
+    /// The agent needs authentication/authorization from the caller.
+    AuthRequired,
 }
 
 impl TaskStatus {
@@ -34,15 +42,27 @@ impl TaskStatus {
             TaskStatus::Completed => "completed",
             TaskStatus::Failed => "failed",
             TaskStatus::Cancelled => "cancelled",
+            TaskStatus::Rejected => "rejected",
+            TaskStatus::InputRequired => "input-required",
+            TaskStatus::AuthRequired => "auth-required",
         }
     }
 
-    /// A task can only be cancelled while it is still in-progress.
+    /// Terminal states: task processing is complete (no further updates).
     fn is_terminal(&self) -> bool {
         matches!(
             self,
-            TaskStatus::Completed | TaskStatus::Failed | TaskStatus::Cancelled
+            TaskStatus::Completed
+                | TaskStatus::Failed
+                | TaskStatus::Cancelled
+                | TaskStatus::Rejected
         )
+    }
+
+    /// Interrupted states: task is paused, waiting for external input.
+    #[allow(dead_code)]
+    fn is_interrupted(&self) -> bool {
+        matches!(self, TaskStatus::InputRequired | TaskStatus::AuthRequired)
     }
 }
 
@@ -235,6 +255,15 @@ fn task_rpc_response(
         "result": task_json,
     })
 }
+
+// A2A-standard JSON-RPC error codes (aligned with A2A protocol spec v0.3)
+const A2A_TASK_NOT_FOUND: i64 = -32001;
+const A2A_TASK_NOT_CANCELABLE: i64 = -32002;
+const A2A_UNSUPPORTED_OPERATION: i64 = -32003;
+#[allow(dead_code)]
+const A2A_INVALID_PARAMS: i64 = -32602;
+#[allow(dead_code)]
+const A2A_INTERNAL_ERROR: i64 = -32603;
 
 /// Build a JSON-RPC error response.
 fn error_response(rpc_id: &serde_json::Value, code: i64, message: &str) -> serde_json::Value {
@@ -453,10 +482,10 @@ fn cancel_task(store: &TaskStore, task_id: &str) -> Result<serde_json::Value, St
     let mut map = store.lock().unwrap();
     let task = map
         .get_mut(task_id)
-        .ok_or_else(|| format!("Task not found: {task_id}"))?;
+        .ok_or_else(|| format!("TaskNotFoundError: {task_id}"))?;
     if task.status.is_terminal() {
         return Err(format!(
-            "Task {} is already in terminal state: {}",
+            "TaskNotCancelableError: task {} is in terminal state '{}'",
             task_id,
             task.status.as_str()
         ));
@@ -548,7 +577,11 @@ async fn handle_jsonrpc(pipeline_path: &str, body: &str, store: &TaskStore) -> S
                 let task_json = store.lock().unwrap().get(task_id).map(|t| t.to_json());
                 match task_json {
                     Some(json) => task_rpc_response(&rpc_id, json),
-                    None => error_response(&rpc_id, -32001, &format!("Task not found: {task_id}")),
+                    None => error_response(
+                        &rpc_id,
+                        A2A_TASK_NOT_FOUND,
+                        &format!("TaskNotFoundError: {task_id}"),
+                    ),
                 }
             }
         }
@@ -562,11 +595,15 @@ async fn handle_jsonrpc(pipeline_path: &str, body: &str, store: &TaskStore) -> S
             } else {
                 match cancel_task(store, task_id) {
                     Ok(json) => task_rpc_response(&rpc_id, json),
-                    Err(msg) => error_response(&rpc_id, -32001, &msg),
+                    Err(msg) => error_response(&rpc_id, A2A_TASK_NOT_CANCELABLE, &msg),
                 }
             }
         }
-        _ => error_response(&rpc_id, -32601, &format!("Method not found: {method}")),
+        _ => error_response(
+            &rpc_id,
+            A2A_UNSUPPORTED_OPERATION,
+            &format!("UnsupportedOperationError: {method}"),
+        ),
     };
 
     serde_json::to_string(&resp).unwrap_or_default()

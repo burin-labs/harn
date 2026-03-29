@@ -347,6 +347,17 @@ impl Linter {
             "cancel",
             "cancel_graceful",
             "is_cancelled",
+            // Error handling
+            "error_category",
+            "throw_error",
+            "is_timeout",
+            "is_rate_limited",
+            // Circuit breaker
+            "circuit_breaker",
+            "circuit_check",
+            "circuit_record_success",
+            "circuit_record_failure",
+            "circuit_reset",
             // Extra builtins
             "json_decode",
             "__range__",
@@ -861,6 +872,21 @@ impl Linter {
             }
 
             Node::ParallelMap {
+                list,
+                variable,
+                body,
+            } => {
+                self.lint_node(list);
+                self.push_scope();
+                if let Some(scope) = self.scopes.last_mut() {
+                    scope.insert(variable.clone());
+                }
+                self.references.insert(variable.clone());
+                self.lint_block(body);
+                self.pop_scope();
+            }
+
+            Node::ParallelSettle {
                 list,
                 variable,
                 body,

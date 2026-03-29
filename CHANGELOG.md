@@ -2,6 +2,55 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.4.18
+
+### Added
+
+- **Generators / coroutines**: Functions using `yield` become generators.
+  Calling them returns a generator object; `.next()` produces `{value, done}`.
+  Generators work with `for-in` loops for lazy iteration.
+
+  ```harn
+  fn fibonacci() {
+    var a = 0
+    var b = 1
+    while true {
+      yield a
+      let temp = a
+      a = b
+      b = temp + b
+    }
+  }
+  for n in fibonacci().take(8) { println(n) }
+  ```
+
+- **Structured error types**: `ErrorCategory` enum with categories: timeout,
+  auth, rate_limit, tool_error, cancelled, not_found, circuit_open, generic.
+  Error classification uses HTTP status codes (RFC 9110) and well-known API
+  error identifiers from Anthropic/OpenAI.
+- **Error builtins**: `error_category(err)`, `throw_error(msg, category)`,
+  `is_timeout(err)`, `is_rate_limited(err)`
+- **`parallel_settle`**: Like `parallel_map` but wraps each result in
+  `Result.Ok/Err` — returns `{results, succeeded, failed}` instead of
+  failing on first error
+- **Circuit breaker**: `circuit_breaker(name, threshold, reset_ms)`,
+  `circuit_check(name)`, `circuit_record_success(name)`,
+  `circuit_record_failure(name)`, `circuit_reset(name)`.
+  Plus `circuit_call(name, fn)` in `std/async`.
+- **Tool retry with backoff**: `agent_loop` now accepts `tool_retries` and
+  `tool_backoff_ms` options for automatic tool call retry with exponential
+  backoff
+- **A2A spec alignment**: Task states now include `rejected`, `input-required`,
+  `auth-required` per A2A protocol v0.3. Error codes use standard A2A names
+  (`TaskNotFoundError`, `TaskNotCancelableError`, `UnsupportedOperationError`)
+
+### Changed
+
+- Deadline inheritance: child VMs from `spawn`/`parallel` now inherit the
+  parent's deadline stack
+- Error classification is based on HTTP status codes and documented API error
+  types rather than fragile substring matching
+
 ## v0.4.17
 
 ### Added

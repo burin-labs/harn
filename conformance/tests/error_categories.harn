@@ -1,0 +1,22 @@
+// Test structured error categories
+pipeline default(task) {
+  // throw_error creates categorized errors
+  let r1 = try {
+    throw_error("connection timed out", "timeout")
+  }
+  println(is_err(r1))
+  println(error_category(unwrap_err(r1)))
+  // is_timeout helper
+  println(is_timeout(unwrap_err(r1)))
+  // rate limit
+  let r2 = try {
+    throw_error("too many requests", "rate_limit")
+  }
+  println(error_category(unwrap_err(r2)))
+  println(is_rate_limited(unwrap_err(r2)))
+  // generic error
+  let r3 = try {
+    throw "some error"
+  }
+  println(error_category(unwrap_err(r3)))
+}

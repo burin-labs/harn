@@ -1165,6 +1165,7 @@ impl Compiler {
                 fn_compiler.enum_names = self.enum_names.clone();
                 fn_compiler.emit_default_preamble(params)?;
                 fn_compiler.emit_type_checks(params);
+                let is_gen = body_contains_yield(body);
                 fn_compiler.compile_block(body)?;
                 fn_compiler.chunk.emit(Op::Nil, self.line);
                 fn_compiler.chunk.emit(Op::Return, self.line);
@@ -1174,6 +1175,7 @@ impl Compiler {
                     params: TypedParam::names(params),
                     default_start: TypedParam::default_start(params),
                     chunk: fn_compiler.chunk,
+                    is_generator: is_gen,
                 };
                 let fn_idx = self.chunk.functions.len();
                 self.chunk.functions.push(func);
@@ -1188,6 +1190,7 @@ impl Compiler {
                 fn_compiler.enum_names = self.enum_names.clone();
                 fn_compiler.emit_default_preamble(params)?;
                 fn_compiler.emit_type_checks(params);
+                let is_gen = body_contains_yield(body);
                 fn_compiler.compile_block(body)?;
                 // If block didn't end with return, the last value is on the stack
                 fn_compiler.chunk.emit(Op::Return, self.line);
@@ -1197,6 +1200,7 @@ impl Compiler {
                     params: TypedParam::names(params),
                     default_start: TypedParam::default_start(params),
                     chunk: fn_compiler.chunk,
+                    is_generator: is_gen,
                 };
                 let fn_idx = self.chunk.functions.len();
                 self.chunk.functions.push(func);
@@ -1635,9 +1639,13 @@ impl Compiler {
                 }
             }
 
-            Node::YieldExpr { .. } => {
-                // v1: yield is host-integration only, emit nil
-                self.chunk.emit(Op::Nil, self.line);
+            Node::YieldExpr { value } => {
+                if let Some(val) = value {
+                    self.compile_node(val)?;
+                } else {
+                    self.chunk.emit(Op::Nil, self.line);
+                }
+                self.chunk.emit(Op::Yield, self.line);
             }
 
             Node::AskExpr { fields } => {
@@ -1757,6 +1765,7 @@ impl Compiler {
                             params: TypedParam::names(params),
                             default_start: TypedParam::default_start(params),
                             chunk: fn_compiler.chunk,
+                            is_generator: false,
                         };
                         let fn_idx = self.chunk.functions.len();
                         self.chunk.functions.push(func);
@@ -1808,6 +1817,7 @@ impl Compiler {
                     params: TypedParam::names(&params),
                     default_start: None,
                     chunk: fn_compiler.chunk,
+                    is_generator: false,
                 };
                 let fn_idx = self.chunk.functions.len();
                 self.chunk.functions.push(func);
@@ -2083,6 +2093,7 @@ impl Compiler {
                     params,
                     default_start: None,
                     chunk: fn_compiler.chunk,
+                    is_generator: false,
                 };
                 let fn_idx = self.chunk.functions.len();
                 self.chunk.functions.push(func);
@@ -2105,11 +2116,35 @@ impl Compiler {
                     params: vec![variable.clone()],
                     default_start: None,
                     chunk: fn_compiler.chunk,
+                    is_generator: false,
                 };
                 let fn_idx = self.chunk.functions.len();
                 self.chunk.functions.push(func);
                 self.chunk.emit_u16(Op::Closure, fn_idx as u16, self.line);
                 self.chunk.emit(Op::ParallelMap, self.line);
+            }
+
+            Node::ParallelSettle {
+                list,
+                variable,
+                body,
+            } => {
+                self.compile_node(list)?;
+                let mut fn_compiler = Compiler::new();
+                fn_compiler.enum_names = self.enum_names.clone();
+                fn_compiler.compile_block(body)?;
+                fn_compiler.chunk.emit(Op::Return, self.line);
+                let func = CompiledFunction {
+                    name: "<parallel_settle>".to_string(),
+                    params: vec![variable.clone()],
+                    default_start: None,
+                    chunk: fn_compiler.chunk,
+                    is_generator: false,
+                };
+                let fn_idx = self.chunk.functions.len();
+                self.chunk.functions.push(func);
+                self.chunk.emit_u16(Op::Closure, fn_idx as u16, self.line);
+                self.chunk.emit(Op::ParallelSettle, self.line);
             }
 
             Node::SpawnExpr { body } => {
@@ -2122,6 +2157,7 @@ impl Compiler {
                     params: vec![],
                     default_start: None,
                     chunk: fn_compiler.chunk,
+                    is_generator: false,
                 };
                 let fn_idx = self.chunk.functions.len();
                 self.chunk.functions.push(func);
@@ -2393,6 +2429,7 @@ impl Compiler {
             params: TypedParam::names(params),
             default_start: TypedParam::default_start(params),
             chunk: fn_compiler.chunk,
+            is_generator: false,
         })
     }
 
@@ -2489,6 +2526,41 @@ impl Compiler {
 impl Default for Compiler {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Check if a list of AST nodes contains any `yield` expression (used to detect generator functions).
+fn body_contains_yield(nodes: &[SNode]) -> bool {
+    nodes.iter().any(|sn| node_contains_yield(&sn.node))
+}
+
+fn node_contains_yield(node: &Node) -> bool {
+    match node {
+        Node::YieldExpr { .. } => true,
+        // Don't recurse into nested function/closure declarations — yield in a nested
+        // function does NOT make the outer function a generator.
+        Node::FnDecl { .. } | Node::Closure { .. } => false,
+        Node::Block(stmts) => body_contains_yield(stmts),
+        Node::IfElse {
+            condition,
+            then_body,
+            else_body,
+        } => {
+            node_contains_yield(&condition.node)
+                || body_contains_yield(then_body)
+                || else_body.as_ref().is_some_and(|b| body_contains_yield(b))
+        }
+        Node::WhileLoop { condition, body } => {
+            node_contains_yield(&condition.node) || body_contains_yield(body)
+        }
+        Node::ForIn { iterable, body, .. } => {
+            node_contains_yield(&iterable.node) || body_contains_yield(body)
+        }
+        Node::TryCatch {
+            body, catch_body, ..
+        } => body_contains_yield(body) || body_contains_yield(catch_body),
+        Node::TryExpr { body } => body_contains_yield(body),
+        _ => false,
     }
 }
 

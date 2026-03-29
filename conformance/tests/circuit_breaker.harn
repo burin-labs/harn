@@ -1,0 +1,25 @@
+// Test circuit breaker builtins
+pipeline default(task) {
+  // Create a circuit breaker: opens after 3 failures, resets after 1000ms
+  circuit_breaker("test_cb", 3, 1000)
+  // Initially closed
+  println(circuit_check("test_cb"))
+  // Record failures
+  circuit_record_failure("test_cb")
+  circuit_record_failure("test_cb")
+  println(circuit_check("test_cb"))
+  // Third failure opens the circuit
+  let opened = circuit_record_failure("test_cb")
+  println(opened)
+  println(circuit_check("test_cb"))
+  // Record success resets
+  circuit_record_success("test_cb")
+  println(circuit_check("test_cb"))
+  // Reset explicitly
+  circuit_record_failure("test_cb")
+  circuit_record_failure("test_cb")
+  circuit_record_failure("test_cb")
+  println(circuit_check("test_cb"))
+  circuit_reset("test_cb")
+  println(circuit_check("test_cb"))
+}

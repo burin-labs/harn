@@ -463,6 +463,18 @@ impl Formatter {
                 self.dedent();
                 self.writeln("}");
             }
+            Node::ParallelSettle {
+                list,
+                variable,
+                body,
+            } => {
+                let lst = self.format_expr(list);
+                self.writeln(&format!("parallel_settle({lst}) {{ {variable} ->"));
+                self.indent();
+                self.format_body(body, node_line);
+                self.dedent();
+                self.writeln("}");
+            }
             Node::SpawnExpr { body } => {
                 self.writeln("spawn {");
                 self.indent();
@@ -1111,6 +1123,26 @@ impl Formatter {
                 let lst = self.format_expr(list);
                 let current_indent = self.indent + 1;
                 let mut result = format!("parallel_map({lst}) {{ {variable} ->\n");
+                for n in body {
+                    let indent_str = "  ".repeat(current_indent);
+                    let expr = self.format_expr_or_stmt(n, current_indent);
+                    result.push_str(&indent_str);
+                    result.push_str(&expr);
+                    result.push('\n');
+                }
+                let close = "  ".repeat(self.indent);
+                result.push_str(&close);
+                result.push('}');
+                result
+            }
+            Node::ParallelSettle {
+                list,
+                variable,
+                body,
+            } => {
+                let lst = self.format_expr(list);
+                let current_indent = self.indent + 1;
+                let mut result = format!("parallel_settle({lst}) {{ {variable} ->\n");
                 for n in body {
                     let indent_str = "  ".repeat(current_indent);
                     let expr = self.format_expr_or_stmt(n, current_indent);

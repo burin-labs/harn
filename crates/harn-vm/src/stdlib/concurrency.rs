@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Arc;
@@ -6,6 +8,17 @@ use crate::value::{VmAtomicHandle, VmChannelHandle, VmError, VmValue};
 use crate::vm::Vm;
 
 use std::collections::BTreeMap;
+
+struct CircuitState {
+    failures: usize,
+    threshold: usize,
+    reset_ms: u64,
+    opened_at: Option<std::time::Instant>,
+}
+
+thread_local! {
+    static CIRCUITS: RefCell<HashMap<String, CircuitState>> = RefCell::new(HashMap::new());
+}
 
 /// Build a select result dict with the given index, value, and channel name.
 fn select_result(index: usize, value: VmValue, channel_name: &str) -> VmValue {
@@ -350,6 +363,103 @@ pub(crate) fn register_concurrency_builtins(vm: &mut Vm) {
         timer.insert("name".to_string(), VmValue::String(Rc::from(name)));
         timer.insert("start_ms".to_string(), VmValue::Int(now_ms));
         Ok(VmValue::Dict(Rc::new(timer)))
+    });
+
+    // --- Circuit breaker builtins ---
+
+    vm.register_builtin("circuit_breaker", |args, _out| {
+        let name = args
+            .first()
+            .map(|a| a.display())
+            .unwrap_or_else(|| "default".to_string());
+        let threshold = args.get(1).and_then(|a| a.as_int()).unwrap_or(5) as usize;
+        let reset_ms = args.get(2).and_then(|a| a.as_int()).unwrap_or(30000) as u64;
+        CIRCUITS.with(|circuits| {
+            circuits.borrow_mut().insert(
+                name.clone(),
+                CircuitState {
+                    failures: 0,
+                    threshold,
+                    reset_ms,
+                    opened_at: None,
+                },
+            );
+        });
+        Ok(VmValue::String(Rc::from(name)))
+    });
+
+    vm.register_builtin("circuit_check", |args, _out| {
+        let name = args
+            .first()
+            .map(|a| a.display())
+            .unwrap_or_else(|| "default".to_string());
+        let state = CIRCUITS.with(|circuits| {
+            let circuits = circuits.borrow();
+            let Some(cs) = circuits.get(&name) else {
+                return "closed".to_string();
+            };
+            match cs.opened_at {
+                None => "closed".to_string(),
+                Some(opened) => {
+                    let elapsed = opened.elapsed().as_millis() as u64;
+                    if elapsed >= cs.reset_ms {
+                        "half_open".to_string()
+                    } else {
+                        "open".to_string()
+                    }
+                }
+            }
+        });
+        Ok(VmValue::String(Rc::from(state)))
+    });
+
+    vm.register_builtin("circuit_record_success", |args, _out| {
+        let name = args
+            .first()
+            .map(|a| a.display())
+            .unwrap_or_else(|| "default".to_string());
+        CIRCUITS.with(|circuits| {
+            let mut circuits = circuits.borrow_mut();
+            if let Some(cs) = circuits.get_mut(&name) {
+                cs.failures = 0;
+                cs.opened_at = None;
+            }
+        });
+        Ok(VmValue::Nil)
+    });
+
+    vm.register_builtin("circuit_record_failure", |args, _out| {
+        let name = args
+            .first()
+            .map(|a| a.display())
+            .unwrap_or_else(|| "default".to_string());
+        let is_open = CIRCUITS.with(|circuits| {
+            let mut circuits = circuits.borrow_mut();
+            if let Some(cs) = circuits.get_mut(&name) {
+                cs.failures += 1;
+                if cs.failures >= cs.threshold && cs.opened_at.is_none() {
+                    cs.opened_at = Some(std::time::Instant::now());
+                    return true;
+                }
+            }
+            false
+        });
+        Ok(VmValue::Bool(is_open))
+    });
+
+    vm.register_builtin("circuit_reset", |args, _out| {
+        let name = args
+            .first()
+            .map(|a| a.display())
+            .unwrap_or_else(|| "default".to_string());
+        CIRCUITS.with(|circuits| {
+            let mut circuits = circuits.borrow_mut();
+            if let Some(cs) = circuits.get_mut(&name) {
+                cs.failures = 0;
+                cs.opened_at = None;
+            }
+        });
+        Ok(VmValue::Nil)
     });
 
     vm.register_builtin("timer_end", |args, out| {

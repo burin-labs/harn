@@ -52,7 +52,7 @@ pub struct DebugState {
     pub frame_depth: usize,
 }
 
-/// Iterator state for for-in loops: either a pre-collected vec or an async channel.
+/// Iterator state for for-in loops: either a pre-collected vec, an async channel, or a generator.
 pub(crate) enum IterState {
     Vec {
         items: Vec<VmValue>,
@@ -61,6 +61,9 @@ pub(crate) enum IterState {
     Channel {
         receiver: std::sync::Arc<tokio::sync::Mutex<tokio::sync::mpsc::Receiver<VmValue>>>,
         closed: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    },
+    Generator {
+        gen: crate::value::VmGenerator,
     },
 }
 
@@ -109,6 +112,9 @@ pub struct Vm {
     pub(crate) cancel_token: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     /// Captured stack trace from the most recent error (fn_name, line, col).
     pub(crate) error_stack_trace: Vec<(String, usize, usize)>,
+    /// Yield channel sender for generator execution. When set, `Op::Yield`
+    /// sends values through this channel instead of being a no-op.
+    pub(crate) yield_sender: Option<tokio::sync::mpsc::Sender<VmValue>>,
 }
 
 impl Vm {
@@ -138,6 +144,7 @@ impl Vm {
             denied_builtins: HashSet::new(),
             cancel_token: None,
             error_stack_trace: Vec::new(),
+            yield_sender: None,
         }
     }
 
@@ -383,7 +390,7 @@ impl Vm {
             exception_handlers: Vec::new(),
             spawned_tasks: BTreeMap::new(),
             task_counter: 0,
-            deadlines: Vec::new(),
+            deadlines: self.deadlines.clone(),
             breakpoints: Vec::new(),
             step_mode: false,
             step_frame_depth: 0,
@@ -397,6 +404,7 @@ impl Vm {
             denied_builtins: self.denied_builtins.clone(),
             cancel_token: None,
             error_stack_trace: Vec::new(),
+            yield_sender: None,
         }
     }
 
@@ -831,6 +839,50 @@ impl Vm {
         });
 
         Ok(())
+    }
+
+    /// Create a generator value by spawning the closure body as an async task.
+    /// The generator body communicates yielded values through an mpsc channel.
+    pub(crate) fn create_generator(&self, closure: &VmClosure, args: &[VmValue]) -> VmValue {
+        use crate::value::VmGenerator;
+
+        // Buffer size of 1: the generator produces one value at a time.
+        let (tx, rx) = tokio::sync::mpsc::channel::<VmValue>(1);
+
+        let mut child = self.child_vm();
+        child.yield_sender = Some(tx);
+
+        // Set up the environment for the generator body
+        let saved_env = child.env.clone();
+        let mut call_env = Self::merge_env_into_closure(&saved_env, closure);
+        call_env.push_scope();
+
+        let default_start = closure
+            .func
+            .default_start
+            .unwrap_or(closure.func.params.len());
+        for (i, param) in closure.func.params.iter().enumerate() {
+            if i < args.len() {
+                call_env.define(param, args[i].clone(), false);
+            } else if i < default_start {
+                call_env.define(param, VmValue::Nil, false);
+            }
+        }
+        child.env = call_env;
+
+        let chunk = closure.func.chunk.clone();
+        // Spawn the generator body as an async task.
+        // The task will execute until return, sending yielded values through the channel.
+        tokio::task::spawn_local(async move {
+            let _ = child.run_chunk(&chunk).await;
+            // When the generator body finishes (return or fall-through),
+            // the sender is dropped, signaling completion to the receiver.
+        });
+
+        VmValue::Generator(VmGenerator {
+            done: Rc::new(std::cell::Cell::new(false)),
+            receiver: Rc::new(tokio::sync::Mutex::new(rx)),
+        })
     }
 
     fn pop(&mut self) -> Result<VmValue, VmError> {

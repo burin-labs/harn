@@ -350,6 +350,24 @@ fn collect_symbols(snode: &SNode, symbols: &mut Vec<SymbolInfo>, scope_span: Opt
                 collect_symbols(s, symbols, Some(snode.span));
             }
         }
+        Node::ParallelSettle {
+            list,
+            variable,
+            body,
+        } => {
+            collect_symbols(list, symbols, scope_span);
+            symbols.push(SymbolInfo {
+                name: variable.clone(),
+                kind: HarnSymbolKind::Variable,
+                def_span: snode.span,
+                type_info: None,
+                signature: None,
+                scope_span: Some(snode.span),
+            });
+            for s in body {
+                collect_symbols(s, symbols, Some(snode.span));
+            }
+        }
         Node::MatchExpr { value, arms } => {
             collect_symbols(value, symbols, scope_span);
             for arm in arms {

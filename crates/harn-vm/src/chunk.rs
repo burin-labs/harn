@@ -122,6 +122,9 @@ pub enum Op {
     /// Execute closure for each item in list, push results as list.
     /// Stack: list, closure → result_list
     ParallelMap,
+    /// Like ParallelMap but wraps each result in Result.Ok/Err, never fails.
+    /// Stack: list, closure → {results: [Result], succeeded: int, failed: int}
+    ParallelSettle,
     /// Store closure for deferred execution, push TaskHandle.
     /// Stack: closure → TaskHandle
     Spawn,
@@ -181,6 +184,8 @@ pub enum Op {
     Dup,
     /// Swap top two stack values.
     Swap,
+    /// Yield a value from a generator. Pops value, sends through channel, suspends.
+    Yield,
 }
 
 /// A constant value in the constant pool.
@@ -233,6 +238,8 @@ pub struct CompiledFunction {
     /// Index of the first parameter with a default value, or None if all required.
     pub default_start: Option<usize>,
     pub chunk: Chunk,
+    /// True if the function body contains `yield` expressions (generator function).
+    pub is_generator: bool,
 }
 
 impl Chunk {
@@ -546,6 +553,7 @@ impl Chunk {
                 x if x == Op::Pipe as u8 => out.push_str("PIPE\n"),
                 x if x == Op::Parallel as u8 => out.push_str("PARALLEL\n"),
                 x if x == Op::ParallelMap as u8 => out.push_str("PARALLEL_MAP\n"),
+                x if x == Op::ParallelSettle as u8 => out.push_str("PARALLEL_SETTLE\n"),
                 x if x == Op::Spawn as u8 => out.push_str("SPAWN\n"),
                 x if x == Op::Import as u8 => {
                     let idx = self.read_u16(ip);
@@ -609,6 +617,7 @@ impl Chunk {
                 }
                 x if x == Op::Dup as u8 => out.push_str("DUP\n"),
                 x if x == Op::Swap as u8 => out.push_str("SWAP\n"),
+                x if x == Op::Yield as u8 => out.push_str("YIELD\n"),
                 _ => {
                     out.push_str(&format!("UNKNOWN(0x{:02x})\n", op));
                 }

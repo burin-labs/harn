@@ -74,6 +74,7 @@ module.exports = grammar({
         $.override_declaration,
         $.parallel_expression,
         $.parallel_map_expression,
+        $.parallel_settle_expression,
         $.assignment,
         $._expression
       ),
@@ -209,6 +210,7 @@ module.exports = grammar({
         $.spawn_expression,
         $.parallel_expression,
         $.parallel_map_expression,
+        $.parallel_settle_expression,
         $.if_statement,
         $.retry_statement,
         $._primary
@@ -293,6 +295,19 @@ module.exports = grammar({
     parallel_map_expression: ($) =>
       seq(
         "parallel_map",
+        "(",
+        field("list", $._expression),
+        ")",
+        "{",
+        field("variable", $.identifier),
+        "->",
+        repeat($._statement),
+        "}"
+      ),
+
+    parallel_settle_expression: ($) =>
+      seq(
+        "parallel_settle",
         "(",
         field("list", $._expression),
         ")",

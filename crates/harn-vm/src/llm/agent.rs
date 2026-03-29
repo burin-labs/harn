@@ -36,6 +36,8 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
             let max_nudges = opt_int(&options, "max_nudges").unwrap_or(5) as usize;
             let custom_nudge = opt_str(&options, "nudge");
             let max_tokens = opt_int(&options, "max_tokens").unwrap_or(8192);
+            let tool_retries = opt_int(&options, "tool_retries").unwrap_or(0) as usize;
+            let tool_backoff_ms = opt_int(&options, "tool_backoff_ms").unwrap_or(1000) as u64;
             let tool_format = opt_str(&options, "tool_format")
                 .unwrap_or_else(|| "text".to_string());
 
@@ -167,21 +169,42 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                         );
 
                         // Try local handling first (read_file, list_directory),
-                        // fall back to bridge for mutations and complex tools
-                        let call_result = if let Some(local_result) =
-                            handle_tool_locally(tool_name, &tool_args)
-                        {
-                            Ok(serde_json::Value::String(local_result))
-                        } else {
-                            bridge
-                                .call(
-                                    "builtin_call",
-                                    serde_json::json!({
-                                        "name": tool_name,
-                                        "args": [tool_args],
-                                    }),
-                                )
-                                .await
+                        // fall back to bridge for mutations and complex tools.
+                        // Retry on failure with exponential backoff if configured.
+                        let call_result = {
+                            let mut attempt = 0usize;
+                            loop {
+                                let result = if let Some(local_result) =
+                                    handle_tool_locally(tool_name, &tool_args)
+                                {
+                                    Ok(serde_json::Value::String(local_result))
+                                } else {
+                                    bridge
+                                        .call(
+                                            "builtin_call",
+                                            serde_json::json!({
+                                                "name": tool_name,
+                                                "args": [tool_args],
+                                            }),
+                                        )
+                                        .await
+                                };
+                                match &result {
+                                    Ok(_) => break result,
+                                    Err(_) if attempt < tool_retries => {
+                                        attempt += 1;
+                                        let delay = tool_backoff_ms * (1u64 << attempt.min(5));
+                                        eprintln!(
+                                            "[agent_loop] tool={tool_name} retry {attempt}/{tool_retries} backoff={delay}ms"
+                                        );
+                                        tokio::time::sleep(
+                                            tokio::time::Duration::from_millis(delay),
+                                        )
+                                        .await;
+                                    }
+                                    Err(_) => break result,
+                                }
+                            }
                         };
 
                         let result_text = match call_result {

@@ -61,3 +61,22 @@ pub fn retry_with_backoff(max_attempts, base_ms, predicate) {
   }
   return Err("exhausted")
 }
+
+// circuit_call(name, closure) -> Result
+// Calls the closure only if the circuit breaker is not open.
+// Records success/failure on the circuit breaker automatically.
+// Returns Err("circuit_open") if the circuit is open.
+// In half_open state, allows one call through as a probe.
+pub fn circuit_call(name, closure) {
+  let state = circuit_check(name)
+  if state == "open" {
+    return Err("circuit_open")
+  }
+  let result = try { closure() }
+  if is_ok(result) {
+    circuit_record_success(name)
+  } else {
+    circuit_record_failure(name)
+  }
+  return result
+}

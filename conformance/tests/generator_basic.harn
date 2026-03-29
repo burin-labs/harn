@@ -1,0 +1,37 @@
+pipeline test(task) {
+  fn count_up(start, end) {
+    var i = start
+    while i < end {
+      yield i
+      i = i + 1
+    }
+  }
+  // Test .next() method
+  let gen = count_up(1, 4)
+  let r1 = gen.next()
+  println(r1.value)
+  println(r1.done)
+  let r2 = gen.next()
+  println(r2.value)
+  println(r2.done)
+  let r3 = gen.next()
+  println(r3.value)
+  println(r3.done)
+  // After exhaustion
+  let r4 = gen.next()
+  println(r4.value)
+  println(r4.done)
+  // Test for-in with generator
+  for n in count_up(10, 13) {
+    println(n)
+  }
+  // Test yield with no value
+  fn empty_yields() {
+    yield
+    yield
+  }
+  let g2 = empty_yields()
+  let e1 = g2.next()
+  println(e1.value)
+  println(e1.done)
+}

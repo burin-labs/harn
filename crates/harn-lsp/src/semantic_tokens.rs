@@ -61,6 +61,7 @@ fn token_kind_to_semantic(kind: &TokenKind) -> Option<u32> {
         | TokenKind::Retry
         | TokenKind::Parallel
         | TokenKind::ParallelMap
+        | TokenKind::ParallelSettle
         | TokenKind::Return
         | TokenKind::Import
         | TokenKind::True

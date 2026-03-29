@@ -283,7 +283,12 @@ impl super::Vm {
                         self.stack.push(VmValue::Bool(cancelled));
                     } else if let Some(VmValue::Closure(closure)) = self.env.get(&name) {
                         // Check closures in env
-                        self.push_closure_frame(&closure, &args, &functions)?;
+                        if closure.func.is_generator {
+                            let gen = self.create_generator(&closure, &args);
+                            self.stack.push(gen);
+                        } else {
+                            self.push_closure_frame(&closure, &args, &functions)?;
+                        }
                         // Don't push result - frame will handle it on return
                     } else {
                         let result = self.call_named_builtin(&name, args).await?;
@@ -291,7 +296,12 @@ impl super::Vm {
                     }
                 }
                 VmValue::Closure(closure) => {
-                    self.push_closure_frame(&closure, &args, &functions)?;
+                    if closure.func.is_generator {
+                        let gen = self.create_generator(&closure, &args);
+                        self.stack.push(gen);
+                    } else {
+                        self.push_closure_frame(&closure, &args, &functions)?;
+                    }
                 }
                 _ => {
                     return Err(VmError::TypeError(format!(
@@ -343,14 +353,24 @@ impl super::Vm {
                         }
                         self.stack.push(VmValue::Nil);
                     } else if let Some(VmValue::Closure(closure)) = self.env.get(&name) {
-                        self.push_closure_frame(&closure, &args, &functions)?;
+                        if closure.func.is_generator {
+                            let gen = self.create_generator(&closure, &args);
+                            self.stack.push(gen);
+                        } else {
+                            self.push_closure_frame(&closure, &args, &functions)?;
+                        }
                     } else {
                         let result = self.call_named_builtin(&name, args).await?;
                         self.stack.push(result);
                     }
                 }
                 VmValue::Closure(closure) => {
-                    self.push_closure_frame(&closure, &args, &functions)?;
+                    if closure.func.is_generator {
+                        let gen = self.create_generator(&closure, &args);
+                        self.stack.push(gen);
+                    } else {
+                        self.push_closure_frame(&closure, &args, &functions)?;
+                    }
                 }
                 _ => {
                     return Err(VmError::TypeError(format!(
@@ -381,6 +401,11 @@ impl super::Vm {
             };
 
             if let Some(closure) = resolved_closure {
+                if closure.func.is_generator {
+                    // Generator functions cannot be tail-call optimized; return the generator.
+                    let gen = self.create_generator(&closure, &args);
+                    return Err(VmError::Return(gen));
+                }
                 // Tail call optimization: replace current frame instead of pushing.
                 // Pop the current frame and reuse its stack_base and saved_env.
                 let popped = self.frames.pop().unwrap();
@@ -925,6 +950,9 @@ impl super::Vm {
                         closed: ch.closed.clone(),
                     });
                 }
+                VmValue::Generator(gen) => {
+                    self.iterators.push(super::IterState::Generator { gen });
+                }
                 _ => {
                     self.iterators.push(super::IterState::Vec {
                         items: Vec::new(),
@@ -968,6 +996,28 @@ impl super::Vm {
                                 self.iterators.pop();
                                 let frame = self.frames.last_mut().unwrap();
                                 frame.ip = target;
+                            }
+                        }
+                    }
+                    super::IterState::Generator { gen } => {
+                        if gen.done.get() {
+                            self.iterators.pop();
+                            let frame = self.frames.last_mut().unwrap();
+                            frame.ip = target;
+                        } else {
+                            let rx = gen.receiver.clone();
+                            let mut guard = rx.lock().await;
+                            match guard.recv().await {
+                                Some(val) => {
+                                    self.stack.push(val);
+                                }
+                                None => {
+                                    gen.done.set(true);
+                                    drop(guard);
+                                    self.iterators.pop();
+                                    let frame = self.frames.last_mut().unwrap();
+                                    frame.ip = target;
+                                }
                             }
                         }
                     }
@@ -1056,6 +1106,58 @@ impl super::Vm {
                         results.push(val);
                     }
                     self.stack.push(VmValue::List(Rc::new(results)));
+                }
+                _ => self.stack.push(VmValue::Nil),
+            }
+        } else if op == Op::ParallelSettle as u8 {
+            let closure = self.pop()?;
+            let list_val = self.pop()?;
+            match (&list_val, &closure) {
+                (VmValue::List(items), VmValue::Closure(closure)) => {
+                    let len = items.len();
+                    let mut handles = Vec::with_capacity(len);
+                    for item in items.iter() {
+                        let mut child = self.child_vm();
+                        let closure = closure.clone();
+                        let item = item.clone();
+                        handles.push(tokio::task::spawn_local(async move {
+                            let result = child.call_closure(&closure, &[item], &[]).await;
+                            let output = std::mem::take(&mut child.output);
+                            (result, output)
+                        }));
+                    }
+                    let mut results = Vec::with_capacity(len);
+                    let mut succeeded = 0i64;
+                    let mut failed = 0i64;
+                    for handle in handles {
+                        let (result, task_output) = handle
+                            .await
+                            .map_err(|e| VmError::Runtime(format!("Parallel settle error: {e}")))?;
+                        self.output.push_str(&task_output);
+                        match result {
+                            Ok(val) => {
+                                succeeded += 1;
+                                results.push(VmValue::EnumVariant {
+                                    enum_name: "Result".into(),
+                                    variant: "Ok".into(),
+                                    fields: vec![val],
+                                });
+                            }
+                            Err(e) => {
+                                failed += 1;
+                                results.push(VmValue::EnumVariant {
+                                    enum_name: "Result".into(),
+                                    variant: "Err".into(),
+                                    fields: vec![VmValue::String(Rc::from(e.to_string()))],
+                                });
+                            }
+                        }
+                    }
+                    let mut dict = BTreeMap::new();
+                    dict.insert("results".to_string(), VmValue::List(Rc::new(results)));
+                    dict.insert("succeeded".to_string(), VmValue::Int(succeeded));
+                    dict.insert("failed".to_string(), VmValue::Int(failed));
+                    self.stack.push(VmValue::Dict(Rc::new(dict)));
                 }
                 _ => self.stack.push(VmValue::Nil),
             }
@@ -1150,6 +1252,18 @@ impl super::Vm {
         } else if op == Op::GetArgc as u8 {
             let argc = self.frames.last().map(|f| f.argc).unwrap_or(0);
             self.stack.push(VmValue::Int(argc as i64));
+        } else if op == Op::Yield as u8 {
+            let val = self.pop()?;
+            if let Some(sender) = &self.yield_sender {
+                // Inside a generator task: send the yielded value through the channel.
+                // If the receiver has been dropped, the generator was abandoned.
+                let _ = sender.send(val).await;
+                // After sending, yield to the tokio executor to let the consumer
+                // receive the value before we produce the next one.
+                tokio::task::yield_now().await;
+            }
+            // After yield, push Nil as the result of the yield expression.
+            self.stack.push(VmValue::Nil);
         } else {
             return Err(VmError::InvalidInstruction(op));
         }

@@ -178,6 +178,11 @@ pub enum Node {
         variable: String,
         body: Vec<SNode>,
     },
+    ParallelSettle {
+        list: Box<SNode>,
+        variable: String,
+        body: Vec<SNode>,
+    },
 
     SelectExpr {
         cases: Vec<SelectCase>,
