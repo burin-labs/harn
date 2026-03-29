@@ -55,6 +55,9 @@ struct Linter {
     known_functions: HashSet<String>,
     /// Track function call sites for undefined-function checking.
     function_calls: Vec<(String, Span)>,
+    /// Whether the file has wildcard imports (import "module").
+    /// If true, skip undefined-function checks since we can't know what was imported.
+    has_wildcard_import: bool,
 }
 
 impl Linter {
@@ -70,6 +73,7 @@ impl Linter {
             loop_depth: 0,
             known_functions: Self::builtin_names(),
             function_calls: Vec::new(),
+            has_wildcard_import: false,
         }
     }
 
@@ -132,6 +136,8 @@ impl Linter {
             // JSON
             "json_parse",
             "json_stringify",
+            "json_extract",
+            "json_validate",
             // FS
             "read_file",
             "write_file",
@@ -141,6 +147,11 @@ impl Linter {
             "glob_files",
             "mkdir",
             "remove_file",
+            "delete_file",
+            "copy_file",
+            "stat",
+            "temp_dir",
+            "path_join",
             // Process & system
             "exec",
             "shell",
@@ -167,6 +178,25 @@ impl Linter {
             "regex_match",
             "regex_replace",
             "regex_captures",
+            // Math (trig)
+            "sin",
+            "cos",
+            "tan",
+            "asin",
+            "acos",
+            "atan",
+            "atan2",
+            "log2",
+            "log10",
+            "ln",
+            "exp",
+            "sign",
+            "is_nan",
+            "is_infinite",
+            "clamp",
+            "lerp",
+            "sum",
+            "avg",
             // Crypto
             "base64_encode",
             "base64_decode",
@@ -250,18 +280,40 @@ impl Linter {
             "llm_budget_remaining",
             // MCP
             "mcp_connect",
+            "mcp_disconnect",
             "mcp_list_tools",
             "mcp_call_tool",
+            "mcp_call",
             "mcp_list_resources",
             "mcp_read_resource",
             "mcp_list_prompts",
             "mcp_get_prompt",
+            "mcp_server_info",
+            // IO extras
+            "log_json",
+            "prompt_user",
+            "progress",
+            "emit_response",
+            // Conversation
+            "conversation",
+            "add_user",
+            "add_assistant",
+            "add_system",
+            "add_message",
+            "add_tool_result",
+            // Bridge
+            "host_call",
+            "apply_edit",
+            "ask_user",
+            "run_command",
             // Store
             "store_get",
             "store_set",
             "store_delete",
             "store_keys",
             "store_clear",
+            "store_list",
+            "store_save",
             // Metadata
             "metadata_set",
             "metadata_get",
@@ -269,12 +321,35 @@ impl Linter {
             "metadata_list",
             "metadata_search",
             "metadata_hash",
+            "metadata_save",
+            "metadata_stale",
+            "metadata_refresh_hashes",
+            "compute_content_hash",
+            "invalidate_facts",
             // Tools
             "tool_registry",
             "tool_schemas",
-            // Cancel
+            "tool_add",
+            "tool_list",
+            "tool_find",
+            "tool_describe",
+            "tool_remove",
+            "tool_count",
+            "tool_schema",
+            "tool_parse_call",
+            "tool_format_result",
+            "tool_prompt",
+            // Logging
+            "log_set_level",
+            // Async task management
+            "spawn",
+            "await",
+            "cancel",
             "cancel_graceful",
             "is_cancelled",
+            // Extra builtins
+            "json_decode",
+            "__range__",
         ]
         .iter()
         .map(|s| s.to_string())
@@ -916,6 +991,10 @@ impl Linter {
                 });
             }
 
+            Node::ImportDecl { .. } => {
+                self.has_wildcard_import = true;
+            }
+
             // Leaf nodes and declarations that don't need recursion.
             Node::StringLiteral(_)
             | Node::IntLiteral(_)
@@ -923,7 +1002,6 @@ impl Linter {
             | Node::BoolLiteral(_)
             | Node::NilLiteral
             | Node::DurationLiteral(_)
-            | Node::ImportDecl { .. }
             | Node::InterfaceDecl { .. }
             | Node::OverrideDecl { .. }
             | Node::TypeDecl { .. }
@@ -1051,11 +1129,19 @@ impl Linter {
             }
         }
 
-        // Also add variables that hold closures as known functions
-        // (let-bound identifiers that are referenced as function calls)
-        let all_vars: HashSet<String> = self.declarations.iter().map(|d| d.name.clone()).collect();
+        // Variables and parameters that could hold closures
+        let all_vars: HashSet<String> = self
+            .declarations
+            .iter()
+            .map(|d| d.name.clone())
+            .chain(self.param_declarations.iter().map(|p| p.name.clone()))
+            .collect();
 
         // Rule: undefined-function
+        // Skip entirely if the file has wildcard imports — we can't know what they provide
+        if self.has_wildcard_import {
+            return;
+        }
         for (name, span) in &self.function_calls {
             if self.known_functions.contains(name) {
                 continue;
