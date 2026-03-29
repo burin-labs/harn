@@ -151,4 +151,76 @@ pub(crate) fn register_set_builtins(vm: &mut Vm) {
             .collect();
         Ok(VmValue::Set(Rc::new(items)))
     });
+
+    vm.register_builtin("set_symmetric_difference", |args, _out| {
+        let a = match args.first() {
+            Some(VmValue::Set(s)) => s,
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "set_symmetric_difference: arguments must be sets",
+                ))));
+            }
+        };
+        let b = match args.get(1) {
+            Some(VmValue::Set(s)) => s,
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "set_symmetric_difference: arguments must be sets",
+                ))));
+            }
+        };
+        let mut items: Vec<VmValue> = a
+            .iter()
+            .filter(|x| !b.iter().any(|y| values_equal(x, y)))
+            .cloned()
+            .collect();
+        for v in b.iter() {
+            if !a.iter().any(|x| values_equal(x, v)) {
+                items.push(v.clone());
+            }
+        }
+        Ok(VmValue::Set(Rc::new(items)))
+    });
+
+    vm.register_builtin("set_is_subset", |args, _out| {
+        let a = match args.first() {
+            Some(VmValue::Set(s)) => s,
+            _ => return Ok(VmValue::Bool(false)),
+        };
+        let b = match args.get(1) {
+            Some(VmValue::Set(s)) => s,
+            _ => return Ok(VmValue::Bool(false)),
+        };
+        Ok(VmValue::Bool(
+            a.iter().all(|x| b.iter().any(|y| values_equal(x, y))),
+        ))
+    });
+
+    vm.register_builtin("set_is_superset", |args, _out| {
+        let a = match args.first() {
+            Some(VmValue::Set(s)) => s,
+            _ => return Ok(VmValue::Bool(false)),
+        };
+        let b = match args.get(1) {
+            Some(VmValue::Set(s)) => s,
+            _ => return Ok(VmValue::Bool(false)),
+        };
+        Ok(VmValue::Bool(
+            b.iter().all(|x| a.iter().any(|y| values_equal(x, y))),
+        ))
+    });
+
+    vm.register_builtin("set_is_disjoint", |args, _out| {
+        let a = match args.first() {
+            Some(VmValue::Set(s)) => s,
+            _ => return Ok(VmValue::Bool(true)),
+        };
+        let b = match args.get(1) {
+            Some(VmValue::Set(s)) => s,
+            _ => return Ok(VmValue::Bool(true)),
+        };
+        Ok(VmValue::Bool(
+            !a.iter().any(|x| b.iter().any(|y| values_equal(x, y))),
+        ))
+    });
 }

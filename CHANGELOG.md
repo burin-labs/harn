@@ -2,6 +2,19 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.4.16
+
+### Added
+
+- **Set method syntax**: Sets now support dot-notation methods matching
+  lists and dicts. All set operations work as methods:
+  `.add()`, `.remove()`, `.contains()`, `.union()`, `.intersect()`,
+  `.difference()`, `.symmetric_difference()`, `.is_subset()`,
+  `.is_superset()`, `.is_disjoint()`, `.to_list()`, `.map()`,
+  `.filter()`, `.any()`, `.all()`, `.count()`, `.empty()`
+- **New set builtins**: `set_symmetric_difference()`, `set_is_subset()`,
+  `set_is_superset()`, `set_is_disjoint()` (function-style)
+
 ## v0.4.15
 
 ### Added

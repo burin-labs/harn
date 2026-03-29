@@ -184,8 +184,37 @@ let name = json_extract(response, "name") // extract just one key
 | `set_contains(s, value)` | s: set, value: any | bool | Check if set contains a value |
 | `set_union(a, b)` | a: set, b: set | set | Union of two sets |
 | `set_intersect(a, b)` | a: set, b: set | set | Intersection of two sets |
-| `set_difference(a, b)` | a: set, b: set | set | Difference of two sets (elements in a but not in b) |
-| `to_list(s)` | s: set | list | Convert a set to a sorted list |
+| `set_intersection(a, b)` | a: set, b: set | set | Alias for `set_intersect` |
+| `set_difference(a, b)` | a: set, b: set | set | Difference (elements in a but not b) |
+| `set_symmetric_difference(a, b)` | a: set, b: set | set | Elements in either but not both |
+| `set_is_subset(a, b)` | a: set, b: set | bool | True if all elements of a are in b |
+| `set_is_superset(a, b)` | a: set, b: set | bool | True if a contains all elements of b |
+| `set_is_disjoint(a, b)` | a: set, b: set | bool | True if a and b share no elements |
+| `to_list(s)` | s: set | list | Convert a set to a list |
+
+### Set methods (dot syntax)
+
+Sets also support method syntax: `my_set.union(other)`.
+
+| Method | Parameters | Returns | Description |
+|---|---|---|---|
+| `.count()` / `.len()` | none | int | Number of elements |
+| `.empty()` | none | bool | True if set is empty |
+| `.contains(val)` | val: any | bool | Check membership |
+| `.add(val)` | val: any | set | New set with val added |
+| `.remove(val)` | val: any | set | New set with val removed |
+| `.union(other)` | other: set | set | Union |
+| `.intersect(other)` | other: set | set | Intersection |
+| `.difference(other)` | other: set | set | Elements in self but not other |
+| `.symmetric_difference(other)` | other: set | set | Elements in either but not both |
+| `.is_subset(other)` | other: set | bool | True if self is a subset of other |
+| `.is_superset(other)` | other: set | bool | True if self is a superset of other |
+| `.is_disjoint(other)` | other: set | bool | True if no shared elements |
+| `.to_list()` | none | list | Convert to list |
+| `.map(fn)` | fn: closure | set | Transform elements (deduplicates) |
+| `.filter(fn)` | fn: closure | set | Keep elements matching predicate |
+| `.any(fn)` | fn: closure | bool | True if any element matches |
+| `.all(fn)` / `.every(fn)` | fn: closure | bool | True if all elements match |
 
 ## String functions
 

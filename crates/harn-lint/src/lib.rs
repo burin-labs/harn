@@ -177,8 +177,13 @@ impl Linter {
             "set_remove",
             "set_contains",
             "set_union",
+            "set_intersect",
             "set_intersection",
             "set_difference",
+            "set_symmetric_difference",
+            "set_is_subset",
+            "set_is_superset",
+            "set_is_disjoint",
             // Testing
             "assert",
             "assert_eq",

@@ -1,0 +1,38 @@
+// Test set method syntax and new operations
+pipeline default(task) {
+  let a = set([1, 2, 3, 4])
+  let b = set([3, 4, 5, 6])
+  // Basic methods
+  println(a.count())
+  println(a.contains(2))
+  println(a.contains(9))
+  println(a.empty())
+  // add / remove (return new sets)
+  let c = a.add(5)
+  println(c.count())
+  let d = a.remove(1)
+  println(d.count())
+  // Set operations
+  println(a.union(b).count())
+  println(a.intersect(b).count())
+  println(a.difference(b).count())
+  println(a.symmetric_difference(b).count())
+  // Subset / superset / disjoint
+  let small = set([2, 3])
+  println(small.is_subset(a))
+  println(a.is_superset(small))
+  println(a.is_disjoint(b))
+  println(set([10, 20]).is_disjoint(a))
+  // to_list
+  let lst = set([3, 1, 2]).to_list()
+  println(len(lst))
+  // map / filter
+  let doubled = set([1, 2, 3]).map({ x -> x * 2 })
+  println(doubled.count())
+  let evens = a.filter({ x -> x % 2 == 0 })
+  println(evens.count())
+  // any / all
+  println(a.any({ x -> x > 3 }))
+  println(a.all({ x -> x > 0 }))
+  println(a.all({ x -> x > 2 }))
+}
