@@ -108,7 +108,13 @@ def main():
                 response = {
                     "jsonrpc": "2.0",
                     "id": req_id,
-                    "result": f"Mock agent_loop result for: {prompt}",
+                    "result": {
+                        "status": "done",
+                        "text": f"Mock agent_loop result for: {prompt}",
+                        "iterations": 1,
+                        "duration_ms": 0,
+                        "tools_used": [],
+                    },
                 }
             else:
                 response = {

@@ -73,7 +73,7 @@ const BUILTINS: &[(&str, &str)] = &[
     ),
     (
         "agent_loop",
-        "agent_loop(prompt, system?, options?) -> string",
+        "agent_loop(prompt, system?, options?) -> dict",
     ),
     // MCP
     ("mcp_connect", "mcp_connect(command, args?) -> client"),
@@ -151,6 +151,29 @@ const BUILTINS: &[(&str, &str)] = &[
     ("prompt_user", "prompt_user(msg) -> string"),
     // Host interop
     ("host_call", "host_call(name, args) -> value"),
+    // LLM introspection
+    ("llm_info", "llm_info() -> dict"),
+    ("llm_usage", "llm_usage() -> dict"),
+    // Timers
+    ("timer_start", "timer_start(name?) -> dict"),
+    ("timer_end", "timer_end(timer) -> int"),
+    ("elapsed", "elapsed() -> int"),
+    // Structured logging
+    ("log_json", "log_json(key, value) -> nil"),
+    // Metadata
+    ("metadata_get", "metadata_get(dir, namespace?) -> dict"),
+    ("metadata_set", "metadata_set(dir, namespace, data) -> nil"),
+    ("metadata_save", "metadata_save() -> nil"),
+    ("metadata_stale", "metadata_stale(project) -> dict"),
+    (
+        "metadata_refresh_hashes",
+        "metadata_refresh_hashes() -> nil",
+    ),
+    (
+        "compute_content_hash",
+        "compute_content_hash(dir) -> string",
+    ),
+    ("invalidate_facts", "invalidate_facts(dir) -> nil"),
 ];
 
 /// Known keywords for completion.
@@ -2677,7 +2700,7 @@ fn builtin_doc(name: &str) -> Option<String> {
         "http_get" => "**http_get(url)** → string — HTTP GET request",
         "http_post" => "**http_post(url, body, headers?)** → string — HTTP POST request",
         "llm_call" => "**llm_call(prompt, system?, options?)** → string — Call an LLM API\n\nOptions: `{provider, model, max_tokens}`",
-        "agent_loop" => "**agent_loop(prompt, system?, options?)** → string — Agent loop with tool dispatch\n\nOptions: `{provider, model, persistent, max_iterations, max_nudges, nudge}`\n\nIn persistent mode, loop continues until `##DONE##` sentinel is output.",
+        "agent_loop" => "**agent_loop(prompt, system?, options?)** → dict — Agent loop with tool dispatch\n\nReturns: `{status, text, iterations, duration_ms, tools_used}`\n\nOptions: `{provider, model, persistent, max_iterations, max_nudges, nudge}`\n\nIn persistent mode, loop continues until `##DONE##` sentinel is output.",
         "await" => "**await(handle)** → value — Wait for spawned task to complete",
         "cancel" => "**cancel(handle)** → nil — Cancel a spawned task",
         "abs" => "**abs(value)** → int | float — Absolute value",
@@ -2720,6 +2743,19 @@ fn builtin_doc(name: &str) -> Option<String> {
         "atomic_cas" => "**atomic_cas(a, expected, new)** → bool — Compare-and-swap",
         "select" => "**select(ch1, ch2, ...)** → dict — Wait for first channel with data: {index, value, channel}",
         "prompt_user" => "**prompt_user(message?)** → string — Read a line from stdin",
+        "llm_info" => "**llm_info()** → dict — LLM configuration: {provider, model, api_key_set}",
+        "llm_usage" => "**llm_usage()** → dict — Cumulative LLM usage: {input_tokens, output_tokens, total_duration_ms, call_count}",
+        "timer_start" => "**timer_start(name?)** → dict — Start a named timer, returns timer handle",
+        "timer_end" => "**timer_end(timer)** → int — Stop timer, prints elapsed, returns milliseconds",
+        "elapsed" => "**elapsed()** → int — Milliseconds since process start",
+        "log_json" => "**log_json(key, value)** → nil — Emit structured JSON log line with timestamp",
+        "metadata_get" => "**metadata_get(dir, namespace?)** → dict | nil — Read project metadata with hierarchical inheritance",
+        "metadata_set" => "**metadata_set(dir, namespace, data)** → nil — Write metadata for a directory/namespace",
+        "metadata_save" => "**metadata_save()** → nil — Flush metadata to .burin/metadata/ files",
+        "metadata_stale" => "**metadata_stale(project)** → dict — Check for stale metadata: {any_stale, tier1, tier2}",
+        "metadata_refresh_hashes" => "**metadata_refresh_hashes()** → nil — Recompute content hashes",
+        "compute_content_hash" => "**compute_content_hash(dir)** → string — Hash of directory contents for staleness detection",
+        "invalidate_facts" => "**invalidate_facts(dir)** → nil — Mark cached facts as stale",
         _ => return None,
     };
     Some(doc.to_string())

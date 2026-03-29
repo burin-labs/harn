@@ -66,7 +66,8 @@ let response = llm_call(
 
 Run an agent that keeps working until it's done. The agent maintains
 conversation history across turns and loops until it outputs the
-`##DONE##` sentinel.
+`##DONE##` sentinel. Returns a dict with `{status, text, iterations,
+duration_ms, tools_used}`.
 
 ```javascript
 let result = agent_loop(
@@ -74,6 +75,9 @@ let result = agent_loop(
   "You are a senior engineer.",
   {persistent: true}
 )
+log(result.text)       // the accumulated output
+log(result.status)     // "done" or "stuck"
+log(result.iterations) // number of LLM round-trips
 ```
 
 ### How it works
@@ -125,7 +129,7 @@ retry 3 {
       model: "claude-sonnet-4-20250514"
     }
   )
-  log(result)
+  log(result.text)
 }
 ```
 

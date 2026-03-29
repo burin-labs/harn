@@ -171,7 +171,7 @@ pipeline default(task) {
     "You are a coding assistant.",
     {persistent: true, max_nudges: 3, max_iterations: 50}
   )
-  log(result)
+  log(result.text)
 }
 ```
 
@@ -195,7 +195,7 @@ pipeline default(task) {
       max_iterations: 25
     }
   )
-  log(result)
+  log(result.text)
 }
 ```
 

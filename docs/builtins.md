@@ -232,7 +232,39 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `llm_call(prompt, system?, options?)` | prompt: string, system: string, options: dict | string | Single LLM request |
-| `agent_loop(prompt, system?, options?)` | prompt: string, system: string, options: dict | string | Multi-turn agent loop with `##DONE##` sentinel |
+| `agent_loop(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Multi-turn agent loop with `##DONE##` sentinel. Returns `{status, text, iterations, duration_ms, tools_used}` |
+| `llm_info()` | — | dict | Current LLM config: `{provider, model, api_key_set}` |
+| `llm_usage()` | — | dict | Cumulative usage: `{input_tokens, output_tokens, total_duration_ms, call_count}` |
+
+## Timers
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `timer_start(name?)` | name: string | dict | Start a named timer |
+| `timer_end(timer)` | timer: dict | int | Stop timer, prints elapsed, returns milliseconds |
+| `elapsed()` | — | int | Milliseconds since process start |
+
+## Structured logging
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `log_json(key, value)` | key: string, value: any | nil | Emit a JSON log line with timestamp |
+
+## Metadata
+
+Project metadata store backed by `.burin/metadata/` sharded JSON files.
+Supports hierarchical namespace resolution (child directories inherit
+from parents).
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `metadata_get(dir, namespace?)` | dir: string, namespace: string | dict \| nil | Read metadata with inheritance |
+| `metadata_set(dir, namespace, data)` | dir: string, namespace: string, data: dict | nil | Write metadata for directory/namespace |
+| `metadata_save()` | — | nil | Flush metadata to disk |
+| `metadata_stale(project)` | project: string | dict | Check staleness: `{any_stale, tier1, tier2}` |
+| `metadata_refresh_hashes()` | — | nil | Recompute content hashes |
+| `compute_content_hash(dir)` | dir: string | string | Hash of directory contents |
+| `invalidate_facts(dir)` | dir: string | nil | Mark cached facts as stale |
 
 ## MCP (Model Context Protocol)
 

@@ -133,13 +133,18 @@ fn builtin_return_type(name: &str) -> InferredType {
             Some(TypeExpr::Named("nil".into()))
         }
         "type_of" | "to_string" | "json_stringify" | "read_file" | "http_get" | "http_post"
-        | "llm_call" | "agent_loop" | "regex_replace" | "path_join" | "temp_dir"
-        | "date_format" | "format" => Some(TypeExpr::Named("string".into())),
-        "to_int" => Some(TypeExpr::Named("int".into())),
+        | "llm_call" | "regex_replace" | "path_join" | "temp_dir"
+        | "date_format" | "format" | "compute_content_hash" => {
+            Some(TypeExpr::Named("string".into()))
+        }
+        "to_int" | "timer_end" | "elapsed" => Some(TypeExpr::Named("int".into())),
         "to_float" | "timestamp" | "date_parse" => Some(TypeExpr::Named("float".into())),
         "file_exists" | "json_validate" => Some(TypeExpr::Named("bool".into())),
         "list_dir" => Some(TypeExpr::Named("list".into())),
-        "stat" | "exec" | "shell" | "date_now" => Some(TypeExpr::Named("dict".into())),
+        "stat" | "exec" | "shell" | "date_now" | "agent_loop" | "llm_info" | "llm_usage"
+        | "timer_start" | "metadata_get" => Some(TypeExpr::Named("dict".into())),
+        "metadata_set" | "metadata_save" | "metadata_refresh_hashes"
+        | "invalidate_facts" | "log_json" => Some(TypeExpr::Named("nil".into())),
         "env" | "regex_match" => Some(TypeExpr::Union(vec![
             TypeExpr::Named("string".into()),
             TypeExpr::Named("nil".into()),
