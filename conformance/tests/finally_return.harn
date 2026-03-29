@@ -12,7 +12,6 @@ pipeline test(task) {
       log("finally ran")
     }
   }
-
   let v = get_value()
   log("result: ${v}")
 }

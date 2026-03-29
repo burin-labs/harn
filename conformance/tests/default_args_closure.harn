@@ -2,7 +2,6 @@ pipeline test(task) {
   let add = { x, y = 10 -> x + y }
   log(add(5))
   log(add(5, 20))
-
   let greet = { name, prefix = "Hello" -> "${prefix}, ${name}" }
   log(greet("world"))
   log(greet("world", "Hi"))

@@ -2,27 +2,22 @@ pipeline test(task) {
   // metadata_get on empty store returns nil
   let result = metadata_get(".", "test_ns")
   assert_eq(result, nil)
-
   // metadata_set and metadata_get roundtrip
   metadata_set(".", "test_ns", {key1: "value1", key2: 42})
   let data = metadata_get(".", "test_ns")
   assert_eq(data.key1, "value1")
   assert_eq(data.key2, 42)
-
   // metadata_stale returns expected shape
   let stale = metadata_stale(".")
   assert_eq(stale.any_stale, false)
   assert_eq(type_of(stale.tier1), "list")
   assert_eq(type_of(stale.tier2), "list")
-
   // compute_content_hash returns a string
   let hash = compute_content_hash(".")
   assert_eq(type_of(hash), "string")
   assert(len(hash) > 0)
-
   // metadata_refresh_hashes and invalidate_facts are no-ops
   metadata_refresh_hashes()
   invalidate_facts(".")
-
   log("metadata ok")
 }

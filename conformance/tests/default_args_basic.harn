@@ -2,17 +2,13 @@ pipeline test(task) {
   fn greet(name, greeting = "hello") {
     log("${greeting}, ${name}!")
   }
-
   greet("world")
   greet("world", "hi")
-
   fn add(a, b = 10) {
     return a + b
   }
-
   log(add(5))
   log(add(5, 20))
-
   fn flag(x, enabled = true) {
     if enabled {
       log("on: ${x}")
@@ -20,7 +16,6 @@ pipeline test(task) {
       log("off: ${x}")
     }
   }
-
   flag("test")
   flag("test", false)
 }

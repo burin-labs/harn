@@ -2,7 +2,6 @@ pipeline test(task) {
   fn make_config(host = "localhost", port = 8080, debug = false) {
     return "${host}:${port} debug=${debug}"
   }
-
   log(make_config())
   log(make_config("example.com"))
   log(make_config("example.com", 3000))

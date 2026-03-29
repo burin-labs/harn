@@ -2,7 +2,6 @@ pipeline test(task) {
   fn repeat_text(text: string, count: int = 3) -> string {
     return text.repeat(count)
   }
-
   log(repeat_text("ha"))
   log(repeat_text("ha", 5))
 }

@@ -1,23 +1,17 @@
 pipeline test(task) {
   // Suppress structured log output from trace_end
   log_set_level("error")
-
   // trace_id is nil when no active span
   assert_eq(trace_id(), nil)
-
   let span = trace_start("my_op")
   assert_eq(span.name, "my_op")
   assert(span.trace_id != nil)
   assert(span.span_id != nil)
-
   // trace_id returns current span's trace id
   assert_eq(trace_id(), span.trace_id)
-
   trace_end(span)
-
   // After ending, trace_id is nil again
   assert_eq(trace_id(), nil)
-
   // Restore log level for final assertion output
   log_set_level("debug")
   log("trace ok")

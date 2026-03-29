@@ -4,7 +4,6 @@ pipeline test(task) {
   // api_key_set should be bool regardless of env
   assert(type_of(info.api_key_set) == "bool")
   log("llm_info ok")
-
   let usage = llm_usage()
   assert_eq(usage.input_tokens, 0)
   assert_eq(usage.output_tokens, 0)

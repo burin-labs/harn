@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use harn_lexer::Span;
+use harn_lexer::{Span, StringSegment};
 use harn_parser::{BindingPattern, Node, SNode};
 
 /// A lint diagnostic reported by the linter.
@@ -589,7 +589,26 @@ impl Linter {
                 }
             }
 
-            Node::InterpolatedString(_) => {}
+            Node::InterpolatedString(segments) => {
+                for seg in segments {
+                    if let StringSegment::Expression(expr) = seg {
+                        // Extract the root identifier from expressions like
+                        // "name", "opts.host", "x + 1", etc.
+                        // We split on non-identifier chars and record any
+                        // leading identifier tokens as references.
+                        for token in expr.split(|c: char| !c.is_alphanumeric() && c != '_') {
+                            if !token.is_empty()
+                                && token
+                                    .chars()
+                                    .next()
+                                    .is_some_and(|c| c.is_alphabetic() || c == '_')
+                            {
+                                self.references.insert(token.to_string());
+                            }
+                        }
+                    }
+                }
+            }
 
             Node::RangeExpr { start, end, .. } => {
                 self.lint_node(start);

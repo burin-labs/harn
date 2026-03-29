@@ -1,6 +1,5 @@
 pipeline test(task) {
   var cleanup_ran = false
-
   try {
     try {
       throw "error"
@@ -10,6 +9,5 @@ pipeline test(task) {
   } catch (e) {
     log("outer caught: ${e}")
   }
-
   log("cleanup_ran: ${cleanup_ran}")
 }
