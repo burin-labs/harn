@@ -1616,6 +1616,69 @@ Six builtins provide a persistent key-value store backed by `.harn/store.json`:
 The store file is created lazily on first mutation. In bridge mode, the
 host can override these builtins via the bridge protocol.
 
+## Checkpoint & resume
+
+Checkpoints enable resilient, resumable pipelines. State is persisted to
+`.harn/checkpoints/<pipeline>.json` and survives crashes, restarts, and
+migration to another machine.
+
+### Core builtins
+
+| Function | Description |
+|---|---|
+| `checkpoint(key, value)` | Save `value` at `key`; writes to disk immediately |
+| `checkpoint_get(key)` | Retrieve saved value, or `nil` if absent |
+| `checkpoint_exists(key)` | Return `true` if `key` is present (even if value is `nil`) |
+| `checkpoint_delete(key)` | Remove a single key; no-op if absent |
+| `checkpoint_clear()` | Remove all checkpoints for this pipeline |
+| `checkpoint_list()` | Return sorted list of all checkpoint keys |
+
+`checkpoint_exists` is preferable to `checkpoint_get(key) == nil` when `nil`
+is a valid checkpoint value.
+
+### std/checkpoint module
+
+```harn
+import { checkpoint_stage, checkpoint_stage_retry } from "std/checkpoint"
+```
+
+#### checkpoint_stage(name, fn) -> value
+
+Runs `fn()` and caches the result under `name`. On subsequent calls with the
+same name, returns the cached result without running `fn()` again. This is the
+primary primitive for building resumable pipelines.
+
+```harn
+import { checkpoint_stage } from "std/checkpoint"
+
+pipeline process(task) {
+  let data    = checkpoint_stage("fetch",   fn() { fetch_dataset(url) })
+  let cleaned = checkpoint_stage("clean",   fn() { clean(data) })
+  let result  = checkpoint_stage("process", fn() { run_model(cleaned) })
+  upload(result)
+}
+```
+
+On first run all three stages execute. On a resumed run (pipeline restarted
+after a crash), completed stages are skipped automatically.
+
+#### checkpoint_stage_retry(name, max_retries, fn) -> value
+
+Like `checkpoint_stage`, but retries `fn()` up to `max_retries` times on
+failure before propagating the error. Once successful, the result is cached so
+retries are never needed on resume.
+
+```harn
+let data = checkpoint_stage_retry("fetch", 3, fn() { fetch_with_timeout(url) })
+```
+
+### File location
+
+Checkpoint files are stored at `.harn/checkpoints/<pipeline>.json` relative to
+the project root (where `harn.toml` lives), or relative to the source file
+directory if no project root is found. Files are plain JSON and can be copied
+between machines to migrate pipeline state.
+
 ## Sandbox mode
 
 The `harn run` command supports sandbox flags that restrict which builtins

@@ -88,6 +88,17 @@ impl CheckpointState {
         self.ensure_loaded();
         self.data.keys().cloned().collect()
     }
+
+    fn exists(&mut self, key: &str) -> bool {
+        self.ensure_loaded();
+        self.data.contains_key(key)
+    }
+
+    fn delete(&mut self, key: &str) -> Result<(), String> {
+        self.ensure_loaded();
+        self.data.remove(key);
+        self.save()
+    }
 }
 
 fn vm_to_json(val: &VmValue) -> serde_json::Value {
@@ -192,5 +203,21 @@ pub fn register_checkpoint_builtins(vm: &mut Vm, base_dir: &Path, pipeline_name:
                 .map(|k| VmValue::String(Rc::from(k)))
                 .collect(),
         )))
+    });
+
+    // checkpoint_exists(key) -> bool
+    // Returns true if the key is present, even if its value is nil.
+    let s = Rc::clone(&state);
+    vm.register_builtin("checkpoint_exists", move |args, _out| {
+        let key = args.first().map(|a| a.display()).unwrap_or_default();
+        Ok(VmValue::Bool(s.borrow_mut().exists(&key)))
+    });
+
+    // checkpoint_delete(key) — remove a single key from the checkpoint store
+    let s = Rc::clone(&state);
+    vm.register_builtin("checkpoint_delete", move |args, _out| {
+        let key = args.first().map(|a| a.display()).unwrap_or_default();
+        s.borrow_mut().delete(&key).map_err(VmError::Runtime)?;
+        Ok(VmValue::Nil)
     });
 }

@@ -2,6 +2,25 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.4.25
+
+### Added
+
+- **H3: Checkpoint & Resume** — comprehensive support for resilient,
+  resumable pipelines that survive crashes and restarts.
+- **`checkpoint_exists(key)`** — returns `true` if the key is present in
+  checkpoint data, even when the stored value is `nil`. More reliable than
+  `checkpoint_get(key) == nil` for existence checks.
+- **`checkpoint_delete(key)`** — removes a single key from the checkpoint
+  store without clearing everything. No-op if the key is absent.
+- **`std/checkpoint` module** — importable utilities for the resume pattern:
+  - `checkpoint_stage(name, fn)` — runs `fn()` and caches the result; on
+    subsequent calls returns the cached value without re-executing `fn`.
+    The primary primitive for building idempotent, resumable pipelines.
+  - `checkpoint_stage_retry(name, max_retries, fn)` — like `checkpoint_stage`
+    but retries `fn()` up to `max_retries` times on failure before
+    propagating the error. Cached on first success.
+
 ## v0.4.19
 
 ### Fixed

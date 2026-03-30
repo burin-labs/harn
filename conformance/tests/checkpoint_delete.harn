@@ -1,0 +1,36 @@
+pipeline test(task) {
+  // Start clean
+  checkpoint_clear()
+
+  // Set up multiple checkpoints
+  checkpoint("a", 1)
+  checkpoint("b", 2)
+  checkpoint("c", 3)
+
+  let keys = checkpoint_list()
+  assert(len(keys) == 3, "should have 3 keys")
+
+  // Delete a single key
+  checkpoint_delete("b")
+  assert(!checkpoint_exists("b"), "b should be gone")
+  assert(checkpoint_exists("a"), "a should still exist")
+  assert(checkpoint_exists("c"), "c should still exist")
+  assert(checkpoint_get("a") == 1, "a value intact")
+  assert(checkpoint_get("c") == 3, "c value intact")
+
+  let keys2 = checkpoint_list()
+  assert(len(keys2) == 2, "should have 2 keys after delete")
+
+  // Deleting a non-existent key is a no-op
+  checkpoint_delete("nonexistent")
+  assert(len(checkpoint_list()) == 2, "count unchanged after deleting missing key")
+
+  // Deleting the same key twice is a no-op
+  checkpoint_delete("a")
+  checkpoint_delete("a")
+  assert(!checkpoint_exists("a"), "a should remain gone")
+  assert(len(checkpoint_list()) == 1, "only c remains")
+
+  checkpoint_clear()
+  log("checkpoint_delete tests passed")
+}
