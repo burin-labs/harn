@@ -38,7 +38,7 @@ pipeline default() {
   // 7. Dynamic value — non-dict passed to shape param
   fn make_string() -> dict {
     // Type says dict but returns string at runtime
-    return json_decode("{}")
+    return json_parse("{}")
   }
   // Can't easily produce a non-dict from a dict-typed fn,
   // so test with a function that returns any

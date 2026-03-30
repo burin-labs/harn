@@ -77,6 +77,33 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
     register_agent_stdlib(vm);
 }
 
+/// Return the canonical list of all stdlib builtin names.
+/// This creates a temporary VM, registers all builtins, and collects the names.
+/// Used by harn-lint and harn-lsp to avoid hardcoded duplicate lists.
+pub fn stdlib_builtin_names() -> Vec<String> {
+    let mut vm = Vm::new();
+    register_vm_stdlib(&mut vm);
+    // Register path-dependent builtins with a dummy path so we capture their names.
+    let tmp = std::path::PathBuf::from("/tmp");
+    crate::store::register_store_builtins(&mut vm, &tmp);
+    crate::checkpoint::register_checkpoint_builtins(&mut vm, &tmp, "default");
+    crate::metadata::register_metadata_builtins(&mut vm, &tmp);
+    crate::metadata::register_scan_builtins(&mut vm, &tmp);
+    let mut names = vm.builtin_names();
+    // These are handled as special opcodes/keywords, not registered builtins,
+    // but the linter should recognize them as valid function calls.
+    for extra in [
+        "spawn",
+        "await",
+        "cancel",
+        "cancel_graceful",
+        "is_cancelled",
+    ] {
+        names.push(extra.to_string());
+    }
+    names
+}
+
 /// Reset thread-local stdlib state (logging, tracing, source dir). Call between test runs.
 pub fn reset_stdlib_state() {
     logging::reset_logging_state();
