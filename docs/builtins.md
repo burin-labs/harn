@@ -597,6 +597,7 @@ transport (spawns a child process).
 | `mcp_list_tools(client)` | client: mcp\_client | list | List available tools from the server |
 | `mcp_call(client, name, arguments?)` | client: mcp\_client, name: string, arguments: dict | string or list | Call a tool and return the result |
 | `mcp_list_resources(client)` | client: mcp\_client | list | List available resources from the server |
+| `mcp_list_resource_templates(client)` | client: mcp\_client | list | List resource templates (URI templates) from the server |
 | `mcp_read_resource(client, uri)` | client: mcp\_client, uri: string | string or list | Read a resource by URI |
 | `mcp_list_prompts(client)` | client: mcp\_client | list | List available prompts from the server |
 | `mcp_get_prompt(client, name, arguments?)` | client: mcp\_client, name: string, arguments: dict | dict | Get a prompt with optional arguments |
@@ -671,29 +672,64 @@ connects successfully.
 
 ### MCP Server Mode
 
-Harn pipelines can expose themselves as MCP tools using `harn mcp-serve`.
-The pipeline defines tools with `tool_registry()` + `tool_define()` and
-returns the registry. The CLI then serves those tools over stdio using
-the MCP protocol, making them callable by Claude Desktop, Cursor, or any
-MCP client.
+Harn pipelines can expose tools, resources, resource templates, and prompts
+as an MCP server using `harn mcp-serve`. The CLI serves them over stdio
+using the MCP protocol, making them callable by Claude Desktop, Cursor,
+or any MCP client.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `tool_registry()` | — | dict | Create an empty tool registry |
-| `tool_define(registry, name, description, config)` | registry: dict, name: string, description: string, config: dict | dict | Add a tool to the registry |
+| `tool_define(registry, name, desc, config)` | registry, name, desc: string, config: dict | dict | Add a tool (config: `{params, handler, annotations?}`) |
+| `mcp_tools(registry)` | registry: dict | nil | Register tools for MCP serving |
+| `mcp_resource(config)` | config: dict | nil | Register a static resource (`{uri, name, text, description?, mime_type?}`) |
+| `mcp_resource_template(config)` | config: dict | nil | Register a resource template (`{uri_template, name, handler, description?, mime_type?}`) |
+| `mcp_prompt(config)` | config: dict | nil | Register a prompt (`{name, handler, description?, arguments?}`) |
+
+Tool annotations (MCP spec `annotations` field) can be passed in the
+`tool_define` config to describe tool behavior:
+
+```harn
+tools = tool_define(tools, "search", "Search files", {
+  params: { query: "string" },
+  handler: { args -> "results for " + args.query },
+  annotations: {
+    title: "File Search",
+    readOnlyHint: true,
+    destructiveHint: false
+  }
+})
+```
 
 Example (`agent.harn`):
 
 ```harn
 pipeline main(task) {
   var tools = tool_registry()
-
-  tools = tool_define(tools, "greet", "Greet someone by name", {
+  tools = tool_define(tools, "greet", "Greet someone", {
     params: { name: "string" },
     handler: { args -> "Hello, " + args.name + "!" }
   })
+  mcp_tools(tools)
 
-  mcp_serve(tools)
+  mcp_resource({
+    uri: "docs://readme",
+    name: "README",
+    text: "# My Agent\nA demo MCP server."
+  })
+
+  mcp_resource_template({
+    uri_template: "config://{key}",
+    name: "Config Values",
+    handler: { args -> "value for " + args.key }
+  })
+
+  mcp_prompt({
+    name: "review",
+    description: "Code review prompt",
+    arguments: [{ name: "code", required: true }],
+    handler: { args -> "Please review:\n" + args.code }
+  })
 }
 ```
 
@@ -718,7 +754,12 @@ Configure in Claude Desktop (`claude_desktop_config.json`):
 
 Notes:
 
-- The pipeline must return a `tool_registry` value.
+- `mcp_tools(registry)` (or the alias `mcp_serve`) must be called to register tools.
+- Resources, resource templates, and prompts are registered individually.
 - All `print`/`println` output goes to stderr (stdout is the MCP transport).
 - The server supports the `2024-11-05` MCP protocol version over stdio.
 - Tool handlers receive arguments as a dict and should return a string result.
+- Prompt handlers receive arguments as a dict and return a string (single
+  user message) or a list of `{role, content}` dicts.
+- Resource template handlers receive URI template variables as a dict and
+  return the resource text.

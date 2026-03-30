@@ -84,6 +84,10 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
         "mcp_read_resource",
         "mcp_read_resource(client, uri) -> string",
     ),
+    (
+        "mcp_list_resource_templates",
+        "mcp_list_resource_templates(client) -> list",
+    ),
     ("mcp_list_prompts", "mcp_list_prompts(client) -> list"),
     (
         "mcp_get_prompt",
@@ -92,7 +96,14 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
     ("mcp_server_info", "mcp_server_info(client) -> dict"),
     ("mcp_disconnect", "mcp_disconnect(client) -> nil"),
     // MCP server
+    ("mcp_tools", "mcp_tools(registry) -> nil"),
     ("mcp_serve", "mcp_serve(registry) -> nil"),
+    ("mcp_resource", "mcp_resource({uri, name, text, ...}) -> nil"),
+    (
+        "mcp_resource_template",
+        "mcp_resource_template({uri_template, name, handler, ...}) -> nil",
+    ),
+    ("mcp_prompt", "mcp_prompt({name, handler, ...}) -> nil"),
     // Conversation management
     ("conversation", "conversation() -> list"),
     ("add_message", "add_message(conv, role, content) -> list"),
@@ -185,6 +196,9 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
     ("trace_start", "trace_start(name) -> span"),
     ("trace_end", "trace_end(span) -> nil"),
     ("trace_id", "trace_id() -> string"),
+    ("enable_tracing", "enable_tracing(enabled?) -> nil"),
+    ("trace_spans", "trace_spans() -> list"),
+    ("trace_summary", "trace_summary() -> string"),
     // Tool registry
     ("tool_registry", "tool_registry() -> registry"),
     (
@@ -467,13 +481,18 @@ pub(crate) fn builtin_doc(name: &str) -> Option<String> {
         "mcp_list_tools" => "**mcp_list_tools(client)** → list — List available tools from MCP server",
         "mcp_call" => "**mcp_call(client, name, arguments?)** → string | list — Call an MCP tool",
         "mcp_list_resources" => "**mcp_list_resources(client)** → list — List resources from MCP server",
+        "mcp_list_resource_templates" => "**mcp_list_resource_templates(client)** → list — List resource templates from MCP server",
         "mcp_read_resource" => "**mcp_read_resource(client, uri)** → string | list — Read a resource by URI",
         "mcp_list_prompts" => "**mcp_list_prompts(client)** → list — List prompts from MCP server",
         "mcp_get_prompt" => "**mcp_get_prompt(client, name, arguments?)** → dict — Get a prompt with optional arguments",
         "mcp_server_info" => "**mcp_server_info(client)** → dict — Server info: `{name, connected}`",
         "mcp_disconnect" => "**mcp_disconnect(client)** → nil — Disconnect and kill MCP server process",
         // MCP server
-        "mcp_serve" => "**mcp_serve(registry)** → nil — Serve a tool registry as an MCP server over stdio (used with `harn mcp-serve`)",
+        "mcp_tools" => "**mcp_tools(registry)** → nil — Register a tool registry for the MCP server (used with `harn mcp-serve`)",
+        "mcp_serve" => "**mcp_serve(registry)** → nil — Alias for `mcp_tools` (deprecated)",
+        "mcp_resource" => "**mcp_resource({uri, name, text, description?, mime_type?})** → nil — Register a static resource for the MCP server",
+        "mcp_resource_template" => "**mcp_resource_template({uri_template, name, handler, description?, mime_type?})** → nil — Register a parameterized resource template (RFC 6570 URI template)",
+        "mcp_prompt" => "**mcp_prompt({name, handler, description?, arguments?})** → nil — Register a prompt template for the MCP server",
         // Conversation management
         "conversation" => "**conversation()** → list — Create an empty conversation message list",
         "add_message" => "**add_message(conv, role, content)** → list — Add a message with given role to conversation",

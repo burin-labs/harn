@@ -2,9 +2,8 @@
 //
 // Run with: harn mcp-serve examples/mcp_server.harn
 //
-// This exposes two tools over MCP stdio transport:
-//   - greet: Returns a greeting for a given name
-//   - add: Adds two numbers together
+// This exposes tools, resources, resource templates, and prompts over MCP
+// stdio transport for use by Claude Desktop, Cursor, or any MCP client.
 //
 // Configure in Claude Desktop (claude_desktop_config.json):
 // {
@@ -17,17 +16,64 @@
 // }
 
 pipeline main(task) {
+  // ---- Tools (with annotations) ----
   var tools = tool_registry()
 
   tools = tool_define(tools, "greet", "Greet someone by name", {
     params: { name: "string" },
-    handler: { args -> "Hello, " + args.name + "! Welcome to Harn." }
+    handler: { args -> "Hello, " + args.name + "! Welcome to Harn." },
+    annotations: {
+      title: "Greeting Tool",
+      readOnlyHint: true,
+      destructiveHint: false
+    }
   })
 
   tools = tool_define(tools, "add", "Add two numbers together", {
     params: { a: "number", b: "number" },
-    handler: { args -> to_string(args.a + args.b) }
+    handler: { args -> to_string(args.a + args.b) },
+    annotations: { readOnlyHint: true }
   })
 
-  mcp_serve(tools)
+  mcp_tools(tools)
+
+  // ---- Static Resources ----
+  mcp_resource({
+    uri: "docs://readme",
+    name: "README",
+    description: "Project documentation",
+    mime_type: "text/markdown",
+    text: "# Harn MCP Demo\n\nThis is a demo MCP server built with Harn."
+  })
+
+  // ---- Resource Templates ----
+  mcp_resource_template({
+    uri_template: "config://{key}",
+    name: "Configuration Values",
+    description: "Read configuration by key",
+    mime_type: "text/plain",
+    handler: { args ->
+      if args.key == "version" {
+        "0.4.23"
+      } else if args.key == "name" {
+        "harn-demo"
+      } else {
+        "unknown key: " + args.key
+      }
+    }
+  })
+
+  // ---- Prompts ----
+  mcp_prompt({
+    name: "code_review",
+    description: "Review code for quality and suggest improvements",
+    arguments: [
+      { name: "code", description: "The code to review", required: true },
+      { name: "language", description: "Programming language" }
+    ],
+    handler: { args ->
+      let lang = args.language ?? "unknown"
+      "Please review this " + lang + " code for quality, bugs, and improvements:\n\n" + args.code
+    }
+  })
 }

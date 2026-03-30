@@ -301,7 +301,8 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
     });
 
     // tool_define(registry, name, description, config) -> registry
-    // config is {params: {name: {type, description, required?, default?}}, handler: fn}
+    // config is {params: {name: {type, description, required?, default?}}, handler: fn,
+    //            annotations?: {title?, readOnlyHint?, destructiveHint?, idempotentHint?, openWorldHint?}}
     vm.register_builtin("tool_define", |args, _out| {
         if args.len() < 4 {
             return Err(VmError::Thrown(VmValue::String(Rc::from(
@@ -346,6 +347,11 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
         );
         tool_entry.insert("handler".to_string(), handler);
         tool_entry.insert("parameters".to_string(), parameters);
+
+        // Optional MCP tool annotations (title, readOnlyHint, destructiveHint, etc.)
+        if let Some(annotations) = config.get("annotations") {
+            tool_entry.insert("annotations".to_string(), annotations.clone());
+        }
 
         let mut tools: Vec<VmValue> = match registry.get("tools") {
             Some(VmValue::List(list)) => list

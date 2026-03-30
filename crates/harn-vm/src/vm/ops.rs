@@ -1051,6 +1051,10 @@ impl super::Vm {
         } else if op == Op::PopHandler as u8 {
             self.exception_handlers.pop();
         } else if op == Op::Parallel as u8 {
+            let _par_span = super::ScopeSpan::new(
+                crate::tracing::SpanKind::Parallel,
+                "parallel".into(),
+            );
             let closure = self.pop()?;
             let count_val = self.pop()?;
             let count = match &count_val {
@@ -1162,6 +1166,10 @@ impl super::Vm {
                 _ => self.stack.push(VmValue::Nil),
             }
         } else if op == Op::Spawn as u8 {
+            let _spawn_span = super::ScopeSpan::new(
+                crate::tracing::SpanKind::Spawn,
+                "spawn".into(),
+            );
             let closure = self.pop()?;
             if let VmValue::Closure(closure) = closure {
                 self.task_counter += 1;

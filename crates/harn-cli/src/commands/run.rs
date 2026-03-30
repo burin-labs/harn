@@ -305,19 +305,50 @@ pub(crate) async fn run_file_mcp_serve(path: &str) {
                 }
             };
 
+            let resources = harn_vm::take_mcp_serve_resources();
+            let resource_templates = harn_vm::take_mcp_serve_resource_templates();
+            let prompts = harn_vm::take_mcp_serve_prompts();
+
             let server_name = std::path::Path::new(path)
                 .file_stem()
                 .and_then(|s| s.to_str())
                 .unwrap_or("harn")
                 .to_string();
 
+            let mut caps = Vec::new();
+            if !tools.is_empty() {
+                caps.push(format!(
+                    "{} tool{}",
+                    tools.len(),
+                    if tools.len() == 1 { "" } else { "s" }
+                ));
+            }
+            let total_resources = resources.len() + resource_templates.len();
+            if total_resources > 0 {
+                caps.push(format!(
+                    "{total_resources} resource{}",
+                    if total_resources == 1 { "" } else { "s" }
+                ));
+            }
+            if !prompts.is_empty() {
+                caps.push(format!(
+                    "{} prompt{}",
+                    prompts.len(),
+                    if prompts.len() == 1 { "" } else { "s" }
+                ));
+            }
             eprintln!(
-                "[harn] mcp-serve: serving {} tool{} as '{server_name}'",
-                tools.len(),
-                if tools.len() == 1 { "" } else { "s" }
+                "[harn] mcp-serve: serving {} as '{server_name}'",
+                caps.join(", ")
             );
 
-            let server = harn_vm::McpServer::new(server_name, tools);
+            let server = harn_vm::McpServer::new(
+                server_name,
+                tools,
+                resources,
+                resource_templates,
+                prompts,
+            );
             if let Err(e) = server.run(&mut vm).await {
                 eprintln!("error: MCP server error: {e}");
                 process::exit(1);

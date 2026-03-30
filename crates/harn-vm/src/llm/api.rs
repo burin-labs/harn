@@ -324,7 +324,28 @@ async fn vm_call_llm_api(
     let req = resolved.apply_headers(req, api_key);
 
     if streaming {
-        return vm_call_llm_api_sse(req, provider, model, &resolved, delta_tx.unwrap()).await;
+        let tx = delta_tx.unwrap();
+        let response = req.send().await.map_err(|e| {
+            VmError::Thrown(VmValue::String(Rc::from(format!(
+                "{provider} stream error: {e}"
+            ))))
+        })?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                "{provider} HTTP {status}: {body}"
+            )))));
+        }
+        let ct = response
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        if ct.contains("text/event-stream") {
+            return vm_call_llm_api_sse_from_response(response, model, &resolved, tx).await;
+        }
+        return vm_call_llm_api_ndjson_from_response(response, model, tx).await;
     }
 
     let response = req.send().await.map_err(|e| {
@@ -435,27 +456,27 @@ fn parse_llm_response(
     }
 }
 
-/// Consume an SSE streaming response, forwarding text deltas to `delta_tx`
-/// while accumulating the full result.
-async fn vm_call_llm_api_sse(
-    request: reqwest::RequestBuilder,
-    provider: &str,
+/// Consume an SSE streaming response from an already-sent request.
+/// Parses `data: {...}` lines from the response body.
+async fn vm_call_llm_api_sse_from_response(
+    response: reqwest::Response,
     model: &str,
     resolved: &super::helpers::ResolvedProvider<'_>,
     delta_tx: DeltaSender,
 ) -> Result<LlmResult, VmError> {
-    use reqwest_eventsource::{Event, EventSource};
+    use tokio::io::AsyncBufReadExt;
     use tokio_stream::StreamExt;
 
-    let mut es = EventSource::new(request).map_err(|e| {
-        VmError::Thrown(VmValue::String(Rc::from(format!(
-            "{provider} stream setup error: {e}"
-        ))))
-    })?;
+    let stream = response.bytes_stream();
+    let reader = tokio::io::BufReader::new(tokio_util::io::StreamReader::new(
+        stream.map(|r| r.map_err(std::io::Error::other)),
+    ));
+    let mut lines = reader.lines();
 
     let mut text = String::new();
     let mut input_tokens: i64 = 0;
     let mut output_tokens: i64 = 0;
+    let mut tool_calls: Vec<serde_json::Value> = Vec::new();
 
     // Anthropic tool-use streaming state
     struct ToolBlock {
@@ -463,133 +484,125 @@ async fn vm_call_llm_api_sse(
         name: String,
         input_json: String,
     }
-    let mut tool_calls: Vec<serde_json::Value> = Vec::new();
     let mut current_tool: Option<ToolBlock> = None;
 
-    // OpenAI tool-call streaming state: index -> (id, name, accumulated args)
+    // OpenAI tool-call streaming state
     let mut oai_tool_map: std::collections::HashMap<u64, (String, String, String)> =
         std::collections::HashMap::new();
 
-    while let Some(event) = es.next().await {
-        match event {
-            Ok(Event::Message(msg)) => {
-                if msg.data == "[DONE]" {
-                    break;
-                }
-                let json: serde_json::Value = match serde_json::from_str(&msg.data) {
-                    Ok(v) => v,
-                    Err(_) => continue,
-                };
+    while let Ok(Some(line)) = lines.next_line().await {
+        // SSE lines are prefixed with "data: "
+        let data = if let Some(d) = line.strip_prefix("data: ") {
+            d
+        } else {
+            continue;
+        };
+        if data == "[DONE]" {
+            break;
+        }
+        let json: serde_json::Value = match serde_json::from_str(data) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
 
-                if resolved.is_anthropic_style {
-                    match json["type"].as_str() {
-                        Some("message_start") => {
-                            if let Some(n) = json["message"]["usage"]["input_tokens"].as_i64() {
-                                input_tokens = n;
+        if resolved.is_anthropic_style {
+            match json["type"].as_str() {
+                Some("message_start") => {
+                    if let Some(n) = json["message"]["usage"]["input_tokens"].as_i64() {
+                        input_tokens = n;
+                    }
+                }
+                Some("content_block_start") => {
+                    let block = &json["content_block"];
+                    if block["type"].as_str() == Some("tool_use") {
+                        current_tool = Some(ToolBlock {
+                            id: block["id"].as_str().unwrap_or("").to_string(),
+                            name: block["name"].as_str().unwrap_or("").to_string(),
+                            input_json: String::new(),
+                        });
+                    }
+                }
+                Some("content_block_delta") => {
+                    let delta = &json["delta"];
+                    match delta["type"].as_str() {
+                        Some("text_delta") => {
+                            if let Some(t) = delta["text"].as_str() {
+                                text.push_str(t);
+                                let _ = delta_tx.send(t.to_string());
                             }
                         }
-                        Some("content_block_start") => {
-                            let block = &json["content_block"];
-                            if block["type"].as_str() == Some("tool_use") {
-                                current_tool = Some(ToolBlock {
-                                    id: block["id"].as_str().unwrap_or("").to_string(),
-                                    name: block["name"].as_str().unwrap_or("").to_string(),
-                                    input_json: String::new(),
-                                });
-                            }
-                        }
-                        Some("content_block_delta") => {
-                            let delta = &json["delta"];
-                            match delta["type"].as_str() {
-                                Some("text_delta") => {
-                                    if let Some(t) = delta["text"].as_str() {
-                                        text.push_str(t);
-                                        let _ = delta_tx.send(t.to_string());
-                                    }
+                        Some("input_json_delta") => {
+                            if let Some(ref mut tool) = current_tool {
+                                if let Some(j) = delta["partial_json"].as_str() {
+                                    tool.input_json.push_str(j);
                                 }
-                                Some("input_json_delta") => {
-                                    if let Some(ref mut tool) = current_tool {
-                                        if let Some(j) = delta["partial_json"].as_str() {
-                                            tool.input_json.push_str(j);
-                                        }
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
-                        Some("content_block_stop") => {
-                            if let Some(tool) = current_tool.take() {
-                                let input: serde_json::Value =
-                                    serde_json::from_str(&tool.input_json)
-                                        .unwrap_or(serde_json::json!({}));
-                                tool_calls.push(serde_json::json!({
-                                    "id": tool.id,
-                                    "name": tool.name,
-                                    "arguments": input,
-                                }));
-                            }
-                        }
-                        Some("message_delta") => {
-                            if let Some(n) = json["usage"]["output_tokens"].as_i64() {
-                                output_tokens = n;
                             }
                         }
                         _ => {}
                     }
-                } else {
-                    // OpenAI-style SSE
-                    if let Some(content) = json["choices"][0]["delta"]["content"].as_str() {
-                        text.push_str(content);
-                        let _ = delta_tx.send(content.to_string());
+                }
+                Some("content_block_stop") => {
+                    if let Some(tool) = current_tool.take() {
+                        let args = serde_json::from_str::<serde_json::Value>(&tool.input_json)
+                            .unwrap_or(serde_json::Value::Object(Default::default()));
+                        tool_calls.push(serde_json::json!({
+                            "id": tool.id, "name": tool.name, "arguments": args,
+                        }));
                     }
-                    // Accumulate tool call fragments
-                    if let Some(calls) = json["choices"][0]["delta"]["tool_calls"].as_array() {
-                        for call in calls {
-                            let idx = call["index"].as_u64().unwrap_or(0);
-                            let entry = oai_tool_map.entry(idx).or_insert_with(|| {
-                                (
-                                    call["id"].as_str().unwrap_or("").to_string(),
-                                    call["function"]["name"].as_str().unwrap_or("").to_string(),
-                                    String::new(),
-                                )
-                            });
-                            if let Some(args) = call["function"]["arguments"].as_str() {
-                                entry.2.push_str(args);
-                            }
-                        }
+                }
+                Some("message_delta") => {
+                    if let Some(n) = json["usage"]["output_tokens"].as_i64() {
+                        output_tokens = n;
                     }
-                    // Usage in final chunk (stream_options.include_usage)
-                    if let Some(usage) = json.get("usage") {
-                        if let Some(n) = usage["prompt_tokens"].as_i64() {
-                            input_tokens = n;
-                        }
-                        if let Some(n) = usage["completion_tokens"].as_i64() {
-                            output_tokens = n;
-                        }
+                }
+                _ => {}
+            }
+        } else {
+            // OpenAI-style streaming
+            let choice = &json["choices"][0];
+            let delta = &choice["delta"];
+
+            if let Some(content) = delta["content"].as_str() {
+                text.push_str(content);
+                let _ = delta_tx.send(content.to_string());
+            }
+
+            // Tool calls
+            if let Some(tcs) = delta["tool_calls"].as_array() {
+                for tc in tcs {
+                    let idx = tc["index"].as_u64().unwrap_or(0);
+                    let entry = oai_tool_map
+                        .entry(idx)
+                        .or_insert_with(|| {
+                            let id = tc["id"].as_str().unwrap_or("").to_string();
+                            let name = tc["function"]["name"].as_str().unwrap_or("").to_string();
+                            (id, name, String::new())
+                        });
+                    if let Some(args) = tc["function"]["arguments"].as_str() {
+                        entry.2.push_str(args);
                     }
                 }
             }
-            Ok(Event::Open) => {}
-            Err(_) => break,
+
+            // Usage in final chunk
+            if let Some(usage) = json.get("usage") {
+                if let Some(n) = usage["prompt_tokens"].as_i64() {
+                    input_tokens = n;
+                }
+                if let Some(n) = usage["completion_tokens"].as_i64() {
+                    output_tokens = n;
+                }
+            }
         }
     }
 
-    es.close();
-
     // Finalize OpenAI tool calls
-    if !oai_tool_map.is_empty() {
-        let mut indices: Vec<u64> = oai_tool_map.keys().copied().collect();
-        indices.sort_unstable();
-        for idx in indices {
-            let (id, name, args_str) = oai_tool_map.remove(&idx).unwrap();
-            let arguments: serde_json::Value =
-                serde_json::from_str(&args_str).unwrap_or(serde_json::json!({}));
-            tool_calls.push(serde_json::json!({
-                "id": id,
-                "name": name,
-                "arguments": arguments,
-            }));
-        }
+    for (_, (id, name, args_str)) in oai_tool_map {
+        let args = serde_json::from_str::<serde_json::Value>(&args_str)
+            .unwrap_or(serde_json::Value::Object(Default::default()));
+        tool_calls.push(serde_json::json!({
+            "id": id, "name": name, "arguments": args,
+        }));
     }
 
     Ok(LlmResult {
@@ -624,4 +637,73 @@ pub(crate) fn apply_auth_headers(
         // Unknown provider: default to bearer
         req.header("Authorization", format!("Bearer {api_key}"))
     }
+}
+
+/// Consume an NDJSON streaming response, forwarding text deltas to `delta_tx`
+/// while accumulating the full result.
+///
+/// Supports Ollama format (one JSON object per line):
+/// `{"message":{"role":"assistant","content":"Hi"},"done":false}`
+/// Final line has `"done":true` with token counts.
+///
+/// Also supports OpenAI-compatible NDJSON where each line is `data: {...}`.
+async fn vm_call_llm_api_ndjson_from_response(
+    response: reqwest::Response,
+    model: &str,
+    delta_tx: DeltaSender,
+) -> Result<LlmResult, VmError> {
+    use tokio::io::AsyncBufReadExt;
+    use tokio_stream::StreamExt;
+
+    let stream = response.bytes_stream();
+    let reader = tokio::io::BufReader::new(tokio_util::io::StreamReader::new(
+        stream.map(|r| r.map_err(std::io::Error::other)),
+    ));
+    let mut lines = reader.lines();
+
+    let mut text = String::new();
+    let mut input_tokens: i64 = 0;
+    let mut output_tokens: i64 = 0;
+    let mut result_model = model.to_string();
+
+    while let Ok(Some(line)) = lines.next_line().await {
+        if line.is_empty() {
+            continue;
+        }
+        let json: serde_json::Value = match serde_json::from_str(&line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        // Extract text delta from message.content
+        if let Some(content) = json["message"]["content"].as_str() {
+            if !content.is_empty() {
+                text.push_str(content);
+                let _ = delta_tx.send(content.to_string());
+            }
+        }
+
+        if let Some(m) = json["model"].as_str() {
+            result_model = m.to_string();
+        }
+
+        // Final chunk has done=true with token counts
+        if json["done"].as_bool() == Some(true) {
+            if let Some(n) = json["prompt_eval_count"].as_i64() {
+                input_tokens = n;
+            }
+            if let Some(n) = json["eval_count"].as_i64() {
+                output_tokens = n;
+            }
+            break;
+        }
+    }
+
+    Ok(LlmResult {
+        text,
+        tool_calls: Vec::new(),
+        input_tokens,
+        output_tokens,
+        model: result_model,
+    })
 }

@@ -14,6 +14,7 @@ pub mod metadata;
 pub mod stdlib;
 pub mod stdlib_modules;
 pub mod store;
+pub mod tracing;
 pub mod value;
 mod vm;
 
@@ -23,7 +24,10 @@ pub use compiler::*;
 pub use http::{register_http_builtins, reset_http_state};
 pub use llm::register_llm_builtins;
 pub use mcp::{connect_mcp_server, register_mcp_builtins};
-pub use mcp_server::{take_mcp_serve_registry, tool_registry_to_mcp_tools, McpServer};
+pub use mcp_server::{
+    take_mcp_serve_prompts, take_mcp_serve_registry, take_mcp_serve_resource_templates,
+    take_mcp_serve_resources, tool_registry_to_mcp_tools, McpServer,
+};
 pub use metadata::{register_metadata_builtins, register_scan_builtins};
 pub use stdlib::{
     register_agent_stdlib, register_core_stdlib, register_io_stdlib, register_vm_stdlib,

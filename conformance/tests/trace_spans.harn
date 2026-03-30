@@ -1,0 +1,18 @@
+pipeline test(task) {
+  // enable_tracing enables VM-level span collection
+  enable_tracing(true)
+
+  // trace_spans returns the list (may be empty since pipeline span
+  // is still in-flight, but it should return a list)
+  let spans = trace_spans()
+  assert(type_of(spans) == "list", "trace_spans should return a list")
+
+  // trace_summary returns a formatted string
+  let summary = trace_summary()
+  assert(type_of(summary) == "string", "trace_summary should return a string")
+
+  // enable_tracing(false) disables collection
+  enable_tracing(false)
+
+  println("trace spans ok")
+}

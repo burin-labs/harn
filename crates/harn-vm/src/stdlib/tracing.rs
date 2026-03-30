@@ -120,6 +120,30 @@ pub(crate) fn register_tracing_builtins(vm: &mut Vm) {
         Ok(VmValue::Dict(Rc::new(info)))
     });
 
+    // --- Pipeline observability ---
+
+    vm.register_builtin("enable_tracing", |args, _out| {
+        let enabled = match args.first() {
+            Some(VmValue::Bool(b)) => *b,
+            _ => true,
+        };
+        crate::tracing::set_tracing_enabled(enabled);
+        Ok(VmValue::Nil)
+    });
+
+    vm.register_builtin("trace_spans", |_args, _out| {
+        let spans = crate::tracing::peek_spans();
+        let vm_spans: Vec<VmValue> = spans
+            .iter()
+            .map(crate::tracing::span_to_vm_value)
+            .collect();
+        Ok(VmValue::List(Rc::new(vm_spans)))
+    });
+
+    vm.register_builtin("trace_summary", |_args, _out| {
+        Ok(VmValue::String(Rc::from(crate::tracing::format_summary())))
+    });
+
     vm.register_builtin("llm_usage", |_args, _out| {
         let (total_input, total_output, total_duration, call_count) =
             crate::llm::peek_trace_summary();

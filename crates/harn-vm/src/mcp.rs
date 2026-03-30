@@ -514,6 +514,31 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         }
     });
 
+    // mcp_list_resource_templates(client) -> list of resource template dicts
+    vm.register_async_builtin("mcp_list_resource_templates", |args| async move {
+        let client = match args.first() {
+            Some(VmValue::McpClient(c)) => c.clone(),
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "mcp_list_resource_templates: argument must be an MCP client",
+                ))));
+            }
+        };
+
+        let result = client
+            .call("resources/templates/list", serde_json::json!({}))
+            .await?;
+
+        let templates = result
+            .get("resourceTemplates")
+            .and_then(|r| r.as_array())
+            .cloned()
+            .unwrap_or_default();
+
+        let vm_templates: Vec<VmValue> = templates.iter().map(json_to_vm_value).collect();
+        Ok(VmValue::List(Rc::new(vm_templates)))
+    });
+
     // mcp_list_prompts(client) -> list of prompt dicts
     vm.register_async_builtin("mcp_list_prompts", |args| async move {
         let client = match args.first() {

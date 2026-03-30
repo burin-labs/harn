@@ -1,0 +1,16 @@
+pipeline test(task) {
+  // mcp_tools should accept a tool_registry (renamed from mcp_serve)
+  var tools = tool_registry()
+  tools = tool_define(tools, "echo", "Echo input", {
+    params: { text: "string" },
+    handler: { args -> args.text },
+    annotations: {
+      title: "Echo Tool",
+      readOnlyHint: true,
+      destructiveHint: false
+    }
+  })
+  let result = mcp_tools(tools)
+  assert(result == nil, "mcp_tools should return nil")
+  println("mcp_tools accepted tool_registry with annotations")
+}
