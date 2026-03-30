@@ -21,3 +21,4 @@ sha2 = "0.10"
 md-5 = "0.10"
 toml = "0.8"
 serde = { version = "1", features = ["derive"] }
+uuid = { version = "1", features = ["v7"] }

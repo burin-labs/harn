@@ -32,6 +32,10 @@ pub struct HostBridge {
     cancelled: Arc<AtomicBool>,
     /// Mutex protecting stdout writes to prevent interleaving.
     stdout_lock: Arc<std::sync::Mutex<()>>,
+    /// ACP session ID (set in ACP mode for session-scoped notifications).
+    session_id: std::sync::Mutex<String>,
+    /// Name of the currently executing Harn script (without .harn suffix).
+    script_name: std::sync::Mutex<String>,
 }
 
 // Default doesn't apply — new() spawns async tasks requiring a tokio LocalSet.
@@ -94,6 +98,8 @@ impl HostBridge {
             pending,
             cancelled,
             stdout_lock: Arc::new(std::sync::Mutex::new(())),
+            session_id: std::sync::Mutex::new(String::new()),
+            script_name: std::sync::Mutex::new(String::new()),
         }
     }
 
@@ -113,7 +119,29 @@ impl HostBridge {
             pending,
             cancelled,
             stdout_lock,
+            session_id: std::sync::Mutex::new(String::new()),
+            script_name: std::sync::Mutex::new(String::new()),
         }
+    }
+
+    /// Set the ACP session ID for session-scoped notifications.
+    pub fn set_session_id(&self, id: &str) {
+        *self.session_id.lock().unwrap_or_else(|e| e.into_inner()) = id.to_string();
+    }
+
+    /// Set the currently executing script name (without .harn suffix).
+    pub fn set_script_name(&self, name: &str) {
+        *self.script_name.lock().unwrap_or_else(|e| e.into_inner()) = name.to_string();
+    }
+
+    /// Get the current script name.
+    fn get_script_name(&self) -> String {
+        self.script_name.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// Get the session ID.
+    fn get_session_id(&self) -> String {
+        self.session_id.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// Write a complete JSON-RPC line to stdout, serialized through a mutex.
@@ -238,6 +266,87 @@ impl HostBridge {
             payload["fields"] = f;
         }
         self.notify("log", payload);
+    }
+
+    /// Send a `session/update` with `call_start` — signals the beginning of
+    /// an LLM call, tool call, or builtin call for observability.
+    pub fn send_call_start(
+        &self,
+        call_id: &str,
+        call_type: &str,
+        name: &str,
+        metadata: serde_json::Value,
+    ) {
+        let session_id = self.get_session_id();
+        let script = self.get_script_name();
+        self.notify(
+            "session/update",
+            serde_json::json!({
+                "sessionId": session_id,
+                "update": {
+                    "sessionUpdate": "call_start",
+                    "content": {
+                        "call_id": call_id,
+                        "call_type": call_type,
+                        "name": name,
+                        "script": script,
+                        "metadata": metadata,
+                    },
+                },
+            }),
+        );
+    }
+
+    /// Send a `session/update` with `call_progress` — a streaming token delta
+    /// from an in-flight LLM call.
+    pub fn send_call_progress(&self, call_id: &str, delta: &str, accumulated_tokens: u64) {
+        let session_id = self.get_session_id();
+        self.notify(
+            "session/update",
+            serde_json::json!({
+                "sessionId": session_id,
+                "update": {
+                    "sessionUpdate": "call_progress",
+                    "content": {
+                        "call_id": call_id,
+                        "delta": delta,
+                        "accumulated_tokens": accumulated_tokens,
+                    },
+                },
+            }),
+        );
+    }
+
+    /// Send a `session/update` with `call_end` — signals completion of a call.
+    pub fn send_call_end(
+        &self,
+        call_id: &str,
+        call_type: &str,
+        name: &str,
+        duration_ms: u64,
+        status: &str,
+        metadata: serde_json::Value,
+    ) {
+        let session_id = self.get_session_id();
+        let script = self.get_script_name();
+        self.notify(
+            "session/update",
+            serde_json::json!({
+                "sessionId": session_id,
+                "update": {
+                    "sessionUpdate": "call_end",
+                    "content": {
+                        "call_id": call_id,
+                        "call_type": call_type,
+                        "name": name,
+                        "script": script,
+                        "duration_ms": duration_ms,
+                        "status": status,
+                        "metadata": metadata,
+                    },
+                },
+            }),
+        );
     }
 }
 

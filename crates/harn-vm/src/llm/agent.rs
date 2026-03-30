@@ -4,7 +4,7 @@ use std::rc::Rc;
 use crate::value::VmValue;
 use crate::vm::Vm;
 
-use super::api::vm_call_llm_full;
+use super::api::{vm_call_llm_full_streaming, DeltaSender};
 use super::helpers::{
     opt_bool, opt_int, opt_str, vm_resolve_api_key, vm_resolve_model, vm_resolve_provider,
 };
@@ -13,6 +13,29 @@ use super::tools::{
     handle_tool_locally, normalize_tool_args, parse_text_tool_calls, resolve_tools_for_agent,
 };
 use super::trace::{trace_llm_call, LlmTraceEntry};
+
+fn next_call_id() -> String {
+    uuid::Uuid::now_v7().to_string()
+}
+
+/// Create an unbounded channel and spawn a local task that forwards text
+/// deltas to `bridge.send_call_progress()`.  Returns the sender half —
+/// drop it when the LLM call is done to terminate the forwarding task.
+fn spawn_progress_forwarder(
+    bridge: &Rc<crate::bridge::HostBridge>,
+    call_id: String,
+) -> DeltaSender {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let bridge = bridge.clone();
+    tokio::task::spawn_local(async move {
+        let mut token_count: u64 = 0;
+        while let Some(delta) = rx.recv().await {
+            token_count += 1;
+            bridge.send_call_progress(&call_id, &delta, token_count);
+        }
+    });
+    tx
+}
 
 /// Register a tool-aware `agent_loop` that uses a bridge for tool execution.
 /// This overrides the native text-only agent_loop with one that can:
@@ -100,8 +123,24 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
 
             for iteration in 0..max_iterations {
                 total_iterations = iteration + 1;
+                let llm_call_id = next_call_id();
+                let prompt_chars: usize = messages.iter()
+                    .filter_map(|m| m.get("content").and_then(|c| c.as_str()))
+                    .map(|s| s.len())
+                    .sum();
+                bridge.send_call_start(
+                    &llm_call_id,
+                    "llm",
+                    "llm_call",
+                    serde_json::json!({
+                        "model": model,
+                        "prompt_chars": prompt_chars,
+                        "iteration": iteration,
+                    }),
+                );
                 let start = std::time::Instant::now();
-                let result = vm_call_llm_full(
+                let delta_tx = spawn_progress_forwarder(&bridge, llm_call_id.clone());
+                let llm_result = vm_call_llm_full_streaming(
                     &provider,
                     &model,
                     &api_key,
@@ -116,14 +155,38 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                     None,
                     None,
                     native_tools.as_deref(),
+                    delta_tx,
                 )
-                .await?;
+                .await;
+                let llm_duration = start.elapsed().as_millis() as u64;
+                let result = match llm_result {
+                    Ok(r) => r,
+                    Err(e) => {
+                        bridge.send_call_end(
+                            &llm_call_id, "llm", "llm_call", llm_duration, "error",
+                            serde_json::json!({"error": e.to_string()}),
+                        );
+                        return Err(e);
+                    }
+                };
                 trace_llm_call(LlmTraceEntry {
                     model: result.model.clone(),
                     input_tokens: result.input_tokens,
                     output_tokens: result.output_tokens,
-                    duration_ms: start.elapsed().as_millis() as u64,
+                    duration_ms: llm_duration,
                 });
+                bridge.send_call_end(
+                    &llm_call_id,
+                    "llm",
+                    "llm_call",
+                    llm_duration,
+                    "ok",
+                    serde_json::json!({
+                        "model": result.model,
+                        "input_tokens": result.input_tokens,
+                        "output_tokens": result.output_tokens,
+                    }),
+                );
 
                 let text = result.text.clone();
                 total_text.push_str(&text);
@@ -168,6 +231,15 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                             serde_json::to_string(&tool_args).unwrap_or_default()
                         );
 
+                        let tool_call_id = next_call_id();
+                        bridge.send_call_start(
+                            &tool_call_id,
+                            "tool",
+                            tool_name,
+                            serde_json::json!({"iteration": iteration}),
+                        );
+                        let tool_start = std::time::Instant::now();
+
                         // Try local handling first (read_file, list_directory),
                         // fall back to bridge for mutations and complex tools.
                         // Retry on failure with exponential backoff if configured.
@@ -207,18 +279,32 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                             }
                         };
 
-                        let result_text = match call_result {
+                        let tool_ok = call_result.is_ok();
+                        let result_text = match &call_result {
                             Ok(val) => {
                                 if let Some(s) = val.as_str() {
                                     s.to_string()
                                 } else if val.is_null() {
                                     "(no output)".to_string()
                                 } else {
-                                    serde_json::to_string_pretty(&val).unwrap_or_default()
+                                    serde_json::to_string_pretty(val).unwrap_or_default()
                                 }
                             }
                             Err(e) => format!("Error: {e}"),
                         };
+                        let tool_meta = if tool_ok {
+                            serde_json::json!({})
+                        } else {
+                            serde_json::json!({"error": result_text})
+                        };
+                        bridge.send_call_end(
+                            &tool_call_id,
+                            "tool",
+                            tool_name,
+                            tool_start.elapsed().as_millis() as u64,
+                            if tool_ok { "ok" } else { "error" },
+                            tool_meta,
+                        );
 
                         if tool_format == "native" {
                             messages.push(build_tool_result_message(
@@ -314,6 +400,134 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                 )),
             );
             Ok(VmValue::Dict(Rc::from(result_dict)))
+        }
+    });
+}
+
+/// Register a bridge-aware `llm_call` that emits call_start/call_end notifications.
+/// This overrides the native llm_call with one that reports to the host for observability.
+pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::HostBridge>) {
+    use super::api::vm_build_llm_result;
+    use super::helpers::{
+        extract_json, opt_float, opt_int, opt_str, vm_messages_to_json, vm_resolve_api_key,
+        vm_resolve_model, vm_resolve_provider,
+    };
+    use super::tools::vm_tools_to_native;
+    use crate::stdlib::json_to_vm_value;
+
+    let b = bridge;
+    vm.register_async_builtin("llm_call", move |args| {
+        let bridge = b.clone();
+        async move {
+            let prompt = args.first().map(|a| a.display()).unwrap_or_default();
+            let system = args.get(1).map(|a| a.display());
+            let options = args.get(2).and_then(|a| a.as_dict()).cloned();
+
+            let provider = vm_resolve_provider(&options);
+            let model = vm_resolve_model(&options, &provider);
+            let api_key = vm_resolve_api_key(&provider)?;
+            let max_tokens = opt_int(&options, "max_tokens").unwrap_or(4096);
+            let response_format = opt_str(&options, "response_format");
+            let json_schema = options
+                .as_ref()
+                .and_then(|o| o.get("schema"))
+                .and_then(|v| v.as_dict())
+                .cloned();
+            let temperature = opt_float(&options, "temperature");
+            let tools_val = options.as_ref().and_then(|o| o.get("tools")).cloned();
+            let messages_val = options.as_ref().and_then(|o| o.get("messages")).cloned();
+
+            let messages = if let Some(VmValue::List(msg_list)) = &messages_val {
+                vm_messages_to_json(msg_list)?
+            } else {
+                vec![serde_json::json!({"role": "user", "content": prompt})]
+            };
+
+            let native_tools = if let Some(tools) = &tools_val {
+                Some(vm_tools_to_native(tools, &provider)?)
+            } else {
+                None
+            };
+
+            let call_id = next_call_id();
+            let prompt_chars: usize = messages.iter()
+                .filter_map(|m| m.get("content").and_then(|c| c.as_str()))
+                .map(|s| s.len())
+                .sum();
+            bridge.send_call_start(
+                &call_id,
+                "llm",
+                "llm_call",
+                serde_json::json!({"model": model, "prompt_chars": prompt_chars}),
+            );
+
+            let start = std::time::Instant::now();
+            let delta_tx = spawn_progress_forwarder(&bridge, call_id.clone());
+            let llm_result = vm_call_llm_full_streaming(
+                &provider,
+                &model,
+                &api_key,
+                &messages,
+                system.as_deref(),
+                max_tokens,
+                response_format.as_deref(),
+                json_schema.as_ref(),
+                temperature,
+                native_tools.as_deref(),
+                delta_tx,
+            )
+            .await;
+            let duration_ms = start.elapsed().as_millis() as u64;
+            let result = match llm_result {
+                Ok(r) => r,
+                Err(e) => {
+                    bridge.send_call_end(
+                        &call_id, "llm", "llm_call", duration_ms, "error",
+                        serde_json::json!({"error": e.to_string()}),
+                    );
+                    return Err(e);
+                }
+            };
+
+            trace_llm_call(LlmTraceEntry {
+                model: result.model.clone(),
+                input_tokens: result.input_tokens,
+                output_tokens: result.output_tokens,
+                duration_ms,
+            });
+
+            bridge.send_call_end(
+                &call_id,
+                "llm",
+                "llm_call",
+                duration_ms,
+                "ok",
+                serde_json::json!({
+                    "model": result.model,
+                    "input_tokens": result.input_tokens,
+                    "output_tokens": result.output_tokens,
+                }),
+            );
+
+            // Return logic matches the original llm_call
+            if response_format.as_deref() == Some("json") {
+                let json_str = extract_json(&result.text);
+                let parsed = serde_json::from_str::<serde_json::Value>(json_str)
+                    .ok()
+                    .map(|jv| json_to_vm_value(&jv));
+                return Ok(vm_build_llm_result(&result, parsed));
+            }
+
+            if !result.tool_calls.is_empty() {
+                return Ok(vm_build_llm_result(&result, None));
+            }
+
+            let is_simple_call = tools_val.is_none() && messages_val.is_none();
+            if is_simple_call {
+                return Ok(VmValue::String(Rc::from(result.text)));
+            }
+
+            Ok(vm_build_llm_result(&result, None))
         }
     });
 }

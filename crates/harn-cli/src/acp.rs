@@ -281,6 +281,7 @@ impl AcpServer {
             pending: pending.clone(),
             next_id_counter: AtomicU64::new(next_id.fetch_add(1000, Ordering::SeqCst)),
             cancelled: cancelled.clone(),
+            script_name: std::sync::Mutex::new(String::new()),
         });
 
         // Notify the client that we're starting execution.
@@ -360,6 +361,8 @@ struct AcpBridge {
     pending: Arc<Mutex<HashMap<u64, oneshot::Sender<serde_json::Value>>>>,
     next_id_counter: AtomicU64,
     cancelled: Arc<AtomicBool>,
+    /// Name of the currently executing Harn script (without .harn suffix).
+    script_name: std::sync::Mutex<String>,
 }
 
 impl AcpBridge {
@@ -435,6 +438,78 @@ impl AcpBridge {
             serde_json::json!({
                 "sessionId": self.session_id,
                 "update": update,
+            }),
+        );
+    }
+
+    /// Set the currently executing script name (without .harn suffix).
+    fn set_script_name(&self, name: &str) {
+        *self.script_name.lock().unwrap_or_else(|e| e.into_inner()) = name.to_string();
+    }
+
+    /// Get the current script name.
+    #[allow(dead_code)]
+    fn get_script_name(&self) -> String {
+        self.script_name.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// Send a `session/update` with `call_start` — signals the beginning of
+    /// an LLM call, tool call, or builtin call for observability.
+    #[allow(dead_code)]
+    fn send_call_start(
+        &self,
+        call_id: &str,
+        call_type: &str,
+        name: &str,
+        metadata: serde_json::Value,
+    ) {
+        let script = self.get_script_name();
+        self.send_notification(
+            "session/update",
+            serde_json::json!({
+                "sessionId": self.session_id,
+                "update": {
+                    "sessionUpdate": "call_start",
+                    "content": {
+                        "call_id": call_id,
+                        "call_type": call_type,
+                        "name": name,
+                        "script": script,
+                        "metadata": metadata,
+                    },
+                },
+            }),
+        );
+    }
+
+    /// Send a `session/update` with `call_end` — signals completion of a call.
+    #[allow(dead_code)]
+    fn send_call_end(
+        &self,
+        call_id: &str,
+        call_type: &str,
+        name: &str,
+        duration_ms: u64,
+        status: &str,
+        metadata: serde_json::Value,
+    ) {
+        let script = self.get_script_name();
+        self.send_notification(
+            "session/update",
+            serde_json::json!({
+                "sessionId": self.session_id,
+                "update": {
+                    "sessionUpdate": "call_end",
+                    "content": {
+                        "call_id": call_id,
+                        "call_type": call_type,
+                        "name": name,
+                        "script": script,
+                        "duration_ms": duration_ms,
+                        "status": status,
+                        "metadata": metadata,
+                    },
+                },
             }),
         );
     }
@@ -541,6 +616,7 @@ async fn execute_chunk(
         .and_then(|s| s.to_str())
         .unwrap_or("acp");
     harn_vm::register_checkpoint_builtins(&mut vm, store_base, pipeline_name);
+    bridge.set_script_name(pipeline_name);
     if let Some(ref root) = project_root {
         vm.set_project_root(root);
     }
@@ -578,12 +654,17 @@ async fn execute_chunk(
         bridge.stdout_lock.clone(),
         bridge.next_id_counter.fetch_add(10_000, Ordering::SeqCst),
     ));
+    host_bridge.set_session_id(&bridge.session_id);
+    host_bridge.set_script_name(pipeline_name);
     vm.set_bridge(host_bridge.clone());
 
     // Override the native text-only agent_loop with the tool-aware version.
     // This allows agent_loop to execute tools via the ACP bridge (delegated
     // to the editor/CLI which has the full tool infrastructure).
-    harn_vm::llm::register_agent_loop_with_bridge(&mut vm, host_bridge);
+    harn_vm::llm::register_agent_loop_with_bridge(&mut vm, host_bridge.clone());
+
+    // Override llm_call with bridge-aware version for call_start/call_end observability.
+    harn_vm::llm::register_llm_call_with_bridge(&mut vm, host_bridge);
 
     match vm.execute(&chunk).await {
         Ok(_) => Ok(vm.output().to_string()),

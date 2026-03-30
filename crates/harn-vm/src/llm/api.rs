@@ -8,6 +8,9 @@ use super::mock::{
     fixture_hash, get_replay_mode, load_fixture, mock_llm_response, save_fixture, LlmReplayMode,
 };
 
+/// Sender for streaming text deltas from an in-flight LLM call.
+pub(crate) type DeltaSender = tokio::sync::mpsc::UnboundedSender<String>;
+
 // =============================================================================
 // LLM response type
 // =============================================================================
@@ -70,6 +73,68 @@ pub(crate) async fn vm_call_llm_full(
     temperature: Option<f64>,
     native_tools: Option<&[serde_json::Value]>,
 ) -> Result<LlmResult, VmError> {
+    vm_call_llm_full_inner(
+        provider,
+        model,
+        api_key,
+        messages,
+        system,
+        max_tokens,
+        response_format,
+        json_schema,
+        temperature,
+        native_tools,
+        None,
+    )
+    .await
+}
+
+/// Like [`vm_call_llm_full`] but streams text deltas to `delta_tx` as they
+/// arrive from the LLM provider via SSE.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn vm_call_llm_full_streaming(
+    provider: &str,
+    model: &str,
+    api_key: &str,
+    messages: &[serde_json::Value],
+    system: Option<&str>,
+    max_tokens: i64,
+    response_format: Option<&str>,
+    json_schema: Option<&BTreeMap<String, VmValue>>,
+    temperature: Option<f64>,
+    native_tools: Option<&[serde_json::Value]>,
+    delta_tx: DeltaSender,
+) -> Result<LlmResult, VmError> {
+    vm_call_llm_full_inner(
+        provider,
+        model,
+        api_key,
+        messages,
+        system,
+        max_tokens,
+        response_format,
+        json_schema,
+        temperature,
+        native_tools,
+        Some(delta_tx),
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn vm_call_llm_full_inner(
+    provider: &str,
+    model: &str,
+    api_key: &str,
+    messages: &[serde_json::Value],
+    system: Option<&str>,
+    max_tokens: i64,
+    response_format: Option<&str>,
+    json_schema: Option<&BTreeMap<String, VmValue>>,
+    temperature: Option<f64>,
+    native_tools: Option<&[serde_json::Value]>,
+    delta_tx: Option<DeltaSender>,
+) -> Result<LlmResult, VmError> {
     // Mock provider: return deterministic response without API call.
     if provider == "mock" {
         return Ok(mock_llm_response(messages, system, native_tools));
@@ -88,19 +153,23 @@ pub(crate) async fn vm_call_llm_full(
         )))));
     }
 
-    let result = vm_call_llm_api(
-        provider,
-        model,
-        api_key,
-        messages,
-        system,
-        max_tokens,
-        response_format,
-        json_schema,
-        temperature,
-        native_tools,
-    )
-    .await;
+    let call_api = |dtx: Option<DeltaSender>| {
+        vm_call_llm_api(
+            provider,
+            model,
+            api_key,
+            messages,
+            system,
+            max_tokens,
+            response_format,
+            json_schema,
+            temperature,
+            native_tools,
+            dtx,
+        )
+    };
+
+    let result = call_api(delta_tx).await;
 
     // On failure, check for provider fallback chain
     let result = match result {
@@ -125,6 +194,7 @@ pub(crate) async fn vm_call_llm_full(
                             json_schema,
                             temperature,
                             native_tools,
+                            None, // no streaming for fallback
                         )
                         .await;
                         match fb_result {
@@ -166,7 +236,9 @@ async fn vm_call_llm_api(
     json_schema: Option<&BTreeMap<String, VmValue>>,
     temperature: Option<f64>,
     native_tools: Option<&[serde_json::Value]>,
+    delta_tx: Option<DeltaSender>,
 ) -> Result<LlmResult, VmError> {
+    let streaming = delta_tx.is_some();
     let llm_timeout = std::env::var("HARN_LLM_TIMEOUT")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
@@ -180,7 +252,7 @@ async fn vm_call_llm_api(
     let resolved = super::helpers::ResolvedProvider::resolve(provider);
 
     // Build request body based on API style
-    let body = if resolved.is_anthropic_style {
+    let mut body = if resolved.is_anthropic_style {
         let mut body = serde_json::json!({
             "model": model,
             "messages": messages,
@@ -236,12 +308,24 @@ async fn vm_call_llm_api(
         body
     };
 
+    if streaming {
+        body["stream"] = serde_json::json!(true);
+        // OpenAI-style: request usage in the final streaming chunk.
+        if !resolved.is_anthropic_style {
+            body["stream_options"] = serde_json::json!({"include_usage": true});
+        }
+    }
+
     // Send request
     let req = client
         .post(resolved.url())
         .header("Content-Type", "application/json")
         .json(&body);
     let req = resolved.apply_headers(req, api_key);
+
+    if streaming {
+        return vm_call_llm_api_sse(req, provider, model, &resolved, delta_tx.unwrap()).await;
+    }
 
     let response = req.send().await.map_err(|e| {
         VmError::Thrown(VmValue::String(Rc::from(format!(
@@ -255,7 +339,16 @@ async fn vm_call_llm_api(
         ))))
     })?;
 
-    // Parse response based on API style
+    parse_llm_response(&json, provider, model, &resolved)
+}
+
+/// Parse a complete (non-streaming) LLM JSON response into an `LlmResult`.
+fn parse_llm_response(
+    json: &serde_json::Value,
+    provider: &str,
+    model: &str,
+    resolved: &super::helpers::ResolvedProvider<'_>,
+) -> Result<LlmResult, VmError> {
     if resolved.is_anthropic_style {
         let mut text = String::new();
         let mut tool_calls = Vec::new();
@@ -340,6 +433,172 @@ async fn vm_call_llm_api(
             model: model.to_string(),
         })
     }
+}
+
+/// Consume an SSE streaming response, forwarding text deltas to `delta_tx`
+/// while accumulating the full result.
+async fn vm_call_llm_api_sse(
+    request: reqwest::RequestBuilder,
+    provider: &str,
+    model: &str,
+    resolved: &super::helpers::ResolvedProvider<'_>,
+    delta_tx: DeltaSender,
+) -> Result<LlmResult, VmError> {
+    use reqwest_eventsource::{Event, EventSource};
+    use tokio_stream::StreamExt;
+
+    let mut es = EventSource::new(request).map_err(|e| {
+        VmError::Thrown(VmValue::String(Rc::from(format!(
+            "{provider} stream setup error: {e}"
+        ))))
+    })?;
+
+    let mut text = String::new();
+    let mut input_tokens: i64 = 0;
+    let mut output_tokens: i64 = 0;
+
+    // Anthropic tool-use streaming state
+    struct ToolBlock {
+        id: String,
+        name: String,
+        input_json: String,
+    }
+    let mut tool_calls: Vec<serde_json::Value> = Vec::new();
+    let mut current_tool: Option<ToolBlock> = None;
+
+    // OpenAI tool-call streaming state: index -> (id, name, accumulated args)
+    let mut oai_tool_map: std::collections::HashMap<u64, (String, String, String)> =
+        std::collections::HashMap::new();
+
+    while let Some(event) = es.next().await {
+        match event {
+            Ok(Event::Message(msg)) => {
+                if msg.data == "[DONE]" {
+                    break;
+                }
+                let json: serde_json::Value = match serde_json::from_str(&msg.data) {
+                    Ok(v) => v,
+                    Err(_) => continue,
+                };
+
+                if resolved.is_anthropic_style {
+                    match json["type"].as_str() {
+                        Some("message_start") => {
+                            if let Some(n) = json["message"]["usage"]["input_tokens"].as_i64() {
+                                input_tokens = n;
+                            }
+                        }
+                        Some("content_block_start") => {
+                            let block = &json["content_block"];
+                            if block["type"].as_str() == Some("tool_use") {
+                                current_tool = Some(ToolBlock {
+                                    id: block["id"].as_str().unwrap_or("").to_string(),
+                                    name: block["name"].as_str().unwrap_or("").to_string(),
+                                    input_json: String::new(),
+                                });
+                            }
+                        }
+                        Some("content_block_delta") => {
+                            let delta = &json["delta"];
+                            match delta["type"].as_str() {
+                                Some("text_delta") => {
+                                    if let Some(t) = delta["text"].as_str() {
+                                        text.push_str(t);
+                                        let _ = delta_tx.send(t.to_string());
+                                    }
+                                }
+                                Some("input_json_delta") => {
+                                    if let Some(ref mut tool) = current_tool {
+                                        if let Some(j) = delta["partial_json"].as_str() {
+                                            tool.input_json.push_str(j);
+                                        }
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                        Some("content_block_stop") => {
+                            if let Some(tool) = current_tool.take() {
+                                let input: serde_json::Value =
+                                    serde_json::from_str(&tool.input_json)
+                                        .unwrap_or(serde_json::json!({}));
+                                tool_calls.push(serde_json::json!({
+                                    "id": tool.id,
+                                    "name": tool.name,
+                                    "arguments": input,
+                                }));
+                            }
+                        }
+                        Some("message_delta") => {
+                            if let Some(n) = json["usage"]["output_tokens"].as_i64() {
+                                output_tokens = n;
+                            }
+                        }
+                        _ => {}
+                    }
+                } else {
+                    // OpenAI-style SSE
+                    if let Some(content) = json["choices"][0]["delta"]["content"].as_str() {
+                        text.push_str(content);
+                        let _ = delta_tx.send(content.to_string());
+                    }
+                    // Accumulate tool call fragments
+                    if let Some(calls) = json["choices"][0]["delta"]["tool_calls"].as_array() {
+                        for call in calls {
+                            let idx = call["index"].as_u64().unwrap_or(0);
+                            let entry = oai_tool_map.entry(idx).or_insert_with(|| {
+                                (
+                                    call["id"].as_str().unwrap_or("").to_string(),
+                                    call["function"]["name"].as_str().unwrap_or("").to_string(),
+                                    String::new(),
+                                )
+                            });
+                            if let Some(args) = call["function"]["arguments"].as_str() {
+                                entry.2.push_str(args);
+                            }
+                        }
+                    }
+                    // Usage in final chunk (stream_options.include_usage)
+                    if let Some(usage) = json.get("usage") {
+                        if let Some(n) = usage["prompt_tokens"].as_i64() {
+                            input_tokens = n;
+                        }
+                        if let Some(n) = usage["completion_tokens"].as_i64() {
+                            output_tokens = n;
+                        }
+                    }
+                }
+            }
+            Ok(Event::Open) => {}
+            Err(_) => break,
+        }
+    }
+
+    es.close();
+
+    // Finalize OpenAI tool calls
+    if !oai_tool_map.is_empty() {
+        let mut indices: Vec<u64> = oai_tool_map.keys().copied().collect();
+        indices.sort_unstable();
+        for idx in indices {
+            let (id, name, args_str) = oai_tool_map.remove(&idx).unwrap();
+            let arguments: serde_json::Value =
+                serde_json::from_str(&args_str).unwrap_or(serde_json::json!({}));
+            tool_calls.push(serde_json::json!({
+                "id": id,
+                "name": name,
+                "arguments": arguments,
+            }));
+        }
+    }
+
+    Ok(LlmResult {
+        text,
+        tool_calls,
+        input_tokens,
+        output_tokens,
+        model: model.to_string(),
+    })
 }
 
 /// Apply auth headers to a request based on provider config.

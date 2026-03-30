@@ -43,7 +43,7 @@ use self::trace::trace_llm_call;
 // Public re-exports (used by other crates/modules)
 // =============================================================================
 
-pub use self::agent::register_agent_loop_with_bridge;
+pub use self::agent::{register_agent_loop_with_bridge, register_llm_call_with_bridge};
 pub use self::helpers::vm_value_to_json;
 pub use self::mock::{set_replay_mode, LlmReplayMode};
 pub use self::trace::{enable_tracing, peek_trace_summary, take_trace, LlmTraceEntry};
