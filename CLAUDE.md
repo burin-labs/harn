@@ -95,7 +95,8 @@ via `tokio::task::spawn_local` for `parallel`, `parallel_map`, and
   `llm.rs` (LLM calls for Anthropic/OpenAI/Ollama, agent_loop with
   tool support returning `{status, text, iterations, duration_ms}`),
   `mcp.rs` (MCP client: tools, resources, and prompts),
-  `bridge.rs` / `bridge_builtins.rs` (JSON-RPC host delegation).
+  `bridge.rs` / `bridge_builtins.rs` (JSON-RPC host delegation;
+  error code `-32001` = tool rejected → `ErrorCategory::ToolRejected`).
   50+ opcodes including TailCall, GetPropertyOpt, MethodCallOpt,
   Slice, CallSpread, TryExpr, concurrency, imports, enums, interfaces,
   and deadlines. In bridge mode,
@@ -188,7 +189,7 @@ compile-time warnings.
 ### agent_loop tool support
 
 `agent_loop` returns a dict `{status, text, iterations, duration_ms,
-tools_used}`. It supports tool execution via text-based `<tool_call>`
+tools_used, rejected_tools}`. It supports tool execution via text-based `<tool_call>`
 XML tags (default) or native function calling (`tool_format: "native"`).
 Tools can be passed as string name lists (e.g. `["read", "search",
 "edit"]`), `tool_registry` objects, or raw tool definition dicts.
