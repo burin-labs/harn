@@ -84,5 +84,20 @@ jobs:
     if: github.ref == 'refs/heads/main'
     needs: [fmt, lint-md, lint, test, conformance]
     steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+      - name: Check for docs changes
+        id: docs-changed
+        run: |
+          BEFORE="${{ github.event.before }}"
+          if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "$BEFORE" HEAD | grep -q '^docs/'; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Trigger Render deploy
+        if: steps.docs-changed.outputs.changed == 'true'
         run: curl -s "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
