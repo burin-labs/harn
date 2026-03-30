@@ -187,7 +187,11 @@ fn collect_symbols(
             body,
             ..
         } => {
-            let params_str = params.iter().map(format_param).collect::<Vec<_>>().join(", ");
+            let params_str = params
+                .iter()
+                .map(format_param)
+                .collect::<Vec<_>>()
+                .join(", ");
             let ret_str = match return_type {
                 Some(t) => format!(" -> {}", format_type(t)),
                 None => String::new(),

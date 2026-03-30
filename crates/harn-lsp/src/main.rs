@@ -124,7 +124,8 @@ mod tests {
 
     #[test]
     fn hover_fn_with_default_param() {
-        let source = "fn greet(name: string = \"World\") -> string {\n  return \"Hello, \" + name\n}\n";
+        let source =
+            "fn greet(name: string = \"World\") -> string {\n  return \"Hello, \" + name\n}\n";
         let state = DocumentState::new(source.to_string());
         let fn_sym = state
             .symbols
@@ -154,7 +155,8 @@ mod tests {
 
     #[test]
     fn hover_fn_no_doc_comment() {
-        let source = "let x = 1\n\nfn greet(name: string) -> string {\n  return \"Hello, \" + name\n}\n";
+        let source =
+            "let x = 1\n\nfn greet(name: string) -> string {\n  return \"Hello, \" + name\n}\n";
         let state = DocumentState::new(source.to_string());
         let fn_sym = state
             .symbols
