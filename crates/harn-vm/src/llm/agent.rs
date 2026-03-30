@@ -475,7 +475,8 @@ pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Host
             };
 
             let call_id = next_call_id();
-            let prompt_chars: usize = messages.iter()
+            let prompt_chars: usize = messages
+                .iter()
                 .filter_map(|m| m.get("content").and_then(|c| c.as_str()))
                 .map(|s| s.len())
                 .sum();
@@ -508,7 +509,11 @@ pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Host
                 Ok(r) => r,
                 Err(e) => {
                     bridge.send_call_end(
-                        &call_id, "llm", "llm_call", duration_ms, "error",
+                        &call_id,
+                        "llm",
+                        "llm_call",
+                        duration_ms,
+                        "error",
                         serde_json::json!({"error": e.to_string()}),
                     );
                     return Err(e);

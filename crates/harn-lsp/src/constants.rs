@@ -98,7 +98,10 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
     // MCP server
     ("mcp_tools", "mcp_tools(registry) -> nil"),
     ("mcp_serve", "mcp_serve(registry) -> nil"),
-    ("mcp_resource", "mcp_resource({uri, name, text, ...}) -> nil"),
+    (
+        "mcp_resource",
+        "mcp_resource({uri, name, text, ...}) -> nil",
+    ),
     (
         "mcp_resource_template",
         "mcp_resource_template({uri_template, name, handler, ...}) -> nil",

@@ -133,10 +133,7 @@ pub(crate) fn register_tracing_builtins(vm: &mut Vm) {
 
     vm.register_builtin("trace_spans", |_args, _out| {
         let spans = crate::tracing::peek_spans();
-        let vm_spans: Vec<VmValue> = spans
-            .iter()
-            .map(crate::tracing::span_to_vm_value)
-            .collect();
+        let vm_spans: Vec<VmValue> = spans.iter().map(crate::tracing::span_to_vm_value).collect();
         Ok(VmValue::List(Rc::new(vm_spans)))
     });
 

@@ -134,10 +134,7 @@ impl SpanCollector {
     pub fn end(&mut self, span_id: u64) {
         if let Some(span) = self.open.remove(&span_id) {
             let duration = span.started_at.elapsed();
-            let start_ms = span
-                .started_at
-                .duration_since(self.epoch)
-                .as_millis() as u64;
+            let start_ms = span.started_at.duration_since(self.epoch).as_millis() as u64;
 
             self.completed.push(Span {
                 span_id: span.span_id,
@@ -256,10 +253,7 @@ pub fn span_to_vm_value(span: &Span) -> VmValue {
             .map(|id| VmValue::Int(id as i64))
             .unwrap_or(VmValue::Nil),
     );
-    d.insert(
-        "kind".into(),
-        VmValue::String(Rc::from(span.kind.as_str())),
-    );
+    d.insert("kind".into(), VmValue::String(Rc::from(span.kind.as_str())));
     d.insert("name".into(), VmValue::String(Rc::from(span.name.as_str())));
     d.insert("start_ms".into(), VmValue::Int(span.start_ms as i64));
     d.insert("duration_ms".into(), VmValue::Int(span.duration_ms as i64));
@@ -294,16 +288,8 @@ pub fn format_summary() -> String {
     lines.push(String::new());
 
     // Build tree structure
-    fn print_tree(
-        spans: &[Span],
-        parent_id: Option<u64>,
-        depth: usize,
-        lines: &mut Vec<String>,
-    ) {
-        let children: Vec<&Span> = spans
-            .iter()
-            .filter(|s| s.parent_id == parent_id)
-            .collect();
+    fn print_tree(spans: &[Span], parent_id: Option<u64>, depth: usize, lines: &mut Vec<String>) {
+        let children: Vec<&Span> = spans.iter().filter(|s| s.parent_id == parent_id).collect();
         for span in children {
             let indent = "  ".repeat(depth);
             let meta_str = if span.metadata.is_empty() {

@@ -585,13 +585,11 @@ async fn vm_call_llm_api_sse_from_response(
             if let Some(tcs) = delta["tool_calls"].as_array() {
                 for tc in tcs {
                     let idx = tc["index"].as_u64().unwrap_or(0);
-                    let entry = oai_tool_map
-                        .entry(idx)
-                        .or_insert_with(|| {
-                            let id = tc["id"].as_str().unwrap_or("").to_string();
-                            let name = tc["function"]["name"].as_str().unwrap_or("").to_string();
-                            (id, name, String::new())
-                        });
+                    let entry = oai_tool_map.entry(idx).or_insert_with(|| {
+                        let id = tc["id"].as_str().unwrap_or("").to_string();
+                        let name = tc["function"]["name"].as_str().unwrap_or("").to_string();
+                        (id, name, String::new())
+                    });
                     if let Some(args) = tc["function"]["arguments"].as_str() {
                         entry.2.push_str(args);
                     }

@@ -136,12 +136,18 @@ impl HostBridge {
 
     /// Get the current script name.
     fn get_script_name(&self) -> String {
-        self.script_name.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        self.script_name
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     /// Get the session ID.
     fn get_session_id(&self) -> String {
-        self.session_id.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        self.session_id
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     /// Write a complete JSON-RPC line to stdout, serialized through a mutex.

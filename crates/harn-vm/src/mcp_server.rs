@@ -124,9 +124,7 @@ pub fn register_mcp_server_builtins(vm: &mut Vm) {
         let name = dict
             .get("name")
             .map(|v| v.display())
-            .ok_or_else(|| {
-                VmError::Runtime("mcp_resource_template: 'name' is required".into())
-            })?;
+            .ok_or_else(|| VmError::Runtime("mcp_resource_template: 'name' is required".into()))?;
         let description = dict.get("description").map(|v| v.display());
         let mime_type = dict.get("mime_type").map(|v| v.display());
         let handler = match dict.get("handler") {
@@ -194,7 +192,11 @@ pub fn register_mcp_server_builtins(vm: &mut Vm) {
                         }
                     })
                     .collect();
-                if args.is_empty() { None } else { Some(args) }
+                if args.is_empty() {
+                    None
+                } else {
+                    Some(args)
+                }
             } else {
                 None
             }
@@ -533,9 +535,7 @@ impl McpServer {
         for tmpl in &self.resource_templates {
             if let Some(args) = match_uri_template(&tmpl.uri_template, uri) {
                 let args_vm = json_to_vm_value(&serde_json::json!(args));
-                let result = vm
-                    .call_closure_pub(&tmpl.handler, &[args_vm], &[])
-                    .await;
+                let result = vm.call_closure_pub(&tmpl.handler, &[args_vm], &[]).await;
                 return match result {
                     Ok(value) => {
                         let mut content = serde_json::json!({
@@ -654,9 +654,7 @@ impl McpServer {
             .unwrap_or(serde_json::json!({}));
         let args_vm = json_to_vm_value(&arguments);
 
-        let result = vm
-            .call_closure_pub(&prompt.handler, &[args_vm], &[])
-            .await;
+        let result = vm.call_closure_pub(&prompt.handler, &[args_vm], &[]).await;
 
         match result {
             Ok(value) => {
@@ -697,10 +695,7 @@ fn prompt_value_to_messages(value: &VmValue) -> Vec<serde_json::Value> {
                         .get("role")
                         .map(|v| v.display())
                         .unwrap_or_else(|| "user".into());
-                    let content = d
-                        .get("content")
-                        .map(|v| v.display())
-                        .unwrap_or_default();
+                    let content = d.get("content").map(|v| v.display()).unwrap_or_default();
                     serde_json::json!({
                         "role": role,
                         "content": { "type": "text", "text": content }
@@ -747,7 +742,10 @@ fn match_uri_template(
             let next_literal = if t_pos < t_bytes.len() {
                 // Find how much literal follows
                 let lit_start = t_pos;
-                let lit_end = template[t_pos..].find('{').map(|i| t_pos + i).unwrap_or(t_bytes.len());
+                let lit_end = template[t_pos..]
+                    .find('{')
+                    .map(|i| t_pos + i)
+                    .unwrap_or(t_bytes.len());
                 Some(&template[lit_start..lit_end])
             } else {
                 None
@@ -894,7 +892,10 @@ fn params_to_json_schema(params: Option<&VmValue>) -> serde_json::Value {
                 prop.insert("type".into(), serde_json::Value::String(t.to_string()));
             }
             if let Some(VmValue::String(d)) = def.get("description") {
-                prop.insert("description".into(), serde_json::Value::String(d.to_string()));
+                prop.insert(
+                    "description".into(),
+                    serde_json::Value::String(d.to_string()),
+                );
             }
             if matches!(def.get("required"), Some(VmValue::Bool(true))) {
                 required.push(serde_json::Value::String(param_name.clone()));
@@ -902,7 +903,10 @@ fn params_to_json_schema(params: Option<&VmValue>) -> serde_json::Value {
             properties.insert(param_name.clone(), serde_json::Value::Object(prop));
         } else if let VmValue::String(type_str) = param_def {
             let mut prop = serde_json::Map::new();
-            prop.insert("type".into(), serde_json::Value::String(type_str.to_string()));
+            prop.insert(
+                "type".into(),
+                serde_json::Value::String(type_str.to_string()),
+            );
             properties.insert(param_name.clone(), serde_json::Value::Object(prop));
         }
     }
@@ -925,7 +929,10 @@ mod tests {
     #[test]
     fn test_params_to_json_schema_empty() {
         let schema = params_to_json_schema(None);
-        assert_eq!(schema, serde_json::json!({ "type": "object", "properties": {} }));
+        assert_eq!(
+            schema,
+            serde_json::json!({ "type": "object", "properties": {} })
+        );
     }
 
     #[test]
@@ -933,16 +940,22 @@ mod tests {
         let mut params = BTreeMap::new();
         let mut param_def = BTreeMap::new();
         param_def.insert("type".to_string(), VmValue::String(Rc::from("string")));
-        param_def.insert("description".to_string(), VmValue::String(Rc::from("A file path")));
+        param_def.insert(
+            "description".to_string(),
+            VmValue::String(Rc::from("A file path")),
+        );
         param_def.insert("required".to_string(), VmValue::Bool(true));
         params.insert("path".to_string(), VmValue::Dict(Rc::new(param_def)));
 
         let schema = params_to_json_schema(Some(&VmValue::Dict(Rc::new(params))));
-        assert_eq!(schema, serde_json::json!({
-            "type": "object",
-            "properties": { "path": { "type": "string", "description": "A file path" } },
-            "required": ["path"]
-        }));
+        assert_eq!(
+            schema,
+            serde_json::json!({
+                "type": "object",
+                "properties": { "path": { "type": "string", "description": "A file path" } },
+                "required": ["path"]
+            })
+        );
     }
 
     #[test]
@@ -950,7 +963,10 @@ mod tests {
         let mut params = BTreeMap::new();
         params.insert("query".to_string(), VmValue::String(Rc::from("string")));
         let schema = params_to_json_schema(Some(&VmValue::Dict(Rc::new(params))));
-        assert_eq!(schema["properties"]["query"]["type"], serde_json::json!("string"));
+        assert_eq!(
+            schema["properties"]["query"]["type"],
+            serde_json::json!("string")
+        );
     }
 
     #[test]
@@ -1004,8 +1020,7 @@ mod tests {
 
     #[test]
     fn test_match_uri_template_multiple() {
-        let vars =
-            match_uri_template("db://{schema}/{table}", "db://public/users").unwrap();
+        let vars = match_uri_template("db://{schema}/{table}", "db://public/users").unwrap();
         assert_eq!(vars["schema"], "public");
         assert_eq!(vars["table"], "users");
     }

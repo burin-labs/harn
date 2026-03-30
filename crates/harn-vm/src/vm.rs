@@ -471,10 +471,7 @@ impl Vm {
     ) -> Pin<Box<dyn Future<Output = Result<(), VmError>> + 'a>> {
         Box::pin(async move {
             use std::path::PathBuf;
-            let _import_span = ScopeSpan::new(
-                crate::tracing::SpanKind::Import,
-                path.to_string(),
-            );
+            let _import_span = ScopeSpan::new(crate::tracing::SpanKind::Import, path.to_string());
 
             // ── Embedded stdlib modules (import "std/...") ──────────────
             if let Some(module) = path.strip_prefix("std/") {
@@ -657,10 +654,7 @@ impl Vm {
 
     /// Execute a compiled chunk.
     pub async fn execute(&mut self, chunk: &Chunk) -> Result<VmValue, VmError> {
-        let span_id = crate::tracing::span_start(
-            crate::tracing::SpanKind::Pipeline,
-            "main".into(),
-        );
+        let span_id = crate::tracing::span_start(crate::tracing::SpanKind::Pipeline, "main".into());
         let result = self.run_chunk(chunk).await;
         crate::tracing::span_end(span_id);
         result
@@ -1009,9 +1003,7 @@ impl Vm {
     ) -> Result<VmValue, VmError> {
         // Auto-trace LLM calls and tool calls
         let span_kind = match name {
-            "llm_call" | "llm_stream" | "agent_loop" => {
-                Some(crate::tracing::SpanKind::LlmCall)
-            }
+            "llm_call" | "llm_stream" | "agent_loop" => Some(crate::tracing::SpanKind::LlmCall),
             "mcp_call" => Some(crate::tracing::SpanKind::ToolCall),
             _ => None,
         };

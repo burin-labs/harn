@@ -449,7 +449,10 @@ impl AcpBridge {
     /// Get the current script name.
     #[allow(dead_code)]
     fn get_script_name(&self) -> String {
-        self.script_name.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        self.script_name
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     /// Send a `session/update` with `call_start` — signals the beginning of

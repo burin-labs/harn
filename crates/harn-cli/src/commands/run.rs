@@ -342,13 +342,8 @@ pub(crate) async fn run_file_mcp_serve(path: &str) {
                 caps.join(", ")
             );
 
-            let server = harn_vm::McpServer::new(
-                server_name,
-                tools,
-                resources,
-                resource_templates,
-                prompts,
-            );
+            let server =
+                harn_vm::McpServer::new(server_name, tools, resources, resource_templates, prompts);
             if let Err(e) = server.run(&mut vm).await {
                 eprintln!("error: MCP server error: {e}");
                 process::exit(1);

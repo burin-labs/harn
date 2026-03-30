@@ -331,6 +331,8 @@ impl Linter {
             "checkpoint_get",
             "checkpoint_clear",
             "checkpoint_list",
+            "checkpoint_exists",
+            "checkpoint_delete",
             // Metadata
             "metadata_set",
             "metadata_get",
