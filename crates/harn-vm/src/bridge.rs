@@ -13,7 +13,7 @@ use std::time::Duration;
 use tokio::io::AsyncBufReadExt;
 use tokio::sync::{oneshot, Mutex};
 
-use crate::value::{VmError, VmValue};
+use crate::value::{ErrorCategory, VmError, VmValue};
 
 /// Default timeout for bridge calls (5 minutes).
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(300);
@@ -221,6 +221,13 @@ impl HostBridge {
         if let Some(error) = response.get("error") {
             let message = error["message"].as_str().unwrap_or("Unknown host error");
             let code = error["code"].as_i64().unwrap_or(-1);
+            // -32001: tool rejected by host (not permitted / not in allowlist)
+            if code == -32001 {
+                return Err(VmError::CategorizedError {
+                    message: message.to_string(),
+                    category: ErrorCategory::ToolRejected,
+                });
+            }
             return Err(VmError::Runtime(format!("Host error ({code}): {message}")));
         }
 

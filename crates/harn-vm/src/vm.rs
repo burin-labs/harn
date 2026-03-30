@@ -10,7 +10,7 @@ use std::time::Instant;
 
 use crate::chunk::{Chunk, CompiledFunction, Constant};
 use crate::value::{
-    VmAsyncBuiltinFn, VmBuiltinFn, VmClosure, VmEnv, VmError, VmTaskHandle, VmValue,
+    ErrorCategory, VmAsyncBuiltinFn, VmBuiltinFn, VmClosure, VmEnv, VmError, VmTaskHandle, VmValue,
 };
 
 /// RAII guard that starts a tracing span on creation and ends it on drop.
@@ -1019,10 +1019,10 @@ impl Vm {
 
         // Sandbox check: deny builtins blocked by --deny/--allow flags.
         if self.denied_builtins.contains(name) {
-            return Err(VmError::Runtime(format!(
-                "Permission denied: builtin '{}' is not allowed in sandbox mode (use --allow {} to permit)",
-                name, name
-            )));
+            return Err(VmError::CategorizedError {
+                message: format!("Tool '{}' is not permitted.", name),
+                category: ErrorCategory::ToolRejected,
+            });
         }
         if let Some(builtin) = self.builtins.get(name).cloned() {
             builtin(&args, &mut self.output)
@@ -1740,8 +1740,8 @@ push(xs, 3)
         let err = result.unwrap_err();
         let msg = format!("{err}");
         assert!(
-            msg.contains("Permission denied"),
-            "expected permission denied, got: {msg}"
+            msg.contains("not permitted"),
+            "expected not permitted, got: {msg}"
         );
         assert!(
             msg.contains("push"),
@@ -1783,8 +1783,8 @@ await(handle)
         let err = result.unwrap_err();
         let msg = format!("{err}");
         assert!(
-            msg.contains("Permission denied"),
-            "expected permission denied in spawned VM, got: {msg}"
+            msg.contains("not permitted"),
+            "expected not permitted in spawned VM, got: {msg}"
         );
     }
 
@@ -1804,8 +1804,8 @@ let results = parallel(2) { i ->
         let err = result.unwrap_err();
         let msg = format!("{err}");
         assert!(
-            msg.contains("Permission denied"),
-            "expected permission denied in parallel VM, got: {msg}"
+            msg.contains("not permitted"),
+            "expected not permitted in parallel VM, got: {msg}"
         );
     }
 }

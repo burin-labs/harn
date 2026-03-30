@@ -240,6 +240,8 @@ pub enum ErrorCategory {
     RateLimit,
     /// Tool execution failure
     ToolError,
+    /// Tool was rejected by the host (not permitted / not in allowlist)
+    ToolRejected,
     /// Operation was cancelled
     Cancelled,
     /// Resource not found
@@ -257,6 +259,7 @@ impl ErrorCategory {
             ErrorCategory::Auth => "auth",
             ErrorCategory::RateLimit => "rate_limit",
             ErrorCategory::ToolError => "tool_error",
+            ErrorCategory::ToolRejected => "tool_rejected",
             ErrorCategory::Cancelled => "cancelled",
             ErrorCategory::NotFound => "not_found",
             ErrorCategory::CircuitOpen => "circuit_open",
@@ -270,6 +273,7 @@ impl ErrorCategory {
             "auth" => ErrorCategory::Auth,
             "rate_limit" => ErrorCategory::RateLimit,
             "tool_error" => ErrorCategory::ToolError,
+            "tool_rejected" => ErrorCategory::ToolRejected,
             "cancelled" => ErrorCategory::Cancelled,
             "not_found" => ErrorCategory::NotFound,
             "circuit_open" => ErrorCategory::CircuitOpen,

@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use crate::value::VmValue;
+use crate::value::{ErrorCategory, VmError, VmValue};
 use crate::vm::Vm;
 
 use super::api::{vm_call_llm_full_streaming, DeltaSender};
@@ -118,6 +118,7 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
             let mut total_text = String::new();
             let mut consecutive_text_only = 0usize;
             let mut all_tools_used: Vec<String> = Vec::new();
+            let mut rejected_tools: Vec<String> = Vec::new();
             let mut total_iterations = 0usize;
             let mut final_status = "done";
             let loop_start = std::time::Instant::now();
@@ -265,6 +266,10 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                                 };
                                 match &result {
                                     Ok(_) => break result,
+                                    // Never retry rejections — they are permanent
+                                    Err(VmError::CategorizedError { category: ErrorCategory::ToolRejected, .. }) => {
+                                        break result;
+                                    }
                                     Err(_) if attempt < tool_retries => {
                                         attempt += 1;
                                         let delay = tool_backoff_ms * (1u64 << attempt.min(5));
@@ -282,6 +287,10 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                         };
 
                         let tool_ok = call_result.is_ok();
+                        let is_rejected = matches!(
+                            &call_result,
+                            Err(VmError::CategorizedError { category: ErrorCategory::ToolRejected, .. })
+                        );
                         let result_text = match &call_result {
                             Ok(val) => {
                                 if let Some(s) = val.as_str() {
@@ -292,8 +301,15 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                                     serde_json::to_string_pretty(val).unwrap_or_default()
                                 }
                             }
+                            Err(VmError::CategorizedError { message, category: ErrorCategory::ToolRejected }) => {
+                                format!("REJECTED: {message} Do not retry this tool.")
+                            }
                             Err(e) => format!("Error: {e}"),
                         };
+                        if is_rejected && !rejected_tools.contains(&tool_name.to_string()) {
+                            rejected_tools.push(tool_name.to_string());
+                        }
+                        let tool_status = if tool_ok { "ok" } else if is_rejected { "rejected" } else { "error" };
                         let tool_meta = if tool_ok {
                             serde_json::json!({})
                         } else {
@@ -304,7 +320,7 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                             "tool",
                             tool_name,
                             tool_start.elapsed().as_millis() as u64,
-                            if tool_ok { "ok" } else { "error" },
+                            tool_status,
                             tool_meta,
                         );
 
@@ -399,6 +415,12 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                 "tools_used".to_string(),
                 VmValue::List(Rc::from(
                     all_tools_used.iter().map(|s| VmValue::String(Rc::from(s.as_str()))).collect::<Vec<_>>(),
+                )),
+            );
+            result_dict.insert(
+                "rejected_tools".to_string(),
+                VmValue::List(Rc::from(
+                    rejected_tools.iter().map(|s| VmValue::String(Rc::from(s.as_str()))).collect::<Vec<_>>(),
                 )),
             );
             Ok(VmValue::Dict(Rc::from(result_dict)))
