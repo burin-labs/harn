@@ -95,6 +95,7 @@ impl AcpServer {
     }
 
     /// Send a JSON-RPC notification (no id, no response expected).
+    #[allow(dead_code)]
     fn send_notification(&self, method: &str, params: serde_json::Value) {
         let notification = serde_json::json!({
             "jsonrpc": "2.0",
@@ -107,6 +108,7 @@ impl AcpServer {
     }
 
     /// Send a `session/update` notification with an agent message chunk.
+    #[allow(dead_code)]
     fn send_update(&self, session_id: &str, text: &str) {
         self.send_notification(
             "session/update",
@@ -283,9 +285,6 @@ impl AcpServer {
             cancelled: cancelled.clone(),
             script_name: std::sync::Mutex::new(String::new()),
         });
-
-        // Notify the client that we're starting execution.
-        self.send_update(&sid, "Executing pipeline...\n");
 
         // Execute the compiled chunk.
         let id_owned = id.clone();

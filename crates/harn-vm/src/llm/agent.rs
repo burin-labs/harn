@@ -56,6 +56,7 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
             let api_key = vm_resolve_api_key(&provider)?;
             let max_iterations = opt_int(&options, "max_iterations").unwrap_or(25) as usize;
             let persistent = opt_bool(&options, "persistent");
+            let think = opt_bool(&options, "think");
             let max_nudges = opt_int(&options, "max_nudges").unwrap_or(5) as usize;
             let custom_nudge = opt_str(&options, "nudge");
             let max_tokens = opt_int(&options, "max_tokens").unwrap_or(8192);
@@ -156,6 +157,7 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                     None,
                     native_tools.as_deref(),
                     delta_tx,
+                    think,
                 )
                 .await;
                 let llm_duration = start.elapsed().as_millis() as u64;
@@ -434,6 +436,7 @@ pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Host
                 .and_then(|v| v.as_dict())
                 .cloned();
             let temperature = opt_float(&options, "temperature");
+            let think = opt_bool(&options, "think");
             let tools_val = options.as_ref().and_then(|o| o.get("tools")).cloned();
             let messages_val = options.as_ref().and_then(|o| o.get("messages")).cloned();
 
@@ -475,6 +478,7 @@ pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Host
                 temperature,
                 native_tools.as_deref(),
                 delta_tx,
+                think,
             )
             .await;
             let duration_ms = start.elapsed().as_millis() as u64;

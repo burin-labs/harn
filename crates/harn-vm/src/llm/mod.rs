@@ -75,6 +75,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
             .and_then(|v| v.as_dict())
             .cloned();
         let temperature = opt_float(&options, "temperature");
+        let think = opt_bool(&options, "think");
         let tools_val = options.as_ref().and_then(|o| o.get("tools")).cloned();
         let messages_val = options.as_ref().and_then(|o| o.get("messages")).cloned();
 
@@ -104,6 +105,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
             json_schema.as_ref(),
             temperature,
             native_tools.as_deref(),
+            think,
         )
         .await?;
         trace_llm_call(LlmTraceEntry {
@@ -193,6 +195,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                 None,
                 None,
                 None,
+                false,
             )
             .await?;
             trace_llm_call(LlmTraceEntry {

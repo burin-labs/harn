@@ -72,6 +72,7 @@ pub(crate) async fn vm_call_llm_full(
     json_schema: Option<&BTreeMap<String, VmValue>>,
     temperature: Option<f64>,
     native_tools: Option<&[serde_json::Value]>,
+    think: bool,
 ) -> Result<LlmResult, VmError> {
     vm_call_llm_full_inner(
         provider,
@@ -85,6 +86,7 @@ pub(crate) async fn vm_call_llm_full(
         temperature,
         native_tools,
         None,
+        think,
     )
     .await
 }
@@ -104,6 +106,7 @@ pub(crate) async fn vm_call_llm_full_streaming(
     temperature: Option<f64>,
     native_tools: Option<&[serde_json::Value]>,
     delta_tx: DeltaSender,
+    think: bool,
 ) -> Result<LlmResult, VmError> {
     vm_call_llm_full_inner(
         provider,
@@ -117,6 +120,7 @@ pub(crate) async fn vm_call_llm_full_streaming(
         temperature,
         native_tools,
         Some(delta_tx),
+        think,
     )
     .await
 }
@@ -134,6 +138,7 @@ async fn vm_call_llm_full_inner(
     temperature: Option<f64>,
     native_tools: Option<&[serde_json::Value]>,
     delta_tx: Option<DeltaSender>,
+    think: bool,
 ) -> Result<LlmResult, VmError> {
     // Mock provider: return deterministic response without API call.
     if provider == "mock" {
@@ -166,6 +171,7 @@ async fn vm_call_llm_full_inner(
             temperature,
             native_tools,
             dtx,
+            think,
         )
     };
 
@@ -195,6 +201,7 @@ async fn vm_call_llm_full_inner(
                             temperature,
                             native_tools,
                             None, // no streaming for fallback
+                            think,
                         )
                         .await;
                         match fb_result {
@@ -237,6 +244,7 @@ async fn vm_call_llm_api(
     temperature: Option<f64>,
     native_tools: Option<&[serde_json::Value]>,
     delta_tx: Option<DeltaSender>,
+    think: bool,
 ) -> Result<LlmResult, VmError> {
     let streaming = delta_tx.is_some();
     let llm_timeout = std::env::var("HARN_LLM_TIMEOUT")
@@ -307,6 +315,12 @@ async fn vm_call_llm_api(
         }
         body
     };
+
+    // Only pass `think` for providers that support it (Ollama).
+    // Sending unknown fields to Anthropic/OpenAI could cause errors.
+    if provider == "ollama" || resolved.endpoint.contains("/api/chat") {
+        body["think"] = serde_json::json!(think);
+    }
 
     if streaming {
         body["stream"] = serde_json::json!(true);
@@ -666,6 +680,8 @@ async fn vm_call_llm_api_ndjson_from_response(
     let mut output_tokens: i64 = 0;
     let mut result_model = model.to_string();
 
+    let mut thinking_text = String::new();
+
     while let Ok(Some(line)) = lines.next_line().await {
         if line.is_empty() {
             continue;
@@ -675,12 +691,15 @@ async fn vm_call_llm_api_ndjson_from_response(
             Err(_) => continue,
         };
 
-        // Extract text delta from message.content
-        if let Some(content) = json["message"]["content"].as_str() {
-            if !content.is_empty() {
-                text.push_str(content);
-                let _ = delta_tx.send(content.to_string());
-            }
+        // Extract text delta from message.content or message.thinking (Qwen 3 extended thinking)
+        let content = json["message"]["content"].as_str().unwrap_or("");
+        let thinking = json["message"]["thinking"].as_str().unwrap_or("");
+        if !content.is_empty() {
+            text.push_str(content);
+            let _ = delta_tx.send(content.to_string());
+        } else if !thinking.is_empty() {
+            thinking_text.push_str(thinking);
+            let _ = delta_tx.send(thinking.to_string());
         }
 
         if let Some(m) = json["model"].as_str() {
@@ -697,6 +716,11 @@ async fn vm_call_llm_api_ndjson_from_response(
             }
             break;
         }
+    }
+
+    // Include thinking text in the result if the model only produced thinking tokens
+    if text.is_empty() && !thinking_text.is_empty() {
+        text = thinking_text;
     }
 
     Ok(LlmResult {
