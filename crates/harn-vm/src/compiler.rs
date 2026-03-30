@@ -76,7 +76,7 @@ impl Compiler {
         self.enum_names.insert("Result".to_string());
         Self::collect_interface_methods(program, &mut self.interface_methods);
 
-        // Compile all top-level non-pipeline declarations first (fn, enum, etc.)
+        // Compile all top-level imports first
         for sn in program {
             match &sn.node {
                 Node::ImportDecl { .. } | Node::SelectiveImport { .. } => {
@@ -103,6 +103,24 @@ impl Compiler {
                     self.compile_parent_pipeline(program, parent_name)?;
                 }
                 self.compile_block(body)?;
+            }
+        } else {
+            // No pipeline found — compile all top-level statements as an
+            // implicit entry point (script mode).
+            let top_level: Vec<&SNode> = program
+                .iter()
+                .filter(|sn| {
+                    !matches!(
+                        &sn.node,
+                        Node::ImportDecl { .. } | Node::SelectiveImport { .. }
+                    )
+                })
+                .collect();
+            for sn in &top_level {
+                self.compile_node(sn)?;
+                if Self::produces_value(&sn.node) {
+                    self.chunk.emit(Op::Pop, self.line);
+                }
             }
         }
 
@@ -583,6 +601,11 @@ impl Compiler {
                     ">" => self.chunk.emit(Op::Greater, self.line),
                     "<=" => self.chunk.emit(Op::LessEqual, self.line),
                     ">=" => self.chunk.emit(Op::GreaterEqual, self.line),
+                    "in" => self.chunk.emit(Op::Contains, self.line),
+                    "not_in" => {
+                        self.chunk.emit(Op::Contains, self.line);
+                        self.chunk.emit(Op::Not, self.line);
+                    }
                     _ => {
                         return Err(CompileError {
                             message: format!("Unknown operator: {op}"),

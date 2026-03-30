@@ -2,6 +2,45 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.4.26
+
+### Added
+
+- **Implicit pipeline (script mode)** — files without a `pipeline` block now
+  execute top-level code directly. Write `println("hello")` without wrapping
+  in a pipeline.
+- **`in` / `not in` operators** — membership testing for lists, dicts, strings,
+  and sets: `if name in users`, `if key not in config`.
+- **`url_encode` / `url_decode` builtins** — RFC 3986 percent-encoding for
+  building API URLs and decoding query strings.
+- **Named format placeholders** — `format("Hello {name}", {name: "world"})`
+  in addition to existing positional `{}` placeholders.
+- **Enhanced `progress` builtin** — now supports numeric progress and total:
+  `progress("indexing", "Processing files", 3, 10)`. Auto-emits progress
+  during `agent_loop` iterations in bridge/ACP mode.
+
+### Changed
+
+- **`pi` and `e` are now constants** — use `pi` and `e` directly instead of
+  `pi()` and `e()`. **Breaking change**: calling them as functions will error.
+
+### Fixed
+
+- **`json_extract` balanced bracket matching** — extracts the first balanced
+  JSON structure instead of spanning from first `{` to last `}`. Fixes
+  incorrect extraction from mixed content like `"result: {a: 1}. more {b: 2}"`.
+
+### Documentation
+
+- **New Getting Started guide** with installation, first program, REPL usage.
+- **New MCP and ACP Integration guide** covering client/server usage.
+- **New CLI Reference** documenting all commands.
+- **Restructured docs** — added Getting Started as first page, moved TCO
+  to advanced patterns, documented `parallel_settle`, `llm_stream`, cost
+  tracking, and all v0.4.26 features.
+- **Code snippet overhaul** — all examples use `harn` code fences, `println()`
+  for output, and current syntax.
+
 ## v0.4.25
 
 ### Added

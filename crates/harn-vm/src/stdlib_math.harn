@@ -22,12 +22,12 @@ fn map_range(value, in_lo, in_hi, out_lo, out_hi) {
 
 /// Convert degrees to radians.
 fn deg_to_rad(degrees) {
-  return degrees * pi() / 180
+  return degrees * pi / 180
 }
 
 /// Convert radians to degrees.
 fn rad_to_deg(radians) {
-  return radians * 180 / pi()
+  return radians * 180 / pi
 }
 
 /// Sum a list of numbers.

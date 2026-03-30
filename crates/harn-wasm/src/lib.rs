@@ -720,6 +720,36 @@ impl SyncInterpreter {
                     _ => false,
                 }))
             },
+            "in" => {
+                let result = match &rv {
+                    Val::List(items) => items.iter().any(|v| vals_equal(v, &lv)),
+                    Val::Dict(map) => {
+                        let key = lv.as_string();
+                        map.contains_key(&key)
+                    }
+                    Val::String(s) => {
+                        let substr = lv.as_string();
+                        s.contains(&substr)
+                    }
+                    _ => false,
+                };
+                Ok(Val::Bool(result))
+            }
+            "not_in" => {
+                let result = match &rv {
+                    Val::List(items) => items.iter().any(|v| vals_equal(v, &lv)),
+                    Val::Dict(map) => {
+                        let key = lv.as_string();
+                        map.contains_key(&key)
+                    }
+                    Val::String(s) => {
+                        let substr = lv.as_string();
+                        s.contains(&substr)
+                    }
+                    _ => false,
+                };
+                Ok(Val::Bool(!result))
+            }
             _ => Ok(Val::Nil),
         }
     }

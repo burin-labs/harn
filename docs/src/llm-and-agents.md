@@ -19,13 +19,13 @@ Ollama runs locally and doesn't require an API key. The default host is `http://
 
 Make a single LLM request:
 
-```javascript
+```harn
 let response = llm_call("What is 2 + 2?")
 ```
 
 With a system message:
 
-```javascript
+```harn
 let response = llm_call(
   "Explain quicksort",
   "You are a computer science teacher. Be concise."
@@ -34,7 +34,7 @@ let response = llm_call(
 
 With options:
 
-```javascript
+```harn
 let response = llm_call(
   "Translate to French: Hello, world",
   "You are a translator.",
@@ -69,15 +69,15 @@ conversation history across turns and loops until it outputs the
 `##DONE##` sentinel. Returns a dict with `{status, text, iterations,
 duration_ms, tools_used}`.
 
-```javascript
+```harn
 let result = agent_loop(
   "Write a function that sorts a list, then write tests for it.",
   "You are a senior engineer.",
   {persistent: true}
 )
-log(result.text)       // the accumulated output
-log(result.status)     // "done" or "stuck"
-log(result.iterations) // number of LLM round-trips
+println(result.text)       // the accumulated output
+println(result.status)     // "done" or "stuck"
+println(result.iterations) // number of LLM round-trips
 ```
 
 ### How it works
@@ -91,6 +91,18 @@ log(result.iterations) // number of LLM round-trips
    - Repeats until done or limits are hit
 4. If `persistent: false` (default): returns after the first response
 
+### agent_loop return value
+
+`agent_loop` returns a dict with the following fields:
+
+| Field | Type | Description |
+|---|---|---|
+| `status` | string | `"done"` or `"stuck"` |
+| `text` | string | Accumulated text output from all iterations |
+| `iterations` | int | Number of LLM round-trips |
+| `duration_ms` | int | Total wall-clock time in milliseconds |
+| `tools_used` | list | Names of tools that were called |
+
 ### agent_loop options
 
 Same as `llm_call`, plus additional options:
@@ -101,6 +113,8 @@ Same as `llm_call`, plus additional options:
 | `max_iterations` | int | `50` | Maximum number of LLM round-trips |
 | `max_nudges` | int | `3` | Max consecutive text-only responses before stopping |
 | `nudge` | string | see below | Custom message to send when nudging the agent |
+| `tool_retries` | int | `0` | Number of retry attempts for failed tool calls |
+| `tool_backoff_ms` | int | `1000` | Base backoff delay in ms for tool retries (doubles each attempt) |
 
 Default nudge message:
 
@@ -116,7 +130,7 @@ When `persistent: true`, the system prompt is automatically extended with:
 
 ### Example with retry
 
-```javascript
+```harn
 retry 3 {
   let result = agent_loop(
     task,
@@ -129,9 +143,53 @@ retry 3 {
       model: "claude-sonnet-4-20250514"
     }
   )
-  log(result.text)
+  println(result.text)
 }
 ```
+
+## Streaming responses
+
+`llm_stream` returns a channel that yields response chunks as they
+arrive. Iterate over it with a `for` loop:
+
+```harn
+let stream = llm_stream("Tell me a story", "You are a storyteller")
+for chunk in stream {
+  print(chunk)
+}
+```
+
+`llm_stream` accepts the same options as `llm_call` (provider, model,
+max_tokens). The channel closes automatically when the response is
+complete.
+
+## Cost tracking
+
+Harn provides builtins for estimating and controlling LLM costs:
+
+```harn
+// Estimate cost for a specific call
+let cost = llm_cost("claude-sonnet-4-20250514", 1000, 500)
+println("Estimated cost: $${cost}")
+
+// Check cumulative session costs
+let session = llm_session_cost()
+println("Total: $${session.total_cost}")
+println("Calls: ${session.call_count}")
+println("Input tokens: ${session.input_tokens}")
+println("Output tokens: ${session.output_tokens}")
+
+// Set a budget (LLM calls throw if exceeded)
+llm_budget(1.00)
+println("Remaining: $${llm_budget_remaining()}")
+```
+
+| Function | Description |
+|---|---|
+| `llm_cost(model, input_tokens, output_tokens)` | Estimate USD cost from embedded pricing table |
+| `llm_session_cost()` | Session totals: `{total_cost, input_tokens, output_tokens, call_count}` |
+| `llm_budget(max_cost)` | Set session budget in USD. LLM calls throw if exceeded |
+| `llm_budget_remaining()` | Remaining budget (nil if no budget set) |
 
 ## Provider API details
 

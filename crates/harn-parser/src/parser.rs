@@ -1318,29 +1318,65 @@ impl Parser {
 
     fn parse_comparison(&mut self) -> Result<SNode, ParserError> {
         let mut left = self.parse_additive()?;
-        while self.check(&TokenKind::Lt)
-            || self.check(&TokenKind::Gt)
-            || self.check(&TokenKind::Lte)
-            || self.check(&TokenKind::Gte)
-        {
-            let start = left.span;
-            let op = match self.current().map(|t| &t.kind) {
-                Some(TokenKind::Lt) => "<",
-                Some(TokenKind::Gt) => ">",
-                Some(TokenKind::Lte) => "<=",
-                Some(TokenKind::Gte) => ">=",
-                _ => "<",
-            };
-            self.advance();
-            let right = self.parse_additive()?;
-            left = spanned(
-                Node::BinaryOp {
-                    op: op.into(),
-                    left: Box::new(left),
-                    right: Box::new(right),
-                },
-                Span::merge(start, self.prev_span()),
-            );
+        loop {
+            if self.check(&TokenKind::Lt)
+                || self.check(&TokenKind::Gt)
+                || self.check(&TokenKind::Lte)
+                || self.check(&TokenKind::Gte)
+            {
+                let start = left.span;
+                let op = match self.current().map(|t| &t.kind) {
+                    Some(TokenKind::Lt) => "<",
+                    Some(TokenKind::Gt) => ">",
+                    Some(TokenKind::Lte) => "<=",
+                    Some(TokenKind::Gte) => ">=",
+                    _ => "<",
+                };
+                self.advance();
+                let right = self.parse_additive()?;
+                left = spanned(
+                    Node::BinaryOp {
+                        op: op.into(),
+                        left: Box::new(left),
+                        right: Box::new(right),
+                    },
+                    Span::merge(start, self.prev_span()),
+                );
+            } else if self.check(&TokenKind::In) {
+                let start = left.span;
+                self.advance();
+                let right = self.parse_additive()?;
+                left = spanned(
+                    Node::BinaryOp {
+                        op: "in".into(),
+                        left: Box::new(left),
+                        right: Box::new(right),
+                    },
+                    Span::merge(start, self.prev_span()),
+                );
+            } else if self.check_identifier("not") {
+                // Look ahead for "not in"
+                let saved = self.pos;
+                self.advance(); // consume "not"
+                if self.check(&TokenKind::In) {
+                    let start = left.span;
+                    self.advance(); // consume "in"
+                    let right = self.parse_additive()?;
+                    left = spanned(
+                        Node::BinaryOp {
+                            op: "not_in".into(),
+                            left: Box::new(left),
+                            right: Box::new(right),
+                        },
+                        Span::merge(start, self.prev_span()),
+                    );
+                } else {
+                    self.pos = saved;
+                    break;
+                }
+            } else {
+                break;
+            }
         }
         Ok(left)
     }
@@ -2215,6 +2251,11 @@ impl Parser {
             self.pos = saved;
             false
         }
+    }
+
+    /// Check if current token is an identifier with the given name (without consuming it).
+    fn check_identifier(&self, name: &str) -> bool {
+        matches!(self.current().map(|t| &t.kind), Some(TokenKind::Identifier(s)) if s == name)
     }
 
     fn advance(&mut self) {

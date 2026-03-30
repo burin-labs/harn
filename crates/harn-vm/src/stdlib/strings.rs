@@ -6,6 +6,17 @@ use crate::vm::Vm;
 pub(crate) fn register_string_builtins(vm: &mut Vm) {
     vm.register_builtin("format", |args, _out| {
         let template = args.first().map(|a| a.display()).unwrap_or_default();
+
+        // If the second argument is a dict, use named placeholders {key}
+        if let Some(dict) = args.get(1).and_then(|a| a.as_dict()) {
+            let mut result = template.clone();
+            for (key, val) in dict.iter() {
+                result = result.replace(&format!("{{{key}}}"), &val.display());
+            }
+            return Ok(VmValue::String(Rc::from(result)));
+        }
+
+        // Otherwise, use positional {} placeholders
         let mut result = String::with_capacity(template.len());
         let mut arg_iter = args.iter().skip(1);
         let mut rest = template.as_str();

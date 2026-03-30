@@ -125,6 +125,14 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
 
             for iteration in 0..max_iterations {
                 total_iterations = iteration + 1;
+                // Emit progress notification for each iteration
+                bridge.send_progress(
+                    "agent_loop",
+                    &format!("Iteration {}", iteration + 1),
+                    Some((iteration + 1) as i64),
+                    Some(max_iterations as i64),
+                    None,
+                );
                 let llm_call_id = next_call_id();
                 let prompt_chars: usize = messages.iter()
                     .filter_map(|m| m.get("content").and_then(|c| c.as_str()))

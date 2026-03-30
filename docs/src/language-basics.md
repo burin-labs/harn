@@ -2,19 +2,35 @@
 
 This guide covers the core syntax and semantics of Harn.
 
+## Implicit pipeline
+
+Harn files can contain top-level code without a `pipeline` block. The
+runtime wraps it in an implicit pipeline automatically:
+
+```harn
+let x = 1 + 2
+println(x)
+
+fn double(n) {
+  return n * 2
+}
+println(double(5))
+```
+
+This is convenient for scripts, experiments, and small programs.
+
 ## Pipelines
 
-Pipelines are the top-level organizational unit. A Harn program is one or more
-pipelines. The runtime executes the pipeline named `default`, or the first
-one declared.
+For larger programs, organize code into named pipelines. The runtime
+executes the pipeline named `default`, or the first one declared.
 
-```javascript
+```harn
 pipeline default(task) {
-  log("Hello from the default pipeline")
+  println("Hello from the default pipeline")
 }
 
 pipeline other(task) {
-  log("This only runs if called or if there's no default")
+  println("This only runs if called or if there's no default")
 }
 ```
 
@@ -26,7 +42,7 @@ always available.
 
 `let` creates immutable bindings. `var` creates mutable ones.
 
-```javascript
+```harn
 let name = "Alice"
 var counter = 0
 
@@ -112,17 +128,17 @@ These values are falsy: `false`, `nil`, `0`, `0.0`, `""`, `[]`, `{}`. Everything
 
 ### Interpolation
 
-```javascript
+```harn
 let name = "world"
-log("Hello, ${name}!")
-log("2 + 2 = ${2 + 2}")
+println("Hello, ${name}!")
+println("2 + 2 = ${2 + 2}")
 ```
 
 Any expression works inside `${}`.
 
 ### Multi-line strings
 
-```javascript
+```harn
 let doc = """
   This is a multi-line string.
   Common leading whitespace is stripped.
@@ -136,7 +152,7 @@ let doc = """
 
 ### String methods
 
-```javascript
+```harn
 "hello".count                    // 5
 "hello".empty                    // false
 "hello".contains("ell")          // true
@@ -162,7 +178,7 @@ Ordered by precedence (lowest to highest):
 | 4 | `\|\|` | Logical OR (short-circuit) |
 | 5 | `&&` | Logical AND (short-circuit) |
 | 6 | `==` `!=` | Equality |
-| 7 | `<` `>` `<=` `>=` | Comparison |
+| 7 | `<` `>` `<=` `>=` `in` `not in` | Comparison, membership |
 | 8 | `+` `-` | Add, subtract, string/list concat |
 | 9 | `*` `/` | Multiply, divide |
 | 10 | `!` `-` | Unary not, negate |
@@ -229,24 +245,48 @@ fn compute_zero(x) {
   return Ok(result + 10)
 }
 
-log(compute(20))       // Result.Ok(20)
-log(compute_zero(20))  // Result.Err(division by zero)
+println(compute(20))       // Result.Ok(20)
+println(compute_zero(20))  // Result.Err(division by zero)
 ```
 
 Multiple `?` calls can be chained in a single function to build
 pipelines that short-circuit on the first error.
 
+### Membership operators (`in`, `not in`)
+
+Test whether a value is contained in a collection:
+
+```harn
+// Lists
+println(3 in [1, 2, 3])          // true
+println(6 not in [1, 2, 3])      // true
+
+// Strings (substring containment)
+println("world" in "hello world") // true
+println("xyz" not in "hello")     // true
+
+// Dicts (key membership)
+let data = {name: "Alice", age: 30}
+println("name" in data)           // true
+println("email" not in data)      // true
+
+// Sets
+let s = set(1, 2, 3)
+println(2 in s)                   // true
+println(5 not in s)               // true
+```
+
 ## Control flow
 
 ### if/else
 
-```javascript
+```harn
 if score > 90 {
-  log("A")
+  println("A")
 } else if score > 80 {
-  log("B")
+  println("B")
 } else {
-  log("C")
+  println("C")
 }
 ```
 
@@ -254,23 +294,23 @@ Can be used as an expression: `let grade = if score > 90 { "A" } else { "B" }`
 
 ### for/in
 
-```javascript
+```harn
 for item in [1, 2, 3] {
-  log(item)
+  println(item)
 }
 
 // Dict iteration yields {key, value} entries sorted by key
 for entry in {a: 1, b: 2} {
-  log("${entry.key}: ${entry.value}")
+  println("${entry.key}: ${entry.value}")
 }
 ```
 
 ### while
 
-```javascript
+```harn
 var i = 0
 while i < 10 {
-  log(i)
+  println(i)
   i = i + 1
 }
 ```
@@ -279,10 +319,10 @@ Safety limit of 10,000 iterations.
 
 ### match
 
-```javascript
+```harn
 match status {
-  "active" -> { log("Running") }
-  "stopped" -> { log("Halted") }
+  "active" -> { println("Running") }
+  "stopped" -> { println("Halted") }
 }
 ```
 
@@ -292,7 +332,7 @@ Patterns are expressions compared by equality. First match wins. No match return
 
 Early exit if a condition isn't met:
 
-```javascript
+```harn
 guard x > 0 else {
   return "invalid"
 }
@@ -301,13 +341,13 @@ guard x > 0 else {
 
 ### Ranges
 
-```javascript
+```harn
 for i in 1 thru 5 {   // inclusive: 1, 2, 3, 4, 5
-  log(i)
+  println(i)
 }
 
 for i in 0 upto 3 {   // exclusive: 0, 1, 2
-  log(i)
+  println(i)
 }
 ```
 
@@ -315,7 +355,7 @@ for i in 0 upto 3 {   // exclusive: 0, 1, 2
 
 ### Named functions
 
-```javascript
+```harn
 fn double(x) {
   return x * 2
 }
@@ -329,19 +369,19 @@ Functions can be declared at the top level (for library files) or inside pipelin
 
 ### Closures
 
-```javascript
+```harn
 let square = { x -> x * x }
 let add = { a, b -> a + b }
 
-log(square(4))     // 16
-log(add(2, 3))     // 5
+println(square(4))     // 16
+println(add(2, 3))     // 5
 ```
 
 Closures capture their lexical environment at definition time. Parameters are immutable.
 
 ### Higher-order functions
 
-```javascript
+```harn
 let nums = [1, 2, 3, 4, 5]
 
 nums.map({ x -> x * 2 })           // [2, 4, 6, 8, 10]
@@ -357,7 +397,7 @@ nums.flat_map({ x -> [x, x] })     // [1, 1, 2, 2, 3, 3, 4, 4, 5, 5]
 
 The pipe operator `|>` passes the left side as the argument to the right side:
 
-```javascript
+```harn
 let result = data
   |> { list -> list.filter({ x -> x > 0 }) }
   |> { list -> list.map({ x -> x * 2 }) }
@@ -368,7 +408,7 @@ let result = data
 
 Use `_` to control where the piped value is placed in the call:
 
-```javascript
+```harn
 "hello world" |> split(_, " ")       // ["hello", "world"]
 [3, 1, 2] |> _.sort()               // [1, 2, 3]
 items |> len(_)                      // length of items
@@ -382,7 +422,7 @@ function name.
 
 Binary operators, method chains, and pipes can span multiple lines:
 
-```javascript
+```harn
 let message = "hello"
   + " "
   + "world"
@@ -402,7 +442,7 @@ negation.
 A backslash at the end of a line forces the next line to continue the
 current expression, even when no operator is present:
 
-```javascript
+```harn
 let long_value = some_function( \
   arg1, arg2, arg3 \
 )
@@ -414,38 +454,38 @@ Destructuring extracts values from dicts and lists into local variables.
 
 ### Dict destructuring
 
-```javascript
+```harn
 let person = {name: "Alice", age: 30}
 let {name, age} = person
-log(name)  // "Alice"
-log(age)   // 30
+println(name)  // "Alice"
+println(age)   // 30
 ```
 
 ### List destructuring
 
-```javascript
+```harn
 let items = [1, 2, 3, 4, 5]
 let [first, ...rest] = items
-log(first)  // 1
-log(rest)   // [2, 3, 4, 5]
+println(first)  // 1
+println(rest)   // [2, 3, 4, 5]
 ```
 
 ### Renaming
 
 Use `:` to bind a dict field to a different variable name:
 
-```javascript
+```harn
 let data = {name: "Alice"}
 let {name: user_name} = data
-log(user_name)  // "Alice"
+println(user_name)  // "Alice"
 ```
 
 ### Destructuring in for-in loops
 
-```javascript
+```harn
 let entries = [{key: "a", value: 1}, {key: "b", value: 2}]
 for {key, value} in entries {
-  log("${key}: ${value}")
+  println("${key}: ${value}")
 }
 ```
 
@@ -454,19 +494,19 @@ for {key, value} in entries {
 Missing keys destructure to `nil`. A rest pattern with no remaining
 items gives an empty collection:
 
-```javascript
+```harn
 let {name, email} = {name: "Alice"}
-log(email)  // nil
+println(email)  // nil
 
 let [only, ...rest] = [42]
-log(rest)   // []
+println(rest)   // []
 ```
 
 ## Collections
 
 ### Lists
 
-```javascript
+```harn
 let nums = [1, 2, 3]
 nums.count          // 3
 nums.first          // 1
@@ -480,7 +520,7 @@ Assigning to an out-of-bounds index throws an error.
 
 ### Dicts
 
-```javascript
+```harn
 let user = {name: "Alice", age: 30}
 user.name           // "Alice" (property access)
 user["age"]         // 30 (subscript access)
@@ -513,7 +553,7 @@ insertion order.
 Sets are unordered collections of unique values. Duplicates are
 automatically removed.
 
-```javascript
+```harn
 let s = set(1, 2, 3)          // create from individual values
 let s2 = set([4, 5, 5, 6])   // create from a list (deduplicates)
 let tags = set("a", "b", "c") // works with any value type
@@ -521,7 +561,7 @@ let tags = set("a", "b", "c") // works with any value type
 
 Set operations are provided as builtin functions:
 
-```javascript
+```harn
 let a = set(1, 2, 3)
 let b = set(3, 4, 5)
 
@@ -538,17 +578,17 @@ set_remove(a, 2)         // set(1, 3)
 
 Sets support iteration with `for..in`:
 
-```javascript
+```harn
 var sum = 0
 for item in set(10, 20, 30) {
   sum = sum + item
 }
-log(sum)  // 60
+println(sum)  // 60
 ```
 
 Convert a set to a list with `to_list()`:
 
-```javascript
+```harn
 let items = to_list(set(10, 20))
 type_of(items)  // "list"
 ```
@@ -557,7 +597,7 @@ type_of(items)  // "list"
 
 ### Enums
 
-```javascript
+```harn
 enum Status {
   Active
   Inactive
@@ -567,36 +607,36 @@ enum Status {
 
 let s = Status.Pending("waiting")
 match s.variant {
-  "Pending" -> { log(s.fields[0]) }
-  "Active" -> { log("ok") }
+  "Pending" -> { println(s.fields[0]) }
+  "Active" -> { println("ok") }
 }
 ```
 
 ### Structs
 
-```javascript
+```harn
 struct Point {
   x: int
   y: int
 }
 
 let p = {x: 10, y: 20}
-log(p.x)
+println(p.x)
 ```
 
 Structs can also be constructed with the struct name as a constructor,
 which tags the value with the struct type:
 
-```javascript
+```harn
 let p = Point({x: 10, y: 20})
-log(p.x)  // 10
+println(p.x)  // 10
 ```
 
 ### Impl blocks
 
 Add methods to a struct with `impl`:
 
-```javascript
+```harn
 struct Point {
   x: int
   y: int
@@ -612,8 +652,8 @@ impl Point {
 }
 
 let p = Point({x: 3, y: 4})
-log(p.distance())       // 5.0
-log(p.translate(10, 20)) // Point({x: 13, y: 24})
+println(p.distance())       // 5.0
+println(p.translate(10, 20)) // Point({x: 13, y: 24})
 ```
 
 The first parameter must be `self`, which receives the struct instance.
@@ -777,7 +817,7 @@ parsed as the traditional `try`/`catch` statement instead.
 
 ## Duration literals
 
-```javascript
+```harn
 let d1 = 500ms   // 500 milliseconds
 let d2 = 5s      // 5 seconds
 let d3 = 2m      // 2 minutes
@@ -786,9 +826,41 @@ let d4 = 1h      // 1 hour
 
 Durations can be passed to `sleep()` and used in `deadline` blocks.
 
+## Math constants
+
+`pi` and `e` are global constants (not functions):
+
+```harn
+println(pi)    // 3.141592653589793
+println(e)     // 2.718281828459045
+
+let area = pi * r * r
+```
+
+## Named format placeholders
+
+The `format` builtin supports both positional `{}` placeholders and named
+`{key}` placeholders when the second argument is a dict:
+
+```harn
+// Positional
+println(format("Hello, {}!", "world"))
+
+// Named
+println(format("Hello {name}, you are {age}.", {name: "Alice", age: 30}))
+```
+
+For simple cases, string interpolation with `${}` is usually more
+convenient:
+
+```harn
+let name = "Alice"
+println("Hello, ${name}!")
+```
+
 ## Comments
 
-```javascript
+```harn
 // Line comment
 
 /* Block comment

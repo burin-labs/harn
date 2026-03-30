@@ -23,13 +23,26 @@ under infrastructure code.
 Harn is a programming language where agent orchestration primitives are
 built into the syntax, not bolted on as libraries.
 
-### Pipelines are the unit of composition
+### Native LLM calls
 
-Every Harn program is a set of named pipelines. Pipelines can extend
-each other, override steps, and be imported across files. This gives you
-a natural way to structure multi-stage agent workflows:
+`llm_call` and `agent_loop` are language primitives. No SDK imports, no
+client initialization, no response parsing. Set an environment variable
+and call a model:
 
-```javascript
+```harn
+let answer = llm_call("Summarize this code", "You are a code reviewer.")
+```
+
+Harn supports Anthropic, OpenAI, Ollama, and OpenRouter. Switching
+providers is a one-field change in the options dict.
+
+### Pipeline composition
+
+Pipelines are the unit of composition. They can extend each other,
+override steps, and be imported across files. This gives you a natural
+way to structure multi-stage agent workflows:
+
+```harn
 pipeline analyze(task) {
   let context = read_file("README.md")
   let plan = llm_call(task + "\n\nContext:\n" + context, "Break this into steps.")
@@ -43,82 +56,54 @@ pipeline analyze(task) {
 }
 ```
 
-### LLM calls are builtins
+Files can also contain top-level code without a pipeline block (implicit
+pipeline), making Harn work well for scripts and quick experiments.
 
-`llm_call` and `agent_loop` are language primitives. No SDK imports, no
-client initialization, no response parsing. Set an environment variable
-and call a model:
-
-```javascript
-let answer = llm_call("Summarize this code", "You are a code reviewer.")
-```
-
-Harn supports Anthropic, OpenAI, Ollama, and OpenRouter. Switching
-providers is a one-field change in the options dict.
-
-### Native concurrency without async/await
-
-`parallel_map`, `parallel`, `spawn`/`await`, and channels are keywords,
-not library functions. No callback chains, no promise combinators, no
-`async def` annotations:
-
-```javascript
-let results = parallel_map(files) { file ->
-  llm_call(read_file(file), "Review this file for security issues")
-}
-```
-
-### Retry and error recovery are syntax
-
-`retry` and `try`/`catch` are control flow constructs. Wrapping an
-unreliable LLM call in retries is a one-liner:
-
-```javascript
-retry 3 {
-  let result = llm_call(prompt, system)
-  json_parse(result)
-}
-```
-
-### MCP for external tools
+### MCP and ACP integration
 
 Harn has built-in support for the
 [Model Context Protocol](https://modelcontextprotocol.io). Connect to any
-MCP-compatible tool server, list its tools, and call them -- all from
-within a pipeline:
+MCP server, or expose your Harn pipeline as one. ACP integration lets
+editors use Harn as a coding agent backend.
 
-```javascript
+```harn
 let client = mcp_connect("npx", ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
 let tools = mcp_list_tools(client)
 let content = mcp_call(client, "read_file", {path: "/tmp/data.txt"})
 mcp_disconnect(client)
 ```
 
-### Tail call optimization for agent loops
+### Concurrency without async/await
 
-Recursive agent patterns -- where an agent processes one item, then calls
-itself with the next -- are idiomatic in Harn. The VM performs tail call
-optimization so recursive loops do not overflow the stack, even across
-thousands of iterations:
+`parallel_map`, `parallel`, `spawn`/`await`, and channels are keywords,
+not library functions. No callback chains, no promise combinators, no
+`async def` annotations:
 
-```javascript
-fn process_items(items, results) {
-  if items.count == 0 {
-    return results
-  }
-  let item = items.first
-  let rest = items.slice(1)
-  let result = llm_call(item, "Process this item")
-  return process_items(rest, results + [result])
+```harn
+let results = parallel_map(files) { file ->
+  llm_call(read_file(file), "Review this file for security issues")
+}
+```
+
+### Retry and error recovery
+
+`retry` and `try`/`catch` are control flow constructs. Wrapping an
+unreliable LLM call in retries is a one-liner:
+
+```harn
+retry 3 {
+  let result = llm_call(prompt, system)
+  json_parse(result)
 }
 ```
 
 ### Gradual typing
 
 Type annotations are optional. Add them where they help, leave them off
-where they don't:
+where they don't. Structural shape types let you describe expected dict
+fields:
 
-```javascript
+```harn
 fn score(text: string) -> int {
   let result = llm_call(text, "Rate 1-10. Respond with just the number.")
   return to_int(result)
@@ -174,7 +159,7 @@ asyncio.run(main())
 
 **Harn**:
 
-```javascript
+```harn
 pipeline default(task) {
   let urls = ["https://a.com", "https://b.com", "https://c.com"]
 
@@ -186,7 +171,7 @@ pipeline default(task) {
   }
 
   for r in results {
-    log(r)
+    println(r)
   }
 }
 ```
@@ -197,14 +182,6 @@ all that remains.
 
 ## Getting started
 
-Install Harn and create a project:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/burin-labs/harn/main/install.sh | sh
-harn init my-agent
-cd my-agent
-harn run main.harn
-```
-
-See the [cookbook](cookbook.md) for practical patterns, or
-[language basics](language-basics.md) for a full syntax guide.
+See the [Getting Started](getting-started.md) guide to install Harn and
+run your first program, or jump to the [cookbook](cookbook.md) for
+practical patterns.

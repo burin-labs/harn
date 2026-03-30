@@ -56,15 +56,18 @@ pub fn register_bridge_builtins(vm: &mut Vm, bridge: Rc<HostBridge>) {
     vm.register_builtin("progress", move |args, _out| {
         let phase = args.first().map(|a| a.display()).unwrap_or_default();
         let message = args.get(1).map(|a| a.display()).unwrap_or_default();
-        // Optional third argument: structured data payload (dict).
-        let data = args.get(2).and_then(|a| {
+        // Optional third/fourth arguments: numeric progress and total.
+        let progress_val = args.get(2).and_then(|a| a.as_int());
+        let total_val = args.get(3).and_then(|a| a.as_int());
+        // Optional fifth argument: structured data payload (dict).
+        let data = args.get(4).and_then(|a| {
             if matches!(a, VmValue::Nil) {
                 None
             } else {
                 Some(crate::llm::vm_value_to_json(a))
             }
         });
-        b.send_progress(&phase, &message, data);
+        b.send_progress(&phase, &message, progress_val, total_val, data);
         Ok(VmValue::Nil)
     });
 

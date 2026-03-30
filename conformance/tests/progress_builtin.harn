@@ -1,0 +1,8 @@
+pipeline default(task) {
+  // Basic progress
+  progress("phase1", "Starting work")
+  // Progress with numeric percentage
+  progress("phase2", "Halfway there", 50)
+  // Progress with progress/total
+  progress("phase3", "Processing files", 3, 10)
+}

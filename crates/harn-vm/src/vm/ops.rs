@@ -46,19 +46,23 @@ impl super::Vm {
                 Constant::String(s) => s.clone(),
                 _ => return Err(VmError::TypeError("expected string constant".into())),
             };
-            match self.env.get(&name) {
-                Some(val) => self.stack.push(val),
-                None => {
-                    let all_vars = self.env.all_variables();
-                    if let Some(suggestion) =
-                        crate::value::closest_match(&name, all_vars.keys().map(|s| s.as_str()))
-                    {
-                        return Err(VmError::Runtime(format!(
-                            "Undefined variable: {name} (did you mean `{suggestion}`?)"
-                        )));
-                    }
-                    return Err(VmError::UndefinedVariable(name));
+            if let Some(val) = self.env.get(&name) {
+                self.stack.push(val);
+            } else if let Some(val) = self.globals.get(&name) {
+                self.stack.push(val.clone());
+            } else {
+                let mut all_vars = self.env.all_variables();
+                for (k, v) in &self.globals {
+                    all_vars.entry(k.clone()).or_insert_with(|| v.clone());
                 }
+                if let Some(suggestion) =
+                    crate::value::closest_match(&name, all_vars.keys().map(|s| s.as_str()))
+                {
+                    return Err(VmError::Runtime(format!(
+                        "Undefined variable: {name} (did you mean `{suggestion}`?)"
+                    )));
+                }
+                return Err(VmError::UndefinedVariable(name));
             }
         } else if op == Op::DefLet as u8 {
             let frame = self.frames.last_mut().unwrap();
@@ -137,6 +141,27 @@ impl super::Vm {
             let b = self.pop()?;
             let a = self.pop()?;
             self.stack.push(VmValue::Bool(compare_values(&a, &b) >= 0));
+        } else if op == Op::Contains as u8 {
+            let collection = self.pop()?;
+            let item = self.pop()?;
+            let result = match &collection {
+                VmValue::List(items) => items.iter().any(|v| values_equal(v, &item)),
+                VmValue::Dict(map) => {
+                    let key = item.display();
+                    map.contains_key(&key)
+                }
+                VmValue::Set(items) => items.iter().any(|v| values_equal(v, &item)),
+                VmValue::String(s) => {
+                    if let VmValue::String(substr) = &item {
+                        s.contains(&**substr)
+                    } else {
+                        let substr = item.display();
+                        s.contains(&substr)
+                    }
+                }
+                _ => false,
+            };
+            self.stack.push(VmValue::Bool(result));
         } else if op == Op::Not as u8 {
             let v = self.pop()?;
             self.stack.push(VmValue::Bool(!v.is_truthy()));

@@ -621,12 +621,17 @@ impl Formatter {
             Node::BinaryOp { op, left, right } => {
                 let l = self.format_expr(left);
                 let r = self.format_expr(right);
+                let op_str = if op == "not_in" {
+                    "not in"
+                } else {
+                    op.as_str()
+                };
                 // Preserve multiline formatting when the operands span lines
                 if left.span.line < right.span.line {
                     let pad = "  ".repeat(self.indent + 1);
-                    format!("{l}\n{pad}{op} {r}")
+                    format!("{l}\n{pad}{op_str} {r}")
                 } else {
-                    format!("{l} {op} {r}")
+                    format!("{l} {op_str} {r}")
                 }
             }
             Node::UnaryOp { op, operand } => {

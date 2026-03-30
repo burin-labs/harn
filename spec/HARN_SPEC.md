@@ -159,7 +159,15 @@ Multi-line strings do not support interpolation.
 | `/` | `.slash` | Division |
 | `<` | `.lt` | Less than |
 | `>` | `.gt` | Greater than |
+| `%` | `.percent` | Modulo |
 | `?` | `.question` | Ternary / Result propagation |
+
+#### Keyword operators
+
+| Operator | Description |
+|---|---|
+| `in` | Membership test (lists, dicts, strings, sets) |
+| `not in` | Negated membership test |
 
 ### Delimiters
 
@@ -350,7 +358,7 @@ From lowest to highest binding:
 | 4 | `\|\|` | Left | Logical OR |
 | 5 | `&&` | Left | Logical AND |
 | 6 | `==` `!=` | Left | Equality |
-| 7 | `<` `>` `<=` `>=` | Left | Comparison |
+| 7 | `<` `>` `<=` `>=` `in` `not in` | Left | Comparison / membership |
 | 8 | `+` `-` | Left | Additive |
 | 9 | `*` `/` | Left | Multiplicative |
 | 10 | `!` `-` (unary) | Right (prefix) | Unary |
@@ -528,6 +536,10 @@ with a list pattern produces a runtime error. For example,
 2. The entry pipeline is selected: the pipeline named `"default"` if it exists,
    otherwise the first pipeline in the file.
 3. The entry pipeline's body is executed.
+
+If no pipeline is found in the file, all top-level statements are compiled
+and executed directly as an implicit entry point (script mode). This allows
+simple scripts to work without wrapping code in a pipeline block.
 
 ### Pipeline parameters
 

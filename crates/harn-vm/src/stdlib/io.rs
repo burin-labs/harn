@@ -71,12 +71,18 @@ pub(crate) fn register_io_builtins(vm: &mut Vm) {
         }
     });
 
-    // progress(phase, message, data?) — standalone mode writes structured log line.
+    // progress(phase, message, progress?, total?, data?) — standalone mode writes structured log line.
     // In bridge/ACP mode, this is overridden to emit structured notifications.
     vm.register_builtin("progress", |args, out| {
         let phase = args.first().map(|a| a.display()).unwrap_or_default();
         let message = args.get(1).map(|a| a.display()).unwrap_or_default();
-        out.push_str(&format!("[{phase}] {message}\n"));
+        let progress = args.get(2).and_then(|a| a.as_int());
+        let total = args.get(3).and_then(|a| a.as_int());
+        match (progress, total) {
+            (Some(p), Some(t)) => out.push_str(&format!("[{phase}] {message} ({p}/{t})\n")),
+            (Some(p), None) => out.push_str(&format!("[{phase}] {message} ({p}%)\n")),
+            _ => out.push_str(&format!("[{phase}] {message}\n")),
+        }
         Ok(VmValue::Nil)
     });
 

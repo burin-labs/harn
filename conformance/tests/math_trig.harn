@@ -1,6 +1,6 @@
 pipeline test(task) {
   // Trig
-  let p = pi()
+  let p = pi
   assert(p > 3.14)
   assert(p < 3.15)
   assert_eq(sin(0), 0.0)
@@ -21,7 +21,7 @@ pipeline test(task) {
   let l10 = log10(100)
   assert_eq(l10, 2.0)
   // exp
-  let e_val = e()
+  let e_val = e
   assert(e_val > 2.71)
   assert(e_val < 2.72)
   assert_eq(exp(0), 1.0)

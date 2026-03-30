@@ -1629,7 +1629,9 @@ impl Default for TypeChecker {
 /// Infer the result type of a binary operation.
 fn infer_binary_op_type(op: &str, left: &InferredType, right: &InferredType) -> InferredType {
     match op {
-        "==" | "!=" | "<" | ">" | "<=" | ">=" | "&&" | "||" => Some(TypeExpr::Named("bool".into())),
+        "==" | "!=" | "<" | ">" | "<=" | ">=" | "&&" | "||" | "in" | "not_in" => {
+            Some(TypeExpr::Named("bool".into()))
+        }
         "+" => match (left, right) {
             (Some(TypeExpr::Named(l)), Some(TypeExpr::Named(r))) => {
                 match (l.as_str(), r.as_str()) {

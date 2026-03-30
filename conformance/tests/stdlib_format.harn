@@ -5,4 +5,9 @@ pipeline default() {
   println(format("{} is {} years old", name, age))
   println(format("no placeholders"))
   println(format("{} + {} = {}", 1, 2, 3))
+  // Named placeholders with dict
+  println(format("Hello {name} from {city}", {name: "Alice", city: "NYC"}))
+  println(format("{greeting}, {who}!", {greeting: "Hi", who: "Bob"}))
+  println(format("no named placeholders here", {x: 1}))
+  println(format("{a} + {b} = {c}", {a: 1, b: 2, c: 3}))
 }

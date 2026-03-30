@@ -166,8 +166,8 @@ pub(crate) fn register_math_builtins(vm: &mut Vm) {
         }
     });
 
-    vm.register_builtin("pi", |_args, _out| Ok(VmValue::Float(std::f64::consts::PI)));
-    vm.register_builtin("e", |_args, _out| Ok(VmValue::Float(std::f64::consts::E)));
+    vm.set_global("pi", VmValue::Float(std::f64::consts::PI));
+    vm.set_global("e", VmValue::Float(std::f64::consts::E));
 
     vm.register_builtin("is_nan", |args, _out| {
         match args.first().unwrap_or(&VmValue::Nil) {

@@ -184,6 +184,10 @@ pub enum Op {
     Dup,
     /// Swap top two stack values.
     Swap,
+    /// Membership test: stack has [item, collection]. Pushes bool.
+    /// Works for lists (item in list), dicts (key in dict), strings (substr in string), and sets.
+    Contains,
+
     /// Yield a value from a generator. Pops value, sends through channel, suspends.
     Yield,
 }
@@ -435,6 +439,7 @@ impl Chunk {
                 x if x == Op::Greater as u8 => out.push_str("GREATER\n"),
                 x if x == Op::LessEqual as u8 => out.push_str("LESS_EQUAL\n"),
                 x if x == Op::GreaterEqual as u8 => out.push_str("GREATER_EQUAL\n"),
+                x if x == Op::Contains as u8 => out.push_str("CONTAINS\n"),
                 x if x == Op::Not as u8 => out.push_str("NOT\n"),
                 x if x == Op::Jump as u8 => {
                     let target = self.read_u16(ip);

@@ -1,55 +1,51 @@
 # Harn
 
-Harn is a pipeline-oriented programming language for orchestrating AI coding agents. It has native LLM calls, tool use, structured output, and async concurrency built into the language.
+Harn is a pipeline-oriented programming language for orchestrating AI
+coding agents. LLM calls, tool use, concurrency, and error recovery are
+built into the language -- no libraries or SDKs needed.
 
+```harn
+let response = llm_call(
+  "Explain quicksort in two sentences.",
+  "You are a computer science tutor."
+)
+println(response)
 ```
+
+Harn files can contain top-level code like the above (implicit pipeline),
+or organize logic into named pipelines for larger programs:
+
+```harn
 pipeline default(task) {
-  let tools = tool_registry()
-    |> tool_add("search", "Search the web", search_fn, {query: "string"})
+  let files = ["src/main.rs", "src/lib.rs"]
 
-  let result = llm_call(task, "You are a research assistant", {
-    tools: tools,
-    response_format: "json",
-  })
+  let reviews = parallel_map(files) { file ->
+    let content = read_file(file)
+    llm_call("Review this code:\n" + content, "You are a code reviewer.")
+  }
 
-  log(result.data)
+  for review in reviews {
+    println(review)
+  }
 }
 ```
 
-## Getting started
+## Get started
 
-### Prerequisites
-
-Harn is built with Rust. You'll need:
-
-- **[Rust](https://rustup.rs/)** (1.70 or later) — install with `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
-- **Git**
-
-### Install from source
-
-```bash
-git clone https://github.com/burin-labs/harn
-cd harn && cargo build --release
-cp target/release/harn ~/.local/bin/
-```
-
-Create a project and run it:
-
-```bash
-harn init my-agent
-cd my-agent
-export ANTHROPIC_API_KEY=sk-...
-harn run main.harn
-```
+The fastest way to start is the [Getting Started](./getting-started.md)
+guide: install Harn, write a program, and run it in under five minutes.
 
 ## What's in this guide
 
-- **[Why Harn?](./why-harn.md)** -- What problems Harn solves and how it compares to existing approaches
+- **[Getting Started](./getting-started.md)** -- Install and run your first program
+- **[Why Harn?](./why-harn.md)** -- What problems Harn solves and how it compares
 - **[Language Basics](./language-basics.md)** -- Syntax, types, control flow, functions, structs, enums
 - **[Error Handling](./error-handling.md)** -- try/catch, Result type, the `?` operator, retry
 - **[Modules and Imports](./modules.md)** -- Splitting code across files, standard library
 - **[Concurrency](./concurrency.md)** -- spawn/await, parallel, channels, mutexes, deadlines
 - **[LLM Calls and Agent Loops](./llm-and-agents.md)** -- Calling models, agent loops, tool use
+- **[MCP and ACP Integration](./mcp-and-acp.md)** -- MCP client/server, ACP, and A2A protocols
+- **[CLI Reference](./cli-reference.md)** -- All CLI commands and flags
 - **[Builtin Functions](./builtins.md)** -- Complete reference for all built-in functions
 - **[Cookbook](./cookbook.md)** -- Practical recipes and patterns
 

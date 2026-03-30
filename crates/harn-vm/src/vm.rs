@@ -133,6 +133,9 @@ pub struct Vm {
     /// Project root directory (detected via harn.toml).
     /// Used as base directory for metadata, store, and checkpoint operations.
     pub(crate) project_root: Option<std::path::PathBuf>,
+    /// Global constants (e.g. `pi`, `e`). Checked as a fallback in `GetVar`
+    /// after the environment, so user-defined variables can shadow them.
+    pub(crate) globals: BTreeMap<String, VmValue>,
 }
 
 impl Vm {
@@ -164,6 +167,7 @@ impl Vm {
             error_stack_trace: Vec::new(),
             yield_sender: None,
             project_root: None,
+            globals: BTreeMap::new(),
         }
     }
 
@@ -425,6 +429,7 @@ impl Vm {
             error_stack_trace: Vec::new(),
             yield_sender: None,
             project_root: self.project_root.clone(),
+            globals: self.globals.clone(),
         }
     }
 
@@ -457,10 +462,10 @@ impl Vm {
         names
     }
 
-    /// Set a global variable in the VM's environment.
-    /// Globals are defined before user code runs, so collisions are not possible.
+    /// Set a global constant (e.g. `pi`, `e`).
+    /// Stored separately from the environment so user-defined variables can shadow them.
     pub fn set_global(&mut self, name: &str, value: VmValue) {
-        let _ = self.env.define(name, value, false);
+        self.globals.insert(name.to_string(), value);
     }
 
     /// Execute an import, reading and running the file's declarations.

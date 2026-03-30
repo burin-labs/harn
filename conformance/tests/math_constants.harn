@@ -1,0 +1,11 @@
+pipeline default(task) {
+  // pi and e are now values, not functions
+  println(pi > 3.14)
+  println(pi < 3.15)
+  println(e > 2.71)
+  println(e < 2.72)
+  // Use in expressions
+  let area = pi * pow(5, 2)
+  println(area > 78)
+  println(area < 79)
+}

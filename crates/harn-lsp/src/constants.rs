@@ -165,8 +165,8 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
     ("ln", "ln(n) -> float"),
     ("exp", "exp(n) -> float"),
     // Math: constants/utilities
-    ("pi", "pi() -> float"),
-    ("e", "e() -> float"),
+    ("pi", "pi: float"),
+    ("e", "e: float"),
     ("sign", "sign(n) -> int"),
     ("is_nan", "is_nan(n) -> bool"),
     ("is_infinite", "is_infinite(n) -> bool"),
@@ -257,6 +257,13 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
         "compute_content_hash(dir) -> string",
     ),
     ("invalidate_facts", "invalidate_facts(dir) -> nil"),
+    // Encoding
+    ("url_encode", "url_encode(str) -> string"),
+    ("url_decode", "url_decode(str) -> string"),
+    ("base64_encode", "base64_encode(str) -> string"),
+    ("base64_decode", "base64_decode(str) -> string"),
+    ("sha256", "sha256(str) -> string"),
+    ("md5", "md5(str) -> string"),
 ];
 
 /// Known keywords for completion.
@@ -424,8 +431,8 @@ pub(crate) fn builtin_doc(name: &str) -> Option<String> {
         "log10" => "**log10(n)** → float — Base-10 logarithm",
         "ln" => "**ln(n)** → float — Natural logarithm",
         "exp" => "**exp(n)** → float — e raised to the power n",
-        "pi" => "**pi()** → float — The constant pi (3.14159...)",
-        "e" => "**e()** → float — Euler's number (2.71828...)",
+        "pi" => "**pi** → float — The constant pi (3.14159...)",
+        "e" => "**e** → float — Euler's number (2.71828...)",
         "sign" => "**sign(n)** → int — Sign of a number: -1, 0, or 1",
         "is_nan" => "**is_nan(n)** → bool — Check if value is NaN",
         "is_infinite" => "**is_infinite(n)** → bool — Check if value is infinite",

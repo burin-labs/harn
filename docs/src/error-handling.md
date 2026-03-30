@@ -6,7 +6,7 @@ Harn provides `try`/`catch`/`throw` for error handling and `retry` for automatic
 
 Any value can be thrown as an error:
 
-```javascript
+```harn
 throw "something went wrong"
 throw {code: 404, message: "not found"}
 throw 42
@@ -16,21 +16,21 @@ throw 42
 
 Catch errors with an optional error binding:
 
-```javascript
+```harn
 try {
   let data = json_parse(raw_input)
 } catch (e) {
-  log("Parse failed: ${e}")
+  println("Parse failed: ${e}")
 }
 ```
 
 The error variable is optional:
 
-```javascript
+```harn
 try {
   risky_operation()
 } catch {
-  log("Something failed, moving on")
+  println("Something failed, moving on")
 }
 ```
 
@@ -44,7 +44,7 @@ try {
 A `return` statement inside a `try` block is **not** caught. It propagates
 out of the enclosing pipeline or function as expected.
 
-```javascript
+```harn
 fn find_user(id) {
   try {
     let user = lookup(id)
@@ -59,7 +59,7 @@ fn find_user(id) {
 
 Catch specific error types using enum-based error hierarchies:
 
-```javascript
+```harn
 enum AppError {
   NotFound(resource)
   Unauthorized(reason)
@@ -70,8 +70,8 @@ try {
   throw AppError.NotFound("user:123")
 } catch (e: AppError) {
   match e.variant {
-    "NotFound" -> { log("Missing: ${e.fields[0]}") }
-    "Unauthorized" -> { log("Access denied") }
+    "NotFound" -> { println("Missing: ${e.fields[0]}") }
+    "Unauthorized" -> { println("Access denied") }
   }
 }
 ```
@@ -82,7 +82,7 @@ Errors that don't match the typed catch propagate up the call stack.
 
 Automatically retry a block up to N times:
 
-```javascript
+```harn
 retry 3 {
   let response = http_post(url, payload)
   let parsed = json_parse(response)
@@ -102,14 +102,14 @@ evaluates the body and returns a `Result`:
 - On success: `Result.Ok(value)`
 - On error: `Result.Err(error)`
 
-```javascript
+```harn
 let result = try { json_parse(raw_input) }
 ```
 
 This is useful when you want to capture an error as a value rather than
 crashing or needing a full `try`/`catch`:
 
-```javascript
+```harn
 let parsed = try { json_parse(input) }
 if is_err(parsed) {
   println("Bad input, using defaults")
@@ -121,7 +121,7 @@ let data = unwrap(parsed)
 The try-expression pairs naturally with the `?` operator. Use `try` to
 enter Result-land and `?` to propagate within it:
 
-```javascript
+```harn
 fn fetch_json(url) {
   let body = try { http_get(url) }
   let text = unwrap(body)?
@@ -140,7 +140,7 @@ When a function parameter has a structural type annotation (a shape like
 the argument is missing a required field or a field has the wrong type,
 a clear error is produced:
 
-```javascript
+```harn
 fn process(user: {name: string, age: int}) {
   println("${user.name} is ${user.age}")
 }
@@ -165,12 +165,12 @@ The built-in `Result` enum provides an alternative to try/catch for
 representing success and failure as values. A `Result` is either
 `Ok(value)` or `Err(error)`.
 
-```javascript
+```harn
 let ok = Ok(42)
 let err = Err("something failed")
 
-log(ok)   // Result.Ok(42)
-log(err)  // Result.Err(something failed)
+println(ok)   // Result.Ok(42)
+println(err)  // Result.Err(something failed)
 ```
 
 The shorthand constructors `Ok(value)` and `Err(value)` are equivalent to
@@ -186,26 +186,26 @@ The shorthand constructors `Ok(value)` and `Err(value)` are equivalent to
 | `unwrap_or(r, default)` | Returns the `Ok` value, or `default` if `r` is `Err` |
 | `unwrap_err(r)` | Returns the `Err` value, throws if `r` is `Ok` |
 
-```javascript
+```harn
 let r = Ok(42)
-log(is_ok(r))           // true
-log(is_err(r))          // false
-log(unwrap(r))          // 42
-log(unwrap_or(Err("x"), "default"))  // default
+println(is_ok(r))           // true
+println(is_err(r))          // false
+println(unwrap(r))          // 42
+println(unwrap_or(Err("x"), "default"))  // default
 ```
 
 ### Pattern matching on Result
 
 Result values can be destructured with `match`:
 
-```javascript
+```harn
 fn fetch_data(url) {
   // ... returns Ok(data) or Err(message)
 }
 
 match fetch_data("/api/users") {
-  Result.Ok(data) -> { log("Got ${len(data)} users") }
-  Result.Err(err) -> { log("Failed: ${err}") }
+  Result.Ok(data) -> { println("Got ${len(data)} users") }
+  Result.Err(err) -> { println("Failed: ${err}") }
 }
 ```
 
@@ -215,7 +215,7 @@ The postfix `?` operator provides concise error propagation. Applied to a
 `Result` value, it unwraps `Ok` and returns the value, or immediately
 returns the `Err` from the enclosing function.
 
-```javascript
+```harn
 fn divide(a, b) {
   if b == 0 {
     return Err("division by zero")
@@ -235,7 +235,7 @@ let r2 = compute(0)   // Result.Err(division by zero)
 The `?` operator has the same precedence as `.`, `[]`, and `()`, so it
 chains naturally:
 
-```javascript
+```harn
 fn fetch_and_parse(url) {
   let response = http_get(url)?
   let data = json_parse(response)?
@@ -254,7 +254,7 @@ without propagating them through return values.
 
 The two patterns can be combined:
 
-```javascript
+```harn
 fn safe_parse(input) {
   try {
     let data = json_parse(input)
@@ -301,14 +301,14 @@ at a higher level.
 
 ## Combining patterns
 
-```javascript
+```harn
 retry 3 {
   try {
     let result = llm_call(prompt, system)
     let parsed = json_parse(result)
     return parsed
   } catch (e) {
-    log("Attempt failed: ${e}")
+    println("Attempt failed: ${e}")
     throw e  // re-throw to trigger retry
   }
 }

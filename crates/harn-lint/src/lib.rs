@@ -197,11 +197,13 @@ impl Linter {
             "lerp",
             "sum",
             "avg",
-            // Crypto
+            // Crypto / encoding
             "base64_encode",
             "base64_decode",
             "sha256",
             "md5",
+            "url_encode",
+            "url_decode",
             // Sets
             "set",
             "set_add",

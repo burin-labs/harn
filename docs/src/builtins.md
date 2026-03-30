@@ -120,7 +120,8 @@ json_validate(data, schema)  // throws if invalid
 
 Extracts JSON from LLM responses that may contain markdown code fences
 or surrounding prose. Handles `` ```json ... ``` ``, `` ``` ... ``` ``,
-and bare JSON with surrounding text.
+and bare JSON with surrounding text. Uses balanced bracket matching to
+correctly extract nested objects and arrays from mixed prose.
 
 ```harn
 let response = llm_call("Return JSON with name and age")
@@ -168,8 +169,8 @@ let name = json_extract(response, "name") // extract just one key
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `pi()` | none | float | The constant pi (3.14159...) |
-| `e()` | none | float | Euler's number (2.71828...) |
+| `pi` | — | float | The constant pi (3.14159...) |
+| `e` | — | float | Euler's number (2.71828...) |
 | `sign(n)` | n: int or float | int | Sign of a number: -1, 0, or 1 |
 | `is_nan(n)` | n: float | bool | Check if value is NaN |
 | `is_infinite(n)` | n: float | bool | Check if value is infinite |
@@ -231,7 +232,7 @@ Sets also support method syntax: `my_set.union(other)`.
 | `replace(str, old, new)` | str: string, old: string, new: string | string | Replace all occurrences |
 | `join(list, sep)` | list: list, sep: string | string | Join list elements with separator |
 | `substring(str, start, len?)` | str: string, start: int, len: int | string | Extract substring from start position |
-| `format(template, ...)` | template: string, args: any | string | Format string with `{}` placeholders |
+| `format(template, ...)` | template: string, args: any | string | Format string with `{}` placeholders. With a dict as the second arg, supports named `{key}` placeholders |
 
 ### String methods (dot syntax)
 
@@ -375,6 +376,8 @@ Returns an empty list if there are no matches. Throws on invalid regex.
 |---|---|---|---|
 | `base64_encode(string)` | string: string | string | Base64 encode a string (standard alphabet with padding) |
 | `base64_decode(string)` | string: string | string | Base64 decode a string. Throws on invalid input |
+| `url_encode(string)` | string: string | string | URL percent-encode a string. Unreserved characters (alphanumeric, `-`, `_`, `.`, `~`) pass through unchanged |
+| `url_decode(string)` | string: string | string | Decode a URL-encoded string. Decodes `%XX` sequences and `+` as space |
 
 Example:
 
@@ -382,6 +385,13 @@ Example:
 let encoded = base64_encode("Hello, World!")
 println(encoded)                  // SGVsbG8sIFdvcmxkIQ==
 println(base64_decode(encoded))   // Hello, World!
+```
+
+```harn
+println(url_encode("hello world"))         // hello%20world
+println(url_decode("hello%20world"))       // hello world
+println(url_encode("a=1&b=2"))             // a%3D1%26b%3D2
+println(url_decode("hello+world"))         // hello world
 ```
 
 ## Hashing

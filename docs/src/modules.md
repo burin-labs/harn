@@ -4,13 +4,13 @@ Harn supports splitting code across files using `import` and top-level `fn` decl
 
 ## Importing files
 
-```javascript
+```harn
 import "lib/helpers.harn"
 ```
 
 The extension is optional — these are equivalent:
 
-```javascript
+```harn
 import "lib/helpers.harn"
 import "lib/helpers"
 ```
@@ -23,7 +23,7 @@ next to `main.harn`.
 
 Library files contain top-level `fn` declarations:
 
-```javascript
+```harn
 // lib/math.harn
 
 fn double(x) {
@@ -41,12 +41,12 @@ When imported, these functions become available in the importing file's scope.
 
 ## Using imported functions
 
-```javascript
+```harn
 import "lib/math"
 
 pipeline default(task) {
-  log(double(21))        // 42
-  log(clamp(150, 0, 100)) // 100
+  println(double(21))        // 42
+  println(clamp(150, 0, 100)) // 100
 }
 ```
 
@@ -54,14 +54,14 @@ pipeline default(task) {
 
 Imported files can also contain pipelines, which are registered globally by name:
 
-```javascript
+```harn
 // lib/analysis.harn
 pipeline analyze(task) {
-  log("Analyzing: ${task}")
+  println("Analyzing: ${task}")
 }
 ```
 
-```javascript
+```harn
 import "lib/analysis"
 
 pipeline default(task) {
@@ -74,7 +74,7 @@ pipeline default(task) {
 Harn includes built-in modules that are compiled into the interpreter.
 Import them with the `std/` prefix:
 
-```javascript
+```harn
 import "std/text"
 import "std/collections"
 import "std/math"
@@ -120,14 +120,14 @@ Extended math utilities:
 | `sum(items)` | Sum a list of numbers |
 | `avg(items)` | Average of a list of numbers (returns 0 for empty lists) |
 
-```javascript
+```harn
 import "std/math"
 
-log(clamp(150, 0, 100))         // 100
-log(lerp(0, 10, 0.5))           // 5
-log(map_range(50, 0, 100, 0, 1)) // 0.5
-log(sum([1, 2, 3, 4]))          // 10
-log(avg([10, 20, 30]))          // 20
+println(clamp(150, 0, 100))         // 100
+println(lerp(0, 10, 0.5))           // 5
+println(map_range(50, 0, 100, 0, 1)) // 0.5
+println(sum([1, 2, 3, 4]))          // 10
+println(avg([10, 20, 30]))          // 20
 ```
 
 ### std/path
@@ -143,12 +143,12 @@ Path manipulation utilities:
 | `list_files(dir)` | List files in a directory (one level) |
 | `list_dirs(dir)` | List subdirectories in a directory |
 
-```javascript
+```harn
 import "std/path"
 
-log(ext("main.harn"))          // "harn"
-log(stem("/src/main.harn"))    // "main"
-log(is_absolute("/usr/bin"))   // true
+println(ext("main.harn"))          // "harn"
+println(stem("/src/main.harn"))    // "main"
+println(is_absolute("/usr/bin"))   // true
 
 let files = list_files("src")
 let dirs = list_dirs(".")
@@ -166,7 +166,7 @@ JSON utility patterns:
 | `pick(data, keys)` | Pick specific keys from a dict |
 | `omit(data, keys)` | Omit specific keys from a dict |
 
-```javascript
+```harn
 import "std/json"
 
 let data = safe_parse("{\"x\": 1}")   // {x: 1}, or nil on bad input
@@ -179,7 +179,7 @@ let rest = omit({a: 1, b: 2, c: 3}, ["b"])          // {a: 1, c: 3}
 
 Import specific functions from any module:
 
-```javascript
+```harn
 import { extract_paths, parse_cells } from "std/text"
 ```
 
@@ -195,16 +195,16 @@ import { extract_paths, parse_cells } from "std/text"
 
 Pipelines can extend other pipelines:
 
-```javascript
+```harn
 pipeline base(task) {
-  log("Step 1: setup")
-  log("Step 2: execute")
-  log("Step 3: cleanup")
+  println("Step 1: setup")
+  println("Step 2: execute")
+  println("Step 3: cleanup")
 }
 
 pipeline custom(task) extends base {
   override fn setup() {
-    log("Custom setup")
+    println("Custom setup")
   }
 }
 ```
@@ -226,7 +226,7 @@ my-project/
     helpers.harn      # general-purpose utilities
 ```
 
-```javascript
+```harn
 // main.harn
 import "lib/context"
 import "lib/agent"

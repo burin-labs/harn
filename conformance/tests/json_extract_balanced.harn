@@ -1,0 +1,14 @@
+pipeline default(task) {
+  // Should extract first balanced JSON object, not span to last }
+  let mixed = "The result was {\"a\": 1}. Later text {\"b\": 2}"
+  let extracted = json_extract(mixed)
+  println(extracted.a)
+  // Nested JSON
+  let nested = "Here is {\"outer\": {\"inner\": 42}} done"
+  let result = json_extract(nested)
+  println(result.outer.inner)
+  // Array extraction
+  let arr_text = "data: [1, 2, 3] end"
+  let arr = json_extract(arr_text)
+  println(arr)
+}

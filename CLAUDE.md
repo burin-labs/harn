@@ -98,8 +98,8 @@ via `tokio::task::spawn_local` for `parallel`, `parallel_map`, and
   `bridge.rs` / `bridge_builtins.rs` (JSON-RPC host delegation;
   error code `-32001` = tool rejected → `ErrorCategory::ToolRejected`).
   50+ opcodes including TailCall, GetPropertyOpt, MethodCallOpt,
-  Slice, CallSpread, TryExpr, concurrency, imports, enums, interfaces,
-  and deadlines. In bridge mode,
+  Slice, CallSpread, TryExpr, Contains (for `in`/`not in`),
+  concurrency, imports, enums, interfaces, and deadlines. In bridge mode,
   unknown builtins are automatically delegated to the host via
   `builtin_call` JSON-RPC. Stdlib .harn files live in `stdlib/` at
   the repo root and are embedded via `include_str!`.
@@ -123,6 +123,11 @@ via `tokio::task::spawn_local` for `parallel`, `parallel_map`, and
   wasm-pack). Contains its own minimal sync interpreter for browser use.
 
 ### Key design patterns
+
+**Implicit pipeline (script mode)**: Files without a `pipeline` block
+execute all top-level statements directly. The compiler treats the
+entire file as an implicit entry point. If a pipeline IS present,
+only the pipeline body executes (existing behavior).
 
 **AST spans**: All AST nodes are `SNode = Spanned<Node>` carrying source
 `Span` with byte offsets and line/column. Errors include source location
@@ -181,7 +186,7 @@ that `T` satisfies the named interface. Checked at call sites with
 compile-time warnings.
 
 **Encoding/hashing builtins**: `base64_encode`, `base64_decode`,
-`sha256`, `md5`.
+`sha256`, `md5`, `url_encode`, `url_decode`.
 
 **Regex builtins**: `regex_match`, `regex_replace`, `regex_captures`
 (capture groups with positional and named group support).

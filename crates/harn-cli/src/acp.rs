@@ -404,12 +404,25 @@ impl AcpBridge {
     }
 
     /// Send a structured `session/update` with progress phase, message, and data.
-    fn send_progress(&self, phase: &str, message: &str, data: Option<serde_json::Value>) {
+    fn send_progress(
+        &self,
+        phase: &str,
+        message: &str,
+        progress: Option<i64>,
+        total: Option<i64>,
+        data: Option<serde_json::Value>,
+    ) {
         let mut update = serde_json::json!({
             "sessionUpdate": "progress",
             "phase": phase,
             "message": message,
         });
+        if let Some(p) = progress {
+            update["progress"] = serde_json::json!(p);
+        }
+        if let Some(t) = total {
+            update["total"] = serde_json::json!(t);
+        }
         if let Some(d) = data {
             update["data"] = d;
         }
@@ -776,14 +789,16 @@ fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Rc<AcpBridge>) {
     vm.register_builtin("progress", move |args, _out| {
         let phase = args.first().map(|a| a.display()).unwrap_or_default();
         let message = args.get(1).map(|a| a.display()).unwrap_or_default();
-        let data = args.get(2).and_then(|a| {
+        let progress_val = args.get(2).and_then(|a| a.as_int());
+        let total_val = args.get(3).and_then(|a| a.as_int());
+        let data = args.get(4).and_then(|a| {
             if matches!(a, harn_vm::VmValue::Nil) {
                 None
             } else {
                 Some(harn_vm::llm::vm_value_to_json(a))
             }
         });
-        b.send_progress(&phase, &message, data);
+        b.send_progress(&phase, &message, progress_val, total_val, data);
         Ok(harn_vm::VmValue::Nil)
     });
 

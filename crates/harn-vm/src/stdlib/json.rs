@@ -232,6 +232,7 @@ fn validate_value(
 pub(crate) fn extract_json_from_text(text: &str) -> String {
     let trimmed = text.trim();
 
+    // 1. Try code-fence extraction first (```json ... ```)
     if let Some(start) = trimmed.find("```") {
         let after_backticks = &trimmed[start + 3..];
         let content_start = if let Some(nl) = after_backticks.find('\n') {
@@ -245,20 +246,53 @@ pub(crate) fn extract_json_from_text(text: &str) -> String {
         }
     }
 
-    if let Some(obj_start) = trimmed.find('{') {
-        if let Some(obj_end) = trimmed.rfind('}') {
-            if obj_end > obj_start {
-                return trimmed[obj_start..=obj_end].to_string();
-            }
-        }
+    // 2. Try to find a balanced JSON object or array
+    if let Some(result) = find_balanced_json(trimmed, b'{', b'}') {
+        return result;
     }
-    if let Some(arr_start) = trimmed.find('[') {
-        if let Some(arr_end) = trimmed.rfind(']') {
-            if arr_end > arr_start {
-                return trimmed[arr_start..=arr_end].to_string();
-            }
-        }
+    if let Some(result) = find_balanced_json(trimmed, b'[', b']') {
+        return result;
     }
 
     trimmed.to_string()
+}
+
+/// Find the first balanced JSON structure delimited by `open`/`close` chars.
+/// Respects string literals (skipping brackets inside "...") and nesting.
+fn find_balanced_json(text: &str, open: u8, close: u8) -> Option<String> {
+    let bytes = text.as_bytes();
+    let start = bytes.iter().position(|&b| b == open)?;
+
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut escape = false;
+    let mut i = start;
+
+    while i < bytes.len() {
+        let b = bytes[i];
+        if escape {
+            escape = false;
+            i += 1;
+            continue;
+        }
+        if b == b'\\' && in_string {
+            escape = true;
+            i += 1;
+            continue;
+        }
+        if b == b'"' {
+            in_string = !in_string;
+        } else if !in_string {
+            if b == open {
+                depth += 1;
+            } else if b == close {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(text[start..=i].to_string());
+                }
+            }
+        }
+        i += 1;
+    }
+    None
 }

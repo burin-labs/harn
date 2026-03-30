@@ -1,0 +1,15 @@
+pipeline default(task) {
+  // Basic URL encoding
+  let encoded = url_encode("hello world")
+  println(encoded)
+  // Round-trip
+  let decoded = url_decode(encoded)
+  println(decoded)
+  // Special characters
+  println(url_encode("a=1&b=2"))
+  println(url_decode("a%3D1%26b%3D2"))
+  // Plus decoding (form-encoded space)
+  println(url_decode("hello+world"))
+  // Unreserved chars pass through
+  println(url_encode("abc-123_test.file~ok"))
+}

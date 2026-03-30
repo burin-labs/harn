@@ -1,0 +1,22 @@
+pipeline default(task) {
+  // List membership
+  let items = [1, 2, 3, 4, 5]
+  println(3 in items)
+  println(6 in items)
+  println(6 not in items)
+  println(3 not in items)
+  // String containment
+  let msg = "hello world"
+  println("world" in msg)
+  println("xyz" in msg)
+  println("xyz" not in msg)
+  // Dict key membership
+  let data = {name: "Alice", age: 30}
+  println("name" in data)
+  println("email" in data)
+  println("email" not in data)
+  // Set membership
+  let s = set(1, 2, 3)
+  println(2 in s)
+  println(5 in s)
+}
