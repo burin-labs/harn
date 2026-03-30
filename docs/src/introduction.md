@@ -18,7 +18,14 @@ pipeline default(task) {
 
 ## Getting started
 
-Install from source:
+### Prerequisites
+
+Harn is built with Rust. You'll need:
+
+- **[Rust](https://rustup.rs/)** (1.70 or later) — install with `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
+- **Git**
+
+### Install from source
 
 ```bash
 git clone https://github.com/burin-labs/harn
