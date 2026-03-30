@@ -1,0 +1,14 @@
+[book]
+title = "Harn Documentation"
+description = "The pipeline-oriented language for AI agent orchestration"
+authors = ["Burin Labs"]
+language = "en"
+src = "src"
+
+[build]
+build-dir = "dist"
+
+[output.html]
+git-repository-url = "https://github.com/burin-labs/harn"
+edit-url-template = "https://github.com/burin-labs/harn/edit/main/docs/src/{path}"
+no-section-label = true
