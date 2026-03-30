@@ -421,11 +421,15 @@ impl tower_lsp::LanguageServer for HarnLsp {
             if sym.name != word {
                 continue;
             }
-            // If the symbol has a scope_span, check if the cursor byte
-            // offset falls within it.
-            let in_scope = match sym.scope_span {
-                Some(sp) => cursor_offset >= sp.start && cursor_offset <= sp.end,
-                None => true, // top-level symbol is always visible
+            // Methods inside impl blocks are globally visible (called via
+            // dot syntax), so skip the scope check for them.
+            let in_scope = if sym.impl_type.is_some() {
+                true
+            } else {
+                match sym.scope_span {
+                    Some(sp) => cursor_offset >= sp.start && cursor_offset <= sp.end,
+                    None => true, // top-level symbol is always visible
+                }
             };
             if !in_scope {
                 continue;
@@ -453,7 +457,13 @@ impl tower_lsp::LanguageServer for HarnLsp {
 
             // Show signature if available (functions, pipelines, structs, enums)
             if let Some(ref sig) = sym.signature {
-                hover_text.push_str(&format!("```harn\n{sig}\n```\n"));
+                // For methods, prefix with the impl type name
+                let display_sig = if let Some(ref impl_ty) = sym.impl_type {
+                    format!("impl {impl_ty}\n{sig}")
+                } else {
+                    sig.clone()
+                };
+                hover_text.push_str(&format!("```harn\n{display_sig}\n```\n"));
             } else {
                 // For variables/parameters, build a code-block declaration
                 // with the type annotation when known.
@@ -495,6 +505,11 @@ impl tower_lsp::LanguageServer for HarnLsp {
                         }
                     }
                 }
+            }
+
+            // Append doc comment if present
+            if let Some(ref doc) = sym.doc_comment {
+                hover_text.push_str(&format!("\n---\n\n{doc}"));
             }
 
             return Ok(Some(Hover {

@@ -26,15 +26,68 @@ pub(crate) struct SymbolInfo {
     pub(crate) signature: Option<String>,
     /// Span of the whole containing scope (for scope-aware completion).
     pub(crate) scope_span: Option<Span>,
+    /// Doc comment extracted from `//` lines above the definition.
+    pub(crate) doc_comment: Option<String>,
+    /// For methods inside `impl` blocks: the type name (e.g. "Point").
+    pub(crate) impl_type: Option<String>,
 }
 
 /// Walk the parsed AST and collect all definitions.
-pub(crate) fn build_symbol_table(program: &[SNode]) -> Vec<SymbolInfo> {
+pub(crate) fn build_symbol_table(program: &[SNode], source: &str) -> Vec<SymbolInfo> {
     let mut symbols = Vec::new();
     for snode in program {
-        collect_symbols(snode, &mut symbols, None);
+        collect_symbols(snode, &mut symbols, None, source, None);
     }
     symbols
+}
+
+/// Extract leading `//` comment lines immediately above a span in the source.
+/// Returns `None` if there are no comment lines directly above.
+fn extract_doc_comment(source: &str, span: &Span) -> Option<String> {
+    let lines: Vec<&str> = source.lines().collect();
+    // span.line is 1-based
+    let def_line = span.line.saturating_sub(1); // 0-based index of def line
+    if def_line == 0 {
+        return None;
+    }
+
+    let mut comment_lines = Vec::new();
+    let mut line_idx = def_line - 1; // line above the definition
+    loop {
+        let line = lines.get(line_idx)?;
+        let trimmed = line.trim();
+        if trimmed.starts_with("//") {
+            // Strip leading `//` and optional space
+            let text = trimmed.trim_start_matches("//").trim_start();
+            comment_lines.push(text.to_string());
+        } else {
+            break;
+        }
+        if line_idx == 0 {
+            break;
+        }
+        line_idx -= 1;
+    }
+
+    if comment_lines.is_empty() {
+        return None;
+    }
+    comment_lines.reverse();
+    Some(comment_lines.join("\n"))
+}
+
+/// Format a default value AST node as a short string for display in signatures.
+fn format_default_value(snode: &SNode) -> String {
+    match &snode.node {
+        Node::IntLiteral(n) => n.to_string(),
+        Node::FloatLiteral(n) => n.to_string(),
+        Node::StringLiteral(s) => format!("\"{s}\""),
+        Node::BoolLiteral(b) => b.to_string(),
+        Node::NilLiteral => "nil".to_string(),
+        Node::ListLiteral(items) if items.is_empty() => "[]".to_string(),
+        Node::DictLiteral(entries) if entries.is_empty() => "{}".to_string(),
+        _ => "...".to_string(),
+    }
 }
 
 /// Extract all variable names from a binding pattern.
@@ -51,7 +104,48 @@ pub(crate) fn binding_pattern_names(pattern: &harn_parser::BindingPattern) -> Ve
     }
 }
 
-fn collect_symbols(snode: &SNode, symbols: &mut Vec<SymbolInfo>, scope_span: Option<Span>) {
+/// Format a typed parameter for display in a signature, including default values.
+fn format_param(p: &harn_parser::TypedParam) -> String {
+    let base = match &p.type_expr {
+        Some(t) => format!("{}: {}", p.name, format_type(t)),
+        None => p.name.clone(),
+    };
+    match &p.default_value {
+        Some(dv) => format!("{base} = {}", format_default_value(dv)),
+        None => base,
+    }
+}
+
+fn collect_symbols(
+    snode: &SNode,
+    symbols: &mut Vec<SymbolInfo>,
+    scope_span: Option<Span>,
+    source: &str,
+    impl_type_name: Option<&str>,
+) {
+    // Helper macro for simple SymbolInfo with no doc/impl fields
+    macro_rules! simple_sym {
+        ($name:expr, $kind:expr, $span:expr, $type_info:expr, $sig:expr, $scope:expr) => {
+            SymbolInfo {
+                name: $name,
+                kind: $kind,
+                def_span: $span,
+                type_info: $type_info,
+                signature: $sig,
+                scope_span: $scope,
+                doc_comment: None,
+                impl_type: None,
+            }
+        };
+    }
+
+    // Shorthand for recursive calls
+    macro_rules! recurse {
+        ($child:expr, $scope:expr) => {
+            collect_symbols($child, symbols, $scope, source, None)
+        };
+    }
+
     match &snode.node {
         Node::Pipeline {
             name, params, body, ..
@@ -68,20 +162,22 @@ fn collect_symbols(snode: &SNode, symbols: &mut Vec<SymbolInfo>, scope_span: Opt
                 type_info: None,
                 signature: Some(sig),
                 scope_span,
+                doc_comment: extract_doc_comment(source, &snode.span),
+                impl_type: None,
             });
             // Params are plain strings (no individual spans), register them scoped to body.
             for p in params {
-                symbols.push(SymbolInfo {
-                    name: p.clone(),
-                    kind: HarnSymbolKind::Parameter,
-                    def_span: snode.span,
-                    type_info: None,
-                    signature: None,
-                    scope_span: Some(snode.span),
-                });
+                symbols.push(simple_sym!(
+                    p.clone(),
+                    HarnSymbolKind::Parameter,
+                    snode.span,
+                    None,
+                    None,
+                    Some(snode.span)
+                ));
             }
             for s in body {
-                collect_symbols(s, symbols, Some(snode.span));
+                recurse!(s, Some(snode.span));
             }
         }
         Node::FnDecl {
@@ -91,14 +187,7 @@ fn collect_symbols(snode: &SNode, symbols: &mut Vec<SymbolInfo>, scope_span: Opt
             body,
             ..
         } => {
-            let params_str = params
-                .iter()
-                .map(|p| match &p.type_expr {
-                    Some(t) => format!("{}: {}", p.name, format_type(t)),
-                    None => p.name.clone(),
-                })
-                .collect::<Vec<_>>()
-                .join(", ");
+            let params_str = params.iter().map(format_param).collect::<Vec<_>>().join(", ");
             let ret_str = match return_type {
                 Some(t) => format!(" -> {}", format_type(t)),
                 None => String::new(),
@@ -111,19 +200,21 @@ fn collect_symbols(snode: &SNode, symbols: &mut Vec<SymbolInfo>, scope_span: Opt
                 type_info: return_type.clone(),
                 signature: Some(sig),
                 scope_span,
+                doc_comment: extract_doc_comment(source, &snode.span),
+                impl_type: impl_type_name.map(String::from),
             });
             for p in params {
-                symbols.push(SymbolInfo {
-                    name: p.name.clone(),
-                    kind: HarnSymbolKind::Parameter,
-                    def_span: snode.span,
-                    type_info: p.type_expr.clone(),
-                    signature: None,
-                    scope_span: Some(snode.span),
-                });
+                symbols.push(simple_sym!(
+                    p.name.clone(),
+                    HarnSymbolKind::Parameter,
+                    snode.span,
+                    p.type_expr.clone(),
+                    None,
+                    Some(snode.span)
+                ));
             }
             for s in body {
-                collect_symbols(s, symbols, Some(snode.span));
+                recurse!(s, Some(snode.span));
             }
         }
         Node::LetBinding {
@@ -132,16 +223,16 @@ fn collect_symbols(snode: &SNode, symbols: &mut Vec<SymbolInfo>, scope_span: Opt
             value,
         } => {
             for name in binding_pattern_names(pattern) {
-                symbols.push(SymbolInfo {
+                symbols.push(simple_sym!(
                     name,
-                    kind: HarnSymbolKind::Variable,
-                    def_span: snode.span,
-                    type_info: type_ann.clone().or_else(|| infer_literal_type(value)),
-                    signature: None,
-                    scope_span,
-                });
+                    HarnSymbolKind::Variable,
+                    snode.span,
+                    type_ann.clone().or_else(|| infer_literal_type(value)),
+                    None,
+                    scope_span
+                ));
             }
-            collect_symbols(value, symbols, scope_span);
+            recurse!(value, scope_span);
         }
         Node::VarBinding {
             pattern,
@@ -149,16 +240,16 @@ fn collect_symbols(snode: &SNode, symbols: &mut Vec<SymbolInfo>, scope_span: Opt
             value,
         } => {
             for name in binding_pattern_names(pattern) {
-                symbols.push(SymbolInfo {
+                symbols.push(simple_sym!(
                     name,
-                    kind: HarnSymbolKind::Variable,
-                    def_span: snode.span,
-                    type_info: type_ann.clone().or_else(|| infer_literal_type(value)),
-                    signature: None,
-                    scope_span,
-                });
+                    HarnSymbolKind::Variable,
+                    snode.span,
+                    type_ann.clone().or_else(|| infer_literal_type(value)),
+                    None,
+                    scope_span
+                ));
             }
-            collect_symbols(value, symbols, scope_span);
+            recurse!(value, scope_span);
         }
         Node::EnumDecl { name, .. } => {
             symbols.push(SymbolInfo {
@@ -168,6 +259,8 @@ fn collect_symbols(snode: &SNode, symbols: &mut Vec<SymbolInfo>, scope_span: Opt
                 type_info: None,
                 signature: Some(format!("enum {name}")),
                 scope_span,
+                doc_comment: extract_doc_comment(source, &snode.span),
+                impl_type: None,
             });
         }
         Node::StructDecl { name, fields } => {
@@ -189,6 +282,8 @@ fn collect_symbols(snode: &SNode, symbols: &mut Vec<SymbolInfo>, scope_span: Opt
                 type_info: None,
                 signature: Some(format!("struct {name} {{ {fields_str} }}")),
                 scope_span,
+                doc_comment: extract_doc_comment(source, &snode.span),
+                impl_type: None,
             });
         }
         Node::InterfaceDecl { name, methods } => {
@@ -212,6 +307,8 @@ fn collect_symbols(snode: &SNode, symbols: &mut Vec<SymbolInfo>, scope_span: Opt
                 type_info: None,
                 signature: Some(format!("interface {name} {{ {methods_str} }}")),
                 scope_span,
+                doc_comment: extract_doc_comment(source, &snode.span),
+                impl_type: None,
             });
         }
         Node::ImplBlock {
@@ -224,9 +321,11 @@ fn collect_symbols(snode: &SNode, symbols: &mut Vec<SymbolInfo>, scope_span: Opt
                 type_info: None,
                 signature: Some(format!("impl {type_name}")),
                 scope_span,
+                doc_comment: None,
+                impl_type: None,
             });
             for m in methods {
-                collect_symbols(m, symbols, Some(snode.span));
+                collect_symbols(m, symbols, Some(snode.span), source, Some(type_name));
             }
         }
         Node::ForIn {
@@ -235,18 +334,18 @@ fn collect_symbols(snode: &SNode, symbols: &mut Vec<SymbolInfo>, scope_span: Opt
             body,
         } => {
             for name in binding_pattern_names(pattern) {
-                symbols.push(SymbolInfo {
+                symbols.push(simple_sym!(
                     name,
-                    kind: HarnSymbolKind::Variable,
-                    def_span: snode.span,
-                    type_info: None,
-                    signature: None,
-                    scope_span: Some(snode.span),
-                });
+                    HarnSymbolKind::Variable,
+                    snode.span,
+                    None,
+                    None,
+                    Some(snode.span)
+                ));
             }
-            collect_symbols(iterable, symbols, scope_span);
+            recurse!(iterable, scope_span);
             for s in body {
-                collect_symbols(s, symbols, Some(snode.span));
+                recurse!(s, Some(snode.span));
             }
         }
         Node::TryCatch {
@@ -257,45 +356,45 @@ fn collect_symbols(snode: &SNode, symbols: &mut Vec<SymbolInfo>, scope_span: Opt
             ..
         } => {
             for s in body {
-                collect_symbols(s, symbols, Some(snode.span));
+                recurse!(s, Some(snode.span));
             }
             if let Some(var) = error_var {
-                symbols.push(SymbolInfo {
-                    name: var.clone(),
-                    kind: HarnSymbolKind::Variable,
-                    def_span: snode.span,
-                    type_info: None,
-                    signature: None,
-                    scope_span: Some(snode.span),
-                });
+                symbols.push(simple_sym!(
+                    var.clone(),
+                    HarnSymbolKind::Variable,
+                    snode.span,
+                    None,
+                    None,
+                    Some(snode.span)
+                ));
             }
             for s in catch_body {
-                collect_symbols(s, symbols, Some(snode.span));
+                recurse!(s, Some(snode.span));
             }
             if let Some(fb) = finally_body {
                 for s in fb {
-                    collect_symbols(s, symbols, Some(snode.span));
+                    recurse!(s, Some(snode.span));
                 }
             }
         }
         Node::TryExpr { body } => {
             for s in body {
-                collect_symbols(s, symbols, Some(snode.span));
+                recurse!(s, Some(snode.span));
             }
         }
         Node::Closure { params, body, .. } => {
             for p in params {
-                symbols.push(SymbolInfo {
-                    name: p.name.clone(),
-                    kind: HarnSymbolKind::Parameter,
-                    def_span: snode.span,
-                    type_info: p.type_expr.clone(),
-                    signature: None,
-                    scope_span: Some(snode.span),
-                });
+                symbols.push(simple_sym!(
+                    p.name.clone(),
+                    HarnSymbolKind::Parameter,
+                    snode.span,
+                    p.type_expr.clone(),
+                    None,
+                    Some(snode.span)
+                ));
             }
             for s in body {
-                collect_symbols(s, symbols, Some(snode.span));
+                recurse!(s, Some(snode.span));
             }
         }
         // Recurse into all child-bearing nodes
@@ -304,32 +403,32 @@ fn collect_symbols(snode: &SNode, symbols: &mut Vec<SymbolInfo>, scope_span: Opt
             then_body,
             else_body,
         } => {
-            collect_symbols(condition, symbols, scope_span);
+            recurse!(condition, scope_span);
             for s in then_body {
-                collect_symbols(s, symbols, scope_span);
+                recurse!(s, scope_span);
             }
             if let Some(eb) = else_body {
                 for s in eb {
-                    collect_symbols(s, symbols, scope_span);
+                    recurse!(s, scope_span);
                 }
             }
         }
         Node::WhileLoop { condition, body } => {
-            collect_symbols(condition, symbols, scope_span);
+            recurse!(condition, scope_span);
             for s in body {
-                collect_symbols(s, symbols, scope_span);
+                recurse!(s, scope_span);
             }
         }
         Node::Retry { count, body } => {
-            collect_symbols(count, symbols, scope_span);
+            recurse!(count, scope_span);
             for s in body {
-                collect_symbols(s, symbols, scope_span);
+                recurse!(s, scope_span);
             }
         }
         Node::Parallel { count, body, .. } => {
-            collect_symbols(count, symbols, scope_span);
+            recurse!(count, scope_span);
             for s in body {
-                collect_symbols(s, symbols, scope_span);
+                recurse!(s, scope_span);
             }
         }
         Node::ParallelMap {
@@ -337,17 +436,17 @@ fn collect_symbols(snode: &SNode, symbols: &mut Vec<SymbolInfo>, scope_span: Opt
             variable,
             body,
         } => {
-            collect_symbols(list, symbols, scope_span);
-            symbols.push(SymbolInfo {
-                name: variable.clone(),
-                kind: HarnSymbolKind::Variable,
-                def_span: snode.span,
-                type_info: None,
-                signature: None,
-                scope_span: Some(snode.span),
-            });
+            recurse!(list, scope_span);
+            symbols.push(simple_sym!(
+                variable.clone(),
+                HarnSymbolKind::Variable,
+                snode.span,
+                None,
+                None,
+                Some(snode.span)
+            ));
             for s in body {
-                collect_symbols(s, symbols, Some(snode.span));
+                recurse!(s, Some(snode.span));
             }
         }
         Node::ParallelSettle {
@@ -355,131 +454,131 @@ fn collect_symbols(snode: &SNode, symbols: &mut Vec<SymbolInfo>, scope_span: Opt
             variable,
             body,
         } => {
-            collect_symbols(list, symbols, scope_span);
-            symbols.push(SymbolInfo {
-                name: variable.clone(),
-                kind: HarnSymbolKind::Variable,
-                def_span: snode.span,
-                type_info: None,
-                signature: None,
-                scope_span: Some(snode.span),
-            });
+            recurse!(list, scope_span);
+            symbols.push(simple_sym!(
+                variable.clone(),
+                HarnSymbolKind::Variable,
+                snode.span,
+                None,
+                None,
+                Some(snode.span)
+            ));
             for s in body {
-                collect_symbols(s, symbols, Some(snode.span));
+                recurse!(s, Some(snode.span));
             }
         }
         Node::MatchExpr { value, arms } => {
-            collect_symbols(value, symbols, scope_span);
+            recurse!(value, scope_span);
             for arm in arms {
-                collect_symbols(&arm.pattern, symbols, scope_span);
+                recurse!(&arm.pattern, scope_span);
                 for s in &arm.body {
-                    collect_symbols(s, symbols, scope_span);
+                    recurse!(s, scope_span);
                 }
             }
         }
         Node::Block(stmts) => {
             for s in stmts {
-                collect_symbols(s, symbols, scope_span);
+                recurse!(s, scope_span);
             }
         }
         Node::BinaryOp { left, right, .. } => {
-            collect_symbols(left, symbols, scope_span);
-            collect_symbols(right, symbols, scope_span);
+            recurse!(left, scope_span);
+            recurse!(right, scope_span);
         }
         Node::UnaryOp { operand, .. } => {
-            collect_symbols(operand, symbols, scope_span);
+            recurse!(operand, scope_span);
         }
         Node::TryOperator { operand } => {
-            collect_symbols(operand, symbols, scope_span);
+            recurse!(operand, scope_span);
         }
         Node::FunctionCall { args, .. } => {
             for a in args {
-                collect_symbols(a, symbols, scope_span);
+                recurse!(a, scope_span);
             }
         }
         Node::MethodCall { object, args, .. } | Node::OptionalMethodCall { object, args, .. } => {
-            collect_symbols(object, symbols, scope_span);
+            recurse!(object, scope_span);
             for a in args {
-                collect_symbols(a, symbols, scope_span);
+                recurse!(a, scope_span);
             }
         }
         Node::PropertyAccess { object, .. } | Node::OptionalPropertyAccess { object, .. } => {
-            collect_symbols(object, symbols, scope_span);
+            recurse!(object, scope_span);
         }
         Node::SubscriptAccess { object, index } => {
-            collect_symbols(object, symbols, scope_span);
-            collect_symbols(index, symbols, scope_span);
+            recurse!(object, scope_span);
+            recurse!(index, scope_span);
         }
         Node::SliceAccess { object, start, end } => {
-            collect_symbols(object, symbols, scope_span);
+            recurse!(object, scope_span);
             if let Some(s) = start {
-                collect_symbols(s, symbols, scope_span);
+                recurse!(s, scope_span);
             }
             if let Some(e) = end {
-                collect_symbols(e, symbols, scope_span);
+                recurse!(e, scope_span);
             }
         }
         Node::Assignment { target, value, .. } => {
-            collect_symbols(target, symbols, scope_span);
-            collect_symbols(value, symbols, scope_span);
+            recurse!(target, scope_span);
+            recurse!(value, scope_span);
         }
         Node::ReturnStmt { value: Some(v) } => {
-            collect_symbols(v, symbols, scope_span);
+            recurse!(v, scope_span);
         }
         Node::ThrowStmt { value } => {
-            collect_symbols(value, symbols, scope_span);
+            recurse!(value, scope_span);
         }
         Node::Ternary {
             condition,
             true_expr,
             false_expr,
         } => {
-            collect_symbols(condition, symbols, scope_span);
-            collect_symbols(true_expr, symbols, scope_span);
-            collect_symbols(false_expr, symbols, scope_span);
+            recurse!(condition, scope_span);
+            recurse!(true_expr, scope_span);
+            recurse!(false_expr, scope_span);
         }
         Node::SpawnExpr { body } | Node::MutexBlock { body } => {
             for s in body {
-                collect_symbols(s, symbols, scope_span);
+                recurse!(s, scope_span);
             }
         }
         Node::DeadlineBlock { duration, body } => {
-            collect_symbols(duration, symbols, scope_span);
+            recurse!(duration, scope_span);
             for s in body {
-                collect_symbols(s, symbols, scope_span);
+                recurse!(s, scope_span);
             }
         }
         Node::GuardStmt {
             condition,
             else_body,
         } => {
-            collect_symbols(condition, symbols, scope_span);
+            recurse!(condition, scope_span);
             for s in else_body {
-                collect_symbols(s, symbols, scope_span);
+                recurse!(s, scope_span);
             }
         }
         Node::RangeExpr { start, end, .. } => {
-            collect_symbols(start, symbols, scope_span);
-            collect_symbols(end, symbols, scope_span);
+            recurse!(start, scope_span);
+            recurse!(end, scope_span);
         }
         Node::ListLiteral(items) => {
             for item in items {
-                collect_symbols(item, symbols, scope_span);
+                recurse!(item, scope_span);
             }
         }
         Node::DictLiteral(entries) | Node::AskExpr { fields: entries } => {
-            collect_dict_entries(entries, symbols, scope_span);
+            collect_dict_entries(entries, symbols, scope_span, source);
         }
         Node::StructConstruct { fields, .. } => {
-            collect_dict_entries(fields, symbols, scope_span);
+            collect_dict_entries(fields, symbols, scope_span, source);
         }
         Node::EnumConstruct { args, .. } => {
             for a in args {
-                collect_symbols(a, symbols, scope_span);
+                recurse!(a, scope_span);
             }
         }
         Node::Spread(inner) => {
-            collect_symbols(inner, symbols, scope_span);
+            recurse!(inner, scope_span);
         }
         Node::SelectExpr {
             cases,
@@ -487,28 +586,28 @@ fn collect_symbols(snode: &SNode, symbols: &mut Vec<SymbolInfo>, scope_span: Opt
             default_body,
         } => {
             for case in cases {
-                collect_symbols(&case.channel, symbols, scope_span);
-                symbols.push(SymbolInfo {
-                    name: case.variable.clone(),
-                    kind: HarnSymbolKind::Variable,
-                    def_span: snode.span,
-                    type_info: None,
-                    signature: None,
-                    scope_span: Some(snode.span),
-                });
+                recurse!(&case.channel, scope_span);
+                symbols.push(simple_sym!(
+                    case.variable.clone(),
+                    HarnSymbolKind::Variable,
+                    snode.span,
+                    None,
+                    None,
+                    Some(snode.span)
+                ));
                 for s in &case.body {
-                    collect_symbols(s, symbols, Some(snode.span));
+                    recurse!(s, Some(snode.span));
                 }
             }
             if let Some((dur, body)) = timeout {
-                collect_symbols(dur, symbols, scope_span);
+                recurse!(dur, scope_span);
                 for s in body {
-                    collect_symbols(s, symbols, Some(snode.span));
+                    recurse!(s, Some(snode.span));
                 }
             }
             if let Some(body) = default_body {
                 for s in body {
-                    collect_symbols(s, symbols, Some(snode.span));
+                    recurse!(s, Some(snode.span));
                 }
             }
         }
@@ -523,13 +622,15 @@ fn collect_symbols(snode: &SNode, symbols: &mut Vec<SymbolInfo>, scope_span: Opt
                 type_info: None,
                 signature: Some(sig),
                 scope_span,
+                doc_comment: extract_doc_comment(source, &snode.span),
+                impl_type: None,
             });
             for s in body {
-                collect_symbols(s, symbols, Some(snode.span));
+                recurse!(s, Some(snode.span));
             }
         }
         Node::YieldExpr { value: Some(v) } => {
-            collect_symbols(v, symbols, scope_span);
+            recurse!(v, scope_span);
         }
         Node::InterpolatedString(_)
         | Node::StringLiteral(_)
@@ -553,10 +654,11 @@ fn collect_dict_entries(
     entries: &[DictEntry],
     symbols: &mut Vec<SymbolInfo>,
     scope_span: Option<Span>,
+    source: &str,
 ) {
     for entry in entries {
-        collect_symbols(&entry.key, symbols, scope_span);
-        collect_symbols(&entry.value, symbols, scope_span);
+        collect_symbols(&entry.key, symbols, scope_span, source, None);
+        collect_symbols(&entry.value, symbols, scope_span, source, None);
     }
 }
 

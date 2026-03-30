@@ -102,7 +102,7 @@ impl DocumentState {
         }
 
         // Build symbol table
-        self.symbols = build_symbol_table(&program);
+        self.symbols = build_symbol_table(&program, &self.source);
         self.ast = Some(program);
     }
 }
