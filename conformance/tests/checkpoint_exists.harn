@@ -1,29 +1,23 @@
 pipeline test(task) {
   // Start clean in case a previous run left state
   checkpoint_clear()
-
   // Non-existent key returns false
   assert(!checkpoint_exists("step1"), "missing key should return false")
-
   // After setting, exists returns true
   checkpoint("step1", "done")
   assert(checkpoint_exists("step1"), "existing key should return true")
-
   // Works with any serializable value type
   checkpoint("step2", 42)
   checkpoint("step3", {status: "ok"})
   assert(checkpoint_exists("step2"), "int value should exist")
   assert(checkpoint_exists("step3"), "dict value should exist")
   assert(!checkpoint_exists("step4"), "step4 not set yet")
-
   // Still works after overwriting a key
   checkpoint("step1", "updated")
   assert(checkpoint_exists("step1"), "still exists after overwrite")
-
   // Also works for nil values (key present even if value is nil)
   checkpoint("nil_key", nil)
   assert(checkpoint_exists("nil_key"), "key with nil value should still exist")
-
   checkpoint_clear()
   log("checkpoint_exists tests passed")
 }

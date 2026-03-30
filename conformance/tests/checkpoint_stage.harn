@@ -3,54 +3,41 @@ import { checkpoint_stage, checkpoint_stage_retry } from "std/checkpoint"
 pipeline test(task) {
   // Start clean
   checkpoint_clear()
-
   // --- checkpoint_stage ---
-
   // First call: f() should run and return its value
   let result1 = checkpoint_stage("step1", fn() { 42 })
   assert(result1 == 42, "first call should return fn result")
   assert(checkpoint_exists("step1"), "checkpoint should be saved")
-
   // Second call with same name: must return cached value (42), not re-run
   let result2 = checkpoint_stage("step1", fn() { 99 })
   assert(result2 == 42, "second call should return cached value, not 99")
-
   // Different name: f() runs fresh
   let result3 = checkpoint_stage("step2", fn() { "hello" })
   assert(result3 == "hello", "different stage should run its fn")
-
   // Verify both keys are now checkpointed
   assert(checkpoint_exists("step2"), "step2 should be checkpointed")
-
   // Works with dict results
   let result4 = checkpoint_stage("step3", fn() { {x: 1, y: 2} })
   assert(result4.x == 1, "dict result preserved")
   assert(result4.y == 2, "dict result preserved")
-
   // Second call with dict: returns cached dict
   let result4b = checkpoint_stage("step3", fn() { {x: 99, y: 99} })
   assert(result4b.x == 1, "cached dict result returned, not re-run")
-
   // List results are preserved
   let result5 = checkpoint_stage("step4", fn() { [1, 2, 3] })
   assert(len(result5) == 3, "list result preserved")
   assert(result5[0] == 1, "list element preserved")
-
   // Second call returns cached list
   let result5b = checkpoint_stage("step4", fn() { [9, 9, 9] })
   assert(result5b[0] == 1, "cached list returned")
-
   // --- checkpoint_stage_retry ---
-
   // Succeeds on first attempt
   let r = checkpoint_stage_retry("retry_step", 3, fn() { "success" })
   assert(r == "success", "retry stage should return value")
   assert(checkpoint_exists("retry_step"), "successful retry stage cached")
-
   // Cached: returns stored value, doesn't re-run
   let r2 = checkpoint_stage_retry("retry_step", 3, fn() { "different" })
   assert(r2 == "success", "cached retry result returned")
-
   checkpoint_clear()
   log("checkpoint_stage tests passed")
 }
