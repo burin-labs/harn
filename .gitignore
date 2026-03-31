@@ -3,3 +3,6 @@ node_modules/
 *.DS_Store
 .burin/
 docs/dist/
+tree-sitter-harn/*.dylib
+tree-sitter-harn/*.so
+tree-sitter-harn/*.dll
