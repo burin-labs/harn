@@ -72,6 +72,7 @@ println(result.text)
 | `tool_calls` | list | Tool calls (when model uses tools) |
 | `thinking` | string | Reasoning trace (when `thinking` is enabled) |
 | `stop_reason` | string | `"end_turn"`, `"max_tokens"`, `"tool_use"`, `"stop_sequence"` |
+| `transcript` | dict | Transcript carrying message history, summary, metadata, and id |
 
 ### Options dict
 
@@ -95,6 +96,8 @@ println(result.text)
 | `cache` | bool | `false` | Enable prompt caching (Anthropic) |
 | `timeout` | int | `120` | Request timeout in seconds |
 | `messages` | list | nil | Full message list (overrides prompt) |
+| `transcript` | dict | nil | Continue from a previous transcript; prompt is appended as the next user turn |
+| `model_tier` | string | nil | Resolve a configured tier alias such as `"small"`, `"mid"`, or `"frontier"` |
 
 Provider-specific overrides can be passed as sub-dicts:
 
@@ -103,13 +106,27 @@ let result = llm_call("hello", nil, {
   provider: "ollama",
   ollama: {num_ctx: 32768}
 })
+```
+
+## llm_completion
+
+Use `llm_completion` for text continuation and fill-in-the-middle generation.
+It lives at the same abstraction level as `llm_call`.
+
+```harn
+let result = llm_completion("let total = ", ";", nil, {
+  provider: "ollama",
+  model_tier: "small"
+})
+println(result.text)
+```
 
 ## agent_loop
 
 Run an agent that keeps working until it's done. The agent maintains
 conversation history across turns and loops until it outputs the
 `##DONE##` sentinel. Returns a dict with `{status, text, iterations,
-duration_ms, tools_used}`.
+duration_ms, tools_used, transcript}`.
 
 ```harn
 let result = agent_loop(
@@ -144,6 +161,7 @@ println(result.iterations) // number of LLM round-trips
 | `iterations` | int | Number of LLM round-trips |
 | `duration_ms` | int | Total wall-clock time in milliseconds |
 | `tools_used` | list | Names of tools that were called |
+| `transcript` | dict | Transcript of the full conversation state |
 
 ### agent_loop options
 
@@ -204,6 +222,27 @@ for chunk in stream {
 `llm_stream` accepts the same options as `llm_call` (provider, model,
 max_tokens). The channel closes automatically when the response is
 complete.
+
+## Transcript management
+
+Harn includes transcript primitives for carrying context across calls,
+forks, repairs, and resumptions:
+
+```harn
+let first = llm_call("Plan the work", nil, {provider: "mock"})
+let second = llm_call("Continue", nil, {
+  provider: "mock",
+  transcript: first.transcript
+})
+
+let compacted = transcript_compact(second.transcript, {
+  keep_last: 4,
+  summary: "Planning complete."
+})
+```
+
+Use `transcript_summarize()` when you want Harn to create a fresh summary with
+an LLM, or `transcript_compact()` when you want a local compaction step.
 
 ## Cost tracking
 

@@ -7,6 +7,7 @@ mod concurrency;
 mod crypto;
 mod datetime;
 mod fs;
+mod host;
 mod io;
 mod json;
 mod logging;
@@ -52,6 +53,7 @@ pub fn register_core_stdlib(vm: &mut Vm) {
 /// Requires OS access (file reads, process spawning, environment vars).
 pub fn register_io_stdlib(vm: &mut Vm) {
     io::register_io_builtins(vm);
+    host::register_host_builtins(vm);
     fs::register_fs_builtins(vm);
     process::register_process_builtins(vm);
     process::register_path_builtins(vm);

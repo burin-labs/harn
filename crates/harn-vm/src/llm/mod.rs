@@ -30,8 +30,10 @@ use crate::stdlib::json_to_vm_value;
 use crate::value::{VmChannelHandle, VmValue};
 use crate::vm::Vm;
 
-use self::api::{vm_build_llm_result, vm_call_llm_full};
-use self::helpers::{extract_json, extract_llm_options, opt_bool, opt_int, opt_str};
+use self::api::{vm_build_llm_result, vm_call_completion_full, vm_call_llm_full};
+use self::helpers::{
+    extract_json, extract_llm_options, opt_bool, opt_int, opt_str, transcript_to_vm,
+};
 use self::stream::vm_stream_llm;
 use self::trace::trace_llm_call;
 
@@ -60,6 +62,17 @@ pub fn register_llm_builtins(vm: &mut Vm) {
 
         let start = std::time::Instant::now();
         let result = vm_call_llm_full(&opts).await?;
+        let mut transcript_messages = opts.messages.clone();
+        transcript_messages.push(serde_json::json!({
+            "role": "assistant",
+            "content": result.text.clone(),
+        }));
+        let transcript = transcript_to_vm(
+            opts.transcript_id.clone(),
+            opts.transcript_summary.clone(),
+            opts.transcript_metadata.clone(),
+            &transcript_messages,
+        );
         trace_llm_call(LlmTraceEntry {
             model: result.model.clone(),
             input_tokens: result.input_tokens,
@@ -73,10 +86,36 @@ pub fn register_llm_builtins(vm: &mut Vm) {
             let parsed = serde_json::from_str::<serde_json::Value>(json_str)
                 .ok()
                 .map(|jv| json_to_vm_value(&jv));
-            return Ok(vm_build_llm_result(&result, parsed));
+            return Ok(vm_build_llm_result(&result, parsed, Some(transcript)));
         }
 
-        Ok(vm_build_llm_result(&result, None))
+        Ok(vm_build_llm_result(&result, None, Some(transcript)))
+    });
+
+    vm.register_async_builtin("llm_completion", |args| async move {
+        let prefix = args.first().map(|a| a.display()).unwrap_or_default();
+        let suffix = args.get(1).and_then(|a| {
+            if matches!(a, VmValue::Nil) {
+                None
+            } else {
+                Some(a.display())
+            }
+        });
+        let opts = extract_llm_options(&[
+            VmValue::String(Rc::from(prefix.clone())),
+            args.get(2).cloned().unwrap_or(VmValue::Nil),
+            args.get(3).cloned().unwrap_or(VmValue::Nil),
+        ])?;
+
+        let start = std::time::Instant::now();
+        let result = vm_call_completion_full(&opts, &prefix, suffix.as_deref()).await?;
+        trace_llm_call(LlmTraceEntry {
+            model: result.model.clone(),
+            input_tokens: result.input_tokens,
+            output_tokens: result.output_tokens,
+            duration_ms: start.elapsed().as_millis() as u64,
+        });
+        Ok(vm_build_llm_result(&result, None, None))
     });
 
     // =========================================================================
@@ -170,6 +209,15 @@ pub fn register_llm_builtins(vm: &mut Vm) {
             "tools_used".to_string(),
             VmValue::List(Rc::from(Vec::<VmValue>::new())),
         );
+        result_dict.insert(
+            "transcript".to_string(),
+            transcript_to_vm(
+                opts.transcript_id.clone(),
+                opts.transcript_summary.clone(),
+                opts.transcript_metadata.clone(),
+                &opts.messages,
+            ),
+        );
         Ok(VmValue::Dict(Rc::from(result_dict)))
     });
 
@@ -185,7 +233,8 @@ fn register_llm_stream(vm: &mut Vm) {
     vm.register_async_builtin("llm_stream", |args| async move {
         let opts = extract_llm_options(&args)?;
         let provider = opts.provider.clone();
-        let prompt_text = opts.messages
+        let prompt_text = opts
+            .messages
             .last()
             .and_then(|m| m["content"].as_str())
             .unwrap_or("")
@@ -209,11 +258,7 @@ fn register_llm_stream(vm: &mut Vm) {
                 return;
             }
 
-            let result = vm_stream_llm(
-                &opts,
-                &tx_for_task,
-            )
-            .await;
+            let result = vm_stream_llm(&opts, &tx_for_task).await;
             closed_clone.store(true, std::sync::atomic::Ordering::Relaxed);
             if let Err(e) = result {
                 let _ = tx_for_task

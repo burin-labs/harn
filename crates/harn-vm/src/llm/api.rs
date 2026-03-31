@@ -34,6 +34,9 @@ pub(crate) struct LlmCallOptions {
     // --- Conversation ---
     pub messages: Vec<serde_json::Value>,
     pub system: Option<String>,
+    pub transcript_id: Option<String>,
+    pub transcript_summary: Option<String>,
+    pub transcript_metadata: Option<serde_json::Value>,
 
     // --- Generation ---
     pub max_tokens: i64,
@@ -80,7 +83,11 @@ pub(crate) struct LlmResult {
     pub stop_reason: Option<String>,
 }
 
-pub(crate) fn vm_build_llm_result(result: &LlmResult, parsed_json: Option<VmValue>) -> VmValue {
+pub(crate) fn vm_build_llm_result(
+    result: &LlmResult,
+    parsed_json: Option<VmValue>,
+    transcript: Option<VmValue>,
+) -> VmValue {
     use crate::stdlib::json_to_vm_value;
 
     let mut dict = BTreeMap::new();
@@ -124,6 +131,10 @@ pub(crate) fn vm_build_llm_result(result: &LlmResult, parsed_json: Option<VmValu
         );
     }
 
+    if let Some(transcript) = transcript {
+        dict.insert("transcript".to_string(), transcript);
+    }
+
     VmValue::Dict(Rc::new(dict))
 }
 
@@ -132,9 +143,7 @@ pub(crate) fn vm_build_llm_result(result: &LlmResult, parsed_json: Option<VmValu
 // =============================================================================
 
 /// Execute an LLM call (non-streaming).
-pub(crate) async fn vm_call_llm_full(
-    opts: &LlmCallOptions,
-) -> Result<LlmResult, VmError> {
+pub(crate) async fn vm_call_llm_full(opts: &LlmCallOptions) -> Result<LlmResult, VmError> {
     vm_call_llm_full_inner(opts, None).await
 }
 
@@ -144,6 +153,26 @@ pub(crate) async fn vm_call_llm_full_streaming(
     delta_tx: DeltaSender,
 ) -> Result<LlmResult, VmError> {
     vm_call_llm_full_inner(opts, Some(delta_tx)).await
+}
+
+/// Execute a text completion / fill-in-the-middle call owned by Harn.
+pub(crate) async fn vm_call_completion_full(
+    opts: &LlmCallOptions,
+    prefix: &str,
+    suffix: Option<&str>,
+) -> Result<LlmResult, VmError> {
+    if opts.provider == "mock" {
+        return Ok(mock_completion_response(prefix, suffix));
+    }
+
+    let resolved = crate::llm_config::provider_config(&opts.provider);
+    let completion_endpoint = resolved.and_then(|p| p.completion_endpoint.as_deref());
+
+    match completion_endpoint {
+        Some("/api/generate") => vm_call_completion_ollama(opts, prefix, suffix).await,
+        Some(_) => vm_call_completion_openai_style(opts, prefix, suffix).await,
+        None => vm_call_completion_fallback(opts, prefix, suffix).await,
+    }
 }
 
 async fn vm_call_llm_full_inner(
@@ -212,6 +241,254 @@ async fn vm_call_llm_full_inner(
     super::cost::accumulate_cost(&result.model, result.input_tokens, result.output_tokens)?;
 
     Ok(result)
+}
+
+fn mock_completion_response(prefix: &str, suffix: Option<&str>) -> LlmResult {
+    let suffix = suffix.unwrap_or_default();
+    let text = format!(
+        "Mock completion after {} chars{}",
+        prefix.chars().count(),
+        if suffix.is_empty() {
+            String::new()
+        } else {
+            format!(" before {} chars", suffix.chars().count())
+        }
+    );
+    LlmResult {
+        text,
+        tool_calls: Vec::new(),
+        input_tokens: (prefix.len() + suffix.len()) as i64,
+        output_tokens: 16,
+        model: "mock".to_string(),
+        thinking: None,
+        stop_reason: Some("stop".to_string()),
+    }
+}
+
+async fn vm_call_completion_openai_style(
+    opts: &LlmCallOptions,
+    prefix: &str,
+    suffix: Option<&str>,
+) -> Result<LlmResult, VmError> {
+    let llm_timeout = opts.timeout.unwrap_or_else(|| {
+        std::env::var("HARN_LLM_TIMEOUT")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(120)
+    });
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(30))
+        .timeout(std::time::Duration::from_secs(llm_timeout))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+
+    let pdef = crate::llm_config::provider_config(&opts.provider);
+    let base_url = pdef
+        .map(crate::llm_config::resolve_base_url)
+        .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
+    let endpoint = pdef
+        .and_then(|p| p.completion_endpoint.as_deref())
+        .unwrap_or("/completions");
+
+    let mut body = serde_json::json!({
+        "model": opts.model,
+        "prompt": prefix,
+        "max_tokens": opts.max_tokens,
+    });
+    if let Some(suffix) = suffix.filter(|s| !s.is_empty()) {
+        body["suffix"] = serde_json::json!(suffix);
+    }
+    if let Some(temp) = opts.temperature {
+        body["temperature"] = serde_json::json!(temp);
+    }
+    if let Some(top_p) = opts.top_p {
+        body["top_p"] = serde_json::json!(top_p);
+    }
+    if let Some(stop) = &opts.stop {
+        body["stop"] = serde_json::json!(stop);
+    }
+    if let Some(seed) = opts.seed {
+        body["seed"] = serde_json::json!(seed);
+    }
+    if let Some(overrides) = &opts.provider_overrides {
+        if let Some(obj) = overrides.as_object() {
+            for (k, v) in obj {
+                body[k] = v.clone();
+            }
+        }
+    }
+
+    let req = client
+        .post(format!("{base_url}{endpoint}"))
+        .header("Content-Type", "application/json")
+        .json(&body);
+    let req = apply_auth_headers(req, &opts.api_key, pdef);
+
+    let response = req.send().await.map_err(|e| {
+        VmError::Thrown(VmValue::String(Rc::from(format!(
+            "{} completion API error: {e}",
+            opts.provider
+        ))))
+    })?;
+
+    let json: serde_json::Value = response.json().await.map_err(|e| {
+        VmError::Thrown(VmValue::String(Rc::from(format!(
+            "{} completion response parse error: {e}",
+            opts.provider
+        ))))
+    })?;
+
+    if let Some(err) = json["error"]["message"].as_str() {
+        return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+            "{} completion API error: {err}",
+            opts.provider
+        )))));
+    }
+
+    Ok(LlmResult {
+        text: json["choices"][0]["text"]
+            .as_str()
+            .unwrap_or("")
+            .to_string(),
+        tool_calls: Vec::new(),
+        input_tokens: json["usage"]["prompt_tokens"].as_i64().unwrap_or(0),
+        output_tokens: json["usage"]["completion_tokens"].as_i64().unwrap_or(0),
+        model: opts.model.clone(),
+        thinking: None,
+        stop_reason: json["choices"][0]["finish_reason"]
+            .as_str()
+            .map(|s| s.to_string()),
+    })
+}
+
+async fn vm_call_completion_ollama(
+    opts: &LlmCallOptions,
+    prefix: &str,
+    suffix: Option<&str>,
+) -> Result<LlmResult, VmError> {
+    let llm_timeout = opts.timeout.unwrap_or_else(|| {
+        std::env::var("HARN_LLM_TIMEOUT")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(120)
+    });
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(30))
+        .timeout(std::time::Duration::from_secs(llm_timeout))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+    let pdef = crate::llm_config::provider_config(&opts.provider);
+    let base_url = pdef
+        .map(crate::llm_config::resolve_base_url)
+        .unwrap_or_else(|| "http://localhost:11434".to_string());
+    let endpoint = pdef
+        .and_then(|p| p.completion_endpoint.as_deref())
+        .unwrap_or("/api/generate");
+
+    let mut options = serde_json::Map::new();
+    if let Some(temp) = opts.temperature {
+        options.insert("temperature".to_string(), serde_json::json!(temp));
+    }
+    if let Some(top_p) = opts.top_p {
+        options.insert("top_p".to_string(), serde_json::json!(top_p));
+    }
+    if let Some(top_k) = opts.top_k {
+        options.insert("top_k".to_string(), serde_json::json!(top_k));
+    }
+    if let Some(seed) = opts.seed {
+        options.insert("seed".to_string(), serde_json::json!(seed));
+    }
+    if let Some(stop) = &opts.stop {
+        options.insert("stop".to_string(), serde_json::json!(stop));
+    }
+    options.insert(
+        "num_predict".to_string(),
+        serde_json::json!(opts.max_tokens),
+    );
+
+    let mut body = serde_json::json!({
+        "model": opts.model,
+        "prompt": prefix,
+        "stream": false,
+        "raw": true,
+        "options": options,
+    });
+    if let Some(suffix) = suffix.filter(|s| !s.is_empty()) {
+        body["suffix"] = serde_json::json!(suffix);
+    }
+    if let Some(system) = &opts.system {
+        body["system"] = serde_json::json!(system);
+    }
+    if let Some(overrides) = &opts.provider_overrides {
+        if let Some(obj) = overrides.as_object() {
+            for (k, v) in obj {
+                body[k] = v.clone();
+            }
+        }
+    }
+
+    let req = client
+        .post(format!("{base_url}{endpoint}"))
+        .header("Content-Type", "application/json")
+        .json(&body);
+    let req = apply_auth_headers(req, &opts.api_key, pdef);
+
+    let response = req.send().await.map_err(|e| {
+        VmError::Thrown(VmValue::String(Rc::from(format!(
+            "{} completion API error: {e}",
+            opts.provider
+        ))))
+    })?;
+    let json: serde_json::Value = response.json().await.map_err(|e| {
+        VmError::Thrown(VmValue::String(Rc::from(format!(
+            "{} completion response parse error: {e}",
+            opts.provider
+        ))))
+    })?;
+    if let Some(err) = json["error"].as_str() {
+        return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+            "{} completion API error: {err}",
+            opts.provider
+        )))));
+    }
+
+    Ok(LlmResult {
+        text: json["response"].as_str().unwrap_or("").to_string(),
+        tool_calls: Vec::new(),
+        input_tokens: json["prompt_eval_count"].as_i64().unwrap_or(0),
+        output_tokens: json["eval_count"].as_i64().unwrap_or(0),
+        model: opts.model.clone(),
+        thinking: None,
+        stop_reason: json["done_reason"].as_str().map(|s| s.to_string()),
+    })
+}
+
+async fn vm_call_completion_fallback(
+    opts: &LlmCallOptions,
+    prefix: &str,
+    suffix: Option<&str>,
+) -> Result<LlmResult, VmError> {
+    let mut fallback_opts = opts.clone();
+    let mut instruction = String::from(
+        "Continue the user's text. Return only the missing continuation with no commentary, fences, or quoting.",
+    );
+    if let Some(suffix) = suffix.filter(|s| !s.is_empty()) {
+        instruction.push_str("\nRespect the required suffix exactly and produce only the text that belongs between PREFIX and SUFFIX.");
+        fallback_opts.messages = vec![serde_json::json!({
+            "role": "user",
+            "content": format!("PREFIX:\n{prefix}\n\nSUFFIX:\n{suffix}\n\nReturn only the missing text between PREFIX and SUFFIX."),
+        })];
+    } else {
+        fallback_opts.messages = vec![serde_json::json!({
+            "role": "user",
+            "content": format!("PREFIX:\n{prefix}\n\nReturn only the next continuation text."),
+        })];
+    }
+    fallback_opts.system = match &opts.system {
+        Some(system) => Some(format!("{system}\n\n{instruction}")),
+        None => Some(instruction),
+    };
+    vm_call_llm_full(&fallback_opts).await
 }
 
 async fn vm_call_llm_api(
@@ -360,7 +637,10 @@ async fn vm_call_llm_api(
     // Ollama thinking support
     if is_ollama {
         if let Some(ref thinking) = opts.thinking {
-            body["think"] = serde_json::json!(matches!(thinking, ThinkingConfig::Enabled | ThinkingConfig::WithBudget(_)));
+            body["think"] = serde_json::json!(matches!(
+                thinking,
+                ThinkingConfig::Enabled | ThinkingConfig::WithBudget(_)
+            ));
         }
     }
 

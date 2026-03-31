@@ -80,6 +80,8 @@ import "std/collections"
 import "std/math"
 import "std/path"
 import "std/json"
+import "std/context"
+import "std/agents"
 ```
 
 ### std/text
@@ -174,6 +176,30 @@ let merged = merge({a: 1}, {b: 2})    // {a: 1, b: 2}
 let subset = pick({a: 1, b: 2, c: 3}, ["a", "c"])  // {a: 1, c: 3}
 let rest = omit({a: 1, b: 2, c: 3}, ["b"])          // {a: 1, c: 3}
 ```
+
+### std/context
+
+Structured prompt/context assembly helpers:
+
+| Function | Description |
+|---|---|
+| `section(name, content, options?)` | Create a named context section |
+| `context_attach(name, path, content, options?)` | Attach file/path-oriented context |
+| `context(sections, options?)` | Build a context object |
+| `context_render(ctx, options?)` | Render a context into prompt text |
+| `prompt_compose(task, ctx, options?)` | Compose `{prompt, system, rendered_context}` |
+
+### std/agents
+
+Workflow helpers built on transcripts and `agent_loop`:
+
+| Function | Description |
+|---|---|
+| `workflow(config)` | Create a workflow config |
+| `task_run(task, flow, overrides?)` | Run an act/verify/repair workflow |
+| `workflow_continue(prev, task, flow, overrides?)` | Continue from an existing transcript |
+| `workflow_compact(prev, options?)` | Summarize and compact a transcript |
+| `workflow_reset(prev, carry_summary)` | Reset or summarize-then-reset a workflow transcript |
 
 ### Selective imports
 

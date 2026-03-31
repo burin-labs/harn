@@ -36,6 +36,36 @@ pub(crate) fn register_config_builtins(vm: &mut Vm) {
         Ok(VmValue::Dict(Rc::new(dict)))
     });
 
+    vm.register_builtin("llm_pick_model", |args, _out| {
+        let target = args.first().map(|a| a.display()).unwrap_or_default();
+        let options = args.get(1).and_then(|v| v.as_dict());
+        let preferred_provider = options.and_then(|d| d.get("provider")).map(|v| v.display());
+
+        let (id, provider) = if let Some((id, provider)) =
+            llm_config::resolve_tier_model(&target, preferred_provider.as_deref())
+        {
+            (id, provider)
+        } else {
+            let (id, provider) = llm_config::resolve_model(&target);
+            (
+                id.clone(),
+                provider.unwrap_or_else(|| llm_config::infer_provider(&id)),
+            )
+        };
+
+        let mut dict = BTreeMap::new();
+        dict.insert("id".to_string(), VmValue::String(Rc::from(id.clone())));
+        dict.insert(
+            "provider".to_string(),
+            VmValue::String(Rc::from(provider.clone())),
+        );
+        dict.insert(
+            "tier".to_string(),
+            VmValue::String(Rc::from(llm_config::model_tier(&id))),
+        );
+        Ok(VmValue::Dict(Rc::new(dict)))
+    });
+
     vm.register_builtin("llm_providers", |_args, _out| {
         let names = llm_config::provider_names();
         let list: Vec<VmValue> = names
@@ -172,6 +202,12 @@ fn provider_def_to_vm_value(pdef: &llm_config::ProviderDef) -> VmValue {
         "chat_endpoint".to_string(),
         VmValue::String(Rc::from(pdef.chat_endpoint.as_str())),
     );
+    if let Some(endpoint) = &pdef.completion_endpoint {
+        dict.insert(
+            "completion_endpoint".to_string(),
+            VmValue::String(Rc::from(endpoint.as_str())),
+        );
+    }
     if let Some(header) = &pdef.auth_header {
         dict.insert(
             "auth_header".to_string(),

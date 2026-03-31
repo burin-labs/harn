@@ -60,9 +60,7 @@ async fn main() {
             // Find the .harn file (skip flag values)
             let flag_vals: std::collections::HashSet<&str> = args
                 .windows(2)
-                .filter(|w| {
-                    w[0] == "--deny" || w[0] == "--allow" || w[0] == "-e"
-                })
+                .filter(|w| w[0] == "--deny" || w[0] == "--allow" || w[0] == "-e")
                 .map(|w| w[1].as_str())
                 .collect();
             let file = args

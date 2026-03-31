@@ -1,0 +1,8 @@
+pipeline default() {
+  let caps = host_capabilities()
+  println(host_has("process", "exec"))
+  println(caps?.workspace?.description != nil)
+  let result = host_invoke("process", "exec", {command: "printf hi"})
+  println(result?.success)
+  println(result?.combined)
+}

@@ -1,0 +1,26 @@
+pipeline default() {
+  let result = llm_call("hello world", nil, {provider: "mock"})
+  println(result?.transcript?._type)
+
+  let resumed = llm_call("follow up", nil, {
+    provider: "mock",
+    transcript: result?.transcript
+  })
+  println(len(transcript_messages(resumed?.transcript)))
+
+  let compacted = transcript_compact(resumed?.transcript, {
+    keep_last: 1,
+    summary: "summary"
+  })
+  println(transcript_summary(compacted))
+
+  let completion = llm_completion("let x = ", ";", nil, {
+    provider: "mock",
+    model_tier: "small"
+  })
+  println(completion?.text)
+
+  let picked = llm_pick_model("frontier")
+  println(picked?.provider)
+  println(picked?.tier)
+}

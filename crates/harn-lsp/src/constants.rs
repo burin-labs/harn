@@ -58,7 +58,11 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
     ("http_mock_clear", "http_mock_clear() -> nil"),
     ("http_mock_calls", "http_mock_calls() -> list"),
     // LLM
-    ("llm_call", "llm_call(prompt, system?, options?) -> string"),
+    ("llm_call", "llm_call(prompt, system?, options?) -> dict"),
+    (
+        "llm_completion",
+        "llm_completion(prefix, suffix?, system?, options?) -> dict",
+    ),
     // LLM cost tracking
     (
         "llm_cost",
@@ -233,7 +237,20 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
         "llm_infer_provider(model_id) -> string",
     ),
     ("llm_model_tier", "llm_model_tier(model_id) -> string"),
+    ("llm_pick_model", "llm_pick_model(target, options?) -> dict"),
     ("llm_resolve_model", "llm_resolve_model(alias) -> dict"),
+    ("transcript", "transcript(metadata?) -> dict"),
+    (
+        "transcript_compact",
+        "transcript_compact(transcript, options?) -> dict",
+    ),
+    (
+        "transcript_summarize",
+        "transcript_summarize(transcript, options?) -> dict",
+    ),
+    ("host_capabilities", "host_capabilities() -> dict"),
+    ("host_has", "host_has(capability, op?) -> bool"),
+    ("host_invoke", "host_invoke(capability, op, params?) -> any"),
     ("llm_providers", "llm_providers() -> list"),
     ("llm_config", "llm_config(provider?) -> dict"),
     ("llm_healthcheck", "llm_healthcheck(provider?) -> dict"),
@@ -406,8 +423,9 @@ pub(crate) fn builtin_doc(name: &str) -> Option<String> {
         }
         "http_get" => "**http_get(url)** → string — HTTP GET request",
         "http_post" => "**http_post(url, body, headers?)** → string — HTTP POST request",
-        "llm_call" => "**llm_call(prompt, system?, options?)** → string — Call an LLM API\n\nOptions: `{provider, model, max_tokens}`",
-        "agent_loop" => "**agent_loop(prompt, system?, options?)** → dict — Agent loop with tool dispatch\n\nReturns: `{status, text, iterations, duration_ms, tools_used}`\n\nOptions: `{provider, model, persistent, max_iterations, max_nudges, nudge}`\n\nIn persistent mode, loop continues until `##DONE##` sentinel is output.",
+        "llm_call" => "**llm_call(prompt, system?, options?)** → dict — Call an LLM API\n\nReturns: `{text, model, input_tokens, output_tokens, transcript?}`",
+        "llm_completion" => "**llm_completion(prefix, suffix?, system?, options?)** → dict — Text completion / fill-in-the-middle generation",
+        "agent_loop" => "**agent_loop(prompt, system?, options?)** → dict — Agent loop with tool dispatch\n\nReturns: `{status, text, iterations, duration_ms, tools_used, transcript}`\n\nOptions: `{provider, model, persistent, max_iterations, max_nudges, nudge}`\n\nIn persistent mode, loop continues until `##DONE##` sentinel is output.",
         "await" => "**await(handle)** → value — Wait for spawned task to complete",
         "cancel" => "**cancel(handle)** → nil — Cancel a spawned task",
         "abs" => "**abs(value)** → int | float — Absolute value",
@@ -518,10 +536,17 @@ pub(crate) fn builtin_doc(name: &str) -> Option<String> {
         // LLM provider config
         "llm_infer_provider" => "**llm_infer_provider(model_id)** → string — Infer provider name from model ID",
         "llm_model_tier" => "**llm_model_tier(model_id)** → string — Get model tier (e.g. flagship, mid, small)",
+        "llm_pick_model" => "**llm_pick_model(target, options?)** → dict — Resolve a model alias or tier to `{id, provider, tier}`",
         "llm_resolve_model" => "**llm_resolve_model(alias)** → dict — Resolve a model alias to full model info",
         "llm_providers" => "**llm_providers()** → list — List all configured LLM providers",
         "llm_config" => "**llm_config(provider?)** → dict — Get provider configuration",
         "llm_healthcheck" => "**llm_healthcheck(provider?)** → dict — Check provider health and connectivity",
+        "transcript" => "**transcript(metadata?)** → dict — Create a new transcript",
+        "transcript_compact" => "**transcript_compact(transcript, options?)** → dict — Compact a transcript locally",
+        "transcript_summarize" => "**transcript_summarize(transcript, options?)** → dict — Summarize and compact a transcript with an LLM",
+        "host_capabilities" => "**host_capabilities()** → dict — Typed host capability manifest",
+        "host_has" => "**host_has(capability, op?)** → bool — Check host capability support",
+        "host_invoke" => "**host_invoke(capability, op, params?)** → any — Invoke a typed host operation",
         // Mock HTTP
         "http_mock" => "**http_mock(method, url_pattern, response)** → nil — Register a mock HTTP response for testing",
         "http_mock_clear" => "**http_mock_clear()** → nil — Clear all mocks and recorded calls",

@@ -2,6 +2,38 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.4.29
+
+### Added
+
+- **Typed host capabilities** — `host_capabilities()`, `host_has()`, and `host_invoke()`
+  provide a typed host abstraction for workspace, process, template, and
+  interaction operations in both native and ACP runtimes.
+- **Transcript-aware LLM orchestration** — `llm_call()` and `agent_loop()`
+  now return `transcript`, and new transcript builtins support export/import,
+  fork, compaction, and LLM-assisted summarization for long-running agent work.
+- **`llm_completion()` builtin** — Harn now owns text completion / FIM as an
+  LLM primitive, using provider-native completion endpoints where available and
+  a Harn fallback path otherwise.
+- **Model-tier routing** — `llm_pick_model()` resolves aliases or tiers such as
+  `small`, `mid`, and `frontier` into concrete `{id, provider, tier}` model
+  selections, with built-in default aliases.
+- **Structured context and workflow modules** — new embedded `std/context` and
+  `std/agents` modules provide prompt assembly, context sections, transcript
+  continuation, `task_run()`, verification, repair, and workflow compaction.
+
+### Changed
+
+- **Host process execution results are structured** — `host_invoke("process", "exec", ...)`
+  now returns `{stdout, stderr, combined, status, success}` instead of a flat string.
+- **Workspace listing is richer** — `host_invoke("workspace", "list", ...)`
+  now returns entry dicts with `name`, `path`, and `is_dir`.
+
+### Fixed
+
+- **ACP typed-host parity** — ACP now exposes the same typed host capability
+  surface and normalized process execution results as the local runtime.
+
 ## v0.4.28
 
 ### Breaking changes

@@ -467,6 +467,15 @@ assert_eq(resp.status, 200)
 |---|---|---|---|
 | `prompt_user(msg)` | msg: string (optional) | string | Display message, read line from stdin |
 
+## Host interop
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `host_call(name, args)` | name: string, args: any | any | Generic host escape hatch for legacy integrations |
+| `host_capabilities()` | — | dict | Typed host capability manifest |
+| `host_has(capability, op?)` | capability: string, op: string | bool | Check whether a typed host capability/operation exists |
+| `host_invoke(capability, op, params?)` | capability: string, op: string, params: dict | any | Invoke a typed host operation such as workspace or process |
+
 ## Async and timing
 
 | Function | Parameters | Returns | Description |
@@ -517,10 +526,12 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `llm_call(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Single LLM request. Returns `{text, model, input_tokens, output_tokens}` |
+| `llm_completion(prefix, suffix?, system?, options?)` | prefix: string, suffix: string, system: string, options: dict | dict | Text completion / fill-in-the-middle request. Returns `{text, model, input_tokens, output_tokens}` |
 | `agent_loop(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Multi-turn agent loop with `##DONE##` sentinel. Returns `{status, text, iterations, duration_ms, tools_used}` |
 | `llm_info()` | — | dict | Current LLM config: `{provider, model, api_key_set}` |
 | `llm_usage()` | — | dict | Cumulative usage: `{input_tokens, output_tokens, total_duration_ms, call_count}` |
 | `llm_resolve_model(alias)` | alias: string | dict | Resolve model alias to `{id, provider}` via providers.toml |
+| `llm_pick_model(target, options?)` | target: string, options: dict | dict | Resolve a model alias or tier to `{id, provider, tier}` |
 | `llm_infer_provider(model_id)` | model_id: string | string | Infer provider from model ID (e.g. `"claude-*"` → `"anthropic"`) |
 | `llm_model_tier(model_id)` | model_id: string | string | Get capability tier: `"small"`, `"mid"`, or `"frontier"` |
 | `llm_healthcheck(provider?)` | provider: string | dict | Validate API key. Returns `{valid, message, metadata}` |
@@ -530,6 +541,21 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `llm_session_cost()` | — | dict | Session totals: `{total_cost, input_tokens, output_tokens, call_count}` |
 | `llm_budget(max_cost)` | max_cost: float | nil | Set session budget in USD. LLM calls throw if exceeded |
 | `llm_budget_remaining()` | — | float or nil | Remaining budget (nil if no budget set) |
+
+### Transcript helpers
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `transcript(metadata?)` | metadata: dict | dict | Create a new transcript |
+| `transcript_from_messages(messages_or_transcript)` | list or dict | dict | Normalize a message list into a transcript |
+| `transcript_messages(transcript)` | transcript: dict | list | Get transcript messages |
+| `transcript_summary(transcript)` | transcript: dict | string or nil | Get transcript summary |
+| `transcript_id(transcript)` | transcript: dict | string | Get transcript id |
+| `transcript_export(transcript)` | transcript: dict | string | Export transcript as JSON |
+| `transcript_import(json_text)` | json_text: string | dict | Import transcript JSON |
+| `transcript_fork(transcript, options?)` | transcript: dict, options: dict | dict | Fork transcript, optionally dropping messages or summary |
+| `transcript_summarize(transcript, options?)` | transcript: dict, options: dict | dict | Summarize and compact a transcript via `llm_call` |
+| `transcript_compact(transcript, options?)` | transcript: dict, options: dict | dict | Compact a transcript locally, preserving summary and recent turns |
 
 ### Provider configuration
 

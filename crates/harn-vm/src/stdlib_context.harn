@@ -1,0 +1,127 @@
+import "std/collections"
+
+pub fn clip_text(text, max_chars) {
+  if max_chars == nil || max_chars <= 0 {
+    return text
+  }
+  if len(text) <= max_chars {
+    return text
+  }
+  if max_chars <= 16 {
+    return text.substring(0, max_chars)
+  }
+  return text.substring(0, max_chars - 15) + "\n...[truncated]"
+}
+
+pub fn render_section(section, include_headers, section_max_chars) {
+  if section == nil || section?.enabled == false {
+    return ""
+  }
+  let content = section?.content ?? ""
+  if content == "" {
+    return ""
+  }
+  let body = clip_text(content, section?.max_chars ?? section_max_chars)
+  if include_headers == false || section?.name == nil || section?.name == "" {
+    return body
+  }
+  return "[" + section?.name + "]\n" + body
+}
+
+pub fn context_section(name, content, options) {
+  let opts = options ?? {}
+  return filter_nil({
+    _type: "context_section",
+    name: name,
+    content: content,
+    kind: opts?.kind,
+    path: opts?.path,
+    priority: opts?.priority,
+    max_chars: opts?.max_chars,
+    enabled: opts?.enabled
+  })
+}
+
+pub fn section(name, content, options) {
+  return context_section(name, content, options)
+}
+
+pub fn context_attach(name, path, content, options) {
+  let opts = options ?? {}
+  return context_section(name, "Path: " + path + "\n\n" + content, opts + {
+    kind: opts?.kind ?? "attachment",
+    path: path
+  })
+}
+
+pub fn context(sections, options) {
+  let opts = options ?? {}
+  return filter_nil({
+    _type: "context",
+    sections: sections ?? [],
+    separator: opts?.separator ?? "\n\n",
+    include_headers: opts?.include_headers,
+    max_chars: opts?.max_chars,
+    section_max_chars: opts?.section_max_chars
+  })
+}
+
+pub fn context_add(ctx, new_section) {
+  let sections = (ctx?.sections ?? []) + [new_section]
+  return context(sections, ctx)
+}
+
+pub fn context_render(ctx, options) {
+  let opts = (ctx ?? {}) + (options ?? {})
+  let separator = opts?.separator ?? "\n\n"
+  let max_chars = opts?.max_chars
+  let section_max_chars = opts?.section_max_chars
+  let include_headers = opts?.include_headers != false
+
+  var pieces = []
+  var used = 0
+  var section_text = ""
+  var remaining = nil
+  var clipped = ""
+  for sec in opts?.sections ?? [] {
+    section_text = render_section(sec, include_headers, section_max_chars)
+    if section_text == "" {
+      continue
+    }
+    remaining = if max_chars == nil { nil } else { max_chars - used }
+    if remaining != nil && remaining <= 0 {
+      break
+    }
+    clipped = clip_text(section_text, remaining)
+    pieces = pieces + [clipped]
+    used = used + len(clipped) + len(separator)
+  }
+  return join(pieces, separator)
+}
+
+pub fn context_compact(ctx, options) {
+  let opts = (ctx ?? {}) + (options ?? {})
+  return context(opts?.sections ?? [], {
+    separator: opts?.separator,
+    include_headers: opts?.include_headers,
+    max_chars: opts?.max_chars,
+    section_max_chars: opts?.section_max_chars
+  })
+}
+
+pub fn prompt_compose(task, ctx, options) {
+  let opts = options ?? {}
+  let rendered = context_render(ctx, opts)
+  let task_label = opts?.task_label ?? "Task"
+  let prompt = if rendered == "" {
+    task
+  } else {
+    rendered + "\n\n" + task_label + ":\n" + task
+  }
+  return filter_nil({
+    prompt: prompt,
+    system: opts?.system,
+    rendered_context: rendered,
+    context: ctx
+  })
+}

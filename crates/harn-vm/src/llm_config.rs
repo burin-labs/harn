@@ -40,6 +40,8 @@ pub struct ProviderDef {
     #[serde(default)]
     pub chat_endpoint: String,
     #[serde(default)]
+    pub completion_endpoint: Option<String>,
+    #[serde(default)]
     pub healthcheck: Option<HealthcheckDef>,
     #[serde(default)]
     pub features: Vec<String>,
@@ -64,6 +66,7 @@ impl Default for ProviderDef {
             auth_env: AuthEnv::None,
             extra_headers: BTreeMap::new(),
             chat_endpoint: String::new(),
+            completion_endpoint: None,
             healthcheck: None,
             features: Vec::new(),
             fallback: None,
@@ -285,6 +288,37 @@ pub fn provider_names() -> Vec<String> {
     load_config().providers.keys().cloned().collect()
 }
 
+/// Resolve a tier or alias into a concrete model/provider pair.
+pub fn resolve_tier_model(
+    target: &str,
+    preferred_provider: Option<&str>,
+) -> Option<(String, String)> {
+    let config = load_config();
+
+    if let Some(alias) = config.aliases.get(target) {
+        return Some((alias.id.clone(), alias.provider.clone()));
+    }
+
+    let candidate_aliases = if let Some(provider) = preferred_provider {
+        vec![
+            format!("{provider}/{target}"),
+            format!("{provider}:{target}"),
+            format!("tier/{target}"),
+            target.to_string(),
+        ]
+    } else {
+        vec![format!("tier/{target}"), target.to_string()]
+    };
+
+    for alias_name in candidate_aliases {
+        if let Some(alias) = config.aliases.get(&alias_name) {
+            return Some((alias.id.clone(), alias.provider.clone()));
+        }
+    }
+
+    None
+}
+
 // =============================================================================
 // Helpers
 // =============================================================================
@@ -344,6 +378,7 @@ fn default_config() -> ProvidersConfig {
                 "2023-06-01".to_string(),
             )]),
             chat_endpoint: "/messages".to_string(),
+            completion_endpoint: None,
             healthcheck: Some(HealthcheckDef {
                 method: "POST".to_string(),
                 path: Some("/messages/count_tokens".to_string()),
@@ -366,6 +401,7 @@ fn default_config() -> ProvidersConfig {
             auth_style: "bearer".to_string(),
             auth_env: AuthEnv::Single("OPENAI_API_KEY".to_string()),
             chat_endpoint: "/chat/completions".to_string(),
+            completion_endpoint: Some("/completions".to_string()),
             healthcheck: Some(HealthcheckDef {
                 method: "GET".to_string(),
                 path: Some("/models".to_string()),
@@ -384,6 +420,7 @@ fn default_config() -> ProvidersConfig {
             auth_style: "bearer".to_string(),
             auth_env: AuthEnv::Single("OPENROUTER_API_KEY".to_string()),
             chat_endpoint: "/chat/completions".to_string(),
+            completion_endpoint: Some("/completions".to_string()),
             healthcheck: Some(HealthcheckDef {
                 method: "GET".to_string(),
                 path: Some("/auth/key".to_string()),
@@ -405,6 +442,7 @@ fn default_config() -> ProvidersConfig {
                 "HUGGINGFACE_API_KEY".to_string(),
             ]),
             chat_endpoint: "/chat/completions".to_string(),
+            completion_endpoint: Some("/completions".to_string()),
             healthcheck: Some(HealthcheckDef {
                 method: "GET".to_string(),
                 url: Some("https://huggingface.co/api/whoami-v2".to_string()),
@@ -423,6 +461,7 @@ fn default_config() -> ProvidersConfig {
             base_url_env: Some("OLLAMA_HOST".to_string()),
             auth_style: "none".to_string(),
             chat_endpoint: "/api/chat".to_string(),
+            completion_endpoint: Some("/api/generate".to_string()),
             healthcheck: Some(HealthcheckDef {
                 method: "GET".to_string(),
                 path: Some("/api/tags".to_string()),
@@ -505,6 +544,49 @@ fn default_config() -> ProvidersConfig {
         default: "mid".to_string(),
     };
 
+    config.aliases.insert(
+        "frontier".to_string(),
+        AliasDef {
+            id: "claude-sonnet-4-20250514".to_string(),
+            provider: "anthropic".to_string(),
+        },
+    );
+    config.aliases.insert(
+        "tier/frontier".to_string(),
+        AliasDef {
+            id: "claude-sonnet-4-20250514".to_string(),
+            provider: "anthropic".to_string(),
+        },
+    );
+    config.aliases.insert(
+        "mid".to_string(),
+        AliasDef {
+            id: "gpt-4o-mini".to_string(),
+            provider: "openai".to_string(),
+        },
+    );
+    config.aliases.insert(
+        "tier/mid".to_string(),
+        AliasDef {
+            id: "gpt-4o-mini".to_string(),
+            provider: "openai".to_string(),
+        },
+    );
+    config.aliases.insert(
+        "small".to_string(),
+        AliasDef {
+            id: "Qwen/Qwen3.5-9B".to_string(),
+            provider: "openrouter".to_string(),
+        },
+    );
+    config.aliases.insert(
+        "tier/small".to_string(),
+        AliasDef {
+            id: "Qwen/Qwen3.5-9B".to_string(),
+            provider: "openrouter".to_string(),
+        },
+    );
+
     config
 }
 
@@ -575,6 +657,24 @@ mod tests {
         assert!(names.contains(&"anthropic".to_string()));
         assert!(names.contains(&"openai".to_string()));
         assert!(names.contains(&"ollama".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_tier_model_default_aliases() {
+        let (model, provider) = resolve_tier_model("frontier", None).unwrap();
+        assert_eq!(model, "claude-sonnet-4-20250514");
+        assert_eq!(provider, "anthropic");
+
+        let (model, provider) = resolve_tier_model("small", None).unwrap();
+        assert_eq!(model, "Qwen/Qwen3.5-9B");
+        assert_eq!(provider, "openrouter");
+    }
+
+    #[test]
+    fn test_resolve_tier_model_prefers_provider_scoped_aliases() {
+        let (model, provider) = resolve_tier_model("mid", Some("openai")).unwrap();
+        assert_eq!(model, "gpt-4o-mini");
+        assert_eq!(provider, "openai");
     }
 
     #[test]

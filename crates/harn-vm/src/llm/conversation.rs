@@ -4,7 +4,11 @@ use std::rc::Rc;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
-use super::helpers::vm_add_role_message;
+use super::helpers::{
+    extract_llm_options, is_transcript_value, new_transcript_with, transcript_id,
+    transcript_message_list, transcript_summary_text, vm_add_role_message, vm_message,
+    vm_value_to_json,
+};
 
 /// Register conversation management builtins.
 pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
@@ -13,25 +17,293 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
         Ok(VmValue::List(Rc::new(Vec::new())))
     });
 
-    vm.register_builtin("add_message", |args, _out| {
+    vm.register_builtin("transcript", |args, _out| {
+        let metadata = args.first().cloned();
+        Ok(new_transcript_with(None, Vec::new(), None, metadata))
+    });
+
+    vm.register_builtin("transcript_from_messages", |args, _out| {
         let messages = match args.first() {
             Some(VmValue::List(list)) => (**list).clone(),
+            Some(VmValue::Dict(d)) if is_transcript_value(&VmValue::Dict(d.clone())) => {
+                transcript_message_list(d)?
+            }
             _ => {
                 return Err(VmError::Thrown(VmValue::String(Rc::from(
-                    "add_message: first argument must be a message list",
+                    "transcript_from_messages: argument must be a message list or transcript",
                 ))));
             }
         };
-        let role = args.get(1).map(|a| a.display()).unwrap_or_default();
-        let content = args.get(2).map(|a| a.display()).unwrap_or_default();
+        Ok(new_transcript_with(None, messages, None, None))
+    });
 
-        let mut msg = BTreeMap::new();
-        msg.insert("role".to_string(), VmValue::String(Rc::from(role)));
-        msg.insert("content".to_string(), VmValue::String(Rc::from(content)));
+    vm.register_builtin("transcript_messages", |args, _out| {
+        let transcript = match args.first() {
+            Some(VmValue::Dict(d))
+                if d.get("_type").map(|v| v.display()).as_deref() == Some("transcript") =>
+            {
+                d
+            }
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "transcript_messages: argument must be a transcript",
+                ))));
+            }
+        };
+        Ok(VmValue::List(Rc::new(transcript_message_list(transcript)?)))
+    });
 
-        let mut new_messages = messages;
-        new_messages.push(VmValue::Dict(Rc::new(msg)));
-        Ok(VmValue::List(Rc::new(new_messages)))
+    vm.register_builtin("transcript_summary", |args, _out| {
+        let transcript = match args.first() {
+            Some(VmValue::Dict(d))
+                if d.get("_type").map(|v| v.display()).as_deref() == Some("transcript") =>
+            {
+                d
+            }
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "transcript_summary: argument must be a transcript",
+                ))));
+            }
+        };
+        Ok(transcript.get("summary").cloned().unwrap_or(VmValue::Nil))
+    });
+
+    vm.register_builtin("transcript_id", |args, _out| {
+        let transcript = match args.first() {
+            Some(VmValue::Dict(d))
+                if d.get("_type").map(|v| v.display()).as_deref() == Some("transcript") =>
+            {
+                d
+            }
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "transcript_id: argument must be a transcript",
+                ))));
+            }
+        };
+        Ok(VmValue::String(Rc::from(
+            transcript_id(transcript).unwrap_or_default(),
+        )))
+    });
+
+    vm.register_builtin("transcript_export", |args, _out| {
+        let transcript = args.first().cloned().unwrap_or(VmValue::Nil);
+        if !is_transcript_value(&transcript) {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "transcript_export: argument must be a transcript",
+            ))));
+        }
+        let json = serde_json::to_string_pretty(&vm_value_to_json(&transcript))
+            .map_err(|e| VmError::Runtime(format!("transcript_export: {e}")))?;
+        Ok(VmValue::String(Rc::from(json)))
+    });
+
+    vm.register_builtin("transcript_import", |args, _out| {
+        let text = args.first().map(|a| a.display()).unwrap_or_default();
+        let json: serde_json::Value = serde_json::from_str(&text)
+            .map_err(|e| VmError::Runtime(format!("transcript_import: {e}")))?;
+        Ok(crate::stdlib::json_to_vm_value(&json))
+    });
+
+    vm.register_builtin("transcript_fork", |args, _out| {
+        let transcript = match args.first() {
+            Some(VmValue::Dict(d))
+                if d.get("_type").map(|v| v.display()).as_deref() == Some("transcript") =>
+            {
+                d
+            }
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "transcript_fork: argument must be a transcript",
+                ))));
+            }
+        };
+        let options = args.get(1).and_then(|v| v.as_dict());
+        let retain_messages = options
+            .and_then(|d| d.get("retain_messages"))
+            .map(|v| v.is_truthy())
+            .unwrap_or(true);
+        let retain_summary = options
+            .and_then(|d| d.get("retain_summary"))
+            .map(|v| v.is_truthy())
+            .unwrap_or(true);
+        let messages = if retain_messages {
+            transcript_message_list(transcript)?
+        } else {
+            Vec::new()
+        };
+        let summary = if retain_summary {
+            transcript_summary_text(transcript)
+        } else {
+            None
+        };
+        Ok(new_transcript_with(
+            None,
+            messages,
+            summary,
+            transcript.get("metadata").cloned(),
+        ))
+    });
+
+    vm.register_async_builtin("transcript_summarize", |args| async move {
+        let transcript = match args.first() {
+            Some(VmValue::Dict(d))
+                if d.get("_type").map(|v| v.display()).as_deref() == Some("transcript") => d,
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "transcript_summarize: argument must be a transcript",
+                ))));
+            }
+        };
+        let mut opts = extract_llm_options(&[
+            VmValue::String(Rc::from("")),
+            VmValue::Nil,
+            args.get(1).cloned().unwrap_or(VmValue::Nil),
+        ])?;
+        let keep_last = args
+            .get(1)
+            .and_then(|v| v.as_dict())
+            .and_then(|d| d.get("keep_last"))
+            .and_then(|v| v.as_int())
+            .unwrap_or(6)
+            .max(0) as usize;
+        let prompt = args
+            .get(1)
+            .and_then(|v| v.as_dict())
+            .and_then(|d| d.get("prompt"))
+            .map(|v| v.display())
+            .unwrap_or_else(|| {
+                "Summarize this conversation for a follow-on coding agent. Preserve goals, constraints, decisions, unresolved questions, and concrete next actions. Be concise but complete.".to_string()
+            });
+
+        let messages = transcript_message_list(transcript)?;
+        let formatted = messages
+            .iter()
+            .map(|msg| {
+                let dict = msg.as_dict();
+                let role = dict
+                    .and_then(|d| d.get("role"))
+                    .map(|v| v.display())
+                    .unwrap_or_else(|| "user".to_string());
+                let content = dict
+                    .and_then(|d| d.get("content"))
+                    .map(|v| v.display())
+                    .unwrap_or_default();
+                format!("{}: {}", role.to_uppercase(), content)
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        opts.messages = vec![serde_json::json!({
+            "role": "user",
+            "content": format!("{prompt}\n\nConversation:\n{formatted}"),
+        })];
+
+        let result = super::api::vm_call_llm_full(&opts).await?;
+        let retained = messages
+            .into_iter()
+            .rev()
+            .take(keep_last)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect::<Vec<_>>();
+        let archived_count = transcript_message_list(transcript)?.len().saturating_sub(retained.len());
+        let mut compacted = match new_transcript_with(
+            transcript_id(transcript),
+            retained,
+            Some(result.text.clone()),
+            transcript.get("metadata").cloned(),
+        ) {
+            VmValue::Dict(d) => (*d).clone(),
+            _ => BTreeMap::new(),
+        };
+        compacted.insert("archived_messages".to_string(), VmValue::Int(archived_count as i64));
+        Ok(VmValue::Dict(Rc::new(compacted)))
+    });
+
+    vm.register_builtin("transcript_compact", |args, _out| {
+        let transcript = match args.first() {
+            Some(VmValue::Dict(d))
+                if d.get("_type").map(|v| v.display()).as_deref() == Some("transcript") =>
+            {
+                d
+            }
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "transcript_compact: argument must be a transcript",
+                ))));
+            }
+        };
+        let keep_last = args
+            .get(1)
+            .and_then(|v| v.as_dict())
+            .and_then(|d| d.get("keep_last"))
+            .and_then(|v| v.as_int())
+            .unwrap_or(6)
+            .max(0) as usize;
+        let messages = transcript_message_list(transcript)?;
+        let retained = messages
+            .into_iter()
+            .rev()
+            .take(keep_last)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect::<Vec<_>>();
+        let archived_count = transcript_message_list(transcript)?
+            .len()
+            .saturating_sub(retained.len());
+        let summary = args
+            .get(1)
+            .and_then(|v| v.as_dict())
+            .and_then(|d| d.get("summary"))
+            .map(|v| v.display())
+            .or_else(|| transcript_summary_text(transcript));
+        let mut compacted = match new_transcript_with(
+            transcript_id(transcript),
+            retained,
+            summary,
+            transcript.get("metadata").cloned(),
+        ) {
+            VmValue::Dict(d) => (*d).clone(),
+            _ => BTreeMap::new(),
+        };
+        compacted.insert(
+            "archived_messages".to_string(),
+            VmValue::Int(archived_count as i64),
+        );
+        Ok(VmValue::Dict(Rc::new(compacted)))
+    });
+
+    vm.register_builtin("add_message", |args, _out| match args.first() {
+        Some(VmValue::List(list)) => {
+            let role = args.get(1).map(|a| a.display()).unwrap_or_default();
+            let content = args.get(2).map(|a| a.display()).unwrap_or_default();
+            let mut new_messages = (**list).clone();
+            new_messages.push(vm_message(&role, &content));
+            Ok(VmValue::List(Rc::new(new_messages)))
+        }
+        Some(VmValue::Dict(d))
+            if d.get("_type").map(|v| v.display()).as_deref() == Some("transcript") =>
+        {
+            let role = args.get(1).map(|a| a.display()).unwrap_or_default();
+            let content = args.get(2).map(|a| a.display()).unwrap_or_default();
+            let mut new_messages = transcript_message_list(d)?;
+            new_messages.push(vm_message(&role, &content));
+            Ok(new_transcript_with(
+                transcript_id(d),
+                new_messages,
+                transcript_summary_text(d),
+                d.get("metadata").cloned(),
+            ))
+        }
+        _ => {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "add_message: first argument must be a message list or transcript",
+            ))));
+        }
     });
 
     vm.register_builtin("add_user", |args, _out| vm_add_role_message(args, "user"));
@@ -44,31 +316,52 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
         vm_add_role_message(args, "system")
     });
 
-    vm.register_builtin("add_tool_result", |args, _out| {
-        let messages = match args.first() {
-            Some(VmValue::List(list)) => (**list).clone(),
-            _ => {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(
-                    "add_tool_result: first argument must be a message list",
-                ))));
-            }
-        };
-        let tool_use_id = args.get(1).map(|a| a.display()).unwrap_or_default();
-        let result_content = args.get(2).map(|a| a.display()).unwrap_or_default();
-
-        let mut msg = BTreeMap::new();
-        msg.insert("role".to_string(), VmValue::String(Rc::from("tool_result")));
-        msg.insert(
-            "tool_use_id".to_string(),
-            VmValue::String(Rc::from(tool_use_id)),
-        );
-        msg.insert(
-            "content".to_string(),
-            VmValue::String(Rc::from(result_content)),
-        );
-
-        let mut new_messages = messages;
-        new_messages.push(VmValue::Dict(Rc::new(msg)));
-        Ok(VmValue::List(Rc::new(new_messages)))
+    vm.register_builtin("add_tool_result", |args, _out| match args.first() {
+        Some(VmValue::List(list)) => {
+            let tool_use_id = args.get(1).map(|a| a.display()).unwrap_or_default();
+            let result_content = args.get(2).map(|a| a.display()).unwrap_or_default();
+            let mut msg = BTreeMap::new();
+            msg.insert("role".to_string(), VmValue::String(Rc::from("tool_result")));
+            msg.insert(
+                "tool_use_id".to_string(),
+                VmValue::String(Rc::from(tool_use_id)),
+            );
+            msg.insert(
+                "content".to_string(),
+                VmValue::String(Rc::from(result_content)),
+            );
+            let mut new_messages = (**list).clone();
+            new_messages.push(VmValue::Dict(Rc::new(msg)));
+            Ok(VmValue::List(Rc::new(new_messages)))
+        }
+        Some(VmValue::Dict(d))
+            if d.get("_type").map(|v| v.display()).as_deref() == Some("transcript") =>
+        {
+            let tool_use_id = args.get(1).map(|a| a.display()).unwrap_or_default();
+            let result_content = args.get(2).map(|a| a.display()).unwrap_or_default();
+            let mut msg = BTreeMap::new();
+            msg.insert("role".to_string(), VmValue::String(Rc::from("tool_result")));
+            msg.insert(
+                "tool_use_id".to_string(),
+                VmValue::String(Rc::from(tool_use_id)),
+            );
+            msg.insert(
+                "content".to_string(),
+                VmValue::String(Rc::from(result_content)),
+            );
+            let mut new_messages = transcript_message_list(d)?;
+            new_messages.push(VmValue::Dict(Rc::new(msg)));
+            Ok(new_transcript_with(
+                transcript_id(d),
+                new_messages,
+                transcript_summary_text(d),
+                d.get("metadata").cloned(),
+            ))
+        }
+        _ => {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "add_tool_result: first argument must be a message list or transcript",
+            ))));
+        }
     });
 }

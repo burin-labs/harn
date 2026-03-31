@@ -200,10 +200,25 @@ fn builtin_return_type(name: &str) -> InferredType {
         }
         "list_dir" | "mcp_list_tools" | "mcp_list_resources" | "mcp_list_prompts" | "to_list"
         | "regex_captures" => Some(TypeExpr::Named("list".into())),
-        "stat" | "exec" | "shell" | "date_now" | "llm_call" | "agent_loop" | "llm_info" | "llm_usage"
-        | "timer_start" | "metadata_get" | "mcp_server_info" | "mcp_get_prompt" => {
-            Some(TypeExpr::Named("dict".into()))
-        }
+        "stat"
+        | "exec"
+        | "shell"
+        | "date_now"
+        | "llm_call"
+        | "llm_completion"
+        | "agent_loop"
+        | "llm_info"
+        | "llm_usage"
+        | "timer_start"
+        | "metadata_get"
+        | "mcp_server_info"
+        | "mcp_get_prompt"
+        | "llm_pick_model"
+        | "transcript"
+        | "transcript_compact"
+        | "transcript_summarize"
+        | "host_capabilities" => Some(TypeExpr::Named("dict".into())),
+        "host_has" => Some(TypeExpr::Named("bool".into())),
         "metadata_set"
         | "metadata_save"
         | "metadata_refresh_hashes"
@@ -244,7 +259,9 @@ fn is_builtin(name: &str) -> bool {
             | "http_get"
             | "http_post"
             | "llm_call"
+            | "llm_completion"
             | "agent_loop"
+            | "llm_pick_model"
             | "await"
             | "cancel"
             | "file_exists"
@@ -255,6 +272,12 @@ fn is_builtin(name: &str) -> bool {
             | "copy_file"
             | "append_file"
             | "temp_dir"
+            | "transcript"
+            | "transcript_compact"
+            | "transcript_summarize"
+            | "host_capabilities"
+            | "host_has"
+            | "host_invoke"
             | "stat"
             | "exec"
             | "shell"

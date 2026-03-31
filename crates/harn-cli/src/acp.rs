@@ -837,6 +837,299 @@ fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Rc<AcpBridge>) {
         }
     });
 
+    // --- Typed host capabilities ---
+
+    vm.register_builtin("host_capabilities", |_args, _out| {
+        Ok(harn_vm::VmValue::Dict(Rc::new(
+            std::collections::BTreeMap::from([
+                (
+                    "workspace".to_string(),
+                    harn_vm::VmValue::Dict(Rc::new(std::collections::BTreeMap::from([
+                        (
+                            "description".to_string(),
+                            harn_vm::VmValue::String(Rc::from(
+                                "Workspace file and directory operations.",
+                            )),
+                        ),
+                        (
+                            "ops".to_string(),
+                            harn_vm::VmValue::List(Rc::new(vec![
+                                harn_vm::VmValue::String(Rc::from("read_text")),
+                                harn_vm::VmValue::String(Rc::from("write_text")),
+                                harn_vm::VmValue::String(Rc::from("apply_edit")),
+                                harn_vm::VmValue::String(Rc::from("delete")),
+                                harn_vm::VmValue::String(Rc::from("exists")),
+                                harn_vm::VmValue::String(Rc::from("list")),
+                            ])),
+                        ),
+                    ]))),
+                ),
+                (
+                    "process".to_string(),
+                    harn_vm::VmValue::Dict(Rc::new(std::collections::BTreeMap::from([
+                        (
+                            "description".to_string(),
+                            harn_vm::VmValue::String(Rc::from("Process execution.")),
+                        ),
+                        (
+                            "ops".to_string(),
+                            harn_vm::VmValue::List(Rc::new(vec![harn_vm::VmValue::String(
+                                Rc::from("exec"),
+                            )])),
+                        ),
+                    ]))),
+                ),
+                (
+                    "template".to_string(),
+                    harn_vm::VmValue::Dict(Rc::new(std::collections::BTreeMap::from([
+                        (
+                            "description".to_string(),
+                            harn_vm::VmValue::String(Rc::from("Template rendering.")),
+                        ),
+                        (
+                            "ops".to_string(),
+                            harn_vm::VmValue::List(Rc::new(vec![harn_vm::VmValue::String(
+                                Rc::from("render"),
+                            )])),
+                        ),
+                    ]))),
+                ),
+                (
+                    "interaction".to_string(),
+                    harn_vm::VmValue::Dict(Rc::new(std::collections::BTreeMap::from([
+                        (
+                            "description".to_string(),
+                            harn_vm::VmValue::String(Rc::from("User interaction.")),
+                        ),
+                        (
+                            "ops".to_string(),
+                            harn_vm::VmValue::List(Rc::new(vec![harn_vm::VmValue::String(
+                                Rc::from("ask"),
+                            )])),
+                        ),
+                    ]))),
+                ),
+            ]),
+        )))
+    });
+
+    vm.register_builtin("host_has", |args, _out| {
+        let capability = args.first().map(|a| a.display()).unwrap_or_default();
+        let op = args.get(1).map(|a| a.display());
+        let valid = match (capability.as_str(), op.as_deref()) {
+            ("workspace", None) => true,
+            (
+                "workspace",
+                Some("read_text" | "write_text" | "apply_edit" | "delete" | "exists" | "list"),
+            ) => true,
+            ("process", None) => true,
+            ("process", Some("exec")) => true,
+            ("template", None) => true,
+            ("template", Some("render")) => true,
+            ("interaction", None) => true,
+            ("interaction", Some("ask")) => true,
+            _ => false,
+        };
+        Ok(harn_vm::VmValue::Bool(valid))
+    });
+
+    let b = bridge.clone();
+    vm.register_async_builtin("host_invoke", move |args| {
+        let bridge = b.clone();
+        async move {
+            let capability = args.first().map(|a| a.display()).unwrap_or_default();
+            let operation = args.get(1).map(|a| a.display()).unwrap_or_default();
+            let params = args.get(2).cloned().unwrap_or(harn_vm::VmValue::Nil);
+            let params_json = harn_vm::llm::vm_value_to_json(&params);
+
+            match (capability.as_str(), operation.as_str()) {
+                ("workspace", "read_text") => {
+                    let path = params_json
+                        .get("path")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default();
+                    let result = bridge
+                        .call_client(
+                            "fs/read_text_file",
+                            serde_json::json!({
+                                "sessionId": bridge.session_id,
+                                "path": path,
+                            }),
+                        )
+                        .await?;
+                    if let Some(content) = result.get("content").and_then(|v| v.as_str()) {
+                        Ok(harn_vm::VmValue::String(Rc::from(content)))
+                    } else {
+                        Ok(harn_vm::bridge::json_result_to_vm_value(&result))
+                    }
+                }
+                ("workspace", "write_text") => {
+                    let path = params_json
+                        .get("path")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default();
+                    let content = params_json
+                        .get("content")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default();
+                    bridge
+                        .call_client(
+                            "fs/write_text_file",
+                            serde_json::json!({
+                                "sessionId": bridge.session_id,
+                                "path": path,
+                                "content": content,
+                            }),
+                        )
+                        .await?;
+                    Ok(harn_vm::VmValue::Nil)
+                }
+                ("workspace", "apply_edit") => {
+                    let path = params_json
+                        .get("path")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default();
+                    let old_string = params_json
+                        .get("old_string")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default();
+                    let new_string = params_json
+                        .get("new_string")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default();
+                    bridge
+                        .call_client(
+                            "fs/apply_edit",
+                            serde_json::json!({
+                                "sessionId": bridge.session_id,
+                                "path": path,
+                                "old_string": old_string,
+                                "new_string": new_string,
+                            }),
+                        )
+                        .await?;
+                    Ok(harn_vm::VmValue::Nil)
+                }
+                ("workspace", "delete") => {
+                    let path = params_json
+                        .get("path")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default();
+                    bridge
+                        .call_client(
+                            "fs/delete_file",
+                            serde_json::json!({
+                                "sessionId": bridge.session_id,
+                                "path": path,
+                            }),
+                        )
+                        .await?;
+                    Ok(harn_vm::VmValue::Nil)
+                }
+                ("workspace", "exists") => {
+                    let path = params_json
+                        .get("path")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default();
+                    let result = bridge
+                        .call_client(
+                            "fs/read_text_file",
+                            serde_json::json!({
+                                "sessionId": bridge.session_id,
+                                "path": path,
+                            }),
+                        )
+                        .await;
+                    Ok(harn_vm::VmValue::Bool(result.is_ok()))
+                }
+                ("workspace", "list") => {
+                    let path = params_json
+                        .get("path")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(".");
+                    let result = bridge
+                        .call_client(
+                            "host/call",
+                            serde_json::json!({
+                                "sessionId": bridge.session_id,
+                                "name": "list_directory",
+                                "args": {"path": path},
+                            }),
+                        )
+                        .await?;
+                    Ok(harn_vm::bridge::json_result_to_vm_value(&result))
+                }
+                ("process", "exec") => {
+                    acp_terminal_exec(
+                        &bridge,
+                        &[harn_vm::VmValue::String(Rc::from(
+                            params_json
+                                .get("command")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or_default(),
+                        ))],
+                    )
+                    .await
+                }
+                ("template", "render") => {
+                    let template = params_json
+                        .get("path")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default();
+                    let bindings = params_json
+                        .get("bindings")
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null);
+                    let result = bridge
+                        .call_client(
+                            "host/call",
+                            serde_json::json!({
+                                "sessionId": bridge.session_id,
+                                "name": "render",
+                                "args": {"template": template, "bindings": bindings},
+                            }),
+                        )
+                        .await?;
+                    Ok(harn_vm::bridge::json_result_to_vm_value(&result))
+                }
+                ("interaction", "ask") => {
+                    let question = params_json
+                        .get("question")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default();
+                    let result = bridge
+                        .call_client(
+                            "host/call",
+                            serde_json::json!({
+                                "sessionId": bridge.session_id,
+                                "name": "ask_user",
+                                "args": {"question": question},
+                            }),
+                        )
+                        .await?;
+                    Ok(harn_vm::bridge::json_result_to_vm_value(&result))
+                }
+                _ => {
+                    let result = bridge
+                        .call_client(
+                            "host/call",
+                            serde_json::json!({
+                                "sessionId": bridge.session_id,
+                                "name": "host_invoke",
+                                "args": {
+                                    "capability": capability,
+                                    "operation": operation,
+                                    "params": params_json,
+                                },
+                            }),
+                        )
+                        .await?;
+                    Ok(harn_vm::bridge::json_result_to_vm_value(&result))
+                }
+            }
+        }
+    });
+
     // --- Render — template rendering delegated to host ---
 
     let b = bridge.clone();
@@ -1006,8 +1299,20 @@ async fn acp_terminal_exec(
             harn_vm::VmValue::String(Rc::from(stderr)),
         );
         map.insert(
-            "exit_code".to_string(),
+            "combined".to_string(),
+            harn_vm::VmValue::String(Rc::from(format!(
+                "{}{}",
+                map.get("stdout").map(|v| v.display()).unwrap_or_default(),
+                map.get("stderr").map(|v| v.display()).unwrap_or_default()
+            ))),
+        );
+        map.insert(
+            "status".to_string(),
             harn_vm::VmValue::Int(exit_code as i64),
+        );
+        map.insert(
+            "success".to_string(),
+            harn_vm::VmValue::Bool(output.status.success()),
         );
         return Ok(harn_vm::VmValue::Dict(Rc::new(map)));
     }
@@ -1046,7 +1351,40 @@ async fn acp_terminal_exec(
         )
         .await;
 
-    Ok(harn_vm::bridge::json_result_to_vm_value(&output_result))
+    let output = harn_vm::bridge::json_result_to_vm_value(&output_result);
+    if let harn_vm::VmValue::Dict(map) = &output {
+        let mut normalized = (**map).clone();
+        let stdout = normalized
+            .get("stdout")
+            .map(|v| v.display())
+            .unwrap_or_default();
+        let stderr = normalized
+            .get("stderr")
+            .map(|v| v.display())
+            .unwrap_or_default();
+        if !normalized.contains_key("combined") {
+            normalized.insert(
+                "combined".to_string(),
+                harn_vm::VmValue::String(Rc::from(format!("{stdout}{stderr}"))),
+            );
+        }
+        if !normalized.contains_key("status") {
+            let status = normalized
+                .get("exit_code")
+                .and_then(|v| v.as_int())
+                .unwrap_or(-1);
+            normalized.insert("status".to_string(), harn_vm::VmValue::Int(status));
+        }
+        if !normalized.contains_key("success") {
+            let success = normalized
+                .get("status")
+                .and_then(|v| v.as_int())
+                .is_some_and(|code| code == 0);
+            normalized.insert("success".to_string(), harn_vm::VmValue::Bool(success));
+        }
+        return Ok(harn_vm::VmValue::Dict(Rc::new(normalized)));
+    }
+    Ok(output)
 }
 
 /// Write a `session/update` notification directly through a stdout lock.

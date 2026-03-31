@@ -5,9 +5,7 @@ use crate::value::{ErrorCategory, VmError, VmValue};
 use crate::vm::Vm;
 
 use super::api::{vm_call_llm_full_streaming, DeltaSender};
-use super::helpers::{
-    extract_llm_options, opt_bool, opt_int, opt_str,
-};
+use super::helpers::{extract_llm_options, opt_bool, opt_int, opt_str, transcript_to_vm};
 use super::tools::{
     build_assistant_tool_message, build_text_tool_prompt, build_tool_result_message,
     handle_tool_locally, normalize_tool_args, parse_text_tool_calls, resolve_tools_for_agent,
@@ -400,6 +398,15 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                     rejected_tools.iter().map(|s| VmValue::String(Rc::from(s.as_str()))).collect::<Vec<_>>(),
                 )),
             );
+            result_dict.insert(
+                "transcript".to_string(),
+                transcript_to_vm(
+                    opts.transcript_id.clone(),
+                    opts.transcript_summary.clone(),
+                    opts.transcript_metadata.clone(),
+                    &opts.messages,
+                ),
+            );
             Ok(VmValue::Dict(Rc::from(result_dict)))
         }
     });
@@ -409,7 +416,7 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
 /// This overrides the native llm_call with one that reports to the host for observability.
 pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::HostBridge>) {
     use super::api::vm_build_llm_result;
-    use super::helpers::extract_json;
+    use super::helpers::{extract_json, transcript_to_vm};
     use crate::stdlib::json_to_vm_value;
 
     let b = bridge;
@@ -419,7 +426,8 @@ pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Host
             let opts = extract_llm_options(&args)?;
 
             let call_id = next_call_id();
-            let prompt_chars: usize = opts.messages
+            let prompt_chars: usize = opts
+                .messages
                 .iter()
                 .filter_map(|m| m.get("content").and_then(|c| c.as_str()))
                 .map(|s| s.len())
@@ -470,16 +478,28 @@ pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Host
                 }),
             );
 
+            let mut transcript_messages = opts.messages.clone();
+            transcript_messages.push(serde_json::json!({
+                "role": "assistant",
+                "content": result.text.clone(),
+            }));
+            let transcript = transcript_to_vm(
+                opts.transcript_id.clone(),
+                opts.transcript_summary.clone(),
+                opts.transcript_metadata.clone(),
+                &transcript_messages,
+            );
+
             // Always return dict (breaking change: no more plain string)
             if opts.response_format.as_deref() == Some("json") {
                 let json_str = extract_json(&result.text);
                 let parsed = serde_json::from_str::<serde_json::Value>(json_str)
                     .ok()
                     .map(|jv| json_to_vm_value(&jv));
-                return Ok(vm_build_llm_result(&result, parsed));
+                return Ok(vm_build_llm_result(&result, parsed, Some(transcript)));
             }
 
-            Ok(vm_build_llm_result(&result, None))
+            Ok(vm_build_llm_result(&result, None, Some(transcript)))
         }
     });
 }

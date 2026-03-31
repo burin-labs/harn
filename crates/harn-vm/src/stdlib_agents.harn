@@ -1,0 +1,191 @@
+import "std/collections"
+import "std/context"
+
+pub fn workflow_model_spec(config) {
+  let target = config?.model ?? config?.model_alias ?? config?.model_tier ?? config?.tier
+  if target == nil || target == "" {
+    return nil
+  }
+  return llm_pick_model(target, filter_nil({provider: config?.provider}))
+}
+
+pub fn workflow_options(config) {
+  let spec = workflow_model_spec(config)
+  return filter_nil({
+    provider: config?.provider ?? spec?.provider,
+    model: config?.model ?? spec?.id,
+    max_tokens: config?.max_tokens,
+    temperature: config?.temperature,
+    top_p: config?.top_p,
+    top_k: config?.top_k,
+    stop: config?.stop,
+    seed: config?.seed,
+    frequency_penalty: config?.frequency_penalty,
+    presence_penalty: config?.presence_penalty,
+    response_format: config?.response_format,
+    schema: config?.schema,
+    thinking: config?.thinking,
+    tools: config?.tools,
+    tool_choice: config?.tool_choice,
+    cache: config?.cache,
+    timeout: config?.timeout,
+    persistent: config?.persistent,
+    max_iterations: config?.max_iterations,
+    max_nudges: config?.max_nudges,
+    nudge: config?.nudge,
+    tool_retries: config?.tool_retries,
+    tool_backoff_ms: config?.tool_backoff_ms,
+    tool_format: config?.tool_format,
+    transcript: config?.transcript
+  })
+}
+
+pub fn stage_config(flow, overrides, stage_name) {
+  let combined = (flow ?? {}) + (overrides ?? {})
+  let stage = combined[stage_name] ?? {}
+  let merged = combined + stage
+  return filter_nil(merged + {_stage: stage_name})
+}
+
+pub fn stage_prompt(task, config) {
+  let ctx = config?.context
+  return prompt_compose(task, ctx, filter_nil({
+    system: config?.system,
+    task_label: config?.task_label,
+    separator: config?.context_separator,
+    max_chars: config?.context_max_chars,
+    section_max_chars: config?.context_section_max_chars
+  }))
+}
+
+pub fn run_stage(task, config) {
+  let prompt = stage_prompt(task, config)
+  let opts = workflow_options(config)
+  if config?.mode == "completion" {
+    return llm_completion(prompt?.prompt, config?.suffix, prompt?.system, opts)
+  }
+  if config?.mode == "llm" || config?.persistent == false {
+    return llm_call(prompt?.prompt, prompt?.system, opts)
+  }
+  return agent_loop(prompt?.prompt, prompt?.system, opts + {
+    persistent: config?.persistent ?? true
+  })
+}
+
+pub fn verify_command(config) {
+  if config?.command == nil || config?.command == "" {
+    return nil
+  }
+  let output = host_invoke("process", "exec", {command: config?.command})
+  var ok = output?.success == true
+  if config?.expect_status != nil {
+    ok = output?.status == config?.expect_status
+  }
+  if config?.expect_text != nil {
+    ok = ok && contains(output?.combined ?? "", config?.expect_text)
+  }
+  return {
+    kind: "command",
+    ok: ok,
+    output: output
+  }
+}
+
+pub fn verify_result(task, result, config) {
+  if config == nil {
+    return nil
+  }
+  if config?.command != nil {
+    return verify_command(config)
+  }
+  if config?.assert_text != nil {
+    return {
+      kind: "text",
+      ok: contains(result?.text ?? "", config?.assert_text),
+      output: result?.text ?? ""
+    }
+  }
+  return nil
+}
+
+pub fn repair_task(original_task, verification, config) {
+  if config?.prompt != nil {
+    return config?.prompt
+  }
+  let summary = json_stringify(verification)
+  let message = "The previous attempt did not pass verification.\n\nVerification:\n" + summary + "\n\nContinue working on the original task and fix the problem.\n\nOriginal task:\n" + original_task
+  return message
+}
+
+pub fn workflow(config) {
+  return filter_nil(config + {_type: "workflow"})
+}
+
+pub fn task_run(task, flow, overrides) {
+  let act_config = stage_config(flow, overrides, "act")
+  let act_result = run_stage(task, act_config)
+
+  let verify_config = stage_config(flow, overrides, "verify")
+  let verification = verify_result(task, act_result, verify_config)
+  if verification == nil || verification?.ok == true {
+    return {
+      task: task,
+      workflow: flow?.name ?? "workflow",
+      status: act_result?.status ?? "done",
+      text: act_result?.text,
+      result: act_result,
+      act: act_result,
+      verification: verification,
+      transcript: act_result?.transcript,
+      context: act_config?.context
+    }
+  }
+
+  let repair_config = stage_config(flow, overrides, "repair") + {
+    transcript: act_result?.transcript ?? act_config?.transcript
+  }
+  let repair_result = run_stage(repair_task(task, verification, repair_config), repair_config)
+  let final_verification = verify_result(task, repair_result, verify_config)
+  let status = if final_verification == nil || final_verification?.ok == true {
+    repair_result?.status ?? "repaired"
+  } else {
+    "needs_attention"
+  }
+
+  return {
+    task: task,
+    workflow: flow?.name ?? "workflow",
+    status: status,
+    text: repair_result?.text,
+    result: repair_result,
+    act: act_result,
+    repair: repair_result,
+    verification: verification,
+    final_verification: final_verification,
+    transcript: repair_result?.transcript ?? act_result?.transcript,
+    context: act_config?.context
+  }
+}
+
+pub fn workflow_run(task, flow, overrides) {
+  return task_run(task, flow, overrides)
+}
+
+pub fn workflow_continue(prev, task, flow, overrides) {
+  let transcript = prev?.transcript ?? prev
+  let merged = (overrides ?? {}) + {transcript: transcript}
+  return task_run(task, flow, merged)
+}
+
+pub fn workflow_compact(prev, options) {
+  let transcript = prev?.transcript ?? prev
+  return transcript_summarize(transcript, options)
+}
+
+pub fn workflow_reset(prev, carry_summary) {
+  let transcript = prev?.transcript ?? prev
+  if carry_summary && transcript_summary(transcript) {
+    return transcript_compact(transcript, {keep_last: 0})
+  }
+  return transcript()
+}

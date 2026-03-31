@@ -3,6 +3,8 @@ use std::rc::Rc;
 
 use crate::value::{VmError, VmValue};
 
+const TRANSCRIPT_TYPE: &str = "transcript";
+
 // =============================================================================
 // Option extraction helpers
 // =============================================================================
@@ -57,6 +59,16 @@ pub(crate) fn vm_resolve_provider(options: &Option<BTreeMap<String, VmValue>>) -
     {
         return llm_config::infer_provider(&m);
     }
+    if let Some(tier) = options
+        .as_ref()
+        .and_then(|o| o.get("model_tier"))
+        .map(|v| v.display())
+    {
+        if let Some((model, provider)) = llm_config::resolve_tier_model(&tier, None) {
+            let _ = model;
+            return provider;
+        }
+    }
     if let Ok(m) = std::env::var("HARN_LLM_MODEL") {
         return llm_config::infer_provider(&m);
     }
@@ -77,6 +89,15 @@ pub(crate) fn vm_resolve_model(
     if let Some(raw) = raw {
         let (resolved, _) = llm_config::resolve_model(&raw);
         return resolved;
+    }
+    if let Some(tier) = options
+        .as_ref()
+        .and_then(|o| o.get("model_tier"))
+        .map(|v| v.display())
+    {
+        if let Some((resolved, _)) = llm_config::resolve_tier_model(&tier, Some(provider)) {
+            return resolved;
+        }
     }
     // Default model per provider
     match provider {
@@ -223,28 +244,168 @@ pub(crate) fn vm_messages_to_json(msg_list: &[VmValue]) -> Result<Vec<serde_json
     Ok(messages)
 }
 
+pub(crate) fn transcript_message_list(
+    transcript: &BTreeMap<String, VmValue>,
+) -> Result<Vec<VmValue>, VmError> {
+    match transcript.get("messages") {
+        Some(VmValue::List(list)) => Ok((**list).clone()),
+        Some(_) => Err(VmError::Thrown(VmValue::String(Rc::from(
+            "transcript.messages must be a list",
+        )))),
+        None => Ok(Vec::new()),
+    }
+}
+
+pub(crate) fn transcript_summary_text(transcript: &BTreeMap<String, VmValue>) -> Option<String> {
+    transcript.get("summary").and_then(|v| match v {
+        VmValue::String(s) if !s.is_empty() => Some(s.to_string()),
+        _ => None,
+    })
+}
+
+pub(crate) fn transcript_id(transcript: &BTreeMap<String, VmValue>) -> Option<String> {
+    transcript.get("id").and_then(|v| match v {
+        VmValue::String(s) if !s.is_empty() => Some(s.to_string()),
+        _ => None,
+    })
+}
+
+pub(crate) fn transcript_metadata(
+    transcript: &BTreeMap<String, VmValue>,
+) -> Option<serde_json::Value> {
+    transcript
+        .get("metadata")
+        .and_then(|v| v.as_dict())
+        .map(vm_value_dict_to_json)
+}
+
+pub(crate) fn vm_message(role: &str, content: &str) -> VmValue {
+    let mut msg = BTreeMap::new();
+    msg.insert("role".to_string(), VmValue::String(Rc::from(role)));
+    msg.insert("content".to_string(), VmValue::String(Rc::from(content)));
+    VmValue::Dict(Rc::new(msg))
+}
+
+pub(crate) fn vm_message_list_to_json(
+    msg_list: &[VmValue],
+) -> Result<Vec<serde_json::Value>, VmError> {
+    vm_messages_to_json(msg_list)
+}
+
+pub(crate) fn json_messages_to_vm(msg_list: &[serde_json::Value]) -> Vec<VmValue> {
+    msg_list
+        .iter()
+        .filter_map(|msg| {
+            let role = msg.get("role").and_then(|v| v.as_str())?;
+            if let Some(content) = msg.get("content").and_then(|v| v.as_str()) {
+                return Some(vm_message(role, content));
+            }
+
+            let blocks = msg.get("content")?.as_array()?;
+            if role == "user" {
+                for block in blocks {
+                    if block.get("type").and_then(|v| v.as_str()) == Some("tool_result") {
+                        let content = block
+                            .get("content")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default();
+                        let tool_use_id = block
+                            .get("tool_use_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default();
+                        let mut result = BTreeMap::new();
+                        result.insert("role".to_string(), VmValue::String(Rc::from("tool_result")));
+                        result.insert(
+                            "tool_use_id".to_string(),
+                            VmValue::String(Rc::from(tool_use_id)),
+                        );
+                        result.insert("content".to_string(), VmValue::String(Rc::from(content)));
+                        return Some(VmValue::Dict(Rc::new(result)));
+                    }
+                }
+            }
+            None
+        })
+        .collect()
+}
+
+pub(crate) fn new_transcript_with(
+    id: Option<String>,
+    messages: Vec<VmValue>,
+    summary: Option<String>,
+    metadata: Option<VmValue>,
+) -> VmValue {
+    let mut transcript = BTreeMap::new();
+    transcript.insert(
+        "_type".to_string(),
+        VmValue::String(Rc::from(TRANSCRIPT_TYPE)),
+    );
+    transcript.insert(
+        "id".to_string(),
+        VmValue::String(Rc::from(
+            id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string()),
+        )),
+    );
+    transcript.insert("messages".to_string(), VmValue::List(Rc::new(messages)));
+    if let Some(summary) = summary {
+        transcript.insert("summary".to_string(), VmValue::String(Rc::from(summary)));
+    }
+    if let Some(metadata) = metadata {
+        transcript.insert("metadata".to_string(), metadata);
+    }
+    VmValue::Dict(Rc::new(transcript))
+}
+
+pub(crate) fn transcript_to_vm(
+    id: Option<String>,
+    summary: Option<String>,
+    metadata: Option<serde_json::Value>,
+    messages: &[serde_json::Value],
+) -> VmValue {
+    let metadata_vm = metadata.as_ref().map(crate::stdlib::json_to_vm_value);
+    new_transcript_with(id, json_messages_to_vm(messages), summary, metadata_vm)
+}
+
+pub(crate) fn is_transcript_value(value: &VmValue) -> bool {
+    value
+        .as_dict()
+        .and_then(|d| d.get("_type"))
+        .map(|v| v.display())
+        .as_deref()
+        == Some(TRANSCRIPT_TYPE)
+}
+
 // =============================================================================
 // Helper: add a role message to a conversation list
 // =============================================================================
 
 pub(crate) fn vm_add_role_message(args: &[VmValue], role: &str) -> Result<VmValue, VmError> {
-    let messages = match args.first() {
-        Some(VmValue::List(list)) => (**list).clone(),
+    match args.first() {
+        Some(VmValue::List(list)) => {
+            let content = args.get(1).map(|a| a.display()).unwrap_or_default();
+            let mut new_messages = (**list).clone();
+            new_messages.push(vm_message(role, &content));
+            Ok(VmValue::List(Rc::new(new_messages)))
+        }
+        Some(VmValue::Dict(d))
+            if d.get("_type").map(|v| v.display()).as_deref() == Some(TRANSCRIPT_TYPE) =>
+        {
+            let content = args.get(1).map(|a| a.display()).unwrap_or_default();
+            let mut messages = transcript_message_list(d)?;
+            messages.push(vm_message(role, &content));
+            Ok(new_transcript_with(
+                transcript_id(d),
+                messages,
+                transcript_summary_text(d),
+                d.get("metadata").cloned(),
+            ))
+        }
         _ => {
             return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                "add_{role}: first argument must be a message list"
+                "add_{role}: first argument must be a message list or transcript"
             )))));
         }
-    };
-    let content = args.get(1).map(|a| a.display()).unwrap_or_default();
-
-    let mut msg = BTreeMap::new();
-    msg.insert("role".to_string(), VmValue::String(Rc::from(role)));
-    msg.insert("content".to_string(), VmValue::String(Rc::from(content)));
-
-    let mut new_messages = messages;
-    new_messages.push(VmValue::Dict(Rc::new(msg)));
-    Ok(VmValue::List(Rc::new(new_messages)))
+    }
 }
 
 // =============================================================================
@@ -288,9 +449,7 @@ pub(crate) fn extract_json(text: &str) -> &str {
 // =============================================================================
 
 /// Extract all LLM call options from the standard (prompt, system, options) args.
-pub(crate) fn extract_llm_options(
-    args: &[VmValue],
-) -> Result<super::api::LlmCallOptions, VmError> {
+pub(crate) fn extract_llm_options(args: &[VmValue]) -> Result<super::api::LlmCallOptions, VmError> {
     use super::api::{LlmCallOptions, ThinkingConfig};
     use super::tools::vm_tools_to_native;
 
@@ -327,7 +486,10 @@ pub(crate) fn extract_llm_options(
         .and_then(|v| match v {
             VmValue::Bool(true) => Some(ThinkingConfig::Enabled),
             VmValue::Dict(d) => {
-                let budget = d.get("budget_tokens").and_then(|b| b.as_int()).unwrap_or(10000);
+                let budget = d
+                    .get("budget_tokens")
+                    .and_then(|b| b.as_int())
+                    .unwrap_or(10000);
                 Some(ThinkingConfig::WithBudget(budget))
             }
             _ if v.is_truthy() => Some(ThinkingConfig::Enabled),
@@ -341,12 +503,39 @@ pub(crate) fn extract_llm_options(
         .and_then(|v| v.as_dict())
         .map(vm_value_dict_to_json);
 
-    // Messages: either from options.messages or from prompt
+    let transcript_val = options.as_ref().and_then(|o| o.get("transcript")).cloned();
+    let transcript_dict = transcript_val
+        .as_ref()
+        .and_then(|v| v.as_dict())
+        .filter(|d| d.get("_type").map(|v| v.display()).as_deref() == Some(TRANSCRIPT_TYPE));
+    let transcript_id = transcript_dict.and_then(transcript_id);
+    let transcript_summary = transcript_dict.and_then(transcript_summary_text);
+    let transcript_metadata = transcript_dict.and_then(transcript_metadata);
+
+    // Messages: options.messages > options.transcript > prompt
     let messages_val = options.as_ref().and_then(|o| o.get("messages")).cloned();
     let messages = if let Some(VmValue::List(msg_list)) = &messages_val {
         vm_messages_to_json(msg_list)?
+    } else if let Some(transcript) = transcript_dict {
+        let mut messages = vm_message_list_to_json(&transcript_message_list(transcript)?)?;
+        if !prompt.is_empty() {
+            messages.push(serde_json::json!({
+                "role": "user",
+                "content": prompt,
+            }));
+        }
+        messages
     } else {
         vec![serde_json::json!({"role": "user", "content": prompt})]
+    };
+
+    let system = match (system, transcript_summary.clone()) {
+        (Some(system), Some(summary)) => {
+            Some(format!("{system}\n\nConversation summary:\n{summary}"))
+        }
+        (Some(system), None) => Some(system),
+        (None, Some(summary)) => Some(format!("Conversation summary:\n{summary}")),
+        (None, None) => None,
     };
 
     // Tools
@@ -377,6 +566,9 @@ pub(crate) fn extract_llm_options(
         api_key,
         messages,
         system,
+        transcript_id,
+        transcript_summary,
+        transcript_metadata,
         max_tokens,
         temperature,
         top_p,
@@ -423,19 +615,37 @@ fn validate_options(opts: &super::api::LlmCallOptions) {
 
     match p {
         "anthropic" => {
-            if opts.seed.is_some() { warn("seed"); }
-            if opts.frequency_penalty.is_some() { warn("frequency_penalty"); }
-            if opts.presence_penalty.is_some() { warn("presence_penalty"); }
+            if opts.seed.is_some() {
+                warn("seed");
+            }
+            if opts.frequency_penalty.is_some() {
+                warn("frequency_penalty");
+            }
+            if opts.presence_penalty.is_some() {
+                warn("presence_penalty");
+            }
         }
         "openai" | "openrouter" | "huggingface" => {
-            if opts.top_k.is_some() { warn("top_k"); }
-            if opts.thinking.is_some() { warn("thinking"); }
-            if opts.cache { warn("cache"); }
+            if opts.top_k.is_some() {
+                warn("top_k");
+            }
+            if opts.thinking.is_some() {
+                warn("thinking");
+            }
+            if opts.cache {
+                warn("cache");
+            }
         }
         "ollama" => {
-            if opts.frequency_penalty.is_some() { warn("frequency_penalty"); }
-            if opts.presence_penalty.is_some() { warn("presence_penalty"); }
-            if opts.cache { warn("cache"); }
+            if opts.frequency_penalty.is_some() {
+                warn("frequency_penalty");
+            }
+            if opts.presence_penalty.is_some() {
+                warn("presence_penalty");
+            }
+            if opts.cache {
+                warn("cache");
+            }
         }
         _ => {} // Unknown provider: skip validation
     }
