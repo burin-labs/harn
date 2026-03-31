@@ -480,9 +480,13 @@ pub(crate) async fn execute(source: &str, source_path: Option<&Path>) -> Result<
 
     // Static type checking (same as interpreter path)
     let type_diagnostics = TypeChecker::new().check(&program);
+    let mut warning_lines = Vec::new();
     for diag in &type_diagnostics {
-        if diag.severity == DiagnosticSeverity::Error {
-            return Err(diag.message.clone());
+        match diag.severity {
+            DiagnosticSeverity::Error => return Err(diag.message.clone()),
+            DiagnosticSeverity::Warning => {
+                warning_lines.push(format!("warning: {}", diag.message));
+            }
         }
     }
 
@@ -518,7 +522,13 @@ pub(crate) async fn execute(source: &str, source_path: Option<&Path>) -> Result<
                 }
             }
             vm.execute(&chunk).await.map_err(|e| e.to_string())?;
-            Ok(vm.output().to_string())
+            let mut output = String::new();
+            for wl in &warning_lines {
+                output.push_str(wl);
+                output.push('\n');
+            }
+            output.push_str(vm.output());
+            Ok(output)
         })
         .await
 }

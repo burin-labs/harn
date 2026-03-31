@@ -971,49 +971,84 @@ impl TypeChecker {
         interface_name: &str,
         scope: &TypeScope,
     ) -> bool {
+        self.interface_mismatch_reason(type_name, interface_name, scope)
+            .is_none()
+    }
+
+    /// Return a detailed reason why a type does not satisfy an interface, or None
+    /// if it does satisfy it.  Used for producing actionable warning messages.
+    fn interface_mismatch_reason(
+        &self,
+        type_name: &str,
+        interface_name: &str,
+        scope: &TypeScope,
+    ) -> Option<String> {
         let interface_methods = match scope.get_interface(interface_name) {
             Some(methods) => methods,
-            None => return false,
+            None => return Some(format!("interface '{}' not found", interface_name)),
         };
         let impl_methods = match scope.get_impl_methods(type_name) {
             Some(methods) => methods,
-            None => return interface_methods.is_empty(),
+            None => {
+                if interface_methods.is_empty() {
+                    return None;
+                }
+                let names: Vec<_> = interface_methods.iter().map(|m| m.name.as_str()).collect();
+                return Some(format!("missing method(s): {}", names.join(", ")));
+            }
         };
-        interface_methods.iter().all(|iface_method| {
+        for iface_method in interface_methods {
             let iface_params: Vec<_> = iface_method
                 .params
                 .iter()
                 .filter(|p| p.name != "self")
                 .collect();
             let iface_param_count = iface_params.len();
-            impl_methods.iter().any(|impl_method| {
-                if impl_method.name != iface_method.name
-                    || impl_method.param_count != iface_param_count
-                {
-                    return false;
+            let matching_impl = impl_methods.iter().find(|im| im.name == iface_method.name);
+            let impl_method = match matching_impl {
+                Some(m) => m,
+                None => {
+                    return Some(format!("missing method '{}'", iface_method.name));
                 }
-                // Check parameter types where both sides specify them
-                for (i, iface_param) in iface_params.iter().enumerate() {
-                    if let (Some(expected), Some(actual)) = (
-                        &iface_param.type_expr,
-                        impl_method.param_types.get(i).and_then(|t| t.as_ref()),
-                    ) {
-                        if !self.types_compatible(expected, actual, scope) {
-                            return false;
-                        }
+            };
+            if impl_method.param_count != iface_param_count {
+                return Some(format!(
+                    "method '{}' has {} parameter(s), expected {}",
+                    iface_method.name, impl_method.param_count, iface_param_count
+                ));
+            }
+            // Check parameter types where both sides specify them
+            for (i, iface_param) in iface_params.iter().enumerate() {
+                if let (Some(expected), Some(actual)) = (
+                    &iface_param.type_expr,
+                    impl_method.param_types.get(i).and_then(|t| t.as_ref()),
+                ) {
+                    if !self.types_compatible(expected, actual, scope) {
+                        return Some(format!(
+                            "method '{}' parameter {} has type '{}', expected '{}'",
+                            iface_method.name,
+                            i + 1,
+                            format_type(actual),
+                            format_type(expected),
+                        ));
                     }
                 }
-                // Check return type where both sides specify it
-                if let (Some(expected_ret), Some(actual_ret)) =
-                    (&iface_method.return_type, &impl_method.return_type)
-                {
-                    if !self.types_compatible(expected_ret, actual_ret, scope) {
-                        return false;
-                    }
+            }
+            // Check return type where both sides specify it
+            if let (Some(expected_ret), Some(actual_ret)) =
+                (&iface_method.return_type, &impl_method.return_type)
+            {
+                if !self.types_compatible(expected_ret, actual_ret, scope) {
+                    return Some(format!(
+                        "method '{}' returns '{}', expected '{}'",
+                        iface_method.name,
+                        format_type(actual_ret),
+                        format_type(expected_ret),
+                    ));
                 }
-                true
-            })
-        })
+            }
+        }
+        None
     }
 
     /// Recursively extract type parameter bindings from matching param/arg types.
@@ -1241,12 +1276,14 @@ impl TypeChecker {
                 }
                 for (type_param, bound) in &sig.where_clauses {
                     if let Some(concrete_type) = type_bindings.get(type_param) {
-                        if !self.satisfies_interface(concrete_type, bound, scope) {
+                        if let Some(reason) =
+                            self.interface_mismatch_reason(concrete_type, bound, scope)
+                        {
                             self.warning_at(
                                 format!(
-                                    "Type '{}' does not satisfy interface '{}': \
-                                     required by constraint `where {}: {}`",
-                                    concrete_type, bound, type_param, bound
+                                    "Type '{}' does not satisfy interface '{}': {} \
+                                     (required by constraint `where {}: {}`)",
+                                    concrete_type, bound, reason, type_param, bound
                                 ),
                                 span,
                             );
@@ -2234,5 +2271,162 @@ add("hello", 2) }"#,
             .filter(|w| w.contains("Match pattern type mismatch"))
             .collect();
         assert!(pattern_warns.is_empty());
+    }
+
+    // --- Interface constraint type checking tests ---
+
+    fn iface_warns(source: &str) -> Vec<String> {
+        warnings(source)
+            .into_iter()
+            .filter(|w| w.contains("does not satisfy interface"))
+            .collect()
+    }
+
+    #[test]
+    fn test_interface_constraint_return_type_mismatch() {
+        let warns = iface_warns(
+            r#"pipeline t(task) {
+  interface Sizable {
+    fn size(self) -> int
+  }
+  struct Box { width: int }
+  impl Box {
+    fn size(self) -> string { return "nope" }
+  }
+  fn measure<T>(item: T) where T: Sizable { log(item.size()) }
+  measure(Box({width: 3}))
+}"#,
+        );
+        assert_eq!(warns.len(), 1, "expected 1 warning, got: {:?}", warns);
+        assert!(
+            warns[0].contains("method 'size' returns 'string', expected 'int'"),
+            "unexpected message: {}",
+            warns[0]
+        );
+    }
+
+    #[test]
+    fn test_interface_constraint_param_type_mismatch() {
+        let warns = iface_warns(
+            r#"pipeline t(task) {
+  interface Processor {
+    fn process(self, x: int) -> string
+  }
+  struct MyProc { name: string }
+  impl MyProc {
+    fn process(self, x: string) -> string { return x }
+  }
+  fn run_proc<T>(p: T) where T: Processor { log(p.process(42)) }
+  run_proc(MyProc({name: "a"}))
+}"#,
+        );
+        assert_eq!(warns.len(), 1, "expected 1 warning, got: {:?}", warns);
+        assert!(
+            warns[0].contains("method 'process' parameter 1 has type 'string', expected 'int'"),
+            "unexpected message: {}",
+            warns[0]
+        );
+    }
+
+    #[test]
+    fn test_interface_constraint_missing_method() {
+        let warns = iface_warns(
+            r#"pipeline t(task) {
+  interface Sizable {
+    fn size(self) -> int
+  }
+  struct Box { width: int }
+  impl Box {
+    fn area(self) -> int { return self.width }
+  }
+  fn measure<T>(item: T) where T: Sizable { log(item.size()) }
+  measure(Box({width: 3}))
+}"#,
+        );
+        assert_eq!(warns.len(), 1, "expected 1 warning, got: {:?}", warns);
+        assert!(
+            warns[0].contains("missing method 'size'"),
+            "unexpected message: {}",
+            warns[0]
+        );
+    }
+
+    #[test]
+    fn test_interface_constraint_param_count_mismatch() {
+        let warns = iface_warns(
+            r#"pipeline t(task) {
+  interface Doubler {
+    fn double(self, x: int) -> int
+  }
+  struct Bad { v: int }
+  impl Bad {
+    fn double(self) -> int { return self.v * 2 }
+  }
+  fn run_double<T>(d: T) where T: Doubler { log(d.double(3)) }
+  run_double(Bad({v: 5}))
+}"#,
+        );
+        assert_eq!(warns.len(), 1, "expected 1 warning, got: {:?}", warns);
+        assert!(
+            warns[0].contains("method 'double' has 0 parameter(s), expected 1"),
+            "unexpected message: {}",
+            warns[0]
+        );
+    }
+
+    #[test]
+    fn test_interface_constraint_satisfied() {
+        let warns = iface_warns(
+            r#"pipeline t(task) {
+  interface Sizable {
+    fn size(self) -> int
+  }
+  struct Box { width: int, height: int }
+  impl Box {
+    fn size(self) -> int { return self.width * self.height }
+  }
+  fn measure<T>(item: T) where T: Sizable { log(item.size()) }
+  measure(Box({width: 3, height: 4}))
+}"#,
+        );
+        assert!(warns.is_empty(), "expected no warnings, got: {:?}", warns);
+    }
+
+    #[test]
+    fn test_interface_constraint_untyped_impl_compatible() {
+        // Gradual typing: untyped impl return should not trigger warning
+        let warns = iface_warns(
+            r#"pipeline t(task) {
+  interface Sizable {
+    fn size(self) -> int
+  }
+  struct Box { width: int }
+  impl Box {
+    fn size(self) { return self.width }
+  }
+  fn measure<T>(item: T) where T: Sizable { log(item.size()) }
+  measure(Box({width: 3}))
+}"#,
+        );
+        assert!(warns.is_empty(), "expected no warnings, got: {:?}", warns);
+    }
+
+    #[test]
+    fn test_interface_constraint_int_float_covariance() {
+        // int is compatible with float (covariance)
+        let warns = iface_warns(
+            r#"pipeline t(task) {
+  interface Measurable {
+    fn value(self) -> float
+  }
+  struct Gauge { v: int }
+  impl Gauge {
+    fn value(self) -> int { return self.v }
+  }
+  fn read_val<T>(g: T) where T: Measurable { log(g.value()) }
+  read_val(Gauge({v: 42}))
+}"#,
+        );
+        assert!(warns.is_empty(), "expected no warnings, got: {:?}", warns);
     }
 }

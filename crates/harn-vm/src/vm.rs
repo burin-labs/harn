@@ -356,11 +356,19 @@ impl Vm {
                     Ok(Some((val, false)))
                 }
             }
-            Err(e) => match self.handle_error(e) {
-                Ok(None) => Ok(None),
-                Ok(Some(val)) => Ok(Some((val, false))),
-                Err(e) => Err(e),
-            },
+            Err(e) => {
+                if self.error_stack_trace.is_empty() {
+                    self.error_stack_trace = self.capture_stack_trace();
+                }
+                match self.handle_error(e) {
+                    Ok(None) => {
+                        self.error_stack_trace.clear();
+                        Ok(None)
+                    }
+                    Ok(Some(val)) => Ok(Some((val, false))),
+                    Err(e) => Err(self.enrich_error_with_line(e)),
+                }
+            }
         }
     }
 
@@ -809,7 +817,7 @@ impl Vm {
                             continue; // Handler found, continue
                         }
                         Ok(Some(val)) => return Ok(val),
-                        Err(e) => return Err(e), // No handler, propagate
+                        Err(e) => return Err(self.enrich_error_with_line(e)),
                     }
                 }
             }
@@ -827,6 +835,45 @@ impl Vm {
                 (f.fn_name.clone(), line, col)
             })
             .collect()
+    }
+
+    /// Enrich a VmError with source line information from the captured stack
+    /// trace. Appends ` (line N)` to error variants whose messages don't
+    /// already carry location context.
+    fn enrich_error_with_line(&self, error: VmError) -> VmError {
+        // Determine the line from the captured stack trace (innermost frame).
+        let line = self
+            .error_stack_trace
+            .last()
+            .map(|(_, l, _)| *l)
+            .unwrap_or_else(|| self.current_line());
+        if line == 0 {
+            return error;
+        }
+        let suffix = format!(" (line {line})");
+        match error {
+            VmError::Runtime(msg) => VmError::Runtime(format!("{msg}{suffix}")),
+            VmError::TypeError(msg) => VmError::TypeError(format!("{msg}{suffix}")),
+            VmError::DivisionByZero => VmError::Runtime(format!("Division by zero{suffix}")),
+            VmError::UndefinedVariable(name) => {
+                VmError::Runtime(format!("Undefined variable: {name}{suffix}"))
+            }
+            VmError::UndefinedBuiltin(name) => {
+                VmError::Runtime(format!("Undefined builtin: {name}{suffix}"))
+            }
+            VmError::ImmutableAssignment(name) => VmError::Runtime(format!(
+                "Cannot assign to immutable binding: {name}{suffix}"
+            )),
+            VmError::StackOverflow => {
+                VmError::Runtime(format!("Stack overflow: too many nested calls{suffix}"))
+            }
+            // Leave these untouched:
+            // - Thrown: user-thrown errors should not be silently modified
+            // - CategorizedError: structured errors for agent orchestration
+            // - Return: control flow, not a real error
+            // - StackUnderflow / InvalidInstruction: internal VM bugs
+            other => other,
+        }
     }
 
     const MAX_FRAMES: usize = 512;

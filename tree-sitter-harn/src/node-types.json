@@ -20,7 +20,15 @@
           "named": true
         },
         {
+          "type": "deadline_block",
+          "named": true
+        },
+        {
           "type": "dict_literal",
+          "named": true
+        },
+        {
+          "type": "duration_literal",
           "named": true
         },
         {
@@ -29,6 +37,10 @@
         },
         {
           "type": "float_literal",
+          "named": true
+        },
+        {
+          "type": "fn_expression",
           "named": true
         },
         {
@@ -72,6 +84,10 @@
           "named": true
         },
         {
+          "type": "parallel_settle_expression",
+          "named": true
+        },
+        {
           "type": "parenthesized_expression",
           "named": true
         },
@@ -84,6 +100,10 @@
           "named": true
         },
         {
+          "type": "range_expression",
+          "named": true
+        },
+        {
           "type": "retry_statement",
           "named": true
         },
@@ -93,6 +113,10 @@
         },
         {
           "type": "spawn_expression",
+          "named": true
+        },
+        {
+          "type": "spread_expression",
           "named": true
         },
         {
@@ -112,6 +136,14 @@
           "named": true
         },
         {
+          "type": "try_expression",
+          "named": true
+        },
+        {
+          "type": "try_unwrap_expression",
+          "named": true
+        },
+        {
           "type": "unary_expression",
           "named": true
         }
@@ -128,6 +160,14 @@
         "types": [
           {
             "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "property_access",
+            "named": true
+          },
+          {
+            "type": "subscript_expression",
             "named": true
           }
         ]
@@ -149,7 +189,15 @@
             "named": true
           },
           {
+            "type": "deadline_block",
+            "named": true
+          },
+          {
             "type": "dict_literal",
+            "named": true
+          },
+          {
+            "type": "duration_literal",
             "named": true
           },
           {
@@ -158,6 +206,10 @@
           },
           {
             "type": "float_literal",
+            "named": true
+          },
+          {
+            "type": "fn_expression",
             "named": true
           },
           {
@@ -201,6 +253,10 @@
             "named": true
           },
           {
+            "type": "parallel_settle_expression",
+            "named": true
+          },
+          {
             "type": "parenthesized_expression",
             "named": true
           },
@@ -210,6 +266,10 @@
           },
           {
             "type": "property_access",
+            "named": true
+          },
+          {
+            "type": "range_expression",
             "named": true
           },
           {
@@ -241,6 +301,14 @@
             "named": true
           },
           {
+            "type": "try_expression",
+            "named": true
+          },
+          {
+            "type": "try_unwrap_expression",
+            "named": true
+          },
+          {
             "type": "unary_expression",
             "named": true
           }
@@ -269,7 +337,15 @@
           "named": true
         },
         {
+          "type": "deadline_block",
+          "named": true
+        },
+        {
           "type": "dict_literal",
+          "named": true
+        },
+        {
+          "type": "duration_literal",
           "named": true
         },
         {
@@ -278,6 +354,10 @@
         },
         {
           "type": "float_literal",
+          "named": true
+        },
+        {
+          "type": "fn_expression",
           "named": true
         },
         {
@@ -321,6 +401,10 @@
           "named": true
         },
         {
+          "type": "parallel_settle_expression",
+          "named": true
+        },
+        {
           "type": "parenthesized_expression",
           "named": true
         },
@@ -330,6 +414,10 @@
         },
         {
           "type": "property_access",
+          "named": true
+        },
+        {
+          "type": "range_expression",
           "named": true
         },
         {
@@ -358,6 +446,14 @@
         },
         {
           "type": "true",
+          "named": true
+        },
+        {
+          "type": "try_expression",
+          "named": true
+        },
+        {
+          "type": "try_unwrap_expression",
           "named": true
         },
         {
@@ -384,6 +480,10 @@
           "named": true
         },
         {
+          "type": "break_statement",
+          "named": true
+        },
+        {
           "type": "call_expression",
           "named": true
         },
@@ -392,7 +492,27 @@
           "named": true
         },
         {
+          "type": "compound_assignment",
+          "named": true
+        },
+        {
+          "type": "continue_statement",
+          "named": true
+        },
+        {
+          "type": "deadline_block",
+          "named": true
+        },
+        {
           "type": "dict_literal",
+          "named": true
+        },
+        {
+          "type": "duration_literal",
+          "named": true
+        },
+        {
+          "type": "enum_declaration",
           "named": true
         },
         {
@@ -408,7 +528,15 @@
           "named": true
         },
         {
+          "type": "fn_expression",
+          "named": true
+        },
+        {
           "type": "for_statement",
+          "named": true
+        },
+        {
+          "type": "guard_statement",
           "named": true
         },
         {
@@ -420,7 +548,15 @@
           "named": true
         },
         {
+          "type": "impl_block",
+          "named": true
+        },
+        {
           "type": "integer_literal",
+          "named": true
+        },
+        {
+          "type": "interface_declaration",
           "named": true
         },
         {
@@ -444,6 +580,10 @@
           "named": true
         },
         {
+          "type": "mutex_block",
+          "named": true
+        },
+        {
           "type": "nil",
           "named": true
         },
@@ -464,6 +604,10 @@
           "named": true
         },
         {
+          "type": "parallel_settle_expression",
+          "named": true
+        },
+        {
           "type": "parenthesized_expression",
           "named": true
         },
@@ -476,11 +620,19 @@
           "named": true
         },
         {
+          "type": "range_expression",
+          "named": true
+        },
+        {
           "type": "retry_statement",
           "named": true
         },
         {
           "type": "return_statement",
+          "named": true
+        },
+        {
+          "type": "select_block",
           "named": true
         },
         {
@@ -493,6 +645,10 @@
         },
         {
           "type": "string_literal",
+          "named": true
+        },
+        {
+          "type": "struct_declaration",
           "named": true
         },
         {
@@ -516,6 +672,18 @@
           "named": true
         },
         {
+          "type": "try_expression",
+          "named": true
+        },
+        {
+          "type": "try_unwrap_expression",
+          "named": true
+        },
+        {
+          "type": "type_declaration",
+          "named": true
+        },
+        {
           "type": "unary_expression",
           "named": true
         },
@@ -525,6 +693,10 @@
         },
         {
           "type": "while_statement",
+          "named": true
+        },
+        {
+          "type": "yield_expression",
           "named": true
         }
       ]
@@ -539,7 +711,139 @@
         "required": true,
         "types": [
           {
+            "type": "binary_expression",
+            "named": true
+          },
+          {
+            "type": "call_expression",
+            "named": true
+          },
+          {
+            "type": "closure",
+            "named": true
+          },
+          {
+            "type": "deadline_block",
+            "named": true
+          },
+          {
+            "type": "dict_literal",
+            "named": true
+          },
+          {
+            "type": "duration_literal",
+            "named": true
+          },
+          {
+            "type": "false",
+            "named": true
+          },
+          {
+            "type": "float_literal",
+            "named": true
+          },
+          {
+            "type": "fn_expression",
+            "named": true
+          },
+          {
             "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "if_statement",
+            "named": true
+          },
+          {
+            "type": "integer_literal",
+            "named": true
+          },
+          {
+            "type": "interpolated_string",
+            "named": true
+          },
+          {
+            "type": "list_literal",
+            "named": true
+          },
+          {
+            "type": "method_call",
+            "named": true
+          },
+          {
+            "type": "nil",
+            "named": true
+          },
+          {
+            "type": "nil_coalescing_expression",
+            "named": true
+          },
+          {
+            "type": "parallel_expression",
+            "named": true
+          },
+          {
+            "type": "parallel_map_expression",
+            "named": true
+          },
+          {
+            "type": "parallel_settle_expression",
+            "named": true
+          },
+          {
+            "type": "parenthesized_expression",
+            "named": true
+          },
+          {
+            "type": "pipe_expression",
+            "named": true
+          },
+          {
+            "type": "property_access",
+            "named": true
+          },
+          {
+            "type": "range_expression",
+            "named": true
+          },
+          {
+            "type": "retry_statement",
+            "named": true
+          },
+          {
+            "type": "slice_expression",
+            "named": true
+          },
+          {
+            "type": "spawn_expression",
+            "named": true
+          },
+          {
+            "type": "string_literal",
+            "named": true
+          },
+          {
+            "type": "subscript_expression",
+            "named": true
+          },
+          {
+            "type": "ternary_expression",
+            "named": true
+          },
+          {
+            "type": "true",
+            "named": true
+          },
+          {
+            "type": "try_expression",
+            "named": true
+          },
+          {
+            "type": "try_unwrap_expression",
+            "named": true
+          },
+          {
+            "type": "unary_expression",
             "named": true
           }
         ]
@@ -573,6 +877,10 @@
           "named": true
         },
         {
+          "type": "break_statement",
+          "named": true
+        },
+        {
           "type": "call_expression",
           "named": true
         },
@@ -581,7 +889,27 @@
           "named": true
         },
         {
+          "type": "compound_assignment",
+          "named": true
+        },
+        {
+          "type": "continue_statement",
+          "named": true
+        },
+        {
+          "type": "deadline_block",
+          "named": true
+        },
+        {
           "type": "dict_literal",
+          "named": true
+        },
+        {
+          "type": "duration_literal",
+          "named": true
+        },
+        {
+          "type": "enum_declaration",
           "named": true
         },
         {
@@ -597,7 +925,15 @@
           "named": true
         },
         {
+          "type": "fn_expression",
+          "named": true
+        },
+        {
           "type": "for_statement",
+          "named": true
+        },
+        {
+          "type": "guard_statement",
           "named": true
         },
         {
@@ -609,7 +945,15 @@
           "named": true
         },
         {
+          "type": "impl_block",
+          "named": true
+        },
+        {
           "type": "integer_literal",
+          "named": true
+        },
+        {
+          "type": "interface_declaration",
           "named": true
         },
         {
@@ -633,6 +977,10 @@
           "named": true
         },
         {
+          "type": "mutex_block",
+          "named": true
+        },
+        {
           "type": "nil",
           "named": true
         },
@@ -653,6 +1001,10 @@
           "named": true
         },
         {
+          "type": "parallel_settle_expression",
+          "named": true
+        },
+        {
           "type": "parameter_list",
           "named": true
         },
@@ -669,11 +1021,19 @@
           "named": true
         },
         {
+          "type": "range_expression",
+          "named": true
+        },
+        {
           "type": "retry_statement",
           "named": true
         },
         {
           "type": "return_statement",
+          "named": true
+        },
+        {
+          "type": "select_block",
           "named": true
         },
         {
@@ -686,6 +1046,10 @@
         },
         {
           "type": "string_literal",
+          "named": true
+        },
+        {
+          "type": "struct_declaration",
           "named": true
         },
         {
@@ -709,6 +1073,18 @@
           "named": true
         },
         {
+          "type": "try_expression",
+          "named": true
+        },
+        {
+          "type": "try_unwrap_expression",
+          "named": true
+        },
+        {
+          "type": "type_declaration",
+          "named": true
+        },
+        {
           "type": "unary_expression",
           "named": true
         },
@@ -719,8 +1095,362 @@
         {
           "type": "while_statement",
           "named": true
+        },
+        {
+          "type": "yield_expression",
+          "named": true
         }
       ]
+    }
+  },
+  {
+    "type": "compound_assignment",
+    "named": true,
+    "fields": {
+      "operator": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "%=",
+            "named": false
+          },
+          {
+            "type": "*=",
+            "named": false
+          },
+          {
+            "type": "+=",
+            "named": false
+          },
+          {
+            "type": "-=",
+            "named": false
+          },
+          {
+            "type": "/=",
+            "named": false
+          }
+        ]
+      },
+      "target": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "property_access",
+            "named": true
+          },
+          {
+            "type": "subscript_expression",
+            "named": true
+          }
+        ]
+      },
+      "value": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "binary_expression",
+            "named": true
+          },
+          {
+            "type": "call_expression",
+            "named": true
+          },
+          {
+            "type": "closure",
+            "named": true
+          },
+          {
+            "type": "deadline_block",
+            "named": true
+          },
+          {
+            "type": "dict_literal",
+            "named": true
+          },
+          {
+            "type": "duration_literal",
+            "named": true
+          },
+          {
+            "type": "false",
+            "named": true
+          },
+          {
+            "type": "float_literal",
+            "named": true
+          },
+          {
+            "type": "fn_expression",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "if_statement",
+            "named": true
+          },
+          {
+            "type": "integer_literal",
+            "named": true
+          },
+          {
+            "type": "interpolated_string",
+            "named": true
+          },
+          {
+            "type": "list_literal",
+            "named": true
+          },
+          {
+            "type": "method_call",
+            "named": true
+          },
+          {
+            "type": "nil",
+            "named": true
+          },
+          {
+            "type": "nil_coalescing_expression",
+            "named": true
+          },
+          {
+            "type": "parallel_expression",
+            "named": true
+          },
+          {
+            "type": "parallel_map_expression",
+            "named": true
+          },
+          {
+            "type": "parallel_settle_expression",
+            "named": true
+          },
+          {
+            "type": "parenthesized_expression",
+            "named": true
+          },
+          {
+            "type": "pipe_expression",
+            "named": true
+          },
+          {
+            "type": "property_access",
+            "named": true
+          },
+          {
+            "type": "range_expression",
+            "named": true
+          },
+          {
+            "type": "retry_statement",
+            "named": true
+          },
+          {
+            "type": "slice_expression",
+            "named": true
+          },
+          {
+            "type": "spawn_expression",
+            "named": true
+          },
+          {
+            "type": "string_literal",
+            "named": true
+          },
+          {
+            "type": "subscript_expression",
+            "named": true
+          },
+          {
+            "type": "ternary_expression",
+            "named": true
+          },
+          {
+            "type": "true",
+            "named": true
+          },
+          {
+            "type": "try_expression",
+            "named": true
+          },
+          {
+            "type": "try_unwrap_expression",
+            "named": true
+          },
+          {
+            "type": "unary_expression",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "deadline_block",
+    "named": true,
+    "fields": {
+      "body": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "block",
+            "named": true
+          }
+        ]
+      },
+      "duration": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "binary_expression",
+            "named": true
+          },
+          {
+            "type": "call_expression",
+            "named": true
+          },
+          {
+            "type": "closure",
+            "named": true
+          },
+          {
+            "type": "deadline_block",
+            "named": true
+          },
+          {
+            "type": "dict_literal",
+            "named": true
+          },
+          {
+            "type": "duration_literal",
+            "named": true
+          },
+          {
+            "type": "false",
+            "named": true
+          },
+          {
+            "type": "float_literal",
+            "named": true
+          },
+          {
+            "type": "fn_expression",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "if_statement",
+            "named": true
+          },
+          {
+            "type": "integer_literal",
+            "named": true
+          },
+          {
+            "type": "interpolated_string",
+            "named": true
+          },
+          {
+            "type": "list_literal",
+            "named": true
+          },
+          {
+            "type": "method_call",
+            "named": true
+          },
+          {
+            "type": "nil",
+            "named": true
+          },
+          {
+            "type": "nil_coalescing_expression",
+            "named": true
+          },
+          {
+            "type": "parallel_expression",
+            "named": true
+          },
+          {
+            "type": "parallel_map_expression",
+            "named": true
+          },
+          {
+            "type": "parallel_settle_expression",
+            "named": true
+          },
+          {
+            "type": "parenthesized_expression",
+            "named": true
+          },
+          {
+            "type": "pipe_expression",
+            "named": true
+          },
+          {
+            "type": "property_access",
+            "named": true
+          },
+          {
+            "type": "range_expression",
+            "named": true
+          },
+          {
+            "type": "retry_statement",
+            "named": true
+          },
+          {
+            "type": "slice_expression",
+            "named": true
+          },
+          {
+            "type": "spawn_expression",
+            "named": true
+          },
+          {
+            "type": "string_literal",
+            "named": true
+          },
+          {
+            "type": "subscript_expression",
+            "named": true
+          },
+          {
+            "type": "ternary_expression",
+            "named": true
+          },
+          {
+            "type": "true",
+            "named": true
+          },
+          {
+            "type": "try_expression",
+            "named": true
+          },
+          {
+            "type": "try_unwrap_expression",
+            "named": true
+          },
+          {
+            "type": "unary_expression",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {
@@ -752,7 +1482,15 @@
             "named": true
           },
           {
+            "type": "deadline_block",
+            "named": true
+          },
+          {
             "type": "dict_literal",
+            "named": true
+          },
+          {
+            "type": "duration_literal",
             "named": true
           },
           {
@@ -761,6 +1499,10 @@
           },
           {
             "type": "float_literal",
+            "named": true
+          },
+          {
+            "type": "fn_expression",
             "named": true
           },
           {
@@ -804,6 +1546,10 @@
             "named": true
           },
           {
+            "type": "parallel_settle_expression",
+            "named": true
+          },
+          {
             "type": "parenthesized_expression",
             "named": true
           },
@@ -813,6 +1559,10 @@
           },
           {
             "type": "property_access",
+            "named": true
+          },
+          {
+            "type": "range_expression",
             "named": true
           },
           {
@@ -841,6 +1591,14 @@
           },
           {
             "type": "true",
+            "named": true
+          },
+          {
+            "type": "try_expression",
+            "named": true
+          },
+          {
+            "type": "try_unwrap_expression",
             "named": true
           },
           {
@@ -866,7 +1624,15 @@
             "named": true
           },
           {
+            "type": "deadline_block",
+            "named": true
+          },
+          {
             "type": "dict_literal",
+            "named": true
+          },
+          {
+            "type": "duration_literal",
             "named": true
           },
           {
@@ -875,6 +1641,10 @@
           },
           {
             "type": "float_literal",
+            "named": true
+          },
+          {
+            "type": "fn_expression",
             "named": true
           },
           {
@@ -918,6 +1688,10 @@
             "named": true
           },
           {
+            "type": "parallel_settle_expression",
+            "named": true
+          },
+          {
             "type": "parenthesized_expression",
             "named": true
           },
@@ -927,6 +1701,10 @@
           },
           {
             "type": "property_access",
+            "named": true
+          },
+          {
+            "type": "range_expression",
             "named": true
           },
           {
@@ -958,6 +1736,14 @@
             "named": true
           },
           {
+            "type": "try_expression",
+            "named": true
+          },
+          {
+            "type": "try_unwrap_expression",
+            "named": true
+          },
+          {
             "type": "unary_expression",
             "named": true
           }
@@ -975,6 +1761,92 @@
       "types": [
         {
           "type": "dict_entry",
+          "named": true
+        },
+        {
+          "type": "spread_expression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "dict_pattern",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "dict_pattern_field",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "dict_pattern_field",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "identifier",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "enum_declaration",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "enum_variant",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "enum_variant",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "type_annotation",
           "named": true
         }
       ]
@@ -1010,9 +1882,58 @@
       "required": false,
       "types": [
         {
+          "type": "generic_params",
+          "named": true
+        },
+        {
           "type": "parameter_list",
           "named": true
         },
+        {
+          "type": "type_annotation",
+          "named": true
+        },
+        {
+          "type": "where_clause",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "fn_expression",
+    "named": true,
+    "fields": {
+      "body": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "block",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": false,
+      "required": false,
+      "types": [
+        {
+          "type": "parameter_list",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "fn_type",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
         {
           "type": "type_annotation",
           "named": true
@@ -1051,7 +1972,15 @@
             "named": true
           },
           {
+            "type": "deadline_block",
+            "named": true
+          },
+          {
             "type": "dict_literal",
+            "named": true
+          },
+          {
+            "type": "duration_literal",
             "named": true
           },
           {
@@ -1060,6 +1989,10 @@
           },
           {
             "type": "float_literal",
+            "named": true
+          },
+          {
+            "type": "fn_expression",
             "named": true
           },
           {
@@ -1103,6 +2036,10 @@
             "named": true
           },
           {
+            "type": "parallel_settle_expression",
+            "named": true
+          },
+          {
             "type": "parenthesized_expression",
             "named": true
           },
@@ -1112,6 +2049,10 @@
           },
           {
             "type": "property_access",
+            "named": true
+          },
+          {
+            "type": "range_expression",
             "named": true
           },
           {
@@ -1143,6 +2084,14 @@
             "named": true
           },
           {
+            "type": "try_expression",
+            "named": true
+          },
+          {
+            "type": "try_unwrap_expression",
+            "named": true
+          },
+          {
             "type": "unary_expression",
             "named": true
           }
@@ -1153,7 +2102,188 @@
         "required": true,
         "types": [
           {
+            "type": "dict_pattern",
+            "named": true
+          },
+          {
             "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "list_pattern",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "generic_params",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "identifier",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "guard_statement",
+    "named": true,
+    "fields": {
+      "condition": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "binary_expression",
+            "named": true
+          },
+          {
+            "type": "call_expression",
+            "named": true
+          },
+          {
+            "type": "closure",
+            "named": true
+          },
+          {
+            "type": "deadline_block",
+            "named": true
+          },
+          {
+            "type": "dict_literal",
+            "named": true
+          },
+          {
+            "type": "duration_literal",
+            "named": true
+          },
+          {
+            "type": "false",
+            "named": true
+          },
+          {
+            "type": "float_literal",
+            "named": true
+          },
+          {
+            "type": "fn_expression",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "if_statement",
+            "named": true
+          },
+          {
+            "type": "integer_literal",
+            "named": true
+          },
+          {
+            "type": "interpolated_string",
+            "named": true
+          },
+          {
+            "type": "list_literal",
+            "named": true
+          },
+          {
+            "type": "method_call",
+            "named": true
+          },
+          {
+            "type": "nil",
+            "named": true
+          },
+          {
+            "type": "nil_coalescing_expression",
+            "named": true
+          },
+          {
+            "type": "parallel_expression",
+            "named": true
+          },
+          {
+            "type": "parallel_map_expression",
+            "named": true
+          },
+          {
+            "type": "parallel_settle_expression",
+            "named": true
+          },
+          {
+            "type": "parenthesized_expression",
+            "named": true
+          },
+          {
+            "type": "pipe_expression",
+            "named": true
+          },
+          {
+            "type": "property_access",
+            "named": true
+          },
+          {
+            "type": "range_expression",
+            "named": true
+          },
+          {
+            "type": "retry_statement",
+            "named": true
+          },
+          {
+            "type": "slice_expression",
+            "named": true
+          },
+          {
+            "type": "spawn_expression",
+            "named": true
+          },
+          {
+            "type": "string_literal",
+            "named": true
+          },
+          {
+            "type": "subscript_expression",
+            "named": true
+          },
+          {
+            "type": "ternary_expression",
+            "named": true
+          },
+          {
+            "type": "true",
+            "named": true
+          },
+          {
+            "type": "try_expression",
+            "named": true
+          },
+          {
+            "type": "try_unwrap_expression",
+            "named": true
+          },
+          {
+            "type": "unary_expression",
+            "named": true
+          }
+        ]
+      },
+      "else_body": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "block",
             "named": true
           }
         ]
@@ -1181,7 +2311,15 @@
             "named": true
           },
           {
+            "type": "deadline_block",
+            "named": true
+          },
+          {
             "type": "dict_literal",
+            "named": true
+          },
+          {
+            "type": "duration_literal",
             "named": true
           },
           {
@@ -1190,6 +2328,10 @@
           },
           {
             "type": "float_literal",
+            "named": true
+          },
+          {
+            "type": "fn_expression",
             "named": true
           },
           {
@@ -1233,6 +2375,10 @@
             "named": true
           },
           {
+            "type": "parallel_settle_expression",
+            "named": true
+          },
+          {
             "type": "parenthesized_expression",
             "named": true
           },
@@ -1242,6 +2388,10 @@
           },
           {
             "type": "property_access",
+            "named": true
+          },
+          {
+            "type": "range_expression",
             "named": true
           },
           {
@@ -1270,6 +2420,14 @@
           },
           {
             "type": "true",
+            "named": true
+          },
+          {
+            "type": "try_expression",
+            "named": true
+          },
+          {
+            "type": "try_unwrap_expression",
             "named": true
           },
           {
@@ -1299,6 +2457,32 @@
         },
         {
           "type": "if_statement",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "impl_block",
+    "named": true,
+    "fields": {
+      "type_name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "fn_declaration",
           "named": true
         }
       ]
@@ -1419,7 +2603,15 @@
           "named": true
         },
         {
+          "type": "deadline_block",
+          "named": true
+        },
+        {
           "type": "dict_literal",
+          "named": true
+        },
+        {
+          "type": "duration_literal",
           "named": true
         },
         {
@@ -1428,6 +2620,10 @@
         },
         {
           "type": "float_literal",
+          "named": true
+        },
+        {
+          "type": "fn_expression",
           "named": true
         },
         {
@@ -1471,6 +2667,10 @@
           "named": true
         },
         {
+          "type": "parallel_settle_expression",
+          "named": true
+        },
+        {
           "type": "parenthesized_expression",
           "named": true
         },
@@ -1480,6 +2680,10 @@
         },
         {
           "type": "property_access",
+          "named": true
+        },
+        {
+          "type": "range_expression",
           "named": true
         },
         {
@@ -1511,6 +2715,14 @@
           "named": true
         },
         {
+          "type": "try_expression",
+          "named": true
+        },
+        {
+          "type": "try_unwrap_expression",
+          "named": true
+        },
+        {
           "type": "unary_expression",
           "named": true
         }
@@ -1526,7 +2738,15 @@
         "required": true,
         "types": [
           {
+            "type": "dict_pattern",
+            "named": true
+          },
+          {
             "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "list_pattern",
             "named": true
           }
         ]
@@ -1558,7 +2778,15 @@
             "named": true
           },
           {
+            "type": "deadline_block",
+            "named": true
+          },
+          {
             "type": "dict_literal",
+            "named": true
+          },
+          {
+            "type": "duration_literal",
             "named": true
           },
           {
@@ -1567,6 +2795,10 @@
           },
           {
             "type": "float_literal",
+            "named": true
+          },
+          {
+            "type": "fn_expression",
             "named": true
           },
           {
@@ -1610,6 +2842,10 @@
             "named": true
           },
           {
+            "type": "parallel_settle_expression",
+            "named": true
+          },
+          {
             "type": "parenthesized_expression",
             "named": true
           },
@@ -1619,6 +2855,10 @@
           },
           {
             "type": "property_access",
+            "named": true
+          },
+          {
+            "type": "range_expression",
             "named": true
           },
           {
@@ -1650,6 +2890,14 @@
             "named": true
           },
           {
+            "type": "try_expression",
+            "named": true
+          },
+          {
+            "type": "try_unwrap_expression",
+            "named": true
+          },
+          {
             "type": "unary_expression",
             "named": true
           }
@@ -1678,7 +2926,15 @@
           "named": true
         },
         {
+          "type": "deadline_block",
+          "named": true
+        },
+        {
           "type": "dict_literal",
+          "named": true
+        },
+        {
+          "type": "duration_literal",
           "named": true
         },
         {
@@ -1687,6 +2943,10 @@
         },
         {
           "type": "float_literal",
+          "named": true
+        },
+        {
+          "type": "fn_expression",
           "named": true
         },
         {
@@ -1730,6 +2990,10 @@
           "named": true
         },
         {
+          "type": "parallel_settle_expression",
+          "named": true
+        },
+        {
           "type": "parenthesized_expression",
           "named": true
         },
@@ -1742,6 +3006,10 @@
           "named": true
         },
         {
+          "type": "range_expression",
+          "named": true
+        },
+        {
           "type": "retry_statement",
           "named": true
         },
@@ -1751,6 +3019,10 @@
         },
         {
           "type": "spawn_expression",
+          "named": true
+        },
+        {
+          "type": "spread_expression",
           "named": true
         },
         {
@@ -1770,7 +3042,45 @@
           "named": true
         },
         {
+          "type": "try_expression",
+          "named": true
+        },
+        {
+          "type": "try_unwrap_expression",
+          "named": true
+        },
+        {
           "type": "unary_expression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "list_pattern",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "list_pattern_element",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "list_pattern_element",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "identifier",
           "named": true
         }
       ]
@@ -1807,7 +3117,15 @@
             "named": true
           },
           {
+            "type": "deadline_block",
+            "named": true
+          },
+          {
             "type": "dict_literal",
+            "named": true
+          },
+          {
+            "type": "duration_literal",
             "named": true
           },
           {
@@ -1816,6 +3134,10 @@
           },
           {
             "type": "float_literal",
+            "named": true
+          },
+          {
+            "type": "fn_expression",
             "named": true
           },
           {
@@ -1859,6 +3181,10 @@
             "named": true
           },
           {
+            "type": "parallel_settle_expression",
+            "named": true
+          },
+          {
             "type": "parenthesized_expression",
             "named": true
           },
@@ -1868,6 +3194,10 @@
           },
           {
             "type": "property_access",
+            "named": true
+          },
+          {
+            "type": "range_expression",
             "named": true
           },
           {
@@ -1896,6 +3226,14 @@
           },
           {
             "type": "true",
+            "named": true
+          },
+          {
+            "type": "try_expression",
+            "named": true
+          },
+          {
+            "type": "try_unwrap_expression",
             "named": true
           },
           {
@@ -1927,7 +3265,15 @@
             "named": true
           },
           {
+            "type": "deadline_block",
+            "named": true
+          },
+          {
             "type": "dict_literal",
+            "named": true
+          },
+          {
+            "type": "duration_literal",
             "named": true
           },
           {
@@ -1936,6 +3282,10 @@
           },
           {
             "type": "float_literal",
+            "named": true
+          },
+          {
+            "type": "fn_expression",
             "named": true
           },
           {
@@ -1979,6 +3329,10 @@
             "named": true
           },
           {
+            "type": "parallel_settle_expression",
+            "named": true
+          },
+          {
             "type": "parenthesized_expression",
             "named": true
           },
@@ -1988,6 +3342,10 @@
           },
           {
             "type": "property_access",
+            "named": true
+          },
+          {
+            "type": "range_expression",
             "named": true
           },
           {
@@ -2016,6 +3374,14 @@
           },
           {
             "type": "true",
+            "named": true
+          },
+          {
+            "type": "try_expression",
+            "named": true
+          },
+          {
+            "type": "try_unwrap_expression",
             "named": true
           },
           {
@@ -2067,7 +3433,15 @@
             "named": true
           },
           {
+            "type": "deadline_block",
+            "named": true
+          },
+          {
             "type": "dict_literal",
+            "named": true
+          },
+          {
+            "type": "duration_literal",
             "named": true
           },
           {
@@ -2076,6 +3450,10 @@
           },
           {
             "type": "float_literal",
+            "named": true
+          },
+          {
+            "type": "fn_expression",
             "named": true
           },
           {
@@ -2119,6 +3497,10 @@
             "named": true
           },
           {
+            "type": "parallel_settle_expression",
+            "named": true
+          },
+          {
             "type": "parenthesized_expression",
             "named": true
           },
@@ -2128,6 +3510,10 @@
           },
           {
             "type": "property_access",
+            "named": true
+          },
+          {
+            "type": "range_expression",
             "named": true
           },
           {
@@ -2159,6 +3545,14 @@
             "named": true
           },
           {
+            "type": "try_expression",
+            "named": true
+          },
+          {
+            "type": "try_unwrap_expression",
+            "named": true
+          },
+          {
             "type": "unary_expression",
             "named": true
           }
@@ -2174,6 +3568,22 @@
           "named": true
         }
       ]
+    }
+  },
+  {
+    "type": "mutex_block",
+    "named": true,
+    "fields": {
+      "body": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "block",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {
@@ -2197,7 +3607,15 @@
           "named": true
         },
         {
+          "type": "deadline_block",
+          "named": true
+        },
+        {
           "type": "dict_literal",
+          "named": true
+        },
+        {
+          "type": "duration_literal",
           "named": true
         },
         {
@@ -2206,6 +3624,10 @@
         },
         {
           "type": "float_literal",
+          "named": true
+        },
+        {
+          "type": "fn_expression",
           "named": true
         },
         {
@@ -2249,6 +3671,10 @@
           "named": true
         },
         {
+          "type": "parallel_settle_expression",
+          "named": true
+        },
+        {
           "type": "parenthesized_expression",
           "named": true
         },
@@ -2258,6 +3684,10 @@
         },
         {
           "type": "property_access",
+          "named": true
+        },
+        {
+          "type": "range_expression",
           "named": true
         },
         {
@@ -2286,6 +3716,14 @@
         },
         {
           "type": "true",
+          "named": true
+        },
+        {
+          "type": "try_expression",
+          "named": true
+        },
+        {
+          "type": "try_unwrap_expression",
           "named": true
         },
         {
@@ -2352,7 +3790,15 @@
             "named": true
           },
           {
+            "type": "deadline_block",
+            "named": true
+          },
+          {
             "type": "dict_literal",
+            "named": true
+          },
+          {
+            "type": "duration_literal",
             "named": true
           },
           {
@@ -2361,6 +3807,10 @@
           },
           {
             "type": "float_literal",
+            "named": true
+          },
+          {
+            "type": "fn_expression",
             "named": true
           },
           {
@@ -2404,6 +3854,10 @@
             "named": true
           },
           {
+            "type": "parallel_settle_expression",
+            "named": true
+          },
+          {
             "type": "parenthesized_expression",
             "named": true
           },
@@ -2413,6 +3867,10 @@
           },
           {
             "type": "property_access",
+            "named": true
+          },
+          {
+            "type": "range_expression",
             "named": true
           },
           {
@@ -2441,6 +3899,14 @@
           },
           {
             "type": "true",
+            "named": true
+          },
+          {
+            "type": "try_expression",
+            "named": true
+          },
+          {
+            "type": "try_unwrap_expression",
             "named": true
           },
           {
@@ -2473,6 +3939,10 @@
           "named": true
         },
         {
+          "type": "break_statement",
+          "named": true
+        },
+        {
           "type": "call_expression",
           "named": true
         },
@@ -2481,7 +3951,31 @@
           "named": true
         },
         {
+          "type": "comment",
+          "named": true
+        },
+        {
+          "type": "compound_assignment",
+          "named": true
+        },
+        {
+          "type": "continue_statement",
+          "named": true
+        },
+        {
+          "type": "deadline_block",
+          "named": true
+        },
+        {
           "type": "dict_literal",
+          "named": true
+        },
+        {
+          "type": "duration_literal",
+          "named": true
+        },
+        {
+          "type": "enum_declaration",
           "named": true
         },
         {
@@ -2497,7 +3991,15 @@
           "named": true
         },
         {
+          "type": "fn_expression",
+          "named": true
+        },
+        {
           "type": "for_statement",
+          "named": true
+        },
+        {
+          "type": "guard_statement",
           "named": true
         },
         {
@@ -2509,7 +4011,15 @@
           "named": true
         },
         {
+          "type": "impl_block",
+          "named": true
+        },
+        {
           "type": "integer_literal",
+          "named": true
+        },
+        {
+          "type": "interface_declaration",
           "named": true
         },
         {
@@ -2533,6 +4043,10 @@
           "named": true
         },
         {
+          "type": "mutex_block",
+          "named": true
+        },
+        {
           "type": "nil",
           "named": true
         },
@@ -2553,6 +4067,10 @@
           "named": true
         },
         {
+          "type": "parallel_settle_expression",
+          "named": true
+        },
+        {
           "type": "parenthesized_expression",
           "named": true
         },
@@ -2565,11 +4083,19 @@
           "named": true
         },
         {
+          "type": "range_expression",
+          "named": true
+        },
+        {
           "type": "retry_statement",
           "named": true
         },
         {
           "type": "return_statement",
+          "named": true
+        },
+        {
+          "type": "select_block",
           "named": true
         },
         {
@@ -2582,6 +4108,10 @@
         },
         {
           "type": "string_literal",
+          "named": true
+        },
+        {
+          "type": "struct_declaration",
           "named": true
         },
         {
@@ -2605,6 +4135,18 @@
           "named": true
         },
         {
+          "type": "try_expression",
+          "named": true
+        },
+        {
+          "type": "try_unwrap_expression",
+          "named": true
+        },
+        {
+          "type": "type_declaration",
+          "named": true
+        },
+        {
           "type": "unary_expression",
           "named": true
         },
@@ -2614,6 +4156,10 @@
         },
         {
           "type": "while_statement",
+          "named": true
+        },
+        {
+          "type": "yield_expression",
           "named": true
         }
       ]
@@ -2640,7 +4186,15 @@
             "named": true
           },
           {
+            "type": "deadline_block",
+            "named": true
+          },
+          {
             "type": "dict_literal",
+            "named": true
+          },
+          {
+            "type": "duration_literal",
             "named": true
           },
           {
@@ -2649,6 +4203,10 @@
           },
           {
             "type": "float_literal",
+            "named": true
+          },
+          {
+            "type": "fn_expression",
             "named": true
           },
           {
@@ -2692,6 +4250,10 @@
             "named": true
           },
           {
+            "type": "parallel_settle_expression",
+            "named": true
+          },
+          {
             "type": "parenthesized_expression",
             "named": true
           },
@@ -2701,6 +4263,10 @@
           },
           {
             "type": "property_access",
+            "named": true
+          },
+          {
+            "type": "range_expression",
             "named": true
           },
           {
@@ -2729,6 +4295,14 @@
           },
           {
             "type": "true",
+            "named": true
+          },
+          {
+            "type": "try_expression",
+            "named": true
+          },
+          {
+            "type": "try_unwrap_expression",
             "named": true
           },
           {
@@ -2761,6 +4335,10 @@
           "named": true
         },
         {
+          "type": "break_statement",
+          "named": true
+        },
+        {
           "type": "call_expression",
           "named": true
         },
@@ -2769,7 +4347,31 @@
           "named": true
         },
         {
+          "type": "comment",
+          "named": true
+        },
+        {
+          "type": "compound_assignment",
+          "named": true
+        },
+        {
+          "type": "continue_statement",
+          "named": true
+        },
+        {
+          "type": "deadline_block",
+          "named": true
+        },
+        {
           "type": "dict_literal",
+          "named": true
+        },
+        {
+          "type": "duration_literal",
+          "named": true
+        },
+        {
+          "type": "enum_declaration",
           "named": true
         },
         {
@@ -2785,7 +4387,15 @@
           "named": true
         },
         {
+          "type": "fn_expression",
+          "named": true
+        },
+        {
           "type": "for_statement",
+          "named": true
+        },
+        {
+          "type": "guard_statement",
           "named": true
         },
         {
@@ -2797,7 +4407,15 @@
           "named": true
         },
         {
+          "type": "impl_block",
+          "named": true
+        },
+        {
           "type": "integer_literal",
+          "named": true
+        },
+        {
+          "type": "interface_declaration",
           "named": true
         },
         {
@@ -2821,6 +4439,10 @@
           "named": true
         },
         {
+          "type": "mutex_block",
+          "named": true
+        },
+        {
           "type": "nil",
           "named": true
         },
@@ -2841,6 +4463,10 @@
           "named": true
         },
         {
+          "type": "parallel_settle_expression",
+          "named": true
+        },
+        {
           "type": "parenthesized_expression",
           "named": true
         },
@@ -2853,11 +4479,19 @@
           "named": true
         },
         {
+          "type": "range_expression",
+          "named": true
+        },
+        {
           "type": "retry_statement",
           "named": true
         },
         {
           "type": "return_statement",
+          "named": true
+        },
+        {
+          "type": "select_block",
           "named": true
         },
         {
@@ -2870,6 +4504,10 @@
         },
         {
           "type": "string_literal",
+          "named": true
+        },
+        {
+          "type": "struct_declaration",
           "named": true
         },
         {
@@ -2893,6 +4531,18 @@
           "named": true
         },
         {
+          "type": "try_expression",
+          "named": true
+        },
+        {
+          "type": "try_unwrap_expression",
+          "named": true
+        },
+        {
+          "type": "type_declaration",
+          "named": true
+        },
+        {
           "type": "unary_expression",
           "named": true
         },
@@ -2902,6 +4552,406 @@
         },
         {
           "type": "while_statement",
+          "named": true
+        },
+        {
+          "type": "yield_expression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "parallel_settle_expression",
+    "named": true,
+    "fields": {
+      "list": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "binary_expression",
+            "named": true
+          },
+          {
+            "type": "call_expression",
+            "named": true
+          },
+          {
+            "type": "closure",
+            "named": true
+          },
+          {
+            "type": "deadline_block",
+            "named": true
+          },
+          {
+            "type": "dict_literal",
+            "named": true
+          },
+          {
+            "type": "duration_literal",
+            "named": true
+          },
+          {
+            "type": "false",
+            "named": true
+          },
+          {
+            "type": "float_literal",
+            "named": true
+          },
+          {
+            "type": "fn_expression",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "if_statement",
+            "named": true
+          },
+          {
+            "type": "integer_literal",
+            "named": true
+          },
+          {
+            "type": "interpolated_string",
+            "named": true
+          },
+          {
+            "type": "list_literal",
+            "named": true
+          },
+          {
+            "type": "method_call",
+            "named": true
+          },
+          {
+            "type": "nil",
+            "named": true
+          },
+          {
+            "type": "nil_coalescing_expression",
+            "named": true
+          },
+          {
+            "type": "parallel_expression",
+            "named": true
+          },
+          {
+            "type": "parallel_map_expression",
+            "named": true
+          },
+          {
+            "type": "parallel_settle_expression",
+            "named": true
+          },
+          {
+            "type": "parenthesized_expression",
+            "named": true
+          },
+          {
+            "type": "pipe_expression",
+            "named": true
+          },
+          {
+            "type": "property_access",
+            "named": true
+          },
+          {
+            "type": "range_expression",
+            "named": true
+          },
+          {
+            "type": "retry_statement",
+            "named": true
+          },
+          {
+            "type": "slice_expression",
+            "named": true
+          },
+          {
+            "type": "spawn_expression",
+            "named": true
+          },
+          {
+            "type": "string_literal",
+            "named": true
+          },
+          {
+            "type": "subscript_expression",
+            "named": true
+          },
+          {
+            "type": "ternary_expression",
+            "named": true
+          },
+          {
+            "type": "true",
+            "named": true
+          },
+          {
+            "type": "try_expression",
+            "named": true
+          },
+          {
+            "type": "try_unwrap_expression",
+            "named": true
+          },
+          {
+            "type": "unary_expression",
+            "named": true
+          }
+        ]
+      },
+      "variable": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "assignment",
+          "named": true
+        },
+        {
+          "type": "binary_expression",
+          "named": true
+        },
+        {
+          "type": "break_statement",
+          "named": true
+        },
+        {
+          "type": "call_expression",
+          "named": true
+        },
+        {
+          "type": "closure",
+          "named": true
+        },
+        {
+          "type": "comment",
+          "named": true
+        },
+        {
+          "type": "compound_assignment",
+          "named": true
+        },
+        {
+          "type": "continue_statement",
+          "named": true
+        },
+        {
+          "type": "deadline_block",
+          "named": true
+        },
+        {
+          "type": "dict_literal",
+          "named": true
+        },
+        {
+          "type": "duration_literal",
+          "named": true
+        },
+        {
+          "type": "enum_declaration",
+          "named": true
+        },
+        {
+          "type": "false",
+          "named": true
+        },
+        {
+          "type": "float_literal",
+          "named": true
+        },
+        {
+          "type": "fn_declaration",
+          "named": true
+        },
+        {
+          "type": "fn_expression",
+          "named": true
+        },
+        {
+          "type": "for_statement",
+          "named": true
+        },
+        {
+          "type": "guard_statement",
+          "named": true
+        },
+        {
+          "type": "identifier",
+          "named": true
+        },
+        {
+          "type": "if_statement",
+          "named": true
+        },
+        {
+          "type": "impl_block",
+          "named": true
+        },
+        {
+          "type": "integer_literal",
+          "named": true
+        },
+        {
+          "type": "interface_declaration",
+          "named": true
+        },
+        {
+          "type": "interpolated_string",
+          "named": true
+        },
+        {
+          "type": "let_binding",
+          "named": true
+        },
+        {
+          "type": "list_literal",
+          "named": true
+        },
+        {
+          "type": "match_statement",
+          "named": true
+        },
+        {
+          "type": "method_call",
+          "named": true
+        },
+        {
+          "type": "mutex_block",
+          "named": true
+        },
+        {
+          "type": "nil",
+          "named": true
+        },
+        {
+          "type": "nil_coalescing_expression",
+          "named": true
+        },
+        {
+          "type": "override_declaration",
+          "named": true
+        },
+        {
+          "type": "parallel_expression",
+          "named": true
+        },
+        {
+          "type": "parallel_map_expression",
+          "named": true
+        },
+        {
+          "type": "parallel_settle_expression",
+          "named": true
+        },
+        {
+          "type": "parenthesized_expression",
+          "named": true
+        },
+        {
+          "type": "pipe_expression",
+          "named": true
+        },
+        {
+          "type": "property_access",
+          "named": true
+        },
+        {
+          "type": "range_expression",
+          "named": true
+        },
+        {
+          "type": "retry_statement",
+          "named": true
+        },
+        {
+          "type": "return_statement",
+          "named": true
+        },
+        {
+          "type": "select_block",
+          "named": true
+        },
+        {
+          "type": "slice_expression",
+          "named": true
+        },
+        {
+          "type": "spawn_expression",
+          "named": true
+        },
+        {
+          "type": "string_literal",
+          "named": true
+        },
+        {
+          "type": "struct_declaration",
+          "named": true
+        },
+        {
+          "type": "subscript_expression",
+          "named": true
+        },
+        {
+          "type": "ternary_expression",
+          "named": true
+        },
+        {
+          "type": "throw_statement",
+          "named": true
+        },
+        {
+          "type": "true",
+          "named": true
+        },
+        {
+          "type": "try_catch_statement",
+          "named": true
+        },
+        {
+          "type": "try_expression",
+          "named": true
+        },
+        {
+          "type": "try_unwrap_expression",
+          "named": true
+        },
+        {
+          "type": "type_declaration",
+          "named": true
+        },
+        {
+          "type": "unary_expression",
+          "named": true
+        },
+        {
+          "type": "var_binding",
+          "named": true
+        },
+        {
+          "type": "while_statement",
+          "named": true
+        },
+        {
+          "type": "yield_expression",
           "named": true
         }
       ]
@@ -2943,7 +4993,15 @@
           "named": true
         },
         {
+          "type": "deadline_block",
+          "named": true
+        },
+        {
           "type": "dict_literal",
+          "named": true
+        },
+        {
+          "type": "duration_literal",
           "named": true
         },
         {
@@ -2952,6 +5010,10 @@
         },
         {
           "type": "float_literal",
+          "named": true
+        },
+        {
+          "type": "fn_expression",
           "named": true
         },
         {
@@ -2995,6 +5057,10 @@
           "named": true
         },
         {
+          "type": "parallel_settle_expression",
+          "named": true
+        },
+        {
           "type": "parenthesized_expression",
           "named": true
         },
@@ -3004,6 +5070,10 @@
         },
         {
           "type": "property_access",
+          "named": true
+        },
+        {
+          "type": "range_expression",
           "named": true
         },
         {
@@ -3032,6 +5102,14 @@
         },
         {
           "type": "true",
+          "named": true
+        },
+        {
+          "type": "try_expression",
+          "named": true
+        },
+        {
+          "type": "try_unwrap_expression",
           "named": true
         },
         {
@@ -3062,7 +5140,15 @@
           "named": true
         },
         {
+          "type": "deadline_block",
+          "named": true
+        },
+        {
           "type": "dict_literal",
+          "named": true
+        },
+        {
+          "type": "duration_literal",
           "named": true
         },
         {
@@ -3071,6 +5157,10 @@
         },
         {
           "type": "float_literal",
+          "named": true
+        },
+        {
+          "type": "fn_expression",
           "named": true
         },
         {
@@ -3114,6 +5204,10 @@
           "named": true
         },
         {
+          "type": "parallel_settle_expression",
+          "named": true
+        },
+        {
           "type": "parenthesized_expression",
           "named": true
         },
@@ -3123,6 +5217,10 @@
         },
         {
           "type": "property_access",
+          "named": true
+        },
+        {
+          "type": "range_expression",
           "named": true
         },
         {
@@ -3151,6 +5249,14 @@
         },
         {
           "type": "true",
+          "named": true
+        },
+        {
+          "type": "try_expression",
+          "named": true
+        },
+        {
+          "type": "try_unwrap_expression",
           "named": true
         },
         {
@@ -3221,7 +5327,15 @@
             "named": true
           },
           {
+            "type": "deadline_block",
+            "named": true
+          },
+          {
             "type": "dict_literal",
+            "named": true
+          },
+          {
+            "type": "duration_literal",
             "named": true
           },
           {
@@ -3230,6 +5344,10 @@
           },
           {
             "type": "float_literal",
+            "named": true
+          },
+          {
+            "type": "fn_expression",
             "named": true
           },
           {
@@ -3273,6 +5391,10 @@
             "named": true
           },
           {
+            "type": "parallel_settle_expression",
+            "named": true
+          },
+          {
             "type": "parenthesized_expression",
             "named": true
           },
@@ -3282,6 +5404,10 @@
           },
           {
             "type": "property_access",
+            "named": true
+          },
+          {
+            "type": "range_expression",
             "named": true
           },
           {
@@ -3310,6 +5436,14 @@
           },
           {
             "type": "true",
+            "named": true
+          },
+          {
+            "type": "try_expression",
+            "named": true
+          },
+          {
+            "type": "try_unwrap_expression",
             "named": true
           },
           {
@@ -3331,142 +5465,12 @@
     }
   },
   {
-    "type": "retry_statement",
-    "named": true,
-    "fields": {
-      "body": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "block",
-            "named": true
-          }
-        ]
-      },
-      "count": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "binary_expression",
-            "named": true
-          },
-          {
-            "type": "call_expression",
-            "named": true
-          },
-          {
-            "type": "closure",
-            "named": true
-          },
-          {
-            "type": "dict_literal",
-            "named": true
-          },
-          {
-            "type": "false",
-            "named": true
-          },
-          {
-            "type": "float_literal",
-            "named": true
-          },
-          {
-            "type": "identifier",
-            "named": true
-          },
-          {
-            "type": "if_statement",
-            "named": true
-          },
-          {
-            "type": "integer_literal",
-            "named": true
-          },
-          {
-            "type": "interpolated_string",
-            "named": true
-          },
-          {
-            "type": "list_literal",
-            "named": true
-          },
-          {
-            "type": "method_call",
-            "named": true
-          },
-          {
-            "type": "nil",
-            "named": true
-          },
-          {
-            "type": "nil_coalescing_expression",
-            "named": true
-          },
-          {
-            "type": "parallel_expression",
-            "named": true
-          },
-          {
-            "type": "parallel_map_expression",
-            "named": true
-          },
-          {
-            "type": "parenthesized_expression",
-            "named": true
-          },
-          {
-            "type": "pipe_expression",
-            "named": true
-          },
-          {
-            "type": "property_access",
-            "named": true
-          },
-          {
-            "type": "retry_statement",
-            "named": true
-          },
-          {
-            "type": "slice_expression",
-            "named": true
-          },
-          {
-            "type": "spawn_expression",
-            "named": true
-          },
-          {
-            "type": "string_literal",
-            "named": true
-          },
-          {
-            "type": "subscript_expression",
-            "named": true
-          },
-          {
-            "type": "ternary_expression",
-            "named": true
-          },
-          {
-            "type": "true",
-            "named": true
-          },
-          {
-            "type": "unary_expression",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "return_statement",
+    "type": "range_expression",
     "named": true,
     "fields": {},
     "children": {
-      "multiple": false,
-      "required": false,
+      "multiple": true,
+      "required": true,
       "types": [
         {
           "type": "binary_expression",
@@ -3481,7 +5485,15 @@
           "named": true
         },
         {
+          "type": "deadline_block",
+          "named": true
+        },
+        {
           "type": "dict_literal",
+          "named": true
+        },
+        {
+          "type": "duration_literal",
           "named": true
         },
         {
@@ -3490,6 +5502,10 @@
         },
         {
           "type": "float_literal",
+          "named": true
+        },
+        {
+          "type": "fn_expression",
           "named": true
         },
         {
@@ -3533,6 +5549,10 @@
           "named": true
         },
         {
+          "type": "parallel_settle_expression",
+          "named": true
+        },
+        {
           "type": "parenthesized_expression",
           "named": true
         },
@@ -3542,6 +5562,10 @@
         },
         {
           "type": "property_access",
+          "named": true
+        },
+        {
+          "type": "range_expression",
           "named": true
         },
         {
@@ -3573,10 +5597,688 @@
           "named": true
         },
         {
+          "type": "try_expression",
+          "named": true
+        },
+        {
+          "type": "try_unwrap_expression",
+          "named": true
+        },
+        {
           "type": "unary_expression",
           "named": true
         }
       ]
+    }
+  },
+  {
+    "type": "retry_statement",
+    "named": true,
+    "fields": {
+      "body": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "block",
+            "named": true
+          }
+        ]
+      },
+      "count": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "binary_expression",
+            "named": true
+          },
+          {
+            "type": "call_expression",
+            "named": true
+          },
+          {
+            "type": "closure",
+            "named": true
+          },
+          {
+            "type": "deadline_block",
+            "named": true
+          },
+          {
+            "type": "dict_literal",
+            "named": true
+          },
+          {
+            "type": "duration_literal",
+            "named": true
+          },
+          {
+            "type": "false",
+            "named": true
+          },
+          {
+            "type": "float_literal",
+            "named": true
+          },
+          {
+            "type": "fn_expression",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "if_statement",
+            "named": true
+          },
+          {
+            "type": "integer_literal",
+            "named": true
+          },
+          {
+            "type": "interpolated_string",
+            "named": true
+          },
+          {
+            "type": "list_literal",
+            "named": true
+          },
+          {
+            "type": "method_call",
+            "named": true
+          },
+          {
+            "type": "nil",
+            "named": true
+          },
+          {
+            "type": "nil_coalescing_expression",
+            "named": true
+          },
+          {
+            "type": "parallel_expression",
+            "named": true
+          },
+          {
+            "type": "parallel_map_expression",
+            "named": true
+          },
+          {
+            "type": "parallel_settle_expression",
+            "named": true
+          },
+          {
+            "type": "parenthesized_expression",
+            "named": true
+          },
+          {
+            "type": "pipe_expression",
+            "named": true
+          },
+          {
+            "type": "property_access",
+            "named": true
+          },
+          {
+            "type": "range_expression",
+            "named": true
+          },
+          {
+            "type": "retry_statement",
+            "named": true
+          },
+          {
+            "type": "slice_expression",
+            "named": true
+          },
+          {
+            "type": "spawn_expression",
+            "named": true
+          },
+          {
+            "type": "string_literal",
+            "named": true
+          },
+          {
+            "type": "subscript_expression",
+            "named": true
+          },
+          {
+            "type": "ternary_expression",
+            "named": true
+          },
+          {
+            "type": "true",
+            "named": true
+          },
+          {
+            "type": "try_expression",
+            "named": true
+          },
+          {
+            "type": "try_unwrap_expression",
+            "named": true
+          },
+          {
+            "type": "unary_expression",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "return_statement",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": false,
+      "types": [
+        {
+          "type": "binary_expression",
+          "named": true
+        },
+        {
+          "type": "call_expression",
+          "named": true
+        },
+        {
+          "type": "closure",
+          "named": true
+        },
+        {
+          "type": "deadline_block",
+          "named": true
+        },
+        {
+          "type": "dict_literal",
+          "named": true
+        },
+        {
+          "type": "duration_literal",
+          "named": true
+        },
+        {
+          "type": "false",
+          "named": true
+        },
+        {
+          "type": "float_literal",
+          "named": true
+        },
+        {
+          "type": "fn_expression",
+          "named": true
+        },
+        {
+          "type": "identifier",
+          "named": true
+        },
+        {
+          "type": "if_statement",
+          "named": true
+        },
+        {
+          "type": "integer_literal",
+          "named": true
+        },
+        {
+          "type": "interpolated_string",
+          "named": true
+        },
+        {
+          "type": "list_literal",
+          "named": true
+        },
+        {
+          "type": "method_call",
+          "named": true
+        },
+        {
+          "type": "nil",
+          "named": true
+        },
+        {
+          "type": "nil_coalescing_expression",
+          "named": true
+        },
+        {
+          "type": "parallel_expression",
+          "named": true
+        },
+        {
+          "type": "parallel_map_expression",
+          "named": true
+        },
+        {
+          "type": "parallel_settle_expression",
+          "named": true
+        },
+        {
+          "type": "parenthesized_expression",
+          "named": true
+        },
+        {
+          "type": "pipe_expression",
+          "named": true
+        },
+        {
+          "type": "property_access",
+          "named": true
+        },
+        {
+          "type": "range_expression",
+          "named": true
+        },
+        {
+          "type": "retry_statement",
+          "named": true
+        },
+        {
+          "type": "slice_expression",
+          "named": true
+        },
+        {
+          "type": "spawn_expression",
+          "named": true
+        },
+        {
+          "type": "string_literal",
+          "named": true
+        },
+        {
+          "type": "subscript_expression",
+          "named": true
+        },
+        {
+          "type": "ternary_expression",
+          "named": true
+        },
+        {
+          "type": "true",
+          "named": true
+        },
+        {
+          "type": "try_expression",
+          "named": true
+        },
+        {
+          "type": "try_unwrap_expression",
+          "named": true
+        },
+        {
+          "type": "unary_expression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "select_block",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "select_case",
+          "named": true
+        },
+        {
+          "type": "select_default",
+          "named": true
+        },
+        {
+          "type": "select_timeout",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "select_case",
+    "named": true,
+    "fields": {
+      "body": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "block",
+            "named": true
+          }
+        ]
+      },
+      "channel": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "binary_expression",
+            "named": true
+          },
+          {
+            "type": "call_expression",
+            "named": true
+          },
+          {
+            "type": "closure",
+            "named": true
+          },
+          {
+            "type": "deadline_block",
+            "named": true
+          },
+          {
+            "type": "dict_literal",
+            "named": true
+          },
+          {
+            "type": "duration_literal",
+            "named": true
+          },
+          {
+            "type": "false",
+            "named": true
+          },
+          {
+            "type": "float_literal",
+            "named": true
+          },
+          {
+            "type": "fn_expression",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "if_statement",
+            "named": true
+          },
+          {
+            "type": "integer_literal",
+            "named": true
+          },
+          {
+            "type": "interpolated_string",
+            "named": true
+          },
+          {
+            "type": "list_literal",
+            "named": true
+          },
+          {
+            "type": "method_call",
+            "named": true
+          },
+          {
+            "type": "nil",
+            "named": true
+          },
+          {
+            "type": "nil_coalescing_expression",
+            "named": true
+          },
+          {
+            "type": "parallel_expression",
+            "named": true
+          },
+          {
+            "type": "parallel_map_expression",
+            "named": true
+          },
+          {
+            "type": "parallel_settle_expression",
+            "named": true
+          },
+          {
+            "type": "parenthesized_expression",
+            "named": true
+          },
+          {
+            "type": "pipe_expression",
+            "named": true
+          },
+          {
+            "type": "property_access",
+            "named": true
+          },
+          {
+            "type": "range_expression",
+            "named": true
+          },
+          {
+            "type": "retry_statement",
+            "named": true
+          },
+          {
+            "type": "slice_expression",
+            "named": true
+          },
+          {
+            "type": "spawn_expression",
+            "named": true
+          },
+          {
+            "type": "string_literal",
+            "named": true
+          },
+          {
+            "type": "subscript_expression",
+            "named": true
+          },
+          {
+            "type": "ternary_expression",
+            "named": true
+          },
+          {
+            "type": "true",
+            "named": true
+          },
+          {
+            "type": "try_expression",
+            "named": true
+          },
+          {
+            "type": "try_unwrap_expression",
+            "named": true
+          },
+          {
+            "type": "unary_expression",
+            "named": true
+          }
+        ]
+      },
+      "variable": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "select_default",
+    "named": true,
+    "fields": {
+      "body": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "block",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "select_timeout",
+    "named": true,
+    "fields": {
+      "body": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "block",
+            "named": true
+          }
+        ]
+      },
+      "duration": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "binary_expression",
+            "named": true
+          },
+          {
+            "type": "call_expression",
+            "named": true
+          },
+          {
+            "type": "closure",
+            "named": true
+          },
+          {
+            "type": "deadline_block",
+            "named": true
+          },
+          {
+            "type": "dict_literal",
+            "named": true
+          },
+          {
+            "type": "duration_literal",
+            "named": true
+          },
+          {
+            "type": "false",
+            "named": true
+          },
+          {
+            "type": "float_literal",
+            "named": true
+          },
+          {
+            "type": "fn_expression",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "if_statement",
+            "named": true
+          },
+          {
+            "type": "integer_literal",
+            "named": true
+          },
+          {
+            "type": "interpolated_string",
+            "named": true
+          },
+          {
+            "type": "list_literal",
+            "named": true
+          },
+          {
+            "type": "method_call",
+            "named": true
+          },
+          {
+            "type": "nil",
+            "named": true
+          },
+          {
+            "type": "nil_coalescing_expression",
+            "named": true
+          },
+          {
+            "type": "parallel_expression",
+            "named": true
+          },
+          {
+            "type": "parallel_map_expression",
+            "named": true
+          },
+          {
+            "type": "parallel_settle_expression",
+            "named": true
+          },
+          {
+            "type": "parenthesized_expression",
+            "named": true
+          },
+          {
+            "type": "pipe_expression",
+            "named": true
+          },
+          {
+            "type": "property_access",
+            "named": true
+          },
+          {
+            "type": "range_expression",
+            "named": true
+          },
+          {
+            "type": "retry_statement",
+            "named": true
+          },
+          {
+            "type": "slice_expression",
+            "named": true
+          },
+          {
+            "type": "spawn_expression",
+            "named": true
+          },
+          {
+            "type": "string_literal",
+            "named": true
+          },
+          {
+            "type": "subscript_expression",
+            "named": true
+          },
+          {
+            "type": "ternary_expression",
+            "named": true
+          },
+          {
+            "type": "true",
+            "named": true
+          },
+          {
+            "type": "try_expression",
+            "named": true
+          },
+          {
+            "type": "try_unwrap_expression",
+            "named": true
+          },
+          {
+            "type": "unary_expression",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {
@@ -3641,7 +6343,15 @@
             "named": true
           },
           {
+            "type": "deadline_block",
+            "named": true
+          },
+          {
             "type": "dict_literal",
+            "named": true
+          },
+          {
+            "type": "duration_literal",
             "named": true
           },
           {
@@ -3650,6 +6360,10 @@
           },
           {
             "type": "float_literal",
+            "named": true
+          },
+          {
+            "type": "fn_expression",
             "named": true
           },
           {
@@ -3693,6 +6407,10 @@
             "named": true
           },
           {
+            "type": "parallel_settle_expression",
+            "named": true
+          },
+          {
             "type": "parenthesized_expression",
             "named": true
           },
@@ -3702,6 +6420,10 @@
           },
           {
             "type": "property_access",
+            "named": true
+          },
+          {
+            "type": "range_expression",
             "named": true
           },
           {
@@ -3730,6 +6452,14 @@
           },
           {
             "type": "true",
+            "named": true
+          },
+          {
+            "type": "try_expression",
+            "named": true
+          },
+          {
+            "type": "try_unwrap_expression",
             "named": true
           },
           {
@@ -3755,7 +6485,15 @@
             "named": true
           },
           {
+            "type": "deadline_block",
+            "named": true
+          },
+          {
             "type": "dict_literal",
+            "named": true
+          },
+          {
+            "type": "duration_literal",
             "named": true
           },
           {
@@ -3764,6 +6502,10 @@
           },
           {
             "type": "float_literal",
+            "named": true
+          },
+          {
+            "type": "fn_expression",
             "named": true
           },
           {
@@ -3807,6 +6549,10 @@
             "named": true
           },
           {
+            "type": "parallel_settle_expression",
+            "named": true
+          },
+          {
             "type": "parenthesized_expression",
             "named": true
           },
@@ -3816,6 +6562,10 @@
           },
           {
             "type": "property_access",
+            "named": true
+          },
+          {
+            "type": "range_expression",
             "named": true
           },
           {
@@ -3844,6 +6594,14 @@
           },
           {
             "type": "true",
+            "named": true
+          },
+          {
+            "type": "try_expression",
+            "named": true
+          },
+          {
+            "type": "try_unwrap_expression",
             "named": true
           },
           {
@@ -3869,7 +6627,15 @@
             "named": true
           },
           {
+            "type": "deadline_block",
+            "named": true
+          },
+          {
             "type": "dict_literal",
+            "named": true
+          },
+          {
+            "type": "duration_literal",
             "named": true
           },
           {
@@ -3878,6 +6644,10 @@
           },
           {
             "type": "float_literal",
+            "named": true
+          },
+          {
+            "type": "fn_expression",
             "named": true
           },
           {
@@ -3921,6 +6691,10 @@
             "named": true
           },
           {
+            "type": "parallel_settle_expression",
+            "named": true
+          },
+          {
             "type": "parenthesized_expression",
             "named": true
           },
@@ -3930,6 +6704,10 @@
           },
           {
             "type": "property_access",
+            "named": true
+          },
+          {
+            "type": "range_expression",
             "named": true
           },
           {
@@ -3958,6 +6736,14 @@
           },
           {
             "type": "true",
+            "named": true
+          },
+          {
+            "type": "try_expression",
+            "named": true
+          },
+          {
+            "type": "try_unwrap_expression",
             "named": true
           },
           {
@@ -3986,6 +6772,10 @@
           "named": true
         },
         {
+          "type": "break_statement",
+          "named": true
+        },
+        {
           "type": "call_expression",
           "named": true
         },
@@ -3994,7 +6784,27 @@
           "named": true
         },
         {
+          "type": "compound_assignment",
+          "named": true
+        },
+        {
+          "type": "continue_statement",
+          "named": true
+        },
+        {
+          "type": "deadline_block",
+          "named": true
+        },
+        {
           "type": "dict_literal",
+          "named": true
+        },
+        {
+          "type": "duration_literal",
+          "named": true
+        },
+        {
+          "type": "enum_declaration",
           "named": true
         },
         {
@@ -4010,7 +6820,15 @@
           "named": true
         },
         {
+          "type": "fn_expression",
+          "named": true
+        },
+        {
           "type": "for_statement",
+          "named": true
+        },
+        {
+          "type": "guard_statement",
           "named": true
         },
         {
@@ -4019,6 +6837,10 @@
         },
         {
           "type": "if_statement",
+          "named": true
+        },
+        {
+          "type": "impl_block",
           "named": true
         },
         {
@@ -4054,6 +6876,10 @@
           "named": true
         },
         {
+          "type": "mutex_block",
+          "named": true
+        },
+        {
           "type": "nil",
           "named": true
         },
@@ -4074,6 +6900,10 @@
           "named": true
         },
         {
+          "type": "parallel_settle_expression",
+          "named": true
+        },
+        {
           "type": "parenthesized_expression",
           "named": true
         },
@@ -4090,11 +6920,19 @@
           "named": true
         },
         {
+          "type": "range_expression",
+          "named": true
+        },
+        {
           "type": "retry_statement",
           "named": true
         },
         {
           "type": "return_statement",
+          "named": true
+        },
+        {
+          "type": "select_block",
           "named": true
         },
         {
@@ -4107,6 +6945,10 @@
         },
         {
           "type": "string_literal",
+          "named": true
+        },
+        {
+          "type": "struct_declaration",
           "named": true
         },
         {
@@ -4130,6 +6972,14 @@
           "named": true
         },
         {
+          "type": "try_expression",
+          "named": true
+        },
+        {
+          "type": "try_unwrap_expression",
+          "named": true
+        },
+        {
           "type": "type_declaration",
           "named": true
         },
@@ -4143,6 +6993,10 @@
         },
         {
           "type": "while_statement",
+          "named": true
+        },
+        {
+          "type": "yield_expression",
           "named": true
         }
       ]
@@ -4161,6 +7015,205 @@
           "named": true
         }
       ]
+    }
+  },
+  {
+    "type": "spread_expression",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "binary_expression",
+          "named": true
+        },
+        {
+          "type": "call_expression",
+          "named": true
+        },
+        {
+          "type": "closure",
+          "named": true
+        },
+        {
+          "type": "deadline_block",
+          "named": true
+        },
+        {
+          "type": "dict_literal",
+          "named": true
+        },
+        {
+          "type": "duration_literal",
+          "named": true
+        },
+        {
+          "type": "false",
+          "named": true
+        },
+        {
+          "type": "float_literal",
+          "named": true
+        },
+        {
+          "type": "fn_expression",
+          "named": true
+        },
+        {
+          "type": "identifier",
+          "named": true
+        },
+        {
+          "type": "if_statement",
+          "named": true
+        },
+        {
+          "type": "integer_literal",
+          "named": true
+        },
+        {
+          "type": "interpolated_string",
+          "named": true
+        },
+        {
+          "type": "list_literal",
+          "named": true
+        },
+        {
+          "type": "method_call",
+          "named": true
+        },
+        {
+          "type": "nil",
+          "named": true
+        },
+        {
+          "type": "nil_coalescing_expression",
+          "named": true
+        },
+        {
+          "type": "parallel_expression",
+          "named": true
+        },
+        {
+          "type": "parallel_map_expression",
+          "named": true
+        },
+        {
+          "type": "parallel_settle_expression",
+          "named": true
+        },
+        {
+          "type": "parenthesized_expression",
+          "named": true
+        },
+        {
+          "type": "pipe_expression",
+          "named": true
+        },
+        {
+          "type": "property_access",
+          "named": true
+        },
+        {
+          "type": "range_expression",
+          "named": true
+        },
+        {
+          "type": "retry_statement",
+          "named": true
+        },
+        {
+          "type": "slice_expression",
+          "named": true
+        },
+        {
+          "type": "spawn_expression",
+          "named": true
+        },
+        {
+          "type": "string_literal",
+          "named": true
+        },
+        {
+          "type": "subscript_expression",
+          "named": true
+        },
+        {
+          "type": "ternary_expression",
+          "named": true
+        },
+        {
+          "type": "true",
+          "named": true
+        },
+        {
+          "type": "try_expression",
+          "named": true
+        },
+        {
+          "type": "try_unwrap_expression",
+          "named": true
+        },
+        {
+          "type": "unary_expression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "struct_declaration",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "struct_field",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "struct_field",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "type": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "type_annotation",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {
@@ -4184,7 +7237,15 @@
             "named": true
           },
           {
+            "type": "deadline_block",
+            "named": true
+          },
+          {
             "type": "dict_literal",
+            "named": true
+          },
+          {
+            "type": "duration_literal",
             "named": true
           },
           {
@@ -4193,6 +7254,10 @@
           },
           {
             "type": "float_literal",
+            "named": true
+          },
+          {
+            "type": "fn_expression",
             "named": true
           },
           {
@@ -4236,6 +7301,10 @@
             "named": true
           },
           {
+            "type": "parallel_settle_expression",
+            "named": true
+          },
+          {
             "type": "parenthesized_expression",
             "named": true
           },
@@ -4245,6 +7314,10 @@
           },
           {
             "type": "property_access",
+            "named": true
+          },
+          {
+            "type": "range_expression",
             "named": true
           },
           {
@@ -4276,6 +7349,14 @@
             "named": true
           },
           {
+            "type": "try_expression",
+            "named": true
+          },
+          {
+            "type": "try_unwrap_expression",
+            "named": true
+          },
+          {
             "type": "unary_expression",
             "named": true
           }
@@ -4299,7 +7380,15 @@
           "named": true
         },
         {
+          "type": "deadline_block",
+          "named": true
+        },
+        {
           "type": "dict_literal",
+          "named": true
+        },
+        {
+          "type": "duration_literal",
           "named": true
         },
         {
@@ -4308,6 +7397,10 @@
         },
         {
           "type": "float_literal",
+          "named": true
+        },
+        {
+          "type": "fn_expression",
           "named": true
         },
         {
@@ -4351,6 +7444,10 @@
           "named": true
         },
         {
+          "type": "parallel_settle_expression",
+          "named": true
+        },
+        {
           "type": "parenthesized_expression",
           "named": true
         },
@@ -4360,6 +7457,10 @@
         },
         {
           "type": "property_access",
+          "named": true
+        },
+        {
+          "type": "range_expression",
           "named": true
         },
         {
@@ -4388,6 +7489,14 @@
         },
         {
           "type": "true",
+          "named": true
+        },
+        {
+          "type": "try_expression",
+          "named": true
+        },
+        {
+          "type": "try_unwrap_expression",
           "named": true
         },
         {
@@ -4418,7 +7527,15 @@
           "named": true
         },
         {
+          "type": "deadline_block",
+          "named": true
+        },
+        {
           "type": "dict_literal",
+          "named": true
+        },
+        {
+          "type": "duration_literal",
           "named": true
         },
         {
@@ -4427,6 +7544,10 @@
         },
         {
           "type": "float_literal",
+          "named": true
+        },
+        {
+          "type": "fn_expression",
           "named": true
         },
         {
@@ -4470,6 +7591,10 @@
           "named": true
         },
         {
+          "type": "parallel_settle_expression",
+          "named": true
+        },
+        {
           "type": "parenthesized_expression",
           "named": true
         },
@@ -4479,6 +7604,10 @@
         },
         {
           "type": "property_access",
+          "named": true
+        },
+        {
+          "type": "range_expression",
           "named": true
         },
         {
@@ -4507,6 +7636,14 @@
         },
         {
           "type": "true",
+          "named": true
+        },
+        {
+          "type": "try_expression",
+          "named": true
+        },
+        {
+          "type": "try_unwrap_expression",
           "named": true
         },
         {
@@ -4537,7 +7674,15 @@
           "named": true
         },
         {
+          "type": "deadline_block",
+          "named": true
+        },
+        {
           "type": "dict_literal",
+          "named": true
+        },
+        {
+          "type": "duration_literal",
           "named": true
         },
         {
@@ -4546,6 +7691,10 @@
         },
         {
           "type": "float_literal",
+          "named": true
+        },
+        {
+          "type": "fn_expression",
           "named": true
         },
         {
@@ -4589,6 +7738,10 @@
           "named": true
         },
         {
+          "type": "parallel_settle_expression",
+          "named": true
+        },
+        {
           "type": "parenthesized_expression",
           "named": true
         },
@@ -4598,6 +7751,10 @@
         },
         {
           "type": "property_access",
+          "named": true
+        },
+        {
+          "type": "range_expression",
           "named": true
         },
         {
@@ -4629,6 +7786,14 @@
           "named": true
         },
         {
+          "type": "try_expression",
+          "named": true
+        },
+        {
+          "type": "try_unwrap_expression",
+          "named": true
+        },
+        {
           "type": "unary_expression",
           "named": true
         }
@@ -4649,6 +7814,16 @@
           }
         ]
       },
+      "error_type": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "type_annotation",
+            "named": true
+          }
+        ]
+      },
       "error_var": {
         "multiple": false,
         "required": false,
@@ -4659,9 +7834,19 @@
           }
         ]
       },
+      "finalizer": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "block",
+            "named": true
+          }
+        ]
+      },
       "handler": {
         "multiple": false,
-        "required": true,
+        "required": false,
         "types": [
           {
             "type": "block",
@@ -4672,6 +7857,168 @@
     }
   },
   {
+    "type": "try_expression",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "block",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "try_unwrap_expression",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "binary_expression",
+          "named": true
+        },
+        {
+          "type": "call_expression",
+          "named": true
+        },
+        {
+          "type": "closure",
+          "named": true
+        },
+        {
+          "type": "deadline_block",
+          "named": true
+        },
+        {
+          "type": "dict_literal",
+          "named": true
+        },
+        {
+          "type": "duration_literal",
+          "named": true
+        },
+        {
+          "type": "false",
+          "named": true
+        },
+        {
+          "type": "float_literal",
+          "named": true
+        },
+        {
+          "type": "fn_expression",
+          "named": true
+        },
+        {
+          "type": "identifier",
+          "named": true
+        },
+        {
+          "type": "if_statement",
+          "named": true
+        },
+        {
+          "type": "integer_literal",
+          "named": true
+        },
+        {
+          "type": "interpolated_string",
+          "named": true
+        },
+        {
+          "type": "list_literal",
+          "named": true
+        },
+        {
+          "type": "method_call",
+          "named": true
+        },
+        {
+          "type": "nil",
+          "named": true
+        },
+        {
+          "type": "nil_coalescing_expression",
+          "named": true
+        },
+        {
+          "type": "parallel_expression",
+          "named": true
+        },
+        {
+          "type": "parallel_map_expression",
+          "named": true
+        },
+        {
+          "type": "parallel_settle_expression",
+          "named": true
+        },
+        {
+          "type": "parenthesized_expression",
+          "named": true
+        },
+        {
+          "type": "pipe_expression",
+          "named": true
+        },
+        {
+          "type": "property_access",
+          "named": true
+        },
+        {
+          "type": "range_expression",
+          "named": true
+        },
+        {
+          "type": "retry_statement",
+          "named": true
+        },
+        {
+          "type": "slice_expression",
+          "named": true
+        },
+        {
+          "type": "spawn_expression",
+          "named": true
+        },
+        {
+          "type": "string_literal",
+          "named": true
+        },
+        {
+          "type": "subscript_expression",
+          "named": true
+        },
+        {
+          "type": "ternary_expression",
+          "named": true
+        },
+        {
+          "type": "true",
+          "named": true
+        },
+        {
+          "type": "try_expression",
+          "named": true
+        },
+        {
+          "type": "try_unwrap_expression",
+          "named": true
+        },
+        {
+          "type": "unary_expression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "type_annotation",
     "named": true,
     "fields": {},
@@ -4679,6 +8026,10 @@
       "multiple": true,
       "required": true,
       "types": [
+        {
+          "type": "fn_type",
+          "named": true
+        },
         {
           "type": "identifier",
           "named": true
@@ -4724,6 +8075,148 @@
     "type": "typed_parameter",
     "named": true,
     "fields": {
+      "default": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "binary_expression",
+            "named": true
+          },
+          {
+            "type": "call_expression",
+            "named": true
+          },
+          {
+            "type": "closure",
+            "named": true
+          },
+          {
+            "type": "deadline_block",
+            "named": true
+          },
+          {
+            "type": "dict_literal",
+            "named": true
+          },
+          {
+            "type": "duration_literal",
+            "named": true
+          },
+          {
+            "type": "false",
+            "named": true
+          },
+          {
+            "type": "float_literal",
+            "named": true
+          },
+          {
+            "type": "fn_expression",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "if_statement",
+            "named": true
+          },
+          {
+            "type": "integer_literal",
+            "named": true
+          },
+          {
+            "type": "interpolated_string",
+            "named": true
+          },
+          {
+            "type": "list_literal",
+            "named": true
+          },
+          {
+            "type": "method_call",
+            "named": true
+          },
+          {
+            "type": "nil",
+            "named": true
+          },
+          {
+            "type": "nil_coalescing_expression",
+            "named": true
+          },
+          {
+            "type": "parallel_expression",
+            "named": true
+          },
+          {
+            "type": "parallel_map_expression",
+            "named": true
+          },
+          {
+            "type": "parallel_settle_expression",
+            "named": true
+          },
+          {
+            "type": "parenthesized_expression",
+            "named": true
+          },
+          {
+            "type": "pipe_expression",
+            "named": true
+          },
+          {
+            "type": "property_access",
+            "named": true
+          },
+          {
+            "type": "range_expression",
+            "named": true
+          },
+          {
+            "type": "retry_statement",
+            "named": true
+          },
+          {
+            "type": "slice_expression",
+            "named": true
+          },
+          {
+            "type": "spawn_expression",
+            "named": true
+          },
+          {
+            "type": "string_literal",
+            "named": true
+          },
+          {
+            "type": "subscript_expression",
+            "named": true
+          },
+          {
+            "type": "ternary_expression",
+            "named": true
+          },
+          {
+            "type": "true",
+            "named": true
+          },
+          {
+            "type": "try_expression",
+            "named": true
+          },
+          {
+            "type": "try_unwrap_expression",
+            "named": true
+          },
+          {
+            "type": "unary_expression",
+            "named": true
+          }
+        ]
+      },
       "name": {
         "multiple": false,
         "required": true,
@@ -4767,7 +8260,15 @@
           "named": true
         },
         {
+          "type": "deadline_block",
+          "named": true
+        },
+        {
           "type": "dict_literal",
+          "named": true
+        },
+        {
+          "type": "duration_literal",
           "named": true
         },
         {
@@ -4776,6 +8277,10 @@
         },
         {
           "type": "float_literal",
+          "named": true
+        },
+        {
+          "type": "fn_expression",
           "named": true
         },
         {
@@ -4819,6 +8324,10 @@
           "named": true
         },
         {
+          "type": "parallel_settle_expression",
+          "named": true
+        },
+        {
           "type": "parenthesized_expression",
           "named": true
         },
@@ -4828,6 +8337,10 @@
         },
         {
           "type": "property_access",
+          "named": true
+        },
+        {
+          "type": "range_expression",
           "named": true
         },
         {
@@ -4859,6 +8372,14 @@
           "named": true
         },
         {
+          "type": "try_expression",
+          "named": true
+        },
+        {
+          "type": "try_unwrap_expression",
+          "named": true
+        },
+        {
           "type": "unary_expression",
           "named": true
         }
@@ -4874,7 +8395,15 @@
         "required": true,
         "types": [
           {
+            "type": "dict_pattern",
+            "named": true
+          },
+          {
             "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "list_pattern",
             "named": true
           }
         ]
@@ -4906,7 +8435,15 @@
             "named": true
           },
           {
+            "type": "deadline_block",
+            "named": true
+          },
+          {
             "type": "dict_literal",
+            "named": true
+          },
+          {
+            "type": "duration_literal",
             "named": true
           },
           {
@@ -4915,6 +8452,10 @@
           },
           {
             "type": "float_literal",
+            "named": true
+          },
+          {
+            "type": "fn_expression",
             "named": true
           },
           {
@@ -4958,6 +8499,10 @@
             "named": true
           },
           {
+            "type": "parallel_settle_expression",
+            "named": true
+          },
+          {
             "type": "parenthesized_expression",
             "named": true
           },
@@ -4967,6 +8512,10 @@
           },
           {
             "type": "property_access",
+            "named": true
+          },
+          {
+            "type": "range_expression",
             "named": true
           },
           {
@@ -4998,11 +8547,34 @@
             "named": true
           },
           {
+            "type": "try_expression",
+            "named": true
+          },
+          {
+            "type": "try_unwrap_expression",
+            "named": true
+          },
+          {
             "type": "unary_expression",
             "named": true
           }
         ]
       }
+    }
+  },
+  {
+    "type": "where_clause",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "identifier",
+          "named": true
+        }
+      ]
     }
   },
   {
@@ -5036,7 +8608,15 @@
             "named": true
           },
           {
+            "type": "deadline_block",
+            "named": true
+          },
+          {
             "type": "dict_literal",
+            "named": true
+          },
+          {
+            "type": "duration_literal",
             "named": true
           },
           {
@@ -5045,6 +8625,10 @@
           },
           {
             "type": "float_literal",
+            "named": true
+          },
+          {
+            "type": "fn_expression",
             "named": true
           },
           {
@@ -5088,6 +8672,10 @@
             "named": true
           },
           {
+            "type": "parallel_settle_expression",
+            "named": true
+          },
+          {
             "type": "parenthesized_expression",
             "named": true
           },
@@ -5097,6 +8685,10 @@
           },
           {
             "type": "property_access",
+            "named": true
+          },
+          {
+            "type": "range_expression",
             "named": true
           },
           {
@@ -5128,11 +8720,166 @@
             "named": true
           },
           {
+            "type": "try_expression",
+            "named": true
+          },
+          {
+            "type": "try_unwrap_expression",
+            "named": true
+          },
+          {
             "type": "unary_expression",
             "named": true
           }
         ]
       }
+    }
+  },
+  {
+    "type": "yield_expression",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": false,
+      "types": [
+        {
+          "type": "binary_expression",
+          "named": true
+        },
+        {
+          "type": "call_expression",
+          "named": true
+        },
+        {
+          "type": "closure",
+          "named": true
+        },
+        {
+          "type": "deadline_block",
+          "named": true
+        },
+        {
+          "type": "dict_literal",
+          "named": true
+        },
+        {
+          "type": "duration_literal",
+          "named": true
+        },
+        {
+          "type": "false",
+          "named": true
+        },
+        {
+          "type": "float_literal",
+          "named": true
+        },
+        {
+          "type": "fn_expression",
+          "named": true
+        },
+        {
+          "type": "identifier",
+          "named": true
+        },
+        {
+          "type": "if_statement",
+          "named": true
+        },
+        {
+          "type": "integer_literal",
+          "named": true
+        },
+        {
+          "type": "interpolated_string",
+          "named": true
+        },
+        {
+          "type": "list_literal",
+          "named": true
+        },
+        {
+          "type": "method_call",
+          "named": true
+        },
+        {
+          "type": "nil",
+          "named": true
+        },
+        {
+          "type": "nil_coalescing_expression",
+          "named": true
+        },
+        {
+          "type": "parallel_expression",
+          "named": true
+        },
+        {
+          "type": "parallel_map_expression",
+          "named": true
+        },
+        {
+          "type": "parallel_settle_expression",
+          "named": true
+        },
+        {
+          "type": "parenthesized_expression",
+          "named": true
+        },
+        {
+          "type": "pipe_expression",
+          "named": true
+        },
+        {
+          "type": "property_access",
+          "named": true
+        },
+        {
+          "type": "range_expression",
+          "named": true
+        },
+        {
+          "type": "retry_statement",
+          "named": true
+        },
+        {
+          "type": "slice_expression",
+          "named": true
+        },
+        {
+          "type": "spawn_expression",
+          "named": true
+        },
+        {
+          "type": "string_literal",
+          "named": true
+        },
+        {
+          "type": "subscript_expression",
+          "named": true
+        },
+        {
+          "type": "ternary_expression",
+          "named": true
+        },
+        {
+          "type": "true",
+          "named": true
+        },
+        {
+          "type": "try_expression",
+          "named": true
+        },
+        {
+          "type": "try_unwrap_expression",
+          "named": true
+        },
+        {
+          "type": "unary_expression",
+          "named": true
+        }
+      ]
     }
   },
   {
@@ -5156,6 +8903,14 @@
     "named": false
   },
   {
+    "type": "%",
+    "named": false
+  },
+  {
+    "type": "%=",
+    "named": false
+  },
+  {
     "type": "&&",
     "named": false
   },
@@ -5172,7 +8927,15 @@
     "named": false
   },
   {
+    "type": "*=",
+    "named": false
+  },
+  {
     "type": "+",
+    "named": false
+  },
+  {
+    "type": "+=",
     "named": false
   },
   {
@@ -5184,6 +8947,10 @@
     "named": false
   },
   {
+    "type": "-=",
+    "named": false
+  },
+  {
     "type": "->",
     "named": false
   },
@@ -5192,7 +8959,15 @@
     "named": false
   },
   {
+    "type": "...",
+    "named": false
+  },
+  {
     "type": "/",
+    "named": false
+  },
+  {
+    "type": "/=",
     "named": false
   },
   {
@@ -5244,6 +9019,10 @@
     "named": false
   },
   {
+    "type": "break_statement",
+    "named": true
+  },
+  {
     "type": "catch",
     "named": false
   },
@@ -5252,7 +9031,27 @@
     "named": true
   },
   {
+    "type": "continue_statement",
+    "named": true
+  },
+  {
+    "type": "deadline",
+    "named": false
+  },
+  {
+    "type": "default",
+    "named": false
+  },
+  {
+    "type": "duration_literal",
+    "named": true
+  },
+  {
     "type": "else",
+    "named": false
+  },
+  {
+    "type": "enum",
     "named": false
   },
   {
@@ -5262,6 +9061,10 @@
   {
     "type": "false",
     "named": true
+  },
+  {
+    "type": "finally",
+    "named": false
   },
   {
     "type": "float_literal",
@@ -5280,11 +9083,19 @@
     "named": false
   },
   {
+    "type": "guard",
+    "named": false
+  },
+  {
     "type": "identifier",
     "named": true
   },
   {
     "type": "if",
+    "named": false
+  },
+  {
+    "type": "impl",
     "named": false
   },
   {
@@ -5312,8 +9123,16 @@
     "named": false
   },
   {
+    "type": "mutex",
+    "named": false
+  },
+  {
     "type": "nil",
     "named": true
+  },
+  {
+    "type": "not",
+    "named": false
   },
   {
     "type": "override",
@@ -5325,6 +9144,10 @@
   },
   {
     "type": "parallel_map",
+    "named": false
+  },
+  {
+    "type": "parallel_settle",
     "named": false
   },
   {
@@ -5344,6 +9167,10 @@
     "named": false
   },
   {
+    "type": "select",
+    "named": false
+  },
+  {
     "type": "spawn",
     "named": false
   },
@@ -5356,7 +9183,19 @@
     "named": true
   },
   {
+    "type": "struct",
+    "named": false
+  },
+  {
     "type": "throw",
+    "named": false
+  },
+  {
+    "type": "thru",
+    "named": false
+  },
+  {
+    "type": "timeout",
     "named": false
   },
   {
@@ -5372,11 +9211,23 @@
     "named": false
   },
   {
+    "type": "upto",
+    "named": false
+  },
+  {
     "type": "var",
     "named": false
   },
   {
+    "type": "where",
+    "named": false
+  },
+  {
     "type": "while",
+    "named": false
+  },
+  {
+    "type": "yield",
     "named": false
   },
   {

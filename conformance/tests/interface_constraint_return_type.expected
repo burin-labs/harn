@@ -1,0 +1,2 @@
+warning: Type 'Box' does not satisfy interface 'Sizable': method 'size' returns 'string', expected 'int' (required by constraint `where T: Sizable`)
+[harn] 3

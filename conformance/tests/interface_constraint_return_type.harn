@@ -1,0 +1,17 @@
+pipeline test(task) {
+  interface Sizable {
+    fn size(self) -> int
+  }
+  struct Box {
+    width: int
+  }
+  impl Box {
+    fn size(self) -> string {
+      return to_string(self.width)
+    }
+  }
+  fn measure<T>(item: T) where T: Sizable {
+    log(item.size())
+  }
+  measure(Box({width: 3}))
+}

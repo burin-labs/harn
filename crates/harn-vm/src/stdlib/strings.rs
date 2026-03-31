@@ -9,10 +9,28 @@ pub(crate) fn register_string_builtins(vm: &mut Vm) {
 
         // If the second argument is a dict, use named placeholders {key}
         if let Some(dict) = args.get(1).and_then(|a| a.as_dict()) {
-            let mut result = template.clone();
-            for (key, val) in dict.iter() {
-                result = result.replace(&format!("{{{key}}}"), &val.display());
+            // Build result by scanning for {name} patterns and replacing them
+            // in a single pass to avoid double-substitution.
+            let mut result = String::with_capacity(template.len());
+            let mut rest = template.as_str();
+            while let Some(open) = rest.find('{') {
+                result.push_str(&rest[..open]);
+                if let Some(close) = rest[open..].find('}') {
+                    let key = &rest[open + 1..open + close];
+                    if let Some(val) = dict.get(key) {
+                        result.push_str(&val.display());
+                    } else {
+                        // Keep unmatched placeholders as-is
+                        result.push_str(&rest[open..open + close + 1]);
+                    }
+                    rest = &rest[open + close + 1..];
+                } else {
+                    result.push_str(&rest[open..]);
+                    rest = "";
+                    break;
+                }
             }
+            result.push_str(rest);
             return Ok(VmValue::String(Rc::from(result)));
         }
 

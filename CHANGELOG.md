@@ -2,6 +2,37 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.4.27
+
+### Added
+
+- **Tree-sitter grammar overhaul** — syntax highlighting now supports all
+  current features: `enum`, `struct`, `impl`, `interface`, `in`/`not in`,
+  `%`, `yield`, `deadline`, `guard`, `break`/`continue`, `finally`,
+  `mutex`, `select`, duration literals, compound assignment, spread,
+  try-expression, `?` operator, generic params, where clauses, destructuring.
+- **Typechecker: full interface method signature checking** — `where T: Interface`
+  constraints now verify param types and return types, not just method names
+  and param counts.
+- **VM error source locations** — runtime errors now consistently include
+  `(line N)` for all error types (Runtime, TypeError, DivisionByZero,
+  UndefinedVariable, etc.).
+- **LSP hover for local functions** — shows signature, doc comments, and
+  impl type context.
+
+### Fixed
+
+- **`produces_value` missing entries** — `EnumDecl`, `InterfaceDecl`, and
+  `TypeDecl` now correctly marked as non-value-producing, fixing spurious
+  `Op::Pop` emissions in script mode.
+- **`json_extract` unicode escape handling** — `\uXXXX` sequences inside
+  JSON strings no longer cause incorrect bracket balancing.
+- **`format()` double-substitution** — named placeholder replacement now
+  uses single-pass scanning to prevent values containing `{key}` patterns
+  from being re-substituted.
+- **Lint builtin list** — derived from VM registration instead of hardcoded
+  300-line array that drifted from actual builtins.
+
 ## v0.4.26
 
 ### Added

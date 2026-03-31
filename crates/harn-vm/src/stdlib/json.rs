@@ -271,8 +271,13 @@ fn find_balanced_json(text: &str, open: u8, close: u8) -> Option<String> {
     while i < bytes.len() {
         let b = bytes[i];
         if escape {
+            // Handle \uXXXX: skip the 4 hex digits after \u
+            if b == b'u' && i + 4 < bytes.len() {
+                i += 5; // skip 'u' + 4 hex digits
+            } else {
+                i += 1;
+            }
             escape = false;
-            i += 1;
             continue;
         }
         if b == b'\\' && in_string {

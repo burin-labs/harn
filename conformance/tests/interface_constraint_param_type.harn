@@ -1,0 +1,17 @@
+pipeline test(task) {
+  interface Processor {
+    fn process(self, x: int) -> string
+  }
+  struct MyProc {
+    name: string
+  }
+  impl MyProc {
+    fn process(self, x: string) -> string {
+      return self.name + ": " + x
+    }
+  }
+  fn run_proc<T>(p: T) where T: Processor {
+    log(p.process("hello"))
+  }
+  run_proc(MyProc({name: "a"}))
+}

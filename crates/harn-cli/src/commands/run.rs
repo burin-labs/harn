@@ -69,9 +69,18 @@ pub(crate) async fn run_file(path: &str, trace: bool, denied_builtins: HashSet<S
     // Static type checking
     let type_diagnostics = harn_parser::TypeChecker::new().check(&program);
     for diag in &type_diagnostics {
-        if diag.severity == DiagnosticSeverity::Error {
-            eprintln!("error: {}", diag.message);
-            process::exit(1);
+        match diag.severity {
+            DiagnosticSeverity::Error => {
+                eprintln!("error: {}", diag.message);
+                process::exit(1);
+            }
+            DiagnosticSeverity::Warning => {
+                if let Some(span) = &diag.span {
+                    eprintln!("warning: {} (line {})", diag.message, span.line);
+                } else {
+                    eprintln!("warning: {}", diag.message);
+                }
+            }
         }
     }
 
@@ -224,9 +233,18 @@ pub(crate) async fn run_file_mcp_serve(path: &str) {
 
     let type_diagnostics = harn_parser::TypeChecker::new().check(&program);
     for diag in &type_diagnostics {
-        if diag.severity == DiagnosticSeverity::Error {
-            eprintln!("error: {}", diag.message);
-            process::exit(1);
+        match diag.severity {
+            DiagnosticSeverity::Error => {
+                eprintln!("error: {}", diag.message);
+                process::exit(1);
+            }
+            DiagnosticSeverity::Warning => {
+                if let Some(span) = &diag.span {
+                    eprintln!("warning: {} (line {})", diag.message, span.line);
+                } else {
+                    eprintln!("warning: {}", diag.message);
+                }
+            }
         }
     }
 

@@ -2420,6 +2420,9 @@ impl Compiler {
             | Node::FnDecl { .. }
             | Node::ImplBlock { .. }
             | Node::StructDecl { .. }
+            | Node::EnumDecl { .. }
+            | Node::InterfaceDecl { .. }
+            | Node::TypeDecl { .. }
             | Node::ThrowStmt { .. }
             | Node::BreakStmt
             | Node::ContinueStmt => false,

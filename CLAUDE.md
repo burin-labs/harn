@@ -106,13 +106,17 @@ via `tokio::task::spawn_local` for `parallel`, `parallel_map`, and
 - **harn-fmt** -- AST-based code formatter. Canonical 2-space indent style.
 - **harn-lint** -- Linter with 6 rules: unused-variable, unused-parameter,
   unreachable-code, mutable-never-reassigned, empty-block, shadow-variable.
+  Builtin name list is derived from the VM's actual registrations via
+  `harn_vm::stdlib::stdlib_builtin_names()` — no hardcoded list.
 - **harn-cli** -- CLI entry point. Subcommands: `run`, `test`, `repl`,
   `version`, `fmt`, `lint`, `init`, `acp`, `serve`.
   `acp.rs` (ACP JSON-RPC server with builtin delegation,
   `terminal/*` and `fs/*` support),
   `a2a.rs` (Agent-to-Agent HTTP server with Agent Card).
+  Also: `mcp-serve` subcommand to serve Harn pipelines as MCP servers.
 - **harn-lsp** -- Language Server Protocol implementation. Features:
-  completion, hover, go-to-definition, references, rename, document
+  completion, hover (builtins + local functions with signatures and
+  doc comments), go-to-definition, references, rename, document
   symbols, workspace symbols, signature help, semantic tokens, code
   actions (quick-fix for lint warnings).
 - **harn-dap** -- Debug Adapter Protocol implementation. Supports
@@ -184,6 +188,13 @@ opcode for runtime flattening.
 **Generic constraints**: `fn f<T>(x: T) where T: Interface` enforces
 that `T` satisfies the named interface. Checked at call sites with
 compile-time warnings.
+
+**Membership operators**: `x in list`, `key in dict`, `substr in str`,
+`x not in set`. Compiles to `Op::Contains` (+ `Op::Not` for `not in`).
+
+**Progress reporting**: `progress(phase, message, progress?, total?, data?)`
+emits structured notifications through the bridge/ACP layer. `agent_loop`
+auto-emits progress at each iteration in bridge mode.
 
 **Encoding/hashing builtins**: `base64_encode`, `base64_decode`,
 `sha256`, `md5`, `url_encode`, `url_decode`.
