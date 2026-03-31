@@ -314,7 +314,7 @@ These are called on string values with dot notation: `"hello".uppercase()`.
 | `mkdir(path)` | path: string | nil | Create directory and all parent directories. Throws on failure |
 | `stat(path)` | path: string | dict | File metadata: `{size, is_file, is_dir, readonly, modified}`. Throws on failure |
 | `temp_dir()` | none | string | System temporary directory path |
-| `render(path, bindings?)` | path: string, bindings: dict | string | Read a template file and replace `{{key}}` placeholders with values from bindings dict. Without bindings, just reads the file |
+| `render(path, bindings?)` | path: string, bindings: dict | string | Read a template file relative to the current pipeline source file and replace `{{key}}` placeholders with values from bindings dict. Without bindings, just reads the file |
 
 ## Environment and system
 
@@ -324,7 +324,9 @@ These are called on string values with dot notation: `"hello".uppercase()`.
 | `timestamp()` | none | float | Unix timestamp in seconds with sub-second precision |
 | `elapsed()` | none | int | Milliseconds since VM startup |
 | `exec(cmd, args...)` | cmd: string, args: strings | dict | Execute external command. Returns `{stdout, stderr, status, success}` |
+| `exec_at(dir, cmd, args...)` | dir: string, cmd: string, args: strings | dict | Execute external command inside a specific directory |
 | `shell(cmd)` | cmd: string | dict | Execute command via shell. Returns `{stdout, stderr, status, success}` |
+| `shell_at(dir, cmd)` | dir: string, cmd: string | dict | Execute shell command inside a specific directory |
 | `exit(code)` | code: int (default 0) | never | Terminate the process |
 | `username()` | none | string | Current OS username |
 | `hostname()` | none | string | Machine hostname |
@@ -952,6 +954,7 @@ These builtins expose Harn's typed orchestration runtime.
 |---|---|---|---|
 | `spawn_agent(config)` | config: dict | dict | Start a worker from a workflow graph or delegated stage config |
 | `send_input(handle, task)` | handle, task | dict | Re-run a completed worker with a new task, carrying forward worker state where applicable |
+| `resume_agent(id_or_snapshot_path)` | id or path | dict | Restore a persisted worker snapshot into the current runtime |
 | `wait_agent(handle_or_list)` | handle or list | dict or list | Wait for one worker or a list of workers to finish |
 | `close_agent(handle)` | handle | dict | Cancel a worker and mark it terminal |
 | `list_agents()` | none | list | List worker summaries tracked by the current runtime |
@@ -961,8 +964,15 @@ These builtins expose Harn's typed orchestration runtime.
 - `{task, graph, artifacts?, options?, name?, wait?}` for typed workflow runs
 - `{task, node, artifacts?, transcript?, name?, wait?}` for delegated stage runs
 
+Worker configs may also include `carry` to control continuation behavior:
+
+- `carry: {artifacts: "inherit" | "none" | <context_policy>}`
+- `carry: {transcript: "inherit" | "reset" | "fork" | <transcript_policy>}`
+- `carry: {resume_workflow?: bool, persist_state?: bool}`
+
 Workers return handle dicts with an `id`, lifecycle timestamps, `status`,
-`mode`, result/error fields, transcript presence, and produced artifact count.
+`mode`, result/error fields, transcript presence, produced artifact count, and
+snapshot/child-run paths when available.
 
 ### Artifacts and context
 

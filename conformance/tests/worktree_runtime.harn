@@ -1,0 +1,23 @@
+import "std/worktree"
+
+pipeline main() {
+  let base = path_join(temp_dir(), "harn-worktree-runtime-" + to_string(to_int(timestamp())))
+  mkdir(base)
+  let repo = path_join(base, "repo")
+  mkdir(repo)
+  println(exec_at(repo, "git", "init")?.success)
+  write_file(path_join(repo, "README.md"), "hello\n")
+  println(exec_at(repo, "git", "add", "README.md")?.success)
+  println(shell_at(repo, "git -c user.name='Harn' -c user.email='harn@example.com' commit -m init")?.success)
+  let worktree = worktree_create(repo, "feature_runtime", "HEAD", nil)
+  println(worktree?.success)
+  println(file_exists(path_join(worktree?.path, "README.md")))
+  write_file(path_join(worktree?.path, "README.md"), "hello\nworld\n")
+  let diff = worktree_diff(worktree?.path, nil)
+  println(diff?.success)
+  println(contains(diff?.stdout, "README"))
+  let status = worktree_status(worktree?.path)
+  println(status?.success)
+  println(contains(status?.stdout, "feature_runtime"))
+  println(worktree_remove(repo, worktree?.path, true)?.success)
+}

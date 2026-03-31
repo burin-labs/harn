@@ -1536,7 +1536,7 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
                 );
             }
         }
-        "exec" | "shell" | "run_command" => {
+        "exec" | "exec_at" | "shell" | "shell_at" | "run_command" => {
             if !policy_allows_tool(&policy, "run")
                 || !policy_allows_capability(&policy, "process", "exec")
                 || !policy_allows_side_effect(&policy, "process_exec")
@@ -1684,7 +1684,7 @@ fn redact_transcript_visibility(transcript: &VmValue, visibility: Option<&str>) 
     Some(VmValue::Dict(Rc::new(redacted)))
 }
 
-fn apply_input_transcript_policy(
+pub(crate) fn apply_input_transcript_policy(
     transcript: Option<VmValue>,
     policy: &TranscriptPolicy,
 ) -> Option<VmValue> {

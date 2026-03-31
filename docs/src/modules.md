@@ -202,8 +202,22 @@ Workflow helpers built on transcripts and `agent_loop`:
 | `workflow_reset(prev, carry_summary)` | Reset or summarize-then-reset a workflow transcript |
 
 For background or delegated execution, use the worker lifecycle builtins
-(`spawn_agent`, `send_input`, `wait_agent`, `close_agent`, `list_agents`)
+(`spawn_agent`, `send_input`, `resume_agent`, `wait_agent`, `close_agent`, `list_agents`)
 directly from the runtime.
+
+### std/worktree
+
+Helpers for isolated git worktree execution built on `exec_at(...)` and
+`shell_at(...)`:
+
+| Function | Description |
+|---|---|
+| `worktree_default_path(repo, name)` | Return the default `.harn/worktrees/<name>` path |
+| `worktree_create(repo, name, base_ref, path?)` | Create or reset a worktree branch at a target path |
+| `worktree_remove(repo, path, force)` | Remove a worktree from the parent repo |
+| `worktree_status(path)` | Run `git status --short --branch` in the worktree |
+| `worktree_diff(path, base_ref?)` | Render diff output for the worktree |
+| `worktree_shell(path, script)` | Run an arbitrary shell command inside the worktree |
 
 ### Selective imports
 

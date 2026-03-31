@@ -93,7 +93,7 @@ fn require_param(params: &BTreeMap<String, VmValue>, key: &str) -> Result<String
 }
 
 fn resolve_path(path: &str) -> PathBuf {
-    PathBuf::from(path)
+    crate::stdlib::process::resolve_source_relative_path(path)
 }
 
 fn render_template(

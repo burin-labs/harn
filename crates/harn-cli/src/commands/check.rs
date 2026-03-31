@@ -1,8 +1,10 @@
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use std::process;
 
 use harn_fmt::format_source;
 use harn_lint::{lint_with_config, LintSeverity};
-use harn_parser::{DiagnosticSeverity, TypeChecker};
+use harn_parser::{DiagnosticSeverity, Node, SNode, TypeChecker};
 
 use crate::package::CheckConfig;
 use crate::parse_source_file;
@@ -76,6 +78,22 @@ pub(crate) fn check_file(path: &str, config: &CheckConfig) {
     }
     if print_lint_diagnostics(path, &lint_diagnostics) {
         has_error = true;
+    }
+
+    let preflight_diagnostics = collect_preflight_diagnostics(Path::new(path), &source, &program);
+    for diag in &preflight_diagnostics {
+        has_error = true;
+        diagnostic_count += 1;
+        let rendered = harn_parser::diagnostic::render_diagnostic(
+            &diag.source,
+            &diag.path,
+            &diag.span,
+            "error",
+            &diag.message,
+            Some("preflight failure"),
+            diag.help.as_deref(),
+        );
+        eprint!("{rendered}");
     }
 
     if diagnostic_count == 0 {
@@ -183,4 +201,438 @@ fn fmt_file_inner(path: &str, check_mode: bool) -> bool {
         }
     }
     true
+}
+
+struct PreflightDiagnostic {
+    path: String,
+    source: String,
+    span: harn_lexer::Span,
+    message: String,
+    help: Option<String>,
+}
+
+fn collect_preflight_diagnostics(
+    path: &Path,
+    source: &str,
+    program: &[SNode],
+) -> Vec<PreflightDiagnostic> {
+    let mut diagnostics = Vec::new();
+    let mut visited = HashSet::new();
+    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    scan_program_preflight(&canonical, source, program, &mut visited, &mut diagnostics);
+    diagnostics
+}
+
+fn scan_program_preflight(
+    file_path: &Path,
+    source: &str,
+    program: &[SNode],
+    visited: &mut HashSet<PathBuf>,
+    diagnostics: &mut Vec<PreflightDiagnostic>,
+) {
+    let canonical = file_path
+        .canonicalize()
+        .unwrap_or_else(|_| file_path.to_path_buf());
+    if !visited.insert(canonical.clone()) {
+        return;
+    }
+    for node in program {
+        scan_node_preflight(node, &canonical, source, visited, diagnostics);
+    }
+}
+
+fn scan_node_preflight(
+    node: &SNode,
+    file_path: &Path,
+    source: &str,
+    visited: &mut HashSet<PathBuf>,
+    diagnostics: &mut Vec<PreflightDiagnostic>,
+) {
+    match &node.node {
+        Node::ImportDecl { path } | Node::SelectiveImport { path, .. } => {
+            if path.starts_with("std/") {
+                return;
+            }
+            match resolve_import_path(file_path, path) {
+                Some(import_path) => {
+                    let import_str = import_path.to_string_lossy().to_string();
+                    let (import_source, import_program) = parse_source_file(&import_str);
+                    scan_program_preflight(
+                        &import_path,
+                        &import_source,
+                        &import_program,
+                        visited,
+                        diagnostics,
+                    );
+                }
+                None => diagnostics.push(PreflightDiagnostic {
+                    path: file_path.display().to_string(),
+                    source: source.to_string(),
+                    span: node.span,
+                    message: format!("preflight: unresolved import '{path}'"),
+                    help: Some("verify the import path and packaged module layout".to_string()),
+                }),
+            }
+        }
+        Node::FunctionCall { name, args } if name == "render" => {
+            if let Some(Node::StringLiteral(template_path)) = args.first().map(|arg| &arg.node) {
+                let resolved = resolve_source_relative(file_path, template_path);
+                if !resolved.exists() {
+                    diagnostics.push(PreflightDiagnostic {
+                        path: file_path.display().to_string(),
+                        source: source.to_string(),
+                        span: args[0].span,
+                        message: format!(
+                            "preflight: render target '{}' does not exist at {}",
+                            template_path,
+                            resolved.display()
+                        ),
+                        help: Some(
+                            "keep template paths relative to the pipeline source file or ship the bundled resource"
+                                .to_string(),
+                        ),
+                    });
+                }
+            }
+        }
+        Node::FunctionCall { name, args } if name == "host_invoke" => {
+            if matches!(
+                (args.first().map(|arg| &arg.node), args.get(1).map(|arg| &arg.node)),
+                (Some(Node::StringLiteral(cap)), Some(Node::StringLiteral(op)))
+                    if cap == "template" && op == "render"
+            ) {
+                if let Some(template_path) = host_render_path_arg(args.get(2)) {
+                    let resolved = resolve_source_relative(file_path, &template_path);
+                    if !resolved.exists() {
+                        diagnostics.push(PreflightDiagnostic {
+                            path: file_path.display().to_string(),
+                            source: source.to_string(),
+                            span: args[2].span,
+                            message: format!(
+                                "preflight: host template render target '{}' does not exist at {}",
+                                template_path,
+                                resolved.display()
+                            ),
+                            help: Some(
+                                "verify the template path before ACP or embedded-host execution"
+                                    .to_string(),
+                            ),
+                        });
+                    }
+                }
+            }
+            scan_children(args, file_path, source, visited, diagnostics);
+        }
+        Node::IfElse {
+            condition,
+            then_body,
+            else_body,
+        } => {
+            scan_node_preflight(condition, file_path, source, visited, diagnostics);
+            scan_children(then_body, file_path, source, visited, diagnostics);
+            if let Some(else_body) = else_body {
+                scan_children(else_body, file_path, source, visited, diagnostics);
+            }
+        }
+        Node::ForIn { iterable, body, .. }
+        | Node::WhileLoop {
+            condition: iterable,
+            body,
+        } => {
+            scan_node_preflight(iterable, file_path, source, visited, diagnostics);
+            scan_children(body, file_path, source, visited, diagnostics);
+        }
+        Node::Retry { count, body } => {
+            scan_node_preflight(count, file_path, source, visited, diagnostics);
+            scan_children(body, file_path, source, visited, diagnostics);
+        }
+        Node::ReturnStmt { value } => {
+            if let Some(value) = value {
+                scan_node_preflight(value, file_path, source, visited, diagnostics);
+            }
+        }
+        Node::TryCatch {
+            body,
+            catch_body,
+            finally_body,
+            ..
+        } => {
+            scan_children(body, file_path, source, visited, diagnostics);
+            scan_children(catch_body, file_path, source, visited, diagnostics);
+            if let Some(finally_body) = finally_body {
+                scan_children(finally_body, file_path, source, visited, diagnostics);
+            }
+        }
+        Node::TryExpr { body } | Node::SpawnExpr { body } | Node::MutexBlock { body } => {
+            scan_children(body, file_path, source, visited, diagnostics);
+        }
+        Node::GuardStmt {
+            condition,
+            else_body,
+        } => {
+            scan_node_preflight(condition, file_path, source, visited, diagnostics);
+            scan_children(else_body, file_path, source, visited, diagnostics);
+        }
+        Node::AskExpr { fields } | Node::DictLiteral(fields) => {
+            for field in fields {
+                scan_node_preflight(&field.value, file_path, source, visited, diagnostics);
+            }
+        }
+        Node::DeadlineBlock { duration, body } => {
+            scan_node_preflight(duration, file_path, source, visited, diagnostics);
+            scan_children(body, file_path, source, visited, diagnostics);
+        }
+        Node::YieldExpr { value } => {
+            if let Some(value) = value {
+                scan_node_preflight(value, file_path, source, visited, diagnostics);
+            }
+        }
+        Node::Parallel { count, body, .. } => {
+            scan_node_preflight(count, file_path, source, visited, diagnostics);
+            scan_children(body, file_path, source, visited, diagnostics);
+        }
+        Node::ParallelMap { list, body, .. } | Node::ParallelSettle { list, body, .. } => {
+            scan_node_preflight(list, file_path, source, visited, diagnostics);
+            scan_children(body, file_path, source, visited, diagnostics);
+        }
+        Node::SelectExpr {
+            cases,
+            timeout,
+            default_body,
+        } => {
+            for case in cases {
+                scan_node_preflight(&case.channel, file_path, source, visited, diagnostics);
+                scan_children(&case.body, file_path, source, visited, diagnostics);
+            }
+            if let Some((timeout_expr, body)) = timeout {
+                scan_node_preflight(timeout_expr, file_path, source, visited, diagnostics);
+                scan_children(body, file_path, source, visited, diagnostics);
+            }
+            if let Some(body) = default_body {
+                scan_children(body, file_path, source, visited, diagnostics);
+            }
+        }
+        Node::FunctionCall { args, .. } => {
+            scan_children(args, file_path, source, visited, diagnostics);
+        }
+        Node::MethodCall { object, args, .. } | Node::OptionalMethodCall { object, args, .. } => {
+            scan_node_preflight(object, file_path, source, visited, diagnostics);
+            scan_children(args, file_path, source, visited, diagnostics);
+        }
+        Node::PropertyAccess { object, .. }
+        | Node::OptionalPropertyAccess { object, .. }
+        | Node::UnaryOp {
+            operand: object, ..
+        } => {
+            scan_node_preflight(object, file_path, source, visited, diagnostics);
+        }
+        Node::SubscriptAccess { object, index } => {
+            scan_node_preflight(object, file_path, source, visited, diagnostics);
+            scan_node_preflight(index, file_path, source, visited, diagnostics);
+        }
+        Node::SliceAccess { object, start, end } => {
+            scan_node_preflight(object, file_path, source, visited, diagnostics);
+            if let Some(start) = start {
+                scan_node_preflight(start, file_path, source, visited, diagnostics);
+            }
+            if let Some(end) = end {
+                scan_node_preflight(end, file_path, source, visited, diagnostics);
+            }
+        }
+        Node::BinaryOp { left, right, .. } => {
+            scan_node_preflight(left, file_path, source, visited, diagnostics);
+            scan_node_preflight(right, file_path, source, visited, diagnostics);
+        }
+        Node::Ternary {
+            condition,
+            true_expr,
+            false_expr,
+        } => {
+            scan_node_preflight(condition, file_path, source, visited, diagnostics);
+            scan_node_preflight(true_expr, file_path, source, visited, diagnostics);
+            scan_node_preflight(false_expr, file_path, source, visited, diagnostics);
+        }
+        Node::Assignment { target, value, .. } => {
+            scan_node_preflight(target, file_path, source, visited, diagnostics);
+            scan_node_preflight(value, file_path, source, visited, diagnostics);
+        }
+        Node::ThrowStmt { value } => {
+            scan_node_preflight(value, file_path, source, visited, diagnostics);
+        }
+        Node::EnumConstruct { args, .. } | Node::ListLiteral(args) => {
+            scan_children(args, file_path, source, visited, diagnostics);
+        }
+        Node::StructConstruct { fields, .. } => {
+            for field in fields {
+                scan_node_preflight(&field.value, file_path, source, visited, diagnostics);
+            }
+        }
+        Node::RangeExpr { start, end, .. } => {
+            scan_node_preflight(start, file_path, source, visited, diagnostics);
+            scan_node_preflight(end, file_path, source, visited, diagnostics);
+        }
+        Node::Pipeline { body, .. }
+        | Node::OverrideDecl { body, .. }
+        | Node::FnDecl { body, .. } => {
+            scan_children(body, file_path, source, visited, diagnostics);
+        }
+        Node::LetBinding { value, .. } | Node::VarBinding { value, .. } => {
+            scan_node_preflight(value, file_path, source, visited, diagnostics);
+        }
+        Node::MatchExpr { value, arms } => {
+            scan_node_preflight(value, file_path, source, visited, diagnostics);
+            for arm in arms {
+                scan_children(&arm.body, file_path, source, visited, diagnostics);
+                scan_node_preflight(&arm.pattern, file_path, source, visited, diagnostics);
+            }
+        }
+        Node::ImplBlock { methods, .. } => {
+            scan_children(methods, file_path, source, visited, diagnostics);
+        }
+        Node::Spread(expr) | Node::TryOperator { operand: expr } => {
+            scan_node_preflight(expr, file_path, source, visited, diagnostics);
+        }
+        Node::Block(body) | Node::Closure { body, .. } => {
+            scan_children(body, file_path, source, visited, diagnostics);
+        }
+        Node::TypeDecl { .. }
+        | Node::EnumDecl { .. }
+        | Node::StructDecl { .. }
+        | Node::InterfaceDecl { .. }
+        | Node::DurationLiteral(_)
+        | Node::InterpolatedString(_)
+        | Node::StringLiteral(_)
+        | Node::IntLiteral(_)
+        | Node::FloatLiteral(_)
+        | Node::BoolLiteral(_)
+        | Node::NilLiteral
+        | Node::Identifier(_)
+        | Node::BreakStmt
+        | Node::ContinueStmt => {}
+    }
+}
+
+fn scan_children(
+    nodes: &[SNode],
+    file_path: &Path,
+    source: &str,
+    visited: &mut HashSet<PathBuf>,
+    diagnostics: &mut Vec<PreflightDiagnostic>,
+) {
+    for node in nodes {
+        scan_node_preflight(node, file_path, source, visited, diagnostics);
+    }
+}
+
+fn resolve_import_path(current_file: &Path, import_path: &str) -> Option<PathBuf> {
+    let base = current_file.parent().unwrap_or(Path::new("."));
+    let mut file_path = base.join(import_path);
+    if !file_path.exists() && file_path.extension().is_none() {
+        file_path.set_extension("harn");
+    }
+    if file_path.exists() {
+        return Some(file_path);
+    }
+    for pkg_dir in [".harn/packages", ".burin/packages"] {
+        let pkg_path = base.join(pkg_dir).join(import_path);
+        if pkg_path.exists() {
+            return Some(if pkg_path.is_dir() {
+                let lib = pkg_path.join("lib.harn");
+                if lib.exists() {
+                    lib
+                } else {
+                    pkg_path
+                }
+            } else {
+                pkg_path
+            });
+        }
+        let mut pkg_harn = pkg_path.clone();
+        pkg_harn.set_extension("harn");
+        if pkg_harn.exists() {
+            return Some(pkg_harn);
+        }
+    }
+    None
+}
+
+fn resolve_source_relative(current_file: &Path, target: &str) -> PathBuf {
+    let candidate = PathBuf::from(target);
+    if candidate.is_absolute() {
+        candidate
+    } else {
+        current_file
+            .parent()
+            .unwrap_or(Path::new("."))
+            .join(candidate)
+    }
+}
+
+fn host_render_path_arg(arg: Option<&SNode>) -> Option<String> {
+    let Node::DictLiteral(entries) = &arg?.node else {
+        return None;
+    };
+    entries
+        .iter()
+        .find_map(|entry| match (&entry.key.node, &entry.value.node) {
+            (Node::Identifier(key), Node::StringLiteral(path)) if key == "path" => {
+                Some(path.clone())
+            }
+            (Node::StringLiteral(key), Node::StringLiteral(path)) if key == "path" => {
+                Some(path.clone())
+            }
+            _ => None,
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use harn_lexer::Lexer;
+    use harn_parser::Parser;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn parse_program(source: &str) -> Vec<SNode> {
+        let mut lexer = Lexer::new(source);
+        let tokens = lexer.tokenize().expect("tokenize");
+        let mut parser = Parser::new(tokens);
+        parser.parse().expect("parse")
+    }
+
+    fn unique_temp_dir(prefix: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("{prefix}-{nanos}"))
+    }
+
+    #[test]
+    fn preflight_reports_missing_literal_render_target() {
+        let dir = unique_temp_dir("harn-check");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("main.harn");
+        let source = r#"
+pipeline main() {
+  let text = render("missing.txt")
+  println(text)
+}
+"#;
+        let program = parse_program(source);
+        let diagnostics = collect_preflight_diagnostics(&file, source, &program);
+        assert_eq!(diagnostics.len(), 1);
+        assert!(diagnostics[0].message.contains("render target"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn preflight_resolves_imports_with_implicit_harn_extension() {
+        let dir = unique_temp_dir("harn-check");
+        std::fs::create_dir_all(dir.join("lib")).unwrap();
+        std::fs::write(dir.join("lib").join("helpers.harn"), "pub fn x() { 1 }\n").unwrap();
+        let file = dir.join("main.harn");
+        let resolved = resolve_import_path(&file, "lib/helpers");
+        assert_eq!(resolved, Some(dir.join("lib").join("helpers.harn")));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

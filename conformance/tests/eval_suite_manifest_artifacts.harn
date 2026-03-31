@@ -1,68 +1,18 @@
 pipeline main() {
   let dir = path_join(temp_dir(), "harn_eval_manifest_artifacts")
   mkdir(dir)
-
-  let baseline = run_record({
-    _type: "run_record",
-    id: "baseline",
-    workflow_id: "wf",
-    workflow_name: "demo",
-    task: "demo",
-    status: "completed",
-    started_at: "1",
-    stages: [
-      {
-        id: "stage_1",
-        node_id: "act",
-        kind: "stage",
-        status: "completed",
-        outcome: "success",
-        started_at: "1"
-      }
-    ]
-  })
-  let candidate = run_record({
-    _type: "run_record",
-    id: "candidate",
-    workflow_id: "wf",
-    workflow_name: "demo",
-    task: "demo",
-    status: "failed",
-    started_at: "1",
-    stages: [
-      {
-        id: "stage_1",
-        node_id: "act",
-        kind: "stage",
-        status: "failed",
-        outcome: "error",
-        started_at: "1"
-      }
-    ]
-  })
-
+  let baseline = run_record({_type: "run_record", id: "baseline", workflow_id: "wf", workflow_name: "demo", task: "demo", status: "completed", started_at: "1", stages: [{id: "stage_1", node_id: "act", kind: "stage", status: "completed", outcome: "success", started_at: "1"}]})
+  let candidate = run_record({_type: "run_record", id: "candidate", workflow_id: "wf", workflow_name: "demo", task: "demo", status: "failed", started_at: "1", stages: [{id: "stage_1", node_id: "act", kind: "stage", status: "failed", outcome: "error", started_at: "1"}]})
   run_record_save(baseline, path_join(dir, "baseline.json"))
   run_record_save(candidate, path_join(dir, "candidate.json"))
-
-  let suite = eval_suite_run(eval_suite_manifest({
-    base_dir: dir,
-    cases: [
-      {
-        label: "candidate",
-        run_path: "candidate.json",
-        compare_to: "baseline.json"
-      }
-    ]
-  }))
-
+  let suite = eval_suite_run(eval_suite_manifest({base_dir: dir, cases: [{label: "candidate", run_path: "candidate.json", compare_to: "baseline.json"}]}))
   let diff = artifact_diff("src/main.rs", "old\nsame", "new\nsame")
   let review = artifact_diff_review(diff, "Needs approval")
   let decision = artifact_review_decision(review, "accepted")
   let workspace = artifact_workspace_file("src/main.rs", "fn main() {}")
   let command = artifact_command_result("cargo test", {status: 0, success: true})
-
   println(suite?.failed == 1)
-  println(suite?.cases[0]?.comparison?.identical == false)
+  println(!suite?.cases[0]?.comparison?.identical)
   println(diff?.kind == "diff")
   println(review?.kind == "diff_review")
   println(decision?.kind == "review_decision")

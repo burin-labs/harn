@@ -20,6 +20,18 @@ pub(crate) fn reset_process_state() {
     VM_SOURCE_DIR.with(|sd| *sd.borrow_mut() = None);
 }
 
+pub fn resolve_source_relative_path(path: &str) -> PathBuf {
+    let candidate = PathBuf::from(path);
+    if candidate.is_absolute() {
+        return candidate;
+    }
+    let base = VM_SOURCE_DIR
+        .with(|sd| sd.borrow().clone())
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."));
+    base.join(candidate)
+}
+
 pub(crate) fn register_process_builtins(vm: &mut Vm) {
     vm.register_builtin("env", |args, _out| {
         let name = args.first().map(|a| a.display()).unwrap_or_default();
@@ -51,10 +63,8 @@ pub(crate) fn register_process_builtins(vm: &mut Vm) {
         }
         let cmd = args[0].display();
         let cmd_args: Vec<String> = args[1..].iter().map(|a| a.display()).collect();
-        let output = std::process::Command::new(&cmd)
-            .args(&cmd_args)
-            .output()
-            .map_err(|e| VmError::Thrown(VmValue::String(Rc::from(format!("exec failed: {e}")))))?;
+        let output = exec_command(None, &cmd, &cmd_args)
+            .map_err(|e| VmError::Thrown(VmValue::String(Rc::from(e))))?;
         Ok(vm_output_to_value(output))
     });
 
@@ -75,13 +85,50 @@ pub(crate) fn register_process_builtins(vm: &mut Vm) {
         } else {
             "-c"
         };
-        let output = std::process::Command::new(shell)
-            .arg(flag)
-            .arg(&cmd)
-            .output()
-            .map_err(|e| {
-                VmError::Thrown(VmValue::String(Rc::from(format!("shell failed: {e}"))))
-            })?;
+        let output = exec_shell(None, shell, flag, &cmd)
+            .map_err(|e| VmError::Thrown(VmValue::String(Rc::from(e))))?;
+        Ok(vm_output_to_value(output))
+    });
+
+    vm.register_builtin("exec_at", |args, _out| {
+        if args.len() < 2 {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "exec_at: directory and command are required",
+            ))));
+        }
+        let dir = args[0].display();
+        let cmd = args[1].display();
+        let cmd_args: Vec<String> = args[2..].iter().map(|a| a.display()).collect();
+        let output = exec_command(Some(dir.as_str()), &cmd, &cmd_args)
+            .map_err(|e| VmError::Thrown(VmValue::String(Rc::from(e))))?;
+        Ok(vm_output_to_value(output))
+    });
+
+    vm.register_builtin("shell_at", |args, _out| {
+        if args.len() < 2 {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "shell_at: directory and command string are required",
+            ))));
+        }
+        let dir = args[0].display();
+        let cmd = args[1].display();
+        if cmd.is_empty() {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "shell_at: command string is required",
+            ))));
+        }
+        let shell = if cfg!(target_os = "windows") {
+            "cmd"
+        } else {
+            "sh"
+        };
+        let flag = if cfg!(target_os = "windows") {
+            "/C"
+        } else {
+            "-c"
+        };
+        let output = exec_shell(Some(dir.as_str()), shell, flag, &cmd)
+            .map_err(|e| VmError::Thrown(VmValue::String(Rc::from(e))))?;
         Ok(vm_output_to_value(output))
     });
 
@@ -230,4 +277,47 @@ fn vm_output_to_value(output: std::process::Output) -> VmValue {
         VmValue::Bool(output.status.success()),
     );
     VmValue::Dict(Rc::new(result))
+}
+
+fn exec_command(
+    dir: Option<&str>,
+    cmd: &str,
+    args: &[String],
+) -> Result<std::process::Output, String> {
+    let mut command = std::process::Command::new(cmd);
+    command.args(args);
+    if let Some(dir) = dir {
+        command.current_dir(dir);
+    }
+    command.output().map_err(|e| format!("exec failed: {e}"))
+}
+
+fn exec_shell(
+    dir: Option<&str>,
+    shell: &str,
+    flag: &str,
+    script: &str,
+) -> Result<std::process::Output, String> {
+    let mut command = std::process::Command::new(shell);
+    command.arg(flag).arg(script);
+    if let Some(dir) = dir {
+        command.current_dir(dir);
+    }
+    command.output().map_err(|e| format!("shell failed: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_source_relative_path_prefers_thread_source_dir() {
+        let dir = std::env::temp_dir().join(format!("harn-process-{}", uuid::Uuid::now_v7()));
+        std::fs::create_dir_all(&dir).unwrap();
+        set_thread_source_dir(&dir);
+        let resolved = resolve_source_relative_path("templates/prompt.txt");
+        assert_eq!(resolved, dir.join("templates/prompt.txt"));
+        reset_process_state();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

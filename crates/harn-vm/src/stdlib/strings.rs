@@ -179,9 +179,11 @@ pub(crate) fn register_string_builtins(vm: &mut Vm) {
 
     vm.register_builtin("render", |args, _out| {
         let path = args.first().map(|a| a.display()).unwrap_or_default();
-        let template = std::fs::read_to_string(&path).map_err(|e| {
+        let resolved = crate::stdlib::process::resolve_source_relative_path(&path);
+        let template = std::fs::read_to_string(&resolved).map_err(|e| {
             VmError::Thrown(VmValue::String(Rc::from(format!(
-                "Failed to read template {path}: {e}"
+                "Failed to read template {}: {e}",
+                resolved.display()
             ))))
         })?;
         if let Some(bindings) = args.get(1).and_then(|a| a.as_dict()) {

@@ -66,11 +66,25 @@ println(result.status)
 println(result.visible_text)
 ```
 
-## What Ships In Harn v0.4.32
+## Core Capabilities
 
 - Typed workflow graphs via `workflow_graph(...)` and `workflow_execute(...)`
   with explicit nodes, edges, validation, policy attachment, map/join style
   stages, and resumable execution.
+- Delegated worker lifecycle builtins via `spawn_agent(...)`, `send_input(...)`,
+  `resume_agent(...)`, `wait_agent(...)`, `close_agent(...)`, and `list_agents()`,
+  with child run lineage, persisted worker snapshots, and host-visible worker
+  lifecycle events.
+- Explicit continuation policy for delegated workers: artifact carryover,
+  transcript fork/reset/compaction, workflow resume control, and normalized
+  `worker_result` artifacts.
+- Isolated execution substrate via directory-scoped command builtins
+  (`exec_at`, `shell_at`) plus the `std/worktree` module for git worktree
+  creation, status, diff, shell execution, and cleanup.
+- Stronger preflight behavior via `harn check`: import graph resolution and
+  literal template/render path validation now fail before runtime, and
+  `render(...)` resolves relative to the pipeline source tree instead of the
+  ambient process cwd.
 - Eval suite manifests and baseline comparisons via `eval_suite_manifest(...)`,
   `eval_suite_run(...)`, and `harn eval <manifest.json>`, so grouped replay
   regression suites are first-class runtime data instead of external scripts.

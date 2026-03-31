@@ -273,9 +273,17 @@ Worker lifecycle builtins:
 |---|---|
 | `spawn_agent(config)` | Start a worker from a workflow graph or delegated stage |
 | `send_input(handle, task)` | Re-run a completed worker with a new task, carrying transcript/artifacts forward when applicable |
+| `resume_agent(id_or_snapshot_path)` | Restore a persisted worker snapshot and continue it in the current runtime |
 | `wait_agent(handle_or_list)` | Wait for one worker or a list of workers to finish |
 | `close_agent(handle)` | Cancel a worker and mark it terminal |
 | `list_agents()` | Return summaries for all known workers in the current runtime |
+
+Workers can persist state and child run paths between sessions. Use `carry`
+inside `spawn_agent(...)` when you want continuation to reset transcript state,
+drop carried artifacts, or disable workflow resume against the previous child
+run record.
+
+```harn
 let second = llm_call("Continue", nil, {
   provider: "mock",
   transcript: first.transcript

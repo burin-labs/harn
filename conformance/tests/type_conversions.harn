@@ -12,7 +12,6 @@ pipeline default(task) {
   println(to_int("abc"))
   // to_int from nil returns nil
   println(to_int(nil))
-
   // to_float from float (passthrough)
   println(to_float(3.14))
   // to_float from int
@@ -24,7 +23,6 @@ pipeline default(task) {
   println(to_float("xyz"))
   // to_float from nil returns nil
   println(to_float(nil))
-
   // to_string round-trips
   println(type_of(to_int(5)))
   println(type_of(to_float(5)))

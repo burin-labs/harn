@@ -1,60 +1,35 @@
 import "std/agents"
 
 pipeline main() {
-  let stage_worker = spawn_agent({
-    name: "stage-worker",
-    task: "Draft a short note",
-    node: {
-      kind: "subagent",
-      mode: "llm",
-      model_policy: {provider: "mock"},
-      transcript_policy: {mode: "fork", compact: true, keep_last: 2},
-      output_contract: {output_kinds: ["summary"]}
-    }
-  })
+  let stage_worker = spawn_agent({name: "stage-worker", task: "Draft a short note", node: {kind: "subagent", mode: "llm", model_policy: {provider: "mock"}, transcript_policy: {mode: "fork", compact: true, keep_last: 2}, output_contract: {output_kinds: ["summary"]}}})
   println(stage_worker?.status)
   println(stage_worker?.mode)
-
   let stage_done = wait_agent(stage_worker)
   println(stage_done?.status)
   println(stage_done?.artifact_count >= 1)
   println(stage_done?.has_transcript)
   println(stage_done?.parent_stage_id == nil)
-
   let resumed = send_input(stage_done, "Continue and add one more sentence")
   println(resumed?.status)
-
   let resumed_done = wait_agent(stage_done)
   println(resumed_done?.status)
   println(len(list_agents()) >= 1)
-
-  let flow = workflow_graph({
-    name: "worker-flow",
-    entry: "act",
-    nodes: {
-      act: {
-        kind: "stage",
-        mode: "llm",
-        model_policy: {provider: "mock"},
-        output_contract: {output_kinds: ["summary"]}
-      }
-    },
-    edges: []
-  })
-  let workflow_worker = spawn_agent({
-    name: "flow-worker",
-    task: "Write a workflow summary",
-    graph: flow,
-    options: {max_steps: 2}
-  })
+  let flow = workflow_graph({name: "worker-flow", entry: "act", nodes: {act: {kind: "stage", mode: "llm", model_policy: {provider: "mock"}, output_contract: {output_kinds: ["summary"]}}}, edges: []})
+  let workflow_worker = spawn_agent({name: "flow-worker", task: "Write a workflow summary", graph: flow, options: {max_steps: 2}})
   println(workflow_worker?.mode)
-
   let workflow_done = wait_agent(workflow_worker)
   println(workflow_done?.status)
   println(workflow_done?.result?.status == "completed")
   println(workflow_done?.child_run_id != nil)
   println(workflow_done?.child_run_path != nil)
-
+  println(workflow_done?.snapshot_path != nil)
+  let restored = resume_agent(workflow_done?.snapshot_path)
+  println(restored?.status == "completed")
+  let restored_resumed = send_input(restored, "Continue the workflow with one more update")
+  println(restored_resumed?.status)
+  let restored_done = wait_agent(restored_resumed)
+  println(restored_done?.status == "completed")
+  println(restored_done?.child_run_path != nil)
   let closed = close_agent(workflow_done)
   println(closed?.status)
 }

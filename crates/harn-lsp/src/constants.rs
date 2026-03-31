@@ -29,7 +29,9 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
     ("temp_dir", "temp_dir() -> string"),
     // Process
     ("exec", "exec(cmd, args...) -> dict"),
+    ("exec_at", "exec_at(dir, cmd, args...) -> dict"),
     ("shell", "shell(cmd) -> dict"),
+    ("shell_at", "shell_at(dir, cmd) -> dict"),
     // Environment
     ("env", "env(name) -> string"),
     ("timestamp", "timestamp() -> float"),
@@ -79,6 +81,7 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
         "agent_loop",
         "agent_loop(prompt, system?, options?) -> dict",
     ),
+    ("resume_agent", "resume_agent(id_or_snapshot_path) -> dict"),
     // MCP
     ("mcp_connect", "mcp_connect(command, args?) -> client"),
     ("mcp_list_tools", "mcp_list_tools(client) -> list"),

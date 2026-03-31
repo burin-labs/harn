@@ -2,6 +2,17 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.1
+
+- Added persisted worker snapshots, resumable delegated workers, and `std/worktree`
+  helpers for isolated git worktree execution.
+- Added `exec_at(...)` and `shell_at(...)` plus worker carry policy controls for
+  transcript, artifact, and workflow continuation behavior.
+- Strengthened `harn check` with import/resource preflight validation and fixed
+  `render(...)` / template path resolution to follow pipeline source roots.
+- Split the delegated worker runtime into smaller Rust modules and added new
+  runtime and CLI coverage around snapshots, worktrees, and preflight checks.
+
 ## v0.5.0
 
 ### Added

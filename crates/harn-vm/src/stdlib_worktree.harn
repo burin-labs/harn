@@ -1,0 +1,44 @@
+// std/worktree — isolated git worktree helpers built on exec_at/shell_at.
+//
+// Import: import "std/worktree"
+
+pub fn worktree_default_path(repo, name) {
+  return repo + "/.harn/worktrees/" + name
+}
+
+pub fn worktree_create(repo, name, base_ref, path) {
+  let target = if path == nil || path == "" { worktree_default_path(repo, name) } else { path }
+  mkdir(repo + "/.harn")
+  mkdir(repo + "/.harn/worktrees")
+  let result = exec_at(repo, "git", "worktree", "add", "-B", name, target, base_ref)
+  return {
+    repo: repo,
+    name: name,
+    path: target,
+    base_ref: base_ref,
+    result: result,
+    success: result?.success == true
+  }
+}
+
+pub fn worktree_remove(repo, path, force) {
+  if force == true {
+    return exec_at(repo, "git", "worktree", "remove", "--force", path)
+  }
+  return exec_at(repo, "git", "worktree", "remove", path)
+}
+
+pub fn worktree_status(path) {
+  return exec_at(path, "git", "status", "--short", "--branch")
+}
+
+pub fn worktree_diff(path, base_ref) {
+  if base_ref == nil || base_ref == "" {
+    return exec_at(path, "git", "diff", "--stat")
+  }
+  return exec_at(path, "git", "diff", base_ref + "...HEAD")
+}
+
+pub fn worktree_shell(path, script) {
+  return shell_at(path, script)
+}

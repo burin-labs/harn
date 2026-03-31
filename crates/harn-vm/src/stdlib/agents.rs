@@ -4,12 +4,21 @@
 //! for invoking them. These are ergonomic wrappers around `agent_loop` that
 //! make multi-agent pipelines natural to express.
 
-use std::cell::{Cell, RefCell};
+#[path = "agents_workers.rs"]
+mod agents_workers;
+
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use self::agents_workers::{
+    apply_worker_artifact_policy, apply_worker_transcript_policy, emit_worker_event,
+    execute_delegated_stage, load_worker_state_snapshot, next_worker_id, parse_worker_config,
+    persist_worker_state_snapshot, spawn_worker_task, with_worker_state, worker_id_from_value,
+    worker_snapshot_path, worker_summary, WorkerConfig, WorkerState, WORKER_REGISTRY,
+};
 use crate::orchestration::{
     append_audit_entry, builtin_ceiling, diff_run_records, evaluate_run_against_fixture,
     evaluate_run_suite, evaluate_run_suite_manifest, load_run_record, next_nodes_for,
@@ -18,484 +27,17 @@ use crate::orchestration::{
     render_artifacts_context, render_unified_diff, replay_fixture_from_run, save_run_record,
     select_artifacts, validate_workflow, ArtifactRecord, CapabilityPolicy, ContextPolicy,
     ReplayFixture, RunCheckpointRecord, RunRecord, RunStageAttemptRecord, RunStageRecord,
-    RunTransitionRecord, WorkflowEdge, WorkflowGraph,
+    RunTransitionRecord, TranscriptPolicy, WorkflowEdge, WorkflowGraph,
 };
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
-#[derive(Clone)]
-enum WorkerConfig {
-    Workflow {
-        graph: WorkflowGraph,
-        artifacts: Vec<ArtifactRecord>,
-        options: BTreeMap<String, VmValue>,
-    },
-    Stage {
-        node: crate::orchestration::WorkflowNode,
-        artifacts: Vec<ArtifactRecord>,
-        transcript: Option<VmValue>,
-    },
-}
-
-#[derive(Clone)]
-struct WorkerExecutionResult {
-    payload: serde_json::Value,
-    transcript: Option<VmValue>,
-    artifacts: Vec<ArtifactRecord>,
-}
-
-struct WorkerState {
-    id: String,
-    name: String,
-    task: String,
-    status: String,
-    created_at: String,
-    started_at: String,
-    finished_at: Option<String>,
-    mode: String,
-    history: Vec<String>,
-    config: WorkerConfig,
-    handle: Option<tokio::task::JoinHandle<Result<WorkerExecutionResult, VmError>>>,
-    cancel_token: Arc<AtomicBool>,
-    latest_payload: Option<serde_json::Value>,
-    latest_error: Option<String>,
-    transcript: Option<VmValue>,
-    artifacts: Vec<ArtifactRecord>,
-    parent_worker_id: Option<String>,
-    parent_stage_id: Option<String>,
-    child_run_id: Option<String>,
-    child_run_path: Option<String>,
-}
-
-thread_local! {
-    static WORKER_REGISTRY: RefCell<BTreeMap<String, Rc<RefCell<WorkerState>>>> = const { RefCell::new(BTreeMap::new()) };
-    static WORKER_COUNTER: Cell<u64> = const { Cell::new(0) };
-}
-
-fn next_worker_id() -> String {
-    WORKER_COUNTER.with(|counter| {
-        let next = counter.get() + 1;
-        counter.set(next);
-        format!("worker_{}", uuid::Uuid::now_v7())
-    })
-}
-
-fn worker_id_from_value(value: &VmValue) -> Result<String, VmError> {
+fn parse_transcript_policy(value: Option<&VmValue>) -> Result<TranscriptPolicy, VmError> {
     match value {
-        VmValue::String(text) => Ok(text.to_string()),
-        VmValue::Dict(map) => match map.get("id") {
-            Some(VmValue::String(id)) => Ok(id.to_string()),
-            Some(other) => Ok(other.display()),
-            None => Err(VmError::Runtime(
-                "agent handle dict is missing an id field".to_string(),
-            )),
-        },
-        VmValue::TaskHandle(id) => Ok(id.clone()),
-        _ => Err(VmError::Runtime(
-            "expected agent handle or worker id".to_string(),
-        )),
+        Some(value) => serde_json::from_value(crate::llm::vm_value_to_json(value))
+            .map_err(|e| VmError::Runtime(format!("transcript policy parse error: {e}"))),
+        None => Ok(TranscriptPolicy::default()),
     }
-}
-
-fn clone_worker_state(state: &WorkerState) -> serde_json::Value {
-    serde_json::json!({
-        "_type": "agent_handle",
-        "id": state.id,
-        "name": state.name,
-        "task": state.task,
-        "mode": state.mode,
-        "status": state.status,
-        "created_at": state.created_at,
-        "started_at": state.started_at,
-        "finished_at": state.finished_at,
-        "history": state.history,
-        "result": state.latest_payload,
-        "error": state.latest_error,
-        "artifact_count": state.artifacts.len(),
-        "has_transcript": state.transcript.is_some(),
-        "parent_worker_id": state.parent_worker_id,
-        "parent_stage_id": state.parent_stage_id,
-        "child_run_id": state.child_run_id,
-        "child_run_path": state.child_run_path,
-    })
-}
-
-fn worker_bridge_metadata(state: &WorkerState) -> serde_json::Value {
-    serde_json::json!({
-        "task": state.task,
-        "mode": state.mode,
-        "created_at": state.created_at,
-        "started_at": state.started_at,
-        "finished_at": state.finished_at,
-        "artifact_count": state.artifacts.len(),
-        "has_transcript": state.transcript.is_some(),
-        "parent_worker_id": state.parent_worker_id,
-        "parent_stage_id": state.parent_stage_id,
-        "child_run_id": state.child_run_id,
-        "child_run_path": state.child_run_path,
-        "error": state.latest_error,
-    })
-}
-
-fn emit_worker_event(state: &WorkerState, status: &str) {
-    if let Some(bridge) = crate::llm::current_host_bridge() {
-        let metadata = worker_bridge_metadata(state);
-        bridge.send_worker_update(&state.id, &state.name, status, metadata.clone());
-        bridge.send_progress(
-            "worker",
-            &format!("{} {}", state.name, status),
-            None,
-            None,
-            Some(serde_json::json!({
-                "worker_id": state.id,
-                "worker_name": state.name,
-                "status": status,
-                "metadata": metadata,
-            })),
-        );
-    }
-}
-
-fn worker_summary(state: &WorkerState) -> Result<VmValue, VmError> {
-    to_vm(&clone_worker_state(state))
-}
-
-fn with_worker_state<T>(
-    worker_id: &str,
-    f: impl FnOnce(Rc<RefCell<WorkerState>>) -> Result<T, VmError>,
-) -> Result<T, VmError> {
-    WORKER_REGISTRY.with(|registry| {
-        let state = registry
-            .borrow()
-            .get(worker_id)
-            .cloned()
-            .ok_or_else(|| VmError::Runtime(format!("unknown worker: {worker_id}")))?;
-        f(state)
-    })
-}
-
-fn parse_worker_config(value: &VmValue) -> Result<(String, String, WorkerConfig, bool), VmError> {
-    let dict = value
-        .as_dict()
-        .ok_or_else(|| VmError::Runtime("spawn_agent: config must be a dict".to_string()))?;
-    let task = dict
-        .get("task")
-        .map(|value| value.display())
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| VmError::Runtime("spawn_agent: config.task is required".to_string()))?;
-    let name = dict
-        .get("name")
-        .map(|value| value.display())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "worker".to_string());
-    let wait = matches!(dict.get("wait"), Some(VmValue::Bool(true)));
-
-    if let Some(graph_value) = dict.get("graph") {
-        let graph = normalize_workflow_value(graph_value)?;
-        let artifacts = parse_artifact_list(dict.get("artifacts"))?;
-        let options = dict
-            .get("options")
-            .and_then(|value| value.as_dict())
-            .cloned()
-            .unwrap_or_default();
-        return Ok((
-            name,
-            task,
-            WorkerConfig::Workflow {
-                graph,
-                artifacts,
-                options,
-            },
-            wait,
-        ));
-    }
-
-    let node_value = dict.get("node").ok_or_else(|| {
-        VmError::Runtime("spawn_agent: config requires either graph or node".to_string())
-    })?;
-    let node: crate::orchestration::WorkflowNode =
-        serde_json::from_value(crate::llm::vm_value_to_json(node_value))
-            .map_err(|e| VmError::Runtime(format!("spawn_agent node: {e}")))?;
-    let artifacts = parse_artifact_list(dict.get("artifacts"))?;
-    let transcript = dict.get("transcript").cloned();
-    Ok((
-        name,
-        task,
-        WorkerConfig::Stage {
-            node,
-            artifacts,
-            transcript,
-        },
-        wait,
-    ))
-}
-
-async fn execute_worker_config(
-    task: String,
-    config: WorkerConfig,
-) -> Result<WorkerExecutionResult, VmError> {
-    match config {
-        WorkerConfig::Workflow {
-            mut graph,
-            artifacts,
-            mut options,
-        } => {
-            if let Some(parent_worker_id) = options
-                .get("parent_worker_id")
-                .map(|value| value.display())
-                .filter(|value| !value.is_empty())
-            {
-                graph.metadata.insert(
-                    "parent_worker_id".to_string(),
-                    serde_json::json!(parent_worker_id),
-                );
-            }
-            if let Some(parent_stage_id) = options
-                .get("parent_stage_id")
-                .map(|value| value.display())
-                .filter(|value| !value.is_empty())
-            {
-                graph.metadata.insert(
-                    "parent_stage_id".to_string(),
-                    serde_json::json!(parent_stage_id),
-                );
-            }
-            options.insert("delegated".to_string(), VmValue::Bool(true));
-            let result = execute_workflow(task, graph, artifacts, options).await?;
-            let dict = result.as_dict().ok_or_else(|| {
-                VmError::Runtime("workflow execution returned a non-dict result".to_string())
-            })?;
-            let transcript = dict.get("transcript").cloned();
-            let artifacts = parse_artifact_list(dict.get("artifacts"))?;
-            Ok(WorkerExecutionResult {
-                payload: crate::llm::vm_value_to_json(&VmValue::Dict(Rc::new(dict.clone()))),
-                transcript,
-                artifacts,
-            })
-        }
-        WorkerConfig::Stage {
-            node,
-            artifacts,
-            transcript,
-        } => {
-            let (result, produced, next_transcript) = crate::orchestration::execute_stage_node(
-                "delegated_worker",
-                &node,
-                &task,
-                &artifacts,
-                transcript,
-            )
-            .await?;
-            Ok(WorkerExecutionResult {
-                payload: serde_json::json!({
-                    "status": "completed",
-                    "mode": "stage",
-                    "task": task,
-                    "result": result,
-                    "artifacts": produced,
-                    "transcript": next_transcript.as_ref().map(crate::llm::vm_value_to_json),
-                }),
-                transcript: next_transcript,
-                artifacts: produced,
-            })
-        }
-    }
-}
-
-fn spawn_worker_task(state: Rc<RefCell<WorkerState>>) {
-    let (task, config, cancel_token) = {
-        let worker = state.borrow();
-        emit_worker_event(&worker, "running");
-        (
-            worker.task.clone(),
-            worker.config.clone(),
-            worker.cancel_token.clone(),
-        )
-    };
-
-    let state_for_task = state.clone();
-    let handle = tokio::task::spawn_local(async move {
-        if cancel_token.load(Ordering::SeqCst) {
-            return Err(VmError::CategorizedError {
-                message: "worker cancelled before start".to_string(),
-                category: crate::value::ErrorCategory::Cancelled,
-            });
-        }
-
-        let result = execute_worker_config(task, config).await;
-        {
-            let mut worker = state_for_task.borrow_mut();
-            worker.finished_at = Some(uuid::Uuid::now_v7().to_string());
-            match &result {
-                Ok(executed) => {
-                    worker.status = "completed".to_string();
-                    worker.latest_payload = Some(executed.payload.clone());
-                    worker.latest_error = None;
-                    worker.transcript = executed.transcript.clone();
-                    worker.artifacts = executed.artifacts.clone();
-                    worker.child_run_id = executed
-                        .payload
-                        .get("run")
-                        .and_then(|run| run.get("id"))
-                        .and_then(|value| value.as_str())
-                        .map(|value| value.to_string());
-                    worker.child_run_path = executed
-                        .payload
-                        .get("path")
-                        .and_then(|value| value.as_str())
-                        .map(|value| value.to_string());
-                    emit_worker_event(&worker, "completed");
-                }
-                Err(error) => {
-                    if matches!(
-                        error,
-                        VmError::CategorizedError {
-                            category: crate::value::ErrorCategory::Cancelled,
-                            ..
-                        }
-                    ) {
-                        worker.status = "cancelled".to_string();
-                    } else {
-                        worker.status = "failed".to_string();
-                    }
-                    worker.latest_error = Some(error.to_string());
-                    emit_worker_event(&worker, &worker.status.clone());
-                }
-            }
-        }
-        result
-    });
-
-    state.borrow_mut().handle = Some(handle);
-}
-
-fn worker_result_artifact(
-    node_id: &str,
-    worker_id: &str,
-    worker_name: &str,
-    payload: &serde_json::Value,
-    produced: &[ArtifactRecord],
-    lineage: &[String],
-) -> ArtifactRecord {
-    let summary = payload
-        .get("result")
-        .or_else(|| payload.get("visible_text"))
-        .or_else(|| payload.get("text"))
-        .and_then(|value| value.as_str())
-        .unwrap_or_default()
-        .to_string();
-    ArtifactRecord {
-        type_name: "artifact".to_string(),
-        id: format!("{node_id}_worker_result_{}", uuid::Uuid::now_v7()),
-        kind: "worker_result".to_string(),
-        title: Some(format!("worker result {worker_name}")),
-        text: if summary.is_empty() { None } else { Some(summary) },
-        data: Some(serde_json::json!({
-            "worker_id": worker_id,
-            "worker_name": worker_name,
-            "payload": payload,
-            "produced_artifact_ids": produced.iter().map(|artifact| artifact.id.clone()).collect::<Vec<_>>(),
-        })),
-        source: Some(node_id.to_string()),
-        created_at: uuid::Uuid::now_v7().to_string(),
-        freshness: Some("fresh".to_string()),
-        priority: Some(95),
-        lineage: lineage.to_vec(),
-        relevance: Some(1.0),
-        estimated_tokens: None,
-        stage: Some(node_id.to_string()),
-        metadata: BTreeMap::from([
-            ("worker_id".to_string(), serde_json::json!(worker_id)),
-            ("worker_name".to_string(), serde_json::json!(worker_name)),
-            ("delegated".to_string(), serde_json::json!(true)),
-        ]),
-    }
-    .normalize()
-}
-
-async fn execute_delegated_stage(
-    node_id: &str,
-    node: &crate::orchestration::WorkflowNode,
-    task: &str,
-    artifacts: &[ArtifactRecord],
-    transcript: Option<VmValue>,
-) -> Result<(serde_json::Value, Vec<ArtifactRecord>, Option<VmValue>), VmError> {
-    let worker_id = next_worker_id();
-    let worker_name = node
-        .metadata
-        .get("worker_name")
-        .and_then(|value| value.as_str())
-        .unwrap_or(node_id)
-        .to_string();
-    let mut stage_node = node.clone();
-    stage_node.kind = "stage".to_string();
-    let state = Rc::new(RefCell::new(WorkerState {
-        id: worker_id.clone(),
-        name: worker_name.clone(),
-        task: task.to_string(),
-        status: "running".to_string(),
-        created_at: uuid::Uuid::now_v7().to_string(),
-        started_at: uuid::Uuid::now_v7().to_string(),
-        finished_at: None,
-        mode: "delegated_stage".to_string(),
-        history: vec![task.to_string()],
-        config: WorkerConfig::Stage {
-            node: stage_node,
-            artifacts: artifacts.to_vec(),
-            transcript,
-        },
-        handle: None,
-        cancel_token: Arc::new(AtomicBool::new(false)),
-        latest_payload: None,
-        latest_error: None,
-        transcript: None,
-        artifacts: Vec::new(),
-        parent_worker_id: None,
-        parent_stage_id: Some(node_id.to_string()),
-        child_run_id: None,
-        child_run_path: None,
-    }));
-    WORKER_REGISTRY.with(|registry| {
-        registry
-            .borrow_mut()
-            .insert(worker_id.clone(), state.clone());
-    });
-    spawn_worker_task(state.clone());
-    let handle = state
-        .borrow_mut()
-        .handle
-        .take()
-        .ok_or_else(|| VmError::Runtime("delegated stage did not start".to_string()))?;
-    let executed = handle
-        .await
-        .map_err(|error| VmError::Runtime(format!("delegated stage join error: {error}")))??;
-    let mut result = executed.payload.clone();
-    result["worker"] = clone_worker_state(&state.borrow());
-    let mut produced = executed.artifacts.clone();
-    for artifact in &mut produced {
-        artifact
-            .metadata
-            .insert("worker_id".to_string(), serde_json::json!(worker_id));
-        artifact.metadata.insert(
-            "worker_name".to_string(),
-            serde_json::json!(worker_name.clone()),
-        );
-        artifact
-            .metadata
-            .insert("delegated".to_string(), serde_json::json!(true));
-    }
-    produced.push(worker_result_artifact(
-        node_id,
-        &worker_id,
-        &worker_name,
-        &result,
-        &executed.artifacts,
-        &artifacts
-            .iter()
-            .map(|artifact| artifact.id.clone())
-            .collect::<Vec<_>>(),
-    ));
-    Ok((result, produced, executed.transcript))
 }
 
 pub(crate) fn register_agent_builtins(vm: &mut Vm) {
@@ -592,25 +134,25 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
         let config = args
             .first()
             .ok_or_else(|| VmError::Runtime("spawn_agent: missing config".to_string()))?;
-        let (name, task, config, wait) = parse_worker_config(config)?;
+        let init = parse_worker_config(config)?;
         let worker_id = next_worker_id();
         let created_at = uuid::Uuid::now_v7().to_string();
-        let mode = match &config {
+        let mode = match &init.config {
             WorkerConfig::Workflow { .. } => "workflow",
             WorkerConfig::Stage { .. } => "stage",
         }
         .to_string();
         let state = Rc::new(RefCell::new(WorkerState {
             id: worker_id.clone(),
-            name,
-            task: task.clone(),
+            name: init.name,
+            task: init.task.clone(),
             status: "running".to_string(),
             created_at: created_at.clone(),
             started_at: created_at,
             finished_at: None,
             mode,
-            history: vec![task],
-            config,
+            history: vec![init.task],
+            config: init.config,
             handle: None,
             cancel_token: Arc::new(AtomicBool::new(false)),
             latest_payload: None,
@@ -621,14 +163,22 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
             parent_stage_id: None,
             child_run_id: None,
             child_run_path: None,
+            carry_policy: init.carry_policy,
+            snapshot_path: worker_snapshot_path(&worker_id),
         }));
+        {
+            let worker = state.borrow();
+            if worker.carry_policy.persist_state {
+                persist_worker_state_snapshot(&worker)?;
+            }
+        }
         WORKER_REGISTRY.with(|registry| {
             registry
                 .borrow_mut()
                 .insert(worker_id.clone(), state.clone());
         });
         spawn_worker_task(state.clone());
-        if wait {
+        if init.wait {
             let handle =
                 state.borrow_mut().handle.take().ok_or_else(|| {
                     VmError::Runtime("spawn_agent: worker did not start".to_string())
@@ -655,9 +205,6 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
             ));
         }
         with_worker_state(&worker_id, |state| {
-            let next_artifacts;
-            let next_transcript;
-            let worker_parent;
             let mut worker = state.borrow_mut();
             if worker.status == "running" {
                 return Err(VmError::Runtime(format!(
@@ -673,9 +220,15 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
             worker.finished_at = None;
             worker.latest_error = None;
             worker.latest_payload = None;
-            next_artifacts = worker.artifacts.clone();
-            next_transcript = worker.transcript.clone();
-            worker_parent = worker.id.clone();
+            let next_artifacts =
+                apply_worker_artifact_policy(&worker.artifacts, &worker.carry_policy);
+            let next_transcript = apply_worker_transcript_policy(
+                worker.transcript.clone(),
+                &worker.carry_policy.transcript_policy,
+            );
+            let worker_parent = worker.id.clone();
+            let resume_workflow = worker.carry_policy.resume_workflow;
+            let child_run_path = worker.child_run_path.clone();
             match &mut worker.config {
                 WorkerConfig::Workflow {
                     artifacts, options, ..
@@ -687,6 +240,16 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
                         "parent_worker_id".to_string(),
                         VmValue::String(Rc::from(worker_parent)),
                     );
+                    if resume_workflow {
+                        if let Some(child_run_path) = child_run_path {
+                            options.insert(
+                                "resume_path".to_string(),
+                                VmValue::String(Rc::from(child_run_path)),
+                            );
+                        }
+                    } else {
+                        options.remove("resume_path");
+                    }
                 }
                 WorkerConfig::Stage {
                     artifacts,
@@ -699,11 +262,34 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
                     *transcript = next_transcript;
                 }
             }
+            if worker.carry_policy.persist_state {
+                persist_worker_state_snapshot(&worker)?;
+            }
             drop(worker);
             spawn_worker_task(state.clone());
             let summary = worker_summary(&state.borrow())?;
             Ok(summary)
         })
+    });
+
+    vm.register_builtin("resume_agent", |args, _out| {
+        let target = args
+            .first()
+            .map(|value| value.display())
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                VmError::Runtime("resume_agent: missing worker id or snapshot path".to_string())
+            })?;
+        let state = Rc::new(RefCell::new(load_worker_state_snapshot(&target)?));
+        let worker_id = state.borrow().id.clone();
+        WORKER_REGISTRY.with(|registry| {
+            registry.borrow_mut().insert(worker_id, state.clone());
+        });
+        if state.borrow().carry_policy.persist_state {
+            persist_worker_state_snapshot(&state.borrow())?;
+        }
+        let summary = worker_summary(&state.borrow())?;
+        Ok(summary)
     });
 
     vm.register_async_builtin("wait_agent", |args| async move {
@@ -714,7 +300,7 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
             let mut results = Vec::new();
             for item in list.iter() {
                 let worker_id = worker_id_from_value(item)?;
-                let state = with_worker_state(&worker_id, |state| Ok(state))?;
+                let state = with_worker_state(&worker_id, Ok)?;
                 let handle = state.borrow_mut().handle.take();
                 if let Some(handle) = handle {
                     let _ = handle.await.map_err(|error| {
@@ -726,7 +312,7 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
             return Ok(VmValue::List(Rc::new(results)));
         }
         let worker_id = worker_id_from_value(target)?;
-        let state = with_worker_state(&worker_id, |state| Ok(state))?;
+        let state = with_worker_state(&worker_id, Ok)?;
         let handle = state.borrow_mut().handle.take();
         if let Some(handle) = handle {
             let _ = handle
@@ -751,6 +337,9 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
             worker.status = "cancelled".to_string();
             worker.finished_at = Some(uuid::Uuid::now_v7().to_string());
             worker.latest_error = Some("worker cancelled".to_string());
+            if worker.carry_policy.persist_state {
+                persist_worker_state_snapshot(&worker)?;
+            }
             emit_worker_event(&worker, "cancelled");
             let summary = worker_summary(&worker)?;
             Ok(summary)
