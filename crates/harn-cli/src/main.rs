@@ -531,6 +531,28 @@ fn inspect_run_record(path: &str, compare: Option<&str>) {
     println!("Artifacts: {}", run.artifacts.len());
     println!("Transitions: {}", run.transitions.len());
     println!("Checkpoints: {}", run.checkpoints.len());
+    if let Some(parent_worker_id) = run
+        .metadata
+        .get("parent_worker_id")
+        .and_then(|value| value.as_str())
+    {
+        println!("Parent worker: {}", parent_worker_id);
+    }
+    if let Some(parent_stage_id) = run
+        .metadata
+        .get("parent_stage_id")
+        .and_then(|value| value.as_str())
+    {
+        println!("Parent stage: {}", parent_stage_id);
+    }
+    if run
+        .metadata
+        .get("delegated")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+    {
+        println!("Delegated: true");
+    }
     println!(
         "Pending nodes: {}",
         if run.pending_nodes.is_empty() {
@@ -548,14 +570,36 @@ fn inspect_run_record(path: &str, compare: Option<&str>) {
         }
     );
     for stage in &run.stages {
+        let worker = stage.metadata.get("worker");
+        let worker_suffix = worker
+            .and_then(|value| value.get("name"))
+            .and_then(|value| value.as_str())
+            .map(|name| format!(" worker={name}"))
+            .unwrap_or_default();
         println!(
-            "- {} [{}] status={} outcome={} branch={}",
+            "- {} [{}] status={} outcome={} branch={}{}",
             stage.node_id,
             stage.kind,
             stage.status,
             stage.outcome,
-            stage.branch.clone().unwrap_or_else(|| "-".to_string())
+            stage.branch.clone().unwrap_or_else(|| "-".to_string()),
+            worker_suffix,
         );
+        if let Some(worker) = worker {
+            if let Some(worker_id) = worker.get("id").and_then(|value| value.as_str()) {
+                println!("  worker_id: {}", worker_id);
+            }
+            if let Some(child_run_id) = worker.get("child_run_id").and_then(|value| value.as_str())
+            {
+                println!("  child_run_id: {}", child_run_id);
+            }
+            if let Some(child_run_path) = worker
+                .get("child_run_path")
+                .and_then(|value| value.as_str())
+            {
+                println!("  child_run_path: {}", child_run_path);
+            }
+        }
     }
     if let Some(compare_path) = compare {
         let baseline = load_run_record_or_exit(Path::new(compare_path));

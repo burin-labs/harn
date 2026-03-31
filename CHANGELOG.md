@@ -12,6 +12,9 @@ All notable changes to Harn are documented in this file.
 - **Delegated workflow stages** — `subagent` workflow nodes now execute through
   the same worker runtime and attach worker lineage to produced artifacts and
   stage metadata.
+- **Host-visible worker events** — bridge/ACP hosts now receive structured
+  worker lifecycle updates with lineage, artifact counts, transcript presence,
+  and child run identifiers for delegated work.
 - **Worker lifecycle conformance coverage** — new conformance cases cover
   worker spawn/wait/continue/close flows and delegated workflow node execution.
 
