@@ -283,6 +283,168 @@ pub(crate) fn extract_json(text: &str) -> &str {
     trimmed
 }
 
+// =============================================================================
+// Unified option extraction
+// =============================================================================
+
+/// Extract all LLM call options from the standard (prompt, system, options) args.
+pub(crate) fn extract_llm_options(
+    args: &[VmValue],
+) -> Result<super::api::LlmCallOptions, VmError> {
+    use super::api::{LlmCallOptions, ThinkingConfig};
+    use super::tools::vm_tools_to_native;
+
+    let prompt = args.first().map(|a| a.display()).unwrap_or_default();
+    let system = args.get(1).and_then(|a| {
+        if matches!(a, VmValue::Nil) {
+            None
+        } else {
+            Some(a.display())
+        }
+    });
+    let options = args.get(2).and_then(|a| a.as_dict()).cloned();
+
+    let provider = vm_resolve_provider(&options);
+    let model = vm_resolve_model(&options, &provider);
+    let api_key = vm_resolve_api_key(&provider)?;
+
+    let max_tokens = opt_int(&options, "max_tokens").unwrap_or(4096);
+    let temperature = opt_float(&options, "temperature");
+    let top_p = opt_float(&options, "top_p");
+    let top_k = opt_int(&options, "top_k");
+    let stop = opt_str_list(&options, "stop");
+    let seed = opt_int(&options, "seed");
+    let frequency_penalty = opt_float(&options, "frequency_penalty");
+    let presence_penalty = opt_float(&options, "presence_penalty");
+    let response_format = opt_str(&options, "response_format");
+    let timeout = opt_int(&options, "timeout").map(|t| t as u64);
+    let cache = opt_bool(&options, "cache");
+
+    // Thinking: bool or {budget_tokens: N}
+    let thinking = options
+        .as_ref()
+        .and_then(|o| o.get("thinking"))
+        .and_then(|v| match v {
+            VmValue::Bool(true) => Some(ThinkingConfig::Enabled),
+            VmValue::Dict(d) => {
+                let budget = d.get("budget_tokens").and_then(|b| b.as_int()).unwrap_or(10000);
+                Some(ThinkingConfig::WithBudget(budget))
+            }
+            _ if v.is_truthy() => Some(ThinkingConfig::Enabled),
+            _ => None,
+        });
+
+    // JSON schema: convert VmValue dict to serde_json::Value at extraction time
+    let json_schema = options
+        .as_ref()
+        .and_then(|o| o.get("schema"))
+        .and_then(|v| v.as_dict())
+        .map(vm_value_dict_to_json);
+
+    // Messages: either from options.messages or from prompt
+    let messages_val = options.as_ref().and_then(|o| o.get("messages")).cloned();
+    let messages = if let Some(VmValue::List(msg_list)) = &messages_val {
+        vm_messages_to_json(msg_list)?
+    } else {
+        vec![serde_json::json!({"role": "user", "content": prompt})]
+    };
+
+    // Tools
+    let tools_val = options.as_ref().and_then(|o| o.get("tools")).cloned();
+    let native_tools = if let Some(tools) = &tools_val {
+        Some(vm_tools_to_native(tools, &provider)?)
+    } else {
+        None
+    };
+
+    // Tool choice
+    let tool_choice = options
+        .as_ref()
+        .and_then(|o| o.get("tool_choice"))
+        .map(vm_value_to_json);
+
+    // Provider-specific overrides
+    let provider_overrides = options
+        .as_ref()
+        .and_then(|o| o.get(&provider))
+        .and_then(|v| v.as_dict())
+        .map(vm_value_dict_to_json);
+
+    // Validate options against provider capabilities
+    let opts = LlmCallOptions {
+        provider,
+        model,
+        api_key,
+        messages,
+        system,
+        max_tokens,
+        temperature,
+        top_p,
+        top_k,
+        stop,
+        seed,
+        frequency_penalty,
+        presence_penalty,
+        response_format,
+        json_schema,
+        thinking,
+        native_tools,
+        tool_choice,
+        cache,
+        timeout,
+        provider_overrides,
+    };
+
+    validate_options(&opts);
+    Ok(opts)
+}
+
+fn opt_str_list(options: &Option<BTreeMap<String, VmValue>>, key: &str) -> Option<Vec<String>> {
+    let val = options.as_ref()?.get(key)?;
+    match val {
+        VmValue::List(list) => {
+            let strs: Vec<String> = list.iter().map(|v| v.display()).collect();
+            if strs.is_empty() {
+                None
+            } else {
+                Some(strs)
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Emit warnings for options not supported by the target provider.
+fn validate_options(opts: &super::api::LlmCallOptions) {
+    let p = opts.provider.as_str();
+    let warn = |param: &str| {
+        eprintln!("[harn] warning: \"{param}\" is not supported by provider \"{p}\", ignoring");
+    };
+
+    match p {
+        "anthropic" => {
+            if opts.seed.is_some() { warn("seed"); }
+            if opts.frequency_penalty.is_some() { warn("frequency_penalty"); }
+            if opts.presence_penalty.is_some() { warn("presence_penalty"); }
+        }
+        "openai" | "openrouter" | "huggingface" => {
+            if opts.top_k.is_some() { warn("top_k"); }
+            if opts.thinking.is_some() { warn("thinking"); }
+            if opts.cache { warn("cache"); }
+        }
+        "ollama" => {
+            if opts.frequency_penalty.is_some() { warn("frequency_penalty"); }
+            if opts.presence_penalty.is_some() { warn("presence_penalty"); }
+            if opts.cache { warn("cache"); }
+        }
+        _ => {} // Unknown provider: skip validation
+    }
+}
+
+// =============================================================================
+// Convert VmValue dict to serde_json::Value for API payloads
+// =============================================================================
+
 /// Convert a VmValue dict to serde_json::Value for API payloads.
 pub(crate) fn vm_value_dict_to_json(dict: &BTreeMap<String, VmValue>) -> serde_json::Value {
     let mut map = serde_json::Map::new();

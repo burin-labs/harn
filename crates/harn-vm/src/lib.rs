@@ -1,7 +1,6 @@
 #![allow(clippy::result_large_err, clippy::cloned_ref_to_slice_refs)]
 
 pub mod bridge;
-pub mod bridge_builtins;
 pub mod checkpoint;
 mod chunk;
 mod compiler;

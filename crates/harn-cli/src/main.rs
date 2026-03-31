@@ -40,11 +40,6 @@ async fn main() {
         }
         "run" => {
             let trace = args.iter().any(|a| a == "--trace");
-            let bridge = args.iter().any(|a| a == "--bridge");
-            let arg_json = args
-                .windows(2)
-                .find(|w| w[0] == "--arg")
-                .map(|w| w[1].clone());
             let deny_csv = args
                 .windows(2)
                 .find(|w| w[0] == "--deny")
@@ -66,7 +61,7 @@ async fn main() {
             let flag_vals: std::collections::HashSet<&str> = args
                 .windows(2)
                 .filter(|w| {
-                    w[0] == "--arg" || w[0] == "--deny" || w[0] == "--allow" || w[0] == "-e"
+                    w[0] == "--deny" || w[0] == "--allow" || w[0] == "-e"
                 })
                 .map(|w| w[1].as_str())
                 .collect();
@@ -94,11 +89,7 @@ async fn main() {
             } else {
                 match file {
                     Some(f) => {
-                        if bridge {
-                            commands::run::run_file_bridge(f, arg_json.as_deref()).await;
-                        } else {
-                            commands::run::run_file(f, trace, denied).await;
-                        }
+                        commands::run::run_file(f, trace, denied).await;
                     }
                     None => {
                         eprintln!("Usage: harn run [--trace] [--deny <builtins>] [--allow <builtins>] [-e <code>] <file.harn>");

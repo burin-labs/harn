@@ -2,6 +2,7 @@ use std::rc::Rc;
 
 use crate::value::{VmError, VmValue};
 
+use super::api::LlmCallOptions;
 use super::helpers::ResolvedProvider;
 
 // =============================================================================
@@ -9,17 +10,13 @@ use super::helpers::ResolvedProvider;
 // =============================================================================
 
 pub(crate) async fn vm_stream_llm(
-    provider: &str,
-    model: &str,
-    api_key: &str,
-    prompt: &str,
-    system: Option<&str>,
-    max_tokens: i64,
+    opts: &LlmCallOptions,
     tx: &tokio::sync::mpsc::Sender<VmValue>,
 ) -> Result<(), VmError> {
     use reqwest_eventsource::{Event, EventSource};
     use tokio_stream::StreamExt;
 
+    let provider = &opts.provider;
     let client = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(30))
         .build()
@@ -29,34 +26,41 @@ pub(crate) async fn vm_stream_llm(
 
     let body = if resolved.is_anthropic_style {
         let mut body = serde_json::json!({
-            "model": model,
-            "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": max_tokens,
+            "model": opts.model,
+            "messages": opts.messages,
+            "max_tokens": opts.max_tokens,
             "stream": true,
         });
-        if let Some(sys) = system {
+        if let Some(ref sys) = opts.system {
             body["system"] = serde_json::json!(sys);
+        }
+        if let Some(temp) = opts.temperature {
+            body["temperature"] = serde_json::json!(temp);
         }
         body
     } else {
         let mut msgs = Vec::new();
-        if let Some(sys) = system {
+        if let Some(ref sys) = opts.system {
             msgs.push(serde_json::json!({"role": "system", "content": sys}));
         }
-        msgs.push(serde_json::json!({"role": "user", "content": prompt}));
-        serde_json::json!({
-            "model": model,
+        msgs.extend(opts.messages.iter().cloned());
+        let mut body = serde_json::json!({
+            "model": opts.model,
             "messages": msgs,
-            "max_tokens": max_tokens,
+            "max_tokens": opts.max_tokens,
             "stream": true,
-        })
+        });
+        if let Some(temp) = opts.temperature {
+            body["temperature"] = serde_json::json!(temp);
+        }
+        body
     };
 
     let req = client
         .post(resolved.url())
         .header("Content-Type", "application/json")
         .json(&body);
-    let request = resolved.apply_headers(req, api_key);
+    let request = resolved.apply_headers(req, &opts.api_key);
 
     let mut es = EventSource::new(request).map_err(|e| {
         VmError::Thrown(VmValue::String(Rc::from(format!(

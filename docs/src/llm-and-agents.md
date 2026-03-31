@@ -17,25 +17,28 @@ Ollama runs locally and doesn't require an API key. The default host is `http://
 
 ## llm_call
 
-Make a single LLM request:
+Make a single LLM request. Always returns a dict with `text`, `model`,
+`input_tokens`, and `output_tokens` fields.
 
 ```harn
-let response = llm_call("What is 2 + 2?")
+let result = llm_call("What is 2 + 2?")
+println(result.text)
 ```
 
 With a system message:
 
 ```harn
-let response = llm_call(
+let result = llm_call(
   "Explain quicksort",
   "You are a computer science teacher. Be concise."
 )
+println(result.text)
 ```
 
 With options:
 
 ```harn
-let response = llm_call(
+let result = llm_call(
   "Translate to French: Hello, world",
   "You are a translator.",
   {
@@ -44,6 +47,7 @@ let response = llm_call(
     max_tokens: 1024
   }
 )
+println(result.text)
 ```
 
 ### Parameters
@@ -54,6 +58,21 @@ let response = llm_call(
 | system | string | no | System message for the model |
 | options | dict | no | Provider, model, and generation settings |
 
+### Return value
+
+`llm_call` always returns a dict:
+
+| Field | Type | Description |
+|---|---|---|
+| `text` | string | The text content of the response |
+| `model` | string | The model used |
+| `input_tokens` | int | Input/prompt token count |
+| `output_tokens` | int | Output/completion token count |
+| `data` | any | Parsed JSON (when `response_format: "json"`) |
+| `tool_calls` | list | Tool calls (when model uses tools) |
+| `thinking` | string | Reasoning trace (when `thinking` is enabled) |
+| `stop_reason` | string | `"end_turn"`, `"max_tokens"`, `"tool_use"`, `"stop_sequence"` |
+
 ### Options dict
 
 | Key | Type | Default | Description |
@@ -61,6 +80,29 @@ let response = llm_call(
 | `provider` | string | `"anthropic"` | `"anthropic"`, `"openai"`, `"ollama"`, or `"openrouter"` |
 | `model` | string | varies by provider | Model identifier |
 | `max_tokens` | int | `4096` | Maximum tokens in the response |
+| `temperature` | float | provider default | Sampling temperature (0.0-2.0) |
+| `top_p` | float | nil | Nucleus sampling |
+| `top_k` | int | nil | Top-K sampling (Anthropic/Ollama only) |
+| `stop` | list | nil | Stop sequences |
+| `seed` | int | nil | Reproducibility seed (OpenAI/Ollama) |
+| `frequency_penalty` | float | nil | Frequency penalty (OpenAI only) |
+| `presence_penalty` | float | nil | Presence penalty (OpenAI only) |
+| `response_format` | string | `"text"` | `"text"` or `"json"` |
+| `schema` | dict | nil | JSON Schema for structured output |
+| `thinking` | bool/dict | nil | Enable extended reasoning. `true` or `{budget_tokens: N}` |
+| `tools` | list | nil | Tool definitions |
+| `tool_choice` | string/dict | `"auto"` | `"auto"`, `"none"`, `"required"`, or `{name: "tool"}` |
+| `cache` | bool | `false` | Enable prompt caching (Anthropic) |
+| `timeout` | int | `120` | Request timeout in seconds |
+| `messages` | list | nil | Full message list (overrides prompt) |
+
+Provider-specific overrides can be passed as sub-dicts:
+
+```harn
+let result = llm_call("hello", nil, {
+  provider: "ollama",
+  ollama: {num_ctx: 32768}
+})
 
 ## agent_loop
 

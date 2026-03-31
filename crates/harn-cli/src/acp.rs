@@ -764,6 +764,131 @@ fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Rc<AcpBridge>) {
         }
     });
 
+    // --- Additional file I/O builtins (previously bridge-only) ---
+
+    let b = bridge.clone();
+    vm.register_async_builtin("apply_edit", move |args| {
+        let bridge = b.clone();
+        async move {
+            let file = args.first().map(|a| a.display()).unwrap_or_default();
+            let old_str = args.get(1).map(|a| a.display()).unwrap_or_default();
+            let new_str = args.get(2).map(|a| a.display()).unwrap_or_default();
+            bridge
+                .call_client(
+                    "fs/apply_edit",
+                    serde_json::json!({
+                        "sessionId": bridge.session_id,
+                        "path": file,
+                        "old_string": old_str,
+                        "new_string": new_str,
+                    }),
+                )
+                .await?;
+            Ok(harn_vm::VmValue::Nil)
+        }
+    });
+
+    vm.unregister_builtin("delete_file");
+
+    let b = bridge.clone();
+    vm.register_async_builtin("delete_file", move |args| {
+        let bridge = b.clone();
+        async move {
+            let path = args.first().map(|a| a.display()).unwrap_or_default();
+            bridge
+                .call_client(
+                    "fs/delete_file",
+                    serde_json::json!({
+                        "sessionId": bridge.session_id,
+                        "path": path,
+                    }),
+                )
+                .await?;
+            Ok(harn_vm::VmValue::Nil)
+        }
+    });
+
+    // file_exists is sync — delegates to local filesystem (same as bridge mode)
+    vm.register_builtin("file_exists", |args, _out| {
+        let path = args.first().map(|a| a.display()).unwrap_or_default();
+        Ok(harn_vm::VmValue::Bool(std::path::Path::new(&path).exists()))
+    });
+
+    // --- Host callback — generic escape hatch ---
+
+    let b = bridge.clone();
+    vm.register_async_builtin("host_call", move |args| {
+        let bridge = b.clone();
+        async move {
+            let name = args.first().map(|a| a.display()).unwrap_or_default();
+            let call_args = args.get(1).cloned().unwrap_or(harn_vm::VmValue::Nil);
+            let args_json = harn_vm::llm::vm_value_to_json(&call_args);
+            let result = bridge
+                .call_client(
+                    "host/call",
+                    serde_json::json!({
+                        "sessionId": bridge.session_id,
+                        "name": name,
+                        "args": args_json,
+                    }),
+                )
+                .await?;
+            Ok(harn_vm::bridge::json_result_to_vm_value(&result))
+        }
+    });
+
+    // --- Render — template rendering delegated to host ---
+
+    let b = bridge.clone();
+    vm.register_async_builtin("render", move |args| {
+        let bridge = b.clone();
+        async move {
+            let template = args.first().map(|a| a.display()).unwrap_or_default();
+            let bindings = args.get(1).cloned().unwrap_or(harn_vm::VmValue::Nil);
+            let bindings_json = harn_vm::llm::vm_value_to_json(&bindings);
+            let result = bridge
+                .call_client(
+                    "host/call",
+                    serde_json::json!({
+                        "sessionId": bridge.session_id,
+                        "name": "render",
+                        "args": {"template": template, "bindings": bindings_json},
+                    }),
+                )
+                .await?;
+            Ok(harn_vm::bridge::json_result_to_vm_value(&result))
+        }
+    });
+
+    // --- ask_user — delegate to host (IDE shows modal, CLI reads stdin) ---
+
+    let b = bridge.clone();
+    vm.register_async_builtin("ask_user", move |args| {
+        let bridge = b.clone();
+        async move {
+            let question = args.first().map(|a| a.display()).unwrap_or_default();
+            let question_type = args.get(1).map(|a| a.display());
+            let mut params = serde_json::json!({
+                "sessionId": bridge.session_id,
+                "name": "ask_user",
+                "args": {"question": question},
+            });
+            if let Some(qt) = question_type {
+                params["args"]["type"] = serde_json::json!(qt);
+            }
+            let result = bridge.call_client("host/call", params).await?;
+            Ok(harn_vm::bridge::json_result_to_vm_value(&result))
+        }
+    });
+
+    // --- run_command — alias to exec/terminal ---
+
+    let b = bridge.clone();
+    vm.register_async_builtin("run_command", move |args| {
+        let bridge = b.clone();
+        async move { acp_terminal_exec(&bridge, &args).await }
+    });
+
     // --- Structured log builtins ---
 
     for level in ["log_debug", "log_info", "log_warn", "log_error"] {

@@ -124,9 +124,9 @@ and bare JSON with surrounding text. Uses balanced bracket matching to
 correctly extract nested objects and arrays from mixed prose.
 
 ```harn
-let response = llm_call("Return JSON with name and age")
-let data = json_extract(response)         // parse, stripping fences
-let name = json_extract(response, "name") // extract just one key
+let result = llm_call("Return JSON with name and age")
+let data = json_extract(result.text)         // parse, stripping fences
+let name = json_extract(result.text, "name") // extract just one key
 ```
 
 ## Math
@@ -516,7 +516,7 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `llm_call(prompt, system?, options?)` | prompt: string, system: string, options: dict | string | Single LLM request |
+| `llm_call(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Single LLM request. Returns `{text, model, input_tokens, output_tokens}` |
 | `agent_loop(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Multi-turn agent loop with `##DONE##` sentinel. Returns `{status, text, iterations, duration_ms, tools_used}` |
 | `llm_info()` | — | dict | Current LLM config: `{provider, model, api_key_set}` |
 | `llm_usage()` | — | dict | Cumulative usage: `{input_tokens, output_tokens, total_duration_ms, call_count}` |

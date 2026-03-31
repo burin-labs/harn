@@ -3,13 +3,68 @@ use std::rc::Rc;
 
 use crate::value::{VmError, VmValue};
 
-use super::helpers::vm_value_dict_to_json;
 use super::mock::{
     fixture_hash, get_replay_mode, load_fixture, mock_llm_response, save_fixture, LlmReplayMode,
 };
 
 /// Sender for streaming text deltas from an in-flight LLM call.
 pub(crate) type DeltaSender = tokio::sync::mpsc::UnboundedSender<String>;
+
+// =============================================================================
+// LLM call options -- single struct replaces 12+ positional parameters
+// =============================================================================
+
+/// Extended thinking configuration.
+#[derive(Clone, Debug)]
+pub(crate) enum ThinkingConfig {
+    /// Enable with provider defaults.
+    Enabled,
+    /// Enable with a specific token budget.
+    WithBudget(i64),
+}
+
+/// All options for an LLM API call, extracted once from user-facing args.
+#[derive(Clone)]
+pub(crate) struct LlmCallOptions {
+    // --- Routing ---
+    pub provider: String,
+    pub model: String,
+    pub api_key: String,
+
+    // --- Conversation ---
+    pub messages: Vec<serde_json::Value>,
+    pub system: Option<String>,
+
+    // --- Generation ---
+    pub max_tokens: i64,
+    pub temperature: Option<f64>,
+    pub top_p: Option<f64>,
+    pub top_k: Option<i64>,
+    pub stop: Option<Vec<String>>,
+    pub seed: Option<i64>,
+    pub frequency_penalty: Option<f64>,
+    pub presence_penalty: Option<f64>,
+
+    // --- Structured output ---
+    pub response_format: Option<String>,
+    pub json_schema: Option<serde_json::Value>,
+
+    // --- Thinking ---
+    pub thinking: Option<ThinkingConfig>,
+
+    // --- Tools ---
+    pub native_tools: Option<Vec<serde_json::Value>>,
+    pub tool_choice: Option<serde_json::Value>,
+
+    // --- Caching ---
+    pub cache: bool,
+
+    // --- Advanced ---
+    pub timeout: Option<u64>,
+
+    // --- Provider-specific overrides ---
+    pub provider_overrides: Option<serde_json::Value>,
+}
 
 // =============================================================================
 // LLM response type
@@ -21,6 +76,8 @@ pub(crate) struct LlmResult {
     pub input_tokens: i64,
     pub output_tokens: i64,
     pub model: String,
+    pub thinking: Option<String>,
+    pub stop_reason: Option<String>,
 }
 
 pub(crate) fn vm_build_llm_result(result: &LlmResult, parsed_json: Option<VmValue>) -> VmValue {
@@ -53,6 +110,20 @@ pub(crate) fn vm_build_llm_result(result: &LlmResult, parsed_json: Option<VmValu
         dict.insert("tool_calls".to_string(), VmValue::List(Rc::new(calls)));
     }
 
+    if let Some(ref thinking) = result.thinking {
+        dict.insert(
+            "thinking".to_string(),
+            VmValue::String(Rc::from(thinking.as_str())),
+        );
+    }
+
+    if let Some(ref stop_reason) = result.stop_reason {
+        dict.insert(
+            "stop_reason".to_string(),
+            VmValue::String(Rc::from(stop_reason.as_str())),
+        );
+    }
+
     VmValue::Dict(Rc::new(dict))
 }
 
@@ -60,93 +131,36 @@ pub(crate) fn vm_build_llm_result(result: &LlmResult, parsed_json: Option<VmValu
 // Core LLM call with all options
 // =============================================================================
 
-#[allow(clippy::too_many_arguments)]
+/// Execute an LLM call (non-streaming).
 pub(crate) async fn vm_call_llm_full(
-    provider: &str,
-    model: &str,
-    api_key: &str,
-    messages: &[serde_json::Value],
-    system: Option<&str>,
-    max_tokens: i64,
-    response_format: Option<&str>,
-    json_schema: Option<&BTreeMap<String, VmValue>>,
-    temperature: Option<f64>,
-    native_tools: Option<&[serde_json::Value]>,
-    think: bool,
+    opts: &LlmCallOptions,
 ) -> Result<LlmResult, VmError> {
-    vm_call_llm_full_inner(
-        provider,
-        model,
-        api_key,
-        messages,
-        system,
-        max_tokens,
-        response_format,
-        json_schema,
-        temperature,
-        native_tools,
-        None,
-        think,
-    )
-    .await
+    vm_call_llm_full_inner(opts, None).await
 }
 
-/// Like [`vm_call_llm_full`] but streams text deltas to `delta_tx` as they
-/// arrive from the LLM provider via SSE.
-#[allow(clippy::too_many_arguments)]
+/// Execute an LLM call, streaming text deltas to `delta_tx`.
 pub(crate) async fn vm_call_llm_full_streaming(
-    provider: &str,
-    model: &str,
-    api_key: &str,
-    messages: &[serde_json::Value],
-    system: Option<&str>,
-    max_tokens: i64,
-    response_format: Option<&str>,
-    json_schema: Option<&BTreeMap<String, VmValue>>,
-    temperature: Option<f64>,
-    native_tools: Option<&[serde_json::Value]>,
+    opts: &LlmCallOptions,
     delta_tx: DeltaSender,
-    think: bool,
 ) -> Result<LlmResult, VmError> {
-    vm_call_llm_full_inner(
-        provider,
-        model,
-        api_key,
-        messages,
-        system,
-        max_tokens,
-        response_format,
-        json_schema,
-        temperature,
-        native_tools,
-        Some(delta_tx),
-        think,
-    )
-    .await
+    vm_call_llm_full_inner(opts, Some(delta_tx)).await
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn vm_call_llm_full_inner(
-    provider: &str,
-    model: &str,
-    api_key: &str,
-    messages: &[serde_json::Value],
-    system: Option<&str>,
-    max_tokens: i64,
-    response_format: Option<&str>,
-    json_schema: Option<&BTreeMap<String, VmValue>>,
-    temperature: Option<f64>,
-    native_tools: Option<&[serde_json::Value]>,
+    opts: &LlmCallOptions,
     delta_tx: Option<DeltaSender>,
-    think: bool,
 ) -> Result<LlmResult, VmError> {
     // Mock provider: return deterministic response without API call.
-    if provider == "mock" {
-        return Ok(mock_llm_response(messages, system, native_tools));
+    if opts.provider == "mock" {
+        return Ok(mock_llm_response(
+            &opts.messages,
+            opts.system.as_deref(),
+            opts.native_tools.as_deref(),
+        ));
     }
 
     let replay_mode = get_replay_mode();
-    let hash = fixture_hash(model, messages, system);
+    let hash = fixture_hash(&opts.model, &opts.messages, opts.system.as_deref());
 
     // In replay mode, return cached fixture
     if replay_mode == LlmReplayMode::Replay {
@@ -158,52 +172,21 @@ async fn vm_call_llm_full_inner(
         )))));
     }
 
-    let call_api = |dtx: Option<DeltaSender>| {
-        vm_call_llm_api(
-            provider,
-            model,
-            api_key,
-            messages,
-            system,
-            max_tokens,
-            response_format,
-            json_schema,
-            temperature,
-            native_tools,
-            dtx,
-            think,
-        )
-    };
-
-    let result = call_api(delta_tx).await;
+    let result = vm_call_llm_api(opts, delta_tx).await;
 
     // On failure, check for provider fallback chain
     let result = match result {
         Ok(r) => r,
         Err(primary_err) => {
-            if let Some(pdef) = crate::llm_config::provider_config(provider) {
+            if let Some(pdef) = crate::llm_config::provider_config(&opts.provider) {
                 if let Some(ref fallback_provider) = pdef.fallback {
-                    // Note: uses the same model name. Users should configure
-                    // compatible model names or use providers.toml aliases.
-                    // Resolve fallback provider's API key
                     let fb_key =
                         super::helpers::vm_resolve_api_key(fallback_provider).unwrap_or_default();
                     if !fb_key.is_empty() {
-                        let fb_result = vm_call_llm_api(
-                            fallback_provider,
-                            model,
-                            &fb_key,
-                            messages,
-                            system,
-                            max_tokens,
-                            response_format,
-                            json_schema,
-                            temperature,
-                            native_tools,
-                            None, // no streaming for fallback
-                            think,
-                        )
-                        .await;
+                        let mut fb_opts = opts.clone();
+                        fb_opts.provider = fallback_provider.clone();
+                        fb_opts.api_key = fb_key;
+                        let fb_result = vm_call_llm_api(&fb_opts, None).await;
                         match fb_result {
                             Ok(r) => r,
                             Err(_) => return Err(primary_err),
@@ -231,26 +214,19 @@ async fn vm_call_llm_full_inner(
     Ok(result)
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn vm_call_llm_api(
-    provider: &str,
-    model: &str,
-    api_key: &str,
-    messages: &[serde_json::Value],
-    system: Option<&str>,
-    max_tokens: i64,
-    response_format: Option<&str>,
-    json_schema: Option<&BTreeMap<String, VmValue>>,
-    temperature: Option<f64>,
-    native_tools: Option<&[serde_json::Value]>,
+    opts: &LlmCallOptions,
     delta_tx: Option<DeltaSender>,
-    think: bool,
 ) -> Result<LlmResult, VmError> {
+    let provider = &opts.provider;
+    let model = &opts.model;
     let streaming = delta_tx.is_some();
-    let llm_timeout = std::env::var("HARN_LLM_TIMEOUT")
-        .ok()
-        .and_then(|v| v.parse::<u64>().ok())
-        .unwrap_or(120);
+    let llm_timeout = opts.timeout.unwrap_or_else(|| {
+        std::env::var("HARN_LLM_TIMEOUT")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(120)
+    });
     let client = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(30))
         .timeout(std::time::Duration::from_secs(llm_timeout))
@@ -258,49 +234,111 @@ async fn vm_call_llm_api(
         .unwrap_or_else(|_| reqwest::Client::new());
 
     let resolved = super::helpers::ResolvedProvider::resolve(provider);
+    let is_ollama = provider == "ollama" || resolved.endpoint.contains("/api/chat");
 
     // Build request body based on API style
     let mut body = if resolved.is_anthropic_style {
         let mut body = serde_json::json!({
             "model": model,
-            "messages": messages,
-            "max_tokens": max_tokens,
+            "messages": opts.messages,
+            "max_tokens": opts.max_tokens,
         });
-        if let Some(sys) = system {
-            body["system"] = serde_json::json!(sys);
+        if let Some(ref sys) = opts.system {
+            if opts.cache {
+                // Anthropic cache control: wrap system in content blocks
+                body["system"] = serde_json::json!([{
+                    "type": "text",
+                    "text": sys,
+                    "cache_control": {"type": "ephemeral"},
+                }]);
+            } else {
+                body["system"] = serde_json::json!(sys);
+            }
         }
-        if let Some(temp) = temperature {
+        if let Some(temp) = opts.temperature {
             body["temperature"] = serde_json::json!(temp);
         }
-        if let Some(tools) = native_tools {
+        if let Some(top_p) = opts.top_p {
+            body["top_p"] = serde_json::json!(top_p);
+        }
+        if let Some(top_k) = opts.top_k {
+            body["top_k"] = serde_json::json!(top_k);
+        }
+        if let Some(ref stop) = opts.stop {
+            body["stop_sequences"] = serde_json::json!(stop);
+        }
+        if let Some(ref tools) = opts.native_tools {
             if !tools.is_empty() {
                 body["tools"] = serde_json::json!(tools);
             }
         }
+        if let Some(ref tc) = opts.tool_choice {
+            body["tool_choice"] = tc.clone();
+        }
+        // Anthropic structured output via tool-use constraint
+        if opts.response_format.as_deref() == Some("json") {
+            if let Some(ref schema) = opts.json_schema {
+                body["tools"] = {
+                    let mut tools = body["tools"].as_array().cloned().unwrap_or_default();
+                    tools.push(serde_json::json!({
+                        "name": "json_response",
+                        "description": "Return a structured JSON response matching the schema.",
+                        "input_schema": schema,
+                    }));
+                    serde_json::json!(tools)
+                };
+                body["tool_choice"] = serde_json::json!({"type": "tool", "name": "json_response"});
+            }
+        }
+        // Anthropic thinking
+        if let Some(ref thinking) = opts.thinking {
+            let budget = match thinking {
+                ThinkingConfig::Enabled => 10000,
+                ThinkingConfig::WithBudget(b) => *b,
+            };
+            body["thinking"] = serde_json::json!({
+                "type": "enabled",
+                "budget_tokens": budget,
+            });
+        }
         body
     } else {
         let mut msgs = Vec::new();
-        if let Some(sys) = system {
+        if let Some(ref sys) = opts.system {
             msgs.push(serde_json::json!({"role": "system", "content": sys}));
         }
-        msgs.extend(messages.iter().cloned());
+        msgs.extend(opts.messages.iter().cloned());
 
         let mut body = serde_json::json!({
             "model": model,
             "messages": msgs,
-            "max_tokens": max_tokens,
+            "max_tokens": opts.max_tokens,
         });
-        if let Some(temp) = temperature {
+        if let Some(temp) = opts.temperature {
             body["temperature"] = serde_json::json!(temp);
         }
-        if response_format == Some("json") {
-            if let Some(schema) = json_schema {
-                let schema_json = vm_value_dict_to_json(schema);
+        if let Some(top_p) = opts.top_p {
+            body["top_p"] = serde_json::json!(top_p);
+        }
+        if let Some(ref stop) = opts.stop {
+            body["stop"] = serde_json::json!(stop);
+        }
+        if let Some(seed) = opts.seed {
+            body["seed"] = serde_json::json!(seed);
+        }
+        if let Some(fp) = opts.frequency_penalty {
+            body["frequency_penalty"] = serde_json::json!(fp);
+        }
+        if let Some(pp) = opts.presence_penalty {
+            body["presence_penalty"] = serde_json::json!(pp);
+        }
+        if opts.response_format.as_deref() == Some("json") {
+            if let Some(ref schema) = opts.json_schema {
                 body["response_format"] = serde_json::json!({
                     "type": "json_schema",
                     "json_schema": {
                         "name": "response",
-                        "schema": schema_json,
+                        "schema": schema,
                         "strict": true,
                     }
                 });
@@ -308,18 +346,31 @@ async fn vm_call_llm_api(
                 body["response_format"] = serde_json::json!({"type": "json_object"});
             }
         }
-        if let Some(tools) = native_tools {
+        if let Some(ref tools) = opts.native_tools {
             if !tools.is_empty() {
                 body["tools"] = serde_json::json!(tools);
             }
         }
+        if let Some(ref tc) = opts.tool_choice {
+            body["tool_choice"] = tc.clone();
+        }
         body
     };
 
-    // Only pass `think` for providers that support it (Ollama).
-    // Sending unknown fields to Anthropic/OpenAI could cause errors.
-    if provider == "ollama" || resolved.endpoint.contains("/api/chat") {
-        body["think"] = serde_json::json!(think);
+    // Ollama thinking support
+    if is_ollama {
+        if let Some(ref thinking) = opts.thinking {
+            body["think"] = serde_json::json!(matches!(thinking, ThinkingConfig::Enabled | ThinkingConfig::WithBudget(_)));
+        }
+    }
+
+    // Merge provider-specific overrides
+    if let Some(ref overrides) = opts.provider_overrides {
+        if let Some(obj) = overrides.as_object() {
+            for (k, v) in obj {
+                body[k] = v.clone();
+            }
+        }
     }
 
     if streaming {
@@ -335,7 +386,7 @@ async fn vm_call_llm_api(
         .post(resolved.url())
         .header("Content-Type", "application/json")
         .json(&body);
-    let req = resolved.apply_headers(req, api_key);
+    let req = resolved.apply_headers(req, &opts.api_key);
 
     if streaming {
         let tx = delta_tx.unwrap();
@@ -386,6 +437,7 @@ fn parse_llm_response(
 ) -> Result<LlmResult, VmError> {
     if resolved.is_anthropic_style {
         let mut text = String::new();
+        let mut thinking_text = String::new();
         let mut tool_calls = Vec::new();
 
         if let Some(content) = json["content"].as_array() {
@@ -394,6 +446,11 @@ fn parse_llm_response(
                     Some("text") => {
                         if let Some(t) = block["text"].as_str() {
                             text.push_str(t);
+                        }
+                    }
+                    Some("thinking") => {
+                        if let Some(t) = block["thinking"].as_str() {
+                            thinking_text.push_str(t);
                         }
                     }
                     Some("tool_use") => {
@@ -421,6 +478,7 @@ fn parse_llm_response(
 
         let input_tokens = json["usage"]["input_tokens"].as_i64().unwrap_or(0);
         let output_tokens = json["usage"]["output_tokens"].as_i64().unwrap_or(0);
+        let stop_reason = json["stop_reason"].as_str().map(|s| s.to_string());
 
         Ok(LlmResult {
             text,
@@ -428,6 +486,12 @@ fn parse_llm_response(
             input_tokens,
             output_tokens,
             model: model.to_string(),
+            thinking: if thinking_text.is_empty() {
+                None
+            } else {
+                Some(thinking_text)
+            },
+            stop_reason,
         })
     } else {
         if let Some(err) = json["error"]["message"].as_str() {
@@ -459,6 +523,9 @@ fn parse_llm_response(
 
         let input_tokens = json["usage"]["prompt_tokens"].as_i64().unwrap_or(0);
         let output_tokens = json["usage"]["completion_tokens"].as_i64().unwrap_or(0);
+        let stop_reason = json["choices"][0]["finish_reason"]
+            .as_str()
+            .map(|s| s.to_string());
 
         Ok(LlmResult {
             text,
@@ -466,6 +533,8 @@ fn parse_llm_response(
             input_tokens,
             output_tokens,
             model: model.to_string(),
+            thinking: None,
+            stop_reason,
         })
     }
 }
@@ -499,6 +568,9 @@ async fn vm_call_llm_api_sse_from_response(
         input_json: String,
     }
     let mut current_tool: Option<ToolBlock> = None;
+    let mut thinking_text = String::new();
+    let mut in_thinking_block = false;
+    let mut stop_reason: Option<String> = None;
 
     // OpenAI tool-call streaming state
     let mut oai_tool_map: std::collections::HashMap<u64, (String, String, String)> =
@@ -528,12 +600,18 @@ async fn vm_call_llm_api_sse_from_response(
                 }
                 Some("content_block_start") => {
                     let block = &json["content_block"];
-                    if block["type"].as_str() == Some("tool_use") {
-                        current_tool = Some(ToolBlock {
-                            id: block["id"].as_str().unwrap_or("").to_string(),
-                            name: block["name"].as_str().unwrap_or("").to_string(),
-                            input_json: String::new(),
-                        });
+                    match block["type"].as_str() {
+                        Some("tool_use") => {
+                            current_tool = Some(ToolBlock {
+                                id: block["id"].as_str().unwrap_or("").to_string(),
+                                name: block["name"].as_str().unwrap_or("").to_string(),
+                                input_json: String::new(),
+                            });
+                        }
+                        Some("thinking") => {
+                            in_thinking_block = true;
+                        }
+                        _ => {}
                     }
                 }
                 Some("content_block_delta") => {
@@ -543,6 +621,11 @@ async fn vm_call_llm_api_sse_from_response(
                             if let Some(t) = delta["text"].as_str() {
                                 text.push_str(t);
                                 let _ = delta_tx.send(t.to_string());
+                            }
+                        }
+                        Some("thinking_delta") => {
+                            if let Some(t) = delta["thinking"].as_str() {
+                                thinking_text.push_str(t);
                             }
                         }
                         Some("input_json_delta") => {
@@ -563,10 +646,14 @@ async fn vm_call_llm_api_sse_from_response(
                             "id": tool.id, "name": tool.name, "arguments": args,
                         }));
                     }
+                    in_thinking_block = false;
                 }
                 Some("message_delta") => {
                     if let Some(n) = json["usage"]["output_tokens"].as_i64() {
                         output_tokens = n;
+                    }
+                    if let Some(sr) = json["delta"]["stop_reason"].as_str() {
+                        stop_reason = Some(sr.to_string());
                     }
                 }
                 _ => {}
@@ -579,6 +666,11 @@ async fn vm_call_llm_api_sse_from_response(
             if let Some(content) = delta["content"].as_str() {
                 text.push_str(content);
                 let _ = delta_tx.send(content.to_string());
+            }
+
+            // Capture finish_reason
+            if let Some(fr) = choice["finish_reason"].as_str() {
+                stop_reason = Some(fr.to_string());
             }
 
             // Tool calls
@@ -617,12 +709,20 @@ async fn vm_call_llm_api_sse_from_response(
         }));
     }
 
+    let _ = in_thinking_block; // suppress unused warning
+
     Ok(LlmResult {
         text,
         tool_calls,
         input_tokens,
         output_tokens,
         model: model.to_string(),
+        thinking: if thinking_text.is_empty() {
+            None
+        } else {
+            Some(thinking_text)
+        },
+        stop_reason,
     })
 }
 
@@ -716,7 +816,12 @@ async fn vm_call_llm_api_ndjson_from_response(
         }
     }
 
-    // Include thinking text in the result if the model only produced thinking tokens
+    // Include thinking text in the visible text if the model only produced thinking tokens
+    let thinking = if thinking_text.is_empty() {
+        None
+    } else {
+        Some(thinking_text.clone())
+    };
     if text.is_empty() && !thinking_text.is_empty() {
         text = thinking_text;
     }
@@ -727,5 +832,7 @@ async fn vm_call_llm_api_ndjson_from_response(
         input_tokens,
         output_tokens,
         model: result_model,
+        thinking,
+        stop_reason: None,
     })
 }

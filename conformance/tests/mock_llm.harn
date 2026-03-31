@@ -1,7 +1,8 @@
 pipeline default() {
   // Mock provider returns deterministic responses without API keys
+  // llm_call always returns a dict with .text, .model, .input_tokens, .output_tokens
   let response = llm_call("Hello world", nil, {provider: "mock"})
-  println(response)
+  println(response.text)
   // Mock with agent_loop terminates immediately via ##DONE##
   let result = agent_loop("Do the task", "You are helpful", {provider: "mock"})
   println(result?.text)

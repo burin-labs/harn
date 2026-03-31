@@ -184,7 +184,6 @@ fn builtin_return_type(name: &str) -> InferredType {
         | "read_file"
         | "http_get"
         | "http_post"
-        | "llm_call"
         | "regex_replace"
         | "path_join"
         | "temp_dir"
@@ -201,7 +200,7 @@ fn builtin_return_type(name: &str) -> InferredType {
         }
         "list_dir" | "mcp_list_tools" | "mcp_list_resources" | "mcp_list_prompts" | "to_list"
         | "regex_captures" => Some(TypeExpr::Named("list".into())),
-        "stat" | "exec" | "shell" | "date_now" | "agent_loop" | "llm_info" | "llm_usage"
+        "stat" | "exec" | "shell" | "date_now" | "llm_call" | "agent_loop" | "llm_info" | "llm_usage"
         | "timer_start" | "metadata_get" | "mcp_server_info" | "mcp_get_prompt" => {
             Some(TypeExpr::Named("dict".into()))
         }

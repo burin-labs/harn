@@ -80,6 +80,8 @@ pub(crate) fn load_fixture(hash: &str) -> Option<LlmResult> {
         input_tokens: json["input_tokens"].as_i64().unwrap_or(0),
         output_tokens: json["output_tokens"].as_i64().unwrap_or(0),
         model: json["model"].as_str().unwrap_or("").to_string(),
+        thinking: json["thinking"].as_str().map(|s| s.to_string()),
+        stop_reason: json["stop_reason"].as_str().map(|s| s.to_string()),
     })
 }
 
@@ -117,6 +119,8 @@ pub(crate) fn mock_llm_response(
                 input_tokens: last_msg.len() as i64,
                 output_tokens: 20,
                 model: "mock".to_string(),
+                thinking: None,
+                stop_reason: None,
             };
         }
     }
@@ -145,5 +149,7 @@ pub(crate) fn mock_llm_response(
         input_tokens: last_msg.len() as i64,
         output_tokens: 30,
         model: "mock".to_string(),
+        thinking: None,
+        stop_reason: None,
     }
 }

@@ -2,6 +2,51 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.4.28
+
+### Breaking changes
+
+- **`llm_call` always returns a dict** — previously returned a plain string
+  for simple calls. Now always returns `{text, model, input_tokens,
+  output_tokens}`. Use `.text` to get the string content.
+- **`think` option renamed to `thinking`** — expanded semantics: `true` for
+  provider defaults, or `{budget_tokens: N}` for explicit budget. Works
+  across Anthropic (thinking blocks), OpenAI (reasoning), and Ollama.
+- **`--bridge` flag removed** — bridge protocol replaced by ACP. Use
+  `harn acp` instead of `harn run --bridge`.
+
+### Added
+
+- **Consolidated `LlmCallOptions` struct** — replaces 12 positional parameters
+  internally. All LLM builtins now share a single option extraction path.
+- **New LLM options** — `top_p`, `top_k`, `stop` (stop sequences), `seed`,
+  `frequency_penalty`, `presence_penalty`, `tool_choice`, `cache` (Anthropic
+  prompt caching), `timeout`, and provider-specific override sub-dicts
+  (`anthropic: {}`, `openai: {}`, `ollama: {}`).
+- **Extended thinking support** — `thinking: true` or `thinking: {budget_tokens: N}`
+  works for Anthropic, OpenAI, and Ollama. Response includes `thinking` and
+  `stop_reason` fields.
+- **Anthropic structured output** — `response_format: "json"` with `schema`
+  now works for Anthropic via synthetic tool-use constraint pattern.
+- **Provider option validation** — runtime warnings when passing options
+  not supported by the target provider (e.g., `seed` on Anthropic).
+- **ACP builtins expanded** — `apply_edit`, `delete_file`, `file_exists`,
+  `host_call`, `render`, `ask_user`, `run_command` added to ACP server.
+
+### Removed
+
+- **`bridge_builtins.rs`** — entire bridge protocol layer removed. ACP is
+  now the only host integration protocol.
+- **`run_file_bridge()`** — removed from CLI.
+
+### Fixed
+
+- **Default unification** — `max_tokens` = 4096, `max_nudges` = 3,
+  `max_iterations` = 50 everywhere (previously varied between bridge and
+  non-bridge modes).
+- **`llm_stream` alignment** — now supports `messages`, `temperature`, and
+  other options (previously only accepted flat prompt string).
+
 ## v0.4.27
 
 ### Added

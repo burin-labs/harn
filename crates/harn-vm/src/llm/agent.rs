@@ -6,7 +6,7 @@ use crate::vm::Vm;
 
 use super::api::{vm_call_llm_full_streaming, DeltaSender};
 use super::helpers::{
-    opt_bool, opt_int, opt_str, vm_resolve_api_key, vm_resolve_model, vm_resolve_provider,
+    extract_llm_options, opt_bool, opt_int, opt_str,
 };
 use super::tools::{
     build_assistant_tool_message, build_text_tool_prompt, build_tool_result_message,
@@ -47,73 +47,59 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
     vm.register_async_builtin("agent_loop", move |args| {
         let bridge = b.clone();
         async move {
-            let prompt = args.first().map(|a| a.display()).unwrap_or_default();
-            let system = args.get(1).map(|a| a.display());
             let options = args.get(2).and_then(|a| a.as_dict()).cloned();
-
-            let provider = vm_resolve_provider(&options);
-            let model = vm_resolve_model(&options, &provider);
-            let api_key = vm_resolve_api_key(&provider)?;
-            let max_iterations = opt_int(&options, "max_iterations").unwrap_or(25) as usize;
+            let max_iterations = opt_int(&options, "max_iterations").unwrap_or(50) as usize;
             let persistent = opt_bool(&options, "persistent");
-            let think = opt_bool(&options, "think");
-            let max_nudges = opt_int(&options, "max_nudges").unwrap_or(5) as usize;
+            let max_nudges = opt_int(&options, "max_nudges").unwrap_or(3) as usize;
             let custom_nudge = opt_str(&options, "nudge");
-            let max_tokens = opt_int(&options, "max_tokens").unwrap_or(8192);
             let tool_retries = opt_int(&options, "tool_retries").unwrap_or(0) as usize;
             let tool_backoff_ms = opt_int(&options, "tool_backoff_ms").unwrap_or(1000) as u64;
             let tool_format = opt_str(&options, "tool_format")
                 .unwrap_or_else(|| "text".to_string());
 
-            // Resolve tool definitions from options.tools.
-            // Accepts: string name list, tool_registry, or list of tool dicts.
+            // Extract base LLM options (provider, model, key, messages, etc.)
+            let mut opts = extract_llm_options(&args)?;
+
+            // Resolve tool definitions from options.tools for text-based injection.
             let tools_val = options.as_ref().and_then(|o| o.get("tools")).cloned();
             let tool_schemas = match &tools_val {
-                Some(val) => resolve_tools_for_agent(val, &provider)?,
+                Some(val) => resolve_tools_for_agent(val, &opts.provider)?,
                 None => None,
             };
             let has_tools = tool_schemas.as_ref().is_some_and(|t| !t.is_empty());
 
+            let prompt = args.first().map(|a| a.display()).unwrap_or_default();
             eprintln!(
                 "[agent_loop] model={}/{} prompt_chars={} sys_chars={} has_tools={} format={}",
-                provider, model, prompt.len(),
-                system.as_ref().map_or(0, |s| s.len()),
+                opts.provider, opts.model, prompt.len(),
+                opts.system.as_ref().map_or(0, |s| s.len()),
                 has_tools, tool_format,
             );
 
             // Native format: pass tools via API. Text format: inject into prompt.
-            let native_tools = if has_tools && tool_format == "native" {
-                tool_schemas
-            } else {
-                None
-            };
-
-            let mut system_prompt = system.unwrap_or_default();
+            if has_tools && tool_format != "native" {
+                // Clear native_tools since we're using text format
+                opts.native_tools = None;
+            }
 
             // Always inject tool schema for text-based tool calling.
-            // The schema lists tool names and parameters explicitly.
-            // If the system prompt already has ```call examples, skip the format
-            // instructions (the few-shot examples teach the format).
             if has_tools && tool_format == "text" {
+                let system_prompt = opts.system.get_or_insert_with(String::new);
                 let has_examples = system_prompt.contains("```call");
                 system_prompt.push_str(&build_text_tool_prompt(
                     tools_val.as_ref(),
-                    !has_examples, // include format instructions only if no examples present
+                    !has_examples,
                 ));
             }
 
             if persistent {
+                let system_prompt = opts.system.get_or_insert_with(String::new);
                 system_prompt.push_str(
                     "\n\nIMPORTANT: You MUST keep working until the task is complete. \
                      Do NOT stop to explain or summarize — take action with tools. \
                      When you are done, output ##DONE## on its own line.",
                 );
             }
-
-            let mut messages: Vec<serde_json::Value> = vec![serde_json::json!({
-                "role": "user",
-                "content": prompt,
-            })];
 
             let mut total_text = String::new();
             let mut consecutive_text_only = 0usize;
@@ -125,7 +111,6 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
 
             for iteration in 0..max_iterations {
                 total_iterations = iteration + 1;
-                // Emit progress notification for each iteration
                 bridge.send_progress(
                     "agent_loop",
                     &format!("Iteration {}", iteration + 1),
@@ -134,7 +119,7 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                     None,
                 );
                 let llm_call_id = next_call_id();
-                let prompt_chars: usize = messages.iter()
+                let prompt_chars: usize = opts.messages.iter()
                     .filter_map(|m| m.get("content").and_then(|c| c.as_str()))
                     .map(|s| s.len())
                     .sum();
@@ -143,7 +128,7 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                     "llm",
                     "llm_call",
                     serde_json::json!({
-                        "model": model,
+                        "model": opts.model,
                         "prompt_chars": prompt_chars,
                         "iteration": iteration,
                     }),
@@ -151,22 +136,8 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                 let start = std::time::Instant::now();
                 let delta_tx = spawn_progress_forwarder(&bridge, llm_call_id.clone());
                 let llm_result = vm_call_llm_full_streaming(
-                    &provider,
-                    &model,
-                    &api_key,
-                    &messages,
-                    if system_prompt.is_empty() {
-                        None
-                    } else {
-                        Some(&system_prompt)
-                    },
-                    max_tokens,
-                    None,
-                    None,
-                    None,
-                    native_tools.as_deref(),
+                    &opts,
                     delta_tx,
-                    think,
                 )
                 .await;
                 let llm_duration = start.elapsed().as_millis() as u64;
@@ -216,13 +187,11 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                     consecutive_text_only = 0;
 
                     if tool_format == "native" {
-                        // Native: add assistant message with tool_calls metadata
-                        messages.push(build_assistant_tool_message(
-                            &text, &tool_calls, &provider,
+                        opts.messages.push(build_assistant_tool_message(
+                            &text, &tool_calls, &opts.provider,
                         ));
                     } else {
-                        // Text: add the raw assistant text (contains <tool_call> tags)
-                        messages.push(serde_json::json!({
+                        opts.messages.push(serde_json::json!({
                             "role": "assistant",
                             "content": text,
                         }));
@@ -333,8 +302,8 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                         );
 
                         if tool_format == "native" {
-                            messages.push(build_tool_result_message(
-                                tool_id, &result_text, &provider,
+                            opts.messages.push(build_tool_result_message(
+                                tool_id, &result_text, &opts.provider,
                             ));
                         } else {
                             observations.push_str(&format!(
@@ -347,7 +316,7 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
 
                     // Text format: send all observations as one user message
                     if tool_format != "native" && !observations.is_empty() {
-                        messages.push(serde_json::json!({
+                        opts.messages.push(serde_json::json!({
                             "role": "user",
                             "content": observations.trim_end(),
                         }));
@@ -357,7 +326,7 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                 }
 
                 // Text-only response (no tool calls found)
-                messages.push(serde_json::json!({
+                opts.messages.push(serde_json::json!({
                     "role": "assistant",
                     "content": text,
                 }));
@@ -406,7 +375,7 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                     }
                 });
 
-                messages.push(serde_json::json!({
+                opts.messages.push(serde_json::json!({
                     "role": "user",
                     "content": nudge,
                 }));
@@ -440,50 +409,17 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
 /// This overrides the native llm_call with one that reports to the host for observability.
 pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::HostBridge>) {
     use super::api::vm_build_llm_result;
-    use super::helpers::{
-        extract_json, opt_float, opt_int, opt_str, vm_messages_to_json, vm_resolve_api_key,
-        vm_resolve_model, vm_resolve_provider,
-    };
-    use super::tools::vm_tools_to_native;
+    use super::helpers::extract_json;
     use crate::stdlib::json_to_vm_value;
 
     let b = bridge;
     vm.register_async_builtin("llm_call", move |args| {
         let bridge = b.clone();
         async move {
-            let prompt = args.first().map(|a| a.display()).unwrap_or_default();
-            let system = args.get(1).map(|a| a.display());
-            let options = args.get(2).and_then(|a| a.as_dict()).cloned();
-
-            let provider = vm_resolve_provider(&options);
-            let model = vm_resolve_model(&options, &provider);
-            let api_key = vm_resolve_api_key(&provider)?;
-            let max_tokens = opt_int(&options, "max_tokens").unwrap_or(4096);
-            let response_format = opt_str(&options, "response_format");
-            let json_schema = options
-                .as_ref()
-                .and_then(|o| o.get("schema"))
-                .and_then(|v| v.as_dict())
-                .cloned();
-            let temperature = opt_float(&options, "temperature");
-            let think = opt_bool(&options, "think");
-            let tools_val = options.as_ref().and_then(|o| o.get("tools")).cloned();
-            let messages_val = options.as_ref().and_then(|o| o.get("messages")).cloned();
-
-            let messages = if let Some(VmValue::List(msg_list)) = &messages_val {
-                vm_messages_to_json(msg_list)?
-            } else {
-                vec![serde_json::json!({"role": "user", "content": prompt})]
-            };
-
-            let native_tools = if let Some(tools) = &tools_val {
-                Some(vm_tools_to_native(tools, &provider)?)
-            } else {
-                None
-            };
+            let opts = extract_llm_options(&args)?;
 
             let call_id = next_call_id();
-            let prompt_chars: usize = messages
+            let prompt_chars: usize = opts.messages
                 .iter()
                 .filter_map(|m| m.get("content").and_then(|c| c.as_str()))
                 .map(|s| s.len())
@@ -492,26 +428,12 @@ pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Host
                 &call_id,
                 "llm",
                 "llm_call",
-                serde_json::json!({"model": model, "prompt_chars": prompt_chars}),
+                serde_json::json!({"model": opts.model, "prompt_chars": prompt_chars}),
             );
 
             let start = std::time::Instant::now();
             let delta_tx = spawn_progress_forwarder(&bridge, call_id.clone());
-            let llm_result = vm_call_llm_full_streaming(
-                &provider,
-                &model,
-                &api_key,
-                &messages,
-                system.as_deref(),
-                max_tokens,
-                response_format.as_deref(),
-                json_schema.as_ref(),
-                temperature,
-                native_tools.as_deref(),
-                delta_tx,
-                think,
-            )
-            .await;
+            let llm_result = vm_call_llm_full_streaming(&opts, delta_tx).await;
             let duration_ms = start.elapsed().as_millis() as u64;
             let result = match llm_result {
                 Ok(r) => r,
@@ -548,22 +470,13 @@ pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Host
                 }),
             );
 
-            // Return logic matches the original llm_call
-            if response_format.as_deref() == Some("json") {
+            // Always return dict (breaking change: no more plain string)
+            if opts.response_format.as_deref() == Some("json") {
                 let json_str = extract_json(&result.text);
                 let parsed = serde_json::from_str::<serde_json::Value>(json_str)
                     .ok()
                     .map(|jv| json_to_vm_value(&jv));
                 return Ok(vm_build_llm_result(&result, parsed));
-            }
-
-            if !result.tool_calls.is_empty() {
-                return Ok(vm_build_llm_result(&result, None));
-            }
-
-            let is_simple_call = tools_val.is_none() && messages_val.is_none();
-            if is_simple_call {
-                return Ok(VmValue::String(Rc::from(result.text)));
             }
 
             Ok(vm_build_llm_result(&result, None))
