@@ -810,7 +810,7 @@ These builtins expose Harn's typed orchestration runtime.
 |---|---|---|---|
 | `workflow_graph(config)` | config: dict | workflow graph | Normalize a workflow definition into the typed workflow IR |
 | `workflow_validate(graph, ceiling?)` | graph: workflow, ceiling: dict (optional) | dict | Validate graph structure and capability ceilings |
-| `workflow_inspect(graph)` | graph: workflow | dict | Return graph plus validation summary |
+| `workflow_inspect(graph, ceiling?)` | graph: workflow, ceiling: dict (optional) | dict | Return graph plus validation summary |
 | `workflow_clone(graph)` | graph: workflow | workflow graph | Clone a workflow and append an audit entry |
 | `workflow_insert_node(graph, node, edge?)` | graph, node, edge | workflow graph | Insert a node and optional edge |
 | `workflow_replace_node(graph, node_id, node)` | graph, node_id, node | workflow graph | Replace a node definition |
@@ -818,6 +818,7 @@ These builtins expose Harn's typed orchestration runtime.
 | `workflow_set_model_policy(graph, node_id, policy)` | graph, node_id, policy | workflow graph | Set per-node model policy |
 | `workflow_set_context_policy(graph, node_id, policy)` | graph, node_id, policy | workflow graph | Set per-node context policy |
 | `workflow_set_transcript_policy(graph, node_id, policy)` | graph, node_id, policy | workflow graph | Set per-node transcript policy |
+| `workflow_policy_report(graph, ceiling?)` | graph, ceiling: dict (optional) | dict | Inspect workflow/node policies against an explicit or builtin ceiling |
 | `workflow_diff(left, right)` | left, right | dict | Compare two workflow graphs |
 | `workflow_commit(graph, reason?)` | graph, reason | workflow graph | Validate and append a commit audit entry |
 
@@ -829,12 +830,18 @@ These builtins expose Harn's typed orchestration runtime.
 | `run_record(payload)` | payload: dict | run record | Normalize a run record |
 | `run_record_save(run, path?)` | run, path | dict | Persist a run record |
 | `run_record_load(path)` | path: string | run record | Load a run record from disk |
+| `run_record_fixture(run)` | run | replay fixture | Derive a replay/eval fixture from a saved run |
+| `run_record_eval(run, fixture?)` | run, fixture | dict | Evaluate a run against an embedded or explicit fixture |
 
 `workflow_execute` options currently include:
 
 - `max_steps`
+- `persist_path`
 - `resume_path`
 - `resume_run`
+- `replay_path`
+- `replay_run`
+- `replay_mode` (`"deterministic"` currently replays saved stage fixtures)
 
 ### Artifacts and context
 
@@ -846,7 +853,8 @@ These builtins expose Harn's typed orchestration runtime.
 | `artifact_context(artifacts, policy?)` | artifacts, policy | string | Render selected artifacts into context |
 
 Core artifact kinds commonly used by the runtime include `resource`,
-`summary`, `analysis_note`, `diff`, `test_result`, `verification_result`,
+`workspace_file`, `editor_selection`, `summary`, `transcript_summary`,
+`diff`, `patch`, `test_result`, `verification_result`, `command_result`,
 and `plan`.
 
 ### Transcript lifecycle
@@ -858,6 +866,10 @@ and `plan`.
 | `transcript_events(transcript)` | transcript | list | Return canonical transcript events |
 | `transcript_summary(transcript)` | transcript | string or nil | Return transcript summary |
 | `transcript_fork(transcript, options?)` | transcript, options | transcript | Fork transcript state |
+| `transcript_reset(options?)` | options | transcript | Start a fresh active transcript with optional metadata |
+| `transcript_archive(transcript)` | transcript | transcript | Mark transcript archived and append an internal lifecycle event |
+| `transcript_abandon(transcript)` | transcript | transcript | Mark transcript abandoned and append an internal lifecycle event |
+| `transcript_resume(transcript)` | transcript | transcript | Mark transcript active again and append an internal lifecycle event |
 | `transcript_compact(transcript, options?)` | transcript, options | transcript | Locally compact transcript messages |
 | `transcript_summarize(transcript, options?)` | transcript, options | transcript | Compact via LLM-generated summary |
 | `transcript_render_visible(transcript)` | transcript | string | Render only public/human-visible messages |

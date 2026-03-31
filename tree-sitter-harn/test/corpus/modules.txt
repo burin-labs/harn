@@ -1,0 +1,36 @@
+==================
+Import And Loop
+==================
+
+import { helper } from "lib/helpers"
+
+pipeline build() {
+  let items = [1, 2, 3]
+  for item in items {
+    log(item)
+  }
+}
+
+---
+
+(source_file
+  (import_declaration
+    (identifier)
+    (string_literal))
+  (pipeline_declaration
+    name: (identifier)
+    (block
+      (let_binding
+        name: (identifier)
+        value: (list_literal
+          (integer_literal)
+          (integer_literal)
+          (integer_literal)))
+      (for_statement
+        variable: (identifier)
+        iterable: (identifier)
+        body: (block
+          (call_expression
+            function: (identifier)
+            (argument_list
+              (identifier))))))))

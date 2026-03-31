@@ -1068,11 +1068,13 @@ impl Vm {
                 category: ErrorCategory::ToolRejected,
             });
         }
+        crate::orchestration::enforce_current_policy_for_builtin(name, &args)?;
         if let Some(builtin) = self.builtins.get(name).cloned() {
             builtin(&args, &mut self.output)
         } else if let Some(async_builtin) = self.async_builtins.get(name).cloned() {
             async_builtin(args).await
         } else if let Some(bridge) = &self.bridge {
+            crate::orchestration::enforce_current_policy_for_bridge_builtin(name)?;
             let args_json: Vec<serde_json::Value> =
                 args.iter().map(crate::llm::vm_value_to_json).collect();
             let result = bridge

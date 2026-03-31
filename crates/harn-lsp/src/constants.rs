@@ -240,6 +240,16 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
     ("llm_pick_model", "llm_pick_model(target, options?) -> dict"),
     ("llm_resolve_model", "llm_resolve_model(alias) -> dict"),
     ("transcript", "transcript(metadata?) -> dict"),
+    ("transcript_reset", "transcript_reset(options?) -> dict"),
+    (
+        "transcript_archive",
+        "transcript_archive(transcript) -> dict",
+    ),
+    (
+        "transcript_abandon",
+        "transcript_abandon(transcript) -> dict",
+    ),
+    ("transcript_resume", "transcript_resume(transcript) -> dict"),
     (
         "transcript_compact",
         "transcript_compact(transcript, options?) -> dict",
@@ -251,6 +261,12 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
     ("host_capabilities", "host_capabilities() -> dict"),
     ("host_has", "host_has(capability, op?) -> bool"),
     ("host_invoke", "host_invoke(capability, op, params?) -> any"),
+    (
+        "workflow_policy_report",
+        "workflow_policy_report(graph, ceiling?) -> dict",
+    ),
+    ("run_record_fixture", "run_record_fixture(run) -> dict"),
+    ("run_record_eval", "run_record_eval(run, fixture?) -> dict"),
     ("llm_providers", "llm_providers() -> list"),
     ("llm_config", "llm_config(provider?) -> dict"),
     ("llm_healthcheck", "llm_healthcheck(provider?) -> dict"),

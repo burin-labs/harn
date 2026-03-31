@@ -198,8 +198,15 @@ fn builtin_return_type(name: &str) -> InferredType {
         "file_exists" | "json_validate" | "is_nan" | "is_infinite" | "set_contains" => {
             Some(TypeExpr::Named("bool".into()))
         }
-        "list_dir" | "mcp_list_tools" | "mcp_list_resources" | "mcp_list_prompts" | "to_list"
-        | "regex_captures" => Some(TypeExpr::Named("list".into())),
+        "list_dir"
+        | "mcp_list_tools"
+        | "mcp_list_resources"
+        | "mcp_list_prompts"
+        | "to_list"
+        | "regex_captures"
+        | "artifact_select"
+        | "transcript_messages"
+        | "transcript_events" => Some(TypeExpr::Named("list".into())),
         "stat"
         | "exec"
         | "shell"
@@ -215,9 +222,44 @@ fn builtin_return_type(name: &str) -> InferredType {
         | "mcp_get_prompt"
         | "llm_pick_model"
         | "transcript"
+        | "transcript_from_messages"
+        | "transcript_reset"
+        | "transcript_archive"
+        | "transcript_abandon"
+        | "transcript_resume"
+        | "workflow_graph"
+        | "workflow_validate"
+        | "workflow_inspect"
+        | "workflow_policy_report"
+        | "workflow_clone"
+        | "workflow_insert_node"
+        | "workflow_replace_node"
+        | "workflow_rewire"
+        | "workflow_set_model_policy"
+        | "workflow_set_context_policy"
+        | "workflow_set_transcript_policy"
+        | "workflow_diff"
+        | "workflow_commit"
+        | "artifact"
+        | "artifact_derive"
+        | "run_record"
+        | "run_record_save"
+        | "run_record_load"
+        | "run_record_fixture"
+        | "run_record_eval"
+        | "workflow_execute"
         | "transcript_compact"
         | "transcript_summarize"
         | "host_capabilities" => Some(TypeExpr::Named("dict".into())),
+        "transcript_render_visible"
+        | "transcript_render_full"
+        | "artifact_context"
+        | "transcript_export"
+        | "transcript_id" => Some(TypeExpr::Named("string".into())),
+        "transcript_summary" => Some(TypeExpr::Union(vec![
+            TypeExpr::Named("string".into()),
+            TypeExpr::Named("nil".into()),
+        ])),
         "host_has" => Some(TypeExpr::Named("bool".into())),
         "metadata_set"
         | "metadata_save"
@@ -273,11 +315,48 @@ fn is_builtin(name: &str) -> bool {
             | "append_file"
             | "temp_dir"
             | "transcript"
+            | "transcript_from_messages"
+            | "transcript_messages"
+            | "transcript_events"
+            | "transcript_summary"
+            | "transcript_id"
+            | "transcript_export"
+            | "transcript_import"
+            | "transcript_fork"
+            | "transcript_reset"
+            | "transcript_archive"
+            | "transcript_abandon"
+            | "transcript_resume"
+            | "transcript_render_visible"
+            | "transcript_render_full"
             | "transcript_compact"
             | "transcript_summarize"
             | "host_capabilities"
             | "host_has"
             | "host_invoke"
+            | "workflow_graph"
+            | "workflow_validate"
+            | "workflow_inspect"
+            | "workflow_policy_report"
+            | "workflow_clone"
+            | "workflow_insert_node"
+            | "workflow_replace_node"
+            | "workflow_rewire"
+            | "workflow_set_model_policy"
+            | "workflow_set_context_policy"
+            | "workflow_set_transcript_policy"
+            | "workflow_diff"
+            | "workflow_commit"
+            | "workflow_execute"
+            | "artifact"
+            | "artifact_derive"
+            | "artifact_select"
+            | "artifact_context"
+            | "run_record"
+            | "run_record_save"
+            | "run_record_load"
+            | "run_record_fixture"
+            | "run_record_eval"
             | "stat"
             | "exec"
             | "shell"
@@ -1911,6 +1990,29 @@ add("hello", 2) }"#,
         assert_eq!(errs.len(), 1);
         assert!(errs[0].contains("string"));
         assert!(errs[0].contains("int"));
+    }
+
+    #[test]
+    fn test_workflow_and_transcript_builtins_are_known() {
+        let errs = errors(
+            r#"pipeline t(task) {
+  let flow = workflow_graph({name: "demo", entry: "act", nodes: {act: {kind: "stage"}}})
+  let report: dict = workflow_policy_report(flow, {tools: ["read"], capabilities: {workspace: ["read_text"]}})
+  let run: dict = workflow_execute("task", flow, [], {})
+  let fixture: dict = run_record_fixture(run?.run)
+  let transcript = transcript_reset({metadata: {source: "test"}})
+  let visible: string = transcript_render_visible(transcript_archive(transcript))
+  let events: list = transcript_events(transcript)
+  let context: string = artifact_context([], {max_artifacts: 1})
+  println(report)
+  println(run)
+  println(fixture)
+  println(visible)
+  println(events)
+  println(context)
+}"#,
+        );
+        assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
     }
 
     #[test]

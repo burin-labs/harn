@@ -1,0 +1,12 @@
+pipeline main() {
+  let base = transcript()
+  let next = add_user(base, "hello")
+  let archived = transcript_archive(next)
+  let resumed = transcript_resume(archived)
+  let abandoned = transcript_abandon(resumed)
+  let reset = transcript_reset({metadata: {source: "test"}})
+  println(contains(transcript_render_full(archived), "transcript archived"))
+  println(contains(transcript_render_full(resumed), "transcript resumed"))
+  println(contains(transcript_render_full(abandoned), "transcript abandoned"))
+  println(transcript_messages(reset) == [])
+}

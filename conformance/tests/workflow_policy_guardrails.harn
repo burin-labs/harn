@@ -1,0 +1,10 @@
+pipeline main() {
+  let flow = workflow_graph({name: "policy_guardrails", entry: "act", capability_policy: {capabilities: {workspace: ["read_text"]}, side_effect_level: "read_only"}, nodes: {act: {kind: "stage", mode: "agent", tools: ["edit", "run"], capability_policy: {capabilities: {workspace: ["write_text"], process: ["exec"]}, side_effect_level: "process_exec"}}}})
+  let ceiling = {tools: ["read"], capabilities: {workspace: ["read_text"]}, side_effect_level: "read_only"}
+  let report = workflow_validate(flow, ceiling)
+  println(report?.valid == false)
+  println(len(report?.errors) >= 1)
+  println(contains(join(report?.errors, "\n"), "host ceiling"))
+  let policy = workflow_policy_report(flow, ceiling)
+  println(policy?.validation?.valid == false)
+}

@@ -4,14 +4,16 @@
 //! for invoking them. These are ergonomic wrappers around `agent_loop` that
 //! make multi-agent pipelines natural to express.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::rc::Rc;
 
 use crate::orchestration::{
-    append_audit_entry, builtin_ceiling, load_run_record, next_node_for, normalize_artifact,
-    normalize_run_record, normalize_workflow_value, render_artifacts_context, save_run_record,
-    select_artifacts, validate_workflow, ArtifactRecord, CapabilityPolicy, ContextPolicy,
-    RunRecord, RunStageRecord, WorkflowEdge, WorkflowGraph,
+    append_audit_entry, builtin_ceiling, evaluate_run_against_fixture, load_run_record,
+    next_nodes_for, normalize_artifact, normalize_run_record, normalize_workflow_value,
+    pop_execution_policy, push_execution_policy, render_artifacts_context, replay_fixture_from_run,
+    save_run_record, select_artifacts, validate_workflow, ArtifactRecord, CapabilityPolicy,
+    ContextPolicy, ReplayFixture, RunCheckpointRecord, RunRecord, RunStageAttemptRecord,
+    RunStageRecord, RunTransitionRecord, WorkflowEdge, WorkflowGraph,
 };
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -134,12 +136,36 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
             .cloned()
             .unwrap_or(VmValue::Dict(Rc::new(BTreeMap::new())));
         let graph = normalize_workflow_value(&input)?;
-        let report = validate_workflow(&graph, Some(&builtin_ceiling()));
+        let ceiling = args.get(1).map(normalize_policy).transpose()?;
+        let builtin = builtin_ceiling();
+        let report = validate_workflow(&graph, ceiling.as_ref().or(Some(&builtin)));
         to_vm(&serde_json::json!({
             "graph": graph,
             "validation": report,
             "node_count": graph.nodes.len(),
             "edge_count": graph.edges.len(),
+        }))
+    });
+
+    vm.register_builtin("workflow_policy_report", |args, _out| {
+        let input = args
+            .first()
+            .cloned()
+            .unwrap_or(VmValue::Dict(Rc::new(BTreeMap::new())));
+        let graph = normalize_workflow_value(&input)?;
+        let ceiling = args.get(1).map(normalize_policy).transpose()?;
+        let builtin = builtin_ceiling();
+        let effective_ceiling = ceiling.unwrap_or(builtin);
+        let report = validate_workflow(&graph, Some(&effective_ceiling));
+        to_vm(&serde_json::json!({
+            "workflow_policy": graph.capability_policy,
+            "ceiling": effective_ceiling,
+            "validation": report,
+            "nodes": graph.nodes.iter().map(|(node_id, node)| serde_json::json!({
+                "node_id": node_id,
+                "policy": node.capability_policy,
+                "tools": node.tools,
+            })).collect::<Vec<_>>(),
         }))
     });
 
@@ -374,6 +400,27 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
         to_vm(&load_run_record(std::path::Path::new(&path))?)
     });
 
+    vm.register_builtin("run_record_fixture", |args, _out| {
+        let run = normalize_run_record(
+            args.first()
+                .ok_or_else(|| VmError::Runtime("run_record_fixture: missing run".to_string()))?,
+        )?;
+        to_vm(&replay_fixture_from_run(&run))
+    });
+
+    vm.register_builtin("run_record_eval", |args, _out| {
+        let run = normalize_run_record(
+            args.first()
+                .ok_or_else(|| VmError::Runtime("run_record_eval: missing run".to_string()))?,
+        )?;
+        let fixture: ReplayFixture = match args.get(1) {
+            Some(value) => serde_json::from_value(crate::llm::vm_value_to_json(value))
+                .map_err(|e| VmError::Runtime(format!("run_record_eval: {e}")))?,
+            None => replay_fixture_from_run(&run),
+        };
+        to_vm(&evaluate_run_against_fixture(&run, &fixture))
+    });
+
     vm.register_async_builtin("workflow_execute", |args| async move {
         let task = args.first().map(|v| v.display()).unwrap_or_default();
         let graph =
@@ -487,7 +534,494 @@ fn apply_runtime_node_overrides(
             .map(|value| value.display())
             .filter(|value| !value.is_empty());
     }
+    if !node.capability_policy.tools.is_empty() {
+        node.tools
+            .retain(|tool| node.capability_policy.tools.contains(tool));
+    }
     node
+}
+
+#[derive(Debug)]
+struct ExecutedStage {
+    status: String,
+    outcome: String,
+    branch: Option<String>,
+    result: serde_json::Value,
+    artifacts: Vec<ArtifactRecord>,
+    transcript: Option<VmValue>,
+    verification: Option<serde_json::Value>,
+    error: Option<String>,
+    attempts: Vec<RunStageAttemptRecord>,
+    consumed_artifact_ids: Vec<String>,
+}
+
+fn replay_stage(
+    current: &str,
+    replay_stages: &mut VecDeque<RunStageRecord>,
+) -> Result<ExecutedStage, VmError> {
+    let Some(stage) = replay_stages.pop_front() else {
+        return Err(VmError::Runtime(format!(
+            "workflow replay exhausted before node {current}"
+        )));
+    };
+    if stage.node_id != current {
+        return Err(VmError::Runtime(format!(
+            "workflow replay mismatch: expected node {current}, next replay stage is {}",
+            stage.node_id
+        )));
+    }
+    Ok(ExecutedStage {
+        status: stage.status.clone(),
+        outcome: stage.outcome.clone(),
+        branch: stage.branch.clone(),
+        result: serde_json::json!({
+            "status": stage.status,
+            "visible_text": stage.visible_text,
+            "private_reasoning": stage.private_reasoning,
+        }),
+        artifacts: stage.artifacts.clone(),
+        transcript: stage
+            .transcript
+            .as_ref()
+            .map(crate::stdlib::json_to_vm_value),
+        verification: stage.verification.clone(),
+        error: stage
+            .metadata
+            .get("error")
+            .and_then(|value| value.as_str())
+            .map(|value| value.to_string()),
+        attempts: stage.attempts.clone(),
+        consumed_artifact_ids: stage.consumed_artifact_ids.clone(),
+    })
+}
+
+fn evaluate_verification(
+    node: &crate::orchestration::WorkflowNode,
+    result: &serde_json::Value,
+) -> serde_json::Value {
+    let visible_text = result
+        .get("visible_text")
+        .or_else(|| result.get("text"))
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .to_string();
+    node.verify
+        .as_ref()
+        .and_then(|verify| verify.as_object())
+        .and_then(|verify| {
+            verify
+                .get("assert_text")
+                .and_then(|value| value.as_str())
+                .map(|needle| {
+                    serde_json::json!({
+                        "kind": "assert_text",
+                        "ok": visible_text.contains(needle),
+                        "expected": needle,
+                    })
+                })
+        })
+        .unwrap_or_else(|| serde_json::json!({"kind": "none", "ok": true}))
+}
+
+fn evaluate_condition(
+    node: &crate::orchestration::WorkflowNode,
+    artifacts: &[ArtifactRecord],
+) -> (bool, Vec<String>) {
+    let consumed = artifacts
+        .iter()
+        .map(|artifact| artifact.id.clone())
+        .collect();
+    if let Some(needle) = node
+        .metadata
+        .get("contains_text")
+        .and_then(|value| value.as_str())
+    {
+        let matched = artifacts.iter().any(|artifact| {
+            artifact
+                .text
+                .as_ref()
+                .is_some_and(|text| text.contains(needle))
+        });
+        return (matched, consumed);
+    }
+    if let Some(expected) = node
+        .metadata
+        .get("artifact_kind")
+        .and_then(|value| value.as_str())
+    {
+        let matched = artifacts.iter().any(|artifact| artifact.kind == expected);
+        return (matched, consumed);
+    }
+    (!artifacts.is_empty(), consumed)
+}
+
+fn artifact_from_value(
+    node_id: &str,
+    kind: &str,
+    index: usize,
+    value: serde_json::Value,
+    lineage: &[String],
+    title: String,
+) -> ArtifactRecord {
+    ArtifactRecord {
+        type_name: "artifact".to_string(),
+        id: format!("{node_id}_artifact_{}", uuid::Uuid::now_v7()),
+        kind: kind.to_string(),
+        title: Some(title),
+        text: value.as_str().map(|text| text.to_string()),
+        data: Some(value),
+        source: Some(node_id.to_string()),
+        created_at: uuid::Uuid::now_v7().to_string(),
+        freshness: Some("fresh".to_string()),
+        priority: None,
+        lineage: lineage.to_vec(),
+        relevance: Some(1.0),
+        estimated_tokens: None,
+        stage: Some(node_id.to_string()),
+        metadata: BTreeMap::from([("index".to_string(), serde_json::json!(index))]),
+    }
+    .normalize()
+}
+
+fn checkpoint_run(
+    run: &mut RunRecord,
+    ready_nodes: &VecDeque<String>,
+    completed_nodes: &BTreeSet<String>,
+    last_stage_id: Option<String>,
+    reason: &str,
+    persist_path: &str,
+) -> Result<(), VmError> {
+    run.pending_nodes = ready_nodes.iter().cloned().collect();
+    run.completed_nodes = completed_nodes.iter().cloned().collect();
+    run.checkpoints.push(RunCheckpointRecord {
+        id: uuid::Uuid::now_v7().to_string(),
+        ready_nodes: run.pending_nodes.clone(),
+        completed_nodes: run.completed_nodes.clone(),
+        last_stage_id,
+        persisted_at: uuid::Uuid::now_v7().to_string(),
+        reason: reason.to_string(),
+    });
+    let persisted_path = save_run_record(run, Some(persist_path))?;
+    run.persisted_path = Some(persisted_path);
+    Ok(())
+}
+
+fn enqueue_unique(queue: &mut VecDeque<String>, node_id: String) {
+    if !queue.iter().any(|queued| queued == &node_id) {
+        queue.push_back(node_id);
+    }
+}
+
+fn effective_node_policy(
+    graph: &WorkflowGraph,
+    node: &crate::orchestration::WorkflowNode,
+) -> Result<CapabilityPolicy, VmError> {
+    let builtin = builtin_ceiling();
+    let graph_policy = builtin
+        .intersect(&graph.capability_policy)
+        .map_err(VmError::Runtime)?;
+    graph_policy
+        .intersect(&node.capability_policy)
+        .map_err(VmError::Runtime)
+}
+
+async fn execute_stage_attempts(
+    task: &str,
+    node_id: &str,
+    node: &crate::orchestration::WorkflowNode,
+    artifacts: &[ArtifactRecord],
+    transcript: Option<VmValue>,
+) -> Result<ExecutedStage, VmError> {
+    type StageAttemptResult = (
+        serde_json::Value,
+        Vec<ArtifactRecord>,
+        Option<VmValue>,
+        String,
+        Option<String>,
+        Option<serde_json::Value>,
+    );
+    let consumed_artifact_ids = select_artifacts(artifacts.to_vec(), &node.context_policy)
+        .into_iter()
+        .map(|artifact| artifact.id)
+        .collect::<Vec<_>>();
+    let mut attempts = Vec::new();
+    let max_attempts = node.retry_policy.max_attempts.max(1);
+    let mut last_error = None;
+
+    for attempt in 1..=max_attempts {
+        let started_at = uuid::Uuid::now_v7().to_string();
+        let attempt_task = if attempt == 1 {
+            task.to_string()
+        } else {
+            format!(
+                "{task}\n\nRetry attempt {attempt} of {max_attempts}. Repair the previous failure and produce a corrected result."
+            )
+        };
+        let execution: Result<StageAttemptResult, VmError> = match node.kind.as_str() {
+            "fork" => Ok((
+                serde_json::json!({"status": "completed", "text": "forked"}),
+                Vec::new(),
+                transcript.clone(),
+                "forked".to_string(),
+                Some("fork".to_string()),
+                None,
+            )),
+            "join" => Ok((
+                serde_json::json!({"status": "completed", "text": "joined"}),
+                Vec::new(),
+                transcript.clone(),
+                "joined".to_string(),
+                Some("join".to_string()),
+                None,
+            )),
+            "condition" => {
+                let selected = select_artifacts(artifacts.to_vec(), &node.context_policy);
+                let (matched, _) = evaluate_condition(node, &selected);
+                Ok((
+                    serde_json::json!({"status": "completed", "text": if matched { "true" } else { "false" }}),
+                    Vec::new(),
+                    transcript.clone(),
+                    if matched {
+                        "condition_true".to_string()
+                    } else {
+                        "condition_false".to_string()
+                    },
+                    Some(if matched {
+                        "true".to_string()
+                    } else {
+                        "false".to_string()
+                    }),
+                    None,
+                ))
+            }
+            "map" => {
+                let mut inputs = select_artifacts(artifacts.to_vec(), &node.context_policy);
+                if let Some(kind) = &node.map_policy.item_artifact_kind {
+                    inputs.retain(|artifact| &artifact.kind == kind);
+                }
+                let mut items = node.map_policy.items.clone();
+                if items.is_empty() {
+                    items = inputs
+                        .iter()
+                        .map(|artifact| {
+                            artifact
+                                .data
+                                .clone()
+                                .or_else(|| artifact.text.clone().map(serde_json::Value::String))
+                                .unwrap_or(serde_json::Value::Null)
+                        })
+                        .collect();
+                }
+                if let Some(max_items) = node.map_policy.max_items {
+                    items.truncate(max_items);
+                }
+                let lineage = inputs
+                    .iter()
+                    .map(|artifact| artifact.id.clone())
+                    .collect::<Vec<_>>();
+                let output_kind = node
+                    .map_policy
+                    .output_kind
+                    .clone()
+                    .or_else(|| node.output_contract.output_kinds.first().cloned())
+                    .unwrap_or_else(|| "artifact".to_string());
+                let produced = items
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, item)| {
+                        artifact_from_value(
+                            node_id,
+                            &output_kind,
+                            index,
+                            item,
+                            &lineage,
+                            format!("map {} item {}", node_id, index + 1),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                Ok((
+                    serde_json::json!({"status": "completed", "text": format!("mapped {} items", produced.len())}),
+                    produced,
+                    transcript.clone(),
+                    "mapped".to_string(),
+                    Some("mapped".to_string()),
+                    None,
+                ))
+            }
+            "reduce" => {
+                let selected = select_artifacts(artifacts.to_vec(), &node.context_policy);
+                let separator = node
+                    .reduce_policy
+                    .separator
+                    .clone()
+                    .unwrap_or_else(|| "\n\n".to_string());
+                let reduced_text = selected
+                    .iter()
+                    .filter_map(|artifact| artifact.text.clone())
+                    .collect::<Vec<_>>()
+                    .join(&separator);
+                let reduced = artifact_from_value(
+                    node_id,
+                    node.output_contract
+                        .output_kinds
+                        .first()
+                        .map(|kind| kind.as_str())
+                        .unwrap_or("summary"),
+                    0,
+                    serde_json::Value::String(reduced_text.clone()),
+                    &selected
+                        .iter()
+                        .map(|artifact| artifact.id.clone())
+                        .collect::<Vec<_>>(),
+                    format!("reduce {} output", node_id),
+                );
+                Ok((
+                    serde_json::json!({"status": "completed", "text": reduced_text}),
+                    vec![reduced],
+                    transcript.clone(),
+                    "reduced".to_string(),
+                    Some("reduced".to_string()),
+                    None,
+                ))
+            }
+            "escalation" => {
+                let reason = node
+                    .escalation_policy
+                    .reason
+                    .clone()
+                    .unwrap_or_else(|| "manual review required".to_string());
+                let produced = artifact_from_value(
+                    node_id,
+                    node.output_contract
+                        .output_kinds
+                        .first()
+                        .map(|kind| kind.as_str())
+                        .unwrap_or("plan"),
+                    0,
+                    serde_json::json!({
+                        "queue": node.escalation_policy.queue,
+                        "level": node.escalation_policy.level,
+                        "reason": reason,
+                    }),
+                    &consumed_artifact_ids,
+                    format!("escalation {}", node_id),
+                );
+                Ok((
+                    serde_json::json!({"status": "completed", "text": reason}),
+                    vec![produced],
+                    transcript.clone(),
+                    "escalated".to_string(),
+                    Some("escalated".to_string()),
+                    None,
+                ))
+            }
+            _ => {
+                let (result, produced, next_transcript) = crate::orchestration::execute_stage_node(
+                    node_id,
+                    node,
+                    &attempt_task,
+                    artifacts,
+                    transcript.clone(),
+                )
+                .await?;
+                let verification = evaluate_verification(node, &result);
+                let verified_ok = verification
+                    .get("ok")
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(true);
+                let outcome = if node.kind == "verify" {
+                    if verified_ok {
+                        "verified".to_string()
+                    } else {
+                        "verification_failed".to_string()
+                    }
+                } else if node.kind == "subagent" {
+                    "subagent_completed".to_string()
+                } else {
+                    "success".to_string()
+                };
+                let branch = if node.kind == "verify" {
+                    Some(if verified_ok {
+                        "passed".to_string()
+                    } else {
+                        "failed".to_string()
+                    })
+                } else {
+                    Some("success".to_string())
+                };
+                Ok((
+                    result,
+                    produced,
+                    next_transcript,
+                    outcome,
+                    branch,
+                    Some(verification),
+                ))
+            }
+        };
+
+        match execution {
+            Ok((result, produced, next_transcript, outcome, branch, verification)) => {
+                let success = !matches!(branch.as_deref(), Some("failed"));
+                attempts.push(RunStageAttemptRecord {
+                    attempt,
+                    status: if success {
+                        "completed".to_string()
+                    } else {
+                        "failed".to_string()
+                    },
+                    outcome: outcome.clone(),
+                    branch: branch.clone(),
+                    error: None,
+                    verification: verification.clone(),
+                    started_at,
+                    finished_at: Some(uuid::Uuid::now_v7().to_string()),
+                });
+                if success {
+                    return Ok(ExecutedStage {
+                        status: "completed".to_string(),
+                        outcome,
+                        branch,
+                        result,
+                        artifacts: produced,
+                        transcript: next_transcript,
+                        verification,
+                        error: None,
+                        attempts,
+                        consumed_artifact_ids,
+                    });
+                }
+                last_error = Some("verification failed".to_string());
+            }
+            Err(error) => {
+                let error_message = error.to_string();
+                attempts.push(RunStageAttemptRecord {
+                    attempt,
+                    status: "failed".to_string(),
+                    outcome: "error".to_string(),
+                    branch: Some("error".to_string()),
+                    error: Some(error_message.clone()),
+                    verification: None,
+                    started_at,
+                    finished_at: Some(uuid::Uuid::now_v7().to_string()),
+                });
+                last_error = Some(error_message);
+            }
+        }
+    }
+
+    Ok(ExecutedStage {
+        status: "failed".to_string(),
+        outcome: "failed".to_string(),
+        branch: Some("failed".to_string()),
+        result: serde_json::json!({"status": "failed", "text": ""}),
+        artifacts: Vec::new(),
+        transcript,
+        verification: None,
+        error: last_error,
+        attempts,
+        consumed_artifact_ids,
+    })
 }
 
 async fn execute_workflow(
@@ -511,6 +1045,29 @@ async fn execute_workflow(
             None => None,
         },
     };
+    let replay_source = match options.get("replay_path").map(|v| v.display()) {
+        Some(path) if !path.is_empty() => Some(load_run_record(std::path::Path::new(&path))?),
+        _ => match options.get("replay_run") {
+            Some(value) => Some(normalize_run_record(value)?),
+            None => None,
+        },
+    };
+    let replay_mode = options
+        .get("replay_mode")
+        .map(|value| value.display())
+        .filter(|value| !value.is_empty());
+
+    let persist_path = options
+        .get("persist_path")
+        .map(|value| value.display())
+        .filter(|path| !path.is_empty())
+        .or_else(|| {
+            options
+                .get("resume_path")
+                .map(|value| value.display())
+                .filter(|path| !path.is_empty())
+        })
+        .unwrap_or_else(|| format!(".harn-runs/{}.json", uuid::Uuid::now_v7()));
 
     let mut run = resumed_run.unwrap_or_else(|| RunRecord {
         type_name: "run_record".to_string(),
@@ -522,9 +1079,14 @@ async fn execute_workflow(
         started_at: uuid::Uuid::now_v7().to_string(),
         finished_at: None,
         stages: Vec::new(),
+        transitions: Vec::new(),
+        checkpoints: Vec::new(),
+        pending_nodes: vec![graph.entry.clone()],
+        completed_nodes: Vec::new(),
         artifacts: artifacts.clone(),
         policy: builtin_ceiling(),
         transcript: None,
+        replay_fixture: None,
         metadata: BTreeMap::new(),
         persisted_path: None,
     });
@@ -532,12 +1094,11 @@ async fn execute_workflow(
     run.workflow_name = graph.name.clone();
     run.task = task.clone();
     run.status = "running".to_string();
+    run.metadata.insert(
+        "effective_policy".to_string(),
+        serde_json::to_value(&run.policy).unwrap_or_default(),
+    );
 
-    let mut current = run
-        .stages
-        .last()
-        .and_then(|stage| next_node_for(&graph, &stage.node_id, &stage.status))
-        .unwrap_or_else(|| graph.entry.clone());
     let mut transcript = run
         .transcript
         .clone()
@@ -545,6 +1106,12 @@ async fn execute_workflow(
     if !run.artifacts.is_empty() {
         artifacts = run.artifacts.clone();
     }
+    let mut ready_nodes: VecDeque<String> = if run.pending_nodes.is_empty() {
+        VecDeque::from(vec![graph.entry.clone()])
+    } else {
+        VecDeque::from(run.pending_nodes.clone())
+    };
+    let mut completed_nodes: BTreeSet<String> = run.completed_nodes.iter().cloned().collect();
     let mut steps = 0usize;
     let max_steps = options
         .get("max_steps")
@@ -565,146 +1132,88 @@ async fn execute_workflow(
         "resumed".to_string(),
         serde_json::json!(!run.stages.is_empty()),
     );
+    if let Some(replay_mode) = &replay_mode {
+        run.metadata
+            .insert("replay_mode".to_string(), serde_json::json!(replay_mode));
+    }
+    if let Some(replay_source) = &replay_source {
+        run.metadata.insert(
+            "replayed_from".to_string(),
+            serde_json::json!(replay_source.id.clone()),
+        );
+    }
+    let mut replay_stages = replay_source
+        .as_ref()
+        .map(|source| VecDeque::from(source.stages.clone()));
+    checkpoint_run(
+        &mut run,
+        &ready_nodes,
+        &completed_nodes,
+        None,
+        "start",
+        &persist_path,
+    )?;
 
-    while steps < max_steps {
+    while steps < max_steps && !ready_nodes.is_empty() {
         steps += 1;
+        let current = ready_nodes.pop_front().unwrap_or_default();
         let node =
             graph.nodes.get(&current).cloned().ok_or_else(|| {
                 VmError::Runtime(format!("workflow_execute: missing node {current}"))
             })?;
-        let node = apply_runtime_node_overrides(node, &options);
-
-        let stage_id = format!("{}:{}", run.id, current);
-        let started_at = uuid::Uuid::now_v7().to_string();
-        let mut attempt = 0usize;
-        let max_attempts = node.retry_policy.max_attempts.max(1);
-        let mut result = serde_json::json!({"status": "failed", "text": ""});
-        let mut stage_artifacts = Vec::new();
-        let mut next_transcript = transcript.clone();
-        let mut verification_outcome = None;
-        let mut stage_error = None;
-
-        while attempt < max_attempts {
-            attempt += 1;
-            let attempt_task = if attempt == 1 {
-                task.clone()
-            } else {
-                format!(
-                    "{task}\n\nRetry attempt {attempt} of {max_attempts}. Repair the previous failure and produce a corrected result."
-                )
-            };
-            let stage_attempt = match node.kind.as_str() {
-                "join" => Ok((
-                    serde_json::json!({"status": "joined", "text": ""}),
-                    Vec::new(),
-                    transcript.clone(),
-                )),
-                "condition" => Ok((
-                    serde_json::json!({"status": "branch", "text": ""}),
-                    Vec::new(),
-                    transcript.clone(),
-                )),
-                "map" => {
-                    let items = node
-                        .metadata
-                        .get("items")
-                        .and_then(|v| v.as_array())
-                        .cloned()
-                        .unwrap_or_default();
-                    let mut mapped = Vec::new();
-                    let mut mapped_transcript = transcript.clone();
-                    let item_count = items.len();
-                    for item in items {
-                        let subtask = format!("{attempt_task}\n\nMap item:\n{}", item);
-                        let (_, produced, latest_transcript) =
-                            crate::orchestration::execute_stage_node(
-                                &current,
-                                &node,
-                                &subtask,
-                                &artifacts,
-                                mapped_transcript.clone(),
-                            )
-                            .await?;
-                        mapped.extend(produced);
-                        mapped_transcript = latest_transcript;
-                    }
-                    Ok((
-                        serde_json::json!({"status": "mapped", "text": format!("mapped {} items", item_count)}),
-                        mapped,
-                        mapped_transcript,
-                    ))
-                }
-                _ => {
-                    crate::orchestration::execute_stage_node(
-                        &current,
-                        &node,
-                        &attempt_task,
-                        &artifacts,
-                        transcript.clone(),
-                    )
-                    .await
-                }
-            };
-
-            match stage_attempt {
-                Ok((candidate_result, candidate_artifacts, candidate_transcript)) => {
-                    let visible_text = candidate_result
-                        .get("visible_text")
-                        .or_else(|| candidate_result.get("text"))
-                        .and_then(|value| value.as_str())
-                        .unwrap_or_default()
-                        .to_string();
-                    let verified = node
-                        .verify
-                        .as_ref()
-                        .and_then(|verify| verify.as_object())
-                        .and_then(|verify| {
-                            verify
-                                .get("assert_text")
-                                .and_then(|value| value.as_str())
-                                .map(|needle| {
-                                    serde_json::json!({
-                                        "kind": "assert_text",
-                                        "ok": visible_text.contains(needle),
-                                        "expected": needle,
-                                    })
-                                })
-                        })
-                        .unwrap_or_else(|| serde_json::json!({"kind": "none", "ok": true}));
-                    let verified_ok = verified
-                        .get("ok")
-                        .and_then(|value| value.as_bool())
-                        .unwrap_or(true);
-                    result = candidate_result;
-                    stage_artifacts = candidate_artifacts;
-                    next_transcript = candidate_transcript;
-                    verification_outcome = Some(verified.clone());
-                    if verified_ok {
-                        stage_error = None;
-                        break;
-                    }
-                    stage_error = Some(format!("verification failed: {}", verified));
-                    if attempt >= max_attempts {
-                        result["status"] = serde_json::json!("failed");
-                    }
-                }
-                Err(error) => {
-                    stage_error = Some(error.to_string());
-                    if attempt >= max_attempts {
-                        return Err(error);
-                    }
-                }
+        if node.kind == "join" {
+            let incoming = graph
+                .edges
+                .iter()
+                .filter(|edge| edge.to == current)
+                .map(|edge| edge.from.clone())
+                .collect::<Vec<_>>();
+            let required = node.join_policy.min_completed.unwrap_or(
+                if node.join_policy.require_all_inputs || node.join_policy.strategy == "all" {
+                    incoming.len()
+                } else {
+                    1
+                },
+            );
+            let completed_inputs = incoming
+                .iter()
+                .filter(|input| completed_nodes.contains(*input))
+                .count();
+            if completed_inputs < required {
+                enqueue_unique(&mut ready_nodes, current.clone());
+                continue;
             }
         }
+        let node = apply_runtime_node_overrides(node, &options);
+        let stage_policy = effective_node_policy(&graph, &node)?;
 
-        transcript = next_transcript.clone();
-        artifacts.extend(stage_artifacts.clone());
+        let stage_id = format!("{}:{}:{}", run.id, current, run.stages.len() + 1);
+        let started_at = uuid::Uuid::now_v7().to_string();
+        push_execution_policy(stage_policy.clone());
+        let executed_result = if replay_mode.as_deref() == Some("deterministic") {
+            match replay_stages.as_mut() {
+                Some(stages) => replay_stage(&current, stages),
+                None => Err(VmError::Runtime(
+                    "replay_mode requires replay_run or replay_path".to_string(),
+                )),
+            }
+        } else {
+            execute_stage_attempts(&task, &current, &node, &artifacts, transcript.clone()).await
+        };
+        pop_execution_policy();
+        let executed = match executed_result {
+            Ok(executed) => executed,
+            Err(error) => return Err(error),
+        };
+
+        transcript = executed.transcript.clone();
+        artifacts.extend(executed.artifacts.clone());
         run.artifacts = artifacts.clone();
         run.transcript = transcript
             .clone()
             .map(|value| crate::llm::vm_value_to_json(&value));
+
         let mut stage_metadata = BTreeMap::new();
-        stage_metadata.insert("attempts".to_string(), serde_json::json!(attempt));
         stage_metadata.insert(
             "model_policy".to_string(),
             serde_json::to_value(&node.model_policy).unwrap_or_default(),
@@ -722,57 +1231,104 @@ async fn execute_workflow(
             serde_json::to_value(&node.retry_policy).unwrap_or_default(),
         );
         stage_metadata.insert(
-            "selected_lineage".to_string(),
-            serde_json::json!(stage_artifacts
-                .iter()
-                .flat_map(|artifact| artifact.lineage.iter().cloned())
-                .collect::<Vec<_>>()),
+            "effective_capability_policy".to_string(),
+            serde_json::to_value(&stage_policy).unwrap_or_default(),
         );
-        if let Some(error) = stage_error {
+        stage_metadata.insert(
+            "input_contract".to_string(),
+            serde_json::to_value(&node.input_contract).unwrap_or_default(),
+        );
+        stage_metadata.insert(
+            "output_contract".to_string(),
+            serde_json::to_value(&node.output_contract).unwrap_or_default(),
+        );
+        if let Some(error) = executed.error.clone() {
             stage_metadata.insert("error".to_string(), serde_json::json!(error));
         }
+
+        let produced_artifact_ids = executed
+            .artifacts
+            .iter()
+            .map(|artifact| artifact.id.clone())
+            .collect::<Vec<_>>();
         run.stages.push(RunStageRecord {
-            id: stage_id,
+            id: stage_id.clone(),
             node_id: current.clone(),
             kind: node.kind.clone(),
-            status: result["status"].as_str().unwrap_or("done").to_string(),
+            status: executed.status.clone(),
+            outcome: executed.outcome.clone(),
+            branch: executed.branch.clone(),
             started_at,
             finished_at: Some(uuid::Uuid::now_v7().to_string()),
-            visible_text: result
+            visible_text: executed
+                .result
                 .get("visible_text")
-                .or_else(|| result.get("text"))
+                .or_else(|| executed.result.get("text"))
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string()),
-            private_reasoning: result
+            private_reasoning: executed
+                .result
                 .get("private_reasoning")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string()),
-            transcript: next_transcript.as_ref().map(crate::llm::vm_value_to_json),
-            verification: verification_outcome,
-            artifacts: stage_artifacts,
+            transcript: executed
+                .transcript
+                .as_ref()
+                .map(crate::llm::vm_value_to_json),
+            verification: executed.verification.clone(),
+            artifacts: executed.artifacts.clone(),
+            consumed_artifact_ids: executed.consumed_artifact_ids.clone(),
+            produced_artifact_ids: produced_artifact_ids.clone(),
+            attempts: executed.attempts,
             metadata: stage_metadata,
         });
+        completed_nodes.insert(current.clone());
 
-        let status = result["status"].as_str().unwrap_or("done");
-        let next = next_node_for(&graph, &current, status);
-
-        match next {
-            Some(next) => current = next,
-            None => break,
+        let next_edges = next_nodes_for(&graph, &current, executed.branch.as_deref());
+        for edge in next_edges {
+            enqueue_unique(&mut ready_nodes, edge.to.clone());
+            run.transitions.push(RunTransitionRecord {
+                id: uuid::Uuid::now_v7().to_string(),
+                from_stage_id: Some(stage_id.clone()),
+                from_node_id: Some(current.clone()),
+                to_node_id: edge.to,
+                branch: edge.branch.clone(),
+                timestamp: uuid::Uuid::now_v7().to_string(),
+                consumed_artifact_ids: executed.consumed_artifact_ids.clone(),
+                produced_artifact_ids: produced_artifact_ids.clone(),
+            });
         }
+        checkpoint_run(
+            &mut run,
+            &ready_nodes,
+            &completed_nodes,
+            Some(stage_id),
+            "stage_complete",
+            &persist_path,
+        )?;
     }
 
-    run.status = "completed".to_string();
+    run.status = if ready_nodes.is_empty() {
+        "completed".to_string()
+    } else {
+        "paused".to_string()
+    };
     run.finished_at = Some(uuid::Uuid::now_v7().to_string());
-    let persisted_path = save_run_record(&run, run.persisted_path.as_deref())?;
-    run.persisted_path = Some(persisted_path.clone());
-    save_run_record(&run, Some(&persisted_path))?;
+    run.replay_fixture = Some(replay_fixture_from_run(&run));
+    checkpoint_run(
+        &mut run,
+        &ready_nodes,
+        &completed_nodes,
+        None,
+        "finalize",
+        &persist_path,
+    )?;
 
     to_vm(&serde_json::json!({
         "status": run.status,
         "run": run,
         "artifacts": artifacts,
         "transcript": transcript.map(|value| crate::llm::vm_value_to_json(&value)),
-        "path": persisted_path,
+        "path": persist_path,
     }))
 }

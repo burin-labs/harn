@@ -47,6 +47,13 @@ pub enum QueuedUserMessageMode {
     WaitForCompletion,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DeliveryCheckpoint {
+    InterruptImmediate,
+    AfterCurrentOperation,
+    EndOfInteraction,
+}
+
 impl QueuedUserMessageMode {
     fn from_str(value: &str) -> Self {
         match value {
@@ -343,6 +350,23 @@ impl HostBridge {
         }
         *queue = retained;
         selected
+    }
+
+    pub async fn take_queued_user_messages_for(
+        &self,
+        checkpoint: DeliveryCheckpoint,
+    ) -> Vec<QueuedUserMessage> {
+        match checkpoint {
+            DeliveryCheckpoint::InterruptImmediate => {
+                self.take_queued_user_messages(true, false, false).await
+            }
+            DeliveryCheckpoint::AfterCurrentOperation => {
+                self.take_queued_user_messages(false, true, false).await
+            }
+            DeliveryCheckpoint::EndOfInteraction => {
+                self.take_queued_user_messages(false, false, true).await
+            }
+        }
     }
 
     /// Send an output notification (for log/print in bridge mode).

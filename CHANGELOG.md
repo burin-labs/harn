@@ -2,6 +2,44 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.4.31
+
+### Added
+
+- **Workflow replay fixtures and regression assertions** — run records now
+  produce explicit replay fixtures with stage assertions, workflow diff data,
+  and eval diagnostics that can be consumed from both the CLI and host code.
+- **Policy-aware transcript lifecycle controls** — transcript reset, archive,
+  abandon, resume, visible/full rendering, and canonical event separation are
+  now covered by runtime builtins, conformance tests, and host-facing docs.
+- **Tree-sitter workflow/runtime corpus coverage** — corpus tests now cover
+  workflow/runtime builtin-heavy programs so parser and highlighting regressions
+  show up in CI instead of after release.
+
+### Changed
+
+- **Workflow runtime semantics are more explicit** — condition, fork/join,
+  map/reduce, escalation, checkpoint, transition, and replay state all use
+  typed runtime records rather than status-string inference.
+- **Artifact selection is now a real context budgeter** — built-in artifact
+  kinds are normalized and ranked by priority, freshness, recency, pins, kind
+  preference, stage filters, and reserved token budget.
+- **Policy reporting accepts explicit ceilings** — `workflow_inspect(...)` and
+  `workflow_policy_report(...)` now let hosts inspect a graph against a real
+  upper bound instead of only the permissive builtin ceiling.
+
+### Fixed
+
+- **Bridge and MCP policy escape hatches closed** — unknown bridged builtins
+  and MCP client operations are now rejected under active execution ceilings
+  instead of bypassing workflow policy composition.
+- **Typechecker/runtime builtin drift reduced** — new workflow, replay,
+  artifact, and transcript builtins are recognized by static type inference and
+  LSP signatures.
+- **Conformance and tree-sitter release coverage** — workflow policy guardrail
+  assertions now validate against an explicit restrictive ceiling, and the
+  tree-sitter corpus matches the current grammar.
+
 ## v0.4.30
 
 ### Added

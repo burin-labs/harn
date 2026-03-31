@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::{cell::RefCell, thread_local};
 
 use serde::{Deserialize, Serialize};
 
@@ -24,6 +25,55 @@ fn default_run_dir() -> PathBuf {
     std::env::var("HARN_RUN_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from(".harn-runs"))
+}
+
+thread_local! {
+    static EXECUTION_POLICY_STACK: RefCell<Vec<CapabilityPolicy>> = const { RefCell::new(Vec::new()) };
+}
+
+fn normalize_artifact_kind(kind: &str) -> String {
+    match kind {
+        "resource"
+        | "workspace_file"
+        | "editor_selection"
+        | "transcript_summary"
+        | "summary"
+        | "plan"
+        | "diff"
+        | "patch"
+        | "verification_result"
+        | "test_result"
+        | "command_result"
+        | "provider_payload"
+        | "artifact" => kind.to_string(),
+        "file" => "workspace_file".to_string(),
+        "transcript" => "transcript_summary".to_string(),
+        "verification" => "verification_result".to_string(),
+        "test" => "test_result".to_string(),
+        other if other.trim().is_empty() => "artifact".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn default_artifact_priority(kind: &str) -> i64 {
+    match kind {
+        "verification_result" | "test_result" => 100,
+        "diff" | "patch" => 90,
+        "plan" => 80,
+        "workspace_file" | "editor_selection" | "resource" => 70,
+        "summary" | "transcript_summary" => 60,
+        "command_result" => 50,
+        _ => 40,
+    }
+}
+
+fn freshness_rank(value: Option<&str>) -> i64 {
+    match value.unwrap_or_default() {
+        "fresh" | "live" => 3,
+        "recent" => 2,
+        "stale" => 0,
+        _ => 1,
+    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -190,8 +240,14 @@ pub struct TranscriptPolicy {
 pub struct ContextPolicy {
     pub max_artifacts: Option<usize>,
     pub max_tokens: Option<usize>,
+    pub reserve_tokens: Option<usize>,
     pub include_kinds: Vec<String>,
     pub exclude_kinds: Vec<String>,
+    pub prioritize_kinds: Vec<String>,
+    pub pinned_ids: Vec<String>,
+    pub include_stages: Vec<String>,
+    pub prefer_recent: bool,
+    pub prefer_fresh: bool,
     pub render: Option<String>,
 }
 
@@ -201,6 +257,64 @@ pub struct RetryPolicy {
     pub max_attempts: usize,
     pub verify: bool,
     pub repair: bool,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct StageContract {
+    pub input_kinds: Vec<String>,
+    pub output_kinds: Vec<String>,
+    pub min_inputs: Option<usize>,
+    pub max_inputs: Option<usize>,
+    pub require_transcript: bool,
+    pub schema: Option<serde_json::Value>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct BranchSemantics {
+    pub success: Option<String>,
+    pub failure: Option<String>,
+    pub verify_pass: Option<String>,
+    pub verify_fail: Option<String>,
+    pub condition_true: Option<String>,
+    pub condition_false: Option<String>,
+    pub loop_continue: Option<String>,
+    pub loop_exit: Option<String>,
+    pub escalation: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct MapPolicy {
+    pub items: Vec<serde_json::Value>,
+    pub item_artifact_kind: Option<String>,
+    pub output_kind: Option<String>,
+    pub max_items: Option<usize>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct JoinPolicy {
+    pub strategy: String,
+    pub require_all_inputs: bool,
+    pub min_completed: Option<usize>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ReducePolicy {
+    pub strategy: String,
+    pub separator: Option<String>,
+    pub output_kind: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct EscalationPolicy {
+    pub level: Option<String>,
+    pub queue: Option<String>,
+    pub reason: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
@@ -216,6 +330,7 @@ pub struct ArtifactRecord {
     pub source: Option<String>,
     pub created_at: String,
     pub freshness: Option<String>,
+    pub priority: Option<i64>,
     pub lineage: Vec<String>,
     pub relevance: Option<f64>,
     pub estimated_tokens: Option<usize>,
@@ -237,11 +352,15 @@ impl ArtifactRecord {
         if self.kind.is_empty() {
             self.kind = "artifact".to_string();
         }
+        self.kind = normalize_artifact_kind(&self.kind);
         if self.estimated_tokens.is_none() {
             self.estimated_tokens = self
                 .text
                 .as_ref()
                 .map(|text| ((text.len() as f64) / 4.0).ceil() as usize);
+        }
+        if self.priority.is_none() {
+            self.priority = Some(default_artifact_priority(&self.kind));
         }
         self
     }
@@ -262,6 +381,13 @@ pub struct WorkflowNode {
     pub context_policy: ContextPolicy,
     pub retry_policy: RetryPolicy,
     pub capability_policy: CapabilityPolicy,
+    pub input_contract: StageContract,
+    pub output_contract: StageContract,
+    pub branch_semantics: BranchSemantics,
+    pub map_policy: MapPolicy,
+    pub join_policy: JoinPolicy,
+    pub reduce_policy: ReducePolicy,
+    pub escalation_policy: EscalationPolicy,
     pub verify: Option<serde_json::Value>,
     pub metadata: BTreeMap<String, serde_json::Value>,
 }
@@ -309,6 +435,8 @@ pub struct RunStageRecord {
     pub node_id: String,
     pub kind: String,
     pub status: String,
+    pub outcome: String,
+    pub branch: Option<String>,
     pub started_at: String,
     pub finished_at: Option<String>,
     pub visible_text: Option<String>,
@@ -316,7 +444,80 @@ pub struct RunStageRecord {
     pub transcript: Option<serde_json::Value>,
     pub verification: Option<serde_json::Value>,
     pub artifacts: Vec<ArtifactRecord>,
+    pub consumed_artifact_ids: Vec<String>,
+    pub produced_artifact_ids: Vec<String>,
+    pub attempts: Vec<RunStageAttemptRecord>,
     pub metadata: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct RunStageAttemptRecord {
+    pub attempt: usize,
+    pub status: String,
+    pub outcome: String,
+    pub branch: Option<String>,
+    pub error: Option<String>,
+    pub verification: Option<serde_json::Value>,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RunTransitionRecord {
+    pub id: String,
+    pub from_stage_id: Option<String>,
+    pub from_node_id: Option<String>,
+    pub to_node_id: String,
+    pub branch: Option<String>,
+    pub timestamp: String,
+    pub consumed_artifact_ids: Vec<String>,
+    pub produced_artifact_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RunCheckpointRecord {
+    pub id: String,
+    pub ready_nodes: Vec<String>,
+    pub completed_nodes: Vec<String>,
+    pub last_stage_id: Option<String>,
+    pub persisted_at: String,
+    pub reason: String,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ReplayFixture {
+    #[serde(rename = "_type")]
+    pub type_name: String,
+    pub id: String,
+    pub source_run_id: String,
+    pub workflow_id: String,
+    pub workflow_name: Option<String>,
+    pub created_at: String,
+    pub expected_status: String,
+    pub stage_assertions: Vec<ReplayStageAssertion>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ReplayStageAssertion {
+    pub node_id: String,
+    pub expected_status: String,
+    pub expected_outcome: String,
+    pub expected_branch: Option<String>,
+    pub required_artifact_kinds: Vec<String>,
+    pub visible_text_contains: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ReplayEvalReport {
+    pub pass: bool,
+    pub failures: Vec<String>,
+    pub stage_count: usize,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
@@ -332,9 +533,14 @@ pub struct RunRecord {
     pub started_at: String,
     pub finished_at: Option<String>,
     pub stages: Vec<RunStageRecord>,
+    pub transitions: Vec<RunTransitionRecord>,
+    pub checkpoints: Vec<RunCheckpointRecord>,
+    pub pending_nodes: Vec<String>,
+    pub completed_nodes: Vec<String>,
     pub artifacts: Vec<ArtifactRecord>,
     pub policy: CapabilityPolicy,
     pub transcript: Option<serde_json::Value>,
+    pub replay_fixture: Option<ReplayFixture>,
     pub metadata: BTreeMap<String, serde_json::Value>,
     pub persisted_path: Option<String>,
 }
@@ -478,6 +684,29 @@ pub fn normalize_workflow_value(value: &VmValue) -> Result<WorkflowGraph, VmErro
         if node.kind.is_empty() {
             node.kind = "stage".to_string();
         }
+        if node.join_policy.strategy.is_empty() {
+            node.join_policy.strategy = "all".to_string();
+        }
+        if node.reduce_policy.strategy.is_empty() {
+            node.reduce_policy.strategy = "concat".to_string();
+        }
+        if node.output_contract.output_kinds.is_empty() {
+            node.output_contract.output_kinds = vec![match node.kind.as_str() {
+                "verify" => "verification_result".to_string(),
+                "reduce" => node
+                    .reduce_policy
+                    .output_kind
+                    .clone()
+                    .unwrap_or_else(|| "summary".to_string()),
+                "map" => node
+                    .map_policy
+                    .output_kind
+                    .clone()
+                    .unwrap_or_else(|| "artifact".to_string()),
+                "escalation" => "plan".to_string(),
+                _ => "artifact".to_string(),
+            }];
+        }
         if node.retry_policy.max_attempts == 0 {
             node.retry_policy.max_attempts = 1;
         }
@@ -510,6 +739,75 @@ pub fn validate_workflow(
     for node_id in &node_ids {
         if !reachable_nodes.contains(node_id) {
             warnings.push(format!("node is unreachable: {node_id}"));
+        }
+    }
+
+    for (node_id, node) in &graph.nodes {
+        let incoming = graph
+            .edges
+            .iter()
+            .filter(|edge| edge.to == *node_id)
+            .count();
+        let outgoing: Vec<&WorkflowEdge> = graph
+            .edges
+            .iter()
+            .filter(|edge| edge.from == *node_id)
+            .collect();
+        if let Some(min_inputs) = node.input_contract.min_inputs {
+            if let Some(max_inputs) = node.input_contract.max_inputs {
+                if min_inputs > max_inputs {
+                    errors.push(format!(
+                        "node {node_id}: input contract min_inputs exceeds max_inputs"
+                    ));
+                }
+            }
+        }
+        match node.kind.as_str() {
+            "condition" => {
+                let has_true = outgoing
+                    .iter()
+                    .any(|edge| edge.branch.as_deref() == Some("true"));
+                let has_false = outgoing
+                    .iter()
+                    .any(|edge| edge.branch.as_deref() == Some("false"));
+                if !has_true || !has_false {
+                    errors.push(format!(
+                        "node {node_id}: condition nodes require both 'true' and 'false' branch edges"
+                    ));
+                }
+            }
+            "fork" => {
+                if outgoing.len() < 2 {
+                    errors.push(format!(
+                        "node {node_id}: fork nodes require at least two outgoing edges"
+                    ));
+                }
+            }
+            "join" => {
+                if incoming < 2 {
+                    warnings.push(format!(
+                        "node {node_id}: join node has fewer than two incoming edges"
+                    ));
+                }
+            }
+            "map" => {
+                if node.map_policy.items.is_empty()
+                    && node.map_policy.item_artifact_kind.is_none()
+                    && node.input_contract.input_kinds.is_empty()
+                {
+                    errors.push(format!(
+                        "node {node_id}: map nodes require items, item_artifact_kind, or input_contract.input_kinds"
+                    ));
+                }
+            }
+            "reduce" => {
+                if node.input_contract.input_kinds.is_empty() {
+                    warnings.push(format!(
+                        "node {node_id}: reduce node has no input_contract.input_kinds; it will consume all available artifacts"
+                    ));
+                }
+            }
+            _ => {}
         }
     }
 
@@ -553,11 +851,47 @@ pub fn select_artifacts(
     artifacts.retain(|artifact| {
         (policy.include_kinds.is_empty() || policy.include_kinds.contains(&artifact.kind))
             && !policy.exclude_kinds.contains(&artifact.kind)
+            && (policy.include_stages.is_empty()
+                || artifact
+                    .stage
+                    .as_ref()
+                    .is_some_and(|stage| policy.include_stages.contains(stage)))
     });
     artifacts.sort_by(|a, b| {
-        b.relevance
-            .partial_cmp(&a.relevance)
-            .unwrap_or(std::cmp::Ordering::Equal)
+        let b_pinned = policy.pinned_ids.contains(&b.id);
+        let a_pinned = policy.pinned_ids.contains(&a.id);
+        b_pinned
+            .cmp(&a_pinned)
+            .then_with(|| {
+                let b_prio_kind = policy.prioritize_kinds.contains(&b.kind);
+                let a_prio_kind = policy.prioritize_kinds.contains(&a.kind);
+                b_prio_kind.cmp(&a_prio_kind)
+            })
+            .then_with(|| {
+                b.priority
+                    .unwrap_or_default()
+                    .cmp(&a.priority.unwrap_or_default())
+            })
+            .then_with(|| {
+                if policy.prefer_fresh {
+                    freshness_rank(b.freshness.as_deref())
+                        .cmp(&freshness_rank(a.freshness.as_deref()))
+                } else {
+                    std::cmp::Ordering::Equal
+                }
+            })
+            .then_with(|| {
+                if policy.prefer_recent {
+                    b.created_at.cmp(&a.created_at)
+                } else {
+                    std::cmp::Ordering::Equal
+                }
+            })
+            .then_with(|| {
+                b.relevance
+                    .partial_cmp(&a.relevance)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
             .then_with(|| {
                 a.estimated_tokens
                     .unwrap_or(usize::MAX)
@@ -567,6 +901,10 @@ pub fn select_artifacts(
 
     let mut selected = Vec::new();
     let mut used_tokens = 0usize;
+    let reserve_tokens = policy.reserve_tokens.unwrap_or(0);
+    let effective_max_tokens = policy
+        .max_tokens
+        .map(|max| max.saturating_sub(reserve_tokens));
     for artifact in artifacts {
         if let Some(max_artifacts) = policy.max_artifacts {
             if selected.len() >= max_artifacts {
@@ -574,7 +912,7 @@ pub fn select_artifacts(
             }
         }
         let next_tokens = artifact.estimated_tokens.unwrap_or(0);
-        if let Some(max_tokens) = policy.max_tokens {
+        if let Some(max_tokens) = effective_max_tokens {
             if used_tokens + next_tokens > max_tokens {
                 continue;
             }
@@ -605,12 +943,27 @@ pub fn render_artifacts_context(artifacts: &[ArtifactRecord], policy: &ContextPo
                         "kind": artifact.kind,
                         "title": title,
                         "source": artifact.source,
+                        "freshness": artifact.freshness,
+                        "priority": artifact.priority,
                         "text": body,
                     })
                     .to_string(),
                 );
             }
-            _ => parts.push(format!("[{title}]\n{body}")),
+            _ => parts.push(format!(
+                "[{title}] kind={} source={} freshness={} priority={}\n{}",
+                artifact.kind,
+                artifact
+                    .source
+                    .clone()
+                    .unwrap_or_else(|| "unknown".to_string()),
+                artifact
+                    .freshness
+                    .clone()
+                    .unwrap_or_else(|| "normal".to_string()),
+                artifact.priority.unwrap_or_default(),
+                body
+            )),
         }
     }
     parts.join("\n\n")
@@ -635,6 +988,9 @@ pub fn normalize_run_record(value: &VmValue) -> Result<RunRecord, VmError> {
     if run.status.is_empty() {
         run.status = "running".to_string();
     }
+    if run.replay_fixture.is_none() {
+        run.replay_fixture = Some(replay_fixture_from_run(&run));
+    }
     Ok(run)
 }
 
@@ -658,6 +1014,279 @@ pub fn load_run_record(path: &Path) -> Result<RunRecord, VmError> {
         .map_err(|e| VmError::Runtime(format!("failed to read run record: {e}")))?;
     serde_json::from_str(&content)
         .map_err(|e| VmError::Runtime(format!("failed to parse run record: {e}")))
+}
+
+pub fn replay_fixture_from_run(run: &RunRecord) -> ReplayFixture {
+    ReplayFixture {
+        type_name: "replay_fixture".to_string(),
+        id: new_id("fixture"),
+        source_run_id: run.id.clone(),
+        workflow_id: run.workflow_id.clone(),
+        workflow_name: run.workflow_name.clone(),
+        created_at: now_rfc3339(),
+        expected_status: run.status.clone(),
+        stage_assertions: run
+            .stages
+            .iter()
+            .map(|stage| ReplayStageAssertion {
+                node_id: stage.node_id.clone(),
+                expected_status: stage.status.clone(),
+                expected_outcome: stage.outcome.clone(),
+                expected_branch: stage.branch.clone(),
+                required_artifact_kinds: stage
+                    .artifacts
+                    .iter()
+                    .map(|artifact| artifact.kind.clone())
+                    .collect(),
+                visible_text_contains: stage
+                    .visible_text
+                    .as_ref()
+                    .filter(|text| !text.is_empty())
+                    .map(|text| text.chars().take(80).collect()),
+            })
+            .collect(),
+    }
+}
+
+pub fn evaluate_run_against_fixture(run: &RunRecord, fixture: &ReplayFixture) -> ReplayEvalReport {
+    let mut failures = Vec::new();
+    if run.status != fixture.expected_status {
+        failures.push(format!(
+            "run status mismatch: expected {}, got {}",
+            fixture.expected_status, run.status
+        ));
+    }
+    for assertion in &fixture.stage_assertions {
+        let Some(stage) = run
+            .stages
+            .iter()
+            .find(|stage| stage.node_id == assertion.node_id)
+        else {
+            failures.push(format!("missing stage {}", assertion.node_id));
+            continue;
+        };
+        if stage.status != assertion.expected_status {
+            failures.push(format!(
+                "stage {} status mismatch: expected {}, got {}",
+                assertion.node_id, assertion.expected_status, stage.status
+            ));
+        }
+        if stage.outcome != assertion.expected_outcome {
+            failures.push(format!(
+                "stage {} outcome mismatch: expected {}, got {}",
+                assertion.node_id, assertion.expected_outcome, stage.outcome
+            ));
+        }
+        if stage.branch != assertion.expected_branch {
+            failures.push(format!(
+                "stage {} branch mismatch: expected {:?}, got {:?}",
+                assertion.node_id, assertion.expected_branch, stage.branch
+            ));
+        }
+        for required_kind in &assertion.required_artifact_kinds {
+            if !stage
+                .artifacts
+                .iter()
+                .any(|artifact| &artifact.kind == required_kind)
+            {
+                failures.push(format!(
+                    "stage {} missing artifact kind {}",
+                    assertion.node_id, required_kind
+                ));
+            }
+        }
+        if let Some(snippet) = &assertion.visible_text_contains {
+            let actual = stage.visible_text.clone().unwrap_or_default();
+            if !actual.contains(snippet) {
+                failures.push(format!(
+                    "stage {} visible text does not contain expected snippet {:?}",
+                    assertion.node_id, snippet
+                ));
+            }
+        }
+    }
+
+    ReplayEvalReport {
+        pass: failures.is_empty(),
+        failures,
+        stage_count: run.stages.len(),
+    }
+}
+
+pub fn push_execution_policy(policy: CapabilityPolicy) {
+    EXECUTION_POLICY_STACK.with(|stack| stack.borrow_mut().push(policy));
+}
+
+pub fn pop_execution_policy() {
+    EXECUTION_POLICY_STACK.with(|stack| {
+        stack.borrow_mut().pop();
+    });
+}
+
+pub fn current_execution_policy() -> Option<CapabilityPolicy> {
+    EXECUTION_POLICY_STACK.with(|stack| stack.borrow().last().cloned())
+}
+
+fn policy_allows_tool(policy: &CapabilityPolicy, tool: &str) -> bool {
+    policy.tools.is_empty() || policy.tools.iter().any(|allowed| allowed == tool)
+}
+
+fn policy_allows_capability(policy: &CapabilityPolicy, capability: &str, op: &str) -> bool {
+    policy.capabilities.is_empty()
+        || policy
+            .capabilities
+            .get(capability)
+            .is_some_and(|ops| ops.is_empty() || ops.iter().any(|allowed| allowed == op))
+}
+
+fn policy_allows_side_effect(policy: &CapabilityPolicy, requested: &str) -> bool {
+    fn rank(v: &str) -> usize {
+        match v {
+            "none" => 0,
+            "read_only" => 1,
+            "workspace_write" => 2,
+            "process_exec" => 3,
+            "network" => 4,
+            _ => 5,
+        }
+    }
+    policy
+        .side_effect_level
+        .as_ref()
+        .map(|allowed| rank(allowed) >= rank(requested))
+        .unwrap_or(true)
+}
+
+fn reject_policy(reason: String) -> Result<(), VmError> {
+    Err(VmError::CategorizedError {
+        message: reason,
+        category: crate::value::ErrorCategory::ToolRejected,
+    })
+}
+
+pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Result<(), VmError> {
+    let Some(policy) = current_execution_policy() else {
+        return Ok(());
+    };
+    match name {
+        "read" | "read_file" => {
+            if !policy_allows_tool(&policy, name)
+                || !policy_allows_capability(&policy, "workspace", "read_text")
+            {
+                return reject_policy(format!(
+                    "builtin '{name}' exceeds workspace.read_text ceiling"
+                ));
+            }
+        }
+        "search" | "list_dir" => {
+            if !policy_allows_tool(&policy, name)
+                || !policy_allows_capability(&policy, "workspace", "list")
+            {
+                return reject_policy(format!("builtin '{name}' exceeds workspace.list ceiling"));
+            }
+        }
+        "file_exists" | "stat" => {
+            if !policy_allows_capability(&policy, "workspace", "exists") {
+                return reject_policy(format!("builtin '{name}' exceeds workspace.exists ceiling"));
+            }
+        }
+        "edit" | "write_file" | "append_file" | "mkdir" | "copy_file" => {
+            if !policy_allows_tool(&policy, "edit")
+                || !policy_allows_capability(&policy, "workspace", "write_text")
+                || !policy_allows_side_effect(&policy, "workspace_write")
+            {
+                return reject_policy(format!("builtin '{name}' exceeds workspace write ceiling"));
+            }
+        }
+        "delete_file" => {
+            if !policy_allows_capability(&policy, "workspace", "delete")
+                || !policy_allows_side_effect(&policy, "workspace_write")
+            {
+                return reject_policy(
+                    "builtin 'delete_file' exceeds workspace.delete ceiling".to_string(),
+                );
+            }
+        }
+        "apply_edit" => {
+            if !policy_allows_capability(&policy, "workspace", "apply_edit")
+                || !policy_allows_side_effect(&policy, "workspace_write")
+            {
+                return reject_policy(
+                    "builtin 'apply_edit' exceeds workspace.apply_edit ceiling".to_string(),
+                );
+            }
+        }
+        "exec" | "shell" | "run_command" => {
+            if !policy_allows_tool(&policy, "run")
+                || !policy_allows_capability(&policy, "process", "exec")
+                || !policy_allows_side_effect(&policy, "process_exec")
+            {
+                return reject_policy(format!("builtin '{name}' exceeds process.exec ceiling"));
+            }
+        }
+        "http_get" | "http_post" | "http_put" | "http_patch" | "http_delete" | "http_request" => {
+            if !policy_allows_side_effect(&policy, "network") {
+                return reject_policy(format!("builtin '{name}' exceeds network ceiling"));
+            }
+        }
+        "mcp_connect"
+        | "mcp_call"
+        | "mcp_list_tools"
+        | "mcp_list_resources"
+        | "mcp_list_resource_templates"
+        | "mcp_read_resource"
+        | "mcp_list_prompts"
+        | "mcp_get_prompt"
+        | "mcp_server_info"
+        | "mcp_disconnect" => {
+            if !policy_allows_tool(&policy, "run")
+                || !policy_allows_capability(&policy, "process", "exec")
+                || !policy_allows_side_effect(&policy, "process_exec")
+            {
+                return reject_policy(format!("builtin '{name}' exceeds process.exec ceiling"));
+            }
+        }
+        "host_invoke" => {
+            let capability = args.first().map(|v| v.display()).unwrap_or_default();
+            let op = args.get(1).map(|v| v.display()).unwrap_or_default();
+            if !policy_allows_capability(&policy, &capability, &op) {
+                return reject_policy(format!(
+                    "host_invoke {capability}.{op} exceeds capability ceiling"
+                ));
+            }
+            let requested_side_effect = match (capability.as_str(), op.as_str()) {
+                ("workspace", "write_text" | "apply_edit" | "delete") => "workspace_write",
+                ("process", "exec") => "process_exec",
+                _ => "read_only",
+            };
+            if !policy_allows_side_effect(&policy, requested_side_effect) {
+                return reject_policy(format!(
+                    "host_invoke {capability}.{op} exceeds side-effect ceiling"
+                ));
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+pub fn enforce_current_policy_for_bridge_builtin(name: &str) -> Result<(), VmError> {
+    if current_execution_policy().is_some() {
+        return reject_policy(format!(
+            "bridged builtin '{name}' exceeds execution policy; declare an explicit capability/tool surface instead"
+        ));
+    }
+    Ok(())
+}
+
+pub fn enforce_current_policy_for_tool(tool_name: &str) -> Result<(), VmError> {
+    let Some(policy) = current_execution_policy() else {
+        return Ok(());
+    };
+    if !policy_allows_tool(&policy, tool_name) {
+        return reject_policy(format!("tool '{tool_name}' exceeds tool ceiling"));
+    }
+    Ok(())
 }
 
 fn compact_transcript(transcript: &VmValue, keep_last: usize) -> Option<VmValue> {
@@ -780,9 +1409,32 @@ pub async fn execute_stage_node(
     artifacts: &[ArtifactRecord],
     transcript: Option<VmValue>,
 ) -> Result<(serde_json::Value, Vec<ArtifactRecord>, Option<VmValue>), VmError> {
-    let selected = select_artifacts(artifacts.to_vec(), &node.context_policy);
+    let mut selection_policy = node.context_policy.clone();
+    if selection_policy.include_kinds.is_empty() && !node.input_contract.input_kinds.is_empty() {
+        selection_policy.include_kinds = node.input_contract.input_kinds.clone();
+    }
+    let selected = select_artifacts(artifacts.to_vec(), &selection_policy);
     let rendered_context = render_artifacts_context(&selected, &node.context_policy);
     let transcript = apply_input_transcript_policy(transcript, &node.transcript_policy);
+    if node.input_contract.require_transcript && transcript.is_none() {
+        return Err(VmError::Runtime(format!(
+            "workflow stage {node_id} requires transcript input"
+        )));
+    }
+    if let Some(min_inputs) = node.input_contract.min_inputs {
+        if selected.len() < min_inputs {
+            return Err(VmError::Runtime(format!(
+                "workflow stage {node_id} requires at least {min_inputs} input artifacts"
+            )));
+        }
+    }
+    if let Some(max_inputs) = node.input_contract.max_inputs {
+        if selected.len() > max_inputs {
+            return Err(VmError::Runtime(format!(
+                "workflow stage {node_id} accepts at most {max_inputs} input artifacts"
+            )));
+        }
+    }
     let prompt = if rendered_context.is_empty() {
         task.to_string()
     } else {
@@ -869,20 +1521,38 @@ pub async fn execute_stage_node(
         .cloned()
         .map(|value| crate::stdlib::json_to_vm_value(&value));
     let transcript = apply_output_transcript_policy(transcript, &node.transcript_policy);
+    let output_kind = node
+        .output_contract
+        .output_kinds
+        .first()
+        .cloned()
+        .unwrap_or_else(|| {
+            if node.kind == "verify" {
+                "verification_result".to_string()
+            } else {
+                "artifact".to_string()
+            }
+        });
+    let mut metadata = BTreeMap::new();
+    metadata.insert(
+        "input_artifact_ids".to_string(),
+        serde_json::json!(selected
+            .iter()
+            .map(|artifact| artifact.id.clone())
+            .collect::<Vec<_>>()),
+    );
+    metadata.insert("node_kind".to_string(), serde_json::json!(node.kind));
     let artifact = ArtifactRecord {
         type_name: "artifact".to_string(),
         id: new_id("artifact"),
-        kind: if node.kind == "verify" {
-            "verification_result".to_string()
-        } else {
-            "artifact".to_string()
-        },
+        kind: output_kind,
         title: Some(format!("stage {node_id} output")),
         text: Some(visible_text),
         data: Some(llm_result.clone()),
         source: Some(node_id.to_string()),
         created_at: now_rfc3339(),
         freshness: Some("fresh".to_string()),
+        priority: None,
         lineage: selected
             .iter()
             .map(|artifact| artifact.id.clone())
@@ -890,25 +1560,40 @@ pub async fn execute_stage_node(
         relevance: Some(1.0),
         estimated_tokens: None,
         stage: Some(node_id.to_string()),
-        metadata: BTreeMap::new(),
+        metadata,
     }
     .normalize();
 
     Ok((llm_result, vec![artifact], transcript))
 }
 
-pub fn next_node_for(graph: &WorkflowGraph, current: &str, status: &str) -> Option<String> {
-    graph
+pub fn next_nodes_for(
+    graph: &WorkflowGraph,
+    current: &str,
+    branch: Option<&str>,
+) -> Vec<WorkflowEdge> {
+    let mut matching: Vec<WorkflowEdge> = graph
         .edges
         .iter()
-        .find(|edge| edge.from == current && edge.branch.as_deref() == Some(status))
-        .or_else(|| {
-            graph
-                .edges
-                .iter()
-                .find(|edge| edge.from == current && edge.branch.is_none())
-        })
-        .map(|edge| edge.to.clone())
+        .filter(|edge| edge.from == current && edge.branch.as_deref() == branch)
+        .cloned()
+        .collect();
+    if matching.is_empty() {
+        matching = graph
+            .edges
+            .iter()
+            .filter(|edge| edge.from == current && edge.branch.is_none())
+            .cloned()
+            .collect();
+    }
+    matching
+}
+
+pub fn next_node_for(graph: &WorkflowGraph, current: &str, branch: &str) -> Option<String> {
+    next_nodes_for(graph, current, Some(branch))
+        .into_iter()
+        .next()
+        .map(|edge| edge.to)
 }
 
 pub fn append_audit_entry(
@@ -987,6 +1672,52 @@ mod tests {
     }
 
     #[test]
+    fn active_execution_policy_rejects_unknown_bridge_builtin() {
+        push_execution_policy(CapabilityPolicy {
+            tools: vec!["read".to_string()],
+            capabilities: BTreeMap::from([(
+                "workspace".to_string(),
+                vec!["read_text".to_string()],
+            )]),
+            workspace_roots: Vec::new(),
+            side_effect_level: Some("read_only".to_string()),
+            recursion_limit: Some(1),
+        });
+        let error = enforce_current_policy_for_bridge_builtin("custom_host_builtin").unwrap_err();
+        pop_execution_policy();
+        assert!(matches!(
+            error,
+            VmError::CategorizedError {
+                category: crate::value::ErrorCategory::ToolRejected,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn active_execution_policy_rejects_mcp_escape_hatch() {
+        push_execution_policy(CapabilityPolicy {
+            tools: vec!["read".to_string()],
+            capabilities: BTreeMap::from([(
+                "workspace".to_string(),
+                vec!["read_text".to_string()],
+            )]),
+            workspace_roots: Vec::new(),
+            side_effect_level: Some("read_only".to_string()),
+            recursion_limit: Some(1),
+        });
+        let error = enforce_current_policy_for_builtin("mcp_connect", &[]).unwrap_err();
+        pop_execution_policy();
+        assert!(matches!(
+            error,
+            VmError::CategorizedError {
+                category: crate::value::ErrorCategory::ToolRejected,
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn workflow_normalization_upgrades_legacy_act_verify_repair_shape() {
         let value = crate::stdlib::json_to_vm_value(&serde_json::json!({
             "name": "legacy",
@@ -1007,6 +1738,9 @@ mod tests {
         let policy = ContextPolicy {
             max_artifacts: Some(2),
             max_tokens: Some(30),
+            prefer_recent: true,
+            prefer_fresh: true,
+            prioritize_kinds: vec!["verification_result".to_string()],
             ..Default::default()
         };
         let artifacts = vec![
@@ -1044,5 +1778,111 @@ mod tests {
         let selected = select_artifacts(artifacts, &policy);
         assert_eq!(selected.len(), 2);
         assert!(selected.iter().all(|artifact| artifact.kind == "summary"));
+    }
+
+    #[test]
+    fn workflow_validation_rejects_condition_without_true_false_edges() {
+        let graph = WorkflowGraph {
+            entry: "gate".to_string(),
+            nodes: BTreeMap::from([(
+                "gate".to_string(),
+                WorkflowNode {
+                    id: Some("gate".to_string()),
+                    kind: "condition".to_string(),
+                    ..Default::default()
+                },
+            )]),
+            edges: vec![WorkflowEdge {
+                from: "gate".to_string(),
+                to: "next".to_string(),
+                branch: Some("true".to_string()),
+                label: None,
+            }],
+            ..Default::default()
+        };
+        let report = validate_workflow(&graph, None);
+        assert!(!report.valid);
+        assert!(report
+            .errors
+            .iter()
+            .any(|error| error.contains("true") && error.contains("false")));
+    }
+
+    #[test]
+    fn replay_fixture_round_trip_passes() {
+        let run = RunRecord {
+            type_name: "run_record".to_string(),
+            id: "run_1".to_string(),
+            workflow_id: "wf".to_string(),
+            workflow_name: Some("demo".to_string()),
+            task: "demo".to_string(),
+            status: "completed".to_string(),
+            started_at: "1".to_string(),
+            finished_at: Some("2".to_string()),
+            stages: vec![RunStageRecord {
+                id: "stage_1".to_string(),
+                node_id: "act".to_string(),
+                kind: "stage".to_string(),
+                status: "completed".to_string(),
+                outcome: "success".to_string(),
+                branch: Some("success".to_string()),
+                started_at: "1".to_string(),
+                finished_at: Some("2".to_string()),
+                visible_text: Some("done".to_string()),
+                private_reasoning: None,
+                transcript: None,
+                verification: None,
+                artifacts: vec![ArtifactRecord {
+                    type_name: "artifact".to_string(),
+                    id: "a1".to_string(),
+                    kind: "summary".to_string(),
+                    text: Some("done".to_string()),
+                    created_at: "1".to_string(),
+                    ..Default::default()
+                }
+                .normalize()],
+                consumed_artifact_ids: vec![],
+                produced_artifact_ids: vec!["a1".to_string()],
+                attempts: vec![],
+                metadata: BTreeMap::new(),
+            }],
+            transitions: vec![],
+            checkpoints: vec![],
+            pending_nodes: vec![],
+            completed_nodes: vec!["act".to_string()],
+            artifacts: vec![],
+            policy: CapabilityPolicy::default(),
+            transcript: None,
+            replay_fixture: None,
+            metadata: BTreeMap::new(),
+            persisted_path: None,
+        };
+        let fixture = replay_fixture_from_run(&run);
+        let report = evaluate_run_against_fixture(&run, &fixture);
+        assert!(report.pass);
+        assert!(report.failures.is_empty());
+    }
+
+    #[test]
+    fn execution_policy_rejects_process_exec_when_read_only() {
+        push_execution_policy(CapabilityPolicy {
+            side_effect_level: Some("read_only".to_string()),
+            capabilities: BTreeMap::from([("process".to_string(), vec!["exec".to_string()])]),
+            ..Default::default()
+        });
+        let result = enforce_current_policy_for_builtin("exec", &[]);
+        pop_execution_policy();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn execution_policy_rejects_unlisted_tool() {
+        push_execution_policy(CapabilityPolicy {
+            tools: vec!["read".to_string()],
+            ..Default::default()
+        });
+        let result = enforce_current_policy_for_tool("edit");
+        pop_execution_policy();
+        assert!(result.is_err());
     }
 }

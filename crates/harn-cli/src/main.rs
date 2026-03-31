@@ -440,8 +440,18 @@ fn inspect_run_record(path: &str) {
     println!("Task: {}", run.task);
     println!("Stages: {}", run.stages.len());
     println!("Artifacts: {}", run.artifacts.len());
+    println!("Transitions: {}", run.transitions.len());
+    println!("Checkpoints: {}", run.checkpoints.len());
+    println!("Pending nodes: {}", run.pending_nodes.join(", "));
     for stage in &run.stages {
-        println!("- {} [{}] {}", stage.node_id, stage.kind, stage.status);
+        println!(
+            "- {} [{}] status={} outcome={} branch={}",
+            stage.node_id,
+            stage.kind,
+            stage.status,
+            stage.outcome,
+            stage.branch.clone().unwrap_or_else(|| "-".to_string())
+        );
     }
 }
 
@@ -455,8 +465,18 @@ fn replay_run_record(path: &str) {
     };
     println!("Replay: {}", run.id);
     for stage in &run.stages {
+        println!(
+            "[{}] status={} outcome={} branch={}",
+            stage.node_id,
+            stage.status,
+            stage.outcome,
+            stage.branch.clone().unwrap_or_else(|| "-".to_string())
+        );
         if let Some(text) = &stage.visible_text {
-            println!("[{}] {}", stage.node_id, text);
+            println!("  visible: {}", text);
+        }
+        if let Some(verification) = &stage.verification {
+            println!("  verification: {}", verification);
         }
     }
     if let Some(transcript) = &run.transcript {
@@ -466,6 +486,29 @@ fn replay_run_record(path: &str) {
                 .as_array()
                 .map(|v| v.len())
                 .unwrap_or(0)
+        );
+    }
+    let fixture = run
+        .replay_fixture
+        .clone()
+        .unwrap_or_else(|| harn_vm::orchestration::replay_fixture_from_run(&run));
+    let report = harn_vm::orchestration::evaluate_run_against_fixture(&run, &fixture);
+    println!(
+        "Embedded replay fixture: {}",
+        if report.pass { "PASS" } else { "FAIL" }
+    );
+    for transition in &run.transitions {
+        println!(
+            "transition {} -> {} ({})",
+            transition
+                .from_node_id
+                .clone()
+                .unwrap_or_else(|| "start".to_string()),
+            transition.to_node_id,
+            transition
+                .branch
+                .clone()
+                .unwrap_or_else(|| "default".to_string())
         );
     }
 }
@@ -478,9 +521,19 @@ fn eval_run_record(path: &str) {
             process::exit(1);
         }
     };
-    let passed = run.status == "completed" && !run.stages.is_empty();
-    println!("{}", if passed { "PASS" } else { "FAIL" });
-    if !passed {
+    let fixture = run
+        .replay_fixture
+        .clone()
+        .unwrap_or_else(|| harn_vm::orchestration::replay_fixture_from_run(&run));
+    let report = harn_vm::orchestration::evaluate_run_against_fixture(&run, &fixture);
+    println!("{}", if report.pass { "PASS" } else { "FAIL" });
+    println!("Stages: {}", report.stage_count);
+    if !report.failures.is_empty() {
+        for failure in &report.failures {
+            println!("- {}", failure);
+        }
+    }
+    if !report.pass {
         process::exit(1);
     }
 }

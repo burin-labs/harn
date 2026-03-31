@@ -335,8 +335,20 @@ pub(crate) fn new_transcript_with(
     summary: Option<String>,
     metadata: Option<VmValue>,
 ) -> VmValue {
+    new_transcript_with_events(id, messages, summary, metadata, Vec::new(), None)
+}
+
+pub(crate) fn new_transcript_with_events(
+    id: Option<String>,
+    messages: Vec<VmValue>,
+    summary: Option<String>,
+    metadata: Option<VmValue>,
+    extra_events: Vec<VmValue>,
+    state: Option<&str>,
+) -> VmValue {
     let mut transcript = BTreeMap::new();
-    let events = transcript_events_from_messages(&messages);
+    let mut events = transcript_events_from_messages(&messages);
+    events.extend(extra_events);
     transcript.insert(
         "_type".to_string(),
         VmValue::String(Rc::from(TRANSCRIPT_TYPE)),
@@ -354,6 +366,9 @@ pub(crate) fn new_transcript_with(
     }
     if let Some(metadata) = metadata {
         transcript.insert("metadata".to_string(), metadata);
+    }
+    if let Some(state) = state {
+        transcript.insert("state".to_string(), VmValue::String(Rc::from(state)));
     }
     VmValue::Dict(Rc::new(transcript))
 }
@@ -417,8 +432,65 @@ pub(crate) fn transcript_to_vm(
     metadata: Option<serde_json::Value>,
     messages: &[serde_json::Value],
 ) -> VmValue {
+    transcript_to_vm_with_events(id, summary, metadata, messages, Vec::new(), None)
+}
+
+pub(crate) fn transcript_to_vm_with_events(
+    id: Option<String>,
+    summary: Option<String>,
+    metadata: Option<serde_json::Value>,
+    messages: &[serde_json::Value],
+    extra_events: Vec<VmValue>,
+    state: Option<&str>,
+) -> VmValue {
     let metadata_vm = metadata.as_ref().map(crate::stdlib::json_to_vm_value);
-    new_transcript_with(id, json_messages_to_vm(messages), summary, metadata_vm)
+    new_transcript_with_events(
+        id,
+        json_messages_to_vm(messages),
+        summary,
+        metadata_vm,
+        extra_events,
+        state,
+    )
+}
+
+pub(crate) fn transcript_event(
+    kind: &str,
+    role: &str,
+    visibility: &str,
+    text: &str,
+    metadata: Option<serde_json::Value>,
+) -> VmValue {
+    let mut event = BTreeMap::new();
+    event.insert(
+        "id".to_string(),
+        VmValue::String(Rc::from(uuid::Uuid::now_v7().to_string())),
+    );
+    event.insert("kind".to_string(), VmValue::String(Rc::from(kind)));
+    event.insert("role".to_string(), VmValue::String(Rc::from(role)));
+    event.insert(
+        "visibility".to_string(),
+        VmValue::String(Rc::from(visibility)),
+    );
+    event.insert("text".to_string(), VmValue::String(Rc::from(text)));
+    event.insert(
+        "blocks".to_string(),
+        VmValue::List(Rc::new(vec![VmValue::Dict(Rc::new(BTreeMap::from([
+            ("type".to_string(), VmValue::String(Rc::from("text"))),
+            ("text".to_string(), VmValue::String(Rc::from(text))),
+            (
+                "visibility".to_string(),
+                VmValue::String(Rc::from(visibility)),
+            ),
+        ])))])),
+    );
+    if let Some(metadata) = metadata {
+        event.insert(
+            "metadata".to_string(),
+            crate::stdlib::json_to_vm_value(&metadata),
+        );
+    }
+    VmValue::Dict(Rc::new(event))
 }
 
 pub(crate) fn is_transcript_value(value: &VmValue) -> bool {

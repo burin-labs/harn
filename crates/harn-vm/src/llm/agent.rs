@@ -4,7 +4,9 @@ use crate::value::{ErrorCategory, VmError, VmValue};
 use crate::vm::Vm;
 
 use super::api::{vm_call_llm_full_streaming, DeltaSender};
-use super::helpers::{extract_llm_options, opt_bool, opt_int, opt_str, transcript_to_vm};
+use super::helpers::{
+    extract_llm_options, opt_bool, opt_int, opt_str, transcript_event, transcript_to_vm_with_events,
+};
 use super::tools::{
     build_assistant_tool_message, build_text_tool_prompt, build_tool_result_message,
     handle_tool_locally, normalize_tool_args, parse_text_tool_calls, resolve_tools_for_agent,
@@ -43,35 +45,48 @@ fn current_host_bridge() -> Option<Rc<crate::bridge::HostBridge>> {
 async fn inject_queued_user_messages(
     bridge: Option<&Rc<crate::bridge::HostBridge>>,
     opts: &mut super::api::LlmCallOptions,
-    include_interrupt_immediate: bool,
-    include_finish_step: bool,
-    include_wait_for_completion: bool,
-) -> Result<Vec<String>, VmError> {
+    checkpoint: crate::bridge::DeliveryCheckpoint,
+) -> Result<Vec<crate::bridge::QueuedUserMessage>, VmError> {
     let Some(bridge) = bridge else {
         return Ok(Vec::new());
     };
-    let queued = bridge
-        .take_queued_user_messages(
-            include_interrupt_immediate,
-            include_finish_step,
-            include_wait_for_completion,
-        )
-        .await;
-    let mut delivered = Vec::new();
-    for message in queued {
-        delivered.push(message.content.clone());
+    let queued = bridge.take_queued_user_messages_for(checkpoint).await;
+    for message in &queued {
         opts.messages.push(serde_json::json!({
             "role": "user",
-            "content": message.content,
+            "content": message.content.clone(),
         }));
     }
-    Ok(delivered)
+    Ok(queued)
 }
 
 pub(crate) fn agent_loop_result_from_llm(
     result: &super::api::LlmResult,
     opts: super::api::LlmCallOptions,
 ) -> serde_json::Value {
+    let mut events = vec![transcript_event(
+        "provider_payload",
+        "assistant",
+        "internal",
+        "",
+        Some(serde_json::json!({
+            "model": result.model,
+            "input_tokens": result.input_tokens,
+            "output_tokens": result.output_tokens,
+            "tool_calls": result.tool_calls,
+        })),
+    )];
+    if let Some(thinking) = result.thinking.clone() {
+        if !thinking.is_empty() {
+            events.push(transcript_event(
+                "private_reasoning",
+                "assistant",
+                "private",
+                &thinking,
+                None,
+            ));
+        }
+    }
     serde_json::json!({
         "status": "done",
         "text": result.text,
@@ -80,11 +95,13 @@ pub(crate) fn agent_loop_result_from_llm(
         "iterations": 1,
         "duration_ms": 0,
         "tools_used": [],
-        "transcript": super::helpers::vm_value_to_json(&transcript_to_vm(
+        "transcript": super::helpers::vm_value_to_json(&transcript_to_vm_with_events(
             opts.transcript_id,
             opts.transcript_summary,
             opts.transcript_metadata,
             &opts.messages,
+            events,
+            Some("active"),
         )),
     })
 }
@@ -161,11 +178,25 @@ pub async fn run_agent_loop_internal(
     let mut total_iterations = 0usize;
     let mut final_status = "done";
     let loop_start = std::time::Instant::now();
+    let mut transcript_events = Vec::new();
 
     for iteration in 0..max_iterations {
         total_iterations = iteration + 1;
-        let immediate_messages =
-            inject_queued_user_messages(bridge.as_ref(), opts, true, false, false).await?;
+        let immediate_messages = inject_queued_user_messages(
+            bridge.as_ref(),
+            opts,
+            crate::bridge::DeliveryCheckpoint::InterruptImmediate,
+        )
+        .await?;
+        for message in &immediate_messages {
+            transcript_events.push(transcript_event(
+                "host_input",
+                "user",
+                "public",
+                &message.content,
+                Some(serde_json::json!({"delivery": format!("{:?}", message.mode)})),
+            ));
+        }
         if !immediate_messages.is_empty() {
             consecutive_text_only = 0;
         }
@@ -232,6 +263,29 @@ pub async fn run_agent_loop_internal(
 
         let text = result.text.clone();
         total_text.push_str(&text);
+        transcript_events.push(transcript_event(
+            "provider_payload",
+            "assistant",
+            "internal",
+            "",
+            Some(serde_json::json!({
+                "model": result.model,
+                "input_tokens": result.input_tokens,
+                "output_tokens": result.output_tokens,
+                "tool_calls": result.tool_calls,
+            })),
+        ));
+        if let Some(thinking) = result.thinking.clone() {
+            if !thinking.is_empty() {
+                transcript_events.push(transcript_event(
+                    "private_reasoning",
+                    "assistant",
+                    "private",
+                    &thinking,
+                    None,
+                ));
+            }
+        }
 
         let tool_calls = if !result.tool_calls.is_empty() {
             result.tool_calls.clone()
@@ -262,6 +316,16 @@ pub async fn run_agent_loop_internal(
                 let tool_id = tc["id"].as_str().unwrap_or("");
                 let tool_name = tc["name"].as_str().unwrap_or("");
                 let tool_args = normalize_tool_args(tool_name, &tc["arguments"]);
+                crate::orchestration::enforce_current_policy_for_tool(tool_name)?;
+                transcript_events.push(transcript_event(
+                    "tool_intent",
+                    "assistant",
+                    "internal",
+                    tool_name,
+                    Some(
+                        serde_json::json!({"arguments": tool_args.clone(), "tool_use_id": tool_id}),
+                    ),
+                ));
                 tools_used_this_iter.push(tool_name.to_string());
 
                 let call_result = {
@@ -334,6 +398,17 @@ pub async fn run_agent_loop_internal(
                 if is_rejected && !rejected_tools.contains(&tool_name.to_string()) {
                     rejected_tools.push(tool_name.to_string());
                 }
+                transcript_events.push(transcript_event(
+                    "tool_execution",
+                    "tool",
+                    "internal",
+                    &result_text,
+                    Some(serde_json::json!({
+                        "tool_name": tool_name,
+                        "tool_use_id": tool_id,
+                        "rejected": is_rejected,
+                    })),
+                ));
 
                 if tool_format == "native" {
                     opts.messages.push(build_tool_result_message(
@@ -355,8 +430,21 @@ pub async fn run_agent_loop_internal(
                     "content": observations.trim_end(),
                 }));
             }
-            let finish_step_messages =
-                inject_queued_user_messages(bridge.as_ref(), opts, true, true, false).await?;
+            let finish_step_messages = inject_queued_user_messages(
+                bridge.as_ref(),
+                opts,
+                crate::bridge::DeliveryCheckpoint::AfterCurrentOperation,
+            )
+            .await?;
+            for message in &finish_step_messages {
+                transcript_events.push(transcript_event(
+                    "host_input",
+                    "user",
+                    "public",
+                    &message.content,
+                    Some(serde_json::json!({"delivery": format!("{:?}", message.mode)})),
+                ));
+            }
             if !finish_step_messages.is_empty() {
                 consecutive_text_only = 0;
             }
@@ -375,8 +463,21 @@ pub async fn run_agent_loop_internal(
             break;
         }
 
-        let finish_step_messages =
-            inject_queued_user_messages(bridge.as_ref(), opts, true, true, false).await?;
+        let finish_step_messages = inject_queued_user_messages(
+            bridge.as_ref(),
+            opts,
+            crate::bridge::DeliveryCheckpoint::AfterCurrentOperation,
+        )
+        .await?;
+        for message in &finish_step_messages {
+            transcript_events.push(transcript_event(
+                "host_input",
+                "user",
+                "public",
+                &message.content,
+                Some(serde_json::json!({"delivery": format!("{:?}", message.mode)})),
+            ));
+        }
         if !finish_step_messages.is_empty() {
             consecutive_text_only = 0;
             continue;
@@ -404,8 +505,16 @@ pub async fn run_agent_loop_internal(
         }));
     }
 
-    deferred_user_messages
-        .extend(inject_queued_user_messages(bridge.as_ref(), opts, false, false, true).await?);
+    deferred_user_messages.extend(
+        inject_queued_user_messages(
+            bridge.as_ref(),
+            opts,
+            crate::bridge::DeliveryCheckpoint::EndOfInteraction,
+        )
+        .await?
+        .into_iter()
+        .map(|message| message.content),
+    );
 
     Ok(serde_json::json!({
         "status": final_status,
@@ -416,11 +525,13 @@ pub async fn run_agent_loop_internal(
         "tools_used": all_tools_used,
         "rejected_tools": rejected_tools,
         "deferred_user_messages": deferred_user_messages,
-        "transcript": super::helpers::vm_value_to_json(&transcript_to_vm(
+        "transcript": super::helpers::vm_value_to_json(&transcript_to_vm_with_events(
             opts.transcript_id.clone(),
             opts.transcript_summary.clone(),
             opts.transcript_metadata.clone(),
             &opts.messages,
+            transcript_events,
+            Some(if final_status == "done" { "active" } else { "paused" }),
         )),
     }))
 }
@@ -469,7 +580,7 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
 /// This overrides the native llm_call with one that reports to the host for observability.
 pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::HostBridge>) {
     use super::api::vm_build_llm_result;
-    use super::helpers::{extract_json, transcript_to_vm};
+    use super::helpers::extract_json;
     use crate::stdlib::json_to_vm_value;
 
     let b = bridge;
@@ -536,11 +647,36 @@ pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Host
                 "role": "assistant",
                 "content": result.text.clone(),
             }));
-            let transcript = transcript_to_vm(
+            let mut extra_events = vec![transcript_event(
+                "provider_payload",
+                "assistant",
+                "internal",
+                "",
+                Some(serde_json::json!({
+                    "model": result.model,
+                    "input_tokens": result.input_tokens,
+                    "output_tokens": result.output_tokens,
+                    "tool_calls": result.tool_calls,
+                })),
+            )];
+            if let Some(thinking) = result.thinking.clone() {
+                if !thinking.is_empty() {
+                    extra_events.push(transcript_event(
+                        "private_reasoning",
+                        "assistant",
+                        "private",
+                        &thinking,
+                        None,
+                    ));
+                }
+            }
+            let transcript = transcript_to_vm_with_events(
                 opts.transcript_id.clone(),
                 opts.transcript_summary.clone(),
                 opts.transcript_metadata.clone(),
                 &transcript_messages,
+                extra_events,
+                Some("active"),
             );
 
             // Always return dict (breaking change: no more plain string)

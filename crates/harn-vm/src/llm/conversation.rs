@@ -5,9 +5,9 @@ use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 use super::helpers::{
-    extract_llm_options, is_transcript_value, new_transcript_with, transcript_id,
-    transcript_message_list, transcript_summary_text, vm_add_role_message, vm_message,
-    vm_value_to_json,
+    extract_llm_options, is_transcript_value, new_transcript_with, new_transcript_with_events,
+    transcript_event, transcript_id, transcript_message_list, transcript_summary_text,
+    vm_add_role_message, vm_message, vm_value_to_json,
 };
 
 /// Register conversation management builtins.
@@ -244,6 +244,116 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
             messages,
             summary,
             transcript.get("metadata").cloned(),
+        ))
+    });
+
+    vm.register_builtin("transcript_reset", |args, _out| {
+        let metadata = args
+            .first()
+            .and_then(|value| value.as_dict())
+            .and_then(|dict| dict.get("metadata"))
+            .cloned();
+        Ok(new_transcript_with_events(
+            None,
+            Vec::new(),
+            None,
+            metadata,
+            vec![transcript_event(
+                "transcript_reset",
+                "system",
+                "internal",
+                "transcript reset",
+                None,
+            )],
+            Some("active"),
+        ))
+    });
+
+    vm.register_builtin("transcript_archive", |args, _out| {
+        let transcript = match args.first() {
+            Some(VmValue::Dict(d))
+                if d.get("_type").map(|v| v.display()).as_deref() == Some("transcript") =>
+            {
+                d
+            }
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "transcript_archive: argument must be a transcript",
+                ))));
+            }
+        };
+        let messages = transcript_message_list(transcript)?;
+        Ok(new_transcript_with_events(
+            transcript_id(transcript),
+            messages,
+            transcript_summary_text(transcript),
+            transcript.get("metadata").cloned(),
+            vec![transcript_event(
+                "transcript_archive",
+                "system",
+                "internal",
+                "transcript archived",
+                None,
+            )],
+            Some("archived"),
+        ))
+    });
+
+    vm.register_builtin("transcript_abandon", |args, _out| {
+        let transcript = match args.first() {
+            Some(VmValue::Dict(d))
+                if d.get("_type").map(|v| v.display()).as_deref() == Some("transcript") =>
+            {
+                d
+            }
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "transcript_abandon: argument must be a transcript",
+                ))));
+            }
+        };
+        Ok(new_transcript_with_events(
+            transcript_id(transcript),
+            transcript_message_list(transcript)?,
+            transcript_summary_text(transcript),
+            transcript.get("metadata").cloned(),
+            vec![transcript_event(
+                "transcript_abandon",
+                "system",
+                "internal",
+                "transcript abandoned",
+                None,
+            )],
+            Some("abandoned"),
+        ))
+    });
+
+    vm.register_builtin("transcript_resume", |args, _out| {
+        let transcript = match args.first() {
+            Some(VmValue::Dict(d))
+                if d.get("_type").map(|v| v.display()).as_deref() == Some("transcript") =>
+            {
+                d
+            }
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "transcript_resume: argument must be a transcript",
+                ))));
+            }
+        };
+        Ok(new_transcript_with_events(
+            transcript_id(transcript),
+            transcript_message_list(transcript)?,
+            transcript_summary_text(transcript),
+            transcript.get("metadata").cloned(),
+            vec![transcript_event(
+                "transcript_resume",
+                "system",
+                "internal",
+                "transcript resumed",
+                None,
+            )],
+            Some("active"),
         ))
     });
 

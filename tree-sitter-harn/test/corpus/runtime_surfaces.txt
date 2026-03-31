@@ -1,0 +1,93 @@
+==================
+Transcript And Replay Builtins
+==================
+
+pipeline main(task) {
+  let transcript = transcript_reset({metadata: {source: "corpus"}})
+  let archived = transcript_archive(transcript)
+  let flow = workflow_graph({name: "demo", entry: "act", nodes: {act: {kind: "stage"}}})
+  let report = workflow_policy_report(flow)
+  let eval = run_record_eval({fixture: {workflow_id: "wf"}})
+  return {archived: archived, flow: flow, report: report, eval: eval}
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (parameter_list
+      (typed_parameter
+        name: (identifier)))
+    (block
+      (let_binding
+        name: (identifier)
+        value: (call_expression
+          function: (identifier)
+          (argument_list
+            (dict_literal
+              (dict_entry
+                key: (identifier)
+                value: (dict_literal
+                  (dict_entry
+                    key: (identifier)
+                    value: (string_literal))))))))
+      (let_binding
+        name: (identifier)
+        value: (call_expression
+          function: (identifier)
+          (argument_list
+            (identifier))))
+      (let_binding
+        name: (identifier)
+        value: (call_expression
+          function: (identifier)
+          (argument_list
+            (dict_literal
+              (dict_entry
+                key: (identifier)
+                value: (string_literal))
+              (dict_entry
+                key: (identifier)
+                value: (string_literal))
+              (dict_entry
+                key: (identifier)
+                value: (dict_literal
+                  (dict_entry
+                    key: (identifier)
+                    value: (dict_literal
+                      (dict_entry
+                        key: (identifier)
+                        value: (string_literal))))))))))
+      (let_binding
+        name: (identifier)
+        value: (call_expression
+          function: (identifier)
+          (argument_list
+            (identifier))))
+      (let_binding
+        name: (identifier)
+        value: (call_expression
+          function: (identifier)
+          (argument_list
+            (dict_literal
+              (dict_entry
+                key: (identifier)
+                value: (dict_literal
+                  (dict_entry
+                    key: (identifier)
+                    value: (string_literal))))))))
+      (return_statement
+        (dict_literal
+          (dict_entry
+            key: (identifier)
+            value: (identifier))
+          (dict_entry
+            key: (identifier)
+            value: (identifier))
+          (dict_entry
+            key: (identifier)
+            value: (identifier))
+          (dict_entry
+            key: (identifier)
+            value: (identifier)))))))

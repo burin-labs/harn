@@ -66,7 +66,7 @@ println(result.status)
 println(result.visible_text)
 ```
 
-## What Ships In Harn v0.4.30
+## What Ships In Harn v0.4.31
 
 - Typed workflow graphs via `workflow_graph(...)` and `workflow_execute(...)`
   with explicit nodes, edges, validation, policy attachment, map/join style

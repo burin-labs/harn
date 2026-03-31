@@ -13,7 +13,9 @@ graph with:
 
 - named nodes
 - explicit edges
-- node kinds such as stage, verify, join, condition, and map
+- node kinds such as stage, verify, join, condition, fork, map, reduce, subagent, and escalation
+- typed stage input/output contracts
+- explicit branch semantics and typed run transitions
 - per-node model, transcript, context, retry, and capability policies
 - workflow-level capability ceiling
 - mutation audit log entries
@@ -109,12 +111,21 @@ println(run.run.stages)
 Options currently include:
 
 - `max_steps`
+- `persist_path`
 - `resume_path`
 - `resume_run`
+- `replay_path`
+- `replay_run`
+- `replay_mode: "deterministic"`
 
 Resuming is practical rather than magical: if a saved run has unfinished
-successor stages, Harn can continue from the next node with persisted
-artifacts and transcript state.
+successor stages, Harn continues from persisted ready-node checkpoints with
+saved artifacts, transcript state, and traversed run-graph edges.
+
+Deterministic replay is now a runtime mode rather than a CLI-only inspection
+tool: passing a prior run via `replay_run` or `replay_path` replays saved stage
+records and artifacts through the workflow engine without calling providers or
+tools again.
 
 ## Transcript policy
 
@@ -140,7 +151,7 @@ Harn applies transcript policy inside the runtime:
 Harn exposes typed workflow editing builtins so orchestration changes can be
 audited and validated against the workflow IR:
 
-- `workflow_inspect(...)`
+- `workflow_inspect(..., ceiling?)`
 - `workflow_clone(...)`
 - `workflow_insert_node(...)`
 - `workflow_replace_node(...)`
@@ -149,7 +160,8 @@ audited and validated against the workflow IR:
 - `workflow_set_context_policy(...)`
 - `workflow_set_transcript_policy(...)`
 - `workflow_diff(...)`
-- `workflow_validate(...)`
+- `workflow_validate(..., ceiling?)`
+- `workflow_policy_report(..., ceiling?)`
 - `workflow_commit(...)`
 
 These mutate structured workflow graphs, not free-form prompt text.
@@ -170,9 +182,14 @@ Workflow execution produces a persisted run record containing:
 - workflow identity
 - task
 - stage records
+- stage attempts, outcomes, and branch decisions
+- traversed graph transitions
+- ready-node checkpoints for resume
 - stage transcripts
 - visible output
 - private reasoning metadata
+- tool intent and tool execution events
+- provider payload metadata kept separate from visible text
 - verification outcomes
 - artifacts
 - policy metadata

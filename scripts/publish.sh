@@ -15,6 +15,12 @@ if [[ "${1:-}" == "--dry-run" ]]; then
   echo "=== DRY RUN (no uploads) ==="
 fi
 
+ALLOW_DIRTY=""
+if ! git diff --quiet --ignore-submodules HEAD --; then
+  ALLOW_DIRTY="--allow-dirty"
+  echo "=== Dirty tree detected; publishing with --allow-dirty ==="
+fi
+
 # Dependency order: leaves first, CLI last
 CRATES=(
   harn-lexer
@@ -39,7 +45,7 @@ publish_crate() {
     echo "=== Publishing $crate (attempt $attempt/$max_attempts) ==="
 
     local output
-    output=$(cargo publish -p "$crate" $DRY_RUN 2>&1) && {
+    output=$(cargo publish -p "$crate" $DRY_RUN $ALLOW_DIRTY 2>&1) && {
       echo "$output"
       echo "  Published $crate"
       local last_crate="${CRATES[${#CRATES[@]}-1]}"
