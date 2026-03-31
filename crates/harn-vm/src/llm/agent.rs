@@ -341,7 +341,7 @@ pub async fn run_agent_loop_internal(
                     &tool_args,
                 )?;
 
-                // PreToolUse hooks
+                // PreToolUse hooks: in-process hooks first, then bridge gate
                 match crate::orchestration::run_pre_tool_hooks(tool_name, &tool_args) {
                     crate::orchestration::PreToolAction::Allow => {}
                     crate::orchestration::PreToolAction::Deny(reason) => {
@@ -360,13 +360,71 @@ pub async fn run_agent_loop_internal(
                                 &opts.provider,
                             ));
                         } else {
-                            observations.push_str(&format!("<tool_result name=\"{tool_name}\">\n{result_text}\n</tool_result>\n\n"));
+                            observations.push_str(&format!(
+                                "<tool_result name=\"{tool_name}\">\n{result_text}\n</tool_result>\n\n"
+                            ));
                         }
                         continue;
                     }
                     crate::orchestration::PreToolAction::Modify(new_args) => {
                         tool_args = new_args;
                     }
+                }
+
+                // Bridge-level PreToolUse gate: host can allow/deny/modify
+                if let Some(bridge) = bridge.as_ref() {
+                    if let Ok(response) = bridge
+                        .call(
+                            "tool/pre_use",
+                            serde_json::json!({
+                                "tool_name": tool_name,
+                                "tool_use_id": tool_id,
+                                "args": tool_args,
+                            }),
+                        )
+                        .await
+                    {
+                        let action = response
+                            .get("action")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("allow");
+                        match action {
+                            "deny" => {
+                                let reason = response
+                                    .get("reason")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("denied by host");
+                                let result_text = format!("REJECTED by host: {reason}");
+                                if !rejected_tools.contains(&tool_name.to_string()) {
+                                    rejected_tools.push(tool_name.to_string());
+                                }
+                                transcript_events.push(transcript_event(
+                                    "tool_execution", "tool", "internal", &result_text,
+                                    Some(serde_json::json!({"tool_name": tool_name, "tool_use_id": tool_id, "rejected": true})),
+                                ));
+                                if tool_format == "native" {
+                                    opts.messages.push(build_tool_result_message(
+                                        tool_id,
+                                        &result_text,
+                                        &opts.provider,
+                                    ));
+                                } else {
+                                    observations.push_str(&format!(
+                                        "<tool_result name=\"{tool_name}\">\n{result_text}\n</tool_result>\n\n"
+                                    ));
+                                }
+                                continue;
+                            }
+                            "modify" => {
+                                if let Some(new_args) = response.get("args") {
+                                    tool_args = new_args.clone();
+                                }
+                            }
+                            _ => {} // "allow" or anything else — proceed
+                        }
+                    }
+                    // If the bridge call fails (host doesn't implement tool/pre_use),
+                    // we silently proceed — the host can opt in to this protocol.
                 }
                 transcript_events.push(transcript_event(
                     "tool_intent",
@@ -460,9 +518,35 @@ pub async fn run_agent_loop_internal(
                     result_text
                 };
 
-                // PostToolUse hooks
+                // PostToolUse hooks (in-process)
                 let result_text =
                     crate::orchestration::run_post_tool_hooks(tool_name, &result_text);
+
+                // Bridge-level PostToolUse gate: host can inspect/modify result
+                let result_text = if let Some(bridge) = bridge.as_ref() {
+                    if let Ok(response) = bridge
+                        .call(
+                            "tool/post_use",
+                            serde_json::json!({
+                                "tool_name": tool_name,
+                                "tool_use_id": tool_id,
+                                "result": result_text,
+                                "rejected": is_rejected,
+                            }),
+                        )
+                        .await
+                    {
+                        response
+                            .get("result")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string())
+                            .unwrap_or(result_text)
+                    } else {
+                        result_text
+                    }
+                } else {
+                    result_text
+                };
 
                 transcript_events.push(transcript_event(
                     "tool_execution",
@@ -688,14 +772,11 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                 None
             };
             // Parse per-agent policy from options dict
-            let policy = options
-                .as_ref()
-                .and_then(|o| o.get("policy"))
-                .map(|v| {
-                    let json = crate::llm::helpers::vm_value_to_json(v);
-                    serde_json::from_value::<crate::orchestration::CapabilityPolicy>(json)
-                        .unwrap_or_default()
-                });
+            let policy = options.as_ref().and_then(|o| o.get("policy")).map(|v| {
+                let json = crate::llm::helpers::vm_value_to_json(v);
+                serde_json::from_value::<crate::orchestration::CapabilityPolicy>(json)
+                    .unwrap_or_default()
+            });
             let mut opts = extract_llm_options(&args)?;
             let result = run_agent_loop_internal(
                 &mut opts,

@@ -2107,7 +2107,7 @@ pub async fn execute_stage_node(
     if selection_policy.include_kinds.is_empty() && !node.input_contract.input_kinds.is_empty() {
         selection_policy.include_kinds = node.input_contract.input_kinds.clone();
     }
-    let selected = select_artifacts(artifacts.to_vec(), &selection_policy);
+    let selected = select_artifacts_adaptive(artifacts.to_vec(), &selection_policy);
     let rendered_context = render_artifacts_context(&selected, &node.context_policy);
     let transcript = apply_input_transcript_policy(transcript, &node.transcript_policy);
     if node.input_contract.require_transcript && transcript.is_none() {

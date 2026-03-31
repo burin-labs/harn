@@ -36,6 +36,9 @@ pub(super) struct WorkerCarryPolicy {
     pub(super) transcript_policy: TranscriptPolicy,
     pub(super) resume_workflow: bool,
     pub(super) persist_state: bool,
+    /// Capability policy scoped to this worker. Pushed onto the policy stack
+    /// during execution and popped when the worker completes.
+    pub(super) policy: Option<CapabilityPolicy>,
 }
 
 #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -344,6 +347,7 @@ pub(super) fn load_worker_state_snapshot(target: &str) -> Result<WorkerState, Vm
             transcript_policy: parse_transcript_policy(dict.get("transcript_policy"))?,
             resume_workflow: !matches!(dict.get("resume_workflow"), Some(VmValue::Bool(false))),
             persist_state: !matches!(dict.get("persist_state"), Some(VmValue::Bool(false))),
+            policy: None,
         }
     } else {
         WorkerCarryPolicy::default()
@@ -497,12 +501,18 @@ pub(super) fn parse_worker_carry_policy(
             .map(|value| value.display())
             .filter(|value| matches!(value.as_str(), "inherit" | "reset" | "fork"));
     }
+    let policy = carry.get("policy").or_else(|| dict.get("policy")).map(|v| {
+        let json = crate::llm::helpers::vm_value_to_json(v);
+        serde_json::from_value::<CapabilityPolicy>(json).unwrap_or_default()
+    });
+
     Ok(WorkerCarryPolicy {
         artifact_mode,
         context_policy,
         transcript_policy,
         resume_workflow: !matches!(carry.get("resume_workflow"), Some(VmValue::Bool(false))),
         persist_state: !matches!(carry.get("persist_state"), Some(VmValue::Bool(false))),
+        policy,
     })
 }
 
@@ -800,7 +810,7 @@ async fn execute_worker_config(
 }
 
 pub(super) fn spawn_worker_task(state: Rc<RefCell<WorkerState>>) {
-    let (worker_id, task, config, execution, cancel_token) = {
+    let (worker_id, task, config, execution, cancel_token, worker_policy) = {
         let worker = state.borrow();
         if worker.carry_policy.persist_state {
             persist_worker_state_snapshot(&worker).ok();
@@ -812,6 +822,7 @@ pub(super) fn spawn_worker_task(state: Rc<RefCell<WorkerState>>) {
             worker.config.clone(),
             worker.execution.clone(),
             worker.cancel_token.clone(),
+            worker.carry_policy.policy.clone(),
         )
     };
 
@@ -824,7 +835,14 @@ pub(super) fn spawn_worker_task(state: Rc<RefCell<WorkerState>>) {
             });
         }
 
+        // Push per-worker capability policy
+        if let Some(ref policy) = worker_policy {
+            push_execution_policy(policy.clone());
+        }
         let result = execute_worker_config(worker_id, task, config, execution).await;
+        if worker_policy.is_some() {
+            pop_execution_policy();
+        }
         {
             let mut worker = state_for_task.borrow_mut();
             worker.finished_at = Some(uuid::Uuid::now_v7().to_string());
@@ -970,6 +988,7 @@ pub(super) async fn execute_delegated_stage(
             transcript_policy: TranscriptPolicy::default(),
             resume_workflow: true,
             persist_state: true,
+            policy: None,
         },
         execution,
         snapshot_path: worker_snapshot_path(&worker_id),
@@ -1092,6 +1111,7 @@ mod tests {
                 },
                 resume_workflow: false,
                 persist_state: true,
+                policy: None,
             },
             execution: WorkerExecutionProfile::default(),
             snapshot_path: snapshot_path.clone(),
