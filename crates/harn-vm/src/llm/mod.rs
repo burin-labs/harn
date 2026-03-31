@@ -140,6 +140,9 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                 tool_retries: 0,
                 tool_backoff_ms: 1000,
                 tool_format: "text".to_string(),
+                auto_compact: None,
+                policy: None,
+                daemon: false,
             },
         )
         .await?;

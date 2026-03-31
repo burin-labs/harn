@@ -2,6 +2,32 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.4
+
+### Added
+
+- **Tool lifecycle hooks** — `register_tool_hook({pattern, deny?, max_output?})`
+  and `clear_tool_hooks()` enable pre/post-execution interception of tool calls
+  in agent loops. Pre-hooks can deny with a reason; post-hooks can truncate
+  oversized tool output. Hooks fire through glob-matched patterns (e.g.
+  `"exec*"`, `"*"`) and are wired into the agent loop's tool dispatch.
+- **Automatic multi-strategy transcript compaction** — `agent_loop` now accepts
+  `auto_compact: true` with configurable `compact_threshold`,
+  `compact_keep_last`, and `tool_output_max_chars`. Microcompaction snips
+  oversized individual tool outputs; auto-compaction triggers when estimated
+  tokens exceed the threshold and summarizes older messages in-place.
+- **Daemon agent mode** — `agent_loop` accepts `daemon: true` for agents that
+  stay alive waiting for host-injected messages instead of terminating on
+  text-only responses. Emits `agent/idle` bridge notifications when idle.
+- **Per-agent capability policy** — `agent_loop` accepts `policy: {...}` to
+  scope tool permissions per-agent. Policies are pushed/popped on the execution
+  stack automatically. Supports `tool_arg_constraints` for argument-level
+  pattern matching (e.g. allow `exec` only for `cargo *` commands).
+- **Adaptive context assembly** — `select_artifacts_adaptive(artifacts, policy)`
+  deduplicates artifacts by content, microcompacts oversized ones to fit within
+  budget, then delegates to standard token-aware selection.
+- **New builtins**: `estimate_tokens(messages)`, `microcompact(text, max_chars)`.
+
 ## v0.5.3
 
 - Fixed `render(...)` resolution in imported modules: templates are now

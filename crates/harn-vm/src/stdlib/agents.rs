@@ -1035,6 +1035,100 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
             .unwrap_or_default();
         execute_workflow(task, graph, artifacts, options).await
     });
+
+    // ── Tool lifecycle hooks ──────────────────────────────────────────
+
+    type PostHookFn = Rc<dyn Fn(&str, &str) -> crate::orchestration::PostToolAction>;
+
+    vm.register_builtin("register_tool_hook", |args, _out| {
+        let config = args
+            .first()
+            .and_then(|a| a.as_dict())
+            .cloned()
+            .unwrap_or_default();
+        let pattern = config
+            .get("pattern")
+            .map(|v| v.display())
+            .unwrap_or_else(|| "*".to_string());
+        let deny_reason = config.get("deny").map(|v| v.display());
+        let max_output = config.get("max_output").and_then(|v| match v {
+            VmValue::Int(n) => Some(*n as usize),
+            _ => None,
+        });
+
+        let pre: Option<crate::orchestration::PreToolHookFn> = deny_reason.map(|reason| {
+            Rc::new(move |_name: &str, _args: &serde_json::Value| {
+                crate::orchestration::PreToolAction::Deny(reason.clone())
+            }) as _
+        });
+
+        let post: Option<PostHookFn> = max_output.map(|max| {
+            Rc::new(move |_name: &str, result: &str| {
+                if result.len() > max {
+                    crate::orchestration::PostToolAction::Modify(
+                        crate::orchestration::microcompact_tool_output(result, max),
+                    )
+                } else {
+                    crate::orchestration::PostToolAction::Pass
+                }
+            }) as _
+        });
+
+        crate::orchestration::register_tool_hook(crate::orchestration::ToolHook {
+            pattern,
+            pre,
+            post,
+        });
+        Ok(VmValue::Nil)
+    });
+
+    vm.register_builtin("clear_tool_hooks", |_args, _out| {
+        crate::orchestration::clear_tool_hooks();
+        Ok(VmValue::Nil)
+    });
+
+    // ── Context assembly ──────────────────────────────────────────────
+
+    vm.register_builtin("select_artifacts_adaptive", |args, _out| {
+        let artifacts_val = args.first().cloned().unwrap_or(VmValue::Nil);
+        let policy_val = args.get(1).cloned().unwrap_or(VmValue::Nil);
+        let artifacts: Vec<ArtifactRecord> = parse_artifact_list(Some(&artifacts_val))?;
+        let policy: ContextPolicy = parse_context_policy(Some(&policy_val))?;
+        let selected = crate::orchestration::select_artifacts_adaptive(artifacts, &policy);
+        to_vm(&selected)
+    });
+
+    // ── Auto-compaction builtins ──────────────────────────────────────
+
+    vm.register_builtin("estimate_tokens", |args, _out| {
+        let messages: Vec<serde_json::Value> = args
+            .first()
+            .and_then(|a| match a {
+                VmValue::List(list) => Some(
+                    list.iter()
+                        .map(crate::llm::helpers::vm_value_to_json)
+                        .collect(),
+                ),
+                _ => None,
+            })
+            .unwrap_or_default();
+        let tokens = crate::orchestration::estimate_message_tokens(&messages);
+        Ok(VmValue::Int(tokens as i64))
+    });
+
+    vm.register_builtin("microcompact", |args, _out| {
+        let text = args.first().map(|a| a.display()).unwrap_or_default();
+        let max_chars = args
+            .get(1)
+            .and_then(|v| match v {
+                VmValue::Int(n) => Some(*n as usize),
+                _ => None,
+            })
+            .unwrap_or(20_000);
+        Ok(VmValue::String(Rc::from(
+            crate::orchestration::microcompact_tool_output(&text, max_chars),
+        )))
+    });
 }
 
 fn to_vm<T: serde::Serialize>(value: &T) -> Result<VmValue, VmError> {

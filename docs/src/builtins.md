@@ -952,6 +952,21 @@ These builtins expose Harn's typed orchestration runtime.
 - `root_run_id`
 - `execution` (`{cwd?, env?, worktree?}` for isolated delegated execution)
 
+### Tool lifecycle hooks
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `register_tool_hook(config)` | config: dict | nil | Register a pre/post hook for tool calls matching `pattern` (glob). `deny` string blocks matching tools; `max_output` int truncates results |
+| `clear_tool_hooks()` | none | nil | Remove all registered tool hooks |
+
+### Context and compaction utilities
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `estimate_tokens(messages)` | messages: list | int | Estimate token count for a message list (chars / 4 heuristic) |
+| `microcompact(text, max_chars?)` | text, max_chars (default 20000) | string | Snip oversized text, keeping head and tail with a marker |
+| `select_artifacts_adaptive(artifacts, policy)` | artifacts: list, policy: dict | list | Deduplicate, microcompact oversized artifacts, then select with token budget |
+
 ### Delegated workers
 
 | Function | Parameters | Returns | Description |

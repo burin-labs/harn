@@ -1,0 +1,15 @@
+pipeline test(task) {
+  // Small text should pass through unchanged
+  let small = microcompact("hello world", 1000)
+  log(small)
+  // Large text should be snipped
+  let large = "x".repeat(50000)
+  let snipped = microcompact(large, 10000)
+  log(snipped.contains("snipped"))
+  log(len(snipped) < 50000)
+  // Token estimation
+  let tokens = estimate_tokens(
+    [{role: "user", content: "a".repeat(400)}, {role: "assistant", content: "b".repeat(400)}],
+  )
+  log(tokens)
+}

@@ -1,0 +1,9 @@
+pipeline test(task) {
+  // Register a deny hook for a specific pattern
+  register_tool_hook({pattern: "blocked_*", deny: "this tool is blocked"})
+  // Register a post-hook that limits output size
+  register_tool_hook({pattern: "*", max_output: 100})
+  // Clear hooks should work without error
+  clear_tool_hooks()
+  log("hooks registered and cleared")
+}

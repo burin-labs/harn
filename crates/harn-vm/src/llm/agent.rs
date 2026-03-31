@@ -30,6 +30,14 @@ pub struct AgentLoopConfig {
     pub tool_retries: usize,
     pub tool_backoff_ms: u64,
     pub tool_format: String,
+    /// Auto-compaction config. When set, the agent loop automatically compacts
+    /// the transcript when estimated tokens exceed the threshold.
+    pub auto_compact: Option<crate::orchestration::AutoCompactConfig>,
+    /// Capability policy scoped to this agent loop.
+    pub policy: Option<crate::orchestration::CapabilityPolicy>,
+    /// Daemon mode: agent stays alive waiting for user messages instead of
+    /// terminating after the LLM produces text without tool calls.
+    pub daemon: bool,
 }
 
 pub(crate) fn install_current_host_bridge(bridge: Rc<crate::bridge::HostBridge>) {
@@ -137,6 +145,14 @@ pub async fn run_agent_loop_internal(
     let tool_retries = config.tool_retries;
     let tool_backoff_ms = config.tool_backoff_ms;
     let tool_format = config.tool_format;
+
+    let auto_compact = config.auto_compact.clone();
+    let daemon = config.daemon;
+
+    // Push per-agent policy if configured
+    if let Some(ref policy) = config.policy {
+        crate::orchestration::push_execution_policy(policy.clone());
+    }
 
     let tools_val = None::<VmValue>;
     let tool_schemas = match &tools_val {
@@ -315,8 +331,43 @@ pub async fn run_agent_loop_internal(
             for tc in &tool_calls {
                 let tool_id = tc["id"].as_str().unwrap_or("");
                 let tool_name = tc["name"].as_str().unwrap_or("");
-                let tool_args = normalize_tool_args(tool_name, &tc["arguments"]);
+                let mut tool_args = normalize_tool_args(tool_name, &tc["arguments"]);
+
+                // Policy enforcement
                 crate::orchestration::enforce_current_policy_for_tool(tool_name)?;
+                crate::orchestration::enforce_tool_arg_constraints(
+                    &crate::orchestration::current_execution_policy().unwrap_or_default(),
+                    tool_name,
+                    &tool_args,
+                )?;
+
+                // PreToolUse hooks
+                match crate::orchestration::run_pre_tool_hooks(tool_name, &tool_args) {
+                    crate::orchestration::PreToolAction::Allow => {}
+                    crate::orchestration::PreToolAction::Deny(reason) => {
+                        let result_text = format!("REJECTED by hook: {reason}");
+                        if !rejected_tools.contains(&tool_name.to_string()) {
+                            rejected_tools.push(tool_name.to_string());
+                        }
+                        transcript_events.push(transcript_event(
+                            "tool_execution", "tool", "internal", &result_text,
+                            Some(serde_json::json!({"tool_name": tool_name, "tool_use_id": tool_id, "rejected": true})),
+                        ));
+                        if tool_format == "native" {
+                            opts.messages.push(build_tool_result_message(
+                                tool_id,
+                                &result_text,
+                                &opts.provider,
+                            ));
+                        } else {
+                            observations.push_str(&format!("<tool_result name=\"{tool_name}\">\n{result_text}\n</tool_result>\n\n"));
+                        }
+                        continue;
+                    }
+                    crate::orchestration::PreToolAction::Modify(new_args) => {
+                        tool_args = new_args;
+                    }
+                }
                 transcript_events.push(transcript_event(
                     "tool_intent",
                     "assistant",
@@ -398,6 +449,21 @@ pub async fn run_agent_loop_internal(
                 if is_rejected && !rejected_tools.contains(&tool_name.to_string()) {
                     rejected_tools.push(tool_name.to_string());
                 }
+
+                // Microcompaction: snip oversized tool outputs
+                let result_text = if let Some(ref ac) = auto_compact {
+                    crate::orchestration::microcompact_tool_output(
+                        &result_text,
+                        ac.tool_output_max_chars,
+                    )
+                } else {
+                    result_text
+                };
+
+                // PostToolUse hooks
+                let result_text =
+                    crate::orchestration::run_post_tool_hooks(tool_name, &result_text);
+
                 transcript_events.push(transcript_event(
                     "tool_execution",
                     "tool",
@@ -448,6 +514,15 @@ pub async fn run_agent_loop_internal(
             if !finish_step_messages.is_empty() {
                 consecutive_text_only = 0;
             }
+
+            // Auto-compaction check after tool processing
+            if let Some(ref ac) = auto_compact {
+                let est = crate::orchestration::estimate_message_tokens(&opts.messages);
+                if est > ac.token_threshold {
+                    crate::orchestration::auto_compact_messages(&mut opts.messages, ac.keep_last);
+                }
+            }
+
             continue;
         }
 
@@ -459,8 +534,42 @@ pub async fn run_agent_loop_internal(
         if persistent && text.contains("##DONE##") {
             break;
         }
-        if !persistent {
+        if !persistent && !daemon {
             break;
+        }
+
+        // Daemon mode: if no tool calls and agent is idle, notify host and
+        // wait briefly for user messages before deciding to continue/exit.
+        if daemon && !persistent {
+            if let Some(bridge) = bridge.as_ref() {
+                bridge.notify(
+                    "agent/idle",
+                    serde_json::json!({"iteration": total_iterations}),
+                );
+            }
+            // Give the host a short window to inject messages
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            let idle_messages = inject_queued_user_messages(
+                bridge.as_ref(),
+                opts,
+                crate::bridge::DeliveryCheckpoint::InterruptImmediate,
+            )
+            .await?;
+            if idle_messages.is_empty() {
+                final_status = "idle";
+                break;
+            }
+            for message in &idle_messages {
+                transcript_events.push(transcript_event(
+                    "host_input",
+                    "user",
+                    "public",
+                    &message.content,
+                    Some(serde_json::json!({"delivery": format!("{:?}", message.mode)})),
+                ));
+            }
+            consecutive_text_only = 0;
+            continue;
         }
 
         let finish_step_messages = inject_queued_user_messages(
@@ -503,6 +612,11 @@ pub async fn run_agent_loop_internal(
             "role": "user",
             "content": nudge,
         }));
+    }
+
+    // Pop per-agent policy
+    if config.policy.is_some() {
+        crate::orchestration::pop_execution_policy();
     }
 
     deferred_user_messages.extend(
@@ -557,6 +671,31 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
             let tool_backoff_ms = opt_int(&options, "tool_backoff_ms").unwrap_or(1000) as u64;
             let tool_format =
                 opt_str(&options, "tool_format").unwrap_or_else(|| "text".to_string());
+            let daemon = opt_bool(&options, "daemon");
+            let auto_compact = if opt_bool(&options, "auto_compact") {
+                let mut ac = crate::orchestration::AutoCompactConfig::default();
+                if let Some(v) = opt_int(&options, "compact_threshold") {
+                    ac.token_threshold = v as usize;
+                }
+                if let Some(v) = opt_int(&options, "tool_output_max_chars") {
+                    ac.tool_output_max_chars = v as usize;
+                }
+                if let Some(v) = opt_int(&options, "compact_keep_last") {
+                    ac.keep_last = v as usize;
+                }
+                Some(ac)
+            } else {
+                None
+            };
+            // Parse per-agent policy from options dict
+            let policy = options
+                .as_ref()
+                .and_then(|o| o.get("policy"))
+                .map(|v| {
+                    let json = crate::llm::helpers::vm_value_to_json(v);
+                    serde_json::from_value::<crate::orchestration::CapabilityPolicy>(json)
+                        .unwrap_or_default()
+                });
             let mut opts = extract_llm_options(&args)?;
             let result = run_agent_loop_internal(
                 &mut opts,
@@ -568,6 +707,9 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                     tool_retries,
                     tool_backoff_ms,
                     tool_format,
+                    auto_compact,
+                    policy,
+                    daemon,
                 },
             )
             .await?;

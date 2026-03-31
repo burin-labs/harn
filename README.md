@@ -122,6 +122,20 @@ println(result.visible_text)
 - Formatter width handling now wraps oversized comma-separated forms
   consistently across calls, list literals, dict literals, enum payloads, and
   struct-style construction instead of leaving long single-line output intact.
+- Tool lifecycle hooks via `register_tool_hook(...)`: pre-execution deny/modify
+  and post-execution result interception for agent tool calls, with glob-pattern
+  matching on tool names.
+- Automatic transcript compaction in agent loops: microcompaction snips oversized
+  tool outputs, auto-compaction triggers at configurable token thresholds and
+  summarizes older messages in-place to preserve context window headroom.
+- Daemon agent mode (`daemon: true`): agents stay alive waiting for
+  host-injected messages instead of terminating on text-only responses.
+- Per-agent capability policies with argument-level constraints: `agent_loop`
+  accepts a `policy` dict to scope tool permissions, including `tool_arg_constraints`
+  for pattern-matching on tool arguments.
+- Adaptive context assembly with deduplication and microcompaction via
+  `select_artifacts_adaptive(...)`, plus `estimate_tokens(...)` and
+  `microcompact(...)` utility builtins.
 
 ## Why This Matters
 

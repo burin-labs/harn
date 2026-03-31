@@ -29,6 +29,330 @@ fn default_run_dir() -> PathBuf {
 
 thread_local! {
     static EXECUTION_POLICY_STACK: RefCell<Vec<CapabilityPolicy>> = const { RefCell::new(Vec::new()) };
+    static TOOL_HOOKS: RefCell<Vec<ToolHook>> = const { RefCell::new(Vec::new()) };
+}
+
+// ── Tool lifecycle hooks ──────────────────────────────────────────────
+
+/// Action returned by a PreToolUse hook.
+#[derive(Clone, Debug)]
+pub enum PreToolAction {
+    /// Allow the tool call to proceed unchanged.
+    Allow,
+    /// Deny the tool call with an explanation.
+    Deny(String),
+    /// Allow but replace the arguments.
+    Modify(serde_json::Value),
+}
+
+/// Action returned by a PostToolUse hook.
+#[derive(Clone, Debug)]
+pub enum PostToolAction {
+    /// Pass the result through unchanged.
+    Pass,
+    /// Replace the result text.
+    Modify(String),
+}
+
+/// Callback types for tool lifecycle hooks.
+pub type PreToolHookFn = Rc<dyn Fn(&str, &serde_json::Value) -> PreToolAction>;
+pub type PostToolHookFn = Rc<dyn Fn(&str, &str) -> PostToolAction>;
+
+/// A registered tool hook with a name pattern and callbacks.
+#[derive(Clone)]
+pub struct ToolHook {
+    /// Glob-style pattern matched against tool names (e.g. `"*"`, `"exec*"`, `"read_file"`).
+    pub pattern: String,
+    /// Called before tool execution. Return `Deny` to reject, `Modify` to rewrite args.
+    pub pre: Option<PreToolHookFn>,
+    /// Called after tool execution with the result text. Return `Modify` to rewrite.
+    pub post: Option<PostToolHookFn>,
+}
+
+impl std::fmt::Debug for ToolHook {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ToolHook")
+            .field("pattern", &self.pattern)
+            .field("has_pre", &self.pre.is_some())
+            .field("has_post", &self.post.is_some())
+            .finish()
+    }
+}
+
+fn glob_match(pattern: &str, name: &str) -> bool {
+    if pattern == "*" {
+        return true;
+    }
+    if let Some(prefix) = pattern.strip_suffix('*') {
+        return name.starts_with(prefix);
+    }
+    if let Some(suffix) = pattern.strip_prefix('*') {
+        return name.ends_with(suffix);
+    }
+    pattern == name
+}
+
+pub fn register_tool_hook(hook: ToolHook) {
+    TOOL_HOOKS.with(|hooks| hooks.borrow_mut().push(hook));
+}
+
+pub fn clear_tool_hooks() {
+    TOOL_HOOKS.with(|hooks| hooks.borrow_mut().clear());
+}
+
+/// Run all matching PreToolUse hooks. Returns the final action.
+pub fn run_pre_tool_hooks(tool_name: &str, args: &serde_json::Value) -> PreToolAction {
+    TOOL_HOOKS.with(|hooks| {
+        let hooks = hooks.borrow();
+        let mut current_args = args.clone();
+        for hook in hooks.iter() {
+            if !glob_match(&hook.pattern, tool_name) {
+                continue;
+            }
+            if let Some(ref pre) = hook.pre {
+                match pre(tool_name, &current_args) {
+                    PreToolAction::Allow => {}
+                    PreToolAction::Deny(reason) => return PreToolAction::Deny(reason),
+                    PreToolAction::Modify(new_args) => {
+                        current_args = new_args;
+                    }
+                }
+            }
+        }
+        if current_args != *args {
+            PreToolAction::Modify(current_args)
+        } else {
+            PreToolAction::Allow
+        }
+    })
+}
+
+/// Run all matching PostToolUse hooks. Returns the (possibly modified) result.
+pub fn run_post_tool_hooks(tool_name: &str, result: &str) -> String {
+    TOOL_HOOKS.with(|hooks| {
+        let hooks = hooks.borrow();
+        let mut current = result.to_string();
+        for hook in hooks.iter() {
+            if !glob_match(&hook.pattern, tool_name) {
+                continue;
+            }
+            if let Some(ref post) = hook.post {
+                match post(tool_name, &current) {
+                    PostToolAction::Pass => {}
+                    PostToolAction::Modify(new_result) => {
+                        current = new_result;
+                    }
+                }
+            }
+        }
+        current
+    })
+}
+
+// ── Auto-compaction ───────────────────────────────────────────────────
+
+/// Configuration for automatic transcript compaction in agent loops.
+#[derive(Clone, Debug)]
+pub struct AutoCompactConfig {
+    /// Maximum estimated tokens before triggering auto-compaction.
+    pub token_threshold: usize,
+    /// Maximum character length for a single tool result before microcompaction.
+    pub tool_output_max_chars: usize,
+    /// Number of recent messages to keep during auto-compaction.
+    pub keep_last: usize,
+}
+
+impl Default for AutoCompactConfig {
+    fn default() -> Self {
+        Self {
+            token_threshold: 80_000,
+            tool_output_max_chars: 20_000,
+            keep_last: 8,
+        }
+    }
+}
+
+/// Estimate token count from a list of JSON messages (chars / 4 heuristic).
+pub fn estimate_message_tokens(messages: &[serde_json::Value]) -> usize {
+    messages
+        .iter()
+        .map(|m| {
+            m.get("content")
+                .and_then(|c| c.as_str())
+                .map(|s| s.len())
+                .unwrap_or(0)
+        })
+        .sum::<usize>()
+        / 4
+}
+
+/// Microcompact a tool result: if it exceeds `max_chars`, keep the first and
+/// last portions with a snip marker in between.
+pub fn microcompact_tool_output(output: &str, max_chars: usize) -> String {
+    if output.len() <= max_chars || max_chars < 200 {
+        return output.to_string();
+    }
+    let keep = max_chars / 2;
+    let head = &output[..keep];
+    let tail = &output[output.len() - keep..];
+    let snipped = output.len() - max_chars;
+    format!("{head}\n\n[... {snipped} characters snipped ...]\n\n{tail}")
+}
+
+/// Auto-compact a message list in place: summarize older messages into a
+/// system note and keep the most recent `keep_last` messages.
+pub fn auto_compact_messages(messages: &mut Vec<serde_json::Value>, keep_last: usize) -> bool {
+    if messages.len() <= keep_last {
+        return false;
+    }
+    let split_at = messages.len().saturating_sub(keep_last);
+    let old_messages: Vec<_> = messages.drain(..split_at).collect();
+    let archived_count = old_messages.len();
+    // Build a useful summary: keep tool names, key decisions, and truncate
+    // long content. Use 500 chars per entry (not 200) for better context.
+    let summary_parts: Vec<String> = old_messages
+        .iter()
+        .filter_map(|m| {
+            let role = m.get("role")?.as_str()?;
+            let content = m.get("content")?.as_str()?;
+            if content.is_empty() {
+                return None;
+            }
+            let truncated = if content.len() > 500 {
+                format!("{}...", &content[..500])
+            } else {
+                content.to_string()
+            };
+            Some(format!("[{role}] {truncated}"))
+        })
+        .take(15)
+        .collect();
+    let summary = format!(
+        "[auto-compacted {archived_count} older messages]\n{}{}",
+        summary_parts.join("\n"),
+        if archived_count > 15 {
+            format!("\n... and {} more", archived_count - 15)
+        } else {
+            String::new()
+        }
+    );
+    messages.insert(
+        0,
+        serde_json::json!({
+            "role": "user",
+            "content": summary,
+        }),
+    );
+    true
+}
+
+// ── Adaptive context assembly ─────────────────────────────────────────
+
+/// Snip an artifact's text to fit within a token budget.
+pub fn microcompact_artifact(artifact: &mut ArtifactRecord, max_tokens: usize) {
+    let max_chars = max_tokens * 4;
+    if let Some(ref text) = artifact.text {
+        if text.len() > max_chars && max_chars >= 200 {
+            artifact.text = Some(microcompact_tool_output(text, max_chars));
+            artifact.estimated_tokens = Some(max_tokens);
+        }
+    }
+}
+
+/// Deduplicate artifacts by removing those with identical text content,
+/// keeping the one with higher priority.
+pub fn dedup_artifacts(artifacts: &mut Vec<ArtifactRecord>) {
+    let mut seen_hashes: BTreeSet<u64> = BTreeSet::new();
+    artifacts.retain(|artifact| {
+        let text = artifact.text.as_deref().unwrap_or("");
+        if text.is_empty() {
+            return true;
+        }
+        // Simple hash for dedup
+        let hash = {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            text.hash(&mut hasher);
+            hasher.finish()
+        };
+        seen_hashes.insert(hash)
+    });
+}
+
+/// Enhanced artifact selection: dedup, microcompact oversized artifacts,
+/// then delegate to the standard `select_artifacts`.
+pub fn select_artifacts_adaptive(
+    mut artifacts: Vec<ArtifactRecord>,
+    policy: &ContextPolicy,
+) -> Vec<ArtifactRecord> {
+    // Phase 1: deduplicate
+    dedup_artifacts(&mut artifacts);
+
+    // Phase 2: microcompact oversized artifacts relative to budget.
+    // Cap individual artifacts to a fraction of the total budget, but don't
+    // let the per-artifact cap exceed the total budget (avoid overrun).
+    if let Some(max_tokens) = policy.max_tokens {
+        let count = artifacts.len().max(1);
+        let per_artifact_budget = max_tokens / count;
+        // Floor of 500 tokens, but never more than total budget
+        let cap = per_artifact_budget.max(500).min(max_tokens);
+        for artifact in &mut artifacts {
+            let est = artifact.estimated_tokens.unwrap_or(0);
+            if est > cap * 2 {
+                microcompact_artifact(artifact, cap);
+            }
+        }
+    }
+
+    // Phase 3: standard selection with budget
+    select_artifacts(artifacts, policy)
+}
+
+// ── Per-agent policy with argument patterns ───────────────────────────
+
+/// Extended policy that supports argument-level constraints.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ToolArgConstraint {
+    /// Tool name to constrain.
+    pub tool: String,
+    /// Glob patterns that the first string argument must match.
+    /// If empty, no argument constraint is applied.
+    pub arg_patterns: Vec<String>,
+}
+
+/// Check if a tool call satisfies argument constraints in the policy.
+pub fn enforce_tool_arg_constraints(
+    policy: &CapabilityPolicy,
+    tool_name: &str,
+    args: &serde_json::Value,
+) -> Result<(), VmError> {
+    for constraint in &policy.tool_arg_constraints {
+        if !glob_match(&constraint.tool, tool_name) {
+            continue;
+        }
+        if constraint.arg_patterns.is_empty() {
+            continue;
+        }
+        // Extract the first string-like argument for pattern matching
+        let first_arg = args
+            .as_object()
+            .and_then(|o| o.values().next())
+            .and_then(|v| v.as_str())
+            .or_else(|| args.as_str())
+            .unwrap_or("");
+        let matches = constraint
+            .arg_patterns
+            .iter()
+            .any(|pattern| glob_match(pattern, first_arg));
+        if !matches {
+            return reject_policy(format!(
+                "tool '{tool_name}' argument '{first_arg}' does not match allowed patterns: {:?}",
+                constraint.arg_patterns
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn normalize_artifact_kind(kind: &str) -> String {
@@ -96,6 +420,9 @@ pub struct CapabilityPolicy {
     pub workspace_roots: Vec<String>,
     pub side_effect_level: Option<String>,
     pub recursion_limit: Option<usize>,
+    /// Argument-level constraints for specific tools.
+    #[serde(default)]
+    pub tool_arg_constraints: Vec<ToolArgConstraint>,
 }
 
 impl CapabilityPolicy {
@@ -199,12 +526,17 @@ impl CapabilityPolicy {
             (None, None) => None,
         };
 
+        // Merge arg constraints from both sides
+        let mut tool_arg_constraints = self.tool_arg_constraints.clone();
+        tool_arg_constraints.extend(requested.tool_arg_constraints.clone());
+
         Ok(CapabilityPolicy {
             tools,
             capabilities,
             workspace_roots,
             side_effect_level,
             recursion_limit,
+            tool_arg_constraints,
         })
     }
 }
@@ -1869,6 +2201,9 @@ pub async fn execute_stage_node(
                 tool_retries: 0,
                 tool_backoff_ms: 1000,
                 tool_format: "text".to_string(),
+                auto_compact: None,
+                policy: None,
+                daemon: false,
             },
         )
         .await?
@@ -2009,6 +2344,7 @@ pub fn builtin_ceiling() -> CapabilityPolicy {
         workspace_roots: Vec::new(),
         side_effect_level: Some("network".to_string()),
         recursion_limit: Some(8),
+        tool_arg_constraints: Vec::new(),
     }
 }
 
@@ -2020,10 +2356,9 @@ mod tests {
     fn capability_intersection_rejects_privilege_expansion() {
         let ceiling = CapabilityPolicy {
             tools: vec!["read".to_string()],
-            capabilities: BTreeMap::new(),
-            workspace_roots: Vec::new(),
             side_effect_level: Some("read_only".to_string()),
             recursion_limit: Some(2),
+            ..Default::default()
         };
         let requested = CapabilityPolicy {
             tools: vec!["read".to_string(), "edit".to_string()],
@@ -2041,9 +2376,9 @@ mod tests {
                 "workspace".to_string(),
                 vec!["read_text".to_string()],
             )]),
-            workspace_roots: Vec::new(),
             side_effect_level: Some("read_only".to_string()),
             recursion_limit: Some(1),
+            ..Default::default()
         });
         let error = enforce_current_policy_for_bridge_builtin("custom_host_builtin").unwrap_err();
         pop_execution_policy();
@@ -2064,9 +2399,9 @@ mod tests {
                 "workspace".to_string(),
                 vec!["read_text".to_string()],
             )]),
-            workspace_roots: Vec::new(),
             side_effect_level: Some("read_only".to_string()),
             recursion_limit: Some(1),
+            ..Default::default()
         });
         let error = enforce_current_policy_for_builtin("mcp_connect", &[]).unwrap_err();
         pop_execution_policy();
@@ -2392,5 +2727,245 @@ mod tests {
         let result = enforce_current_policy_for_tool("edit");
         pop_execution_policy();
         assert!(result.is_err());
+    }
+
+    // ── Tool hook tests ──────────────────────────────────────────────
+
+    #[test]
+    fn pre_tool_hook_deny_blocks_execution() {
+        clear_tool_hooks();
+        register_tool_hook(ToolHook {
+            pattern: "dangerous_*".to_string(),
+            pre: Some(Rc::new(|_name, _args| {
+                PreToolAction::Deny("blocked by policy".to_string())
+            })),
+            post: None,
+        });
+        let result = run_pre_tool_hooks("dangerous_delete", &serde_json::json!({}));
+        clear_tool_hooks();
+        assert!(matches!(result, PreToolAction::Deny(_)));
+    }
+
+    #[test]
+    fn pre_tool_hook_allow_passes_through() {
+        clear_tool_hooks();
+        register_tool_hook(ToolHook {
+            pattern: "safe_*".to_string(),
+            pre: Some(Rc::new(|_name, _args| PreToolAction::Allow)),
+            post: None,
+        });
+        let result = run_pre_tool_hooks("safe_read", &serde_json::json!({}));
+        clear_tool_hooks();
+        assert!(matches!(result, PreToolAction::Allow));
+    }
+
+    #[test]
+    fn pre_tool_hook_modify_rewrites_args() {
+        clear_tool_hooks();
+        register_tool_hook(ToolHook {
+            pattern: "*".to_string(),
+            pre: Some(Rc::new(|_name, _args| {
+                PreToolAction::Modify(serde_json::json!({"path": "/sanitized"}))
+            })),
+            post: None,
+        });
+        let result = run_pre_tool_hooks("read_file", &serde_json::json!({"path": "/etc/passwd"}));
+        clear_tool_hooks();
+        match result {
+            PreToolAction::Modify(args) => assert_eq!(args["path"], "/sanitized"),
+            _ => panic!("expected Modify"),
+        }
+    }
+
+    #[test]
+    fn post_tool_hook_modifies_result() {
+        clear_tool_hooks();
+        register_tool_hook(ToolHook {
+            pattern: "exec".to_string(),
+            pre: None,
+            post: Some(Rc::new(|_name, result| {
+                if result.contains("SECRET") {
+                    PostToolAction::Modify("[REDACTED]".to_string())
+                } else {
+                    PostToolAction::Pass
+                }
+            })),
+        });
+        let result = run_post_tool_hooks("exec", "output with SECRET data");
+        let clean = run_post_tool_hooks("exec", "clean output");
+        clear_tool_hooks();
+        assert_eq!(result, "[REDACTED]");
+        assert_eq!(clean, "clean output");
+    }
+
+    #[test]
+    fn unmatched_hook_pattern_does_not_fire() {
+        clear_tool_hooks();
+        register_tool_hook(ToolHook {
+            pattern: "exec".to_string(),
+            pre: Some(Rc::new(|_name, _args| {
+                PreToolAction::Deny("should not match".to_string())
+            })),
+            post: None,
+        });
+        let result = run_pre_tool_hooks("read_file", &serde_json::json!({}));
+        clear_tool_hooks();
+        assert!(matches!(result, PreToolAction::Allow));
+    }
+
+    #[test]
+    fn glob_match_patterns() {
+        assert!(glob_match("*", "anything"));
+        assert!(glob_match("exec*", "exec_at"));
+        assert!(glob_match("*_file", "read_file"));
+        assert!(!glob_match("exec*", "read_file"));
+        assert!(glob_match("read_file", "read_file"));
+        assert!(!glob_match("read_file", "write_file"));
+    }
+
+    // ── Auto-compaction tests ────────────────────────────────────────
+
+    #[test]
+    fn microcompact_snips_large_output() {
+        let large = "x".repeat(50_000);
+        let result = microcompact_tool_output(&large, 10_000);
+        assert!(result.len() < 15_000);
+        assert!(result.contains("snipped"));
+    }
+
+    #[test]
+    fn microcompact_preserves_small_output() {
+        let small = "hello world";
+        let result = microcompact_tool_output(small, 10_000);
+        assert_eq!(result, small);
+    }
+
+    #[test]
+    fn auto_compact_messages_reduces_count() {
+        let mut messages: Vec<serde_json::Value> = (0..20)
+            .map(|i| serde_json::json!({"role": "user", "content": format!("message {i}")}))
+            .collect();
+        let compacted = auto_compact_messages(&mut messages, 6);
+        assert!(compacted);
+        assert!(messages.len() <= 7); // 6 kept + 1 summary
+        assert!(messages[0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("auto-compacted"));
+    }
+
+    #[test]
+    fn auto_compact_noop_when_under_threshold() {
+        let mut messages: Vec<serde_json::Value> = (0..4)
+            .map(|i| serde_json::json!({"role": "user", "content": format!("msg {i}")}))
+            .collect();
+        let compacted = auto_compact_messages(&mut messages, 6);
+        assert!(!compacted);
+        assert_eq!(messages.len(), 4);
+    }
+
+    #[test]
+    fn estimate_message_tokens_basic() {
+        let messages = vec![
+            serde_json::json!({"role": "user", "content": "a".repeat(400)}),
+            serde_json::json!({"role": "assistant", "content": "b".repeat(400)}),
+        ];
+        let tokens = estimate_message_tokens(&messages);
+        assert_eq!(tokens, 200); // 800 chars / 4
+    }
+
+    // ── Artifact dedup and microcompaction tests ─────────────────────
+
+    #[test]
+    fn dedup_artifacts_removes_duplicates() {
+        let mut artifacts = vec![
+            ArtifactRecord {
+                id: "a1".to_string(),
+                kind: "test".to_string(),
+                text: Some("duplicate content".to_string()),
+                ..Default::default()
+            },
+            ArtifactRecord {
+                id: "a2".to_string(),
+                kind: "test".to_string(),
+                text: Some("duplicate content".to_string()),
+                ..Default::default()
+            },
+            ArtifactRecord {
+                id: "a3".to_string(),
+                kind: "test".to_string(),
+                text: Some("unique content".to_string()),
+                ..Default::default()
+            },
+        ];
+        dedup_artifacts(&mut artifacts);
+        assert_eq!(artifacts.len(), 2);
+    }
+
+    #[test]
+    fn microcompact_artifact_snips_oversized() {
+        let mut artifact = ArtifactRecord {
+            id: "a1".to_string(),
+            kind: "test".to_string(),
+            text: Some("x".repeat(10_000)),
+            estimated_tokens: Some(2_500),
+            ..Default::default()
+        };
+        microcompact_artifact(&mut artifact, 500);
+        assert!(artifact.text.as_ref().unwrap().len() < 5_000);
+        assert_eq!(artifact.estimated_tokens, Some(500));
+    }
+
+    // ── Tool argument constraint tests ───────────────────────────────
+
+    #[test]
+    fn arg_constraint_allows_matching_pattern() {
+        let policy = CapabilityPolicy {
+            tool_arg_constraints: vec![ToolArgConstraint {
+                tool: "exec".to_string(),
+                arg_patterns: vec!["cargo *".to_string()],
+            }],
+            ..Default::default()
+        };
+        let result = enforce_tool_arg_constraints(
+            &policy,
+            "exec",
+            &serde_json::json!({"command": "cargo test"}),
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn arg_constraint_rejects_non_matching_pattern() {
+        let policy = CapabilityPolicy {
+            tool_arg_constraints: vec![ToolArgConstraint {
+                tool: "exec".to_string(),
+                arg_patterns: vec!["cargo *".to_string()],
+            }],
+            ..Default::default()
+        };
+        let result = enforce_tool_arg_constraints(
+            &policy,
+            "exec",
+            &serde_json::json!({"command": "rm -rf /"}),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn arg_constraint_ignores_unmatched_tool() {
+        let policy = CapabilityPolicy {
+            tool_arg_constraints: vec![ToolArgConstraint {
+                tool: "exec".to_string(),
+                arg_patterns: vec!["cargo *".to_string()],
+            }],
+            ..Default::default()
+        };
+        let result = enforce_tool_arg_constraints(
+            &policy,
+            "read_file",
+            &serde_json::json!({"path": "/etc/passwd"}),
+        );
+        assert!(result.is_ok());
     }
 }
