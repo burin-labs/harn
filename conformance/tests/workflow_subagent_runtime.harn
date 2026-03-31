@@ -1,0 +1,23 @@
+pipeline main() {
+  let flow = workflow_graph({
+    name: "delegated-flow",
+    entry: "delegate",
+    nodes: {
+      delegate: {
+        kind: "subagent",
+        mode: "llm",
+        model_policy: {provider: "mock"},
+        output_contract: {output_kinds: ["summary"]},
+        metadata: {worker_name: "delegate-1"}
+      }
+    },
+    edges: []
+  })
+  let result = workflow_execute("Write a delegated note", flow, [], {max_steps: 2})
+  println(result?.status)
+  println(result?.run?.stages[0]?.kind)
+  println(result?.run?.stages[0]?.metadata?.worker?.name == "delegate-1")
+  println(result?.run?.stages[0]?.artifacts[0]?.metadata?.delegated == true)
+  println(result?.run?.stages[0]?.artifacts[1]?.kind == "worker_result")
+  println(result?.run?.stages[0]?.metadata?.worker_id != nil)
+}

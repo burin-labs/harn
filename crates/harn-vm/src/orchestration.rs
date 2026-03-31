@@ -50,6 +50,8 @@ fn normalize_artifact_kind(kind: &str) -> String {
         | "test_result"
         | "command_result"
         | "provider_payload"
+        | "worker_result"
+        | "worker_notification"
         | "artifact" => kind.to_string(),
         "file" => "workspace_file".to_string(),
         "transcript" => "transcript_summary".to_string(),

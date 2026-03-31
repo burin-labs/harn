@@ -485,6 +485,34 @@ impl HostBridge {
             }),
         );
     }
+
+    /// Send a worker lifecycle update for delegated/background execution.
+    pub fn send_worker_update(
+        &self,
+        worker_id: &str,
+        worker_name: &str,
+        status: &str,
+        metadata: serde_json::Value,
+    ) {
+        let session_id = self.get_session_id();
+        let script = self.get_script_name();
+        self.notify(
+            "session/update",
+            serde_json::json!({
+                "sessionId": session_id,
+                "update": {
+                    "sessionUpdate": "worker_update",
+                    "content": {
+                        "worker_id": worker_id,
+                        "worker_name": worker_name,
+                        "status": status,
+                        "script": script,
+                        "metadata": metadata,
+                    },
+                },
+            }),
+        );
+    }
 }
 
 /// Convert a serde_json::Value to a VmValue.

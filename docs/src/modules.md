@@ -201,6 +201,10 @@ Workflow helpers built on transcripts and `agent_loop`:
 | `workflow_compact(prev, options?)` | Summarize and compact a transcript |
 | `workflow_reset(prev, carry_summary)` | Reset or summarize-then-reset a workflow transcript |
 
+For background or delegated execution, use the worker lifecycle builtins
+(`spawn_agent`, `send_input`, `wait_agent`, `close_agent`, `list_agents`)
+directly from the runtime.
+
 ### Selective imports
 
 Import specific functions from any module:

@@ -2,6 +2,29 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.0
+
+### Added
+
+- **Delegated worker runtime** — `spawn_agent(...)`, `send_input(...)`,
+  `wait_agent(...)`, `close_agent(...)`, and `list_agents()` add a first-class
+  worker/task lifecycle to Harn's orchestration surface.
+- **Delegated workflow stages** — `subagent` workflow nodes now execute through
+  the same worker runtime and attach worker lineage to produced artifacts and
+  stage metadata.
+- **Worker lifecycle conformance coverage** — new conformance cases cover
+  worker spawn/wait/continue/close flows and delegated workflow node execution.
+
+### Changed
+
+- **Workflow runs record delegation lineage** — delegated stages now persist
+  worker summaries into stage metadata so replay/eval and future host UIs can
+  inspect child execution boundaries.
+- **Delegated stage artifacts carry provenance** — artifacts emitted by
+  delegated stages are tagged with worker metadata and a delegated marker.
+- **Release version raised to 0.5** — crate interdependencies now target the
+  0.5 series to match the expanded orchestration runtime surface.
+
 ## v0.4.32
 
 ### Added

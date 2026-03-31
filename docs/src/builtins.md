@@ -946,6 +946,24 @@ These builtins expose Harn's typed orchestration runtime.
 - `replay_run`
 - `replay_mode` (`"deterministic"` currently replays saved stage fixtures)
 
+### Delegated workers
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `spawn_agent(config)` | config: dict | dict | Start a worker from a workflow graph or delegated stage config |
+| `send_input(handle, task)` | handle, task | dict | Re-run a completed worker with a new task, carrying forward worker state where applicable |
+| `wait_agent(handle_or_list)` | handle or list | dict or list | Wait for one worker or a list of workers to finish |
+| `close_agent(handle)` | handle | dict | Cancel a worker and mark it terminal |
+| `list_agents()` | none | list | List worker summaries tracked by the current runtime |
+
+`spawn_agent(...)` accepts either:
+
+- `{task, graph, artifacts?, options?, name?, wait?}` for typed workflow runs
+- `{task, node, artifacts?, transcript?, name?, wait?}` for delegated stage runs
+
+Workers return handle dicts with an `id`, lifecycle timestamps, `status`,
+`mode`, result/error fields, transcript presence, and produced artifact count.
+
 ### Artifacts and context
 
 | Function | Parameters | Returns | Description |

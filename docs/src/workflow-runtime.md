@@ -20,6 +20,11 @@ graph with:
 - workflow-level capability ceiling
 - mutation audit log entries
 
+`subagent` nodes are now a real delegated execution boundary. They run through
+the worker lifecycle, attach worker metadata to their stage records, and tag
+their produced artifacts with delegated provenance so parent workflows can
+inspect and reduce child results explicitly.
+
 Validation is explicit:
 
 ```harn
@@ -126,6 +131,10 @@ Deterministic replay is now a runtime mode rather than a CLI-only inspection
 tool: passing a prior run via `replay_run` or `replay_path` replays saved stage
 records and artifacts through the workflow engine without calling providers or
 tools again.
+
+Delegated runs surface child worker lineage in each delegated stage's metadata.
+This makes replay/eval and host timelines able to distinguish parent execution
+from child execution without reconstructing that structure from plain text.
 
 ## Transcript policy
 

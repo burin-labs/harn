@@ -39,7 +39,7 @@ use self::trace::trace_llm_call;
 // =============================================================================
 
 pub(crate) use self::agent::{
-    agent_loop_result_from_llm, run_agent_loop_internal, AgentLoopConfig,
+    agent_loop_result_from_llm, current_host_bridge, run_agent_loop_internal, AgentLoopConfig,
 };
 pub use self::agent::{register_agent_loop_with_bridge, register_llm_call_with_bridge};
 pub(crate) use self::api::vm_call_llm_full;

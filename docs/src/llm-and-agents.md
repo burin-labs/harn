@@ -238,6 +238,44 @@ forks, repairs, and resumptions:
 
 ```harn
 let first = llm_call("Plan the work", nil, {provider: "mock"})
+
+## Delegated workers
+
+For long-running or parallel orchestration, Harn now exposes a worker/task
+lifecycle directly in the runtime.
+
+```harn
+let worker = spawn_agent({
+  name: "research-pass",
+  task: "Draft a summary",
+  node: {
+    kind: "subagent",
+    mode: "llm",
+    model_policy: {provider: "mock"},
+    output_contract: {output_kinds: ["summary"]}
+  }
+})
+
+let done = wait_agent(worker)
+println(done.status)
+```
+
+`spawn_agent(...)` accepts either:
+
+- a `graph` plus optional `artifacts` and `options`, which runs a typed
+  workflow in the background, or
+- a `node` plus optional `artifacts` and `transcript`, which runs a single
+  delegated stage and preserves transcript continuity across `send_input(...)`
+
+Worker lifecycle builtins:
+
+| Function | Description |
+|---|---|
+| `spawn_agent(config)` | Start a worker from a workflow graph or delegated stage |
+| `send_input(handle, task)` | Re-run a completed worker with a new task, carrying transcript/artifacts forward when applicable |
+| `wait_agent(handle_or_list)` | Wait for one worker or a list of workers to finish |
+| `close_agent(handle)` | Cancel a worker and mark it terminal |
+| `list_agents()` | Return summaries for all known workers in the current runtime |
 let second = llm_call("Continue", nil, {
   provider: "mock",
   transcript: first.transcript
