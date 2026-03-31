@@ -44,8 +44,11 @@ fn normalize_artifact_kind(kind: &str) -> String {
         | "git_diff"
         | "patch"
         | "patch_set"
+        | "patch_proposal"
         | "diff_review"
         | "review_decision"
+        | "verification_bundle"
+        | "apply_intent"
         | "verification_result"
         | "test_result"
         | "command_result"
@@ -65,7 +68,9 @@ fn normalize_artifact_kind(kind: &str) -> String {
 fn default_artifact_priority(kind: &str) -> i64 {
     match kind {
         "verification_result" | "test_result" => 100,
-        "diff" | "git_diff" | "patch" | "patch_set" | "diff_review" | "review_decision" => 90,
+        "verification_bundle" => 95,
+        "diff" | "git_diff" | "patch" | "patch_set" | "patch_proposal" | "diff_review"
+        | "review_decision" | "apply_intent" => 90,
         "plan" => 80,
         "workspace_file" | "workspace_snapshot" | "editor_selection" | "resource" => 70,
         "summary" | "transcript_summary" => 60,
@@ -605,17 +610,51 @@ pub struct RunRecord {
     pub status: String,
     pub started_at: String,
     pub finished_at: Option<String>,
+    pub parent_run_id: Option<String>,
+    pub root_run_id: Option<String>,
     pub stages: Vec<RunStageRecord>,
     pub transitions: Vec<RunTransitionRecord>,
     pub checkpoints: Vec<RunCheckpointRecord>,
     pub pending_nodes: Vec<String>,
     pub completed_nodes: Vec<String>,
+    pub child_runs: Vec<RunChildRecord>,
     pub artifacts: Vec<ArtifactRecord>,
     pub policy: CapabilityPolicy,
+    pub execution: Option<RunExecutionRecord>,
     pub transcript: Option<serde_json::Value>,
     pub replay_fixture: Option<ReplayFixture>,
     pub metadata: BTreeMap<String, serde_json::Value>,
     pub persisted_path: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RunChildRecord {
+    pub worker_id: String,
+    pub worker_name: String,
+    pub parent_stage_id: Option<String>,
+    pub task: String,
+    pub status: String,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+    pub run_id: Option<String>,
+    pub run_path: Option<String>,
+    pub snapshot_path: Option<String>,
+    pub execution: Option<RunExecutionRecord>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RunExecutionRecord {
+    pub cwd: Option<String>,
+    pub source_dir: Option<String>,
+    pub env: BTreeMap<String, String>,
+    pub adapter: Option<String>,
+    pub repo_path: Option<String>,
+    pub worktree_path: Option<String>,
+    pub branch: Option<String>,
+    pub base_ref: Option<String>,
+    pub cleanup: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -1060,6 +1099,9 @@ pub fn normalize_run_record(value: &VmValue) -> Result<RunRecord, VmError> {
     }
     if run.status.is_empty() {
         run.status = "running".to_string();
+    }
+    if run.root_run_id.is_none() {
+        run.root_run_id = Some(run.id.clone());
     }
     if run.replay_fixture.is_none() {
         run.replay_fixture = Some(replay_fixture_from_run(&run));
@@ -2139,6 +2181,8 @@ mod tests {
             status: "completed".to_string(),
             started_at: "1".to_string(),
             finished_at: Some("2".to_string()),
+            parent_run_id: None,
+            root_run_id: Some("run_1".to_string()),
             stages: vec![RunStageRecord {
                 id: "stage_1".to_string(),
                 node_id: "act".to_string(),
@@ -2170,8 +2214,10 @@ mod tests {
             checkpoints: vec![],
             pending_nodes: vec![],
             completed_nodes: vec!["act".to_string()],
+            child_runs: vec![],
             artifacts: vec![],
             policy: CapabilityPolicy::default(),
+            execution: None,
             transcript: None,
             replay_fixture: None,
             metadata: BTreeMap::new(),

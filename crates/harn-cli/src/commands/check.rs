@@ -295,6 +295,33 @@ fn scan_node_preflight(
                 }
             }
         }
+        Node::FunctionCall { name, args } if name == "exec_at" || name == "shell_at" => {
+            if let Some(dir) = args.first().and_then(literal_string) {
+                let resolved = resolve_source_relative(file_path, &dir);
+                if !resolved.is_dir() {
+                    diagnostics.push(PreflightDiagnostic {
+                        path: file_path.display().to_string(),
+                        source: source.to_string(),
+                        span: args[0].span,
+                        message: format!(
+                            "preflight: execution directory '{}' does not exist at {}",
+                            dir,
+                            resolved.display()
+                        ),
+                        help: Some(
+                            "use a source-relative directory that exists at preflight time, or create it before execution"
+                                .to_string(),
+                        ),
+                    });
+                }
+            }
+        }
+        Node::FunctionCall { name, args } if name == "spawn_agent" => {
+            if let Some(config) = args.first() {
+                scan_spawn_agent_preflight(config, file_path, source, diagnostics);
+            }
+            scan_children(args, file_path, source, visited, diagnostics);
+        }
         Node::FunctionCall { name, args } if name == "host_invoke" => {
             if matches!(
                 (args.first().map(|arg| &arg.node), args.get(1).map(|arg| &arg.node)),
@@ -585,6 +612,75 @@ fn host_render_path_arg(arg: Option<&SNode>) -> Option<String> {
         })
 }
 
+fn literal_string(node: &SNode) -> Option<String> {
+    match &node.node {
+        Node::StringLiteral(value) => Some(value.clone()),
+        _ => None,
+    }
+}
+
+fn dict_literal_field<'a>(node: &'a SNode, field: &str) -> Option<&'a SNode> {
+    let Node::DictLiteral(entries) = &node.node else {
+        return None;
+    };
+    entries.iter().find_map(|entry| match &entry.key.node {
+        Node::Identifier(key) | Node::StringLiteral(key) if key == field => Some(&entry.value),
+        _ => None,
+    })
+}
+
+fn scan_spawn_agent_preflight(
+    config: &SNode,
+    file_path: &Path,
+    source: &str,
+    diagnostics: &mut Vec<PreflightDiagnostic>,
+) {
+    let Some(execution) = dict_literal_field(config, "execution") else {
+        return;
+    };
+    if let Some(cwd) = dict_literal_field(execution, "cwd").and_then(literal_string) {
+        let resolved = resolve_source_relative(file_path, &cwd);
+        if !resolved.is_dir() {
+            diagnostics.push(PreflightDiagnostic {
+                path: file_path.display().to_string(),
+                source: source.to_string(),
+                span: execution.span,
+                message: format!(
+                    "preflight: worker execution cwd '{}' does not exist at {}",
+                    cwd,
+                    resolved.display()
+                ),
+                help: Some(
+                    "keep literal worker cwd paths source-relative and valid, or switch to a worktree adapter"
+                        .to_string(),
+                ),
+            });
+        }
+    }
+    let Some(worktree) = dict_literal_field(execution, "worktree") else {
+        return;
+    };
+    if let Some(repo) = dict_literal_field(worktree, "repo").and_then(literal_string) {
+        let resolved = resolve_source_relative(file_path, &repo);
+        if !resolved.is_dir() {
+            diagnostics.push(PreflightDiagnostic {
+                path: file_path.display().to_string(),
+                source: source.to_string(),
+                span: worktree.span,
+                message: format!(
+                    "preflight: worker worktree repo '{}' does not exist at {}",
+                    repo,
+                    resolved.display()
+                ),
+                help: Some(
+                    "point worktree.repo at a real git checkout so isolated execution can be prepared"
+                        .to_string(),
+                ),
+            });
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -633,6 +729,27 @@ pipeline main() {
         let file = dir.join("main.harn");
         let resolved = resolve_import_path(&file, "lib/helpers");
         assert_eq!(resolved, Some(dir.join("lib").join("helpers.harn")));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn preflight_reports_missing_worker_execution_repo() {
+        let dir = unique_temp_dir("harn-check-worker");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("main.harn");
+        let source = r#"
+pipeline main() {
+  spawn_agent({
+    task: "do it",
+    node: {kind: "stage"},
+    execution: {worktree: {repo: "./missing-repo"}}
+  })
+}
+"#;
+        let program = parse_program(source);
+        let diagnostics = collect_preflight_diagnostics(&file, source, &program);
+        assert_eq!(diagnostics.len(), 1);
+        assert!(diagnostics[0].message.contains("worktree repo"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

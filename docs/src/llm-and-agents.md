@@ -281,7 +281,22 @@ Worker lifecycle builtins:
 Workers can persist state and child run paths between sessions. Use `carry`
 inside `spawn_agent(...)` when you want continuation to reset transcript state,
 drop carried artifacts, or disable workflow resume against the previous child
-run record.
+run record. Worker configs may also include `execution` to pin delegated work
+to an explicit cwd/env overlay or a managed git worktree:
+
+```harn
+let worker = spawn_agent({
+  task: "Run the repo-local verification pass",
+  graph: some_graph,
+  execution: {
+    worktree: {
+      repo: ".",
+      branch: "worker/research-pass",
+      cleanup: "preserve"
+    }
+  }
+})
+```
 
 ```harn
 let second = llm_call("Continue", nil, {

@@ -496,6 +496,11 @@ impl HostBridge {
     ) {
         let session_id = self.get_session_id();
         let script = self.get_script_name();
+        let started_at = metadata.get("started_at").cloned().unwrap_or_default();
+        let finished_at = metadata.get("finished_at").cloned().unwrap_or_default();
+        let snapshot_path = metadata.get("snapshot_path").cloned().unwrap_or_default();
+        let run_id = metadata.get("child_run_id").cloned().unwrap_or_default();
+        let run_path = metadata.get("child_run_path").cloned().unwrap_or_default();
         self.notify(
             "session/update",
             serde_json::json!({
@@ -507,6 +512,11 @@ impl HostBridge {
                         "worker_name": worker_name,
                         "status": status,
                         "script": script,
+                        "started_at": started_at,
+                        "finished_at": finished_at,
+                        "snapshot_path": snapshot_path,
+                        "run_id": run_id,
+                        "run_path": run_path,
                         "metadata": metadata,
                     },
                 },

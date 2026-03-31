@@ -308,6 +308,19 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
         "artifact_review_decision",
         "artifact_review_decision(target, decision, extra?) -> dict",
     ),
+    (
+        "artifact_patch_proposal",
+        "artifact_patch_proposal(target, patch, extra?) -> dict",
+    ),
+    (
+        "artifact_verification_bundle",
+        "artifact_verification_bundle(title, checks, extra?) -> dict",
+    ),
+    (
+        "artifact_apply_intent",
+        "artifact_apply_intent(target, intent, extra?) -> dict",
+    ),
+    ("load_run_tree", "load_run_tree(path) -> dict"),
     ("run_record_fixture", "run_record_fixture(run) -> dict"),
     ("run_record_eval", "run_record_eval(run, fixture?) -> dict"),
     (
@@ -627,6 +640,10 @@ pub(crate) fn builtin_doc(name: &str) -> Option<String> {
         "artifact_git_diff" => "**artifact_git_diff(diff_text, extra?)** → dict — Build a git-diff artifact from host or tool output",
         "artifact_diff_review" => "**artifact_diff_review(target, summary?, extra?)** → dict — Build a pending diff-review artifact linked to a diff or patch artifact",
         "artifact_review_decision" => "**artifact_review_decision(target, decision, extra?)** → dict — Build an accept/reject review-decision artifact linked to a review target",
+        "artifact_patch_proposal" => "**artifact_patch_proposal(target, patch, extra?)** → dict — Build a proposed patch artifact linked to an existing review target",
+        "artifact_verification_bundle" => "**artifact_verification_bundle(title, checks, extra?)** → dict — Bundle multiple verification checks into one review-ready artifact",
+        "artifact_apply_intent" => "**artifact_apply_intent(target, intent, extra?)** → dict — Record an apply or merge intent linked to a reviewed artifact",
+        "load_run_tree" => "**load_run_tree(path)** → dict — Load a persisted run together with delegated child-run lineage",
         "run_record_fixture" => "**run_record_fixture(run)** → dict — Derive a replay fixture from a run record",
         "run_record_eval" => "**run_record_eval(run, fixture?)** → dict — Evaluate one run against a fixture",
         "run_record_eval_suite" => "**run_record_eval_suite(cases)** → dict — Evaluate a list of run/fixture cases as a regression suite",

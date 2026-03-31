@@ -1,6 +1,8 @@
 use super::*;
 use std::cell::{Cell, RefCell};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::process::Command;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -24,6 +26,7 @@ pub(super) struct WorkerExecutionResult {
     pub(super) payload: serde_json::Value,
     pub(super) transcript: Option<VmValue>,
     pub(super) artifacts: Vec<ArtifactRecord>,
+    pub(super) execution: WorkerExecutionProfile,
 }
 
 #[derive(Clone, Default)]
@@ -35,12 +38,31 @@ pub(super) struct WorkerCarryPolicy {
     pub(super) persist_state: bool,
 }
 
+#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub(super) struct WorkerWorktreeSpec {
+    pub(super) repo: String,
+    pub(super) path: Option<String>,
+    pub(super) branch: Option<String>,
+    pub(super) base_ref: Option<String>,
+    pub(super) cleanup: Option<String>,
+}
+
+#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub(super) struct WorkerExecutionProfile {
+    pub(super) cwd: Option<String>,
+    pub(super) env: BTreeMap<String, String>,
+    pub(super) worktree: Option<WorkerWorktreeSpec>,
+}
+
 pub(super) struct WorkerInit {
     pub(super) name: String,
     pub(super) task: String,
     pub(super) config: WorkerConfig,
     pub(super) wait: bool,
     pub(super) carry_policy: WorkerCarryPolicy,
+    pub(super) execution: WorkerExecutionProfile,
 }
 
 pub(super) struct WorkerState {
@@ -65,6 +87,7 @@ pub(super) struct WorkerState {
     pub(super) child_run_id: Option<String>,
     pub(super) child_run_path: Option<String>,
     pub(super) carry_policy: WorkerCarryPolicy,
+    pub(super) execution: WorkerExecutionProfile,
     pub(super) snapshot_path: String,
 }
 
@@ -118,6 +141,7 @@ pub(super) fn clone_worker_state(state: &WorkerState) -> serde_json::Value {
         "parent_stage_id": state.parent_stage_id,
         "child_run_id": state.child_run_id,
         "child_run_path": state.child_run_path,
+        "execution": state.execution,
         "snapshot_path": state.snapshot_path,
     })
 }
@@ -135,6 +159,7 @@ fn worker_bridge_metadata(state: &WorkerState) -> serde_json::Value {
         "parent_stage_id": state.parent_stage_id,
         "child_run_id": state.child_run_id,
         "child_run_path": state.child_run_path,
+        "execution": state.execution,
         "snapshot_path": state.snapshot_path,
         "error": state.latest_error,
     })
@@ -280,6 +305,7 @@ pub(super) fn persist_worker_state_snapshot(state: &WorkerState) -> Result<(), V
             "resume_workflow": state.carry_policy.resume_workflow,
             "persist_state": state.carry_policy.persist_state,
         },
+        "execution": state.execution,
         "snapshot_path": state.snapshot_path,
     });
     let path = PathBuf::from(&state.snapshot_path);
@@ -324,6 +350,9 @@ pub(super) fn load_worker_state_snapshot(target: &str) -> Result<WorkerState, Vm
     };
     let config =
         worker_config_from_json(payload.get("config").unwrap_or(&serde_json::Value::Null))?;
+    let execution: WorkerExecutionProfile =
+        serde_json::from_value(payload.get("execution").cloned().unwrap_or_default())
+            .map_err(|e| VmError::Runtime(format!("worker snapshot execution parse error: {e}")))?;
     let status = payload
         .get("status")
         .and_then(|value| value.as_str())
@@ -414,6 +443,7 @@ pub(super) fn load_worker_state_snapshot(target: &str) -> Result<WorkerState, Vm
             .and_then(|value| value.as_str())
             .map(|value| value.to_string()),
         carry_policy,
+        execution,
         snapshot_path: path.to_string_lossy().to_string(),
     })
 }
@@ -476,6 +506,26 @@ pub(super) fn parse_worker_carry_policy(
     })
 }
 
+fn parse_worker_execution_profile(
+    value: Option<&VmValue>,
+) -> Result<WorkerExecutionProfile, VmError> {
+    match value {
+        Some(value) => serde_json::from_value(crate::llm::vm_value_to_json(value))
+            .map_err(|e| VmError::Runtime(format!("worker execution parse error: {e}"))),
+        None => Ok(WorkerExecutionProfile::default()),
+    }
+}
+
+fn parse_execution_profile_json(
+    value: Option<&serde_json::Value>,
+) -> Result<WorkerExecutionProfile, VmError> {
+    match value {
+        Some(value) => serde_json::from_value(value.clone())
+            .map_err(|e| VmError::Runtime(format!("worker execution parse error: {e}"))),
+        None => Ok(WorkerExecutionProfile::default()),
+    }
+}
+
 pub(super) fn apply_worker_transcript_policy(
     transcript: Option<VmValue>,
     policy: &TranscriptPolicy,
@@ -512,6 +562,7 @@ pub(super) fn parse_worker_config(value: &VmValue) -> Result<WorkerInit, VmError
         .unwrap_or_else(|| "worker".to_string());
     let wait = matches!(dict.get("wait"), Some(VmValue::Bool(true)));
     let carry_policy = parse_worker_carry_policy(dict)?;
+    let execution = parse_worker_execution_profile(dict.get("execution"))?;
 
     if let Some(graph_value) = dict.get("graph") {
         let graph = normalize_workflow_value(graph_value)?;
@@ -531,6 +582,7 @@ pub(super) fn parse_worker_config(value: &VmValue) -> Result<WorkerInit, VmError
             },
             wait,
             carry_policy,
+            execution,
         });
     }
 
@@ -552,13 +604,118 @@ pub(super) fn parse_worker_config(value: &VmValue) -> Result<WorkerInit, VmError
         },
         wait,
         carry_policy,
+        execution,
     })
 }
 
+fn execution_record(profile: &WorkerExecutionProfile) -> crate::orchestration::RunExecutionRecord {
+    let mut record = crate::orchestration::RunExecutionRecord {
+        cwd: profile.cwd.clone(),
+        source_dir: None,
+        env: profile.env.clone(),
+        adapter: None,
+        repo_path: None,
+        worktree_path: None,
+        branch: None,
+        base_ref: None,
+        cleanup: None,
+    };
+    if let Some(worktree) = &profile.worktree {
+        record.adapter = Some("worktree".to_string());
+        record.repo_path = Some(worktree.repo.clone());
+        record.worktree_path = worktree.path.clone().or_else(|| profile.cwd.clone());
+        record.branch = worktree.branch.clone();
+        record.base_ref = worktree.base_ref.clone();
+        record.cleanup = worktree.cleanup.clone();
+    }
+    record
+}
+
+fn infer_worktree_path(worker_id: &str, spec: &WorkerWorktreeSpec) -> Result<String, VmError> {
+    if let Some(path) = &spec.path {
+        return Ok(path.clone());
+    }
+    let repo_name = PathBuf::from(&spec.repo)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("repo")
+        .to_string();
+    Ok(format!(".harn/worktrees/{repo_name}/{worker_id}"))
+}
+
+fn ensure_worker_worktree(
+    worker_id: &str,
+    profile: &mut WorkerExecutionProfile,
+) -> Result<(), VmError> {
+    let Some(spec) = profile.worktree.as_mut() else {
+        return Ok(());
+    };
+    if spec.repo.trim().is_empty() {
+        return Err(VmError::Runtime(
+            "worker execution.worktree.repo must not be empty".to_string(),
+        ));
+    }
+    let path = infer_worktree_path(worker_id, spec)?;
+    let base_ref = spec.base_ref.clone().unwrap_or_else(|| "HEAD".to_string());
+    let branch = spec
+        .branch
+        .clone()
+        .unwrap_or_else(|| format!("harn-{worker_id}"));
+    let target = PathBuf::from(&path);
+    if target.exists() {
+        profile.cwd = Some(path.clone());
+        spec.path = Some(path);
+        spec.branch = Some(branch);
+        spec.base_ref = Some(base_ref);
+        return Ok(());
+    }
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| VmError::Runtime(format!("worker worktree mkdir error: {e}")))?;
+    }
+    let output = Command::new("git")
+        .current_dir(&spec.repo)
+        .args(["worktree", "add", "-B", &branch, &path, &base_ref])
+        .output()
+        .map_err(|e| VmError::Runtime(format!("worker worktree add failed: {e}")))?;
+    if !output.status.success() {
+        return Err(VmError::Runtime(format!(
+            "worker worktree add failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    profile.cwd = Some(path.clone());
+    spec.path = Some(path);
+    spec.branch = Some(branch);
+    spec.base_ref = Some(base_ref);
+    Ok(())
+}
+
+fn cleanup_worker_execution(profile: &WorkerExecutionProfile) {
+    let Some(spec) = &profile.worktree else {
+        return;
+    };
+    if spec.cleanup.as_deref() != Some("remove") {
+        return;
+    }
+    let Some(path) = spec.path.as_deref() else {
+        return;
+    };
+    let _ = Command::new("git")
+        .current_dir(&spec.repo)
+        .args(["worktree", "remove", "--force", path])
+        .output();
+}
+
 async fn execute_worker_config(
+    worker_id: String,
     task: String,
     config: WorkerConfig,
+    mut execution: WorkerExecutionProfile,
 ) -> Result<WorkerExecutionResult, VmError> {
+    ensure_worker_worktree(&worker_id, &mut execution)?;
+    let execution_record = execution_record(&execution);
+    crate::stdlib::process::set_thread_execution_context(Some(execution_record.clone()));
     match config {
         WorkerConfig::Workflow {
             mut graph,
@@ -585,8 +742,17 @@ async fn execute_worker_config(
                     serde_json::json!(parent_stage_id),
                 );
             }
+            options.insert(
+                "execution".to_string(),
+                crate::stdlib::json_to_vm_value(
+                    &serde_json::to_value(&execution_record).unwrap_or_default(),
+                ),
+            );
             options.insert("delegated".to_string(), VmValue::Bool(true));
-            let result = super::execute_workflow(task, *graph, artifacts, options).await?;
+            let result = super::execute_workflow(task, *graph, artifacts, options).await;
+            crate::stdlib::process::set_thread_execution_context(None);
+            cleanup_worker_execution(&execution);
+            let result = result?;
             let dict = result.as_dict().ok_or_else(|| {
                 VmError::Runtime("workflow execution returned a non-dict result".to_string())
             })?;
@@ -596,6 +762,7 @@ async fn execute_worker_config(
                 payload: crate::llm::vm_value_to_json(&VmValue::Dict(Rc::new(dict.clone()))),
                 transcript,
                 artifacts,
+                execution,
             })
         }
         WorkerConfig::Stage {
@@ -603,14 +770,17 @@ async fn execute_worker_config(
             artifacts,
             transcript,
         } => {
-            let (result, produced, next_transcript) = crate::orchestration::execute_stage_node(
+            let result = crate::orchestration::execute_stage_node(
                 "delegated_worker",
                 &node,
                 &task,
                 &artifacts,
                 transcript,
             )
-            .await?;
+            .await;
+            crate::stdlib::process::set_thread_execution_context(None);
+            cleanup_worker_execution(&execution);
+            let (result, produced, next_transcript) = result?;
             Ok(WorkerExecutionResult {
                 payload: serde_json::json!({
                     "status": "completed",
@@ -619,24 +789,28 @@ async fn execute_worker_config(
                     "result": result,
                     "artifacts": produced,
                     "transcript": next_transcript.as_ref().map(crate::llm::vm_value_to_json),
+                    "execution": execution_record,
                 }),
                 transcript: next_transcript,
                 artifacts: produced,
+                execution,
             })
         }
     }
 }
 
 pub(super) fn spawn_worker_task(state: Rc<RefCell<WorkerState>>) {
-    let (task, config, cancel_token) = {
+    let (worker_id, task, config, execution, cancel_token) = {
         let worker = state.borrow();
         if worker.carry_policy.persist_state {
             persist_worker_state_snapshot(&worker).ok();
         }
         emit_worker_event(&worker, "running");
         (
+            worker.id.clone(),
             worker.task.clone(),
             worker.config.clone(),
+            worker.execution.clone(),
             worker.cancel_token.clone(),
         )
     };
@@ -650,7 +824,7 @@ pub(super) fn spawn_worker_task(state: Rc<RefCell<WorkerState>>) {
             });
         }
 
-        let result = execute_worker_config(task, config).await;
+        let result = execute_worker_config(worker_id, task, config, execution).await;
         {
             let mut worker = state_for_task.borrow_mut();
             worker.finished_at = Some(uuid::Uuid::now_v7().to_string());
@@ -661,6 +835,7 @@ pub(super) fn spawn_worker_task(state: Rc<RefCell<WorkerState>>) {
                     worker.latest_error = None;
                     worker.transcript = executed.transcript.clone();
                     worker.artifacts = executed.artifacts.clone();
+                    worker.execution = executed.execution.clone();
                     worker.child_run_id = executed
                         .payload
                         .get("run")
@@ -705,8 +880,7 @@ pub(super) fn spawn_worker_task(state: Rc<RefCell<WorkerState>>) {
 
 fn worker_result_artifact(
     node_id: &str,
-    worker_id: &str,
-    worker_name: &str,
+    state: &WorkerState,
     payload: &serde_json::Value,
     produced: &[ArtifactRecord],
     lineage: &[String],
@@ -722,11 +896,12 @@ fn worker_result_artifact(
         type_name: "artifact".to_string(),
         id: format!("{node_id}_worker_result_{}", uuid::Uuid::now_v7()),
         kind: "worker_result".to_string(),
-        title: Some(format!("worker result {worker_name}")),
+        title: Some(format!("worker result {}", state.name)),
         text: if summary.is_empty() { None } else { Some(summary) },
         data: Some(serde_json::json!({
-            "worker_id": worker_id,
-            "worker_name": worker_name,
+            "worker_id": state.id,
+            "worker_name": state.name,
+            "execution": state.execution,
             "payload": payload,
             "produced_artifact_ids": produced.iter().map(|artifact| artifact.id.clone()).collect::<Vec<_>>(),
         })),
@@ -739,8 +914,8 @@ fn worker_result_artifact(
         estimated_tokens: None,
         stage: Some(node_id.to_string()),
         metadata: BTreeMap::from([
-            ("worker_id".to_string(), serde_json::json!(worker_id)),
-            ("worker_name".to_string(), serde_json::json!(worker_name)),
+            ("worker_id".to_string(), serde_json::json!(state.id)),
+            ("worker_name".to_string(), serde_json::json!(state.name)),
             ("delegated".to_string(), serde_json::json!(true)),
         ]),
     }
@@ -763,6 +938,7 @@ pub(super) async fn execute_delegated_stage(
         .to_string();
     let mut stage_node = node.clone();
     stage_node.kind = "stage".to_string();
+    let execution = parse_execution_profile_json(node.metadata.get("execution"))?;
     let state = Rc::new(RefCell::new(WorkerState {
         id: worker_id.clone(),
         name: worker_name.clone(),
@@ -795,6 +971,7 @@ pub(super) async fn execute_delegated_stage(
             resume_workflow: true,
             persist_state: true,
         },
+        execution,
         snapshot_path: worker_snapshot_path(&worker_id),
     }));
     {
@@ -834,8 +1011,7 @@ pub(super) async fn execute_delegated_stage(
     }
     produced.push(worker_result_artifact(
         node_id,
-        &worker_id,
-        &worker_name,
+        &state.borrow(),
         &result,
         &executed.artifacts,
         &artifacts
@@ -868,10 +1044,10 @@ mod tests {
             mode: "workflow".to_string(),
             history: vec!["task".to_string()],
             config: WorkerConfig::Stage {
-                node: crate::orchestration::WorkflowNode {
+                node: Box::new(crate::orchestration::WorkflowNode {
                     kind: "stage".to_string(),
                     ..Default::default()
-                },
+                }),
                 artifacts: Vec::new(),
                 transcript: Some(VmValue::Dict(Rc::new(BTreeMap::from([(
                     "_type".to_string(),
@@ -917,6 +1093,7 @@ mod tests {
                 resume_workflow: false,
                 persist_state: true,
             },
+            execution: WorkerExecutionProfile::default(),
             snapshot_path: snapshot_path.clone(),
         };
 

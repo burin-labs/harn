@@ -5,6 +5,8 @@ use harn_parser::{
     BindingPattern, Node, Parser, SNode, TypeExpr, TypeParam, TypedParam, WhereClause,
 };
 
+const MAX_INLINE_CALL_WIDTH: usize = 100;
+
 /// Format a binding pattern to a string.
 fn format_pattern(pattern: &BindingPattern) -> String {
     match pattern {
@@ -189,6 +191,34 @@ impl Formatter {
             let last_line = nodes.last().map(|n| n.span.line + 1).unwrap_or(1);
             self.emit_comments_in_range(last_line, max_line + 1);
         }
+    }
+
+    fn format_comma_sequence(&self, rendered: Vec<String>, prefix_len: usize) -> String {
+        let inline = rendered.join(", ");
+        let should_wrap = !rendered.is_empty()
+            && (inline.contains('\n') || prefix_len + inline.len() + 1 > MAX_INLINE_CALL_WIDTH);
+        if !should_wrap {
+            return inline;
+        }
+        let item_indent = "  ".repeat(self.indent + 1);
+        let close_indent = "  ".repeat(self.indent);
+        let mut out = String::new();
+        out.push('\n');
+        for arg in rendered {
+            out.push_str(&item_indent);
+            out.push_str(&arg);
+            out.push_str(",\n");
+        }
+        out.push_str(&close_indent);
+        out
+    }
+
+    fn format_call_args(&self, args: &[SNode], prefix_len: usize) -> String {
+        let rendered = args
+            .iter()
+            .map(|arg| self.format_expr(arg))
+            .collect::<Vec<_>>();
+        self.format_comma_sequence(rendered, prefix_len)
     }
 
     fn format_node(&mut self, node: &SNode) {
@@ -643,11 +673,7 @@ impl Formatter {
                 format!("{expr}?")
             }
             Node::FunctionCall { name, args } => {
-                let args_str = args
-                    .iter()
-                    .map(|a| self.format_expr(a))
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                let args_str = self.format_call_args(args, name.len() + 1);
                 format!("{name}({args_str})")
             }
             Node::MethodCall {
@@ -656,11 +682,7 @@ impl Formatter {
                 args,
             } => {
                 let obj = self.format_expr(object);
-                let args_str = args
-                    .iter()
-                    .map(|a| self.format_expr(a))
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                let args_str = self.format_call_args(args, obj.len() + method.len() + 2);
                 // Preserve multiline method chains: if the `.` was on a
                 // later line than where the object expression ends, keep
                 // it on its own line.
@@ -677,11 +699,7 @@ impl Formatter {
                 args,
             } => {
                 let obj = self.format_expr(object);
-                let args_str = args
-                    .iter()
-                    .map(|a| self.format_expr(a))
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                let args_str = self.format_call_args(args, obj.len() + method.len() + 3);
                 if object.span.end_line > 0 && node.span.end_line > object.span.end_line {
                     let pad = "  ".repeat(self.indent + 1);
                     format!("{obj}\n{pad}?.{method}({args_str})")
@@ -736,11 +754,13 @@ impl Formatter {
                 }
             }
             Node::ListLiteral(elems) => {
-                let items = elems
-                    .iter()
-                    .map(|e| self.format_expr(e))
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                let items = self.format_comma_sequence(
+                    elems
+                        .iter()
+                        .map(|e| self.format_expr(e))
+                        .collect::<Vec<_>>(),
+                    1,
+                );
                 format!("[{items}]")
             }
             Node::DictLiteral(entries) => self.format_dict_entries(entries),
@@ -773,11 +793,7 @@ impl Formatter {
                 if args.is_empty() {
                     format!("{enum_name}.{variant}")
                 } else {
-                    let args_str = args
-                        .iter()
-                        .map(|a| self.format_expr(a))
-                        .collect::<Vec<_>>()
-                        .join(", ");
+                    let args_str = self.format_call_args(args, enum_name.len() + variant.len() + 2);
                     format!("{enum_name}.{variant}({args_str})")
                 }
             }
@@ -785,11 +801,11 @@ impl Formatter {
                 struct_name,
                 fields,
             } => {
-                let items = self.format_dict_entry_list(fields);
+                let items = self.format_dict_entry_list(fields, struct_name.len() + 2);
                 format!("{struct_name} {{{items}}}")
             }
             Node::AskExpr { fields } => {
-                let items = self.format_dict_entry_list(fields);
+                let items = self.format_dict_entry_list(fields, 5);
                 format!("ask {{{items}}}")
             }
             Node::SpawnExpr { body } => {
@@ -1335,12 +1351,16 @@ impl Formatter {
     }
 
     fn format_dict_entries(&self, entries: &[harn_parser::DictEntry]) -> String {
-        let items = self.format_dict_entry_list(entries);
+        let items = self.format_dict_entry_list(entries, 1);
         format!("{{{items}}}")
     }
 
-    fn format_dict_entry_list(&self, entries: &[harn_parser::DictEntry]) -> String {
-        entries
+    fn format_dict_entry_list(
+        &self,
+        entries: &[harn_parser::DictEntry],
+        prefix_len: usize,
+    ) -> String {
+        let rendered = entries
             .iter()
             .map(|e| {
                 // Spread entry: ...expr
@@ -1352,8 +1372,8 @@ impl Formatter {
                 let v = self.format_expr(&e.value);
                 format!("{k}: {v}")
             })
-            .collect::<Vec<_>>()
-            .join(", ")
+            .collect::<Vec<_>>();
+        self.format_comma_sequence(rendered, prefix_len)
     }
 
     /// Format a node as either an expression string or a statement string,
@@ -1907,5 +1927,69 @@ mod tests {
                 line
             );
         }
+    }
+
+    #[test]
+    fn test_wraps_long_function_call_arguments() {
+        let source = r#"pipeline default(task) {
+  let x = some_call(with_a_really_long_argument_name_one, with_a_really_long_argument_name_two, with_a_really_long_argument_name_three, with_a_really_long_argument_name_four, with_a_really_long_argument_name_five)
+}"#;
+        let result = format_source(source).unwrap();
+        assert!(result.contains("some_call(\n"));
+        assert!(result.contains("with_a_really_long_argument_name_five,\n"));
+    }
+
+    #[test]
+    fn test_wraps_long_method_call_arguments() {
+        let source = r#"pipeline default(task) {
+  let x = some_really_long_receiver_name.with_a_very_long_prefix().and_another_segment().call_some_extremely_long_method_name(with_a_really_long_argument_name_one, with_a_really_long_argument_name_two, with_a_really_long_argument_name_three, with_a_really_long_argument_name_four, with_a_really_long_argument_name_five)
+}"#;
+        let result = format_source(source).unwrap();
+        assert!(result.contains(".call_some_extremely_long_method_name(\n"));
+        assert!(result.contains("with_a_really_long_argument_name_five,\n"));
+    }
+
+    #[test]
+    fn test_wraps_long_list_literals() {
+        let source = r#"pipeline default(task) {
+  let x = [with_a_really_long_item_name_one, with_a_really_long_item_name_two, with_a_really_long_item_name_three, with_a_really_long_item_name_four, with_a_really_long_item_name_five]
+}"#;
+        let result = format_source(source).unwrap();
+        assert!(result.contains("[\n"));
+        assert!(result.contains("with_a_really_long_item_name_five,\n"));
+    }
+
+    #[test]
+    fn test_wraps_long_dict_literals() {
+        let source = r#"pipeline default(task) {
+  let x = {first_really_long_key_name: with_a_really_long_value_name_one, second_really_long_key_name: with_a_really_long_value_name_two, third_really_long_key_name: with_a_really_long_value_name_three}
+}"#;
+        let result = format_source(source).unwrap();
+        assert!(result.contains("{\n"));
+        assert!(
+            result.contains("third_really_long_key_name: with_a_really_long_value_name_three,\n")
+        );
+    }
+
+    #[test]
+    fn test_wraps_long_struct_construction() {
+        let source = r#"pipeline default(task) {
+  let x = BuildPlan {first_really_long_key_name: with_a_really_long_value_name_one, second_really_long_key_name: with_a_really_long_value_name_two, third_really_long_key_name: with_a_really_long_value_name_three}
+}"#;
+        let result = format_source(source).unwrap();
+        assert!(result.contains("BuildPlan\n  {\n"));
+        assert!(
+            result.contains("third_really_long_key_name: with_a_really_long_value_name_three,\n")
+        );
+    }
+
+    #[test]
+    fn test_wraps_long_enum_constructor_arguments() {
+        let source = r#"pipeline default(task) {
+  let x = BuildPlan.Step(with_a_really_long_argument_name_one, with_a_really_long_argument_name_two, with_a_really_long_argument_name_three, with_a_really_long_argument_name_four)
+}"#;
+        let result = format_source(source).unwrap();
+        assert!(result.contains("BuildPlan.Step(\n"));
+        assert!(result.contains("with_a_really_long_argument_name_four,\n"));
     }
 }

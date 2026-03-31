@@ -2,6 +2,21 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.2
+
+- Added worker execution profiles with cwd/env overlays and managed worktree
+  preparation so delegated runs can execute in isolated, reproducible roots.
+- Added delegated run-tree lineage to persisted run records plus
+  `load_run_tree(...)` for recursive inspection of child runs.
+- Strengthened `harn check` to validate literal delegated execution roots and
+  `exec_at(...)` / `shell_at(...)` directories before runtime.
+- Added review/apply-oriented artifact helpers:
+  `artifact_patch_proposal(...)`, `artifact_verification_bundle(...)`, and
+  `artifact_apply_intent(...)`.
+- Made the formatter wrap oversized comma-separated inline forms consistently
+  across calls, list literals, dict literals, enum payloads, and struct-style
+  construction.
+
 ## v0.5.1
 
 - Added persisted worker snapshots, resumable delegated workers, and `std/worktree`

@@ -931,6 +931,7 @@ These builtins expose Harn's typed orchestration runtime.
 | `run_record(payload)` | payload: dict | run record | Normalize a run record |
 | `run_record_save(run, path?)` | run, path | dict | Persist a run record |
 | `run_record_load(path)` | path: string | run record | Load a run record from disk |
+| `load_run_tree(path)` | path: string | dict | Load a persisted run with delegated child-run lineage |
 | `run_record_fixture(run)` | run | replay fixture | Derive a replay/eval fixture from a saved run |
 | `run_record_eval(run, fixture?)` | run, fixture | dict | Evaluate a run against an embedded or explicit fixture |
 | `run_record_eval_suite(cases)` | cases: list | dict | Evaluate a list of `{run, fixture?, path?}` cases as a regression suite |
@@ -947,6 +948,9 @@ These builtins expose Harn's typed orchestration runtime.
 - `replay_path`
 - `replay_run`
 - `replay_mode` (`"deterministic"` currently replays saved stage fixtures)
+- `parent_run_id`
+- `root_run_id`
+- `execution` (`{cwd?, env?, worktree?}` for isolated delegated execution)
 
 ### Delegated workers
 
@@ -963,6 +967,8 @@ These builtins expose Harn's typed orchestration runtime.
 
 - `{task, graph, artifacts?, options?, name?, wait?}` for typed workflow runs
 - `{task, node, artifacts?, transcript?, name?, wait?}` for delegated stage runs
+- Either shape may also include `execution: {cwd?, env?, worktree?}` where
+  `worktree` accepts `{repo, path?, branch?, base_ref?, cleanup?}`.
 
 Worker configs may also include `carry` to control continuation behavior:
 
@@ -992,12 +998,16 @@ snapshot/child-run paths when available.
 | `artifact_git_diff(diff_text, extra?)` | diff_text, extra | artifact | Build a git-diff artifact from host/tool output |
 | `artifact_diff_review(target, summary?, extra?)` | target, summary, extra | artifact | Build a diff-review artifact linked to a diff/patch target |
 | `artifact_review_decision(target, decision, extra?)` | target, decision, extra | artifact | Build an accept/reject review-decision artifact linked by lineage |
+| `artifact_patch_proposal(target, patch, extra?)` | target, patch, extra | artifact | Build a proposed patch artifact linked to an existing target |
+| `artifact_verification_bundle(title, checks, extra?)` | title, checks, extra | artifact | Bundle structured verification checks into one review artifact |
+| `artifact_apply_intent(target, intent, extra?)` | target, intent, extra | artifact | Record an apply or merge intent linked to a reviewed artifact |
 
 Core artifact kinds commonly used by the runtime include `resource`,
 `workspace_file`, `workspace_snapshot`, `editor_selection`, `summary`,
 `transcript_summary`, `diff`, `git_diff`, `patch`, `patch_set`,
-`diff_review`, `review_decision`, `test_result`, `verification_result`,
-`command_result`, and `plan`.
+`patch_proposal`, `diff_review`, `review_decision`, `verification_bundle`,
+`apply_intent`, `test_result`, `verification_result`, `command_result`,
+and `plan`.
 
 ### Transcript lifecycle
 

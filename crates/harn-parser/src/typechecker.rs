@@ -254,7 +254,11 @@ fn builtin_return_type(name: &str) -> InferredType {
         | "artifact_git_diff"
         | "artifact_diff_review"
         | "artifact_review_decision"
+        | "artifact_patch_proposal"
+        | "artifact_verification_bundle"
+        | "artifact_apply_intent"
         | "run_record"
+        | "load_run_tree"
         | "run_record_save"
         | "run_record_load"
         | "run_record_fixture"
@@ -378,9 +382,13 @@ fn is_builtin(name: &str) -> bool {
             | "artifact_git_diff"
             | "artifact_diff_review"
             | "artifact_review_decision"
+            | "artifact_patch_proposal"
+            | "artifact_verification_bundle"
+            | "artifact_apply_intent"
             | "artifact_select"
             | "artifact_context"
             | "run_record"
+            | "load_run_tree"
             | "run_record_save"
             | "run_record_load"
             | "run_record_fixture"
@@ -2033,6 +2041,7 @@ add("hello", 2) }"#,
   let flow = workflow_graph({name: "demo", entry: "act", nodes: {act: {kind: "stage"}}})
   let report: dict = workflow_policy_report(flow, {tools: ["read"], capabilities: {workspace: ["read_text"]}})
   let run: dict = workflow_execute("task", flow, [], {})
+  let tree: dict = load_run_tree("run.json")
   let fixture: dict = run_record_fixture(run?.run)
   let suite: dict = run_record_eval_suite([{run: run?.run, fixture: fixture}])
   let diff: dict = run_record_diff(run?.run, run?.run)
@@ -2048,12 +2057,16 @@ add("hello", 2) }"#,
   let git: dict = artifact_git_diff("diff --git a b")
   let review: dict = artifact_diff_review(patch, "review me")
   let decision: dict = artifact_review_decision(review, "accepted")
+  let proposal: dict = artifact_patch_proposal(review, "*** Begin Patch")
+  let bundle: dict = artifact_verification_bundle("checks", [{name: "fmt", ok: true}])
+  let apply: dict = artifact_apply_intent(review, "apply")
   let transcript = transcript_reset({metadata: {source: "test"}})
   let visible: string = transcript_render_visible(transcript_archive(transcript))
   let events: list = transcript_events(transcript)
   let context: string = artifact_context([], {max_artifacts: 1})
   println(report)
   println(run)
+  println(tree)
   println(fixture)
   println(suite)
   println(diff)
@@ -2069,6 +2082,9 @@ add("hello", 2) }"#,
   println(git)
   println(review)
   println(decision)
+  println(proposal)
+  println(bundle)
+  println(apply)
   println(visible)
   println(events)
   println(context)

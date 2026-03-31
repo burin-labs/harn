@@ -246,8 +246,9 @@ Runtime behavior:
 - `interrupt_immediate`: inject on the next agent loop boundary immediately
 - Worker lifecycle updates are emitted as structured `session/update` payloads with
   worker id/name, status, lineage metadata, artifact counts, transcript presence,
-  and child run ids/paths when applicable. Hosts can render these as background
-  task notifications instead of scraping stdout.
+  snapshot path, execution metadata, and child run ids/paths when applicable.
+  Hosts can render these as background task notifications instead of scraping
+  stdout.
 - `finish_step`: inject after the current tool/operation completes
 - `wait_for_completion`: defer until the current agent interaction yields
 

@@ -135,6 +135,9 @@ tools again.
 Delegated runs surface child worker lineage in each delegated stage's metadata.
 This makes replay/eval and host timelines able to distinguish parent execution
 from child execution without reconstructing that structure from plain text.
+Persisted runs also retain explicit `parent_run_id`, `root_run_id`, and
+`child_runs` lineage, and `load_run_tree(path)` materializes that hierarchy
+recursively for inspection or host-side task views.
 
 ## Transcript policy
 
@@ -202,6 +205,7 @@ Workflow execution produces a persisted run record containing:
 - verification outcomes
 - artifacts
 - policy metadata
+- parent/root run lineage and delegated child runs
 - execution status
 
 CLI support:
@@ -248,6 +252,9 @@ helpers for the most common host surfaces:
 - `artifact_git_diff(...)`
 - `artifact_diff_review(...)`
 - `artifact_review_decision(...)`
+- `artifact_patch_proposal(...)`
+- `artifact_verification_bundle(...)`
+- `artifact_apply_intent(...)`
 
 These helpers normalize kind names, token estimates, priority defaults,
 lineage, and metadata so host products can pass editor/test/diff state into

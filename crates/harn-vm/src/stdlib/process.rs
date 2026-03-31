@@ -3,11 +3,13 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 
+use crate::orchestration::RunExecutionRecord;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 thread_local! {
     static VM_SOURCE_DIR: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+    static VM_EXECUTION_CONTEXT: RefCell<Option<RunExecutionRecord>> = const { RefCell::new(None) };
 }
 
 /// Set the source directory for the current thread (called by VM on file execution).
@@ -15,9 +17,18 @@ pub(crate) fn set_thread_source_dir(dir: &std::path::Path) {
     VM_SOURCE_DIR.with(|sd| *sd.borrow_mut() = Some(dir.to_path_buf()));
 }
 
+pub(crate) fn set_thread_execution_context(context: Option<RunExecutionRecord>) {
+    VM_EXECUTION_CONTEXT.with(|current| *current.borrow_mut() = context);
+}
+
+pub(crate) fn current_execution_context() -> Option<RunExecutionRecord> {
+    VM_EXECUTION_CONTEXT.with(|current| current.borrow().clone())
+}
+
 /// Reset thread-local process state (for test isolation).
 pub(crate) fn reset_process_state() {
     VM_SOURCE_DIR.with(|sd| *sd.borrow_mut() = None);
+    VM_EXECUTION_CONTEXT.with(|current| *current.borrow_mut() = None);
 }
 
 pub fn resolve_source_relative_path(path: &str) -> PathBuf {
@@ -35,6 +46,11 @@ pub fn resolve_source_relative_path(path: &str) -> PathBuf {
 pub(crate) fn register_process_builtins(vm: &mut Vm) {
     vm.register_builtin("env", |args, _out| {
         let name = args.first().map(|a| a.display()).unwrap_or_default();
+        if let Some(value) =
+            current_execution_context().and_then(|context| context.env.get(&name).cloned())
+        {
+            return Ok(VmValue::String(Rc::from(value)));
+        }
         match std::env::var(&name) {
             Ok(val) => Ok(VmValue::String(Rc::from(val))),
             Err(_) => Ok(VmValue::Nil),
@@ -205,8 +221,13 @@ pub(crate) fn register_process_builtins(vm: &mut Vm) {
     });
 
     vm.register_builtin("cwd", |_args, _out| {
-        let dir = std::env::current_dir()
-            .map(|p| p.to_string_lossy().to_string())
+        let dir = current_execution_context()
+            .and_then(|context| context.cwd)
+            .or_else(|| {
+                std::env::current_dir()
+                    .ok()
+                    .map(|p| p.to_string_lossy().to_string())
+            })
             .unwrap_or_default();
         Ok(VmValue::String(Rc::from(dir)))
     });
@@ -241,8 +262,9 @@ pub(crate) fn register_path_builtins(vm: &mut Vm) {
     });
 
     vm.register_builtin("project_root", |_args, _out| {
-        let base = VM_SOURCE_DIR
-            .with(|sd| sd.borrow().clone())
+        let base = current_execution_context()
+            .and_then(|context| context.cwd.map(PathBuf::from))
+            .or_else(|| VM_SOURCE_DIR.with(|sd| sd.borrow().clone()))
             .or_else(|| std::env::current_dir().ok())
             .unwrap_or_else(|| PathBuf::from("."));
         match find_project_root(&base) {
@@ -286,9 +308,7 @@ fn exec_command(
 ) -> Result<std::process::Output, String> {
     let mut command = std::process::Command::new(cmd);
     command.args(args);
-    if let Some(dir) = dir {
-        command.current_dir(dir);
-    }
+    apply_execution_context(&mut command, dir);
     command.output().map_err(|e| format!("exec failed: {e}"))
 }
 
@@ -300,10 +320,35 @@ fn exec_shell(
 ) -> Result<std::process::Output, String> {
     let mut command = std::process::Command::new(shell);
     command.arg(flag).arg(script);
-    if let Some(dir) = dir {
-        command.current_dir(dir);
-    }
+    apply_execution_context(&mut command, dir);
     command.output().map_err(|e| format!("shell failed: {e}"))
+}
+
+fn apply_execution_context(command: &mut std::process::Command, dir: Option<&str>) {
+    if let Some(dir) = dir {
+        command.current_dir(resolve_command_dir(dir));
+    } else if let Some(context) = current_execution_context() {
+        if let Some(cwd) = context.cwd.filter(|cwd| !cwd.is_empty()) {
+            command.current_dir(cwd);
+        }
+        if !context.env.is_empty() {
+            command.envs(context.env);
+        }
+    }
+}
+
+fn resolve_command_dir(dir: &str) -> PathBuf {
+    let candidate = PathBuf::from(dir);
+    if candidate.is_absolute() {
+        return candidate;
+    }
+    if let Some(cwd) = current_execution_context().and_then(|context| context.cwd) {
+        return PathBuf::from(cwd).join(candidate);
+    }
+    if let Some(source_dir) = VM_SOURCE_DIR.with(|sd| sd.borrow().clone()) {
+        return source_dir.join(candidate);
+    }
+    candidate
 }
 
 #[cfg(test)]
@@ -317,6 +362,44 @@ mod tests {
         set_thread_source_dir(&dir);
         let resolved = resolve_source_relative_path("templates/prompt.txt");
         assert_eq!(resolved, dir.join("templates/prompt.txt"));
+        reset_process_state();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn exec_context_sets_default_cwd_and_env() {
+        let dir = std::env::temp_dir().join(format!("harn-process-ctx-{}", uuid::Uuid::now_v7()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("marker.txt"), "ok").unwrap();
+        set_thread_execution_context(Some(RunExecutionRecord {
+            cwd: Some(dir.to_string_lossy().to_string()),
+            env: BTreeMap::from([("HARN_PROCESS_TEST".to_string(), "present".to_string())]),
+            ..Default::default()
+        }));
+        let output = exec_shell(
+            None,
+            "sh",
+            "-c",
+            "printf '%s:' \"$HARN_PROCESS_TEST\" && test -f marker.txt",
+        )
+        .unwrap();
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "present:");
+        reset_process_state();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn exec_at_resolves_relative_to_execution_cwd() {
+        let dir = std::env::temp_dir().join(format!("harn-process-rel-{}", uuid::Uuid::now_v7()));
+        std::fs::create_dir_all(dir.join("nested")).unwrap();
+        std::fs::write(dir.join("nested").join("marker.txt"), "ok").unwrap();
+        set_thread_execution_context(Some(RunExecutionRecord {
+            cwd: Some(dir.to_string_lossy().to_string()),
+            ..Default::default()
+        }));
+        let output = exec_shell(Some("nested"), "sh", "-c", "test -f marker.txt").unwrap();
+        assert!(output.status.success());
         reset_process_state();
         let _ = std::fs::remove_dir_all(&dir);
     }

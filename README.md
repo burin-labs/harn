@@ -80,11 +80,15 @@ println(result.visible_text)
   `worker_result` artifacts.
 - Isolated execution substrate via directory-scoped command builtins
   (`exec_at`, `shell_at`) plus the `std/worktree` module for git worktree
-  creation, status, diff, shell execution, and cleanup.
+  creation, status, diff, shell execution, and cleanup. Worker execution
+  profiles can now pin delegated runs to a cwd, env overlay, or managed
+  worktree so background execution is reproducible instead of ambient-cwd
+  dependent.
 - Stronger preflight behavior via `harn check`: import graph resolution and
   literal template/render path validation now fail before runtime, and
   `render(...)` resolves relative to the pipeline source tree instead of the
-  ambient process cwd.
+  ambient process cwd. Literal delegated execution roots and `exec_at(...)` /
+  `shell_at(...)` directories are also checked before launch.
 - Eval suite manifests and baseline comparisons via `eval_suite_manifest(...)`,
   `eval_suite_run(...)`, and `harn eval <manifest.json>`, so grouped replay
   regression suites are first-class runtime data instead of external scripts.
@@ -96,7 +100,8 @@ println(result.visible_text)
   so product code can pass structured state into Harn without rebuilding
   artifact taxonomy or provenance conventions.
 - Durable run records with persisted stage transcripts, artifacts, policy
-  decisions, verification outcomes, and CLI inspection/replay/eval entrypoints.
+  decisions, verification outcomes, delegated child lineage, and
+  inspection/replay/eval entrypoints including recursive run-tree loading.
 - Provider-normalized LLM output with `visible_text`, `private_reasoning`,
   `tool_calls`, `blocks`, `provider`, `stop_reason`, and transcript events.
 - Structured transcript lifecycle support: continue, fork, compact,
@@ -112,6 +117,9 @@ println(result.visible_text)
 - Runtime semantic cleanup for older surfaces: repeated `catch e { ... }`
   bindings now work within the same enclosing block, and float division keeps
   IEEE `NaN`/`Infinity` behavior instead of raising runtime errors.
+- Formatter width handling now wraps oversized comma-separated forms
+  consistently across calls, list literals, dict literals, enum payloads, and
+  struct-style construction instead of leaving long single-line output intact.
 
 ## Why This Matters
 

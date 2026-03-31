@@ -26,8 +26,9 @@ use crate::orchestration::{
     normalize_workflow_value, pop_execution_policy, push_execution_policy,
     render_artifacts_context, render_unified_diff, replay_fixture_from_run, save_run_record,
     select_artifacts, validate_workflow, ArtifactRecord, CapabilityPolicy, ContextPolicy,
-    ReplayFixture, RunCheckpointRecord, RunRecord, RunStageAttemptRecord, RunStageRecord,
-    RunTransitionRecord, TranscriptPolicy, WorkflowEdge, WorkflowGraph,
+    ReplayFixture, RunCheckpointRecord, RunChildRecord, RunExecutionRecord, RunRecord,
+    RunStageAttemptRecord, RunStageRecord, RunTransitionRecord, TranscriptPolicy, WorkflowEdge,
+    WorkflowGraph,
 };
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -164,6 +165,7 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
             child_run_id: None,
             child_run_path: None,
             carry_policy: init.carry_policy,
+            execution: init.execution,
             snapshot_path: worker_snapshot_path(&worker_id),
         }));
         {
@@ -819,12 +821,103 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
         to_vm(&artifact)
     });
 
+    vm.register_builtin("artifact_patch_proposal", |args, _out| {
+        let target = normalize_artifact(args.first().ok_or_else(|| {
+            VmError::Runtime("artifact_patch_proposal: missing target artifact".to_string())
+        })?)?;
+        let patch = require_text_arg(args, 1, "artifact_patch_proposal", "patch")?;
+        let mut options = parse_artifact_helper_options(args.get(2))?;
+        options.lineage.extend(target.lineage.clone());
+        options.lineage.push(target.id.clone());
+        options.metadata.insert(
+            "target_artifact_id".to_string(),
+            serde_json::json!(target.id.clone()),
+        );
+        options.metadata.insert(
+            "target_kind".to_string(),
+            serde_json::json!(target.kind.clone()),
+        );
+        let artifact = build_helper_artifact(
+            "patch_proposal",
+            Some(format!(
+                "patch for {}",
+                target.title.clone().unwrap_or_else(|| target.id.clone())
+            )),
+            Some(patch.clone()),
+            Some(serde_json::json!({
+                "target_artifact_id": target.id,
+                "target_kind": target.kind,
+                "patch": patch
+            })),
+            options,
+        );
+        to_vm(&artifact)
+    });
+
+    vm.register_builtin("artifact_verification_bundle", |args, _out| {
+        let title = require_string_arg(args, 0, "artifact_verification_bundle", "title")?;
+        let checks = args.get(1).ok_or_else(|| {
+            VmError::Runtime("artifact_verification_bundle: missing checks".to_string())
+        })?;
+        let artifact = build_helper_artifact(
+            "verification_bundle",
+            Some(title.clone()),
+            Some(value_to_text(checks)),
+            Some(serde_json::json!({
+                "title": title,
+                "checks": crate::llm::vm_value_to_json(checks)
+            })),
+            parse_artifact_helper_options(args.get(2))?,
+        );
+        to_vm(&artifact)
+    });
+
+    vm.register_builtin("artifact_apply_intent", |args, _out| {
+        let target = normalize_artifact(args.first().ok_or_else(|| {
+            VmError::Runtime("artifact_apply_intent: missing target artifact".to_string())
+        })?)?;
+        let intent = require_string_arg(args, 1, "artifact_apply_intent", "intent")?;
+        let mut options = parse_artifact_helper_options(args.get(2))?;
+        options.lineage.extend(target.lineage.clone());
+        options.lineage.push(target.id.clone());
+        options.metadata.insert(
+            "target_artifact_id".to_string(),
+            serde_json::json!(target.id.clone()),
+        );
+        options.metadata.insert(
+            "target_kind".to_string(),
+            serde_json::json!(target.kind.clone()),
+        );
+        let artifact = build_helper_artifact(
+            "apply_intent",
+            Some(format!(
+                "{} {}",
+                intent,
+                target.title.clone().unwrap_or_else(|| target.id.clone())
+            )),
+            Some(intent.clone()),
+            Some(serde_json::json!({
+                "target_artifact_id": target.id,
+                "target_kind": target.kind,
+                "intent": intent
+            })),
+            options,
+        );
+        to_vm(&artifact)
+    });
+
     vm.register_builtin("run_record", |args, _out| {
         let run = normalize_run_record(
             args.first()
                 .ok_or_else(|| VmError::Runtime("run_record: missing payload".to_string()))?,
         )?;
         to_vm(&run)
+    });
+
+    vm.register_builtin("load_run_tree", |args, _out| {
+        let path = require_string_arg(args, 0, "load_run_tree", "path")?;
+        let tree = load_run_tree(&path)?;
+        to_vm(&tree)
     });
 
     vm.register_builtin("run_record_save", |args, _out| {
@@ -1391,6 +1484,97 @@ fn checkpoint_run(
     Ok(())
 }
 
+fn parse_execution_record(value: Option<&VmValue>) -> Result<Option<RunExecutionRecord>, VmError> {
+    match value {
+        Some(value) => serde_json::from_value(crate::llm::vm_value_to_json(value))
+            .map(Some)
+            .map_err(|e| VmError::Runtime(format!("workflow execution parse error: {e}"))),
+        None => Ok(None),
+    }
+}
+
+fn load_run_tree(path: &str) -> Result<serde_json::Value, VmError> {
+    let run = load_run_record(std::path::Path::new(path))?;
+    let mut children = Vec::new();
+    for child in &run.child_runs {
+        if let Some(run_path) = child.run_path.as_deref() {
+            if std::path::Path::new(run_path).exists() {
+                children.push(load_run_tree(run_path)?);
+                continue;
+            }
+        }
+        children.push(serde_json::json!({
+            "worker": child,
+            "run": serde_json::Value::Null,
+            "children": [],
+        }));
+    }
+    Ok(serde_json::json!({
+        "run": run,
+        "children": children,
+    }))
+}
+
+fn append_child_run_record(run: &mut RunRecord, stage_id: &str, stage: &serde_json::Value) {
+    let Some(worker) = stage.get("worker") else {
+        return;
+    };
+    let worker_id = worker
+        .get("id")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default();
+    if worker_id.is_empty() {
+        return;
+    }
+    let child = RunChildRecord {
+        worker_id: worker_id.to_string(),
+        worker_name: worker
+            .get("name")
+            .and_then(|value| value.as_str())
+            .unwrap_or("worker")
+            .to_string(),
+        parent_stage_id: Some(stage_id.to_string()),
+        task: worker
+            .get("task")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        status: worker
+            .get("status")
+            .and_then(|value| value.as_str())
+            .unwrap_or("completed")
+            .to_string(),
+        started_at: worker
+            .get("started_at")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        finished_at: worker
+            .get("finished_at")
+            .and_then(|value| value.as_str())
+            .map(|value| value.to_string()),
+        run_id: worker
+            .get("child_run_id")
+            .and_then(|value| value.as_str())
+            .map(|value| value.to_string()),
+        run_path: worker
+            .get("child_run_path")
+            .and_then(|value| value.as_str())
+            .map(|value| value.to_string()),
+        snapshot_path: worker
+            .get("snapshot_path")
+            .and_then(|value| value.as_str())
+            .map(|value| value.to_string()),
+        execution: worker
+            .get("execution")
+            .cloned()
+            .and_then(|value| serde_json::from_value(value).ok()),
+    };
+    run.child_runs
+        .retain(|existing| existing.worker_id != child.worker_id);
+    run.child_runs.push(child);
+}
+
 fn enqueue_unique(queue: &mut VecDeque<String>, node_id: String) {
     if !queue.iter().any(|queued| queued == &node_id) {
         queue.push_back(node_id);
@@ -1771,6 +1955,16 @@ async fn execute_workflow(
                 .filter(|path| !path.is_empty())
         })
         .unwrap_or_else(|| format!(".harn-runs/{}.json", uuid::Uuid::now_v7()));
+    let execution = parse_execution_record(options.get("execution"))?;
+    let parent_run_id = options
+        .get("parent_run_id")
+        .map(|value| value.display())
+        .filter(|value| !value.is_empty());
+    let root_run_id = options
+        .get("root_run_id")
+        .map(|value| value.display())
+        .filter(|value| !value.is_empty())
+        .or_else(|| parent_run_id.clone());
 
     let mut run = resumed_run.unwrap_or_else(|| RunRecord {
         type_name: "run_record".to_string(),
@@ -1781,13 +1975,17 @@ async fn execute_workflow(
         status: "running".to_string(),
         started_at: uuid::Uuid::now_v7().to_string(),
         finished_at: None,
+        parent_run_id: parent_run_id.clone(),
+        root_run_id: root_run_id.clone(),
         stages: Vec::new(),
         transitions: Vec::new(),
         checkpoints: Vec::new(),
         pending_nodes: vec![graph.entry.clone()],
         completed_nodes: Vec::new(),
+        child_runs: Vec::new(),
         artifacts: artifacts.clone(),
         policy: builtin_ceiling(),
+        execution: execution.clone(),
         transcript: None,
         replay_fixture: None,
         metadata: BTreeMap::new(),
@@ -1797,6 +1995,13 @@ async fn execute_workflow(
     run.workflow_name = graph.name.clone();
     run.task = task.clone();
     run.status = "running".to_string();
+    run.parent_run_id = parent_run_id.clone().or(run.parent_run_id.clone());
+    if run.root_run_id.is_none() {
+        run.root_run_id = root_run_id.clone().or(Some(run.id.clone()));
+    }
+    if run.execution.is_none() {
+        run.execution = execution.clone();
+    }
     run.metadata.insert(
         "effective_policy".to_string(),
         serde_json::to_value(&run.policy).unwrap_or_default(),
@@ -1824,6 +2029,22 @@ async fn execute_workflow(
     if matches!(options.get("delegated"), Some(VmValue::Bool(true))) {
         run.metadata
             .insert("delegated".to_string(), serde_json::json!(true));
+    }
+    if let Some(parent_run_id) = &run.parent_run_id {
+        run.metadata.insert(
+            "parent_run_id".to_string(),
+            serde_json::json!(parent_run_id),
+        );
+    }
+    if let Some(root_run_id) = &run.root_run_id {
+        run.metadata
+            .insert("root_run_id".to_string(), serde_json::json!(root_run_id));
+    }
+    if let Some(execution) = &run.execution {
+        run.metadata.insert(
+            "execution".to_string(),
+            serde_json::to_value(execution).unwrap_or_default(),
+        );
     }
     if !graph.metadata.is_empty() {
         run.metadata.insert(
@@ -2021,6 +2242,7 @@ async fn execute_workflow(
             attempts: executed.attempts,
             metadata: stage_metadata,
         });
+        append_child_run_record(&mut run, &stage_id, &executed.result);
         completed_nodes.insert(current.clone());
 
         let next_edges = next_nodes_for(&graph, &current, executed.branch.as_deref());
@@ -2070,4 +2292,48 @@ async fn execute_workflow(
         "transcript": transcript.map(|value| crate::llm::vm_value_to_json(&value)),
         "path": persist_path,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn load_run_tree_recurses_into_child_runs() {
+        let dir = std::env::temp_dir().join(format!("harn-run-tree-{}", uuid::Uuid::now_v7()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let child_path = dir.join("child.json");
+        let parent_path = dir.join("parent.json");
+
+        let child = RunRecord {
+            id: "child".to_string(),
+            workflow_id: "wf".to_string(),
+            root_run_id: Some("root".to_string()),
+            status: "completed".to_string(),
+            ..Default::default()
+        };
+        let parent = RunRecord {
+            id: "parent".to_string(),
+            workflow_id: "wf".to_string(),
+            root_run_id: Some("root".to_string()),
+            status: "completed".to_string(),
+            child_runs: vec![RunChildRecord {
+                worker_id: "worker_1".to_string(),
+                worker_name: "worker".to_string(),
+                run_id: Some("child".to_string()),
+                run_path: Some(child_path.to_string_lossy().to_string()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        save_run_record(&child, Some(child_path.to_str().unwrap())).unwrap();
+        save_run_record(&parent, Some(parent_path.to_str().unwrap())).unwrap();
+
+        let tree = load_run_tree(parent_path.to_str().unwrap()).unwrap();
+        assert_eq!(tree["run"]["id"], "parent");
+        assert_eq!(tree["children"][0]["run"]["id"], "child");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
