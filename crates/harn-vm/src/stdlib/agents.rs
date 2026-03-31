@@ -1129,6 +1129,76 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
             crate::orchestration::microcompact_tool_output(&text, max_chars),
         )))
     });
+
+    vm.register_async_builtin("transcript_auto_compact", |args| async move {
+        let mut messages: Vec<serde_json::Value> = match args.first() {
+            Some(VmValue::List(list)) => list
+                .iter()
+                .map(crate::llm::helpers::vm_value_to_json)
+                .collect(),
+            _ => {
+                return Err(VmError::Runtime(
+                    "transcript_auto_compact: first argument must be a message list".to_string(),
+                ))
+            }
+        };
+        let options = args.get(1).and_then(|v| v.as_dict()).cloned();
+        let mut config = crate::orchestration::AutoCompactConfig::default();
+        if let Some(v) = options
+            .as_ref()
+            .and_then(|o| o.get("compact_threshold"))
+            .and_then(|v| v.as_int())
+        {
+            config.token_threshold = v.max(0) as usize;
+        }
+        if let Some(v) = options
+            .as_ref()
+            .and_then(|o| o.get("tool_output_max_chars"))
+            .and_then(|v| v.as_int())
+        {
+            config.tool_output_max_chars = v.max(0) as usize;
+        }
+        if let Some(v) = options
+            .as_ref()
+            .and_then(|o| o.get("keep_last"))
+            .and_then(|v| v.as_int())
+        {
+            config.keep_last = v.max(0) as usize;
+        }
+        if let Some(strategy) = options
+            .as_ref()
+            .and_then(|o| o.get("compact_strategy"))
+            .map(|v| v.display())
+        {
+            config.compact_strategy = crate::orchestration::parse_compact_strategy(&strategy)?;
+        }
+        if let Some(callback) = options.as_ref().and_then(|o| o.get("compact_callback")) {
+            config.custom_compactor = Some(callback.clone());
+            if !options
+                .as_ref()
+                .is_some_and(|o| o.contains_key("compact_strategy"))
+            {
+                config.compact_strategy = crate::orchestration::CompactStrategy::Custom;
+            }
+        }
+        let llm_opts = if config.compact_strategy == crate::orchestration::CompactStrategy::Llm {
+            Some(crate::llm::extract_llm_options(&[
+                VmValue::String(Rc::from("")),
+                VmValue::Nil,
+                args.get(1).cloned().unwrap_or(VmValue::Nil),
+            ])?)
+        } else {
+            None
+        };
+        crate::orchestration::auto_compact_messages(&mut messages, &config, llm_opts.as_ref())
+            .await?;
+        Ok(VmValue::List(Rc::new(
+            messages
+                .iter()
+                .map(crate::stdlib::json_to_vm_value)
+                .collect(),
+        )))
+    });
 }
 
 fn to_vm<T: serde::Serialize>(value: &T) -> Result<VmValue, VmError> {

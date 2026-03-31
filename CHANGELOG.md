@@ -2,6 +2,43 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.5
+
+### Added
+
+- **Pluggable transcript auto-compaction** — `agent_loop` now supports
+  `compact_strategy: "llm" | "truncate" | "custom"` with LLM-powered
+  compaction as the default strategy, plus `compact_callback` for custom
+  Harn closures. Added `transcript_auto_compact(messages, options?)` for
+  invoking the same pipeline outside agent loops.
+- **Daemon wake protocol and adaptive backoff** — daemon agents now idle with
+  exponential backoff (`100ms`, `500ms`, `1s`, `2s`) and can be resumed via
+  bridge `agent/resume` notifications or queued user messages.
+- **Bridge protocol documentation** — documented `tool/pre_use`,
+  `tool/post_use`, `agent/idle`, and `agent/resume` host/runtime messages.
+- **Extensible `harn check` host capability validation** — preflight now
+  accepts host-specific capability schemas from `[check].host_capabilities`,
+  `[check].host_capabilities_path`, or `--host-capabilities <file>`.
+- **Bundle-aware preflight path validation** — `harn check` accepts
+  `[check].bundle_root` or `--bundle-root <dir>` so `render(...)` and
+  `host_invoke("template", "render", ...)` can validate against bundled
+  layouts as well as source layouts.
+- **String case helpers** — string methods now include `.lower()`,
+  `.upper()`, `.to_lower()`, and `.to_upper()`.
+- **Conformance coverage for agent/runtime integration points** — added
+  end-to-end cases covering tool-hook rejection/truncation, policy-driven tool
+  argument rejection, adaptive artifact deduplication, and transcript
+  auto-compaction configuration.
+
+### Changed
+
+- **Auto-compaction defaults are semantic instead of truncation-only** —
+  agent-loop compaction now preserves more task context by defaulting to an
+  LLM summary rather than fixed-size message truncation.
+- **`harn check` preflight is host-extensible instead of Burin-hostile** —
+  host adapter pipelines can declare their own capability surfaces rather than
+  failing static validation on non-core host operations.
+
 ## v0.5.4
 
 ### Added

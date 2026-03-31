@@ -23,6 +23,8 @@ struct Session {
     cwd: PathBuf,
     /// If a cancel was requested for the current prompt execution.
     cancelled: Arc<AtomicBool>,
+    /// Active host bridge for queued input / daemon resume while a prompt runs.
+    host_bridge: Option<Rc<harn_vm::bridge::HostBridge>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -176,6 +178,7 @@ impl AcpServer {
             Session {
                 cwd,
                 cancelled: Arc::new(AtomicBool::new(false)),
+                host_bridge: None,
             },
         );
 
@@ -221,10 +224,11 @@ impl AcpServer {
             .unwrap_or_default();
 
         // Look up the session.
-        let (cwd, cancelled) = match self.sessions.get(&session_id) {
+        let (cwd, cancelled) = match self.sessions.get_mut(&session_id) {
             Some(s) => {
                 // Reset cancel flag for new execution.
                 s.cancelled.store(false, Ordering::SeqCst);
+                s.host_bridge = None;
                 (s.cwd.clone(), s.cancelled.clone())
             }
             None => {
@@ -285,6 +289,16 @@ impl AcpServer {
             cancelled: cancelled.clone(),
             script_name: std::sync::Mutex::new(String::new()),
         });
+        let host_bridge = Rc::new(harn_vm::bridge::HostBridge::from_parts(
+            bridge.pending.clone(),
+            Arc::new(AtomicBool::new(false)),
+            bridge.stdout_lock.clone(),
+            bridge.next_id_counter.fetch_add(10_000, Ordering::SeqCst),
+        ));
+        host_bridge.set_session_id(&bridge.session_id);
+        if let Some(session) = self.sessions.get_mut(&session_id) {
+            session.host_bridge = Some(host_bridge.clone());
+        }
 
         // Execute the compiled chunk.
         let id_owned = id.clone();
@@ -292,11 +306,15 @@ impl AcpServer {
         let result = execute_chunk(
             chunk,
             bridge.clone(),
+            host_bridge,
             &prompt_text,
             source_path.as_deref(),
             &cwd,
         )
         .await;
+        if let Some(session) = self.sessions.get_mut(&session_id) {
+            session.host_bridge = None;
+        }
 
         match result {
             Ok(output) => {
@@ -335,6 +353,49 @@ impl AcpServer {
             if let Some(session) = self.sessions.get(session_id) {
                 session.cancelled.store(true, Ordering::SeqCst);
             }
+        }
+    }
+
+    async fn handle_session_input(&self, params: &serde_json::Value) {
+        let session_id = params
+            .get("sessionId")
+            .and_then(|v| v.as_str())
+            .or_else(|| self.sessions.keys().next().map(|s| s.as_str()));
+        let Some(session_id) = session_id else {
+            return;
+        };
+        let Some(content) = params.get("content").and_then(|v| v.as_str()) else {
+            return;
+        };
+        let mode = params
+            .get("mode")
+            .and_then(|v| v.as_str())
+            .unwrap_or("wait_for_completion");
+        if let Some(bridge) = self
+            .sessions
+            .get(session_id)
+            .and_then(|session| session.host_bridge.clone())
+        {
+            bridge
+                .push_queued_user_message(content.to_string(), mode)
+                .await;
+        }
+    }
+
+    fn handle_agent_resume(&self, params: &serde_json::Value) {
+        let session_id = params
+            .get("sessionId")
+            .and_then(|v| v.as_str())
+            .or_else(|| self.sessions.keys().next().map(|s| s.as_str()));
+        let Some(session_id) = session_id else {
+            return;
+        };
+        if let Some(bridge) = self
+            .sessions
+            .get(session_id)
+            .and_then(|session| session.host_bridge.clone())
+        {
+            bridge.signal_resume();
         }
     }
 
@@ -613,6 +674,7 @@ fn compile_source(
 async fn execute_chunk(
     chunk: harn_vm::Chunk,
     bridge: Rc<AcpBridge>,
+    host_bridge: Rc<harn_vm::bridge::HostBridge>,
     prompt_text: &str,
     source_path: Option<&std::path::Path>,
     cwd: &std::path::Path,
@@ -663,13 +725,6 @@ async fn execute_chunk(
     // client as `builtin_call` JSON-RPC requests.  This reuses the same
     // pending map and stdout lock as the AcpBridge, so responses from the
     // client's stdin reader are dispatched correctly.
-    let host_bridge = Rc::new(harn_vm::bridge::HostBridge::from_parts(
-        bridge.pending.clone(),
-        Arc::new(AtomicBool::new(false)), // separate cancel flag for bridge calls
-        bridge.stdout_lock.clone(),
-        bridge.next_id_counter.fetch_add(10_000, Ordering::SeqCst),
-    ));
-    host_bridge.set_session_id(&bridge.session_id);
     host_bridge.set_script_name(pipeline_name);
     vm.set_bridge(host_bridge.clone());
 
@@ -1511,6 +1566,12 @@ pub async fn run_acp_server(pipeline: Option<&str>) {
                     }
                     "session/cancel" => {
                         server.handle_session_cancel(&params);
+                    }
+                    "session/input" | "user_message" | "agent/user_message" => {
+                        server.handle_session_input(&params).await;
+                    }
+                    "agent/resume" => {
+                        server.handle_agent_resume(&params);
                     }
                     "session/list" => {
                         server.handle_session_list(&id);

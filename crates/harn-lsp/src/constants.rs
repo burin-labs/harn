@@ -261,6 +261,10 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
         "transcript_summarize",
         "transcript_summarize(transcript, options?) -> dict",
     ),
+    (
+        "transcript_auto_compact",
+        "transcript_auto_compact(messages, options?) -> list",
+    ),
     ("host_capabilities", "host_capabilities() -> dict"),
     ("host_has", "host_has(capability, op?) -> bool"),
     ("host_invoke", "host_invoke(capability, op, params?) -> any"),
@@ -626,6 +630,7 @@ pub(crate) fn builtin_doc(name: &str) -> Option<String> {
         "transcript" => "**transcript(metadata?)** → dict — Create a new transcript",
         "transcript_compact" => "**transcript_compact(transcript, options?)** → dict — Compact a transcript locally",
         "transcript_summarize" => "**transcript_summarize(transcript, options?)** → dict — Summarize and compact a transcript with an LLM",
+        "transcript_auto_compact" => "**transcript_auto_compact(messages, options?)** → list — Apply the agent-loop compaction pipeline to a message list",
         "host_capabilities" => "**host_capabilities()** → dict — Typed host capability manifest",
         "host_has" => "**host_has(capability, op?)** → bool — Check host capability support",
         "host_invoke" => "**host_invoke(capability, op, params?)** → any — Invoke a typed host operation",

@@ -28,6 +28,12 @@ pub struct CheckConfig {
     pub strict: bool,
     #[serde(default)]
     pub disable_rules: Vec<String>,
+    #[serde(default)]
+    pub host_capabilities: HashMap<String, Vec<String>>,
+    #[serde(default, alias = "host_capabilities_file")]
+    pub host_capabilities_path: Option<String>,
+    #[serde(default)]
+    pub bundle_root: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -210,13 +216,31 @@ pub fn try_read_manifest_for(harn_file: &std::path::Path) -> Option<Manifest> {
     }
 }
 
+fn absolutize_check_config_paths(mut config: CheckConfig, manifest_dir: &Path) -> CheckConfig {
+    if let Some(path) = config.host_capabilities_path.clone() {
+        let candidate = PathBuf::from(&path);
+        if !candidate.is_absolute() {
+            config.host_capabilities_path =
+                Some(manifest_dir.join(candidate).display().to_string());
+        }
+    }
+    if let Some(path) = config.bundle_root.clone() {
+        let candidate = PathBuf::from(&path);
+        if !candidate.is_absolute() {
+            config.bundle_root = Some(manifest_dir.join(candidate).display().to_string());
+        }
+    }
+    config
+}
+
 /// Load the `[check]` config from the nearest `harn.toml`.
 /// First checks the directory of the given harn file (if any),
 /// then walks up from the current working directory.
 pub fn load_check_config(harn_file: Option<&std::path::Path>) -> CheckConfig {
     if let Some(path) = harn_file {
+        let manifest_dir = path.parent().unwrap_or(Path::new("."));
         if let Some(manifest) = try_read_manifest_for(path) {
-            return manifest.check;
+            return absolutize_check_config_paths(manifest.check, manifest_dir);
         }
     }
     // Walk up from CWD
@@ -226,7 +250,7 @@ pub fn load_check_config(harn_file: Option<&std::path::Path>) -> CheckConfig {
         if manifest_path.exists() {
             if let Ok(content) = fs::read_to_string(&manifest_path) {
                 if let Ok(manifest) = toml::from_str::<Manifest>(&content) {
-                    return manifest.check;
+                    return absolutize_check_config_paths(manifest.check, &dir);
                 }
             }
         }

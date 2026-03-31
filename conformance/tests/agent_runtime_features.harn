@@ -1,0 +1,57 @@
+pipeline test(task) {
+  register_tool_hook({pattern: "list_directory", deny: "listing disabled"})
+  let denied = agent_loop(
+    "Inspect the workspace",
+    "You are helpful",
+    {provider: "mock", tools: ["list_directory"], tool_format: "native", max_iterations: 1},
+  )
+  println(denied?.rejected_tools[0])
+  println(
+    json_stringify(transcript_messages(denied?.transcript))
+    .contains(
+    "REJECTED by hook: listing disabled",
+  ),
+  )
+  clear_tool_hooks()
+  register_tool_hook({pattern: "list_directory", max_output: 200})
+  let truncated = agent_loop(
+    "Inspect the workspace",
+    "You are helpful",
+    {provider: "mock", tools: ["list_directory"], tool_format: "native", max_iterations: 1},
+  )
+  println(json_stringify(transcript_messages(truncated?.transcript)).contains("snipped"))
+  clear_tool_hooks()
+  let base_messages = [
+    {role: "user", content: "Need a parser plan"},
+    {role: "assistant", content: "We should isolate the lexer first."},
+    {role: "user", content: "Then update the diagnostics."},
+  ]
+  let llm_compacted = transcript_auto_compact(base_messages, {provider: "mock", keep_last: 1})
+  println(len(llm_compacted))
+  println(llm_compacted[0].content.contains("Mock response"))
+  let custom_compacted = transcript_auto_compact(
+    base_messages,
+    {
+    keep_last: 1,
+    compact_strategy: "custom",
+    compact_callback: { archived -> {summary: "custom compact " + to_string(len(archived))} },
+  },
+  )
+  println(custom_compacted[0].content.contains("custom compact 2"))
+  let loop_compacted = agent_loop(
+    "Inspect the workspace",
+    "You are helpful",
+    {
+    provider: "mock",
+    tools: ["list_directory"],
+    tool_format: "native",
+    max_iterations: 2,
+    auto_compact: true,
+    compact_threshold: 1,
+    compact_keep_last: 1,
+    compact_strategy: "custom",
+    compact_callback: { archived -> {summary: "loop compact " + to_string(len(archived))} },
+  },
+  )
+  println(transcript_messages(loop_compacted?.transcript)[0].content.contains("loop compact"))
+}

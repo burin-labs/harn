@@ -1,0 +1,6 @@
+pipeline test(task) {
+  println("MiXeD".lower())
+  println("MiXeD".upper())
+  println("Title".to_lower())
+  println("Title".to_upper())
+}

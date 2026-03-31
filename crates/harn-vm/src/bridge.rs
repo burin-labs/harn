@@ -38,6 +38,8 @@ pub struct HostBridge {
     script_name: std::sync::Mutex<String>,
     /// User messages injected by the host while a run is active.
     queued_user_messages: Arc<Mutex<VecDeque<QueuedUserMessage>>>,
+    /// Host-triggered resume signal for daemon agents.
+    resume_requested: Arc<AtomicBool>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -83,11 +85,13 @@ impl HostBridge {
         let cancelled = Arc::new(AtomicBool::new(false));
         let queued_user_messages: Arc<Mutex<VecDeque<QueuedUserMessage>>> =
             Arc::new(Mutex::new(VecDeque::new()));
+        let resume_requested = Arc::new(AtomicBool::new(false));
 
         // Stdin reader: reads JSON-RPC lines and dispatches responses
         let pending_clone = pending.clone();
         let cancelled_clone = cancelled.clone();
         let queued_clone = queued_user_messages.clone();
+        let resume_clone = resume_requested.clone();
         tokio::task::spawn_local(async move {
             let stdin = tokio::io::stdin();
             let reader = tokio::io::BufReader::new(stdin);
@@ -109,6 +113,8 @@ impl HostBridge {
                     if let Some(method) = msg["method"].as_str() {
                         if method == "cancel" {
                             cancelled_clone.store(true, Ordering::SeqCst);
+                        } else if method == "agent/resume" {
+                            resume_clone.store(true, Ordering::SeqCst);
                         } else if method == "user_message"
                             || method == "session/input"
                             || method == "agent/user_message"
@@ -158,6 +164,7 @@ impl HostBridge {
             session_id: std::sync::Mutex::new(String::new()),
             script_name: std::sync::Mutex::new(String::new()),
             queued_user_messages,
+            resume_requested,
         }
     }
 
@@ -180,6 +187,7 @@ impl HostBridge {
             session_id: std::sync::Mutex::new(String::new()),
             script_name: std::sync::Mutex::new(String::new()),
             queued_user_messages: Arc::new(Mutex::new(VecDeque::new())),
+            resume_requested: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -315,6 +323,14 @@ impl HostBridge {
     /// Check if the host has sent a cancel notification.
     pub fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::SeqCst)
+    }
+
+    pub fn take_resume_signal(&self) -> bool {
+        self.resume_requested.swap(false, Ordering::SeqCst)
+    }
+
+    pub fn signal_resume(&self) {
+        self.resume_requested.store(true, Ordering::SeqCst);
     }
 
     pub async fn push_queued_user_message(&self, content: String, mode: &str) {

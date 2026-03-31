@@ -93,7 +93,14 @@ directories, and worker repos that would otherwise fail only at runtime.
 
 ```bash
 harn check main.harn
+harn check --host-capabilities burin-host.json main.harn
+harn check --bundle-root .bundle main.harn
 ```
+
+| Flag | Description |
+|---|---|
+| `--host-capabilities <file>` | Load extra host capability/operation pairs for preflight validation |
+| `--bundle-root <dir>` | Validate `render(...)` and template paths against an alternate bundled layout root |
 
 ## harn init
 

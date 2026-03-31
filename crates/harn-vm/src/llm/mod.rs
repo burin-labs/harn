@@ -129,6 +129,42 @@ pub fn register_llm_builtins(vm: &mut Vm) {
         let persistent = opt_bool(&options, "persistent");
         let max_nudges = opt_int(&options, "max_nudges").unwrap_or(3) as usize;
         let custom_nudge = opt_str(&options, "nudge");
+        let tool_retries = opt_int(&options, "tool_retries").unwrap_or(0) as usize;
+        let tool_backoff_ms = opt_int(&options, "tool_backoff_ms").unwrap_or(1000) as u64;
+        let tool_format = opt_str(&options, "tool_format").unwrap_or_else(|| "text".to_string());
+        let daemon = opt_bool(&options, "daemon");
+        let auto_compact = if opt_bool(&options, "auto_compact") {
+            let mut ac = crate::orchestration::AutoCompactConfig::default();
+            if let Some(v) = opt_int(&options, "compact_threshold") {
+                ac.token_threshold = v as usize;
+            }
+            if let Some(v) = opt_int(&options, "tool_output_max_chars") {
+                ac.tool_output_max_chars = v as usize;
+            }
+            if let Some(v) = opt_int(&options, "compact_keep_last") {
+                ac.keep_last = v as usize;
+            }
+            if let Some(strategy) = opt_str(&options, "compact_strategy") {
+                ac.compact_strategy = crate::orchestration::parse_compact_strategy(&strategy)?;
+            }
+            if let Some(callback) = options.as_ref().and_then(|o| o.get("compact_callback")) {
+                ac.custom_compactor = Some(callback.clone());
+                if !options
+                    .as_ref()
+                    .is_some_and(|o| o.contains_key("compact_strategy"))
+                {
+                    ac.compact_strategy = crate::orchestration::CompactStrategy::Custom;
+                }
+            }
+            Some(ac)
+        } else {
+            None
+        };
+        let policy = options.as_ref().and_then(|o| o.get("policy")).map(|v| {
+            let json = crate::llm::helpers::vm_value_to_json(v);
+            serde_json::from_value::<crate::orchestration::CapabilityPolicy>(json)
+                .unwrap_or_default()
+        });
         let mut opts = extract_llm_options(&args)?;
         let result = run_agent_loop_internal(
             &mut opts,
@@ -137,12 +173,12 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                 max_iterations,
                 max_nudges,
                 nudge: custom_nudge,
-                tool_retries: 0,
-                tool_backoff_ms: 1000,
-                tool_format: "text".to_string(),
-                auto_compact: None,
-                policy: None,
-                daemon: false,
+                tool_retries,
+                tool_backoff_ms,
+                tool_format,
+                auto_compact,
+                policy,
+                daemon,
             },
         )
         .await?;

@@ -777,36 +777,65 @@ pub(crate) fn vm_tools_to_native(
 
     let mut native_tools = Vec::new();
     for tool in &tools_list {
-        if let VmValue::Dict(entry) = tool {
-            let name = entry.get("name").map(|v| v.display()).unwrap_or_default();
-            let description = entry
-                .get("description")
-                .map(|v| v.display())
-                .unwrap_or_default();
-            let params = entry.get("parameters").and_then(|v| v.as_dict());
-
-            let input_schema = vm_build_json_schema(params);
-
-            match provider {
-                "openai" | "openrouter" => {
-                    native_tools.push(serde_json::json!({
-                        "type": "function",
-                        "function": {
-                            "name": name,
-                            "description": description,
-                            "parameters": input_schema,
+        match tool {
+            VmValue::String(name) => {
+                if let Some(schema) = builtin_tool_schema(name) {
+                    let tool_name = schema["name"].as_str().unwrap_or(name);
+                    let description = schema["description"].as_str().unwrap_or("");
+                    let input_schema = vm_build_json_schema_from_json(&schema["parameters"]);
+                    match provider {
+                        "openai" | "openrouter" => {
+                            native_tools.push(serde_json::json!({
+                                "type": "function",
+                                "function": {
+                                    "name": tool_name,
+                                    "description": description,
+                                    "parameters": input_schema,
+                                }
+                            }));
                         }
-                    }));
-                }
-                _ => {
-                    // Anthropic format
-                    native_tools.push(serde_json::json!({
-                        "name": name,
-                        "description": description,
-                        "input_schema": input_schema,
-                    }));
+                        _ => {
+                            native_tools.push(serde_json::json!({
+                                "name": tool_name,
+                                "description": description,
+                                "input_schema": input_schema,
+                            }));
+                        }
+                    }
                 }
             }
+            VmValue::Dict(entry) => {
+                let name = entry.get("name").map(|v| v.display()).unwrap_or_default();
+                let description = entry
+                    .get("description")
+                    .map(|v| v.display())
+                    .unwrap_or_default();
+                let params = entry.get("parameters").and_then(|v| v.as_dict());
+
+                let input_schema = vm_build_json_schema(params);
+
+                match provider {
+                    "openai" | "openrouter" => {
+                        native_tools.push(serde_json::json!({
+                            "type": "function",
+                            "function": {
+                                "name": name,
+                                "description": description,
+                                "parameters": input_schema,
+                            }
+                        }));
+                    }
+                    _ => {
+                        // Anthropic format
+                        native_tools.push(serde_json::json!({
+                            "name": name,
+                            "description": description,
+                            "input_schema": input_schema,
+                        }));
+                    }
+                }
+            }
+            _ => {}
         }
     }
     Ok(native_tools)

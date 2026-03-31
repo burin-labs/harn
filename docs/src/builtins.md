@@ -247,7 +247,9 @@ These are called on string values with dot notation: `"hello".uppercase()`.
 | `.char_at(index)` | index: int | string or nil | Character at index (nil if out of bounds) |
 | `.index_of(substr)` | substr: string | int | First character offset of substring (-1 if not found) |
 | `.last_index_of(substr)` | substr: string | int | Last character offset of substring (-1 if not found) |
+| `.lower()` / `.to_lower()` | none | string | Lowercase string |
 | `.len()` | none | int | Character count |
+| `.upper()` / `.to_upper()` | none | string | Uppercase string |
 | `.chars()` | none | list | List of single-character strings |
 | `.reverse()` | none | string | Reversed string |
 | `.repeat(n)` | n: int | string | Repeat n times |
@@ -559,6 +561,7 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `transcript_fork(transcript, options?)` | transcript: dict, options: dict | dict | Fork transcript, optionally dropping messages or summary |
 | `transcript_summarize(transcript, options?)` | transcript: dict, options: dict | dict | Summarize and compact a transcript via `llm_call` |
 | `transcript_compact(transcript, options?)` | transcript: dict, options: dict | dict | Compact a transcript locally, preserving summary and recent turns |
+| `transcript_auto_compact(messages, options?)` | messages: list, options: dict | list | Apply the agent-loop compaction pipeline to a message list using `llm`, `truncate`, or `custom` strategy |
 
 ### Provider configuration
 
@@ -966,6 +969,7 @@ These builtins expose Harn's typed orchestration runtime.
 | `estimate_tokens(messages)` | messages: list | int | Estimate token count for a message list (chars / 4 heuristic) |
 | `microcompact(text, max_chars?)` | text, max_chars (default 20000) | string | Snip oversized text, keeping head and tail with a marker |
 | `select_artifacts_adaptive(artifacts, policy)` | artifacts: list, policy: dict | list | Deduplicate, microcompact oversized artifacts, then select with token budget |
+| `transcript_auto_compact(messages, options?)` | messages: list, options: dict | list | Run the same transcript auto-compaction pipeline used by `agent_loop` |
 
 ### Delegated workers
 
@@ -1039,5 +1043,6 @@ and `plan`.
 | `transcript_resume(transcript)` | transcript | transcript | Mark transcript active again and append an internal lifecycle event |
 | `transcript_compact(transcript, options?)` | transcript, options | transcript | Locally compact transcript messages |
 | `transcript_summarize(transcript, options?)` | transcript, options | transcript | Compact via LLM-generated summary |
+| `transcript_auto_compact(messages, options?)` | messages, options | list | Apply the agent-loop compaction pipeline to a message list |
 | `transcript_render_visible(transcript)` | transcript | string | Render only public/human-visible messages |
 | `transcript_render_full(transcript)` | transcript | string | Render the full execution history |

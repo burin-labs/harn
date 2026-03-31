@@ -151,6 +151,24 @@ pub fn run_post_tool_hooks(tool_name: &str, result: &str) -> String {
 
 // ── Auto-compaction ───────────────────────────────────────────────────
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CompactStrategy {
+    Llm,
+    Truncate,
+    Custom,
+}
+
+pub fn parse_compact_strategy(value: &str) -> Result<CompactStrategy, VmError> {
+    match value {
+        "llm" => Ok(CompactStrategy::Llm),
+        "truncate" => Ok(CompactStrategy::Truncate),
+        "custom" => Ok(CompactStrategy::Custom),
+        other => Err(VmError::Runtime(format!(
+            "unknown compact_strategy '{other}' (expected 'llm', 'truncate', or 'custom')"
+        ))),
+    }
+}
+
 /// Configuration for automatic transcript compaction in agent loops.
 #[derive(Clone, Debug)]
 pub struct AutoCompactConfig {
@@ -160,6 +178,10 @@ pub struct AutoCompactConfig {
     pub tool_output_max_chars: usize,
     /// Number of recent messages to keep during auto-compaction.
     pub keep_last: usize,
+    /// Strategy used to summarize archived messages.
+    pub compact_strategy: CompactStrategy,
+    /// Optional Harn callback used when `compact_strategy` is `custom`.
+    pub custom_compactor: Option<VmValue>,
 }
 
 impl Default for AutoCompactConfig {
@@ -168,6 +190,8 @@ impl Default for AutoCompactConfig {
             token_threshold: 80_000,
             tool_output_max_chars: 20_000,
             keep_last: 8,
+            compact_strategy: CompactStrategy::Llm,
+            custom_compactor: None,
         }
     }
 }
@@ -199,17 +223,29 @@ pub fn microcompact_tool_output(output: &str, max_chars: usize) -> String {
     format!("{head}\n\n[... {snipped} characters snipped ...]\n\n{tail}")
 }
 
-/// Auto-compact a message list in place: summarize older messages into a
-/// system note and keep the most recent `keep_last` messages.
-pub fn auto_compact_messages(messages: &mut Vec<serde_json::Value>, keep_last: usize) -> bool {
-    if messages.len() <= keep_last {
-        return false;
-    }
-    let split_at = messages.len().saturating_sub(keep_last);
-    let old_messages: Vec<_> = messages.drain(..split_at).collect();
-    let archived_count = old_messages.len();
-    // Build a useful summary: keep tool names, key decisions, and truncate
-    // long content. Use 500 chars per entry (not 200) for better context.
+fn format_compaction_messages(messages: &[serde_json::Value]) -> String {
+    messages
+        .iter()
+        .map(|msg| {
+            let role = msg
+                .get("role")
+                .and_then(|v| v.as_str())
+                .unwrap_or("user")
+                .to_uppercase();
+            let content = msg
+                .get("content")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            format!("{role}: {content}")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn truncate_compaction_summary(
+    old_messages: &[serde_json::Value],
+    archived_count: usize,
+) -> String {
     let summary_parts: Vec<String> = old_messages
         .iter()
         .filter_map(|m| {
@@ -227,7 +263,7 @@ pub fn auto_compact_messages(messages: &mut Vec<serde_json::Value>, keep_last: u
         })
         .take(15)
         .collect();
-    let summary = format!(
+    format!(
         "[auto-compacted {archived_count} older messages]\n{}{}",
         summary_parts.join("\n"),
         if archived_count > 15 {
@@ -235,7 +271,129 @@ pub fn auto_compact_messages(messages: &mut Vec<serde_json::Value>, keep_last: u
         } else {
             String::new()
         }
-    );
+    )
+}
+
+fn compact_summary_text_from_value(value: &VmValue) -> Result<String, VmError> {
+    if let Some(map) = value.as_dict() {
+        if let Some(summary) = map.get("summary").or_else(|| map.get("text")) {
+            return Ok(summary.display());
+        }
+    }
+    match value {
+        VmValue::String(text) => Ok(text.to_string()),
+        VmValue::Nil => Ok(String::new()),
+        _ => serde_json::to_string_pretty(&vm_value_to_json(value))
+            .map_err(|e| VmError::Runtime(format!("custom compactor encode error: {e}"))),
+    }
+}
+
+async fn llm_compaction_summary(
+    old_messages: &[serde_json::Value],
+    archived_count: usize,
+    llm_opts: &crate::llm::api::LlmCallOptions,
+) -> Result<String, VmError> {
+    let mut compact_opts = llm_opts.clone();
+    let formatted = format_compaction_messages(old_messages);
+    compact_opts.system = None;
+    compact_opts.transcript_id = None;
+    compact_opts.transcript_summary = None;
+    compact_opts.transcript_metadata = None;
+    compact_opts.native_tools = None;
+    compact_opts.tool_choice = None;
+    compact_opts.response_format = None;
+    compact_opts.json_schema = None;
+    compact_opts.messages = vec![serde_json::json!({
+        "role": "user",
+        "content": format!(
+            "Summarize these archived conversation messages for a follow-on coding agent. Preserve goals, constraints, decisions, completed tool work, unresolved issues, and next actions. Output only the summary text.\n\nArchived message count: {archived_count}\n\nConversation:\n{formatted}"
+        ),
+    })];
+    let result = vm_call_llm_full(&compact_opts).await?;
+    let summary = result.text.trim();
+    if summary.is_empty() {
+        Ok(truncate_compaction_summary(old_messages, archived_count))
+    } else {
+        Ok(format!(
+            "[auto-compacted {archived_count} older messages]\n{summary}"
+        ))
+    }
+}
+
+async fn custom_compaction_summary(
+    old_messages: &[serde_json::Value],
+    archived_count: usize,
+    callback: &VmValue,
+) -> Result<String, VmError> {
+    let Some(VmValue::Closure(closure)) = Some(callback.clone()) else {
+        return Err(VmError::Runtime(
+            "compact_callback must be a closure when compact_strategy is 'custom'".to_string(),
+        ));
+    };
+    let mut vm = crate::vm::take_async_builtin_child_vm().ok_or_else(|| {
+        VmError::Runtime(
+            "custom transcript compaction requires an async builtin VM context".to_string(),
+        )
+    })?;
+    let messages_vm = VmValue::List(Rc::new(
+        old_messages
+            .iter()
+            .map(crate::stdlib::json_to_vm_value)
+            .collect(),
+    ));
+    let result = vm.call_closure_pub(&closure, &[messages_vm], &[]).await;
+    crate::vm::restore_async_builtin_child_vm(vm);
+    let summary = compact_summary_text_from_value(&result?)?;
+    if summary.trim().is_empty() {
+        Ok(truncate_compaction_summary(old_messages, archived_count))
+    } else {
+        Ok(format!(
+            "[auto-compacted {archived_count} older messages]\n{summary}"
+        ))
+    }
+}
+
+/// Auto-compact a message list in place: summarize older messages into a
+/// note and keep the most recent `keep_last` messages.
+pub(crate) async fn auto_compact_messages(
+    messages: &mut Vec<serde_json::Value>,
+    config: &AutoCompactConfig,
+    llm_opts: Option<&crate::llm::api::LlmCallOptions>,
+) -> Result<bool, VmError> {
+    if messages.len() <= config.keep_last {
+        return Ok(false);
+    }
+    let split_at = messages.len().saturating_sub(config.keep_last);
+    let old_messages: Vec<_> = messages.drain(..split_at).collect();
+    let archived_count = old_messages.len();
+    let summary = match config.compact_strategy {
+        CompactStrategy::Truncate => truncate_compaction_summary(&old_messages, archived_count),
+        CompactStrategy::Llm => {
+            llm_compaction_summary(
+                &old_messages,
+                archived_count,
+                llm_opts.ok_or_else(|| {
+                    VmError::Runtime(
+                        "LLM transcript compaction requires active LLM call options".to_string(),
+                    )
+                })?,
+            )
+            .await?
+        }
+        CompactStrategy::Custom => {
+            custom_compaction_summary(
+                &old_messages,
+                archived_count,
+                config.custom_compactor.as_ref().ok_or_else(|| {
+                    VmError::Runtime(
+                        "compact_callback is required when compact_strategy is 'custom'"
+                            .to_string(),
+                    )
+                })?,
+            )
+            .await?
+        }
+    };
     messages.insert(
         0,
         serde_json::json!({
@@ -243,7 +401,7 @@ pub fn auto_compact_messages(messages: &mut Vec<serde_json::Value>, keep_last: u
             "content": summary,
         }),
     );
-    true
+    Ok(true)
 }
 
 // ── Adaptive context assembly ─────────────────────────────────────────
@@ -2845,8 +3003,20 @@ mod tests {
         let mut messages: Vec<serde_json::Value> = (0..20)
             .map(|i| serde_json::json!({"role": "user", "content": format!("message {i}")}))
             .collect();
-        let compacted = auto_compact_messages(&mut messages, 6);
-        assert!(compacted);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let compacted = runtime.block_on(auto_compact_messages(
+            &mut messages,
+            &AutoCompactConfig {
+                compact_strategy: CompactStrategy::Truncate,
+                keep_last: 6,
+                ..Default::default()
+            },
+            None,
+        ));
+        assert!(compacted.unwrap());
         assert!(messages.len() <= 7); // 6 kept + 1 summary
         assert!(messages[0]["content"]
             .as_str()
@@ -2859,8 +3029,20 @@ mod tests {
         let mut messages: Vec<serde_json::Value> = (0..4)
             .map(|i| serde_json::json!({"role": "user", "content": format!("msg {i}")}))
             .collect();
-        let compacted = auto_compact_messages(&mut messages, 6);
-        assert!(!compacted);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let compacted = runtime.block_on(auto_compact_messages(
+            &mut messages,
+            &AutoCompactConfig {
+                compact_strategy: CompactStrategy::Truncate,
+                keep_last: 6,
+                ..Default::default()
+            },
+            None,
+        ));
+        assert!(!compacted.unwrap());
         assert_eq!(messages.len(), 4);
     }
 

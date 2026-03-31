@@ -1,0 +1,13 @@
+pipeline test(task) {
+  let selected = select_artifacts_adaptive(
+    [
+    artifact({id: "a1", kind: "summary", text: "same content", relevance: 0.9}),
+    artifact({id: "a2", kind: "summary", text: "same content", relevance: 0.2}),
+    artifact({id: "a3", kind: "summary", text: "different content", relevance: 0.8}),
+  ],
+    {include_kinds: ["summary"], max_tokens: 100},
+  )
+  println(len(selected))
+  println(selected[0].id)
+  println(json_stringify(selected).contains("different content"))
+}

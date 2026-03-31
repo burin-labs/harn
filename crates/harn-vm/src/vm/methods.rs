@@ -125,6 +125,12 @@ impl super::Vm {
                             .map(|byte_pos| s[..byte_pos].chars().count() as i64);
                         Ok(VmValue::Int(idx.unwrap_or(-1)))
                     }
+                    "lower" | "to_lower" => {
+                        Ok(VmValue::String(Rc::from(s.to_lowercase().as_str())))
+                    }
+                    "upper" | "to_upper" => {
+                        Ok(VmValue::String(Rc::from(s.to_uppercase().as_str())))
+                    }
                     "len" => Ok(VmValue::Int(s.chars().count() as i64)),
                     _ => Ok(VmValue::Nil),
                 },

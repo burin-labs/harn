@@ -137,6 +137,18 @@ pub async fn run_agent_loop_internal(
     opts: &mut super::api::LlmCallOptions,
     config: AgentLoopConfig,
 ) -> Result<serde_json::Value, VmError> {
+    struct ExecutionPolicyGuard {
+        active: bool,
+    }
+
+    impl Drop for ExecutionPolicyGuard {
+        fn drop(&mut self) {
+            if self.active {
+                crate::orchestration::pop_execution_policy();
+            }
+        }
+    }
+
     let bridge = current_host_bridge();
     let max_iterations = config.max_iterations;
     let persistent = config.persistent;
@@ -153,6 +165,9 @@ pub async fn run_agent_loop_internal(
     if let Some(ref policy) = config.policy {
         crate::orchestration::push_execution_policy(policy.clone());
     }
+    let _policy_guard = ExecutionPolicyGuard {
+        active: config.policy.is_some(),
+    };
 
     let tools_val = None::<VmValue>;
     let tool_schemas = match &tools_val {
@@ -195,6 +210,7 @@ pub async fn run_agent_loop_internal(
     let mut final_status = "done";
     let loop_start = std::time::Instant::now();
     let mut transcript_events = Vec::new();
+    let mut idle_backoff_ms = 100u64;
 
     for iteration in 0..max_iterations {
         total_iterations = iteration + 1;
@@ -215,6 +231,7 @@ pub async fn run_agent_loop_internal(
         }
         if !immediate_messages.is_empty() {
             consecutive_text_only = 0;
+            idle_backoff_ms = 100;
         }
         let start = std::time::Instant::now();
         let result = if let Some(bridge) = bridge.as_ref() {
@@ -313,6 +330,7 @@ pub async fn run_agent_loop_internal(
 
         if !tool_calls.is_empty() {
             consecutive_text_only = 0;
+            idle_backoff_ms = 100;
             if tool_format == "native" {
                 opts.messages.push(build_assistant_tool_message(
                     &text,
@@ -603,7 +621,13 @@ pub async fn run_agent_loop_internal(
             if let Some(ref ac) = auto_compact {
                 let est = crate::orchestration::estimate_message_tokens(&opts.messages);
                 if est > ac.token_threshold {
-                    crate::orchestration::auto_compact_messages(&mut opts.messages, ac.keep_last);
+                    let compact_opts = opts.clone();
+                    crate::orchestration::auto_compact_messages(
+                        &mut opts.messages,
+                        ac,
+                        Some(&compact_opts),
+                    )
+                    .await?;
                 }
             }
 
@@ -625,34 +649,47 @@ pub async fn run_agent_loop_internal(
         // Daemon mode: if no tool calls and agent is idle, notify host and
         // wait briefly for user messages before deciding to continue/exit.
         if daemon && !persistent {
-            if let Some(bridge) = bridge.as_ref() {
-                bridge.notify(
-                    "agent/idle",
-                    serde_json::json!({"iteration": total_iterations}),
-                );
-            }
-            // Give the host a short window to inject messages
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-            let idle_messages = inject_queued_user_messages(
-                bridge.as_ref(),
-                opts,
-                crate::bridge::DeliveryCheckpoint::InterruptImmediate,
-            )
-            .await?;
-            if idle_messages.is_empty() {
+            let Some(bridge) = bridge.as_ref() else {
                 final_status = "idle";
                 break;
+            };
+            loop {
+                bridge.notify(
+                    "agent/idle",
+                    serde_json::json!({
+                        "iteration": total_iterations,
+                        "backoff_ms": idle_backoff_ms,
+                    }),
+                );
+                tokio::time::sleep(tokio::time::Duration::from_millis(idle_backoff_ms)).await;
+                let resumed = bridge.take_resume_signal();
+                let idle_messages = inject_queued_user_messages(
+                    Some(bridge),
+                    opts,
+                    crate::bridge::DeliveryCheckpoint::InterruptImmediate,
+                )
+                .await?;
+                if resumed || !idle_messages.is_empty() {
+                    for message in &idle_messages {
+                        transcript_events.push(transcript_event(
+                            "host_input",
+                            "user",
+                            "public",
+                            &message.content,
+                            Some(serde_json::json!({"delivery": format!("{:?}", message.mode)})),
+                        ));
+                    }
+                    consecutive_text_only = 0;
+                    idle_backoff_ms = 100;
+                    break;
+                }
+                idle_backoff_ms = match idle_backoff_ms {
+                    0..=100 => 500,
+                    101..=500 => 1000,
+                    1001..=1999 => 2000,
+                    _ => 2000,
+                };
             }
-            for message in &idle_messages {
-                transcript_events.push(transcript_event(
-                    "host_input",
-                    "user",
-                    "public",
-                    &message.content,
-                    Some(serde_json::json!({"delivery": format!("{:?}", message.mode)})),
-                ));
-            }
-            consecutive_text_only = 0;
             continue;
         }
 
@@ -673,6 +710,7 @@ pub async fn run_agent_loop_internal(
         }
         if !finish_step_messages.is_empty() {
             consecutive_text_only = 0;
+            idle_backoff_ms = 100;
             continue;
         }
 
@@ -696,11 +734,6 @@ pub async fn run_agent_loop_internal(
             "role": "user",
             "content": nudge,
         }));
-    }
-
-    // Pop per-agent policy
-    if config.policy.is_some() {
-        crate::orchestration::pop_execution_policy();
     }
 
     deferred_user_messages.extend(
@@ -766,6 +799,18 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                 }
                 if let Some(v) = opt_int(&options, "compact_keep_last") {
                     ac.keep_last = v as usize;
+                }
+                if let Some(strategy) = opt_str(&options, "compact_strategy") {
+                    ac.compact_strategy = crate::orchestration::parse_compact_strategy(&strategy)?;
+                }
+                if let Some(callback) = options.as_ref().and_then(|o| o.get("compact_callback")) {
+                    ac.custom_compactor = Some(callback.clone());
+                    if !options
+                        .as_ref()
+                        .is_some_and(|o| o.contains_key("compact_strategy"))
+                    {
+                        ac.compact_strategy = crate::orchestration::CompactStrategy::Custom;
+                    }
                 }
                 Some(ac)
             } else {

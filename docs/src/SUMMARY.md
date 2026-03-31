@@ -13,6 +13,7 @@
 - [LLM Calls and Agent Loops](./llm-and-agents.md)
 - [Workflow Runtime](./workflow-runtime.md)
 - [MCP and ACP Integration](./mcp-and-acp.md)
+- [Bridge Protocol](./bridge-protocol.md)
 
 # Reference
 

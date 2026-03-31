@@ -114,11 +114,9 @@ pub(crate) fn mock_llm_response(
                 text: String::new(),
                 tool_calls: vec![serde_json::json!({
                     "id": "mock_call_1",
-                    "type": "function",
-                    "function": {
-                        "name": tool_name,
-                        "arguments": "{}"
-                    }
+                    "type": "tool_call",
+                    "name": tool_name,
+                    "arguments": {}
                 })],
                 input_tokens: last_msg.len() as i64,
                 output_tokens: 20,

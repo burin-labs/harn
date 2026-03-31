@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process;
 
@@ -80,7 +80,8 @@ pub(crate) fn check_file(path: &str, config: &CheckConfig) {
         has_error = true;
     }
 
-    let preflight_diagnostics = collect_preflight_diagnostics(Path::new(path), &source, &program);
+    let preflight_diagnostics =
+        collect_preflight_diagnostics(Path::new(path), &source, &program, config);
     for diag in &preflight_diagnostics {
         has_error = true;
         diagnostic_count += 1;
@@ -215,11 +216,21 @@ fn collect_preflight_diagnostics(
     path: &Path,
     source: &str,
     program: &[SNode],
+    config: &CheckConfig,
 ) -> Vec<PreflightDiagnostic> {
     let mut diagnostics = Vec::new();
     let mut visited = HashSet::new();
     let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    scan_program_preflight(&canonical, source, program, &mut visited, &mut diagnostics);
+    let host_capabilities = load_host_capabilities(config);
+    scan_program_preflight(
+        &canonical,
+        source,
+        program,
+        config,
+        &host_capabilities,
+        &mut visited,
+        &mut diagnostics,
+    );
 
     // Import collision detection: collect all names exported by each import
     // and flag duplicates across different modules.
@@ -357,6 +368,8 @@ fn scan_program_preflight(
     file_path: &Path,
     source: &str,
     program: &[SNode],
+    config: &CheckConfig,
+    host_capabilities: &HashMap<String, HashSet<String>>,
     visited: &mut HashSet<PathBuf>,
     diagnostics: &mut Vec<PreflightDiagnostic>,
 ) {
@@ -367,7 +380,15 @@ fn scan_program_preflight(
         return;
     }
     for node in program {
-        scan_node_preflight(node, &canonical, source, visited, diagnostics);
+        scan_node_preflight(
+            node,
+            &canonical,
+            source,
+            config,
+            host_capabilities,
+            visited,
+            diagnostics,
+        );
     }
 }
 
@@ -375,6 +396,8 @@ fn scan_node_preflight(
     node: &SNode,
     file_path: &Path,
     source: &str,
+    config: &CheckConfig,
+    host_capabilities: &HashMap<String, HashSet<String>>,
     visited: &mut HashSet<PathBuf>,
     diagnostics: &mut Vec<PreflightDiagnostic>,
 ) {
@@ -391,6 +414,8 @@ fn scan_node_preflight(
                         &import_path,
                         &import_source,
                         &import_program,
+                        config,
+                        host_capabilities,
                         visited,
                         diagnostics,
                     );
@@ -406,8 +431,8 @@ fn scan_node_preflight(
         }
         Node::FunctionCall { name, args } if name == "render" => {
             if let Some(Node::StringLiteral(template_path)) = args.first().map(|arg| &arg.node) {
-                let resolved = resolve_source_relative(file_path, template_path);
-                if !resolved.exists() {
+                let resolved = resolve_preflight_target(file_path, template_path, config);
+                if !resolved.iter().any(|path| path.exists()) {
                     diagnostics.push(PreflightDiagnostic {
                         path: file_path.display().to_string(),
                         source: source.to_string(),
@@ -415,10 +440,10 @@ fn scan_node_preflight(
                         message: format!(
                             "preflight: render target '{}' does not exist at {}",
                             template_path,
-                            resolved.display()
+                            render_candidate_paths(&resolved)
                         ),
                         help: Some(
-                            "keep template paths relative to the pipeline source file or ship the bundled resource"
+                            "keep template paths relative to the pipeline source file, or set [check].bundle_root / --bundle-root for bundled layouts"
                                 .to_string(),
                         ),
                     });
@@ -447,17 +472,25 @@ fn scan_node_preflight(
             }
         }
         Node::FunctionCall { name, args } if name == "spawn_agent" => {
-            if let Some(config) = args.first() {
-                scan_spawn_agent_preflight(config, file_path, source, diagnostics);
+            if let Some(agent_config) = args.first() {
+                scan_spawn_agent_preflight(agent_config, file_path, source, diagnostics);
             }
-            scan_children(args, file_path, source, visited, diagnostics);
+            scan_children(
+                args,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
         }
         Node::FunctionCall { name, args } if name == "host_invoke" => {
             // Validate known capability/operation pairs
             if let (Some(Node::StringLiteral(cap)), Some(Node::StringLiteral(op))) =
                 (args.first().map(|a| &a.node), args.get(1).map(|a| &a.node))
             {
-                if !is_known_host_operation(cap, op) {
+                if !is_known_host_operation(host_capabilities, cap, op) {
                     diagnostics.push(PreflightDiagnostic {
                         path: file_path.display().to_string(),
                         source: source.to_string(),
@@ -466,8 +499,7 @@ fn scan_node_preflight(
                             "preflight: unknown host capability/operation '{cap}.{op}'"
                         ),
                         help: Some(
-                            "known capabilities: workspace (read_text, write_text, apply_edit, delete, exists, list), \
-                             process (exec), template (render), interaction (ask)"
+                            "declare additional host capabilities in [check].host_capabilities, [check].host_capabilities_path, or --host-capabilities"
                                 .to_string(),
                         ),
                     });
@@ -475,8 +507,8 @@ fn scan_node_preflight(
                 // Template render target check
                 if cap == "template" && op == "render" {
                     if let Some(template_path) = host_render_path_arg(args.get(2)) {
-                        let resolved = resolve_source_relative(file_path, &template_path);
-                        if !resolved.exists() {
+                        let resolved = resolve_preflight_target(file_path, &template_path, config);
+                        if !resolved.iter().any(|path| path.exists()) {
                             diagnostics.push(PreflightDiagnostic {
                                 path: file_path.display().to_string(),
                                 source: source.to_string(),
@@ -484,10 +516,10 @@ fn scan_node_preflight(
                                 message: format!(
                                     "preflight: host template render target '{}' does not exist at {}",
                                     template_path,
-                                    resolved.display()
+                                    render_candidate_paths(&resolved)
                                 ),
                                 help: Some(
-                                    "verify the template path before ACP or embedded-host execution"
+                                    "verify the template path, or set [check].bundle_root / --bundle-root when validating bundled layouts"
                                         .to_string(),
                                 ),
                             });
@@ -495,17 +527,49 @@ fn scan_node_preflight(
                     }
                 }
             }
-            scan_children(args, file_path, source, visited, diagnostics);
+            scan_children(
+                args,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
         }
         Node::IfElse {
             condition,
             then_body,
             else_body,
         } => {
-            scan_node_preflight(condition, file_path, source, visited, diagnostics);
-            scan_children(then_body, file_path, source, visited, diagnostics);
+            scan_node_preflight(
+                condition,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
+            scan_children(
+                then_body,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
             if let Some(else_body) = else_body {
-                scan_children(else_body, file_path, source, visited, diagnostics);
+                scan_children(
+                    else_body,
+                    file_path,
+                    source,
+                    config,
+                    host_capabilities,
+                    visited,
+                    diagnostics,
+                );
             }
         }
         Node::ForIn { iterable, body, .. }
@@ -513,16 +577,56 @@ fn scan_node_preflight(
             condition: iterable,
             body,
         } => {
-            scan_node_preflight(iterable, file_path, source, visited, diagnostics);
-            scan_children(body, file_path, source, visited, diagnostics);
+            scan_node_preflight(
+                iterable,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
+            scan_children(
+                body,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
         }
         Node::Retry { count, body } => {
-            scan_node_preflight(count, file_path, source, visited, diagnostics);
-            scan_children(body, file_path, source, visited, diagnostics);
+            scan_node_preflight(
+                count,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
+            scan_children(
+                body,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
         }
         Node::ReturnStmt { value } => {
             if let Some(value) = value {
-                scan_node_preflight(value, file_path, source, visited, diagnostics);
+                scan_node_preflight(
+                    value,
+                    file_path,
+                    source,
+                    config,
+                    host_capabilities,
+                    visited,
+                    diagnostics,
+                );
             }
         }
         Node::TryCatch {
@@ -531,43 +635,155 @@ fn scan_node_preflight(
             finally_body,
             ..
         } => {
-            scan_children(body, file_path, source, visited, diagnostics);
-            scan_children(catch_body, file_path, source, visited, diagnostics);
+            scan_children(
+                body,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
+            scan_children(
+                catch_body,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
             if let Some(finally_body) = finally_body {
-                scan_children(finally_body, file_path, source, visited, diagnostics);
+                scan_children(
+                    finally_body,
+                    file_path,
+                    source,
+                    config,
+                    host_capabilities,
+                    visited,
+                    diagnostics,
+                );
             }
         }
         Node::TryExpr { body } | Node::SpawnExpr { body } | Node::MutexBlock { body } => {
-            scan_children(body, file_path, source, visited, diagnostics);
+            scan_children(
+                body,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
         }
         Node::GuardStmt {
             condition,
             else_body,
         } => {
-            scan_node_preflight(condition, file_path, source, visited, diagnostics);
-            scan_children(else_body, file_path, source, visited, diagnostics);
+            scan_node_preflight(
+                condition,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
+            scan_children(
+                else_body,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
         }
         Node::AskExpr { fields } | Node::DictLiteral(fields) => {
             for field in fields {
-                scan_node_preflight(&field.value, file_path, source, visited, diagnostics);
+                scan_node_preflight(
+                    &field.value,
+                    file_path,
+                    source,
+                    config,
+                    host_capabilities,
+                    visited,
+                    diagnostics,
+                );
             }
         }
         Node::DeadlineBlock { duration, body } => {
-            scan_node_preflight(duration, file_path, source, visited, diagnostics);
-            scan_children(body, file_path, source, visited, diagnostics);
+            scan_node_preflight(
+                duration,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
+            scan_children(
+                body,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
         }
         Node::YieldExpr { value } => {
             if let Some(value) = value {
-                scan_node_preflight(value, file_path, source, visited, diagnostics);
+                scan_node_preflight(
+                    value,
+                    file_path,
+                    source,
+                    config,
+                    host_capabilities,
+                    visited,
+                    diagnostics,
+                );
             }
         }
         Node::Parallel { count, body, .. } => {
-            scan_node_preflight(count, file_path, source, visited, diagnostics);
-            scan_children(body, file_path, source, visited, diagnostics);
+            scan_node_preflight(
+                count,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
+            scan_children(
+                body,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
         }
         Node::ParallelMap { list, body, .. } | Node::ParallelSettle { list, body, .. } => {
-            scan_node_preflight(list, file_path, source, visited, diagnostics);
-            scan_children(body, file_path, source, visited, diagnostics);
+            scan_node_preflight(
+                list,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
+            scan_children(
+                body,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
         }
         Node::SelectExpr {
             cases,
@@ -575,99 +791,371 @@ fn scan_node_preflight(
             default_body,
         } => {
             for case in cases {
-                scan_node_preflight(&case.channel, file_path, source, visited, diagnostics);
-                scan_children(&case.body, file_path, source, visited, diagnostics);
+                scan_node_preflight(
+                    &case.channel,
+                    file_path,
+                    source,
+                    config,
+                    host_capabilities,
+                    visited,
+                    diagnostics,
+                );
+                scan_children(
+                    &case.body,
+                    file_path,
+                    source,
+                    config,
+                    host_capabilities,
+                    visited,
+                    diagnostics,
+                );
             }
             if let Some((timeout_expr, body)) = timeout {
-                scan_node_preflight(timeout_expr, file_path, source, visited, diagnostics);
-                scan_children(body, file_path, source, visited, diagnostics);
+                scan_node_preflight(
+                    timeout_expr,
+                    file_path,
+                    source,
+                    config,
+                    host_capabilities,
+                    visited,
+                    diagnostics,
+                );
+                scan_children(
+                    body,
+                    file_path,
+                    source,
+                    config,
+                    host_capabilities,
+                    visited,
+                    diagnostics,
+                );
             }
             if let Some(body) = default_body {
-                scan_children(body, file_path, source, visited, diagnostics);
+                scan_children(
+                    body,
+                    file_path,
+                    source,
+                    config,
+                    host_capabilities,
+                    visited,
+                    diagnostics,
+                );
             }
         }
         Node::FunctionCall { args, .. } => {
-            scan_children(args, file_path, source, visited, diagnostics);
+            scan_children(
+                args,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
         }
         Node::MethodCall { object, args, .. } | Node::OptionalMethodCall { object, args, .. } => {
-            scan_node_preflight(object, file_path, source, visited, diagnostics);
-            scan_children(args, file_path, source, visited, diagnostics);
+            scan_node_preflight(
+                object,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
+            scan_children(
+                args,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
         }
         Node::PropertyAccess { object, .. }
         | Node::OptionalPropertyAccess { object, .. }
         | Node::UnaryOp {
             operand: object, ..
         } => {
-            scan_node_preflight(object, file_path, source, visited, diagnostics);
+            scan_node_preflight(
+                object,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
         }
         Node::SubscriptAccess { object, index } => {
-            scan_node_preflight(object, file_path, source, visited, diagnostics);
-            scan_node_preflight(index, file_path, source, visited, diagnostics);
+            scan_node_preflight(
+                object,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
+            scan_node_preflight(
+                index,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
         }
         Node::SliceAccess { object, start, end } => {
-            scan_node_preflight(object, file_path, source, visited, diagnostics);
+            scan_node_preflight(
+                object,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
             if let Some(start) = start {
-                scan_node_preflight(start, file_path, source, visited, diagnostics);
+                scan_node_preflight(
+                    start,
+                    file_path,
+                    source,
+                    config,
+                    host_capabilities,
+                    visited,
+                    diagnostics,
+                );
             }
             if let Some(end) = end {
-                scan_node_preflight(end, file_path, source, visited, diagnostics);
+                scan_node_preflight(
+                    end,
+                    file_path,
+                    source,
+                    config,
+                    host_capabilities,
+                    visited,
+                    diagnostics,
+                );
             }
         }
         Node::BinaryOp { left, right, .. } => {
-            scan_node_preflight(left, file_path, source, visited, diagnostics);
-            scan_node_preflight(right, file_path, source, visited, diagnostics);
+            scan_node_preflight(
+                left,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
+            scan_node_preflight(
+                right,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
         }
         Node::Ternary {
             condition,
             true_expr,
             false_expr,
         } => {
-            scan_node_preflight(condition, file_path, source, visited, diagnostics);
-            scan_node_preflight(true_expr, file_path, source, visited, diagnostics);
-            scan_node_preflight(false_expr, file_path, source, visited, diagnostics);
+            scan_node_preflight(
+                condition,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
+            scan_node_preflight(
+                true_expr,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
+            scan_node_preflight(
+                false_expr,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
         }
         Node::Assignment { target, value, .. } => {
-            scan_node_preflight(target, file_path, source, visited, diagnostics);
-            scan_node_preflight(value, file_path, source, visited, diagnostics);
+            scan_node_preflight(
+                target,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
+            scan_node_preflight(
+                value,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
         }
         Node::ThrowStmt { value } => {
-            scan_node_preflight(value, file_path, source, visited, diagnostics);
+            scan_node_preflight(
+                value,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
         }
         Node::EnumConstruct { args, .. } | Node::ListLiteral(args) => {
-            scan_children(args, file_path, source, visited, diagnostics);
+            scan_children(
+                args,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
         }
         Node::StructConstruct { fields, .. } => {
             for field in fields {
-                scan_node_preflight(&field.value, file_path, source, visited, diagnostics);
+                scan_node_preflight(
+                    &field.value,
+                    file_path,
+                    source,
+                    config,
+                    host_capabilities,
+                    visited,
+                    diagnostics,
+                );
             }
         }
         Node::RangeExpr { start, end, .. } => {
-            scan_node_preflight(start, file_path, source, visited, diagnostics);
-            scan_node_preflight(end, file_path, source, visited, diagnostics);
+            scan_node_preflight(
+                start,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
+            scan_node_preflight(
+                end,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
         }
         Node::Pipeline { body, .. }
         | Node::OverrideDecl { body, .. }
         | Node::FnDecl { body, .. } => {
-            scan_children(body, file_path, source, visited, diagnostics);
+            scan_children(
+                body,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
         }
         Node::LetBinding { value, .. } | Node::VarBinding { value, .. } => {
-            scan_node_preflight(value, file_path, source, visited, diagnostics);
+            scan_node_preflight(
+                value,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
         }
         Node::MatchExpr { value, arms } => {
-            scan_node_preflight(value, file_path, source, visited, diagnostics);
+            scan_node_preflight(
+                value,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
             for arm in arms {
-                scan_children(&arm.body, file_path, source, visited, diagnostics);
-                scan_node_preflight(&arm.pattern, file_path, source, visited, diagnostics);
+                scan_children(
+                    &arm.body,
+                    file_path,
+                    source,
+                    config,
+                    host_capabilities,
+                    visited,
+                    diagnostics,
+                );
+                scan_node_preflight(
+                    &arm.pattern,
+                    file_path,
+                    source,
+                    config,
+                    host_capabilities,
+                    visited,
+                    diagnostics,
+                );
             }
         }
         Node::ImplBlock { methods, .. } => {
-            scan_children(methods, file_path, source, visited, diagnostics);
+            scan_children(
+                methods,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
         }
         Node::Spread(expr) | Node::TryOperator { operand: expr } => {
-            scan_node_preflight(expr, file_path, source, visited, diagnostics);
+            scan_node_preflight(
+                expr,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
         }
         Node::Block(body) | Node::Closure { body, .. } => {
-            scan_children(body, file_path, source, visited, diagnostics);
+            scan_children(
+                body,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
         }
         Node::TypeDecl { .. }
         | Node::EnumDecl { .. }
@@ -690,11 +1178,21 @@ fn scan_children(
     nodes: &[SNode],
     file_path: &Path,
     source: &str,
+    config: &CheckConfig,
+    host_capabilities: &HashMap<String, HashSet<String>>,
     visited: &mut HashSet<PathBuf>,
     diagnostics: &mut Vec<PreflightDiagnostic>,
 ) {
     for node in nodes {
-        scan_node_preflight(node, file_path, source, visited, diagnostics);
+        scan_node_preflight(
+            node,
+            file_path,
+            source,
+            config,
+            host_capabilities,
+            visited,
+            diagnostics,
+        );
     }
 }
 
@@ -742,16 +1240,141 @@ fn resolve_source_relative(current_file: &Path, target: &str) -> PathBuf {
     }
 }
 
-fn is_known_host_operation(capability: &str, operation: &str) -> bool {
-    matches!(
-        (capability, operation),
+fn resolve_preflight_target(
+    current_file: &Path,
+    target: &str,
+    config: &CheckConfig,
+) -> Vec<PathBuf> {
+    let mut candidates = vec![resolve_source_relative(current_file, target)];
+    if let Some(bundle_root) = config.bundle_root.as_deref() {
+        let bundle_base = PathBuf::from(bundle_root);
+        candidates.push(if PathBuf::from(target).is_absolute() {
+            PathBuf::from(target)
+        } else {
+            bundle_base.join(target)
+        });
+    }
+    candidates.dedup();
+    candidates
+}
+
+fn render_candidate_paths(candidates: &[PathBuf]) -> String {
+    candidates
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>()
+        .join(" or ")
+}
+
+fn default_host_capabilities() -> HashMap<String, HashSet<String>> {
+    HashMap::from([
         (
-            "workspace",
-            "read_text" | "write_text" | "apply_edit" | "delete" | "exists" | "list"
-        ) | ("process", "exec")
-            | ("template", "render")
-            | ("interaction", "ask")
-    )
+            "workspace".to_string(),
+            HashSet::from([
+                "read_text".to_string(),
+                "write_text".to_string(),
+                "apply_edit".to_string(),
+                "delete".to_string(),
+                "exists".to_string(),
+                "list".to_string(),
+            ]),
+        ),
+        ("process".to_string(), HashSet::from(["exec".to_string()])),
+        (
+            "template".to_string(),
+            HashSet::from(["render".to_string()]),
+        ),
+        (
+            "interaction".to_string(),
+            HashSet::from(["ask".to_string()]),
+        ),
+    ])
+}
+
+fn merge_host_capability_map(
+    target: &mut HashMap<String, HashSet<String>>,
+    source: HashMap<String, HashSet<String>>,
+) {
+    for (capability, ops) in source {
+        target.entry(capability).or_default().extend(ops);
+    }
+}
+
+fn parse_host_capability_value(value: &serde_json::Value) -> HashMap<String, HashSet<String>> {
+    let root = value.get("capabilities").unwrap_or(value);
+    let mut result = HashMap::new();
+    let Some(capabilities) = root.as_object() else {
+        return result;
+    };
+    for (capability, entry) in capabilities {
+        let mut ops = HashSet::new();
+        if let Some(list) = entry.as_array() {
+            for item in list {
+                if let Some(op) = item.as_str() {
+                    ops.insert(op.to_string());
+                }
+            }
+        } else if let Some(obj) = entry.as_object() {
+            if let Some(list) = obj
+                .get("operations")
+                .or_else(|| obj.get("ops"))
+                .and_then(|v| v.as_array())
+            {
+                for item in list {
+                    if let Some(op) = item.as_str() {
+                        ops.insert(op.to_string());
+                    }
+                }
+            } else {
+                for (op, enabled) in obj {
+                    if enabled.as_bool().unwrap_or(true) {
+                        ops.insert(op.to_string());
+                    }
+                }
+            }
+        }
+        if !ops.is_empty() {
+            result.insert(capability.to_string(), ops);
+        }
+    }
+    result
+}
+
+fn load_host_capabilities(config: &CheckConfig) -> HashMap<String, HashSet<String>> {
+    let mut capabilities = default_host_capabilities();
+    let inline = config
+        .host_capabilities
+        .iter()
+        .map(|(capability, ops)| {
+            (
+                capability.clone(),
+                ops.iter().cloned().collect::<HashSet<String>>(),
+            )
+        })
+        .collect::<HashMap<_, _>>();
+    merge_host_capability_map(&mut capabilities, inline);
+    if let Some(path) = config.host_capabilities_path.as_deref() {
+        if let Ok(content) = std::fs::read_to_string(path) {
+            let parsed_json = serde_json::from_str::<serde_json::Value>(&content).ok();
+            let parsed_toml = toml::from_str::<toml::Value>(&content)
+                .ok()
+                .and_then(|value| serde_json::to_value(value).ok());
+            if let Some(value) = parsed_json.or(parsed_toml) {
+                merge_host_capability_map(&mut capabilities, parse_host_capability_value(&value));
+            }
+        }
+    }
+    capabilities
+}
+
+fn is_known_host_operation(
+    capabilities: &HashMap<String, HashSet<String>>,
+    capability: &str,
+    operation: &str,
+) -> bool {
+    capabilities
+        .get(capability)
+        .is_some_and(|ops| ops.contains(operation))
 }
 
 fn host_render_path_arg(arg: Option<&SNode>) -> Option<String> {
@@ -874,7 +1497,8 @@ pipeline main() {
 }
 "#;
         let program = parse_program(source);
-        let diagnostics = collect_preflight_diagnostics(&file, source, &program);
+        let diagnostics =
+            collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
         assert_eq!(diagnostics.len(), 1);
         assert!(diagnostics[0].message.contains("render target"));
         let _ = std::fs::remove_dir_all(&dir);
@@ -906,7 +1530,8 @@ pipeline main() {
 }
 "#;
         let program = parse_program(source);
-        let diagnostics = collect_preflight_diagnostics(&file, source, &program);
+        let diagnostics =
+            collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
         assert_eq!(diagnostics.len(), 1);
         assert!(diagnostics[0].message.contains("worktree repo"));
         let _ = std::fs::remove_dir_all(&dir);
@@ -928,7 +1553,8 @@ pipeline main() {
 }
 "#;
         let program = parse_program(source);
-        let diagnostics = collect_preflight_diagnostics(&file, source, &program);
+        let diagnostics =
+            collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
         assert!(
             diagnostics
                 .iter()
@@ -964,7 +1590,8 @@ pipeline main() {
 }
 "#;
         let program = parse_program(source);
-        let diagnostics = collect_preflight_diagnostics(&file, source, &program);
+        let diagnostics =
+            collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
         assert!(
             diagnostics
                 .iter()
@@ -986,7 +1613,8 @@ pipeline main() {
 }
 "#;
         let program = parse_program(source);
-        let diagnostics = collect_preflight_diagnostics(&file, source, &program);
+        let diagnostics =
+            collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
         assert!(
             diagnostics
                 .iter()
@@ -1009,12 +1637,79 @@ pipeline main() {
 }
 "#;
         let program = parse_program(source);
-        let diagnostics = collect_preflight_diagnostics(&file, source, &program);
+        let diagnostics =
+            collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
         assert!(
             diagnostics
                 .iter()
                 .all(|d| !d.message.contains("unknown host capability")),
             "unexpected host cap diagnostic: {:?}",
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn preflight_accepts_extended_host_capabilities_from_config() {
+        let dir = unique_temp_dir("harn-check-host-extended");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("main.harn");
+        let source = r#"
+pipeline main() {
+  host_invoke("project", "scan", {})
+  host_invoke("runtime", "set_result", {})
+}
+"#;
+        let program = parse_program(source);
+        let diagnostics = collect_preflight_diagnostics(
+            &file,
+            source,
+            &program,
+            &CheckConfig {
+                host_capabilities: HashMap::from([
+                    ("project".to_string(), vec!["scan".to_string()]),
+                    ("runtime".to_string(), vec!["set_result".to_string()]),
+                ]),
+                ..CheckConfig::default()
+            },
+        );
+        assert!(
+            diagnostics
+                .iter()
+                .all(|d| !d.message.contains("unknown host capability")),
+            "unexpected host cap diagnostic: {:?}",
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn preflight_accepts_render_target_from_bundle_root() {
+        let dir = unique_temp_dir("harn-check-bundle-root");
+        std::fs::create_dir_all(dir.join("bundle")).unwrap();
+        std::fs::write(dir.join("bundle").join("shared.prompt"), "hello").unwrap();
+        let file = dir.join("main.harn");
+        let source = r#"
+pipeline main() {
+  let text = render("shared.prompt")
+  println(text)
+}
+"#;
+        let program = parse_program(source);
+        let diagnostics = collect_preflight_diagnostics(
+            &file,
+            source,
+            &program,
+            &CheckConfig {
+                bundle_root: Some(dir.join("bundle").display().to_string()),
+                ..CheckConfig::default()
+            },
+        );
+        assert!(
+            diagnostics
+                .iter()
+                .all(|d| !d.message.contains("render target")),
+            "unexpected render diagnostic: {:?}",
             diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
         let _ = std::fs::remove_dir_all(&dir);
@@ -1039,7 +1734,8 @@ pipeline main() {
 }
 "#;
         let program = parse_program(source);
-        let diagnostics = collect_preflight_diagnostics(&file, source, &program);
+        let diagnostics =
+            collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
         assert!(
             diagnostics
                 .iter()

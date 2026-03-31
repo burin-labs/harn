@@ -97,17 +97,30 @@ async fn main() {
             }
         }
         "check" => {
-            let file = args
-                .iter()
-                .skip(2)
-                .find(|a| a.ends_with(".harn") || !a.starts_with("--"));
+            let flag_vals: std::collections::HashSet<&str> = args
+                .windows(2)
+                .filter(|w| w[0] == "--host-capabilities" || w[0] == "--bundle-root")
+                .map(|w| w[1].as_str())
+                .collect();
+            let file = args.iter().skip(2).find(|a| {
+                (a.ends_with(".harn") || !a.starts_with("--")) && !flag_vals.contains(a.as_str())
+            });
             match file {
                 Some(f) => {
-                    let config = package::load_check_config(Some(std::path::Path::new(f.as_str())));
+                    let mut config =
+                        package::load_check_config(Some(std::path::Path::new(f.as_str())));
+                    if let Some(path) = flag_value(&args, "--host-capabilities") {
+                        config.host_capabilities_path = Some(path);
+                    }
+                    if let Some(path) = flag_value(&args, "--bundle-root") {
+                        config.bundle_root = Some(path);
+                    }
                     commands::check::check_file(f, &config);
                 }
                 None => {
-                    eprintln!("Usage: harn check <file.harn>");
+                    eprintln!(
+                        "Usage: harn check [--host-capabilities <file>] [--bundle-root <dir>] <file.harn>"
+                    );
                     process::exit(1);
                 }
             }
@@ -426,11 +439,16 @@ fn print_help() {
     println!("    --verbose / -v       Show per-test timing and detailed failures");
     println!("    --record / --replay  Record or replay LLM fixtures");
     println!();
+    println!("\x1b[1;33mCHECK OPTIONS:\x1b[0m");
+    println!("    --host-capabilities <file>  Extra host capability schema for preflight");
+    println!("    --bundle-root <dir>         Alternate root for render/template path checks");
+    println!();
     println!("\x1b[1;33mEXAMPLES:\x1b[0m");
     println!("    harn run main.harn");
     println!("    harn test tests/");
     println!("    harn init my-project");
     println!("    harn fmt --check src/");
+    println!("    harn check --host-capabilities burin-host.json agent.harn");
     println!("    harn runs inspect .harn-runs/<run>.json");
     println!();
     println!("Docs: \x1b[4;36mhttps://github.com/burin-labs/harn\x1b[0m");

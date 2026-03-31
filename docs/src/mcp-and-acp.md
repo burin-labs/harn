@@ -195,6 +195,9 @@ Add to `claude_desktop_config.json`:
 ACP lets editors like Burin Code, VS Code, and JetBrains use Harn as a
 coding agent backend. Communication is JSON-RPC 2.0 over stdin/stdout.
 
+Bridge-level tool gates and daemon idle/resume notifications are documented in
+[Bridge Protocol](./bridge-protocol.md).
+
 ### Running the ACP server
 
 ```bash

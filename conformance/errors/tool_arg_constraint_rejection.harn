@@ -1,0 +1,13 @@
+pipeline test(task) {
+  agent_loop(
+    "Inspect the workspace",
+    "You are helpful",
+    {
+    provider: "mock",
+    tools: ["list_directory"],
+    tool_format: "native",
+    max_iterations: 1,
+    policy: {tool_arg_constraints: [{tool: "list_directory", arg_patterns: ["src/*"]}]},
+  },
+  )
+}

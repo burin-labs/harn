@@ -2,6 +2,7 @@ mod format;
 mod methods;
 mod ops;
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
@@ -12,6 +13,10 @@ use crate::chunk::{Chunk, CompiledFunction, Constant};
 use crate::value::{
     ErrorCategory, VmAsyncBuiltinFn, VmBuiltinFn, VmClosure, VmEnv, VmError, VmTaskHandle, VmValue,
 };
+
+thread_local! {
+    static CURRENT_ASYNC_BUILTIN_CHILD_VM: RefCell<Vec<Vm>> = const { RefCell::new(Vec::new()) };
+}
 
 /// RAII guard that starts a tracing span on creation and ends it on drop.
 struct ScopeSpan(u64);
@@ -1110,7 +1115,14 @@ impl Vm {
         if let Some(builtin) = self.builtins.get(name).cloned() {
             builtin(&args, &mut self.output)
         } else if let Some(async_builtin) = self.async_builtins.get(name).cloned() {
-            async_builtin(args).await
+            CURRENT_ASYNC_BUILTIN_CHILD_VM.with(|slot| {
+                slot.borrow_mut().push(self.child_vm());
+            });
+            let result = async_builtin(args).await;
+            CURRENT_ASYNC_BUILTIN_CHILD_VM.with(|slot| {
+                slot.borrow_mut().pop();
+            });
+            result
         } else if let Some(bridge) = &self.bridge {
             crate::orchestration::enforce_current_policy_for_bridge_builtin(name)?;
             let args_json: Vec<serde_json::Value> =
@@ -1136,6 +1148,16 @@ impl Vm {
             Err(VmError::UndefinedBuiltin(name.to_string()))
         }
     }
+}
+
+pub fn take_async_builtin_child_vm() -> Option<Vm> {
+    CURRENT_ASYNC_BUILTIN_CHILD_VM.with(|slot| slot.borrow_mut().pop())
+}
+
+pub fn restore_async_builtin_child_vm(vm: Vm) {
+    CURRENT_ASYNC_BUILTIN_CHILD_VM.with(|slot| {
+        slot.borrow_mut().push(vm);
+    });
 }
 
 impl Default for Vm {

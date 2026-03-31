@@ -126,16 +126,24 @@ println(result.visible_text)
   and post-execution result interception for agent tool calls, with glob-pattern
   matching on tool names.
 - Automatic transcript compaction in agent loops: microcompaction snips oversized
-  tool outputs, auto-compaction triggers at configurable token thresholds and
-  summarizes older messages in-place to preserve context window headroom.
+  tool outputs, auto-compaction triggers at configurable token thresholds, and
+  `compact_strategy` supports default LLM summarization, truncate fallback, or
+  custom Harn closure-based compaction. The same pipeline is exposed directly as
+  `transcript_auto_compact(...)`.
 - Daemon agent mode (`daemon: true`): agents stay alive waiting for
-  host-injected messages instead of terminating on text-only responses.
+  host-injected messages instead of terminating on text-only responses, with
+  adaptive idle backoff and explicit bridge wake/resume signaling.
 - Per-agent capability policies with argument-level constraints: `agent_loop`
   accepts a `policy` dict to scope tool permissions, including `tool_arg_constraints`
   for pattern-matching on tool arguments.
 - Adaptive context assembly with deduplication and microcompaction via
   `select_artifacts_adaptive(...)`, plus `estimate_tokens(...)` and
   `microcompact(...)` utility builtins.
+- Host-aware static preflight: `harn check` can load host-specific capability
+  schemas and alternate bundle roots from `harn.toml` or CLI flags so host
+  adapters and bundled template layouts validate cleanly.
+- String method aliases for case normalization: `.lower()`, `.upper()`,
+  `.to_lower()`, and `.to_upper()`.
 
 ## Why This Matters
 
