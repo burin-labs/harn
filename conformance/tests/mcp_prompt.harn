@@ -1,8 +1,24 @@
 pipeline test(task) {
   // Register a prompt with arguments
-  let r = mcp_prompt({name: "code_review", description: "Review code quality", arguments: [{name: "code", description: "Code to review", required: true}], handler: { args -> "Please review: " + args.code }})
+  let r = mcp_prompt(
+    {
+    name: "code_review",
+    description: "Review code quality",
+    arguments: [{name: "code", description: "Code to review", required: true}],
+    handler: { args -> "Please review: " + args.code },
+  },
+  )
   assert(r == nil, "mcp_prompt should return nil")
   // Register a prompt returning a message list
-  mcp_prompt({name: "pair_program", description: "Pair programming session", handler: { args -> [{role: "user", content: "Let's pair program"}, {role: "assistant", content: "Sure, what are we building?"}] }})
+  mcp_prompt(
+    {
+    name: "pair_program",
+    description: "Pair programming session",
+    handler: { args -> [
+    {role: "user", content: "Let's pair program"},
+    {role: "assistant", content: "Sure, what are we building?"},
+  ] },
+  },
+  )
   println("mcp_prompt registered")
 }

@@ -1,7 +1,45 @@
 pipeline main() {
-  let flow = workflow_graph({name: "graph_runtime", entry: "gate", nodes: {gate: {kind: "condition", context_policy: {include_kinds: ["plan"]}, metadata: {contains_text: "go"}}, fan: {kind: "fork"}, map_docs: {kind: "map", context_policy: {include_kinds: ["workspace_file"]}, map_policy: {item_artifact_kind: "workspace_file", output_kind: "summary"}}, join_results: {kind: "join", join_policy: {strategy: "all", require_all_inputs: true}}, reduce_report: {kind: "reduce", context_policy: {include_kinds: ["summary"]}, input_contract: {input_kinds: ["summary"]}, output_contract: {output_kinds: ["plan"]}}}, edges: [{from: "gate", to: "fan", branch: "true"}, {from: "gate", to: "reduce_report", branch: "false"}, {from: "fan", to: "map_docs"}, {from: "fan", to: "join_results"}, {from: "map_docs", to: "join_results"}, {from: "join_results", to: "reduce_report"}]})
-  let artifacts = [artifact({kind: "plan", text: "go build the report"}), artifact({kind: "workspace_file", text: "alpha"}), artifact({kind: "workspace_file", text: "beta"})]
-  let result = workflow_execute("Assemble the report", flow, artifacts, {max_steps: 8, persist_path: "/tmp/harn-workflow-graph-runtime.json"})
+  let flow = workflow_graph(
+    {
+    name: "graph_runtime",
+    entry: "gate",
+    nodes: {
+    gate: {kind: "condition", context_policy: {include_kinds: ["plan"]}, metadata: {contains_text: "go"}},
+    fan: {kind: "fork"},
+    map_docs: {
+    kind: "map",
+    context_policy: {include_kinds: ["workspace_file"]},
+    map_policy: {item_artifact_kind: "workspace_file", output_kind: "summary"},
+  },
+    join_results: {kind: "join", join_policy: {strategy: "all", require_all_inputs: true}},
+    reduce_report: {
+    kind: "reduce",
+    context_policy: {include_kinds: ["summary"]},
+    input_contract: {input_kinds: ["summary"]},
+    output_contract: {output_kinds: ["plan"]},
+  },
+  },
+    edges: [
+    {from: "gate", to: "fan", branch: "true"},
+    {from: "gate", to: "reduce_report", branch: "false"},
+    {from: "fan", to: "map_docs"},
+    {from: "fan", to: "join_results"},
+    {from: "map_docs", to: "join_results"},
+    {from: "join_results", to: "reduce_report"},
+  ],
+  },
+  )
+  let artifacts = [
+    artifact({kind: "plan", text: "go build the report"}),
+    artifact({kind: "workspace_file", text: "alpha"}),
+    artifact({kind: "workspace_file", text: "beta"}),
+  ]
+  let result = workflow_execute(
+    "Assemble the report",
+    flow,
+    artifacts,
+    {max_steps: 8, persist_path: "/tmp/harn-workflow-graph-runtime.json"},
+  )
   println(result?.status)
   println(len(result?.run?.stages) == 5)
   println(len(result?.run?.transitions) >= 4)

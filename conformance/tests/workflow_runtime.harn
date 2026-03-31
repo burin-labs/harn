@@ -1,5 +1,15 @@
 pipeline main() {
-  let flow = workflow_graph({name: "demo", entry: "act", nodes: {act: {kind: "stage", mode: "llm", model_policy: {provider: "mock"}}, verify: {kind: "verify", mode: "llm", model_policy: {provider: "mock"}}}, edges: [{from: "act", to: "verify"}]})
+  let flow = workflow_graph(
+    {
+    name: "demo",
+    entry: "act",
+    nodes: {
+    act: {kind: "stage", mode: "llm", model_policy: {provider: "mock"}},
+    verify: {kind: "verify", mode: "llm", model_policy: {provider: "mock"}},
+  },
+    edges: [{from: "act", to: "verify"}],
+  },
+  )
   let report = workflow_validate(flow)
   println(report?.valid)
   let base = artifact({kind: "summary", text: "short note", relevance: 0.9})

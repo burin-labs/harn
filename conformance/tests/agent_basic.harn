@@ -1,6 +1,15 @@
 pipeline test(task) {
   // Test agent() and agent_config() builtins.
-  let classifier = agent("classifier", {system: "You classify code directories", provider: "mock", model: "test-model", max_iterations: 5, tools: ["read_file", "search"]})
+  let classifier = agent(
+    "classifier",
+    {
+    system: "You classify code directories",
+    provider: "mock",
+    model: "test-model",
+    max_iterations: 5,
+    tools: ["read_file", "search"],
+  },
+  )
   // Check agent dict shape
   assert(classifier._type == "agent", "should be agent type")
   assert(classifier.name == "classifier", "should have name")

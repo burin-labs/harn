@@ -28,7 +28,9 @@ pipeline default(task) {
   println(schema.schema_version)
   println(len(schema.tools))
   // tool_parse_call
-  let calls = tool_parse_call("<tool_call>{\"name\": \"greet\", \"arguments\": {\"name\": \"world\"}}</tool_call>")
+  let calls = tool_parse_call(
+    "<tool_call>{\"name\": \"greet\", \"arguments\": {\"name\": \"world\"}}</tool_call>",
+  )
   println(len(calls))
   println(calls[0].name)
   // tool_format_result

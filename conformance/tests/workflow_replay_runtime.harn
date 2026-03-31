@@ -1,7 +1,32 @@
 pipeline main() {
-  let flow = workflow_graph({name: "replay_demo", entry: "act", nodes: {act: {kind: "stage", mode: "llm", model_policy: {provider: "mock"}}, verify: {kind: "verify", mode: "llm", model_policy: {provider: "mock"}, verify: {assert_text: "Mock"}}}, edges: [{from: "act", to: "verify"}]})
-  let first = workflow_execute("Write a note", flow, [], {max_steps: 4, persist_path: "/tmp/harn-workflow-replay-source.json"})
-  let replayed = workflow_execute("Write a note", flow, [], {max_steps: 4, replay_run: first?.run, replay_mode: "deterministic", persist_path: "/tmp/harn-workflow-replay-replayed.json"})
+  let flow = workflow_graph(
+    {
+    name: "replay_demo",
+    entry: "act",
+    nodes: {
+    act: {kind: "stage", mode: "llm", model_policy: {provider: "mock"}},
+    verify: {kind: "verify", mode: "llm", model_policy: {provider: "mock"}, verify: {assert_text: "Mock"}},
+  },
+    edges: [{from: "act", to: "verify"}],
+  },
+  )
+  let first = workflow_execute(
+    "Write a note",
+    flow,
+    [],
+    {max_steps: 4, persist_path: "/tmp/harn-workflow-replay-source.json"},
+  )
+  let replayed = workflow_execute(
+    "Write a note",
+    flow,
+    [],
+    {
+    max_steps: 4,
+    replay_run: first?.run,
+    replay_mode: "deterministic",
+    persist_path: "/tmp/harn-workflow-replay-replayed.json",
+  },
+  )
   println(first?.status)
   println(replayed?.status)
   println(replayed?.run?.metadata?.replay_mode)

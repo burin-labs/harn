@@ -1,5 +1,20 @@
 pipeline main() {
-  let flow = workflow_graph({name: "delegated-flow", entry: "delegate", nodes: {delegate: {kind: "subagent", mode: "llm", model_policy: {provider: "mock"}, output_contract: {output_kinds: ["summary"]}, metadata: {worker_name: "delegate-1"}}}, edges: []})
+  let flow = workflow_graph(
+    {
+    name: "delegated-flow",
+    entry: "delegate",
+    nodes: {
+    delegate: {
+    kind: "subagent",
+    mode: "llm",
+    model_policy: {provider: "mock"},
+    output_contract: {output_kinds: ["summary"]},
+    metadata: {worker_name: "delegate-1"},
+  },
+  },
+    edges: [],
+  },
+  )
   let result = workflow_execute("Write a delegated note", flow, [], {max_steps: 2})
   println(result?.status)
   println(result?.run?.stages[0]?.kind)

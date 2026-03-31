@@ -1,8 +1,43 @@
 pipeline main() {
-  let good = run_record({_type: "run_record", id: "run_good", workflow_id: "wf", workflow_name: "demo", task: "demo", status: "completed", started_at: "1", stages: [{id: "stage_1", node_id: "act", kind: "stage", status: "completed", outcome: "success", started_at: "1"}]})
-  let bad = run_record({_type: "run_record", id: "run_bad", workflow_id: "wf", workflow_name: "demo", task: "demo", status: "failed", started_at: "1", stages: [{id: "stage_1", node_id: "act", kind: "stage", status: "failed", outcome: "error", started_at: "1"}]})
+  let good = run_record(
+    {
+    _type: "run_record",
+    id: "run_good",
+    workflow_id: "wf",
+    workflow_name: "demo",
+    task: "demo",
+    status: "completed",
+    started_at: "1",
+    stages: [
+    {
+    id: "stage_1",
+    node_id: "act",
+    kind: "stage",
+    status: "completed",
+    outcome: "success",
+    started_at: "1",
+  },
+  ],
+  },
+  )
+  let bad = run_record(
+    {
+    _type: "run_record",
+    id: "run_bad",
+    workflow_id: "wf",
+    workflow_name: "demo",
+    task: "demo",
+    status: "failed",
+    started_at: "1",
+    stages: [
+    {id: "stage_1", node_id: "act", kind: "stage", status: "failed", outcome: "error", started_at: "1"},
+  ],
+  },
+  )
   let fixture = run_record_fixture(good)
-  let suite = run_record_eval_suite([{run: good, fixture: fixture, path: "good.json"}, {run: bad, fixture: fixture, path: "bad.json"}])
+  let suite = run_record_eval_suite(
+    [{run: good, fixture: fixture, path: "good.json"}, {run: bad, fixture: fixture, path: "bad.json"}],
+  )
   let diff = run_record_diff(good, bad)
   println(!suite?.pass)
   println(suite?.failed == 1)

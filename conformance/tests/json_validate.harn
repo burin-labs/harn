@@ -21,7 +21,10 @@ pipeline test(task) {
   let data = {name: "alice", age: 30}
   println(json_validate(data, schema))
   // Nested dict validation
-  let nested_schema = {type: "dict", properties: {address: {type: "dict", required: ["city"], properties: {city: {type: "string"}}}}}
+  let nested_schema = {
+    type: "dict",
+    properties: {address: {type: "dict", required: ["city"], properties: {city: {type: "string"}}}},
+  }
   let nested_data = {address: {city: "NYC"}}
   println(json_validate(nested_data, nested_schema))
   // List items validation

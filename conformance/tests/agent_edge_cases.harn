@@ -9,7 +9,17 @@ pipeline test(task) {
   assert(cfg.system == nil, "system should be nil when not provided")
   assert(cfg.prompt == "do something", "prompt should be set")
   // Agent with all options
-  let a2 = agent("full", {system: "You are helpful", provider: "mock", model: "test", max_iterations: 3, tool_format: "native", tools: ["read_file"]})
+  let a2 = agent(
+    "full",
+    {
+    system: "You are helpful",
+    provider: "mock",
+    model: "test",
+    max_iterations: 3,
+    tool_format: "native",
+    tools: ["read_file"],
+  },
+  )
   let cfg2 = agent_config(a2, "test")
   assert(cfg2.options.provider == "mock")
   assert(cfg2.options.tool_format == "native")

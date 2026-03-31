@@ -1,8 +1,18 @@
 pipeline test(task) {
   // Test tool_define builtin for ergonomic tool registration.
   var registry = tool_registry()
-  registry = tool_define(registry, "search_code", "Search for code patterns", {params: {query: "string", path: "string"}, handler: { args -> "found: " + args.query }})
-  registry = tool_define(registry, "read_file", "Read file contents", {params: {path: "string"}, handler: { args -> "content of " + args.path }})
+  registry = tool_define(
+    registry,
+    "search_code",
+    "Search for code patterns",
+    {params: {query: "string", path: "string"}, handler: { args -> "found: " + args.query }},
+  )
+  registry = tool_define(
+    registry,
+    "read_file",
+    "Read file contents",
+    {params: {path: "string"}, handler: { args -> "content of " + args.path }},
+  )
   // Verify tools registered
   assert(tool_count(registry) == 2, "should have 2 tools")
   // Find specific tool

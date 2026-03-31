@@ -1,7 +1,11 @@
 pipeline test(task) {
   // Mock HTTP framework
   // Register a mock for GET requests
-  http_mock("GET", "https://api.example.com/users", {status: 200, body: "{\"users\": [\"alice\", \"bob\"]}", headers: {}})
+  http_mock(
+    "GET",
+    "https://api.example.com/users",
+    {status: 200, body: "{\"users\": [\"alice\", \"bob\"]}", headers: {}},
+  )
   // Register a mock for POST with glob pattern
   http_mock("POST", "https://api.example.com/*", {status: 201, body: "{\"created\": true}"})
   // Make a GET request - should hit mock
