@@ -1,0 +1,70 @@
+/// metadata_namespace.
+pub fn metadata_namespace(dir, namespace) {
+  return metadata_resolve(dir, namespace) ?? {}
+}
+
+/// metadata_local_namespace.
+pub fn metadata_local_namespace(dir, namespace) {
+  let normalized = if dir == "" { "." } else { dir }
+  for entry in metadata_entries(namespace) {
+    if entry.dir == normalized {
+      return entry.local ?? {}
+    }
+  }
+  return {}
+}
+
+/// project_inventory.
+pub fn project_inventory(namespace) {
+  return {
+    entries: metadata_entries(namespace),
+    status: metadata_status(namespace),
+  }
+}
+
+/// project_scan.
+pub fn project_scan(path, options) {
+  return scan_directory(path, options)
+}
+
+/// project_scan_paths.
+pub fn project_scan_paths(path, options) {
+  var paths = []
+  for entry in project_scan(path, options) {
+    paths = paths + [entry.path]
+  }
+  return paths
+}
+
+/// project_stale.
+pub fn project_stale(namespace) {
+  return metadata_status(namespace).stale
+}
+
+/// project_stale_dirs.
+pub fn project_stale_dirs(namespace) {
+  let stale = project_stale(namespace)
+  var dirs = []
+  for dir in stale.tier1 {
+    dirs = dirs + [dir]
+  }
+  for dir in stale.tier2 {
+    dirs = dirs + [dir]
+  }
+  return dirs
+}
+
+/// project_requires_refresh.
+pub fn project_requires_refresh(namespace) {
+  let status = metadata_status(namespace)
+  if status.stale.any_stale {
+    return true
+  }
+  for _dir in status.missing_structure_hash {
+    return true
+  }
+  for _dir in status.missing_content_hash {
+    return true
+  }
+  return false
+}

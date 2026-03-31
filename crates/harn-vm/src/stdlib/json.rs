@@ -47,6 +47,101 @@ pub(crate) fn register_json_builtins(vm: &mut Vm) {
         }
     });
 
+    vm.register_builtin("schema_check", |args, _out| {
+        if args.len() < 2 {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "schema_check requires 2 arguments: data and schema",
+            ))));
+        }
+        Ok(schema_result_value(&args[0], &args[1], false))
+    });
+
+    vm.register_builtin("schema_parse", |args, _out| {
+        if args.len() < 2 {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "schema_parse requires 2 arguments: data and schema",
+            ))));
+        }
+        Ok(schema_result_value(&args[0], &args[1], true))
+    });
+
+    vm.register_builtin("schema_to_json_schema", |args, _out| {
+        if args.is_empty() {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "schema_to_json_schema requires 1 argument: schema",
+            ))));
+        }
+        let schema = args[0].as_dict().ok_or_else(|| {
+            VmError::Thrown(VmValue::String(Rc::from(
+                "schema_to_json_schema: schema must be a dict",
+            )))
+        })?;
+        Ok(json_to_vm_value(&schema_dict_to_json_schema(schema)))
+    });
+
+    vm.register_builtin("schema_extend", |args, _out| {
+        if args.len() < 2 {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "schema_extend requires 2 arguments: base and overrides",
+            ))));
+        }
+        let base = args[0].as_dict().ok_or_else(|| {
+            VmError::Thrown(VmValue::String(Rc::from(
+                "schema_extend: base must be a dict",
+            )))
+        })?;
+        let overrides = args[1].as_dict().ok_or_else(|| {
+            VmError::Thrown(VmValue::String(Rc::from(
+                "schema_extend: overrides must be a dict",
+            )))
+        })?;
+        Ok(VmValue::Dict(Rc::new(merge_schema_dicts(base, overrides))))
+    });
+
+    vm.register_builtin("schema_partial", |args, _out| {
+        if args.is_empty() {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "schema_partial requires 1 argument: schema",
+            ))));
+        }
+        let schema = args[0].as_dict().ok_or_else(|| {
+            VmError::Thrown(VmValue::String(Rc::from(
+                "schema_partial: schema must be a dict",
+            )))
+        })?;
+        Ok(VmValue::Dict(Rc::new(schema_partial_dict(schema))))
+    });
+
+    vm.register_builtin("schema_pick", |args, _out| {
+        if args.len() < 2 {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "schema_pick requires 2 arguments: schema and keys",
+            ))));
+        }
+        let schema = args[0].as_dict().ok_or_else(|| {
+            VmError::Thrown(VmValue::String(Rc::from(
+                "schema_pick: schema must be a dict",
+            )))
+        })?;
+        let keys = schema_key_list(&args[1], "schema_pick")?;
+        Ok(VmValue::Dict(Rc::new(schema_pick_dict(schema, &keys))))
+    });
+
+    vm.register_builtin("schema_omit", |args, _out| {
+        if args.len() < 2 {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "schema_omit requires 2 arguments: schema and keys",
+            ))));
+        }
+        let schema = args[0].as_dict().ok_or_else(|| {
+            VmError::Thrown(VmValue::String(Rc::from(
+                "schema_omit: schema must be a dict",
+            )))
+        })?;
+        let keys = schema_key_list(&args[1], "schema_omit")?;
+        Ok(VmValue::Dict(Rc::new(schema_omit_dict(schema, &keys))))
+    });
+
     vm.register_builtin("json_extract", |args, _out| {
         if args.is_empty() {
             return Err(VmError::Thrown(VmValue::String(Rc::from(
@@ -165,68 +260,580 @@ fn validate_value(
     path: &str,
     errors: &mut Vec<String>,
 ) {
+    let result = validate_against_schema(value, schema, path, false);
+    errors.extend(result.errors);
+}
+
+struct ValidationResult {
+    value: VmValue,
+    errors: Vec<String>,
+}
+
+fn schema_result_value(data: &VmValue, schema: &VmValue, apply_defaults: bool) -> VmValue {
+    let schema_dict = match schema.as_dict() {
+        Some(dict) => dict,
+        None => return result_err_value(vec!["schema must be a dict".to_string()], None),
+    };
+    let result = validate_against_schema(data, schema_dict, "", apply_defaults);
+    if result.errors.is_empty() {
+        result_ok_value(result.value)
+    } else {
+        result_err_value(result.errors, Some(result.value))
+    }
+}
+
+fn result_ok_value(value: VmValue) -> VmValue {
+    VmValue::EnumVariant {
+        enum_name: "Result".to_string(),
+        variant: "Ok".to_string(),
+        fields: vec![value],
+    }
+}
+
+fn result_err_value(errors: Vec<String>, value: Option<VmValue>) -> VmValue {
+    let mut payload = BTreeMap::new();
+    payload.insert(
+        "message".to_string(),
+        VmValue::String(Rc::from(
+            errors
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "schema validation failed".to_string()),
+        )),
+    );
+    payload.insert(
+        "errors".to_string(),
+        VmValue::List(Rc::new(
+            errors
+                .into_iter()
+                .map(|err| VmValue::String(Rc::from(err)))
+                .collect(),
+        )),
+    );
+    if let Some(value) = value {
+        payload.insert("value".to_string(), value);
+    }
+    VmValue::EnumVariant {
+        enum_name: "Result".to_string(),
+        variant: "Err".to_string(),
+        fields: vec![VmValue::Dict(Rc::new(payload))],
+    }
+}
+
+fn validate_against_schema(
+    value: &VmValue,
+    schema: &BTreeMap<String, VmValue>,
+    path: &str,
+    apply_defaults: bool,
+) -> ValidationResult {
+    if matches!(value, VmValue::Nil) && schema_bool(schema, "nullable") {
+        return ValidationResult {
+            value: VmValue::Nil,
+            errors: Vec::new(),
+        };
+    }
+
+    if let Some(VmValue::List(union_schemas)) = schema.get("union") {
+        for branch in union_schemas.iter() {
+            if let Some(dict) = branch.as_dict() {
+                let branch_result = validate_against_schema(value, dict, path, apply_defaults);
+                if branch_result.errors.is_empty() {
+                    return branch_result;
+                }
+            }
+        }
+        return ValidationResult {
+            value: value.clone(),
+            errors: vec![format!(
+                "at {}: value did not match any union branch",
+                location_label(path)
+            )],
+        };
+    }
+
     if let Some(VmValue::String(expected_type)) = schema.get("type") {
         let actual_type = value.type_name();
         let type_str: &str = expected_type;
         if type_str != "any" && actual_type != type_str {
-            let location = if path.is_empty() {
-                "root".to_string()
-            } else {
-                path.to_string()
+            return ValidationResult {
+                value: value.clone(),
+                errors: vec![format!(
+                    "at {}: expected type '{}', got '{}'",
+                    location_label(path),
+                    type_str,
+                    actual_type
+                )],
             };
-            errors.push(format!(
-                "at {}: expected type '{}', got '{}'",
-                location, type_str, actual_type
-            ));
-            return;
         }
     }
 
-    if let Some(VmValue::List(required_keys)) = schema.get("required") {
-        if let VmValue::Dict(map) = value {
-            for key_val in required_keys.iter() {
-                let key = key_val.display();
-                if !map.contains_key(&key) {
-                    let location = if path.is_empty() {
-                        "root".to_string()
-                    } else {
-                        path.to_string()
-                    };
-                    errors.push(format!("at {}: missing required key '{}'", location, key));
-                }
-            }
-        }
-    }
+    let mut errors = Vec::new();
+    let mut normalized = value.clone();
 
-    if let Some(VmValue::Dict(prop_schemas)) = schema.get("properties") {
-        if let VmValue::Dict(map) = value {
-            for (key, prop_schema) in prop_schemas.iter() {
-                if let Some(prop_value) = map.get(key) {
-                    if let Some(prop_schema_dict) = prop_schema.as_dict() {
-                        let child_path = if path.is_empty() {
-                            key.clone()
-                        } else {
-                            format!("{}.{}", path, key)
-                        };
-                        validate_value(prop_value, prop_schema_dict, &child_path, errors);
+    match value {
+        VmValue::Dict(map) => {
+            if let Some(VmValue::List(required_keys)) = schema.get("required") {
+                for key_val in required_keys.iter() {
+                    let key = key_val.display();
+                    if !map.contains_key(&key) {
+                        let has_default = schema
+                            .get("properties")
+                            .and_then(VmValue::as_dict)
+                            .and_then(|props| props.get(&key))
+                            .and_then(VmValue::as_dict)
+                            .is_some_and(|prop_schema| prop_schema.contains_key("default"));
+                        if apply_defaults && has_default {
+                            continue;
+                        }
+                        errors.push(format!(
+                            "at {}: missing required key '{}'",
+                            location_label(path),
+                            key
+                        ));
                     }
                 }
             }
-        }
-    }
 
-    if let Some(VmValue::Dict(item_schema)) = schema.get("items") {
-        if let VmValue::List(items) = value {
-            for (i, item) in items.iter().enumerate() {
-                let child_path = if path.is_empty() {
-                    format!("[{}]", i)
-                } else {
-                    format!("{}[{}]", path, i)
-                };
-                validate_value(item, item_schema, &child_path, errors);
+            let mut merged = (**map).clone();
+            if let Some(VmValue::Dict(prop_schemas)) = schema.get("properties") {
+                for (key, prop_schema) in prop_schemas.iter() {
+                    let Some(prop_schema_dict) = prop_schema.as_dict() else {
+                        continue;
+                    };
+                    let child_path = child_path(path, key);
+                    match map.get(key) {
+                        Some(prop_value) => {
+                            let child = validate_against_schema(
+                                prop_value,
+                                prop_schema_dict,
+                                &child_path,
+                                apply_defaults,
+                            );
+                            if child.errors.is_empty() {
+                                merged.insert(key.clone(), child.value);
+                            } else {
+                                errors.extend(child.errors);
+                            }
+                        }
+                        None if apply_defaults => {
+                            if let Some(default_value) = prop_schema_dict.get("default") {
+                                let child = validate_against_schema(
+                                    default_value,
+                                    prop_schema_dict,
+                                    &child_path,
+                                    apply_defaults,
+                                );
+                                if child.errors.is_empty() {
+                                    merged.insert(key.clone(), child.value);
+                                } else {
+                                    errors.extend(child.errors);
+                                }
+                            }
+                        }
+                        None => {}
+                    }
+                }
+            }
+            normalized = VmValue::Dict(Rc::new(merged));
+        }
+        VmValue::List(items) => {
+            if let Some(min_items) = schema_i64(schema, "min_items") {
+                if (items.len() as i64) < min_items {
+                    errors.push(format!(
+                        "at {}: expected at least {} items, got {}",
+                        location_label(path),
+                        min_items,
+                        items.len()
+                    ));
+                }
+            }
+            if let Some(max_items) = schema_i64(schema, "max_items") {
+                if (items.len() as i64) > max_items {
+                    errors.push(format!(
+                        "at {}: expected at most {} items, got {}",
+                        location_label(path),
+                        max_items,
+                        items.len()
+                    ));
+                }
+            }
+            if let Some(VmValue::Dict(item_schema)) = schema.get("items") {
+                let mut normalized_items = Vec::with_capacity(items.len());
+                for (i, item) in items.iter().enumerate() {
+                    let child = validate_against_schema(
+                        item,
+                        item_schema,
+                        &index_path(path, i),
+                        apply_defaults,
+                    );
+                    if child.errors.is_empty() {
+                        normalized_items.push(child.value);
+                    } else {
+                        errors.extend(child.errors);
+                    }
+                }
+                normalized = VmValue::List(Rc::new(normalized_items));
             }
         }
+        VmValue::String(text) => {
+            let length = text.chars().count() as i64;
+            if let Some(min_length) = schema_i64(schema, "min_length") {
+                if length < min_length {
+                    errors.push(format!(
+                        "at {}: expected length >= {}, got {}",
+                        location_label(path),
+                        min_length,
+                        length
+                    ));
+                }
+            }
+            if let Some(max_length) = schema_i64(schema, "max_length") {
+                if length > max_length {
+                    errors.push(format!(
+                        "at {}: expected length <= {}, got {}",
+                        location_label(path),
+                        max_length,
+                        length
+                    ));
+                }
+            }
+            if let Some(VmValue::String(pattern)) = schema.get("pattern") {
+                match regex::Regex::new(pattern) {
+                    Ok(re) => {
+                        if !re.is_match(text) {
+                            errors.push(format!(
+                                "at {}: value does not match pattern '{}'",
+                                location_label(path),
+                                pattern
+                            ));
+                        }
+                    }
+                    Err(error) => errors.push(format!(
+                        "at {}: invalid regex pattern '{}': {}",
+                        location_label(path),
+                        pattern,
+                        error
+                    )),
+                }
+            }
+            if let Some(VmValue::List(enum_values)) = schema.get("enum") {
+                if !enum_values
+                    .iter()
+                    .any(|candidate| candidate.display() == value.display())
+                {
+                    errors.push(format!(
+                        "at {}: value must be one of [{}]",
+                        location_label(path),
+                        enum_values
+                            .iter()
+                            .map(VmValue::display)
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
+                }
+            }
+        }
+        VmValue::Int(number) => {
+            validate_numeric_constraints(*number as f64, schema, path, &mut errors);
+        }
+        VmValue::Float(number) => {
+            validate_numeric_constraints(*number, schema, path, &mut errors);
+        }
+        _ => {}
     }
+
+    ValidationResult {
+        value: normalized,
+        errors,
+    }
+}
+
+fn validate_numeric_constraints(
+    value: f64,
+    schema: &BTreeMap<String, VmValue>,
+    path: &str,
+    errors: &mut Vec<String>,
+) {
+    if let Some(min) = schema_number(schema, "min") {
+        if value < min {
+            errors.push(format!(
+                "at {}: expected value >= {}, got {}",
+                location_label(path),
+                min,
+                value
+            ));
+        }
+    }
+    if let Some(max) = schema_number(schema, "max") {
+        if value > max {
+            errors.push(format!(
+                "at {}: expected value <= {}, got {}",
+                location_label(path),
+                max,
+                value
+            ));
+        }
+    }
+}
+
+fn schema_dict_to_json_schema(schema: &BTreeMap<String, VmValue>) -> serde_json::Value {
+    let mut out = serde_json::Map::new();
+
+    if let Some(VmValue::String(type_name)) = schema.get("type") {
+        out.insert("type".to_string(), json_type_for_harn(type_name));
+    }
+    if schema_bool(schema, "nullable") {
+        if let Some(existing) = out.remove("type") {
+            out.insert(
+                "type".to_string(),
+                serde_json::Value::Array(vec![existing, serde_json::Value::String("null".into())]),
+            );
+        }
+    }
+    if let Some(min) = schema_number(schema, "min") {
+        out.insert("minimum".to_string(), serde_json::json!(min));
+    }
+    if let Some(max) = schema_number(schema, "max") {
+        out.insert("maximum".to_string(), serde_json::json!(max));
+    }
+    if let Some(min_length) = schema_i64(schema, "min_length") {
+        out.insert("minLength".to_string(), serde_json::json!(min_length));
+    }
+    if let Some(max_length) = schema_i64(schema, "max_length") {
+        out.insert("maxLength".to_string(), serde_json::json!(max_length));
+    }
+    if let Some(VmValue::String(pattern)) = schema.get("pattern") {
+        out.insert(
+            "pattern".to_string(),
+            serde_json::Value::String(pattern.to_string()),
+        );
+    }
+    if let Some(VmValue::List(enum_values)) = schema.get("enum") {
+        out.insert(
+            "enum".to_string(),
+            serde_json::Value::Array(enum_values.iter().map(vm_value_to_serde_json).collect()),
+        );
+    }
+    if let Some(min_items) = schema_i64(schema, "min_items") {
+        out.insert("minItems".to_string(), serde_json::json!(min_items));
+    }
+    if let Some(max_items) = schema_i64(schema, "max_items") {
+        out.insert("maxItems".to_string(), serde_json::json!(max_items));
+    }
+    if let Some(VmValue::Dict(item_schema)) = schema.get("items") {
+        out.insert("items".to_string(), schema_dict_to_json_schema(item_schema));
+    }
+    if let Some(VmValue::Dict(properties)) = schema.get("properties") {
+        let mut props = serde_json::Map::new();
+        for (name, child) in properties.iter() {
+            if let Some(child_dict) = child.as_dict() {
+                props.insert(name.clone(), schema_dict_to_json_schema(child_dict));
+            }
+        }
+        out.insert("properties".to_string(), serde_json::Value::Object(props));
+    }
+    if let Some(VmValue::List(required)) = schema.get("required") {
+        out.insert(
+            "required".to_string(),
+            serde_json::Value::Array(
+                required
+                    .iter()
+                    .map(|value| serde_json::Value::String(value.display()))
+                    .collect(),
+            ),
+        );
+    }
+    if let Some(VmValue::List(union_schemas)) = schema.get("union") {
+        out.insert(
+            "oneOf".to_string(),
+            serde_json::Value::Array(
+                union_schemas
+                    .iter()
+                    .filter_map(|value| value.as_dict().map(schema_dict_to_json_schema))
+                    .collect(),
+            ),
+        );
+    }
+    if let Some(default) = schema.get("default") {
+        out.insert("default".to_string(), vm_value_to_serde_json(default));
+    }
+
+    serde_json::Value::Object(out)
+}
+
+fn json_type_for_harn(type_name: &str) -> serde_json::Value {
+    let json_type = match type_name {
+        "int" => "integer",
+        "float" => "number",
+        "bool" => "boolean",
+        "list" => "array",
+        "dict" => "object",
+        "nil" => "null",
+        other => other,
+    };
+    serde_json::Value::String(json_type.to_string())
+}
+
+fn vm_value_to_serde_json(value: &VmValue) -> serde_json::Value {
+    match value {
+        VmValue::Nil => serde_json::Value::Null,
+        VmValue::Bool(value) => serde_json::Value::Bool(*value),
+        VmValue::Int(value) => serde_json::json!(value),
+        VmValue::Float(value) => serde_json::json!(value),
+        VmValue::String(value) => serde_json::Value::String(value.to_string()),
+        VmValue::List(items) => {
+            serde_json::Value::Array(items.iter().map(vm_value_to_serde_json).collect())
+        }
+        VmValue::Dict(items) => serde_json::Value::Object(
+            items
+                .iter()
+                .map(|(key, value)| (key.clone(), vm_value_to_serde_json(value)))
+                .collect(),
+        ),
+        _ => serde_json::Value::String(value.display()),
+    }
+}
+
+fn schema_bool(schema: &BTreeMap<String, VmValue>, key: &str) -> bool {
+    matches!(schema.get(key), Some(VmValue::Bool(true)))
+}
+
+fn schema_i64(schema: &BTreeMap<String, VmValue>, key: &str) -> Option<i64> {
+    match schema.get(key) {
+        Some(VmValue::Int(value)) => Some(*value),
+        _ => None,
+    }
+}
+
+fn schema_number(schema: &BTreeMap<String, VmValue>, key: &str) -> Option<f64> {
+    match schema.get(key) {
+        Some(VmValue::Int(value)) => Some(*value as f64),
+        Some(VmValue::Float(value)) => Some(*value),
+        _ => None,
+    }
+}
+
+fn location_label(path: &str) -> String {
+    if path.is_empty() {
+        "root".to_string()
+    } else {
+        path.to_string()
+    }
+}
+
+fn child_path(path: &str, key: &str) -> String {
+    if path.is_empty() {
+        key.to_string()
+    } else {
+        format!("{}.{}", path, key)
+    }
+}
+
+fn index_path(path: &str, index: usize) -> String {
+    if path.is_empty() {
+        format!("[{}]", index)
+    } else {
+        format!("{}[{}]", path, index)
+    }
+}
+
+fn merge_schema_dicts(
+    base: &BTreeMap<String, VmValue>,
+    overrides: &BTreeMap<String, VmValue>,
+) -> BTreeMap<String, VmValue> {
+    let mut merged = base.clone();
+    for (key, value) in overrides {
+        merged.insert(key.clone(), value.clone());
+    }
+    merged
+}
+
+fn schema_partial_dict(schema: &BTreeMap<String, VmValue>) -> BTreeMap<String, VmValue> {
+    let mut partial = schema.clone();
+    partial.remove("required");
+    if let Some(VmValue::Dict(properties)) = schema.get("properties") {
+        let mut next_props = BTreeMap::new();
+        for (key, value) in properties.iter() {
+            if let Some(child) = value.as_dict() {
+                next_props.insert(
+                    key.clone(),
+                    VmValue::Dict(Rc::new(schema_partial_dict(child))),
+                );
+            } else {
+                next_props.insert(key.clone(), value.clone());
+            }
+        }
+        partial.insert("properties".to_string(), VmValue::Dict(Rc::new(next_props)));
+    }
+    partial
+}
+
+fn schema_pick_dict(
+    schema: &BTreeMap<String, VmValue>,
+    keys: &[String],
+) -> BTreeMap<String, VmValue> {
+    let mut picked = schema.clone();
+    if let Some(VmValue::Dict(properties)) = schema.get("properties") {
+        let filtered: BTreeMap<String, VmValue> = properties
+            .iter()
+            .filter(|(key, _)| keys.contains(*key))
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+        picked.insert("properties".to_string(), VmValue::Dict(Rc::new(filtered)));
+    }
+    if let Some(VmValue::List(required)) = schema.get("required") {
+        picked.insert(
+            "required".to_string(),
+            VmValue::List(Rc::new(
+                required
+                    .iter()
+                    .filter(|value| keys.contains(&value.display()))
+                    .cloned()
+                    .collect(),
+            )),
+        );
+    }
+    picked
+}
+
+fn schema_omit_dict(
+    schema: &BTreeMap<String, VmValue>,
+    keys: &[String],
+) -> BTreeMap<String, VmValue> {
+    let mut kept = schema.clone();
+    if let Some(VmValue::Dict(properties)) = schema.get("properties") {
+        let filtered: BTreeMap<String, VmValue> = properties
+            .iter()
+            .filter(|(key, _)| !keys.contains(*key))
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+        kept.insert("properties".to_string(), VmValue::Dict(Rc::new(filtered)));
+    }
+    if let Some(VmValue::List(required)) = schema.get("required") {
+        kept.insert(
+            "required".to_string(),
+            VmValue::List(Rc::new(
+                required
+                    .iter()
+                    .filter(|value| !keys.contains(&value.display()))
+                    .cloned()
+                    .collect(),
+            )),
+        );
+    }
+    kept
+}
+
+fn schema_key_list(value: &VmValue, builtin_name: &str) -> Result<Vec<String>, VmError> {
+    let list = match value {
+        VmValue::List(list) => list,
+        _ => {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                "{builtin_name}: keys must be a list"
+            )))));
+        }
+    };
+    Ok(list.iter().map(VmValue::display).collect())
 }
 
 pub(crate) fn extract_json_from_text(text: &str) -> String {

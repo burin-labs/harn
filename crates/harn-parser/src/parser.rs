@@ -140,6 +140,7 @@ impl Parser {
                     | TokenKind::Struct
                     | TokenKind::Interface
                     | TokenKind::Guard
+                    | TokenKind::Require
                     | TokenKind::Deadline
                     | TokenKind::Yield
                     | TokenKind::Mutex
@@ -299,6 +300,7 @@ impl Parser {
             TokenKind::Interface => self.parse_interface_decl(),
             TokenKind::Impl => self.parse_impl_block(),
             TokenKind::Guard => self.parse_guard(),
+            TokenKind::Require => self.parse_require(),
             TokenKind::Deadline => self.parse_deadline(),
             TokenKind::Yield => self.parse_yield(),
             TokenKind::Mutex => self.parse_mutex(),
@@ -1032,6 +1034,25 @@ impl Parser {
             Node::GuardStmt {
                 condition: Box::new(condition),
                 else_body,
+            },
+            Span::merge(start, self.prev_span()),
+        ))
+    }
+
+    fn parse_require(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
+        self.consume(&TokenKind::Require, "require")?;
+        let condition = self.parse_expression()?;
+        let message = if self.check(&TokenKind::Comma) {
+            self.advance();
+            Some(Box::new(self.parse_expression()?))
+        } else {
+            None
+        };
+        Ok(spanned(
+            Node::RequireStmt {
+                condition: Box::new(condition),
+                message,
             },
             Span::merge(start, self.prev_span()),
         ))

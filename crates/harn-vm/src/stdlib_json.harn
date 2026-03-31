@@ -3,11 +3,13 @@
 // Import with: import "std/json"
 
 /// Pretty-print a value as indented JSON (2-space indent).
+/// pretty.
 pub fn pretty(value) {
   return json_stringify(value)
 }
 
 /// Safely parse JSON, returning nil on failure instead of throwing.
+/// safe_parse.
 pub fn safe_parse(text) {
   let result = try { json_parse(text) }
   if is_ok(result) {
@@ -17,6 +19,7 @@ pub fn safe_parse(text) {
 }
 
 /// Merge two dicts (shallow). Keys in b override keys in a.
+/// merge.
 pub fn merge(a, b) {
   var result = a
   for entry in b {
@@ -26,6 +29,7 @@ pub fn merge(a, b) {
 }
 
 /// Pick specific keys from a dict.
+/// pick.
 pub fn pick(data, keys) {
   var result = {}
   for k in keys {
@@ -37,6 +41,7 @@ pub fn pick(data, keys) {
 }
 
 /// Omit specific keys from a dict.
+/// omit.
 pub fn omit(data, keys) {
   let exclude = set(keys)
   var result = {}

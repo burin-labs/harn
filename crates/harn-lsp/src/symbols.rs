@@ -26,7 +26,7 @@ pub(crate) struct SymbolInfo {
     pub(crate) signature: Option<String>,
     /// Span of the whole containing scope (for scope-aware completion).
     pub(crate) scope_span: Option<Span>,
-    /// Doc comment extracted from `//` lines above the definition.
+    /// Doc comment extracted from `///` lines above the definition.
     pub(crate) doc_comment: Option<String>,
     /// For methods inside `impl` blocks: the type name (e.g. "Point").
     pub(crate) impl_type: Option<String>,
@@ -41,8 +41,8 @@ pub(crate) fn build_symbol_table(program: &[SNode], source: &str) -> Vec<SymbolI
     symbols
 }
 
-/// Extract leading `//` comment lines immediately above a span in the source.
-/// Returns `None` if there are no comment lines directly above.
+/// Extract leading `///` lines immediately above a span in the source.
+/// Falls back to plain `//` comments when no `///` block is present.
 fn extract_doc_comment(source: &str, span: &Span) -> Option<String> {
     let lines: Vec<&str> = source.lines().collect();
     // span.line is 1-based
@@ -51,29 +51,29 @@ fn extract_doc_comment(source: &str, span: &Span) -> Option<String> {
         return None;
     }
 
-    let mut comment_lines = Vec::new();
-    let mut line_idx = def_line - 1; // line above the definition
-    loop {
-        let line = lines.get(line_idx)?;
-        let trimmed = line.trim();
-        if trimmed.starts_with("//") {
-            // Strip leading `//` and optional space
-            let text = trimmed.trim_start_matches("//").trim_start();
-            comment_lines.push(text.to_string());
-        } else {
-            break;
+    for prefix in ["///", "//"] {
+        let mut comment_lines = Vec::new();
+        let mut line_idx = def_line - 1;
+        loop {
+            let line = lines.get(line_idx)?;
+            let trimmed = line.trim();
+            if trimmed.starts_with(prefix) {
+                let text = trimmed.trim_start_matches(prefix).trim_start();
+                comment_lines.push(text.to_string());
+            } else {
+                break;
+            }
+            if line_idx == 0 {
+                break;
+            }
+            line_idx -= 1;
         }
-        if line_idx == 0 {
-            break;
+        if !comment_lines.is_empty() {
+            comment_lines.reverse();
+            return Some(comment_lines.join("\n"));
         }
-        line_idx -= 1;
     }
-
-    if comment_lines.is_empty() {
-        return None;
-    }
-    comment_lines.reverse();
-    Some(comment_lines.join("\n"))
+    None
 }
 
 /// Format a default value AST node as a short string for display in signatures.
@@ -635,6 +635,12 @@ fn collect_symbols(
         }
         Node::YieldExpr { value: Some(v) } => {
             recurse!(v, scope_span);
+        }
+        Node::RequireStmt { condition, message } => {
+            recurse!(condition, scope_span);
+            if let Some(message) = message {
+                recurse!(message, scope_span);
+            }
         }
         Node::InterpolatedString(_)
         | Node::StringLiteral(_)

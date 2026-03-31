@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process;
 
 use harn_fmt::format_source;
-use harn_lint::{lint_with_config, LintSeverity};
+use harn_lint::LintSeverity;
 use harn_parser::{DiagnosticSeverity, Node, SNode, TypeChecker};
 
 use crate::package::CheckConfig;
@@ -68,7 +68,8 @@ pub(crate) fn check_file(path: &str, config: &CheckConfig) {
     }
 
     // Linting
-    let lint_diagnostics = lint_with_config(&program, &config.disable_rules);
+    let lint_diagnostics =
+        harn_lint::lint_with_config_and_source(&program, &config.disable_rules, Some(&source));
     diagnostic_count += lint_diagnostics.len();
     if lint_diagnostics
         .iter()
@@ -107,9 +108,10 @@ pub(crate) fn check_file(path: &str, config: &CheckConfig) {
 }
 
 pub(crate) fn lint_file(path: &str, config: &CheckConfig) {
-    let (_source, program) = parse_source_file(path);
+    let (source, program) = parse_source_file(path);
 
-    let diagnostics = lint_with_config(&program, &config.disable_rules);
+    let diagnostics =
+        harn_lint::lint_with_config_and_source(&program, &config.disable_rules, Some(&source));
 
     if diagnostics.is_empty() {
         println!("{path}: no issues found");
@@ -620,6 +622,28 @@ fn scan_node_preflight(
             if let Some(value) = value {
                 scan_node_preflight(
                     value,
+                    file_path,
+                    source,
+                    config,
+                    host_capabilities,
+                    visited,
+                    diagnostics,
+                );
+            }
+        }
+        Node::RequireStmt { condition, message } => {
+            scan_node_preflight(
+                condition,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
+            if let Some(message) = message {
+                scan_node_preflight(
+                    message,
                     file_path,
                     source,
                     config,
@@ -1744,5 +1768,25 @@ pipeline main() {
             diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn check_lint_reports_missing_harndoc_for_public_functions() {
+        let source = r#"
+pub fn exposed() -> string {
+  return "x"
+}
+"#;
+        let program = parse_program(source);
+        let diagnostics = harn_lint::lint_with_config_and_source(
+            &program,
+            &CheckConfig::default().disable_rules,
+            Some(source),
+        );
+        assert!(
+            diagnostics.iter().any(|d| d.rule == "missing-harndoc"),
+            "expected missing-harndoc warning, got: {:?}",
+            diagnostics.iter().map(|d| &d.rule).collect::<Vec<_>>()
+        );
     }
 }

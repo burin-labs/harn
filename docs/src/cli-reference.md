@@ -77,7 +77,7 @@ harn fmt --check main.harn    # check mode (no changes, exit 1 if unformatted)
 ## harn lint
 
 Lint a `.harn` file for common issues (unused variables, unreachable code,
-empty blocks, etc.).
+empty blocks, missing `///` HarnDoc on public functions, etc.).
 
 ```bash
 harn lint main.harn
@@ -90,6 +90,8 @@ The preflight pass resolves imports, checks literal `render(...)` targets,
 detects import symbol collisions across modules, validates `host_invoke(...)`
 capability/operation pairs, and flags missing template resources, execution
 directories, and worker repos that would otherwise fail only at runtime.
+Source-aware lint rules run as part of `check`, including the `missing-harndoc`
+warning for undocumented `pub fn` APIs.
 
 ```bash
 harn check main.harn

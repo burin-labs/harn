@@ -523,6 +523,14 @@ impl Formatter {
                 self.dedent();
                 self.writeln("}");
             }
+            Node::RequireStmt { condition, message } => {
+                let cond = self.format_expr(condition);
+                if let Some(message) = message {
+                    self.writeln(&format!("require {cond}, {}", self.format_expr(message)));
+                } else {
+                    self.writeln(&format!("require {cond}"));
+                }
+            }
             Node::DeadlineBlock { duration, body } => {
                 let dur = self.format_expr(duration);
                 self.writeln(&format!("deadline {dur} {{"));
@@ -909,6 +917,14 @@ impl Formatter {
                 result.push_str(&close_indent);
                 result.push('}');
                 result
+            }
+            Node::RequireStmt { condition, message } => {
+                let cond = self.format_expr(condition);
+                if let Some(message) = message {
+                    format!("require {cond}, {}", self.format_expr(message))
+                } else {
+                    format!("require {cond}")
+                }
             }
             Node::DeadlineBlock { duration, body } => {
                 let dur = self.format_expr(duration);
@@ -1741,6 +1757,7 @@ fn is_simple_expr(node: &SNode) -> bool {
             | Node::ReturnStmt { .. }
             | Node::BreakStmt
             | Node::ContinueStmt
+            | Node::RequireStmt { .. }
     )
 }
 

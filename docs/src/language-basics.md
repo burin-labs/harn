@@ -863,6 +863,12 @@ println("Hello, ${name}!")
 ```harn
 // Line comment
 
+/// HarnDoc comment for a public API
+/// Use contiguous `///` lines directly above `pub fn`
+pub fn greet(name: string) -> string {
+  return "Hello, " + name
+}
+
 /* Block comment
    /* Nested block comments are supported */
    Still inside the outer comment */

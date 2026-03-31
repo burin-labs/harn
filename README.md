@@ -78,6 +78,11 @@ println(result.visible_text)
 - Explicit continuation policy for delegated workers: artifact carryover,
   transcript fork/reset/compaction, workflow resume control, and normalized
   `worker_result` artifacts.
+- Runtime schema helpers for structured LLM I/O: `schema_check(...)`,
+  `schema_parse(...)`, JSON Schema export, and schema composition helpers.
+- Design-by-contract and project orchestration helpers: `require ...`,
+  metadata/scanner runtime builtins, and `import "std/project"` for
+  freshness-aware project state assembly inside Harn itself.
 - Isolated execution substrate via directory-scoped command builtins
   (`exec_at`, `shell_at`) plus the `std/worktree` module for git worktree
   creation, status, diff, shell execution, and cleanup. Worker execution

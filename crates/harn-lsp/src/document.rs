@@ -85,7 +85,7 @@ impl DocumentState {
         }
 
         // Lint
-        let lint_diags = harn_lint::lint(&program);
+        let lint_diags = harn_lint::lint_with_source(&program, &self.source);
         for ld in lint_diags {
             let severity = match ld.severity {
                 harn_lint::LintSeverity::Warning => DiagnosticSeverity::WARNING,

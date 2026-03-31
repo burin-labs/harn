@@ -198,6 +198,11 @@ fn builtin_return_type(name: &str) -> InferredType {
         "file_exists" | "json_validate" | "is_nan" | "is_infinite" | "set_contains" => {
             Some(TypeExpr::Named("bool".into()))
         }
+        "schema_to_json_schema"
+        | "schema_extend"
+        | "schema_partial"
+        | "schema_pick"
+        | "schema_omit" => Some(TypeExpr::Named("dict".into())),
         "list_dir"
         | "mcp_list_tools"
         | "mcp_list_resources"
@@ -220,6 +225,8 @@ fn builtin_return_type(name: &str) -> InferredType {
         | "llm_usage"
         | "timer_start"
         | "metadata_get"
+        | "metadata_resolve"
+        | "metadata_status"
         | "mcp_server_info"
         | "mcp_get_prompt"
         | "llm_pick_model"
@@ -272,6 +279,7 @@ fn builtin_return_type(name: &str) -> InferredType {
         | "transcript_compact"
         | "transcript_summarize"
         | "host_capabilities" => Some(TypeExpr::Named("dict".into())),
+        "metadata_entries" => Some(TypeExpr::Named("list".into())),
         "transcript_render_visible"
         | "transcript_render_full"
         | "artifact_context"
@@ -292,7 +300,7 @@ fn builtin_return_type(name: &str) -> InferredType {
             TypeExpr::Named("string".into()),
             TypeExpr::Named("nil".into()),
         ])),
-        "json_parse" | "json_extract" => None, // could be any type
+        "json_parse" | "json_extract" | "schema_parse" | "schema_check" => None, // could be any type
         _ => None,
     }
 }
@@ -407,6 +415,16 @@ fn is_builtin(name: &str) -> bool {
             | "date_parse"
             | "format"
             | "json_validate"
+            | "metadata_resolve"
+            | "metadata_entries"
+            | "metadata_status"
+            | "schema_parse"
+            | "schema_check"
+            | "schema_to_json_schema"
+            | "schema_extend"
+            | "schema_partial"
+            | "schema_pick"
+            | "schema_omit"
             | "json_extract"
             | "trim"
             | "lowercase"
@@ -750,6 +768,13 @@ impl TypeChecker {
                 self.check_node(condition, scope);
                 let mut loop_scope = scope.child();
                 self.check_block(body, &mut loop_scope);
+            }
+
+            Node::RequireStmt { condition, message } => {
+                self.check_node(condition, scope);
+                if let Some(message) = message {
+                    self.check_node(message, scope);
+                }
             }
 
             Node::TryCatch {

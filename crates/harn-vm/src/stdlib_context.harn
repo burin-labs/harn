@@ -1,5 +1,6 @@
 import "std/collections"
 
+/// clip_text.
 pub fn clip_text(text, max_chars) {
   if max_chars == nil || max_chars <= 0 {
     return text
@@ -13,6 +14,7 @@ pub fn clip_text(text, max_chars) {
   return text.substring(0, max_chars - 15) + "\n...[truncated]"
 }
 
+/// render_section.
 pub fn render_section(section, include_headers, section_max_chars) {
   if section == nil || section?.enabled == false {
     return ""
@@ -28,6 +30,7 @@ pub fn render_section(section, include_headers, section_max_chars) {
   return "[" + section?.name + "]\n" + body
 }
 
+/// context_section.
 pub fn context_section(name, content, options) {
   let opts = options ?? {}
   return filter_nil({
@@ -42,10 +45,12 @@ pub fn context_section(name, content, options) {
   })
 }
 
+/// section.
 pub fn section(name, content, options) {
   return context_section(name, content, options)
 }
 
+/// context_attach.
 pub fn context_attach(name, path, content, options) {
   let opts = options ?? {}
   return context_section(name, "Path: " + path + "\n\n" + content, opts + {
@@ -54,6 +59,7 @@ pub fn context_attach(name, path, content, options) {
   })
 }
 
+/// context.
 pub fn context(sections, options) {
   let opts = options ?? {}
   return filter_nil({
@@ -66,11 +72,13 @@ pub fn context(sections, options) {
   })
 }
 
+/// context_add.
 pub fn context_add(ctx, new_section) {
   let sections = (ctx?.sections ?? []) + [new_section]
   return context(sections, ctx)
 }
 
+/// context_render.
 pub fn context_render(ctx, options) {
   let opts = (ctx ?? {}) + (options ?? {})
   let separator = opts?.separator ?? "\n\n"
@@ -99,6 +107,7 @@ pub fn context_render(ctx, options) {
   return join(pieces, separator)
 }
 
+/// context_compact.
 pub fn context_compact(ctx, options) {
   let opts = (ctx ?? {}) + (options ?? {})
   return context(opts?.sections ?? [], {
@@ -109,6 +118,7 @@ pub fn context_compact(ctx, options) {
   })
 }
 
+/// prompt_compose.
 pub fn prompt_compose(task, ctx, options) {
   let opts = options ?? {}
   let rendered = context_render(ctx, opts)

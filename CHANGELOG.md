@@ -2,6 +2,33 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.6
+
+### Added
+
+- **Structured schema runtime helpers** — added `schema_check(...)`,
+  `schema_parse(...)`, `schema_to_json_schema(...)`, `schema_extend(...)`,
+  `schema_partial(...)`, `schema_pick(...)`, and `schema_omit(...)` for
+  runtime validation, defaulting, JSON Schema export, and schema composition.
+- **Design-by-contract with `require`** — added a `require condition, "message"`
+  statement for lightweight runtime precondition checks in pipelines and
+  functions.
+- **Project metadata/runtime inventory helpers** — added `metadata_resolve(...)`,
+  `metadata_entries(...)`, `metadata_status(...)`, and an options-aware
+  `scan_directory(...)`, plus a new `std/project` module for freshness-aware
+  project state assembly inside Harn code.
+- **HarnDoc enforcement for public APIs** — `harn lint` and `harn check` now
+  report `missing-harndoc` when `pub fn` APIs lack a contiguous `///` doc block.
+
+### Changed
+
+- **`scan_directory(...)` now follows execution cwd semantics** — relative scan
+  paths now resolve the same way as runtime file/process operations instead of
+  the VM registration base, fixing incorrect project scans in embedded hosts.
+- **LSP/hover doc extraction prefers HarnDoc** — contiguous `///` comments are
+  now the canonical documentation source, with plain `//` comments retained
+  only as a fallback for hover text.
+
 ## v0.5.5
 
 ### Added

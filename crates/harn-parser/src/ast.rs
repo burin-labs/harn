@@ -145,6 +145,10 @@ pub enum Node {
         condition: Box<SNode>,
         else_body: Vec<SNode>,
     },
+    RequireStmt {
+        condition: Box<SNode>,
+        message: Option<Box<SNode>>,
+    },
     /// Ask expression: ask { system: "...", user: "...", ... }
     AskExpr {
         fields: Vec<DictEntry>,

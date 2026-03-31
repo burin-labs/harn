@@ -85,6 +85,7 @@ fn token_kind_to_semantic(kind: &TokenKind) -> Option<u32> {
         | TokenKind::Thru
         | TokenKind::Upto
         | TokenKind::Guard
+        | TokenKind::Require
         | TokenKind::Ask
         | TokenKind::Deadline
         | TokenKind::Yield

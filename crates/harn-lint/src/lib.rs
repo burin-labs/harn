@@ -41,7 +41,7 @@ struct ParamDeclaration {
 }
 
 /// The linter walks the AST and collects diagnostics.
-struct Linter {
+struct Linter<'a> {
     diagnostics: Vec<LintDiagnostic>,
     scopes: Vec<HashSet<String>>,
     declarations: Vec<Declaration>,
@@ -58,10 +58,11 @@ struct Linter {
     /// Whether the file has wildcard imports (import "module").
     /// If true, skip undefined-function checks since we can't know what was imported.
     has_wildcard_import: bool,
+    source: Option<&'a str>,
 }
 
-impl Linter {
-    fn new() -> Self {
+impl<'a> Linter<'a> {
+    fn new(source: Option<&'a str>) -> Self {
         Self {
             diagnostics: Vec::new(),
             scopes: vec![HashSet::new()],
@@ -74,6 +75,7 @@ impl Linter {
             known_functions: Self::builtin_names(),
             function_calls: Vec::new(),
             has_wildcard_import: false,
+            source,
         }
     }
 
@@ -236,10 +238,30 @@ impl Linter {
             }
 
             Node::FnDecl {
-                name, params, body, ..
+                name,
+                params,
+                body,
+                is_pub,
+                ..
             } => {
                 self.known_functions.insert(name.clone());
                 self.references.insert(name.clone());
+                if *is_pub
+                    && self
+                        .source
+                        .and_then(|source| extract_harndoc(source, &snode.span))
+                        .is_none()
+                {
+                    self.diagnostics.push(LintDiagnostic {
+                        rule: "missing-harndoc",
+                        message: format!("public function `{name}` is missing a `///` doc comment"),
+                        span: snode.span,
+                        severity: LintSeverity::Warning,
+                        suggestion: Some(format!(
+                            "add a contiguous `///` HarnDoc block above `pub fn {name}`"
+                        )),
+                    });
+                }
                 self.push_scope();
                 let saved_loop_depth = self.loop_depth;
                 self.loop_depth = 0; // Functions are a new scope
@@ -575,6 +597,13 @@ impl Linter {
                 self.push_scope();
                 self.lint_block(else_body);
                 self.pop_scope();
+            }
+
+            Node::RequireStmt { condition, message } => {
+                self.lint_node(condition);
+                if let Some(message) = message {
+                    self.lint_node(message);
+                }
             }
 
             Node::DeadlineBlock { duration, body } => {
@@ -935,14 +964,57 @@ impl Linter {
     }
 }
 
+fn extract_harndoc(source: &str, span: &Span) -> Option<String> {
+    let lines: Vec<&str> = source.lines().collect();
+    let def_line = span.line.saturating_sub(1);
+    if def_line == 0 {
+        return None;
+    }
+    let mut comment_lines = Vec::new();
+    let mut line_idx = def_line - 1;
+    loop {
+        let line = lines.get(line_idx)?;
+        let trimmed = line.trim();
+        if trimmed.starts_with("///") {
+            comment_lines.push(trimmed.trim_start_matches("///").trim_start().to_string());
+        } else {
+            break;
+        }
+        if line_idx == 0 {
+            break;
+        }
+        line_idx -= 1;
+    }
+    if comment_lines.is_empty() {
+        None
+    } else {
+        comment_lines.reverse();
+        Some(comment_lines.join("\n"))
+    }
+}
+
 /// Lint an AST program and return all diagnostics.
 pub fn lint(program: &[SNode]) -> Vec<LintDiagnostic> {
-    lint_with_config(program, &[])
+    lint_with_config_and_source(program, &[], None)
+}
+
+/// Lint an AST program with source-aware rules enabled.
+pub fn lint_with_source(program: &[SNode], source: &str) -> Vec<LintDiagnostic> {
+    lint_with_config_and_source(program, &[], Some(source))
 }
 
 /// Lint an AST program, filtering out diagnostics for disabled rules.
 pub fn lint_with_config(program: &[SNode], disabled_rules: &[String]) -> Vec<LintDiagnostic> {
-    let mut linter = Linter::new();
+    lint_with_config_and_source(program, disabled_rules, None)
+}
+
+/// Lint an AST program, optionally using the original source for source-aware rules.
+pub fn lint_with_config_and_source(
+    program: &[SNode],
+    disabled_rules: &[String],
+    source: Option<&str>,
+) -> Vec<LintDiagnostic> {
+    let mut linter = Linter::new(source);
     linter.lint_program(program);
     linter.finalize();
     if disabled_rules.is_empty() {
@@ -967,7 +1039,7 @@ mod tests {
         let tokens = lexer.tokenize().unwrap();
         let mut parser = Parser::new(tokens);
         let program = parser.parse().unwrap();
-        lint(&program)
+        lint_with_source(&program, source)
     }
 
     fn has_rule(diagnostics: &[LintDiagnostic], rule: &str) -> bool {
@@ -993,6 +1065,56 @@ pipeline default(task) {
             !has_rule(&diags, "unused-variable"),
             "expected no unused-variable, got: {diags:?}"
         );
+    }
+
+    #[test]
+    fn test_public_function_requires_harndoc() {
+        let diags = lint_source(
+            r#"
+pub fn exposed() -> string {
+  return "x"
+}
+"#,
+        );
+        assert!(has_rule(&diags, "missing-harndoc"));
+    }
+
+    #[test]
+    fn test_public_function_with_harndoc_is_clean() {
+        let diags = lint_source(
+            r#"
+/// Explain the public API.
+pub fn exposed() -> string {
+  return "x"
+}
+"#,
+        );
+        assert!(!has_rule(&diags, "missing-harndoc"));
+    }
+
+    #[test]
+    fn test_plain_comment_does_not_satisfy_harndoc() {
+        let diags = lint_source(
+            r#"
+// Not HarnDoc.
+pub fn exposed() -> string {
+  return "x"
+}
+"#,
+        );
+        assert!(has_rule(&diags, "missing-harndoc"));
+    }
+
+    #[test]
+    fn test_private_function_does_not_require_harndoc() {
+        let diags = lint_source(
+            r#"
+fn helper() -> string {
+  return "x"
+}
+"#,
+        );
+        assert!(!has_rule(&diags, "missing-harndoc"));
     }
 
     #[test]

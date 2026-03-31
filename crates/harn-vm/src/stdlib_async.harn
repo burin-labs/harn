@@ -7,6 +7,7 @@
 // Example:
 //   import { wait_for } from "std/async"
 //   let result = wait_for(5000, 500, { -> metadata_get("status") == "ready" })
+/// wait_for.
 pub fn wait_for(timeout_ms, interval_ms, predicate) {
   let end_time = timestamp() * 1000 + timeout_ms
   let interval = interval_ms
@@ -31,6 +32,7 @@ pub fn wait_for(timeout_ms, interval_ms, predicate) {
 // retry_until(max_attempts, predicate) -> Result
 // Calls predicate() up to max_attempts times with no delay.
 // Returns Ok(value) on first truthy result, or Err("exhausted").
+/// retry_until.
 pub fn retry_until(max_attempts, predicate) {
   var i = 0
   while i < max_attempts {
@@ -46,6 +48,7 @@ pub fn retry_until(max_attempts, predicate) {
 // retry_with_backoff(max_attempts, base_ms, predicate) -> Result
 // Calls predicate() with exponential backoff (base_ms * 2^attempt).
 // Returns Ok(value) on first truthy result, or Err("exhausted").
+/// retry_with_backoff.
 pub fn retry_with_backoff(max_attempts, base_ms, predicate) {
   var attempt = 0
   while attempt < max_attempts {
@@ -67,6 +70,7 @@ pub fn retry_with_backoff(max_attempts, base_ms, predicate) {
 // Records success/failure on the circuit breaker automatically.
 // Returns Err("circuit_open") if the circuit is open.
 // In half_open state, allows one call through as a probe.
+/// circuit_call.
 pub fn circuit_call(name, closure) {
   let state = circuit_check(name)
   if state == "open" {

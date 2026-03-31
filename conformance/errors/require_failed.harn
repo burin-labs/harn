@@ -1,0 +1,3 @@
+pipeline test(task) {
+  require 1 > 2, "math broke"
+}

@@ -1,0 +1,31 @@
+pipeline test(task) {
+  let schema = {
+    type: "dict",
+    required: ["name", "age"],
+    properties: {
+    name: {type: "string", min_length: 2},
+    age: {type: "int", min: 0},
+    role: {type: "string", enum: ["admin", "user"], default: "user"},
+    tags: {type: "list", min_items: 1, items: {type: "string", pattern: "^[a-z]+$"}},
+  },
+  }
+  let ok = schema_parse({name: "Ada", age: 36, tags: ["core"]}, schema)
+  println(is_ok(ok))
+  println(unwrap(ok).role)
+  let bad = schema_check({name: "A", age: -1, tags: ["Core"]}, schema)
+  println(is_err(bad))
+  println(len(unwrap_err(bad).errors) >= 2)
+  let union_schema = {union: [{type: "string", min_length: 3}, {type: "int", min: 10}]}
+  println(is_ok(schema_check(12, union_schema)))
+  println(is_err(schema_check("hi", union_schema)))
+  let json_schema = schema_to_json_schema(schema)
+  println(json_schema.type)
+  println(json_schema.properties.role.default)
+  let picked = schema_pick(schema, ["name", "role"])
+  println(picked.required[0])
+  println(len(picked.properties) == 2)
+  let partial = schema_partial(schema)
+  println(partial.required == nil || len(partial.required) == 0)
+  let extended = schema_extend(schema, {title: "User"})
+  println(extended.title)
+}

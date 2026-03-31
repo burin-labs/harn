@@ -1630,6 +1630,23 @@ impl Compiler {
                 self.chunk.emit(Op::Nil, self.line);
             }
 
+            Node::RequireStmt { condition, message } => {
+                self.compile_node(condition)?;
+                let ok_jump = self.chunk.emit_jump(Op::JumpIfTrue, self.line);
+                self.chunk.emit(Op::Pop, self.line);
+                if let Some(message) = message {
+                    self.compile_node(message)?;
+                } else {
+                    let idx = self
+                        .chunk
+                        .add_constant(Constant::String("require condition failed".to_string()));
+                    self.chunk.emit_u16(Op::Constant, idx, self.line);
+                }
+                self.chunk.emit(Op::Throw, self.line);
+                self.chunk.patch_jump(ok_jump);
+                self.chunk.emit(Op::Pop, self.line);
+            }
+
             Node::Block(stmts) => {
                 if stmts.is_empty() {
                     self.chunk.emit(Op::Nil, self.line);
@@ -2428,7 +2445,8 @@ impl Compiler {
             | Node::TypeDecl { .. }
             | Node::ThrowStmt { .. }
             | Node::BreakStmt
-            | Node::ContinueStmt => false,
+            | Node::ContinueStmt
+            | Node::RequireStmt { .. } => false,
             // These compound nodes explicitly produce a value
             Node::TryCatch { .. }
             | Node::TryExpr { .. }

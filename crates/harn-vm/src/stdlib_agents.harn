@@ -1,6 +1,7 @@
 import "std/collections"
 import "std/context"
 
+/// workflow_model_spec.
 pub fn workflow_model_spec(config) {
   let target = config?.model ?? config?.model_alias ?? config?.model_tier ?? config?.tier
   if target == nil || target == "" {
@@ -9,6 +10,7 @@ pub fn workflow_model_spec(config) {
   return llm_pick_model(target, filter_nil({provider: config?.provider}))
 }
 
+/// workflow_options.
 pub fn workflow_options(config) {
   let spec = workflow_model_spec(config)
   return filter_nil({
@@ -40,6 +42,7 @@ pub fn workflow_options(config) {
   })
 }
 
+/// stage_config.
 pub fn stage_config(flow, overrides, stage_name) {
   let combined = (flow ?? {}) + (overrides ?? {})
   let stage = combined[stage_name] ?? {}
@@ -47,6 +50,7 @@ pub fn stage_config(flow, overrides, stage_name) {
   return filter_nil(merged + {_stage: stage_name})
 }
 
+/// stage_prompt.
 pub fn stage_prompt(task, config) {
   let ctx = config?.context
   return prompt_compose(task, ctx, filter_nil({
@@ -58,6 +62,7 @@ pub fn stage_prompt(task, config) {
   }))
 }
 
+/// run_stage.
 pub fn run_stage(task, config) {
   let prompt = stage_prompt(task, config)
   let opts = workflow_options(config)
@@ -72,6 +77,7 @@ pub fn run_stage(task, config) {
   })
 }
 
+/// verify_command.
 pub fn verify_command(config) {
   if config?.command == nil || config?.command == "" {
     return nil
@@ -91,6 +97,7 @@ pub fn verify_command(config) {
   }
 }
 
+/// verify_result.
 pub fn verify_result(task, result, config) {
   if config == nil {
     return nil
@@ -108,6 +115,7 @@ pub fn verify_result(task, result, config) {
   return nil
 }
 
+/// repair_task.
 pub fn repair_task(original_task, verification, config) {
   if config?.prompt != nil {
     return config?.prompt
@@ -117,10 +125,12 @@ pub fn repair_task(original_task, verification, config) {
   return message
 }
 
+/// workflow.
 pub fn workflow(config) {
   return workflow_graph(config ?? {})
 }
 
+/// task_run.
 pub fn task_run(task, flow, overrides) {
   let graph = workflow_graph(flow ?? {})
   let runtime = workflow_execute(task, graph, overrides?.artifacts ?? [], overrides)
@@ -168,17 +178,20 @@ pub fn task_run(task, flow, overrides) {
   }
 }
 
+/// workflow_continue.
 pub fn workflow_continue(prev, task, flow, overrides) {
   let transcript = prev?.transcript ?? prev
   let merged = (overrides ?? {}) + {transcript: transcript}
   return task_run(task, flow, merged)
 }
 
+/// workflow_compact.
 pub fn workflow_compact(prev, options) {
   let transcript = prev?.transcript ?? prev
   return transcript_summarize(transcript, options)
 }
 
+/// workflow_reset.
 pub fn workflow_reset(prev, carry_summary) {
   let transcript = prev?.transcript ?? prev
   if carry_summary && transcript_summary(transcript) {

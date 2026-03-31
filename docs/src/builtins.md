@@ -76,6 +76,13 @@ println(unwrap_err(bad))         // something went wrong
 | `json_parse(str)` | str: string | value | Parse JSON string into Harn values. Throws on invalid JSON |
 | `json_stringify(value)` | value: any | string | Serialize Harn value to JSON. Closures and handles become `null` |
 | `json_validate(data, schema)` | data: any, schema: dict | bool | Validate data against a schema. Returns `true` if valid, throws with details if not |
+| `schema_check(data, schema)` | data: any, schema: dict | Result | Validate data against an extended schema and return `Result.Ok(data)` or `Result.Err({message, errors, value?})` |
+| `schema_parse(data, schema)` | data: any, schema: dict | Result | Same as `schema_check`, but applies `default` values recursively |
+| `schema_to_json_schema(schema)` | schema: dict | dict | Convert an extended Harn schema into JSON Schema |
+| `schema_extend(base, overrides)` | base: dict, overrides: dict | dict | Shallow-merge two schema dicts |
+| `schema_partial(schema)` | schema: dict | dict | Remove `required` recursively so properties become optional |
+| `schema_pick(schema, keys)` | schema: dict, keys: list | dict | Keep only selected top-level properties |
+| `schema_omit(schema, keys)` | schema: dict, keys: list | dict | Remove selected top-level properties |
 | `json_extract(text, key?)` | text: string, key: string (optional) | value | Extract JSON from text (strips markdown code fences). If key given, returns that key's value |
 
 Type mapping:
@@ -114,6 +121,54 @@ let schema = {
   }
 }
 json_validate(data, schema)  // throws if invalid
+```
+
+### Extended schema constraints
+
+The schema builtins support these additional keys:
+
+| Key | Type | Description |
+|---|---|---|
+| `nullable` | bool | Allow `nil` |
+| `min` / `max` | int or float | Numeric bounds |
+| `min_length` / `max_length` | int | String length bounds |
+| `pattern` | string | Regex pattern for strings |
+| `enum` | list | Allowed literal values |
+| `min_items` / `max_items` | int | List length bounds |
+| `union` | list of schemas | Value must match one schema |
+| `default` | any | Default value applied by `schema_parse` |
+
+Example:
+
+```harn
+let user_schema = {
+  type: "dict",
+  required: ["name", "age"],
+  properties: {
+    name: {type: "string", min_length: 1},
+    age: {type: "int", min: 0},
+    role: {type: "string", enum: ["admin", "user"], default: "user"}
+  }
+}
+
+let parsed = schema_parse({name: "Ada", age: 36}, user_schema)
+println(is_ok(parsed))
+println(unwrap(parsed).role)
+println(schema_to_json_schema(user_schema).type)
+```
+
+Composition helpers:
+
+```harn
+let public_user = schema_pick(user_schema, ["name", "role"])
+let patch_schema = schema_partial(user_schema)
+let admin_user = schema_extend(user_schema, {
+  properties: {
+    name: {type: "string", min_length: 1},
+    age: {type: "int", min: 0},
+    role: {type: "string", enum: ["admin"], default: "admin"}
+  }
+})
 ```
 
 ### json_extract
@@ -718,12 +773,16 @@ from parents).
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `metadata_get(dir, namespace?)` | dir: string, namespace: string | dict \| nil | Read metadata with inheritance |
+| `metadata_resolve(dir, namespace?)` | dir: string, namespace: string | dict \| nil | Read resolved metadata while preserving namespaces |
+| `metadata_entries(namespace?)` | namespace: string | list | List stored directories with local and resolved metadata |
 | `metadata_set(dir, namespace, data)` | dir: string, namespace: string, data: dict | nil | Write metadata for directory/namespace |
 | `metadata_save()` | — | nil | Flush metadata to disk |
 | `metadata_stale(project)` | project: string | dict | Check staleness: `{any_stale, tier1, tier2}` |
+| `metadata_status(namespace?)` | namespace: string | dict | Summarize directory counts, namespaces, missing hashes, and stale state |
 | `metadata_refresh_hashes()` | — | nil | Recompute content hashes |
 | `compute_content_hash(dir)` | dir: string | string | Hash of directory contents |
 | `invalidate_facts(dir)` | dir: string | nil | Mark cached facts as stale |
+| `scan_directory(path?, pattern_or_options?, options?)` | path: string, pattern: string or options: dict | list | Enumerate files and directories with optional `pattern`, `max_depth`, `include_hidden`, `include_dirs`, `include_files` |
 
 ## MCP (Model Context Protocol)
 

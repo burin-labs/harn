@@ -140,7 +140,7 @@ mod tests {
 
     #[test]
     fn hover_fn_with_doc_comment() {
-        let source = "// Greets a person by name.\n// Returns a greeting string.\nfn greet(name: string) -> string {\n  return \"Hello, \" + name\n}\n";
+        let source = "/// Greets a person by name.\n/// Returns a greeting string.\nfn greet(name: string) -> string {\n  return \"Hello, \" + name\n}\n";
         let state = DocumentState::new(source.to_string());
         let fn_sym = state
             .symbols
@@ -150,6 +150,21 @@ mod tests {
         assert_eq!(
             fn_sym.doc_comment.as_deref(),
             Some("Greets a person by name.\nReturns a greeting string.")
+        );
+    }
+
+    #[test]
+    fn hover_fn_with_plain_comment_fallback() {
+        let source = "// Greets a person by name.\nfn greet(name: string) -> string {\n  return \"Hello, \" + name\n}\n";
+        let state = DocumentState::new(source.to_string());
+        let fn_sym = state
+            .symbols
+            .iter()
+            .find(|s| s.name == "greet" && s.kind == HarnSymbolKind::Function)
+            .expect("should find greet");
+        assert_eq!(
+            fn_sym.doc_comment.as_deref(),
+            Some("Greets a person by name.")
         );
     }
 

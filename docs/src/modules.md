@@ -189,6 +189,21 @@ Structured prompt/context assembly helpers:
 | `context_render(ctx, options?)` | Render a context into prompt text |
 | `prompt_compose(task, ctx, options?)` | Compose `{prompt, system, rendered_context}` |
 
+### std/project
+
+Project metadata and scanner helpers built on `metadata_*` and `scan_directory(...)`:
+
+| Function | Description |
+|---|---|
+| `metadata_namespace(dir, namespace)` | Read resolved metadata for a namespace, defaulting to `{}` |
+| `metadata_local_namespace(dir, namespace)` | Read only the namespace data stored directly on a directory |
+| `project_inventory(namespace?)` | Return `{entries, status}` for metadata-backed project state |
+| `project_scan(path, options?)` | Scan files/directories with the runtime scanner options |
+| `project_scan_paths(path, options?)` | Return only the scanned paths |
+| `project_stale(namespace?)` | Return the stale summary from `metadata_status(...)` |
+| `project_stale_dirs(namespace?)` | Return the tier1+tier2 stale directory list |
+| `project_requires_refresh(namespace?)` | Return `true` when stale or missing hashes require refresh |
+
 ### std/agents
 
 Workflow helpers built on transcripts and `agent_loop`:

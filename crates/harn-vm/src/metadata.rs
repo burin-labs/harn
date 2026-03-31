@@ -122,6 +122,11 @@ impl MetadataState {
         resolved.namespaces.get(namespace).cloned()
     }
 
+    fn local_directory(&mut self, directory: &str) -> DirectoryMetadata {
+        self.ensure_loaded();
+        self.entries.get(directory).cloned().unwrap_or_default()
+    }
+
     /// Set metadata for a directory + namespace.
     fn set_namespace(
         &mut self,
@@ -317,6 +322,109 @@ fn json_to_vm(jv: &serde_json::Value) -> VmValue {
     }
 }
 
+fn namespace_fields_to_vm(fields: &BTreeMap<FieldKey, serde_json::Value>) -> VmValue {
+    let mut map = BTreeMap::new();
+    for (k, v) in fields {
+        map.insert(k.clone(), json_to_vm(v));
+    }
+    VmValue::Dict(Rc::new(map))
+}
+
+fn directory_metadata_to_vm(meta: &DirectoryMetadata) -> VmValue {
+    let mut namespaces = BTreeMap::new();
+    for (ns, fields) in &meta.namespaces {
+        namespaces.insert(ns.clone(), namespace_fields_to_vm(fields));
+    }
+    VmValue::Dict(Rc::new(namespaces))
+}
+
+fn normalize_directory_key(dir: &str) -> String {
+    if dir.trim().is_empty() || dir == "." {
+        ".".to_string()
+    } else {
+        dir.to_string()
+    }
+}
+
+#[derive(Clone)]
+struct ScanOptions {
+    pattern: Option<String>,
+    max_depth: usize,
+    include_hidden: bool,
+    include_dirs: bool,
+    include_files: bool,
+}
+
+impl Default for ScanOptions {
+    fn default() -> Self {
+        Self {
+            pattern: None,
+            max_depth: 5,
+            include_hidden: false,
+            include_dirs: true,
+            include_files: true,
+        }
+    }
+}
+
+fn bool_arg(map: &BTreeMap<String, VmValue>, key: &str, default: bool) -> bool {
+    match map.get(key) {
+        Some(VmValue::Bool(value)) => *value,
+        _ => default,
+    }
+}
+
+fn usize_arg(map: &BTreeMap<String, VmValue>, key: &str, default: usize) -> usize {
+    match map.get(key) {
+        Some(VmValue::Int(value)) if *value >= 0 => *value as usize,
+        _ => default,
+    }
+}
+
+fn parse_scan_options(
+    pattern_or_options: Option<&VmValue>,
+    explicit_options: Option<&VmValue>,
+) -> ScanOptions {
+    let mut options = ScanOptions::default();
+    if let Some(VmValue::String(pattern)) = pattern_or_options {
+        options.pattern = Some(pattern.to_string());
+    } else if let Some(VmValue::Dict(dict)) = pattern_or_options {
+        apply_scan_options_dict(&mut options, dict);
+    }
+    if let Some(VmValue::Dict(dict)) = explicit_options {
+        apply_scan_options_dict(&mut options, dict);
+    }
+    options
+}
+
+fn apply_scan_options_dict(options: &mut ScanOptions, dict: &BTreeMap<String, VmValue>) {
+    if let Some(pattern) = dict.get("pattern").map(|value| value.display()) {
+        if !pattern.is_empty() {
+            options.pattern = Some(pattern);
+        }
+    }
+    options.max_depth = usize_arg(dict, "max_depth", options.max_depth);
+    options.include_hidden = bool_arg(dict, "include_hidden", options.include_hidden);
+    options.include_dirs = bool_arg(dict, "include_dirs", options.include_dirs);
+    options.include_files = bool_arg(dict, "include_files", options.include_files);
+}
+
+fn resolve_scan_root(base_dir: &Path, rel_dir: &str) -> PathBuf {
+    let candidate = PathBuf::from(rel_dir);
+    if candidate.is_absolute() {
+        return candidate;
+    }
+    if let Some(cwd) =
+        crate::stdlib::process::current_execution_context().and_then(|context| context.cwd)
+    {
+        return PathBuf::from(cwd).join(candidate);
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        return cwd.join(candidate);
+    }
+    base_dir.join(candidate)
+}
+
 /// Register metadata builtins on a VM.
 ///
 /// In standalone mode, these operate directly on `.burin/metadata/` files.
@@ -364,6 +472,82 @@ pub fn register_metadata_builtins(vm: &mut Vm, base_dir: &Path) {
                 Ok(VmValue::Dict(Rc::new(m)))
             }
         }
+    });
+
+    // metadata_resolve(dir, namespace?) -> dict | nil
+    let s = Rc::clone(&state);
+    vm.register_builtin("metadata_resolve", move |args, _out| {
+        let dir = args.first().map(|a| a.display()).unwrap_or_default();
+        let namespace = args.get(1).and_then(|a| {
+            if matches!(a, VmValue::Nil) {
+                None
+            } else {
+                Some(a.display())
+            }
+        });
+        let mut st = s.borrow_mut();
+        let resolved = st.resolve(&dir);
+        if let Some(ns) = namespace {
+            match resolved.namespaces.get(&ns) {
+                Some(fields) => Ok(namespace_fields_to_vm(fields)),
+                None => Ok(VmValue::Nil),
+            }
+        } else if resolved.namespaces.is_empty() {
+            Ok(VmValue::Nil)
+        } else {
+            Ok(directory_metadata_to_vm(&resolved))
+        }
+    });
+
+    // metadata_entries(namespace?) -> list
+    let s = Rc::clone(&state);
+    vm.register_builtin("metadata_entries", move |args, _out| {
+        let namespace = args.first().and_then(|a| {
+            if matches!(a, VmValue::Nil) {
+                None
+            } else {
+                Some(a.display())
+            }
+        });
+        let mut st = s.borrow_mut();
+        st.ensure_loaded();
+        let directories: Vec<String> = st.entries.keys().cloned().collect();
+        let mut items = Vec::new();
+        for dir in directories {
+            let local = st.local_directory(&dir);
+            let resolved = st.resolve(&dir);
+            let mut item = BTreeMap::new();
+            item.insert(
+                "dir".to_string(),
+                VmValue::String(Rc::from(normalize_directory_key(&dir))),
+            );
+            match &namespace {
+                Some(ns) => {
+                    item.insert(
+                        "local".to_string(),
+                        local
+                            .namespaces
+                            .get(ns)
+                            .map(namespace_fields_to_vm)
+                            .unwrap_or(VmValue::Nil),
+                    );
+                    item.insert(
+                        "resolved".to_string(),
+                        resolved
+                            .namespaces
+                            .get(ns)
+                            .map(namespace_fields_to_vm)
+                            .unwrap_or(VmValue::Nil),
+                    );
+                }
+                None => {
+                    item.insert("local".to_string(), directory_metadata_to_vm(&local));
+                    item.insert("resolved".to_string(), directory_metadata_to_vm(&resolved));
+                }
+            }
+            items.push(VmValue::Dict(Rc::new(item)));
+        }
+        Ok(VmValue::List(Rc::new(items)))
     });
 
     // metadata_set(dir, namespace, data_dict)
@@ -470,6 +654,84 @@ pub fn register_metadata_builtins(vm: &mut Vm, base_dir: &Path) {
         Ok(VmValue::Nil)
     });
 
+    // metadata_status(namespace?) -> dict
+    let s = Rc::clone(&state);
+    let base4 = base_dir.to_path_buf();
+    vm.register_builtin("metadata_status", move |args, _out| {
+        let namespace = args.first().and_then(|a| {
+            if matches!(a, VmValue::Nil) {
+                None
+            } else {
+                Some(a.display())
+            }
+        });
+        s.borrow_mut().ensure_loaded();
+        let state = s.borrow();
+        let mut namespaces = BTreeMap::new();
+        let mut directories = Vec::new();
+        let mut missing_structure_hash = Vec::new();
+        let mut missing_content_hash = Vec::new();
+        for (dir, meta) in &state.entries {
+            directories.push(VmValue::String(Rc::from(normalize_directory_key(dir))));
+            for ns in meta.namespaces.keys() {
+                namespaces.insert(ns.clone(), VmValue::Bool(true));
+            }
+            let full_dir = if dir.is_empty() {
+                base4.clone()
+            } else {
+                base4.join(dir)
+            };
+            let relevant = namespace
+                .as_ref()
+                .and_then(|name| meta.namespaces.get(name))
+                .or_else(|| meta.namespaces.get("classification"));
+            if let Some(fields) = relevant {
+                if !fields.contains_key("structureHash") && full_dir.exists() {
+                    missing_structure_hash
+                        .push(VmValue::String(Rc::from(normalize_directory_key(dir))));
+                }
+                if !fields.contains_key("contentHash") && full_dir.exists() {
+                    missing_content_hash
+                        .push(VmValue::String(Rc::from(normalize_directory_key(dir))));
+                }
+            }
+        }
+        let stale = metadata_stale_value(&state, &base4);
+        let mut result = BTreeMap::new();
+        result.insert(
+            "directory_count".to_string(),
+            VmValue::Int(state.entries.len() as i64),
+        );
+        result.insert(
+            "namespace_count".to_string(),
+            VmValue::Int(namespaces.len() as i64),
+        );
+        result.insert(
+            "namespaces".to_string(),
+            VmValue::List(Rc::new(
+                namespaces
+                    .keys()
+                    .cloned()
+                    .map(|name| VmValue::String(Rc::from(name)))
+                    .collect(),
+            )),
+        );
+        result.insert(
+            "directories".to_string(),
+            VmValue::List(Rc::new(directories)),
+        );
+        result.insert(
+            "missing_structure_hash".to_string(),
+            VmValue::List(Rc::new(missing_structure_hash)),
+        );
+        result.insert(
+            "missing_content_hash".to_string(),
+            VmValue::List(Rc::new(missing_content_hash)),
+        );
+        result.insert("stale".to_string(), stale);
+        Ok(VmValue::Dict(Rc::new(result)))
+    });
+
     // compute_content_hash(dir) -> string
     // Hash of file list + sizes + mtimes in directory for staleness tracking
     let base = base_dir.to_path_buf();
@@ -545,33 +807,68 @@ pub fn register_scan_builtins(vm: &mut Vm, base_dir: &Path) {
     // scan_directory(path?, pattern?) -> [{path, size, modified, is_dir}, ...]
     vm.register_builtin("scan_directory", move |args, _out| {
         let rel_dir = args.first().map(|a| a.display()).unwrap_or_default();
-        let pattern = args.get(1).and_then(|a| {
-            if matches!(a, VmValue::Nil) {
-                None
-            } else {
-                Some(a.display())
-            }
-        });
+        let options = parse_scan_options(args.get(1), args.get(2));
+        let scan_base = resolve_scan_root(&base, ".");
         let full_dir = if rel_dir.is_empty() {
-            base.clone()
+            scan_base.clone()
         } else {
-            base.join(&rel_dir)
+            scan_base.join(&rel_dir)
         };
         let mut results: Vec<VmValue> = Vec::new();
-        scan_dir_recursive(&full_dir, &base, &pattern, &mut results, 0, 5);
+        scan_dir_recursive(&full_dir, &scan_base, &options, &mut results, 0);
         Ok(VmValue::List(Rc::new(results)))
     });
+}
+
+fn metadata_stale_value(state: &MetadataState, base_dir: &Path) -> VmValue {
+    let mut tier1_stale: Vec<VmValue> = Vec::new();
+    let mut tier2_stale: Vec<VmValue> = Vec::new();
+    for (dir, meta) in &state.entries {
+        let full_dir = if dir.is_empty() {
+            base_dir.to_path_buf()
+        } else {
+            base_dir.join(dir)
+        };
+        if let Some(stored_hash) = meta
+            .namespaces
+            .get("classification")
+            .and_then(|ns| ns.get("structureHash"))
+            .and_then(|v| v.as_str())
+        {
+            let current_hash = compute_structure_hash(&full_dir);
+            if current_hash != stored_hash {
+                tier1_stale.push(VmValue::String(Rc::from(normalize_directory_key(dir))));
+                continue;
+            }
+        }
+        if let Some(stored_hash) = meta
+            .namespaces
+            .get("classification")
+            .and_then(|ns| ns.get("contentHash"))
+            .and_then(|v| v.as_str())
+        {
+            let current_hash = compute_content_hash_for_dir(&full_dir);
+            if current_hash != stored_hash {
+                tier2_stale.push(VmValue::String(Rc::from(normalize_directory_key(dir))));
+            }
+        }
+    }
+    let any_stale = !tier1_stale.is_empty() || !tier2_stale.is_empty();
+    let mut m = BTreeMap::new();
+    m.insert("any_stale".to_string(), VmValue::Bool(any_stale));
+    m.insert("tier1".to_string(), VmValue::List(Rc::new(tier1_stale)));
+    m.insert("tier2".to_string(), VmValue::List(Rc::new(tier2_stale)));
+    VmValue::Dict(Rc::new(m))
 }
 
 fn scan_dir_recursive(
     dir: &Path,
     base: &Path,
-    pattern: &Option<String>,
+    options: &ScanOptions,
     results: &mut Vec<VmValue>,
     depth: usize,
-    max_depth: usize,
 ) {
-    if depth > max_depth {
+    if depth > options.max_depth {
         return;
     }
     let rd = match std::fs::read_dir(dir) {
@@ -585,7 +882,7 @@ fn scan_dir_recursive(
         };
         let name = entry.file_name().to_string_lossy().to_string();
         // Skip hidden files and .burin directory
-        if name.starts_with('.') {
+        if !options.include_hidden && name.starts_with('.') {
             continue;
         }
         let rel_path = entry
@@ -595,10 +892,10 @@ fn scan_dir_recursive(
             .to_string_lossy()
             .to_string();
         // Apply glob-like pattern filter
-        if let Some(pat) = pattern {
+        if let Some(pat) = &options.pattern {
             if !glob_match(pat, &rel_path) {
                 if meta.is_dir() {
-                    scan_dir_recursive(&entry.path(), base, pattern, results, depth + 1, max_depth);
+                    scan_dir_recursive(&entry.path(), base, options, results, depth + 1);
                 }
                 continue;
             }
@@ -614,9 +911,11 @@ fn scan_dir_recursive(
         m.insert("size".to_string(), VmValue::Int(meta.len() as i64));
         m.insert("modified".to_string(), VmValue::Int(mtime));
         m.insert("is_dir".to_string(), VmValue::Bool(meta.is_dir()));
-        results.push(VmValue::Dict(Rc::new(m)));
+        if (meta.is_dir() && options.include_dirs) || (!meta.is_dir() && options.include_files) {
+            results.push(VmValue::Dict(Rc::new(m)));
+        }
         if meta.is_dir() {
-            scan_dir_recursive(&entry.path(), base, pattern, results, depth + 1, max_depth);
+            scan_dir_recursive(&entry.path(), base, options, results, depth + 1);
         }
     }
 }
@@ -640,4 +939,69 @@ fn glob_match(pattern: &str, path: &str) -> bool {
         }
     }
     path.contains(pattern)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_path(name: &str) -> PathBuf {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        std::env::temp_dir().join(format!("harn-metadata-{name}-{unique}"))
+    }
+
+    #[test]
+    fn metadata_resolve_preserves_namespace_structure() {
+        let base = temp_path("resolve");
+        let mut state = MetadataState::new(&base);
+        state.set_namespace(
+            "".into(),
+            "classification",
+            BTreeMap::from([("language".into(), serde_json::json!("rust"))]),
+        );
+        state.set_namespace(
+            "src".into(),
+            "classification",
+            BTreeMap::from([("owner".into(), serde_json::json!("vm"))]),
+        );
+
+        let resolved = state.resolve("src");
+        let classification = resolved.namespaces.get("classification").unwrap();
+        assert_eq!(
+            classification.get("language"),
+            Some(&serde_json::json!("rust"))
+        );
+        assert_eq!(classification.get("owner"), Some(&serde_json::json!("vm")));
+    }
+
+    #[test]
+    fn scan_options_filter_hidden_and_depth() {
+        let base = temp_path("scan");
+        std::fs::create_dir_all(base.join("project/deep")).unwrap();
+        std::fs::write(base.join("project/root.txt"), "root").unwrap();
+        std::fs::write(base.join("project/.hidden.txt"), "hidden").unwrap();
+        std::fs::write(base.join("project/deep/nested.txt"), "nested").unwrap();
+
+        let options = ScanOptions {
+            pattern: Some(".txt".into()),
+            max_depth: 0,
+            include_hidden: false,
+            include_dirs: false,
+            include_files: true,
+        };
+        let mut results = Vec::new();
+        scan_dir_recursive(&base.join("project"), &base, &options, &mut results, 0);
+        let paths: Vec<String> = results
+            .into_iter()
+            .map(|value| match value {
+                VmValue::Dict(dict) => dict.get("path").unwrap().display(),
+                _ => String::new(),
+            })
+            .collect();
+        assert_eq!(paths, vec!["project/root.txt".to_string()]);
+        let _ = std::fs::remove_dir_all(base);
+    }
 }

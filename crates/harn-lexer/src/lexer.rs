@@ -546,6 +546,7 @@ impl Lexer {
             "thru" => TokenKind::Thru,
             "upto" => TokenKind::Upto,
             "guard" => TokenKind::Guard,
+            "require" => TokenKind::Require,
             "ask" => TokenKind::Ask,
             "deadline" => TokenKind::Deadline,
             "yield" => TokenKind::Yield,
@@ -668,7 +669,7 @@ mod tests {
 
     #[test]
     fn test_keywords() {
-        let mut lexer = Lexer::new("pipeline let var if else for in");
+        let mut lexer = Lexer::new("pipeline let var if else for in require");
         let tokens = lexer.tokenize().unwrap();
         assert_eq!(tokens[0].kind, TokenKind::Pipeline);
         assert_eq!(tokens[1].kind, TokenKind::Let);
@@ -677,6 +678,7 @@ mod tests {
         assert_eq!(tokens[4].kind, TokenKind::Else);
         assert_eq!(tokens[5].kind, TokenKind::For);
         assert_eq!(tokens[6].kind, TokenKind::In);
+        assert_eq!(tokens[7].kind, TokenKind::Require);
     }
 
     #[test]
