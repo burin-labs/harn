@@ -1625,6 +1625,33 @@ log(result)
     }
 
     #[test]
+    fn test_float_division_by_zero_uses_ieee_values() {
+        let out = run_vm(
+            "pipeline default(task) { log(is_nan(0.0 / 0.0))\nlog(is_infinite(1.0 / 0.0))\nlog(is_infinite(-1.0 / 0.0)) }",
+        );
+        assert_eq!(out, "[harn] true\n[harn] true\n[harn] true\n");
+    }
+
+    #[test]
+    fn test_reusing_catch_binding_name_in_same_block() {
+        let out = run_vm(
+            r#"pipeline default(task) {
+try {
+    throw "a"
+} catch e {
+    log(e)
+}
+try {
+    throw "b"
+} catch e {
+    log(e)
+}
+}"#,
+        );
+        assert_eq!(out, "[harn] a\n[harn] b\n");
+    }
+
+    #[test]
     fn test_try_catch_nested() {
         let out = run_output(
             r#"pipeline t(task) {

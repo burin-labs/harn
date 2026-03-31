@@ -199,9 +199,47 @@ CLI support:
 
 ```bash
 harn runs inspect .harn-runs/<run>.json
+harn runs inspect .harn-runs/<run>.json --compare baseline.json
 harn replay .harn-runs/<run>.json
 harn eval .harn-runs/<run>.json
+harn eval .harn-runs/
+harn eval evals/regression.json
 ```
 
 The replay/eval surface is intentionally tied to saved typed run records so
 host applications do not need to build their own provenance layer.
+
+For host/runtime consumers that want the same logic inside Harn code, the VM
+also exposes:
+
+- `run_record_fixture(...)`
+- `run_record_eval(...)`
+- `run_record_eval_suite(...)`
+- `run_record_diff(...)`
+- `eval_suite_manifest(...)`
+- `eval_suite_run(...)`
+
+Eval manifests group persisted runs, optional explicit replay fixtures, and
+optional baseline run comparisons under a single typed document. This lets
+hosts treat replay/eval suites as data rather than external scripts.
+
+## Host artifact handoff
+
+Hosts and editor bridges should hand Harn typed artifacts instead of embedding
+their own orchestration rules in ad hoc prompt strings. The VM now exposes
+helpers for the most common host surfaces:
+
+- `artifact_workspace_file(...)`
+- `artifact_workspace_snapshot(...)`
+- `artifact_editor_selection(...)`
+- `artifact_verification_result(...)`
+- `artifact_test_result(...)`
+- `artifact_command_result(...)`
+- `artifact_diff(...)`
+- `artifact_git_diff(...)`
+- `artifact_diff_review(...)`
+- `artifact_review_decision(...)`
+
+These helpers normalize kind names, token estimates, priority defaults,
+lineage, and metadata so host products can pass editor/test/diff state into
+Harn without recreating artifact taxonomy and provenance logic externally.

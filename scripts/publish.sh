@@ -10,9 +10,12 @@ set -euo pipefail
 #   ./scripts/publish.sh --dry-run  # verify without uploading
 
 DRY_RUN=""
+VERIFY_FLAGS=""
 if [[ "${1:-}" == "--dry-run" ]]; then
   DRY_RUN="--dry-run"
+  VERIFY_FLAGS="--no-verify"
   echo "=== DRY RUN (no uploads) ==="
+  echo "=== Dry run skips cargo publish verification for unpublished workspace dependencies ==="
 fi
 
 ALLOW_DIRTY=""
@@ -45,7 +48,7 @@ publish_crate() {
     echo "=== Publishing $crate (attempt $attempt/$max_attempts) ==="
 
     local output
-    output=$(cargo publish -p "$crate" $DRY_RUN $ALLOW_DIRTY 2>&1) && {
+    output=$(cargo publish -p "$crate" $DRY_RUN $VERIFY_FLAGS $ALLOW_DIRTY 2>&1) && {
       echo "$output"
       echo "  Published $crate"
       local last_crate="${CRATES[${#CRATES[@]}-1]}"

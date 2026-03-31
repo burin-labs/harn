@@ -126,6 +126,7 @@ Inspect persisted workflow run records.
 
 ```bash
 harn runs inspect .harn-runs/<run>.json
+harn runs inspect .harn-runs/<run>.json --compare baseline.json
 ```
 
 ## harn replay
@@ -142,7 +143,16 @@ Evaluate a persisted workflow run record as a regression fixture.
 
 ```bash
 harn eval .harn-runs/<run>.json
+harn eval .harn-runs/<run>.json --compare baseline.json
+harn eval .harn-runs/
+harn eval evals/regression.json
 ```
+
+`harn eval` accepts three inputs:
+
+- a single run record JSON file
+- a directory of run record JSON files
+- an eval suite manifest JSON file with grouped cases and optional baseline comparisons
 
 ## harn serve
 

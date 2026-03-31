@@ -372,7 +372,10 @@ impl Compiler {
     fn compile_catch_binding(&mut self, error_var: &Option<String>) -> Result<(), CompileError> {
         if let Some(var_name) = error_var {
             let idx = self.chunk.add_constant(Constant::String(var_name.clone()));
-            self.chunk.emit_u16(Op::DefLet, idx, self.line);
+            // Catch bindings share the surrounding runtime scope with sibling
+            // try/catch blocks, so use a mutable slot to allow repeated
+            // `catch e { ... }` bindings in the same enclosing block.
+            self.chunk.emit_u16(Op::DefVar, idx, self.line);
         } else {
             self.chunk.emit(Op::Pop, self.line);
         }

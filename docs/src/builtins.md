@@ -501,8 +501,9 @@ assert_eq(resp.status, 200)
 |---|---|---|---|
 | `atomic(initial?)` | initial: any (default 0) | dict | Create an atomic value |
 | `atomic_get(a)` | a: dict | any | Read the current value |
-| `atomic_set(a, value)` | a: dict, value: any | dict | Returns new atomic with updated value |
-| `atomic_add(a, delta)` | a: dict, delta: int | dict | Returns new atomic with incremented value |
+| `atomic_set(a, value)` | a: dict, value: any | int | Set value, returns previous value |
+| `atomic_add(a, delta)` | a: dict, delta: int | int | Add delta, returns previous value |
+| `atomic_cas(a, expected, new)` | a: dict, expected: int, new: int | bool | Compare-and-swap. Returns true if the swap succeeded |
 
 ## Persistent store
 
@@ -598,6 +599,104 @@ temperature = 0.3
 | `timer_start(name?)` | name: string | dict | Start a named timer |
 | `timer_end(timer)` | timer: dict | int | Stop timer, prints elapsed, returns milliseconds |
 | `elapsed()` | — | int | Milliseconds since process start |
+
+## Circuit breakers
+
+Protect against cascading failures by tracking error counts and opening
+a circuit when a threshold is reached.
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `circuit_breaker(name, threshold?, reset_ms?)` | name: string, threshold: int (default 5), reset_ms: int (default 30000) | string | Create a named circuit breaker. Returns the name |
+| `circuit_check(name)` | name: string | string | Check state: `"closed"`, `"open"`, or `"half_open"` (after reset period) |
+| `circuit_record_failure(name)` | name: string | bool | Record a failure. Returns true if the circuit just opened |
+| `circuit_record_success(name)` | name: string | nil | Record a success, resetting failure count and closing the circuit |
+| `circuit_reset(name)` | name: string | nil | Manually reset the circuit to closed |
+
+Example:
+
+```harn
+circuit_breaker("api", 3, 10000)
+
+for i in 0..5 {
+  if circuit_check("api") == "open" {
+    println("circuit open, skipping call")
+  } else {
+    try {
+      let resp = http_get("https://api.example.com/data")
+      circuit_record_success("api")
+    } catch e {
+      circuit_record_failure("api")
+    }
+  }
+}
+```
+
+## Tracing
+
+Distributed tracing primitives for instrumenting pipeline execution.
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `trace_start(name)` | name: string | dict | Start a trace span. Returns a span dict with `trace_id`, `span_id`, `name`, `start_ms` |
+| `trace_end(span)` | span: dict | nil | End a span and emit a structured log line with duration |
+| `trace_id()` | none | string or nil | Current trace ID from the span stack, or nil if no active span |
+| `enable_tracing(enabled?)` | enabled: bool (default true) | nil | Enable or disable pipeline-level tracing |
+| `trace_spans()` | none | list | Peek at recorded trace spans |
+| `trace_summary()` | none | string | Formatted summary of trace spans |
+
+Example:
+
+```harn
+let span = trace_start("fetch_data")
+// ... do work ...
+trace_end(span)
+
+println(trace_summary())
+```
+
+## Error classification
+
+Structured error throwing and classification for retry logic and error handling.
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `throw_error(message, category?)` | message: string, category: string | never | Throw a categorized error. The error is a dict with `message` and `category` fields |
+| `error_category(err)` | err: any | string | Extract category from a caught error. Returns `"timeout"`, `"auth"`, `"rate_limit"`, `"tool_error"`, `"cancelled"`, `"not_found"`, `"circuit_open"`, or `"generic"` |
+| `is_timeout(err)` | err: any | bool | Check if error is a timeout |
+| `is_rate_limited(err)` | err: any | bool | Check if error is a rate limit |
+
+Example:
+
+```harn
+try {
+  throw_error("request timed out", "timeout")
+} catch e {
+  if is_timeout(e) {
+    println("will retry after backoff")
+  }
+  println(error_category(e))  // "timeout"
+}
+```
+
+## Tool registry (low-level)
+
+Low-level tool management functions for building and inspecting tool
+registries programmatically. For MCP serving, see the `tool_define` /
+`mcp_tools` API above.
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `tool_add(registry, name, desc, handler, params?)` | registry, name, desc: string, handler: closure, params: dict | dict | Add a tool to a registry (replaces if name exists) |
+| `tool_remove(registry, name)` | registry, name: string | dict | Remove a tool by name |
+| `tool_list(registry)` | registry: dict | list | List tools as `[{name, description, parameters}]` |
+| `tool_find(registry, name)` | registry, name: string | dict or nil | Find a tool entry by name |
+| `tool_count(registry)` | registry: dict | int | Number of tools in the registry |
+| `tool_describe(registry)` | registry: dict | string | Human-readable summary of all tools |
+| `tool_schema(registry, components?)` | registry, components: dict | dict | Generate JSON Schema for all tools |
+| `tool_prompt(registry)` | registry: dict | string | Generate an LLM system prompt describing available tools |
+| `tool_parse_call(text)` | text: string | list | Parse `<tool_call>...</tool_call>` XML from LLM output |
+| `tool_format_result(name, result)` | name, result: string | string | Format a `<tool_result>` XML envelope |
 
 ## Structured logging
 
@@ -832,6 +931,10 @@ These builtins expose Harn's typed orchestration runtime.
 | `run_record_load(path)` | path: string | run record | Load a run record from disk |
 | `run_record_fixture(run)` | run | replay fixture | Derive a replay/eval fixture from a saved run |
 | `run_record_eval(run, fixture?)` | run, fixture | dict | Evaluate a run against an embedded or explicit fixture |
+| `run_record_eval_suite(cases)` | cases: list | dict | Evaluate a list of `{run, fixture?, path?}` cases as a regression suite |
+| `run_record_diff(left, right)` | left, right | dict | Compare two run records and summarize stage/status deltas |
+| `eval_suite_manifest(payload)` | payload: dict | dict | Normalize a grouped eval suite manifest |
+| `eval_suite_run(manifest)` | manifest: dict | dict | Evaluate a manifest of saved runs, fixtures, and optional baselines |
 
 `workflow_execute` options currently include:
 
@@ -851,11 +954,22 @@ These builtins expose Harn's typed orchestration runtime.
 | `artifact_derive(parent, kind, extra?)` | parent, kind, extra | artifact | Derive a new artifact from a prior one |
 | `artifact_select(artifacts, policy?)` | artifacts, policy | list | Select artifacts under context policy and budget |
 | `artifact_context(artifacts, policy?)` | artifacts, policy | string | Render selected artifacts into context |
+| `artifact_workspace_file(path, content, extra?)` | path, content, extra | artifact | Build a normalized workspace-file artifact with path provenance |
+| `artifact_workspace_snapshot(paths, summary?, extra?)` | paths, summary, extra | artifact | Build a workspace snapshot artifact for host/editor context |
+| `artifact_editor_selection(path, text, extra?)` | path, text, extra | artifact | Build an editor-selection artifact from host UI state |
+| `artifact_verification_result(title, text, extra?)` | title, text, extra | artifact | Build a verification-result artifact |
+| `artifact_test_result(title, text, extra?)` | title, text, extra | artifact | Build a test-result artifact |
+| `artifact_command_result(command, output, extra?)` | command, output, extra | artifact | Build a command-result artifact with structured output |
+| `artifact_diff(path, before, after, extra?)` | path, before, after, extra | artifact | Build a unified diff artifact from before/after text |
+| `artifact_git_diff(diff_text, extra?)` | diff_text, extra | artifact | Build a git-diff artifact from host/tool output |
+| `artifact_diff_review(target, summary?, extra?)` | target, summary, extra | artifact | Build a diff-review artifact linked to a diff/patch target |
+| `artifact_review_decision(target, decision, extra?)` | target, decision, extra | artifact | Build an accept/reject review-decision artifact linked by lineage |
 
 Core artifact kinds commonly used by the runtime include `resource`,
-`workspace_file`, `editor_selection`, `summary`, `transcript_summary`,
-`diff`, `patch`, `test_result`, `verification_result`, `command_result`,
-and `plan`.
+`workspace_file`, `workspace_snapshot`, `editor_selection`, `summary`,
+`transcript_summary`, `diff`, `git_diff`, `patch`, `patch_set`,
+`diff_review`, `review_decision`, `test_result`, `verification_result`,
+`command_result`, and `plan`.
 
 ### Transcript lifecycle
 

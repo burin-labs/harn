@@ -328,9 +328,12 @@ async fn main() {
             args.get(2).map(|s| s.as_str()),
             args.get(3).map(|s| s.as_str()),
         ) {
-            (Some("inspect"), Some(path)) => inspect_run_record(path),
+            (Some("inspect"), Some(path)) => {
+                let compare = flag_value(&args[4..], "--compare");
+                inspect_run_record(path, compare.as_deref());
+            }
             _ => {
-                eprintln!("Usage: harn runs inspect <run.json>");
+                eprintln!("Usage: harn runs inspect <run.json> [--compare <other.json>]");
                 process::exit(1);
             }
         },
@@ -347,9 +350,14 @@ async fn main() {
         "eval" => {
             let path = args.get(2).map(|s| s.as_str());
             match path {
-                Some(path) => eval_run_record(path),
+                Some(path) => {
+                    let compare = flag_value(&args[3..], "--compare");
+                    eval_run_record(path, compare.as_deref());
+                }
                 None => {
-                    eprintln!("Usage: harn eval <run.json>");
+                    eprintln!(
+                        "Usage: harn eval <run.json|dir|manifest.json> [--compare <baseline.json>]"
+                    );
                     process::exit(1);
                 }
             }
@@ -398,7 +406,9 @@ fn print_help() {
     println!("    \x1b[1;32mmcp-serve\x1b[0m <file>        Serve tools as MCP server on stdio");
     println!("    \x1b[1;32mruns\x1b[0m inspect <file>    Inspect a persisted workflow run record");
     println!("    \x1b[1;32mreplay\x1b[0m <file>           Replay a saved run record from persisted output");
-    println!("    \x1b[1;32meval\x1b[0m <file>             Evaluate a saved run record as a regression fixture");
+    println!(
+        "    \x1b[1;32meval\x1b[0m <path>             Evaluate a run record, run directory, or eval manifest"
+    );
     println!("    \x1b[1;32madd\x1b[0m <name> --git <url>  Add a dependency to harn.toml");
     println!("    \x1b[1;32minstall\x1b[0m                 Install dependencies from harn.toml");
     println!("    \x1b[1;32mversion\x1b[0m                 Show version info");
@@ -426,23 +436,117 @@ fn print_help() {
     println!("Docs: \x1b[4;36mhttps://github.com/burin-labs/harn\x1b[0m");
 }
 
-fn inspect_run_record(path: &str) {
-    let run = match harn_vm::orchestration::load_run_record(Path::new(path)) {
+fn flag_value(args: &[String], flag: &str) -> Option<String> {
+    args.windows(2).find(|w| w[0] == flag).map(|w| w[1].clone())
+}
+
+fn load_run_record_or_exit(path: &Path) -> harn_vm::orchestration::RunRecord {
+    match harn_vm::orchestration::load_run_record(path) {
         Ok(run) => run,
         Err(error) => {
             eprintln!("Failed to load run record: {error}");
             process::exit(1);
         }
+    }
+}
+
+fn load_eval_suite_manifest_or_exit(path: &Path) -> harn_vm::orchestration::EvalSuiteManifest {
+    let content = fs::read_to_string(path).unwrap_or_else(|error| {
+        eprintln!("Failed to read eval manifest {}: {error}", path.display());
+        process::exit(1);
+    });
+    let mut manifest: harn_vm::orchestration::EvalSuiteManifest = serde_json::from_str(&content)
+        .unwrap_or_else(|error| {
+            eprintln!("Failed to parse eval manifest {}: {error}", path.display());
+            process::exit(1);
+        });
+    if manifest.base_dir.is_none() {
+        manifest.base_dir = path.parent().map(|parent| parent.display().to_string());
+    }
+    manifest
+}
+
+fn file_looks_like_eval_manifest(path: &Path) -> bool {
+    let Ok(content) = fs::read_to_string(path) else {
+        return false;
     };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return false;
+    };
+    json.get("_type").and_then(|value| value.as_str()) == Some("eval_suite_manifest")
+        || json.get("cases").is_some()
+}
+
+fn collect_run_record_paths(path: &str) -> Vec<PathBuf> {
+    let path = Path::new(path);
+    if path.is_file() {
+        return vec![path.to_path_buf()];
+    }
+    if path.is_dir() {
+        let mut entries: Vec<PathBuf> = fs::read_dir(path)
+            .unwrap_or_else(|error| {
+                eprintln!("Failed to read run directory {}: {error}", path.display());
+                process::exit(1);
+            })
+            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+            .filter(|entry| entry.extension().and_then(|ext| ext.to_str()) == Some("json"))
+            .collect();
+        entries.sort();
+        return entries;
+    }
+    eprintln!("Run path does not exist: {}", path.display());
+    process::exit(1);
+}
+
+fn print_run_diff(diff: &harn_vm::orchestration::RunDiffReport) {
+    println!(
+        "Diff: {} -> {} [{} -> {}]",
+        diff.left_run_id, diff.right_run_id, diff.left_status, diff.right_status
+    );
+    println!("Identical: {}", diff.identical);
+    println!("Stage diffs: {}", diff.stage_diffs.len());
+    println!("Transition delta: {}", diff.transition_count_delta);
+    println!("Artifact delta: {}", diff.artifact_count_delta);
+    println!("Checkpoint delta: {}", diff.checkpoint_count_delta);
+    for stage in &diff.stage_diffs {
+        println!("- {} [{}]", stage.node_id, stage.change);
+        for detail in &stage.details {
+            println!("  {}", detail);
+        }
+    }
+}
+
+fn inspect_run_record(path: &str, compare: Option<&str>) {
+    let run = load_run_record_or_exit(Path::new(path));
     println!("Run: {}", run.id);
-    println!("Workflow: {}", run.workflow_name.unwrap_or(run.workflow_id));
+    println!(
+        "Workflow: {}",
+        run.workflow_name
+            .clone()
+            .unwrap_or_else(|| run.workflow_id.clone())
+    );
     println!("Status: {}", run.status);
     println!("Task: {}", run.task);
     println!("Stages: {}", run.stages.len());
     println!("Artifacts: {}", run.artifacts.len());
     println!("Transitions: {}", run.transitions.len());
     println!("Checkpoints: {}", run.checkpoints.len());
-    println!("Pending nodes: {}", run.pending_nodes.join(", "));
+    println!(
+        "Pending nodes: {}",
+        if run.pending_nodes.is_empty() {
+            "-".to_string()
+        } else {
+            run.pending_nodes.join(", ")
+        }
+    );
+    println!(
+        "Replay fixture: {}",
+        if run.replay_fixture.is_some() {
+            "embedded"
+        } else {
+            "derived"
+        }
+    );
     for stage in &run.stages {
         println!(
             "- {} [{}] status={} outcome={} branch={}",
@@ -453,16 +557,14 @@ fn inspect_run_record(path: &str) {
             stage.branch.clone().unwrap_or_else(|| "-".to_string())
         );
     }
+    if let Some(compare_path) = compare {
+        let baseline = load_run_record_or_exit(Path::new(compare_path));
+        print_run_diff(&harn_vm::orchestration::diff_run_records(&baseline, &run));
+    }
 }
 
 fn replay_run_record(path: &str) {
-    let run = match harn_vm::orchestration::load_run_record(Path::new(path)) {
-        Ok(run) => run,
-        Err(error) => {
-            eprintln!("Failed to load run record: {error}");
-            process::exit(1);
-        }
-    };
+    let run = load_run_record_or_exit(Path::new(path));
     println!("Replay: {}", run.id);
     for stage in &run.stages {
         println!(
@@ -513,14 +615,102 @@ fn replay_run_record(path: &str) {
     }
 }
 
-fn eval_run_record(path: &str) {
-    let run = match harn_vm::orchestration::load_run_record(Path::new(path)) {
-        Ok(run) => run,
-        Err(error) => {
-            eprintln!("Failed to load run record: {error}");
+fn eval_run_record(path: &str, compare: Option<&str>) {
+    let path_buf = PathBuf::from(path);
+    if path_buf.is_file() && file_looks_like_eval_manifest(&path_buf) {
+        if compare.is_some() {
+            eprintln!("--compare is not supported with eval suite manifests");
             process::exit(1);
         }
-    };
+        let manifest = load_eval_suite_manifest_or_exit(&path_buf);
+        let suite = harn_vm::orchestration::evaluate_run_suite_manifest(&manifest).unwrap_or_else(
+            |error| {
+                eprintln!(
+                    "Failed to evaluate manifest {}: {error}",
+                    path_buf.display()
+                );
+                process::exit(1);
+            },
+        );
+        println!(
+            "{} {} passed, {} failed, {} total",
+            if suite.pass { "PASS" } else { "FAIL" },
+            suite.passed,
+            suite.failed,
+            suite.total
+        );
+        for case in &suite.cases {
+            println!(
+                "- {} [{}] {}",
+                case.label.clone().unwrap_or_else(|| case.run_id.clone()),
+                case.workflow_id,
+                if case.pass { "PASS" } else { "FAIL" }
+            );
+            if let Some(path) = &case.source_path {
+                println!("  path: {}", path);
+            }
+            if let Some(comparison) = &case.comparison {
+                println!("  baseline identical: {}", comparison.identical);
+                if !comparison.identical {
+                    println!(
+                        "  baseline status: {} -> {}",
+                        comparison.left_status, comparison.right_status
+                    );
+                }
+            }
+            for failure in &case.failures {
+                println!("  {}", failure);
+            }
+        }
+        if !suite.pass {
+            process::exit(1);
+        }
+        return;
+    }
+
+    let paths = collect_run_record_paths(path);
+    if paths.len() > 1 {
+        let mut cases = Vec::new();
+        for path in &paths {
+            let run = load_run_record_or_exit(path);
+            let fixture = run
+                .replay_fixture
+                .clone()
+                .unwrap_or_else(|| harn_vm::orchestration::replay_fixture_from_run(&run));
+            cases.push((run, fixture, Some(path.display().to_string())));
+        }
+        let suite = harn_vm::orchestration::evaluate_run_suite(cases);
+        println!(
+            "{} {} passed, {} failed, {} total",
+            if suite.pass { "PASS" } else { "FAIL" },
+            suite.passed,
+            suite.failed,
+            suite.total
+        );
+        for case in &suite.cases {
+            println!(
+                "- {} [{}] {}",
+                case.run_id,
+                case.workflow_id,
+                if case.pass { "PASS" } else { "FAIL" }
+            );
+            if let Some(path) = &case.source_path {
+                println!("  path: {}", path);
+            }
+            if let Some(comparison) = &case.comparison {
+                println!("  baseline identical: {}", comparison.identical);
+            }
+            for failure in &case.failures {
+                println!("  {}", failure);
+            }
+        }
+        if !suite.pass {
+            process::exit(1);
+        }
+        return;
+    }
+
+    let run = load_run_record_or_exit(&paths[0]);
     let fixture = run
         .replay_fixture
         .clone()
@@ -528,6 +718,10 @@ fn eval_run_record(path: &str) {
     let report = harn_vm::orchestration::evaluate_run_against_fixture(&run, &fixture);
     println!("{}", if report.pass { "PASS" } else { "FAIL" });
     println!("Stages: {}", report.stage_count);
+    if let Some(compare_path) = compare {
+        let baseline = load_run_record_or_exit(Path::new(compare_path));
+        print_run_diff(&harn_vm::orchestration::diff_run_records(&baseline, &run));
+    }
     if !report.failures.is_empty() {
         for failure in &report.failures {
             println!("- {}", failure);

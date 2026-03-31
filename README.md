@@ -66,14 +66,21 @@ println(result.status)
 println(result.visible_text)
 ```
 
-## What Ships In Harn v0.4.31
+## What Ships In Harn v0.4.32
 
 - Typed workflow graphs via `workflow_graph(...)` and `workflow_execute(...)`
   with explicit nodes, edges, validation, policy attachment, map/join style
   stages, and resumable execution.
+- Eval suite manifests and baseline comparisons via `eval_suite_manifest(...)`,
+  `eval_suite_run(...)`, and `harn eval <manifest.json>`, so grouped replay
+  regression suites are first-class runtime data instead of external scripts.
 - Typed artifacts and resources as the real context boundary. Context
   selection is artifact-aware, budget-aware, and policy-driven rather than
   raw prompt concatenation.
+- Host-facing artifact helpers for workspace files, snapshots, editor
+  selections, command/test/verification outputs, and diff/review decisions,
+  so product code can pass structured state into Harn without rebuilding
+  artifact taxonomy or provenance conventions.
 - Durable run records with persisted stage transcripts, artifacts, policy
   decisions, verification outcomes, and CLI inspection/replay/eval entrypoints.
 - Provider-normalized LLM output with `visible_text`, `private_reasoning`,
@@ -88,6 +95,9 @@ println(result.visible_text)
 - ACP/bridge queued-user-message handling modes for agent execution:
   interrupt immediately, inject after the current operation, or defer until
   the agent yields back to the human.
+- Runtime semantic cleanup for older surfaces: repeated `catch e { ... }`
+  bindings now work within the same enclosing block, and float division keeps
+  IEEE `NaN`/`Infinity` behavior instead of raising runtime errors.
 
 ## Why This Matters
 

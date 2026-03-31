@@ -2,6 +2,43 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.4.32
+
+### Added
+
+- **Eval suite manifests** — grouped replay/eval suites are now a typed
+  runtime surface via `eval_suite_manifest(...)`, `eval_suite_run(...)`, and
+  `harn eval <manifest.json>`, with optional baseline run comparisons per case.
+- **Host artifact helper builtins** — new artifact constructors cover
+  workspace files, workspace snapshots, editor selections, command results,
+  verification/test outputs, unified diffs, git diffs, review items, and
+  accept/reject decisions.
+- **Regression coverage for artifact/review flows** — conformance and VM tests
+  now cover eval manifests, diff/review artifacts, baseline comparison
+  reporting, IEEE float division semantics, and repeated catch bindings.
+
+### Changed
+
+- **CLI replay/eval inspection is more useful** — `harn eval` now accepts a
+  manifest file in addition to single run records or run directories, and
+  suite case output includes baseline diff status when comparisons are present.
+- **Artifact taxonomy is more explicit** — `workspace_snapshot`, `git_diff`,
+  `patch_set`, `diff_review`, and `review_decision` are normalized built-in
+  artifact kinds with default priority and provenance-friendly helper APIs.
+- **Typechecker/LSP/docs stay aligned with runtime growth** — the new eval and
+  artifact helper builtins are recognized statically, surfaced in hover and
+  signatures, and documented in the runtime and CLI references.
+
+### Fixed
+
+- **Repeated catch bindings in the same block** — sibling `try/catch`
+  expressions can now reuse the same catch variable name without tripping
+  same-scope immutable redeclaration errors.
+- **Float divide-by-zero semantics** — floating-point division preserves IEEE
+  `NaN`/`Infinity` behavior while integer division by zero still fails.
+- **Release hygiene around run artifacts** — `.harn-runs/` is ignored by git so
+  persisted run records stop polluting release working trees.
+
 ## v0.4.31
 
 ### Added

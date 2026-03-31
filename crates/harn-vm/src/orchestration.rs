@@ -36,11 +36,16 @@ fn normalize_artifact_kind(kind: &str) -> String {
         "resource"
         | "workspace_file"
         | "editor_selection"
+        | "workspace_snapshot"
         | "transcript_summary"
         | "summary"
         | "plan"
         | "diff"
+        | "git_diff"
         | "patch"
+        | "patch_set"
+        | "diff_review"
+        | "review_decision"
         | "verification_result"
         | "test_result"
         | "command_result"
@@ -58,9 +63,9 @@ fn normalize_artifact_kind(kind: &str) -> String {
 fn default_artifact_priority(kind: &str) -> i64 {
     match kind {
         "verification_result" | "test_result" => 100,
-        "diff" | "patch" => 90,
+        "diff" | "git_diff" | "patch" | "patch_set" | "diff_review" | "review_decision" => 90,
         "plan" => 80,
-        "workspace_file" | "editor_selection" | "resource" => 70,
+        "workspace_file" | "workspace_snapshot" | "editor_selection" | "resource" => 70,
         "summary" | "transcript_summary" => 60,
         "command_result" => 50,
         _ => 40,
@@ -518,6 +523,72 @@ pub struct ReplayEvalReport {
     pub pass: bool,
     pub failures: Vec<String>,
     pub stage_count: usize,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ReplayEvalCaseReport {
+    pub run_id: String,
+    pub workflow_id: String,
+    pub label: Option<String>,
+    pub pass: bool,
+    pub failures: Vec<String>,
+    pub stage_count: usize,
+    pub source_path: Option<String>,
+    pub comparison: Option<RunDiffReport>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ReplayEvalSuiteReport {
+    pub pass: bool,
+    pub total: usize,
+    pub passed: usize,
+    pub failed: usize,
+    pub cases: Vec<ReplayEvalCaseReport>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RunStageDiffRecord {
+    pub node_id: String,
+    pub change: String,
+    pub details: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RunDiffReport {
+    pub left_run_id: String,
+    pub right_run_id: String,
+    pub identical: bool,
+    pub status_changed: bool,
+    pub left_status: String,
+    pub right_status: String,
+    pub stage_diffs: Vec<RunStageDiffRecord>,
+    pub transition_count_delta: isize,
+    pub artifact_count_delta: isize,
+    pub checkpoint_count_delta: isize,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct EvalSuiteManifest {
+    #[serde(rename = "_type")]
+    pub type_name: String,
+    pub id: String,
+    pub name: Option<String>,
+    pub base_dir: Option<String>,
+    pub cases: Vec<EvalSuiteCase>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct EvalSuiteCase {
+    pub label: Option<String>,
+    pub run_path: String,
+    pub fixture_path: Option<String>,
+    pub compare_to: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
@@ -994,6 +1065,136 @@ pub fn normalize_run_record(value: &VmValue) -> Result<RunRecord, VmError> {
     Ok(run)
 }
 
+pub fn normalize_eval_suite_manifest(value: &VmValue) -> Result<EvalSuiteManifest, VmError> {
+    let mut manifest: EvalSuiteManifest = parse_json_value(value)?;
+    if manifest.type_name.is_empty() {
+        manifest.type_name = "eval_suite_manifest".to_string();
+    }
+    if manifest.id.is_empty() {
+        manifest.id = new_id("eval_suite");
+    }
+    Ok(manifest)
+}
+
+fn load_replay_fixture(path: &Path) -> Result<ReplayFixture, VmError> {
+    let content = std::fs::read_to_string(path)
+        .map_err(|e| VmError::Runtime(format!("failed to read replay fixture: {e}")))?;
+    serde_json::from_str(&content)
+        .map_err(|e| VmError::Runtime(format!("failed to parse replay fixture: {e}")))
+}
+
+fn resolve_manifest_path(base_dir: Option<&Path>, path: &str) -> PathBuf {
+    let path_buf = PathBuf::from(path);
+    if path_buf.is_absolute() {
+        path_buf
+    } else if let Some(base_dir) = base_dir {
+        base_dir.join(path_buf)
+    } else {
+        path_buf
+    }
+}
+
+pub fn evaluate_run_suite_manifest(
+    manifest: &EvalSuiteManifest,
+) -> Result<ReplayEvalSuiteReport, VmError> {
+    let base_dir = manifest.base_dir.as_deref().map(Path::new);
+    let mut reports = Vec::new();
+    for case in &manifest.cases {
+        let run_path = resolve_manifest_path(base_dir, &case.run_path);
+        let run = load_run_record(&run_path)?;
+        let fixture = match &case.fixture_path {
+            Some(path) => load_replay_fixture(&resolve_manifest_path(base_dir, path))?,
+            None => run
+                .replay_fixture
+                .clone()
+                .unwrap_or_else(|| replay_fixture_from_run(&run)),
+        };
+        let eval = evaluate_run_against_fixture(&run, &fixture);
+        let mut pass = eval.pass;
+        let mut failures = eval.failures;
+        let comparison = match &case.compare_to {
+            Some(path) => {
+                let baseline_path = resolve_manifest_path(base_dir, path);
+                let baseline = load_run_record(&baseline_path)?;
+                let diff = diff_run_records(&baseline, &run);
+                if !diff.identical {
+                    pass = false;
+                    failures.push(format!(
+                        "run differs from baseline {} with {} stage changes",
+                        baseline_path.display(),
+                        diff.stage_diffs.len()
+                    ));
+                }
+                Some(diff)
+            }
+            None => None,
+        };
+        reports.push(ReplayEvalCaseReport {
+            run_id: run.id.clone(),
+            workflow_id: run.workflow_id.clone(),
+            label: case.label.clone(),
+            pass,
+            failures,
+            stage_count: eval.stage_count,
+            source_path: Some(run_path.display().to_string()),
+            comparison,
+        });
+    }
+    let total = reports.len();
+    let passed = reports.iter().filter(|report| report.pass).count();
+    let failed = total.saturating_sub(passed);
+    Ok(ReplayEvalSuiteReport {
+        pass: failed == 0,
+        total,
+        passed,
+        failed,
+        cases: reports,
+    })
+}
+
+pub fn render_unified_diff(path: Option<&str>, before: &str, after: &str) -> String {
+    let before_lines: Vec<&str> = before.lines().collect();
+    let after_lines: Vec<&str> = after.lines().collect();
+    let mut table = vec![vec![0usize; after_lines.len() + 1]; before_lines.len() + 1];
+    for i in (0..before_lines.len()).rev() {
+        for j in (0..after_lines.len()).rev() {
+            table[i][j] = if before_lines[i] == after_lines[j] {
+                table[i + 1][j + 1] + 1
+            } else {
+                table[i + 1][j].max(table[i][j + 1])
+            };
+        }
+    }
+
+    let mut diff = String::new();
+    let file = path.unwrap_or("artifact");
+    diff.push_str(&format!("--- a/{file}\n+++ b/{file}\n"));
+    let mut i = 0;
+    let mut j = 0;
+    while i < before_lines.len() && j < after_lines.len() {
+        if before_lines[i] == after_lines[j] {
+            diff.push_str(&format!(" {}\n", before_lines[i]));
+            i += 1;
+            j += 1;
+        } else if table[i + 1][j] >= table[i][j + 1] {
+            diff.push_str(&format!("-{}\n", before_lines[i]));
+            i += 1;
+        } else {
+            diff.push_str(&format!("+{}\n", after_lines[j]));
+            j += 1;
+        }
+    }
+    while i < before_lines.len() {
+        diff.push_str(&format!("-{}\n", before_lines[i]));
+        i += 1;
+    }
+    while j < after_lines.len() {
+        diff.push_str(&format!("+{}\n", after_lines[j]));
+        j += 1;
+    }
+    diff
+}
+
 pub fn save_run_record(run: &RunRecord, path: Option<&str>) -> Result<String, VmError> {
     let path = path
         .map(PathBuf::from)
@@ -1110,6 +1311,123 @@ pub fn evaluate_run_against_fixture(run: &RunRecord, fixture: &ReplayFixture) ->
         pass: failures.is_empty(),
         failures,
         stage_count: run.stages.len(),
+    }
+}
+
+pub fn evaluate_run_suite(
+    cases: Vec<(RunRecord, ReplayFixture, Option<String>)>,
+) -> ReplayEvalSuiteReport {
+    let mut reports = Vec::new();
+    for (run, fixture, source_path) in cases {
+        let report = evaluate_run_against_fixture(&run, &fixture);
+        reports.push(ReplayEvalCaseReport {
+            run_id: run.id.clone(),
+            workflow_id: run.workflow_id.clone(),
+            label: None,
+            pass: report.pass,
+            failures: report.failures,
+            stage_count: report.stage_count,
+            source_path,
+            comparison: None,
+        });
+    }
+    let total = reports.len();
+    let passed = reports.iter().filter(|report| report.pass).count();
+    let failed = total.saturating_sub(passed);
+    ReplayEvalSuiteReport {
+        pass: failed == 0,
+        total,
+        passed,
+        failed,
+        cases: reports,
+    }
+}
+
+pub fn diff_run_records(left: &RunRecord, right: &RunRecord) -> RunDiffReport {
+    let mut stage_diffs = Vec::new();
+    let mut all_node_ids = BTreeSet::new();
+    all_node_ids.extend(left.stages.iter().map(|stage| stage.node_id.clone()));
+    all_node_ids.extend(right.stages.iter().map(|stage| stage.node_id.clone()));
+
+    for node_id in all_node_ids {
+        let left_stage = left.stages.iter().find(|stage| stage.node_id == node_id);
+        let right_stage = right.stages.iter().find(|stage| stage.node_id == node_id);
+        match (left_stage, right_stage) {
+            (Some(_), None) => stage_diffs.push(RunStageDiffRecord {
+                node_id,
+                change: "removed".to_string(),
+                details: vec!["stage missing from right run".to_string()],
+            }),
+            (None, Some(_)) => stage_diffs.push(RunStageDiffRecord {
+                node_id,
+                change: "added".to_string(),
+                details: vec!["stage missing from left run".to_string()],
+            }),
+            (Some(left_stage), Some(right_stage)) => {
+                let mut details = Vec::new();
+                if left_stage.status != right_stage.status {
+                    details.push(format!(
+                        "status: {} -> {}",
+                        left_stage.status, right_stage.status
+                    ));
+                }
+                if left_stage.outcome != right_stage.outcome {
+                    details.push(format!(
+                        "outcome: {} -> {}",
+                        left_stage.outcome, right_stage.outcome
+                    ));
+                }
+                if left_stage.branch != right_stage.branch {
+                    details.push(format!(
+                        "branch: {:?} -> {:?}",
+                        left_stage.branch, right_stage.branch
+                    ));
+                }
+                if left_stage.produced_artifact_ids.len() != right_stage.produced_artifact_ids.len()
+                {
+                    details.push(format!(
+                        "produced_artifacts: {} -> {}",
+                        left_stage.produced_artifact_ids.len(),
+                        right_stage.produced_artifact_ids.len()
+                    ));
+                }
+                if left_stage.artifacts.len() != right_stage.artifacts.len() {
+                    details.push(format!(
+                        "artifact_records: {} -> {}",
+                        left_stage.artifacts.len(),
+                        right_stage.artifacts.len()
+                    ));
+                }
+                if !details.is_empty() {
+                    stage_diffs.push(RunStageDiffRecord {
+                        node_id,
+                        change: "changed".to_string(),
+                        details,
+                    });
+                }
+            }
+            (None, None) => {}
+        }
+    }
+
+    let status_changed = left.status != right.status;
+    let identical = !status_changed
+        && stage_diffs.is_empty()
+        && left.transitions.len() == right.transitions.len()
+        && left.artifacts.len() == right.artifacts.len()
+        && left.checkpoints.len() == right.checkpoints.len();
+
+    RunDiffReport {
+        left_run_id: left.id.clone(),
+        right_run_id: right.id.clone(),
+        identical,
+        status_changed,
+        left_status: left.status.clone(),
+        right_status: right.status.clone(),
+        stage_diffs,
+        transition_count_delta: right.transitions.len() as isize - left.transitions.len() as isize,
+        artifact_count_delta: right.artifacts.len() as isize - left.artifacts.len() as isize,
+        checkpoint_count_delta: right.checkpoints.len() as isize - left.checkpoints.len() as isize,
     }
 }
 
@@ -1861,6 +2179,148 @@ mod tests {
         let report = evaluate_run_against_fixture(&run, &fixture);
         assert!(report.pass);
         assert!(report.failures.is_empty());
+    }
+
+    #[test]
+    fn replay_eval_suite_reports_failed_case() {
+        let good = RunRecord {
+            id: "run_good".to_string(),
+            workflow_id: "wf".to_string(),
+            status: "completed".to_string(),
+            stages: vec![RunStageRecord {
+                node_id: "act".to_string(),
+                status: "completed".to_string(),
+                outcome: "success".to_string(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let bad = RunRecord {
+            id: "run_bad".to_string(),
+            workflow_id: "wf".to_string(),
+            status: "failed".to_string(),
+            stages: vec![RunStageRecord {
+                node_id: "act".to_string(),
+                status: "failed".to_string(),
+                outcome: "error".to_string(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let suite = evaluate_run_suite(vec![
+            (
+                good.clone(),
+                replay_fixture_from_run(&good),
+                Some("good.json".to_string()),
+            ),
+            (
+                bad.clone(),
+                replay_fixture_from_run(&good),
+                Some("bad.json".to_string()),
+            ),
+        ]);
+        assert!(!suite.pass);
+        assert_eq!(suite.total, 2);
+        assert_eq!(suite.failed, 1);
+        assert!(suite.cases.iter().any(|case| !case.pass));
+    }
+
+    #[test]
+    fn run_diff_reports_changed_stage() {
+        let left = RunRecord {
+            id: "left".to_string(),
+            workflow_id: "wf".to_string(),
+            status: "completed".to_string(),
+            stages: vec![RunStageRecord {
+                node_id: "act".to_string(),
+                status: "completed".to_string(),
+                outcome: "success".to_string(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let right = RunRecord {
+            id: "right".to_string(),
+            workflow_id: "wf".to_string(),
+            status: "failed".to_string(),
+            stages: vec![RunStageRecord {
+                node_id: "act".to_string(),
+                status: "failed".to_string(),
+                outcome: "error".to_string(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let diff = diff_run_records(&left, &right);
+        assert!(diff.status_changed);
+        assert!(!diff.identical);
+        assert_eq!(diff.stage_diffs.len(), 1);
+    }
+
+    #[test]
+    fn eval_suite_manifest_can_fail_on_baseline_diff() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("harn-eval-suite-{}", uuid::Uuid::now_v7()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let baseline_path = temp_dir.join("baseline.json");
+        let candidate_path = temp_dir.join("candidate.json");
+
+        let baseline = RunRecord {
+            id: "baseline".to_string(),
+            workflow_id: "wf".to_string(),
+            status: "completed".to_string(),
+            stages: vec![RunStageRecord {
+                node_id: "act".to_string(),
+                status: "completed".to_string(),
+                outcome: "success".to_string(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let candidate = RunRecord {
+            id: "candidate".to_string(),
+            workflow_id: "wf".to_string(),
+            status: "failed".to_string(),
+            stages: vec![RunStageRecord {
+                node_id: "act".to_string(),
+                status: "failed".to_string(),
+                outcome: "error".to_string(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        save_run_record(&baseline, Some(baseline_path.to_str().unwrap())).unwrap();
+        save_run_record(&candidate, Some(candidate_path.to_str().unwrap())).unwrap();
+
+        let manifest = EvalSuiteManifest {
+            base_dir: Some(temp_dir.display().to_string()),
+            cases: vec![EvalSuiteCase {
+                label: Some("candidate".to_string()),
+                run_path: "candidate.json".to_string(),
+                fixture_path: None,
+                compare_to: Some("baseline.json".to_string()),
+            }],
+            ..Default::default()
+        };
+        let suite = evaluate_run_suite_manifest(&manifest).unwrap();
+        assert!(!suite.pass);
+        assert_eq!(suite.failed, 1);
+        assert!(suite.cases[0].comparison.is_some());
+        assert!(suite.cases[0]
+            .failures
+            .iter()
+            .any(|failure| failure.contains("baseline")));
+    }
+
+    #[test]
+    fn render_unified_diff_marks_removed_and_added_lines() {
+        let diff = render_unified_diff(Some("src/main.rs"), "old\nsame", "new\nsame");
+        assert!(diff.contains("--- a/src/main.rs"));
+        assert!(diff.contains("+++ b/src/main.rs"));
+        assert!(diff.contains("-old"));
+        assert!(diff.contains("+new"));
+        assert!(diff.contains(" same"));
     }
 
     #[test]

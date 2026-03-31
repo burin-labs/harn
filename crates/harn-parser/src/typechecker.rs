@@ -242,11 +242,25 @@ fn builtin_return_type(name: &str) -> InferredType {
         | "workflow_commit"
         | "artifact"
         | "artifact_derive"
+        | "artifact_workspace_file"
+        | "artifact_workspace_snapshot"
+        | "artifact_editor_selection"
+        | "artifact_verification_result"
+        | "artifact_test_result"
+        | "artifact_command_result"
+        | "artifact_diff"
+        | "artifact_git_diff"
+        | "artifact_diff_review"
+        | "artifact_review_decision"
         | "run_record"
         | "run_record_save"
         | "run_record_load"
         | "run_record_fixture"
         | "run_record_eval"
+        | "run_record_eval_suite"
+        | "run_record_diff"
+        | "eval_suite_manifest"
+        | "eval_suite_run"
         | "workflow_execute"
         | "transcript_compact"
         | "transcript_summarize"
@@ -350,6 +364,16 @@ fn is_builtin(name: &str) -> bool {
             | "workflow_execute"
             | "artifact"
             | "artifact_derive"
+            | "artifact_workspace_file"
+            | "artifact_workspace_snapshot"
+            | "artifact_editor_selection"
+            | "artifact_verification_result"
+            | "artifact_test_result"
+            | "artifact_command_result"
+            | "artifact_diff"
+            | "artifact_git_diff"
+            | "artifact_diff_review"
+            | "artifact_review_decision"
             | "artifact_select"
             | "artifact_context"
             | "run_record"
@@ -357,6 +381,10 @@ fn is_builtin(name: &str) -> bool {
             | "run_record_load"
             | "run_record_fixture"
             | "run_record_eval"
+            | "run_record_eval_suite"
+            | "run_record_diff"
+            | "eval_suite_manifest"
+            | "eval_suite_run"
             | "stat"
             | "exec"
             | "shell"
@@ -2000,6 +2028,20 @@ add("hello", 2) }"#,
   let report: dict = workflow_policy_report(flow, {tools: ["read"], capabilities: {workspace: ["read_text"]}})
   let run: dict = workflow_execute("task", flow, [], {})
   let fixture: dict = run_record_fixture(run?.run)
+  let suite: dict = run_record_eval_suite([{run: run?.run, fixture: fixture}])
+  let diff: dict = run_record_diff(run?.run, run?.run)
+  let manifest: dict = eval_suite_manifest({cases: [{run_path: "run.json"}]})
+  let suite_report: dict = eval_suite_run(manifest)
+  let wf: dict = artifact_workspace_file("src/main.rs", "fn main() {}", {source: "host"})
+  let snap: dict = artifact_workspace_snapshot(["src/main.rs"], "snapshot")
+  let selection: dict = artifact_editor_selection("src/main.rs", "main")
+  let verify: dict = artifact_verification_result("verify", "ok")
+  let test_result: dict = artifact_test_result("tests", "pass")
+  let cmd: dict = artifact_command_result("cargo test", {status: 0})
+  let patch: dict = artifact_diff("src/main.rs", "old", "new")
+  let git: dict = artifact_git_diff("diff --git a b")
+  let review: dict = artifact_diff_review(patch, "review me")
+  let decision: dict = artifact_review_decision(review, "accepted")
   let transcript = transcript_reset({metadata: {source: "test"}})
   let visible: string = transcript_render_visible(transcript_archive(transcript))
   let events: list = transcript_events(transcript)
@@ -2007,6 +2049,20 @@ add("hello", 2) }"#,
   println(report)
   println(run)
   println(fixture)
+  println(suite)
+  println(diff)
+  println(manifest)
+  println(suite_report)
+  println(wf)
+  println(snap)
+  println(selection)
+  println(verify)
+  println(test_result)
+  println(cmd)
+  println(patch)
+  println(git)
+  println(review)
+  println(decision)
   println(visible)
   println(events)
   println(context)

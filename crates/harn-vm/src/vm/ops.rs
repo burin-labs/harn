@@ -1347,11 +1347,8 @@ impl super::Vm {
         match (&a, &b) {
             (VmValue::Int(_), VmValue::Int(y)) if *y == 0 => Err(VmError::DivisionByZero),
             (VmValue::Int(x), VmValue::Int(y)) => Ok(VmValue::Int(x / y)),
-            (VmValue::Float(_), VmValue::Float(y)) if *y == 0.0 => Err(VmError::DivisionByZero),
             (VmValue::Float(x), VmValue::Float(y)) => Ok(VmValue::Float(x / y)),
-            (VmValue::Int(_), VmValue::Float(y)) if *y == 0.0 => Err(VmError::DivisionByZero),
             (VmValue::Int(x), VmValue::Float(y)) => Ok(VmValue::Float(*x as f64 / y)),
-            (VmValue::Float(_), VmValue::Int(y)) if *y == 0 => Err(VmError::DivisionByZero),
             (VmValue::Float(x), VmValue::Int(y)) => Ok(VmValue::Float(x / *y as f64)),
             _ => Err(VmError::Runtime(format!(
                 "Cannot divide {} by {}",
