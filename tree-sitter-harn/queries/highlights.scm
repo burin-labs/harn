@@ -72,9 +72,6 @@
 (call_expression
   function: (identifier) @function.call)
 
-(method_call
-  method: (identifier) @function.method)
-
 ; Property access
 (property_access
   property: (identifier) @property)
