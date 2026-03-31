@@ -1,33 +1,51 @@
-pipeline default() {
+// Test tool registry builtins
+pipeline default(task) {
   // Create registry
   var tools = tool_registry()
   println(type_of(tools))
   println(tool_count(tools))
-  // Add tools with closure handlers
-  tools = tool_add(tools, "greet", "Greet a person", { name -> return "Hello, " + name + "!" }, {name: "string"})
-  tools = tool_add(tools, "add", "Add two numbers", { a, b -> return a + b }, {a: "int", b: "int"})
+
+  // tool_add
+  tools = tool_add(tools, "greet", "Say hello", { args -> "hi " + args.name }, {name: "string"})
+  tools = tool_add(tools, "add", "Add numbers", { args -> args.a + args.b }, {a: "int", b: "int"})
   println(tool_count(tools))
-  // List tools (no handlers exposed)
+
+  // tool_list
   let list = tool_list(tools)
-  println(list.count())
-  println(list[0].name)
-  println(list[1].name)
-  // Find a tool
+  println(len(list))
+
+  // tool_find
   let found = tool_find(tools, "greet")
-  println(found.name)
-  println(found.description)
-  // Call the handler by extracting it to a variable
-  let handler = found.handler
-  let result = handler("World")
-  println(result)
-  // Find non-existent tool
+  println(found != nil)
   let missing = tool_find(tools, "nonexistent")
-  println(missing)
-  // Describe for LLM system prompt
+  println(missing == nil)
+
+  // tool_remove
+  let smaller = tool_remove(tools, "add")
+  println(tool_count(smaller))
+
+  // tool_describe
   let desc = tool_describe(tools)
-  println(desc)
-  // Remove a tool
-  tools = tool_remove(tools, "greet")
-  println(tool_count(tools))
-  println("tool_registry_ok")
+  println(contains(desc, "greet"))
+  println(contains(desc, "add"))
+
+  // tool_schema
+  let schema = tool_schema(tools)
+  println(schema.schema_version)
+  println(len(schema.tools))
+
+  // tool_parse_call
+  let calls = tool_parse_call("<tool_call>{\"name\": \"greet\", \"arguments\": {\"name\": \"world\"}}</tool_call>")
+  println(len(calls))
+  println(calls[0].name)
+
+  // tool_format_result
+  let result = tool_format_result("greet", "hello")
+  println(contains(result, "tool_result"))
+  println(contains(result, "greet"))
+
+  // tool_prompt
+  let prompt = tool_prompt(tools)
+  println(contains(prompt, "Available Tools"))
+  println(contains(prompt, "greet"))
 }

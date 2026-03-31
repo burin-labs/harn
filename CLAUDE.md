@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 This repository implements Harn, the agent harness language and runtime.
 
 ## What Harn Is
@@ -54,15 +56,22 @@ cargo run --bin harn -- eval .harn-runs/<run>.json
 ## Quality Gates
 
 ```bash
-make fmt
-make lint
-make test
-make conformance
-make all
+make fmt          # cargo fmt --all
+make lint         # clippy with -D warnings
+make test         # cargo test --workspace
+make conformance  # run the conformance suite
+make all          # fmt, then lint + test + conformance (use -j for parallel)
 ```
 
-`make lint` runs clippy with warnings denied. `make all` is the main
-release-quality aggregate check.
+`make all` is the main release-quality aggregate check. It also runs
+`make lint-md` (markdownlint), `make lint-harn` (harn check on conformance
+tests), and `make fmt-harn` (harn fmt --check on conformance tests).
+
+## Publishing
+
+Use `scripts/publish.sh` for crate releases — it publishes all 8 crates
+to crates.io in dependency order with rate-limit retry logic. Supports
+`--dry-run` and `--allow-dirty` flags.
 
 ## Architecture
 
@@ -87,6 +96,24 @@ source -> Lexer -> Parser -> TypeChecker -> Compiler -> VM
 - `harn-dap`: debugger.
 - `tree-sitter-harn`: syntax grammar for editor integrations.
 
+Note: `harn-wasm` is excluded from the workspace and built separately
+with `cd crates/harn-wasm && wasm-pack build`.
+
+### Stdlib registration
+
+Builtins are registered in three tiers in `crates/harn-vm/src/stdlib/stdlib.rs`:
+
+- `register_core_stdlib()` — pure/deterministic (types, math, strings, JSON,
+  datetime, regex, crypto, sets, shapes, testing)
+- `register_io_stdlib()` — OS access (filesystem, process, logging, tracing)
+- `register_agent_stdlib()` — network/async (concurrency, tools, agents,
+  HTTP, LLM, MCP)
+
+`stdlib_builtin_names()` creates a temporary VM, registers all builtins,
+and extracts names (plus opcode-level keywords like `spawn`, `await`,
+`cancel`). The linter and LSP consume this list — there is no separate
+hardcoded name list.
+
 ### Runtime modules worth knowing
 
 - `crates/harn-vm/src/llm/`
@@ -101,6 +128,17 @@ source -> Lexer -> Parser -> TypeChecker -> Compiler -> VM
   host bridge, JSON-RPC integration, queued user messages.
 - `crates/harn-vm/src/llm/conversation.rs`
   transcript lifecycle builtins.
+
+## Conformance Tests
+
+Tests live in `conformance/tests/` as paired `.harn` + `.expected` files.
+The `.harn` file contains Harn source; the `.expected` file contains the
+exact expected stdout (e.g. `[harn] 5`). Shared helpers live in
+`conformance/tests/lib/`. Run a single test with:
+
+```bash
+cargo run --bin harn -- test conformance --filter <test_name>
+```
 
 ## Alignment Rules
 

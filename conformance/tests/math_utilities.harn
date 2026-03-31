@@ -1,0 +1,24 @@
+// Test sign, is_nan, is_infinite, atan2
+pipeline default(task) {
+  // sign
+  println(sign(42))
+  println(sign(-7))
+  println(sign(0))
+  println(sign(3.14))
+  println(sign(-0.5))
+  println(sign(0.0))
+
+  // is_nan: sqrt(-1) produces NaN
+  println(is_nan(1.0))
+  println(is_nan(sqrt(-1.0)))
+
+  // is_infinite on normal values
+  println(is_infinite(1.0))
+  println(is_infinite(0.0))
+
+  // atan2
+  let result = atan2(1.0, 1.0)
+  // atan2(1,1) = pi/4 ~ 0.785
+  println(result > 0.78)
+  println(result < 0.79)
+}

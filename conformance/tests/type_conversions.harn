@@ -1,0 +1,31 @@
+// Test to_int and to_float builtins
+pipeline default(task) {
+  // to_int from int (passthrough)
+  println(to_int(42))
+  // to_int from float (truncates)
+  println(to_int(3.9))
+  println(to_int(-2.7))
+  // to_int from string
+  println(to_int("123"))
+  println(to_int("-5"))
+  // to_int from invalid string returns nil
+  println(to_int("abc"))
+  // to_int from nil returns nil
+  println(to_int(nil))
+
+  // to_float from float (passthrough)
+  println(to_float(3.14))
+  // to_float from int
+  println(to_float(10))
+  // to_float from string
+  println(to_float("2.5"))
+  println(to_float("-1.0"))
+  // to_float from invalid string returns nil
+  println(to_float("xyz"))
+  // to_float from nil returns nil
+  println(to_float(nil))
+
+  // to_string round-trips
+  println(type_of(to_int(5)))
+  println(type_of(to_float(5)))
+}

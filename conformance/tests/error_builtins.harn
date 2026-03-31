@@ -1,0 +1,36 @@
+// Test error category builtins
+pipeline default(task) {
+  // throw_error and error_category
+  try {
+    throw_error("request timed out", "timeout")
+  } catch e {
+    println(error_category(e))
+    println(is_timeout(e))
+    println(is_rate_limited(e))
+  }
+
+  // rate limit error
+  try {
+    throw_error("slow down", "rate_limit")
+  } catch e2 {
+    println(error_category(e2))
+    println(is_rate_limited(e2))
+    println(is_timeout(e2))
+  }
+
+  // generic error
+  try {
+    throw_error("something broke")
+  } catch e3 {
+    println(error_category(e3))
+  }
+
+  // error_category on string uses API-specific heuristics
+  println(error_category("Deadline exceeded"))
+  println(error_category("overloaded_error"))
+  println(error_category("some random error"))
+
+  // is_timeout / is_rate_limited on non-errors
+  println(is_timeout("not an error"))
+  println(is_rate_limited(42))
+}

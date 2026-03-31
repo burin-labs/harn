@@ -1,0 +1,39 @@
+// Test set predicate builtins (function-call syntax)
+pipeline default(task) {
+  let a = set(1, 2, 3, 4)
+  let b = set(3, 4, 5, 6)
+  let small = set(2, 3)
+  let disjoint = set(10, 20)
+  let empty = set()
+
+  // set_symmetric_difference
+  let sd = set_symmetric_difference(a, b)
+  println(len(sd))
+  println(set_contains(sd, 1))
+  println(set_contains(sd, 2))
+  println(set_contains(sd, 5))
+  println(set_contains(sd, 6))
+  println(set_contains(sd, 3))
+  println(set_contains(sd, 4))
+
+  // symmetric difference with self is empty
+  println(len(set_symmetric_difference(a, a)))
+
+  // set_is_subset
+  println(set_is_subset(small, a))
+  println(set_is_subset(a, small))
+  println(set_is_subset(a, a))
+  println(set_is_subset(empty, a))
+
+  // set_is_superset
+  println(set_is_superset(a, small))
+  println(set_is_superset(small, a))
+  println(set_is_superset(a, a))
+  println(set_is_superset(a, empty))
+
+  // set_is_disjoint
+  println(set_is_disjoint(a, disjoint))
+  println(set_is_disjoint(a, b))
+  println(set_is_disjoint(empty, a))
+  println(set_is_disjoint(empty, empty))
+}
