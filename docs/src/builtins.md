@@ -799,3 +799,66 @@ Notes:
   user message) or a list of `{role, content}` dicts.
 - Resource template handlers receive URI template variables as a dict and
   return the resource text.
+
+## Workflow and orchestration builtins
+
+These builtins expose Harn's typed orchestration runtime.
+
+### Workflow graph and planning
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `workflow_graph(config)` | config: dict | workflow graph | Normalize a workflow definition into the typed workflow IR |
+| `workflow_validate(graph, ceiling?)` | graph: workflow, ceiling: dict (optional) | dict | Validate graph structure and capability ceilings |
+| `workflow_inspect(graph)` | graph: workflow | dict | Return graph plus validation summary |
+| `workflow_clone(graph)` | graph: workflow | workflow graph | Clone a workflow and append an audit entry |
+| `workflow_insert_node(graph, node, edge?)` | graph, node, edge | workflow graph | Insert a node and optional edge |
+| `workflow_replace_node(graph, node_id, node)` | graph, node_id, node | workflow graph | Replace a node definition |
+| `workflow_rewire(graph, from, to, branch?)` | graph, from, to, branch | workflow graph | Rewire an edge |
+| `workflow_set_model_policy(graph, node_id, policy)` | graph, node_id, policy | workflow graph | Set per-node model policy |
+| `workflow_set_context_policy(graph, node_id, policy)` | graph, node_id, policy | workflow graph | Set per-node context policy |
+| `workflow_set_transcript_policy(graph, node_id, policy)` | graph, node_id, policy | workflow graph | Set per-node transcript policy |
+| `workflow_diff(left, right)` | left, right | dict | Compare two workflow graphs |
+| `workflow_commit(graph, reason?)` | graph, reason | workflow graph | Validate and append a commit audit entry |
+
+### Workflow execution and run records
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `workflow_execute(task, graph, artifacts?, options?)` | task, graph, artifacts, options | dict | Execute a workflow and persist a run record |
+| `run_record(payload)` | payload: dict | run record | Normalize a run record |
+| `run_record_save(run, path?)` | run, path | dict | Persist a run record |
+| `run_record_load(path)` | path: string | run record | Load a run record from disk |
+
+`workflow_execute` options currently include:
+
+- `max_steps`
+- `resume_path`
+- `resume_run`
+
+### Artifacts and context
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `artifact(payload)` | payload: dict | artifact | Normalize a typed artifact/resource |
+| `artifact_derive(parent, kind, extra?)` | parent, kind, extra | artifact | Derive a new artifact from a prior one |
+| `artifact_select(artifacts, policy?)` | artifacts, policy | list | Select artifacts under context policy and budget |
+| `artifact_context(artifacts, policy?)` | artifacts, policy | string | Render selected artifacts into context |
+
+Core artifact kinds commonly used by the runtime include `resource`,
+`summary`, `analysis_note`, `diff`, `test_result`, `verification_result`,
+and `plan`.
+
+### Transcript lifecycle
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `transcript(metadata?)` | metadata: any | transcript | Create an empty transcript |
+| `transcript_messages(transcript)` | transcript | list | Return transcript messages |
+| `transcript_events(transcript)` | transcript | list | Return canonical transcript events |
+| `transcript_summary(transcript)` | transcript | string or nil | Return transcript summary |
+| `transcript_fork(transcript, options?)` | transcript, options | transcript | Fork transcript state |
+| `transcript_compact(transcript, options?)` | transcript, options | transcript | Locally compact transcript messages |
+| `transcript_summarize(transcript, options?)` | transcript, options | transcript | Compact via LLM-generated summary |
+| `transcript_render_visible(transcript)` | transcript | string | Render only public/human-visible messages |
+| `transcript_render_full(transcript)` | transcript | string | Render the full execution history |

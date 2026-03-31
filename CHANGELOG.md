@@ -2,6 +2,50 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.4.30
+
+### Added
+
+- **Typed workflow runtime** — `workflow_graph()`, `workflow_validate()`,
+  `workflow_execute()`, and workflow edit builtins now provide a typed
+  orchestration graph layer above raw `task_run`-style helpers.
+- **Typed artifacts/resources** — first-class artifact records now support
+  provenance, lineage, relevance, token estimates, and policy-driven context
+  selection via `artifact()`, `artifact_derive()`, `artifact_select()`, and
+  `artifact_context()`.
+- **Durable run records and CLI inspection** — workflow executions now persist
+  structured run records with stage data, transcripts, artifacts, and policy
+  metadata. New CLI commands: `harn runs inspect`, `harn replay`, and
+  `harn eval`.
+- **Canonical transcript event model** — transcripts now carry normalized
+  `events`, with helpers for visible rendering, full rendering, compaction,
+  summarization, forking, export/import, and lifecycle management.
+- **Provider-normalized response schema** — `llm_call()` and `agent_loop()`
+  now expose canonical `visible_text`, `private_reasoning`, `provider`,
+  `blocks`, and normalized tool-call metadata across providers and mocks.
+- **Queued human-message delivery modes for ACP/bridge hosts** — agent loops
+  now support `interrupt_immediate`, `finish_step`, and
+  `wait_for_completion` delivery semantics inside the runtime.
+
+### Changed
+
+- **`workflow_run()` removed** — it had become a dead narrow wrapper over
+  `workflow_execute()`. `task_run()` remains the compatibility helper, and
+  `workflow_execute()` is the direct runtime entrypoint.
+- **Workflow execution is more inspectable** — stage records now include
+  policy metadata, verification outcome fields, transcript policy effects,
+  and persisted run-path handling.
+- **Docs and help surfaces updated** — README, docs book, CLI reference,
+  and contributor guidance now reflect the workflow/artifact/run-record
+  runtime and current ACP usage.
+
+### Fixed
+
+- **Capability-ceiling enforcement** — workflow validation now explicitly
+  rejects attempted privilege expansion relative to the runtime ceiling.
+- **Queued message tests** — bridge-side queued-message behavior is covered
+  by runtime tests without relying on `tokio::test`.
+
 ## v0.4.29
 
 ### Added

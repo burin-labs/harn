@@ -4,7 +4,7 @@
 //! file I/O, tool execution) to a host process over stdin/stdout JSON-RPC.
 //! The host (e.g., Burin IDE) handles these requests using its own providers.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -36,6 +36,31 @@ pub struct HostBridge {
     session_id: std::sync::Mutex<String>,
     /// Name of the currently executing Harn script (without .harn suffix).
     script_name: std::sync::Mutex<String>,
+    /// User messages injected by the host while a run is active.
+    queued_user_messages: Arc<Mutex<VecDeque<QueuedUserMessage>>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum QueuedUserMessageMode {
+    InterruptImmediate,
+    FinishStep,
+    WaitForCompletion,
+}
+
+impl QueuedUserMessageMode {
+    fn from_str(value: &str) -> Self {
+        match value {
+            "interrupt_immediate" | "interrupt" => Self::InterruptImmediate,
+            "finish_step" | "after_current_operation" => Self::FinishStep,
+            _ => Self::WaitForCompletion,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QueuedUserMessage {
+    pub content: String,
+    pub mode: QueuedUserMessageMode,
 }
 
 // Default doesn't apply — new() spawns async tasks requiring a tokio LocalSet.
@@ -49,10 +74,13 @@ impl HostBridge {
         let pending: Arc<Mutex<HashMap<u64, oneshot::Sender<serde_json::Value>>>> =
             Arc::new(Mutex::new(HashMap::new()));
         let cancelled = Arc::new(AtomicBool::new(false));
+        let queued_user_messages: Arc<Mutex<VecDeque<QueuedUserMessage>>> =
+            Arc::new(Mutex::new(VecDeque::new()));
 
         // Stdin reader: reads JSON-RPC lines and dispatches responses
         let pending_clone = pending.clone();
         let cancelled_clone = cancelled.clone();
+        let queued_clone = queued_user_messages.clone();
         tokio::task::spawn_local(async move {
             let stdin = tokio::io::stdin();
             let reader = tokio::io::BufReader::new(stdin);
@@ -74,6 +102,28 @@ impl HostBridge {
                     if let Some(method) = msg["method"].as_str() {
                         if method == "cancel" {
                             cancelled_clone.store(true, Ordering::SeqCst);
+                        } else if method == "user_message"
+                            || method == "session/input"
+                            || method == "agent/user_message"
+                        {
+                            let params = &msg["params"];
+                            let content = params
+                                .get("content")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string();
+                            if !content.is_empty() {
+                                let mode = QueuedUserMessageMode::from_str(
+                                    params
+                                        .get("mode")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("wait_for_completion"),
+                                );
+                                queued_clone
+                                    .lock()
+                                    .await
+                                    .push_back(QueuedUserMessage { content, mode });
+                            }
                         }
                     }
                     continue;
@@ -100,6 +150,7 @@ impl HostBridge {
             stdout_lock: Arc::new(std::sync::Mutex::new(())),
             session_id: std::sync::Mutex::new(String::new()),
             script_name: std::sync::Mutex::new(String::new()),
+            queued_user_messages,
         }
     }
 
@@ -121,6 +172,7 @@ impl HostBridge {
             stdout_lock,
             session_id: std::sync::Mutex::new(String::new()),
             script_name: std::sync::Mutex::new(String::new()),
+            queued_user_messages: Arc::new(Mutex::new(VecDeque::new())),
         }
     }
 
@@ -256,6 +308,41 @@ impl HostBridge {
     /// Check if the host has sent a cancel notification.
     pub fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::SeqCst)
+    }
+
+    pub async fn push_queued_user_message(&self, content: String, mode: &str) {
+        self.queued_user_messages
+            .lock()
+            .await
+            .push_back(QueuedUserMessage {
+                content,
+                mode: QueuedUserMessageMode::from_str(mode),
+            });
+    }
+
+    pub async fn take_queued_user_messages(
+        &self,
+        include_interrupt_immediate: bool,
+        include_finish_step: bool,
+        include_wait_for_completion: bool,
+    ) -> Vec<QueuedUserMessage> {
+        let mut queue = self.queued_user_messages.lock().await;
+        let mut selected = Vec::new();
+        let mut retained = VecDeque::new();
+        while let Some(message) = queue.pop_front() {
+            let should_take = match message.mode {
+                QueuedUserMessageMode::InterruptImmediate => include_interrupt_immediate,
+                QueuedUserMessageMode::FinishStep => include_finish_step,
+                QueuedUserMessageMode::WaitForCompletion => include_wait_for_completion,
+            };
+            if should_take {
+                selected.push(message);
+            } else {
+                retained.push_back(message);
+            }
+        }
+        *queue = retained;
+        selected
     }
 
     /// Send an output notification (for log/print in bridge mode).
@@ -452,6 +539,36 @@ mod tests {
         assert!(!cancelled.load(Ordering::SeqCst));
         cancelled.store(true, Ordering::SeqCst);
         assert!(cancelled.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn queued_messages_are_filtered_by_delivery_mode() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let bridge = HostBridge::from_parts(
+                Arc::new(Mutex::new(HashMap::new())),
+                Arc::new(AtomicBool::new(false)),
+                Arc::new(std::sync::Mutex::new(())),
+                1,
+            );
+            bridge
+                .push_queued_user_message("first".to_string(), "finish_step")
+                .await;
+            bridge
+                .push_queued_user_message("second".to_string(), "wait_for_completion")
+                .await;
+
+            let finish_step = bridge.take_queued_user_messages(false, true, false).await;
+            assert_eq!(finish_step.len(), 1);
+            assert_eq!(finish_step[0].content, "first");
+
+            let turn_end = bridge.take_queued_user_messages(false, false, true).await;
+            assert_eq!(turn_end.len(), 1);
+            assert_eq!(turn_end[0].content, "second");
+        });
     }
 
     #[test]

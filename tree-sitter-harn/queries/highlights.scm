@@ -29,8 +29,6 @@
 "impl" @keyword
 "interface" @keyword
 "where" @keyword
-"break" @keyword
-"continue" @keyword
 "yield" @keyword
 "deadline" @keyword
 "guard" @keyword

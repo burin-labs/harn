@@ -1,245 +1,154 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with
-code in this repository.
+This repository implements Harn, the agent harness language and runtime.
 
-## What is Harn?
+## What Harn Is
 
-Harn is a pipeline-oriented programming language for orchestrating AI coding
-agents. It features pipelines, first-class functions, pattern matching, enums,
-async/concurrency primitives (channels, mutexes, atomics), and LLM builtins.
+Harn is a language plus runtime for orchestrating coding agents. The key
+design goal is to keep product applications thin: host apps should mainly
+declare capabilities, workflow templates, policy ceilings, and UI/session
+hooks, while Harn owns orchestration behavior.
 
-## Build & run commands
+That means the runtime now includes:
+
+- LLM calls and persistent agent loops
+- typed workflow graphs and workflow execution
+- typed artifacts/resources for context assembly
+- transcript lifecycle management and transcript event normalization
+- run records, replay/eval surfaces, and provenance
+- ACP/bridge host integration with queued human-message delivery policies
+- capability-ceiling enforcement for nested orchestration
+
+## Core Commands
 
 ```bash
-# Build everything
+# Build
 cargo build
 
-# Run a .harn file
+# Run a file
 cargo run --bin harn -- run examples/hello.harn
 
-# Run conformance test suite (the primary test mechanism)
+# Run the conformance suite
 cargo run --bin harn -- test conformance
 
-# Run Rust unit tests
-cargo test
+# Run a targeted conformance case
+cargo run --bin harn -- test conformance --filter workflow_runtime
 
-# Run tests for a specific crate
-cargo test -p harn-parser
-cargo test -p harn-vm
+# Rust tests
+cargo test --workspace
 
-# Run a single Rust test by name
-cargo test -p harn-vm test_parallel_basic
-
-# REPL
-cargo run --bin harn -- repl
-
-# Format a .harn file
-cargo run --bin harn -- fmt examples/hello.harn
+# Type-check / lint / format
+cargo run --bin harn -- check examples/hello.harn
+cargo run --bin harn -- lint examples/hello.harn
 cargo run --bin harn -- fmt --check examples/hello.harn
 
-# Lint a .harn file
-cargo run --bin harn -- lint examples/hello.harn
+# ACP
+cargo run --bin harn -- acp
 
-# Build WASM target (excluded from workspace)
-cd crates/harn-wasm && wasm-pack build
+# Run records
+cargo run --bin harn -- runs inspect .harn-runs/<run>.json
+cargo run --bin harn -- replay .harn-runs/<run>.json
+cargo run --bin harn -- eval .harn-runs/<run>.json
 ```
 
-## Quality commands
+## Quality Gates
 
 ```bash
-# Run all checks (format, lint, test, conformance) — use -j for parallel
-make all -j
-
-# Clippy lints (treats warnings as errors)
-make lint
-
-# Markdown lint
-make lint-md
-
-# Auto-format
 make fmt
-
-# Format check (CI mode, no changes)
-make fmt-check
+make lint
+make test
+make conformance
+make all
 ```
 
-Always run `make lint` before committing — clippy warnings are treated
-as errors. Pre-commit hooks (`.githooks/pre-commit`) run fmt + clippy +
-markdown lint automatically. Set up with: `git config core.hooksPath .githooks`
+`make lint` runs clippy with warnings denied. `make all` is the main
+release-quality aggregate check.
 
 ## Architecture
 
-Single execution backend: source -> Lexer -> Parser -> TypeChecker ->
-Compiler -> VM (async bytecode, explicit call frames). True concurrency
-via `tokio::task::spawn_local` for `parallel`, `parallel_map`, and
-`spawn`/`await`/`cancel`.
+Execution pipeline:
+
+```text
+source -> Lexer -> Parser -> TypeChecker -> Compiler -> VM
+```
 
 ### Workspace crates
 
-- **harn-lexer** -- Tokenizer with span tracking (byte offsets + line/column).
-  Token types in `token.rs`, scanning in `lexer.rs`.
-- **harn-parser** -- AST definition (`ast.rs` with `SNode = Spanned<Node>`),
-  recursive-descent parser (`parser.rs`), static type checker
-  (`typechecker.rs`), diagnostic renderer (`diagnostic.rs`).
-  Supports interfaces, generic constraints (`where T: Interface`),
-  try-expressions, and spread arguments.
-- **harn-vm** -- The sole execution engine. Modular structure:
-  `value.rs` (VmValue, VmEnv, errors), `chunk.rs` (opcodes, bytecode),
-  `compiler.rs` (AST -> bytecode, pipe placeholder desugaring),
-  `vm.rs` (async execution loop), `stdlib.rs` (100+ builtin functions),
-  `stdlib_modules.rs` (embedded std/text, std/collections .harn modules),
-  `store.rs` (persistent key-value store backed by .harn/store.json),
-  `metadata.rs` (project metadata store for `.burin/metadata/` shards),
-  `http.rs` (HTTP client with retries),
-  `llm.rs` (LLM calls for Anthropic/OpenAI/Ollama, agent_loop with
-  tool support returning `{status, text, iterations, duration_ms}`),
-  `mcp.rs` (MCP client: tools, resources, and prompts),
-  `bridge.rs` / `bridge_builtins.rs` (JSON-RPC host delegation;
-  error code `-32001` = tool rejected → `ErrorCategory::ToolRejected`).
-  50+ opcodes including TailCall, GetPropertyOpt, MethodCallOpt,
-  Slice, CallSpread, TryExpr, Contains (for `in`/`not in`),
-  concurrency, imports, enums, interfaces, and deadlines. In bridge mode,
-  unknown builtins are automatically delegated to the host via
-  `builtin_call` JSON-RPC. Stdlib .harn files live in `stdlib/` at
-  the repo root and are embedded via `include_str!`.
-- **harn-fmt** -- AST-based code formatter. Canonical 2-space indent style.
-- **harn-lint** -- Linter with 6 rules: unused-variable, unused-parameter,
-  unreachable-code, mutable-never-reassigned, empty-block, shadow-variable.
-  Builtin name list is derived from the VM's actual registrations via
-  `harn_vm::stdlib::stdlib_builtin_names()` — no hardcoded list.
-- **harn-cli** -- CLI entry point. Subcommands: `run`, `test`, `repl`,
-  `version`, `fmt`, `lint`, `init`, `acp`, `serve`.
-  `acp.rs` (ACP JSON-RPC server with builtin delegation,
-  `terminal/*` and `fs/*` support),
-  `a2a.rs` (Agent-to-Agent HTTP server with Agent Card).
-  Also: `mcp-serve` subcommand to serve Harn pipelines as MCP servers.
-- **harn-lsp** -- Language Server Protocol implementation. Features:
-  completion, hover (builtins + local functions with signatures and
-  doc comments), go-to-definition, references, rename, document
-  symbols, workspace symbols, signature help, semantic tokens, code
-  actions (quick-fix for lint warnings).
-- **harn-dap** -- Debug Adapter Protocol implementation. Supports
-  breakpoints (including conditional), stepping, variable inspection,
-  expression evaluation (dot-access, subscripts, len/type_of),
-  exception breakpoints.
-- **harn-wasm** -- WASM target (excluded from workspace, built with
-  wasm-pack). Contains its own minimal sync interpreter for browser use.
+- `harn-lexer`: tokenization and span tracking.
+- `harn-parser`: AST, parser, type checker, diagnostics.
+- `harn-vm`: bytecode compiler, interpreter, stdlib, LLM providers,
+  transcripts, orchestration runtime, ACP/MCP runtime integration.
+- `harn-cli`: command-line interface, conformance runner, ACP server,
+  A2A server, run-record inspection/replay/eval.
+- `harn-lint`: static linting. Builtin names come from the VM, so linter
+  builtin awareness stays aligned with runtime registration.
+- `harn-fmt`: formatter.
+- `harn-lsp`: language server.
+- `harn-dap`: debugger.
+- `tree-sitter-harn`: syntax grammar for editor integrations.
 
-### Key design patterns
+### Runtime modules worth knowing
 
-**Implicit pipeline (script mode)**: Files without a `pipeline` block
-execute all top-level statements directly. The compiler treats the
-entire file as an implicit entry point. If a pipeline IS present,
-only the pipeline body executes (existing behavior).
+- `crates/harn-vm/src/llm/`
+  provider clients, response normalization, transcript helpers,
+  agent loops, tool handling, replay fixtures.
+- `crates/harn-vm/src/orchestration.rs`
+  workflow graphs, artifact records, capability policies,
+  run records, validation, execution helpers.
+- `crates/harn-vm/src/stdlib/agents.rs`
+  Harn-facing orchestration builtins.
+- `crates/harn-vm/src/bridge.rs`
+  host bridge, JSON-RPC integration, queued user messages.
+- `crates/harn-vm/src/llm/conversation.rs`
+  transcript lifecycle builtins.
 
-**AST spans**: All AST nodes are `SNode = Spanned<Node>` carrying source
-`Span` with byte offsets and line/column. Errors include source location
-for rustc-style diagnostic rendering.
+## Alignment Rules
 
-**Gradual type system**: The typechecker in `typechecker.rs` uses
-`InferredType = Option<TypeExpr>` -- `None` means unknown/untyped. Type
-annotations are optional. Supports structural typing: dict literals
-with string keys infer `Shape` types, enabling compile-time checking
-of `{name: string, age: int}` shape annotations with width subtyping.
-Also supports `list<T>`, `dict<K, V>`, union types, type aliases, and
-interfaces (implicit satisfaction checking). Shape annotations on
-function parameters are also validated at runtime. The checker tracks
-enums for match exhaustiveness warnings and interfaces for generic
-constraint (`where T: Interface`) enforcement.
-Union type narrowing removes `nil` from union types after `if x != nil`
-checks in the then-branch.
+When changing Harn, check which layers can drift:
 
-**VM concurrency model**: The VM is async (runs inside a tokio
-`LocalSet`). `spawn` creates real async tasks via
-`tokio::task::spawn_local`, `await` joins them, `cancel` aborts them.
-`parallel`/`parallel_map` fork child VMs for true concurrent execution.
-Async builtins (HTTP, LLM, sleep, channels) are natively awaited in
-the execution loop.
+- Parser / lexer / tree-sitter only need changes for syntax changes.
+- Interpreter / stdlib / CLI / docs must change for builtin or runtime changes.
+- Linter builtin awareness comes from `harn_vm::stdlib::stdlib_builtin_names()`.
+- Conformance tests are the primary executable spec for language/runtime behavior.
 
-**Result type**: Built-in `Result` enum with `Ok(value)` and
-`Err(error)` variants. Postfix `?` operator unwraps `Ok` or propagates
-`Err` from the current function. Helpers: `is_ok`, `is_err`, `unwrap`,
-`unwrap_or`, `unwrap_err`.
+If you add or remove public builtins or commands, update:
 
-**Impl blocks**: `impl TypeName { fn method(self, ...) { ... } }`
-attaches methods to structs. Methods receive the instance as `self`
-and are called with dot syntax: `instance.method(args)`. Struct
-declarations produce constructor functions: `Point({x: 3, y: 4})`.
+- `README.md`
+- `docs/src/*`
+- `CHANGELOG.md`
+- CLI help in `crates/harn-cli/src/main.rs`
+- conformance coverage when appropriate
 
-**Interfaces**: `interface Name { fn method(self) -> Type }` declares
-method contracts. Structs satisfy interfaces implicitly (Go-style) if
-their impl block has all required methods. Used as parameter types and
-in `where T: Interface` generic constraints. The type checker verifies
-satisfaction at call sites.
+## Workflow And Transcript Model
 
-**Runtime shape validation**: Shape-annotated parameters
-(`fn f(x: {name: string})`) are validated at runtime, checking for
-missing fields and type mismatches. Works with dicts and struct
-instances.
+Preferred public surface:
 
-**Try-expression**: `try { expr }` without `catch` returns
-`Result.Ok(value)` or `Result.Err(error)`. Complement to `?` operator.
+- `workflow_graph(...)`
+- `workflow_validate(...)`
+- `workflow_execute(...)`
+- `artifact(...)`, `artifact_derive(...)`, `artifact_select(...)`
+- `run_record_*`
+- `transcript_*`
 
-**Spread in calls**: `f(...args)` expands a list into individual
-arguments. Supports mixed args: `f(a, ...list, b)`. Uses `CallSpread`
-opcode for runtime flattening.
+Compatibility helpers may remain, but avoid adding narrow wrappers when the
+typed runtime surface already expresses the concept.
 
-**Generic constraints**: `fn f<T>(x: T) where T: Interface` enforces
-that `T` satisfies the named interface. Checked at call sites with
-compile-time warnings.
+## Host / ACP Notes
 
-**Membership operators**: `x in list`, `key in dict`, `substr in str`,
-`x not in set`. Compiles to `Op::Contains` (+ `Op::Not` for `not in`).
+ACP hosts can inject queued user messages during agent execution using
+`user_message`, `session/input`, or `agent/user_message` notifications with
+a `mode`:
 
-**Progress reporting**: `progress(phase, message, progress?, total?, data?)`
-emits structured notifications through the bridge/ACP layer. `agent_loop`
-auto-emits progress at each iteration in bridge mode.
+- `interrupt_immediate`
+- `finish_step`
+- `wait_for_completion`
 
-**Encoding/hashing builtins**: `base64_encode`, `base64_decode`,
-`sha256`, `md5`, `url_encode`, `url_decode`.
+Harn is responsible for interpreting those delivery semantics inside the
+agent loop, not the product host.
 
-**Regex builtins**: `regex_match`, `regex_replace`, `regex_captures`
-(capture groups with positional and named group support).
+## Spec And Docs
 
-### agent_loop tool support
-
-`agent_loop` returns a dict `{status, text, iterations, duration_ms,
-tools_used, rejected_tools}`. It supports tool execution via text-based `<tool_call>`
-XML tags (default) or native function calling (`tool_format: "native"`).
-Tools can be passed as string name lists (e.g. `["read", "search",
-"edit"]`), `tool_registry` objects, or raw tool definition dicts.
-Tool arguments are normalized before dispatch (`normalize_tool_args`),
-and read-only tools (`read_file`, `list_directory`) are handled locally
-in the VM via `handle_tool_locally` to reduce bridge latency.
-
-In ACP mode, `register_agent_loop_with_bridge()` (in `llm.rs`) overrides
-the native text-only `agent_loop` so that tool calls are executed via
-host delegation through the bridge. This is wired up in `acp.rs` during
-`execute_chunk`.
-
-Built-in tool schemas are available for: `read_file`, `search`, `edit`,
-`run`, `outline`, `web_search`, `web_fetch`, `lsp_hover`,
-`lsp_definition`, `lsp_references`, `list_directory`.
-
-### Conformance tests
-
-Tests live in `conformance/tests/` and `conformance/errors/`. Each
-test is a `.harn` file paired with a `.expected` or `.error` file. The
-CLI `test` command executes each `.harn` file and compares trimmed output.
-Error tests check that the expected error text is a substring of the
-actual error. This is the primary way to verify language behavior.
-
-To add a new conformance test, create both `name.harn` and `name.expected`
-(or `name.error`) in the appropriate directory.
-
-### Language spec
-
-`spec/HARN_SPEC.md` is the authoritative language specification.
-`spec/AST.md` documents AST node types. Consult these when making
-parser or VM changes.
-
-### Tree-sitter grammar
-
-`tree-sitter-harn/grammar.js` defines the tree-sitter grammar used by
-the LSP for syntax highlighting.
+- `spec/HARN_SPEC.md` is the language spec.
+- `spec/AST.md` describes AST shapes.
+- `docs/src/` is the mdBook source.
+- `docs/dist/` is the generated site output when rebuilt.

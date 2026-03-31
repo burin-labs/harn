@@ -9,8 +9,6 @@ Execute a `.harn` file.
 ```bash
 harn run <file.harn>
 harn run --trace <file.harn>
-harn run --bridge <file.harn>
-harn run --arg '{"key": "value"}' <file.harn>
 harn run -e 'println("hello")'
 harn run --deny shell,exec <file.harn>
 harn run --allow read_file,write_file <file.harn>
@@ -19,8 +17,6 @@ harn run --allow read_file,write_file <file.harn>
 | Flag | Description |
 |---|---|
 | `--trace` | Print LLM trace summary after execution |
-| `--bridge` | Run in bridge mode (JSON-RPC delegation to host) |
-| `--arg <json>` | Pass a JSON string as the pipeline argument |
 | `-e <code>` | Evaluate inline code instead of a file |
 | `--deny <builtins>` | Deny specific builtins (comma-separated) |
 | `--allow <builtins>` | Allow only specific builtins (comma-separated) |
@@ -123,6 +119,30 @@ harn acp pipeline.harn      # execute a pipeline per prompt
 ```
 
 See [MCP and ACP Integration](./mcp-and-acp.md) for protocol details.
+
+## harn runs
+
+Inspect persisted workflow run records.
+
+```bash
+harn runs inspect .harn-runs/<run>.json
+```
+
+## harn replay
+
+Replay a persisted workflow run record from saved output.
+
+```bash
+harn replay .harn-runs/<run>.json
+```
+
+## harn eval
+
+Evaluate a persisted workflow run record as a regression fixture.
+
+```bash
+harn eval .harn-runs/<run>.json
+```
 
 ## harn serve
 

@@ -44,6 +44,7 @@ guide: install Harn, write a program, and run it in under five minutes.
 - **[Modules and Imports](./modules.md)** -- Splitting code across files, standard library
 - **[Concurrency](./concurrency.md)** -- spawn/await, parallel, channels, mutexes, deadlines
 - **[LLM Calls and Agent Loops](./llm-and-agents.md)** -- Calling models, agent loops, tool use
+- **[Workflow Runtime](./workflow-runtime.md)** -- Workflow graphs, artifacts, run records, replay, evals
 - **[MCP and ACP Integration](./mcp-and-acp.md)** -- MCP client/server, ACP, and A2A protocols
 - **[CLI Reference](./cli-reference.md)** -- All CLI commands and flags
 - **[Builtin Functions](./builtins.md)** -- Complete reference for all built-in functions

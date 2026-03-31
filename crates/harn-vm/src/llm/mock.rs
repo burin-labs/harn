@@ -59,6 +59,8 @@ pub(crate) fn save_fixture(hash: &str, result: &LlmResult) {
         "input_tokens": result.input_tokens,
         "output_tokens": result.output_tokens,
         "model": result.model,
+        "provider": result.provider,
+        "blocks": result.blocks,
     });
     let _ = std::fs::write(
         &path,
@@ -80,8 +82,10 @@ pub(crate) fn load_fixture(hash: &str) -> Option<LlmResult> {
         input_tokens: json["input_tokens"].as_i64().unwrap_or(0),
         output_tokens: json["output_tokens"].as_i64().unwrap_or(0),
         model: json["model"].as_str().unwrap_or("").to_string(),
+        provider: json["provider"].as_str().unwrap_or("mock").to_string(),
         thinking: json["thinking"].as_str().map(|s| s.to_string()),
         stop_reason: json["stop_reason"].as_str().map(|s| s.to_string()),
+        blocks: json["blocks"].as_array().cloned().unwrap_or_default(),
     })
 }
 
@@ -119,8 +123,16 @@ pub(crate) fn mock_llm_response(
                 input_tokens: last_msg.len() as i64,
                 output_tokens: 20,
                 model: "mock".to_string(),
+                provider: "mock".to_string(),
                 thinking: None,
                 stop_reason: None,
+                blocks: vec![serde_json::json!({
+                    "type": "tool_call",
+                    "id": "mock_call_1",
+                    "name": tool_name,
+                    "arguments": {},
+                    "visibility": "internal",
+                })],
             };
         }
     }
@@ -144,12 +156,18 @@ pub(crate) fn mock_llm_response(
     };
 
     LlmResult {
-        text: response,
+        text: response.clone(),
         tool_calls: vec![],
         input_tokens: last_msg.len() as i64,
         output_tokens: 30,
         model: "mock".to_string(),
+        provider: "mock".to_string(),
         thinking: None,
         stop_reason: None,
+        blocks: vec![serde_json::json!({
+            "type": "output_text",
+            "text": response,
+            "visibility": "public",
+        })],
     }
 }

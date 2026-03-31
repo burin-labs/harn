@@ -916,20 +916,20 @@ fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Rc<AcpBridge>) {
     vm.register_builtin("host_has", |args, _out| {
         let capability = args.first().map(|a| a.display()).unwrap_or_default();
         let op = args.get(1).map(|a| a.display());
-        let valid = match (capability.as_str(), op.as_deref()) {
-            ("workspace", None) => true,
-            (
-                "workspace",
-                Some("read_text" | "write_text" | "apply_edit" | "delete" | "exists" | "list"),
-            ) => true,
-            ("process", None) => true,
-            ("process", Some("exec")) => true,
-            ("template", None) => true,
-            ("template", Some("render")) => true,
-            ("interaction", None) => true,
-            ("interaction", Some("ask")) => true,
-            _ => false,
-        };
+        let valid = matches!(
+            (capability.as_str(), op.as_deref()),
+            ("workspace", None)
+                | (
+                    "workspace",
+                    Some("read_text" | "write_text" | "apply_edit" | "delete" | "exists" | "list"),
+                )
+                | ("process", None)
+                | ("process", Some("exec"))
+                | ("template", None)
+                | ("template", Some("render"))
+                | ("interaction", None)
+                | ("interaction", Some("ask"))
+        );
         Ok(harn_vm::VmValue::Bool(valid))
     });
 

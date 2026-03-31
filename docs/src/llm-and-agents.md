@@ -17,8 +17,9 @@ Ollama runs locally and doesn't require an API key. The default host is `http://
 
 ## llm_call
 
-Make a single LLM request. Always returns a dict with `text`, `model`,
-`input_tokens`, and `output_tokens` fields.
+Make a single LLM request. Harn normalizes provider responses into a
+canonical dict so product code does not need to parse provider-native
+message shapes.
 
 ```harn
 let result = llm_call("What is 2 + 2?")
@@ -65,14 +66,18 @@ println(result.text)
 | Field | Type | Description |
 |---|---|---|
 | `text` | string | The text content of the response |
+| `visible_text` | string | Human-visible assistant output |
 | `model` | string | The model used |
+| `provider` | string | Canonical provider identifier |
 | `input_tokens` | int | Input/prompt token count |
 | `output_tokens` | int | Output/completion token count |
 | `data` | any | Parsed JSON (when `response_format: "json"`) |
 | `tool_calls` | list | Tool calls (when model uses tools) |
 | `thinking` | string | Reasoning trace (when `thinking` is enabled) |
+| `private_reasoning` | string | Provider reasoning metadata kept separate from visible text |
+| `blocks` | list | Canonical structured content blocks across providers |
 | `stop_reason` | string | `"end_turn"`, `"max_tokens"`, `"tool_use"`, `"stop_sequence"` |
-| `transcript` | dict | Transcript carrying message history, summary, metadata, and id |
+| `transcript` | dict | Transcript carrying message history, events, summary, metadata, and id |
 
 ### Options dict
 
@@ -125,8 +130,8 @@ println(result.text)
 
 Run an agent that keeps working until it's done. The agent maintains
 conversation history across turns and loops until it outputs the
-`##DONE##` sentinel. Returns a dict with `{status, text, iterations,
-duration_ms, tools_used, transcript}`.
+`##DONE##` sentinel. Returns a dict with canonical visible text,
+tool usage, transcript state, and any deferred queued human messages.
 
 ```harn
 let result = agent_loop(
@@ -158,9 +163,12 @@ println(result.iterations) // number of LLM round-trips
 |---|---|---|
 | `status` | string | `"done"` or `"stuck"` |
 | `text` | string | Accumulated text output from all iterations |
+| `visible_text` | string | Human-visible accumulated output |
 | `iterations` | int | Number of LLM round-trips |
 | `duration_ms` | int | Total wall-clock time in milliseconds |
 | `tools_used` | list | Names of tools that were called |
+| `rejected_tools` | list | Tools rejected by policy/host ceiling |
+| `deferred_user_messages` | list | Queued human messages deferred until agent yield/completion |
 | `transcript` | dict | Transcript of the full conversation state |
 
 ### agent_loop options
@@ -243,6 +251,44 @@ let compacted = transcript_compact(second.transcript, {
 
 Use `transcript_summarize()` when you want Harn to create a fresh summary with
 an LLM, or `transcript_compact()` when you want a local compaction step.
+
+Transcript helpers also expose the canonical event model:
+
+```harn
+let visible = transcript_render_visible(result.transcript)
+let full = transcript_render_full(result.transcript)
+let events = transcript_events(result.transcript)
+```
+
+Use these when a host app needs to render human-visible chat separately from
+internal execution history.
+
+## Workflow runtime
+
+For multi-stage orchestration, prefer the workflow runtime over product-side
+loop wiring:
+
+```harn
+let graph = workflow_graph({
+  name: "review_and_repair",
+  entry: "act",
+  nodes: {
+    act: {kind: "stage", mode: "agent", tools: ["read_file", "edit", "run"]},
+    verify: {kind: "verify", mode: "agent", tools: ["run"]}
+  },
+  edges: [{from: "act", to: "verify"}]
+})
+
+let run = workflow_execute(
+  "Fix the failing test and verify the change.",
+  graph,
+  [],
+  {max_steps: 6}
+)
+```
+
+This keeps orchestration structure, transcript policy, context policy,
+artifacts, and retries inside Harn instead of product code.
 
 ## Cost tracking
 

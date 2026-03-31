@@ -79,8 +79,10 @@ pub(crate) struct LlmResult {
     pub input_tokens: i64,
     pub output_tokens: i64,
     pub model: String,
+    pub provider: String,
     pub thinking: Option<String>,
     pub stop_reason: Option<String>,
+    pub blocks: Vec<serde_json::Value>,
 }
 
 pub(crate) fn vm_build_llm_result(
@@ -98,6 +100,10 @@ pub(crate) fn vm_build_llm_result(
     dict.insert(
         "model".to_string(),
         VmValue::String(Rc::from(result.model.as_str())),
+    );
+    dict.insert(
+        "provider".to_string(),
+        VmValue::String(Rc::from(result.provider.as_str())),
     );
     dict.insert(
         "input_tokens".to_string(),
@@ -122,6 +128,10 @@ pub(crate) fn vm_build_llm_result(
             "thinking".to_string(),
             VmValue::String(Rc::from(thinking.as_str())),
         );
+        dict.insert(
+            "private_reasoning".to_string(),
+            VmValue::String(Rc::from(thinking.as_str())),
+        );
     }
 
     if let Some(ref stop_reason) = result.stop_reason {
@@ -134,6 +144,21 @@ pub(crate) fn vm_build_llm_result(
     if let Some(transcript) = transcript {
         dict.insert("transcript".to_string(), transcript);
     }
+
+    dict.insert(
+        "visible_text".to_string(),
+        VmValue::String(Rc::from(result.text.as_str())),
+    );
+    dict.insert(
+        "blocks".to_string(),
+        VmValue::List(Rc::new(
+            result
+                .blocks
+                .iter()
+                .map(json_to_vm_value)
+                .collect::<Vec<_>>(),
+        )),
+    );
 
     VmValue::Dict(Rc::new(dict))
 }
@@ -255,13 +280,19 @@ fn mock_completion_response(prefix: &str, suffix: Option<&str>) -> LlmResult {
         }
     );
     LlmResult {
-        text,
+        text: text.clone(),
         tool_calls: Vec::new(),
         input_tokens: (prefix.len() + suffix.len()) as i64,
         output_tokens: 16,
         model: "mock".to_string(),
+        provider: "mock".to_string(),
         thinking: None,
         stop_reason: Some("stop".to_string()),
+        blocks: vec![serde_json::json!({
+            "type": "output_text",
+            "text": text,
+            "visibility": "public",
+        })],
     }
 }
 
@@ -354,10 +385,16 @@ async fn vm_call_completion_openai_style(
         input_tokens: json["usage"]["prompt_tokens"].as_i64().unwrap_or(0),
         output_tokens: json["usage"]["completion_tokens"].as_i64().unwrap_or(0),
         model: opts.model.clone(),
+        provider: opts.provider.clone(),
         thinking: None,
         stop_reason: json["choices"][0]["finish_reason"]
             .as_str()
             .map(|s| s.to_string()),
+        blocks: vec![serde_json::json!({
+            "type": "output_text",
+            "text": json["choices"][0]["text"].as_str().unwrap_or(""),
+            "visibility": "public",
+        })],
     })
 }
 
@@ -458,8 +495,14 @@ async fn vm_call_completion_ollama(
         input_tokens: json["prompt_eval_count"].as_i64().unwrap_or(0),
         output_tokens: json["eval_count"].as_i64().unwrap_or(0),
         model: opts.model.clone(),
+        provider: opts.provider.clone(),
         thinking: None,
         stop_reason: json["done_reason"].as_str().map(|s| s.to_string()),
+        blocks: vec![serde_json::json!({
+            "type": "output_text",
+            "text": json["response"].as_str().unwrap_or(""),
+            "visibility": "public",
+        })],
     })
 }
 
@@ -719,6 +762,7 @@ fn parse_llm_response(
         let mut text = String::new();
         let mut thinking_text = String::new();
         let mut tool_calls = Vec::new();
+        let mut blocks = Vec::new();
 
         if let Some(content) = json["content"].as_array() {
             for block in content {
@@ -726,11 +770,13 @@ fn parse_llm_response(
                     Some("text") => {
                         if let Some(t) = block["text"].as_str() {
                             text.push_str(t);
+                            blocks.push(serde_json::json!({"type": "output_text", "text": t, "visibility": "public"}));
                         }
                     }
                     Some("thinking") => {
                         if let Some(t) = block["thinking"].as_str() {
                             thinking_text.push_str(t);
+                            blocks.push(serde_json::json!({"type": "reasoning", "text": t, "visibility": "private"}));
                         }
                     }
                     Some("tool_use") => {
@@ -741,6 +787,13 @@ fn parse_llm_response(
                             "id": id,
                             "name": name,
                             "arguments": input,
+                        }));
+                        blocks.push(serde_json::json!({
+                            "type": "tool_call",
+                            "id": block["id"].clone(),
+                            "name": block["name"].clone(),
+                            "arguments": block["input"].clone(),
+                            "visibility": "internal",
                         }));
                     }
                     _ => {}
@@ -766,12 +819,14 @@ fn parse_llm_response(
             input_tokens,
             output_tokens,
             model: model.to_string(),
+            provider: provider.to_string(),
             thinking: if thinking_text.is_empty() {
                 None
             } else {
                 Some(thinking_text)
             },
             stop_reason,
+            blocks,
         })
     } else {
         if let Some(err) = json["error"]["message"].as_str() {
@@ -784,6 +839,11 @@ fn parse_llm_response(
             .as_str()
             .unwrap_or("")
             .to_string();
+        let mut blocks = if text.is_empty() {
+            Vec::new()
+        } else {
+            vec![serde_json::json!({"type": "output_text", "text": text, "visibility": "public"})]
+        };
 
         let mut tool_calls = Vec::new();
         if let Some(calls) = json["choices"][0]["message"]["tool_calls"].as_array() {
@@ -797,6 +857,13 @@ fn parse_llm_response(
                     "id": id,
                     "name": name,
                     "arguments": arguments,
+                }));
+                blocks.push(serde_json::json!({
+                    "type": "tool_call",
+                    "id": call["id"].clone(),
+                    "name": call["function"]["name"].clone(),
+                    "arguments": serde_json::from_str::<serde_json::Value>(args_str).unwrap_or(serde_json::json!({})),
+                    "visibility": "internal",
                 }));
             }
         }
@@ -813,8 +880,10 @@ fn parse_llm_response(
             input_tokens,
             output_tokens,
             model: model.to_string(),
+            provider: provider.to_string(),
             thinking: None,
             stop_reason,
+            blocks,
         })
     }
 }
@@ -840,6 +909,7 @@ async fn vm_call_llm_api_sse_from_response(
     let mut input_tokens: i64 = 0;
     let mut output_tokens: i64 = 0;
     let mut tool_calls: Vec<serde_json::Value> = Vec::new();
+    let mut blocks: Vec<serde_json::Value> = Vec::new();
 
     // Anthropic tool-use streaming state
     struct ToolBlock {
@@ -901,11 +971,13 @@ async fn vm_call_llm_api_sse_from_response(
                             if let Some(t) = delta["text"].as_str() {
                                 text.push_str(t);
                                 let _ = delta_tx.send(t.to_string());
+                                blocks.push(serde_json::json!({"type": "output_text", "text": t, "visibility": "public"}));
                             }
                         }
                         Some("thinking_delta") => {
                             if let Some(t) = delta["thinking"].as_str() {
                                 thinking_text.push_str(t);
+                                blocks.push(serde_json::json!({"type": "reasoning", "text": t, "visibility": "private"}));
                             }
                         }
                         Some("input_json_delta") => {
@@ -925,6 +997,7 @@ async fn vm_call_llm_api_sse_from_response(
                         tool_calls.push(serde_json::json!({
                             "id": tool.id, "name": tool.name, "arguments": args,
                         }));
+                        blocks.push(serde_json::json!({"type": "tool_call", "id": tool.id, "name": tool.name, "arguments": args, "visibility": "internal"}));
                     }
                     in_thinking_block = false;
                 }
@@ -946,6 +1019,7 @@ async fn vm_call_llm_api_sse_from_response(
             if let Some(content) = delta["content"].as_str() {
                 text.push_str(content);
                 let _ = delta_tx.send(content.to_string());
+                blocks.push(serde_json::json!({"type": "output_text", "text": content, "visibility": "public"}));
             }
 
             // Capture finish_reason
@@ -987,6 +1061,7 @@ async fn vm_call_llm_api_sse_from_response(
         tool_calls.push(serde_json::json!({
             "id": id, "name": name, "arguments": args,
         }));
+        blocks.push(serde_json::json!({"type": "tool_call", "id": id, "name": name, "arguments": args, "visibility": "internal"}));
     }
 
     let _ = in_thinking_block; // suppress unused warning
@@ -997,12 +1072,18 @@ async fn vm_call_llm_api_sse_from_response(
         input_tokens,
         output_tokens,
         model: model.to_string(),
+        provider: if resolved.is_anthropic_style {
+            "anthropic".to_string()
+        } else {
+            "openai".to_string()
+        },
         thinking: if thinking_text.is_empty() {
             None
         } else {
             Some(thinking_text)
         },
         stop_reason,
+        blocks,
     })
 }
 
@@ -1059,6 +1140,7 @@ async fn vm_call_llm_api_ndjson_from_response(
     let mut result_model = model.to_string();
 
     let mut thinking_text = String::new();
+    let mut blocks = Vec::new();
 
     while let Ok(Some(line)) = lines.next_line().await {
         if line.is_empty() {
@@ -1075,9 +1157,15 @@ async fn vm_call_llm_api_ndjson_from_response(
         if !content.is_empty() {
             text.push_str(content);
             let _ = delta_tx.send(content.to_string());
+            blocks.push(
+                serde_json::json!({"type": "output_text", "text": content, "visibility": "public"}),
+            );
         } else if !thinking.is_empty() {
             thinking_text.push_str(thinking);
             let _ = delta_tx.send(thinking.to_string());
+            blocks.push(
+                serde_json::json!({"type": "reasoning", "text": thinking, "visibility": "private"}),
+            );
         }
 
         if let Some(m) = json["model"].as_str() {
@@ -1112,7 +1200,9 @@ async fn vm_call_llm_api_ndjson_from_response(
         input_tokens,
         output_tokens,
         model: result_model,
+        provider: "ollama".to_string(),
         thinking,
         stop_reason: None,
+        blocks,
     })
 }

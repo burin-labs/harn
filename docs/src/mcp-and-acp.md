@@ -213,19 +213,48 @@ The ACP server supports these JSON-RPC methods:
 | `session/prompt` | Send a prompt to the agent for execution |
 | `session/cancel` | Cancel the currently running prompt |
 
-### Bridge mode
+### Queued user messages during agent execution
 
-Bridge mode lets a host application delegate execution to Harn while
-retaining control over tool execution:
+ACP hosts can inject user follow-up messages while an agent is running.
+Harn owns the delivery semantics inside the runtime so product apps do
+not need to reimplement queue/orchestration logic.
 
-```bash
-harn run --bridge main.harn
+Supported notification methods:
+
+- `user_message`
+- `session/input`
+- `agent/user_message`
+
+Payload shape:
+
+```json
+{
+  "content": "Please stop editing that file and explain first.",
+  "mode": "interrupt_immediate"
+}
 ```
 
-In bridge mode, unknown builtins are automatically delegated to the host
-via `builtin_call` JSON-RPC requests. This enables the host to provide
-filesystem access, editor integration, or other capabilities that the
-Harn program can call as regular builtins.
+Supported `mode` values:
+
+- `interrupt_immediate`
+- `finish_step`
+- `wait_for_completion`
+
+Runtime behavior:
+
+- `interrupt_immediate`: inject on the next agent loop boundary immediately
+- `finish_step`: inject after the current tool/operation completes
+- `wait_for_completion`: defer until the current agent interaction yields
+
+### Bridge mode
+
+ACP internally uses Harn's host bridge so the host can retain control over
+tool execution while Harn still owns agent/runtime orchestration.
+
+Unknown builtins are delegated to the host via `builtin_call` JSON-RPC
+requests. This enables the host to provide filesystem access, editor
+integration, or other capabilities that Harn code can call as regular
+builtins.
 
 ## A2A (Agent-to-Agent Protocol)
 

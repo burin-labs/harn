@@ -1,14 +1,9 @@
 import "std/context"
 
 pipeline default() {
-  let ctx = context([
-    section("repo", "Use Rust.", nil),
-    context_attach("file", "src/lib.rs", "fn main() {}", {max_chars: 12})
-  ], {separator: "\n--\n"})
-
+  let ctx = context([section("repo", "Use Rust.", nil), context_attach("file", "src/lib.rs", "fn main() {}", {max_chars: 12})], {separator: "\n--\n"})
   let rendered = context_render(ctx)
   println(rendered)
-
   let prompt = prompt_compose("Fix it", ctx, {system: "You are helpful", task_label: "Work"})
   println(prompt?.system)
   println(contains(prompt?.prompt, "[repo]"))

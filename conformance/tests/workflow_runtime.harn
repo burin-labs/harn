@@ -1,0 +1,15 @@
+pipeline main() {
+  let flow = workflow_graph({name: "demo", entry: "act", nodes: {act: {kind: "stage", mode: "llm", model_policy: {provider: "mock"}}, verify: {kind: "verify", mode: "llm", model_policy: {provider: "mock"}}}, edges: [{from: "act", to: "verify"}]})
+  let report = workflow_validate(flow)
+  println(report?.valid)
+  let base = artifact({kind: "summary", text: "short note", relevance: 0.9})
+  let derived = artifact_derive(base, "analysis_note", {text: "derived note"})
+  let ctx = artifact_context([base, derived], {max_artifacts: 2})
+  println(len(ctx) > 0)
+  let result = workflow_execute("Write a note", flow, [base], {max_steps: 4})
+  println(result?.status)
+  println(result?.run?._type)
+  let saved = run_record_save(result?.run, "/tmp/harn-workflow-runtime.json")
+  let loaded = run_record_load(saved?.path)
+  println(loaded?._type)
+}

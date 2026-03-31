@@ -10,6 +10,7 @@ pub mod llm_config;
 pub mod mcp;
 pub mod mcp_server;
 pub mod metadata;
+pub mod orchestration;
 pub mod stdlib;
 pub mod stdlib_modules;
 pub mod store;

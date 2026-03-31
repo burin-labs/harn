@@ -324,6 +324,36 @@ async fn main() {
                 }
             }
         }
+        "runs" => match (
+            args.get(2).map(|s| s.as_str()),
+            args.get(3).map(|s| s.as_str()),
+        ) {
+            (Some("inspect"), Some(path)) => inspect_run_record(path),
+            _ => {
+                eprintln!("Usage: harn runs inspect <run.json>");
+                process::exit(1);
+            }
+        },
+        "replay" => {
+            let path = args.get(2).map(|s| s.as_str());
+            match path {
+                Some(path) => replay_run_record(path),
+                None => {
+                    eprintln!("Usage: harn replay <run.json>");
+                    process::exit(1);
+                }
+            }
+        }
+        "eval" => {
+            let path = args.get(2).map(|s| s.as_str());
+            match path {
+                Some(path) => eval_run_record(path),
+                None => {
+                    eprintln!("Usage: harn eval <run.json>");
+                    process::exit(1);
+                }
+            }
+        }
         "repl" => commands::repl::run_repl().await,
         "install" => package::install_packages(),
         "add" => package::add_package(&args[2..]),
@@ -366,6 +396,9 @@ fn print_help() {
     println!("    \x1b[1;32mserve\x1b[0m [--port N] <file> Serve as an A2A agent over HTTP");
     println!("    \x1b[1;32macp\x1b[0m [file]              Start ACP server on stdio");
     println!("    \x1b[1;32mmcp-serve\x1b[0m <file>        Serve tools as MCP server on stdio");
+    println!("    \x1b[1;32mruns\x1b[0m inspect <file>    Inspect a persisted workflow run record");
+    println!("    \x1b[1;32mreplay\x1b[0m <file>           Replay a saved run record from persisted output");
+    println!("    \x1b[1;32meval\x1b[0m <file>             Evaluate a saved run record as a regression fixture");
     println!("    \x1b[1;32madd\x1b[0m <name> --git <url>  Add a dependency to harn.toml");
     println!("    \x1b[1;32minstall\x1b[0m                 Install dependencies from harn.toml");
     println!("    \x1b[1;32mversion\x1b[0m                 Show version info");
@@ -375,7 +408,6 @@ fn print_help() {
     println!("    --trace              Print LLM trace summary after execution");
     println!("    --deny <builtins>    Deny specific builtins (comma-separated)");
     println!("    --allow <builtins>   Allow only specific builtins (comma-separated)");
-    println!("    --sandbox            Restrict file/network access");
     println!();
     println!("\x1b[1;33mTEST OPTIONS:\x1b[0m");
     println!("    --filter <pattern>   Only run tests matching pattern");
@@ -389,8 +421,68 @@ fn print_help() {
     println!("    harn test tests/");
     println!("    harn init my-project");
     println!("    harn fmt --check src/");
+    println!("    harn runs inspect .harn-runs/<run>.json");
     println!();
     println!("Docs: \x1b[4;36mhttps://github.com/burin-labs/harn\x1b[0m");
+}
+
+fn inspect_run_record(path: &str) {
+    let run = match harn_vm::orchestration::load_run_record(Path::new(path)) {
+        Ok(run) => run,
+        Err(error) => {
+            eprintln!("Failed to load run record: {error}");
+            process::exit(1);
+        }
+    };
+    println!("Run: {}", run.id);
+    println!("Workflow: {}", run.workflow_name.unwrap_or(run.workflow_id));
+    println!("Status: {}", run.status);
+    println!("Task: {}", run.task);
+    println!("Stages: {}", run.stages.len());
+    println!("Artifacts: {}", run.artifacts.len());
+    for stage in &run.stages {
+        println!("- {} [{}] {}", stage.node_id, stage.kind, stage.status);
+    }
+}
+
+fn replay_run_record(path: &str) {
+    let run = match harn_vm::orchestration::load_run_record(Path::new(path)) {
+        Ok(run) => run,
+        Err(error) => {
+            eprintln!("Failed to load run record: {error}");
+            process::exit(1);
+        }
+    };
+    println!("Replay: {}", run.id);
+    for stage in &run.stages {
+        if let Some(text) = &stage.visible_text {
+            println!("[{}] {}", stage.node_id, text);
+        }
+    }
+    if let Some(transcript) = &run.transcript {
+        println!(
+            "Transcript events persisted: {}",
+            transcript["events"]
+                .as_array()
+                .map(|v| v.len())
+                .unwrap_or(0)
+        );
+    }
+}
+
+fn eval_run_record(path: &str) {
+    let run = match harn_vm::orchestration::load_run_record(Path::new(path)) {
+        Ok(run) => run,
+        Err(error) => {
+            eprintln!("Failed to load run record: {error}");
+            process::exit(1);
+        }
+    };
+    let passed = run.status == "completed" && !run.stages.is_empty();
+    println!("{}", if passed { "PASS" } else { "FAIL" });
+    if !passed {
+        process::exit(1);
+    }
 }
 
 /// Parse a .harn file, returning (source, AST). Exits on error.

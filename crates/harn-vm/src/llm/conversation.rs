@@ -53,6 +53,25 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
         Ok(VmValue::List(Rc::new(transcript_message_list(transcript)?)))
     });
 
+    vm.register_builtin("transcript_events", |args, _out| {
+        let transcript = match args.first() {
+            Some(VmValue::Dict(d))
+                if d.get("_type").map(|v| v.display()).as_deref() == Some("transcript") =>
+            {
+                d
+            }
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "transcript_events: argument must be a transcript",
+                ))));
+            }
+        };
+        Ok(transcript
+            .get("events")
+            .cloned()
+            .unwrap_or_else(|| VmValue::List(Rc::new(Vec::new()))))
+    });
+
     vm.register_builtin("transcript_summary", |args, _out| {
         let transcript = match args.first() {
             Some(VmValue::Dict(d))
@@ -85,6 +104,88 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
         Ok(VmValue::String(Rc::from(
             transcript_id(transcript).unwrap_or_default(),
         )))
+    });
+
+    vm.register_builtin("transcript_render_visible", |args, _out| {
+        let transcript = match args.first() {
+            Some(VmValue::Dict(d))
+                if d.get("_type").map(|v| v.display()).as_deref() == Some("transcript") =>
+            {
+                d
+            }
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "transcript_render_visible: argument must be a transcript",
+                ))));
+            }
+        };
+        let rendered = match transcript.get("events") {
+            Some(VmValue::List(events)) => events
+                .iter()
+                .filter_map(|event| {
+                    let dict = event.as_dict()?;
+                    let visibility = dict.get("visibility")?.display();
+                    if visibility != "public" {
+                        return None;
+                    }
+                    let role = dict
+                        .get("role")
+                        .map(|value| value.display())
+                        .unwrap_or_default();
+                    let text = dict
+                        .get("text")
+                        .map(|value| value.display())
+                        .unwrap_or_default();
+                    if text.is_empty() {
+                        None
+                    } else {
+                        Some(format!("{role}: {text}"))
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+            _ => String::new(),
+        };
+        Ok(VmValue::String(Rc::from(rendered)))
+    });
+
+    vm.register_builtin("transcript_render_full", |args, _out| {
+        let transcript = match args.first() {
+            Some(VmValue::Dict(d))
+                if d.get("_type").map(|v| v.display()).as_deref() == Some("transcript") =>
+            {
+                d
+            }
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "transcript_render_full: argument must be a transcript",
+                ))));
+            }
+        };
+        let rendered = match transcript.get("events") {
+            Some(VmValue::List(events)) => events
+                .iter()
+                .filter_map(|event| {
+                    let dict = event.as_dict()?;
+                    let role = dict
+                        .get("role")
+                        .map(|value| value.display())
+                        .unwrap_or_default();
+                    let visibility = dict
+                        .get("visibility")
+                        .map(|value| value.display())
+                        .unwrap_or_default();
+                    let text = dict
+                        .get("text")
+                        .map(|value| value.display())
+                        .unwrap_or_default();
+                    Some(format!("[{visibility}] {role}: {text}"))
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+            _ => String::new(),
+        };
+        Ok(VmValue::String(Rc::from(rendered)))
     });
 
     vm.register_builtin("transcript_export", |args, _out| {
@@ -299,11 +400,9 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
                 d.get("metadata").cloned(),
             ))
         }
-        _ => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
-                "add_message: first argument must be a message list or transcript",
-            ))));
-        }
+        _ => Err(VmError::Thrown(VmValue::String(Rc::from(
+            "add_message: first argument must be a message list or transcript",
+        )))),
     });
 
     vm.register_builtin("add_user", |args, _out| vm_add_role_message(args, "user"));
@@ -358,10 +457,8 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
                 d.get("metadata").cloned(),
             ))
         }
-        _ => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
-                "add_tool_result: first argument must be a message list or transcript",
-            ))));
-        }
+        _ => Err(VmError::Thrown(VmValue::String(Rc::from(
+            "add_tool_result: first argument must be a message list or transcript",
+        )))),
     });
 }

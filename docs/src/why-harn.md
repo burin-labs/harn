@@ -23,6 +23,12 @@ under infrastructure code.
 Harn is a programming language where agent orchestration primitives are
 built into the syntax, not bolted on as libraries.
 
+In practice that means Harn aims to be the long-term orchestration boundary
+between product code and provider/runtime code. Product integrations should
+mainly declare workflows, policies, capabilities, and UI hooks rather than
+rebuilding transcript logic, tool queues, replay fixtures, or provider
+response normalization.
+
 ### Native LLM calls
 
 `llm_call` and `agent_loop` are language primitives. No SDK imports, no

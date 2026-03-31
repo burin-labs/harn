@@ -2,455 +2,250 @@
 
 [![CI](https://github.com/burin-labs/harn/actions/workflows/ci.yml/badge.svg)](https://github.com/burin-labs/harn/actions/workflows/ci.yml)
 
-A programming language for orchestrating AI agents.
+Harn is a programming language and runtime for orchestrating coding agents.
+It is designed to be the orchestration boundary between product code and
+provider/runtime code: products declare workflows, policies, capabilities,
+and UI hooks, while Harn owns transcripts, context assembly, retries,
+tool routing, persistence, replay, and provider normalization.
 
-Harn gives you pipelines, concurrency, LLM calls, error recovery,
-destructuring, a built-in test framework, and sandboxed execution as
-language primitives — not library abstractions. Instead of wiring together
-agents in Python with callbacks and retry decorators, you write this:
+## Install
 
-```javascript
-pipeline default(task) {
-  let plan = llm_call(task, "Break this into steps")
-
-  let results = parallel_map(json_parse(plan)) { step ->
-    retry 3 {
-      agent_loop(step, "You are a coding assistant", {persistent: true})
-    }
-  }
-
-  write_file("output.json", json_stringify(results))
-}
-```
-
-## Getting started
-
-### Install
-
-From a [GitHub release](https://github.com/burin-labs/harn/releases)
-(macOS and Linux):
+From a GitHub release:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/burin-labs/harn/main/install.sh | sh
 ```
 
-With Cargo (recommended for Rust users):
+With Cargo:
 
 ```bash
 cargo install harn-cli
 ```
 
-Or build from source:
+From source:
 
 ```bash
 git clone https://github.com/burin-labs/harn.git
-cd harn && cargo install --path crates/harn-cli
+cd harn
+cargo install --path crates/harn-cli
 ```
 
-### Create a project
+## Quick Start
 
 ```bash
 harn init my-project
 cd my-project
-```
-
-This scaffolds `main.harn`, `lib/helpers.harn`, and `tests/test_main.harn`.
-
-### Run it
-
-```bash
 harn run main.harn
-```
-
-### Run the tests
-
-```bash
 harn test tests/
 ```
 
-Any pipeline named `test_*` is discovered and executed automatically.
-Use `assert`, `assert_eq`, and `assert_ne` for assertions:
+Simple LLM call:
 
-```javascript
-pipeline test_math(task) {
-  assert_eq(2 + 2, 4)
-  assert(10 > 5)
-  assert_ne("hello", "world")
-}
+```harn
+let result = llm_call(
+  "Explain quicksort in two sentences.",
+  "You are a concise CS tutor."
+)
+println(result.visible_text)
 ```
 
-### Try the REPL
+Persistent agent loop with tools:
 
-```bash
-harn repl
-```
-
-### Make an LLM call
-
-Set your API key and call a model directly from the language:
-
-```bash
-export ANTHROPIC_API_KEY="sk-..."
-harn run examples/llm-call.harn
-```
-
-```javascript
-pipeline default(task) {
-  let response = llm_call(
-    "What is 2 + 2? Answer with just the number.",
-    "You are a helpful assistant. Be concise."
-  )
-  log("LLM says: ${response}")
-}
-```
-
-Harn supports Anthropic, OpenAI, Ollama, and OpenRouter out of the box.
-
-### Build an agent with tools
-
-Register tools with JSON Schema-compatible definitions, then let the LLM
-call them:
-
-```javascript
-pipeline default(task) {
-  var tools = tool_registry()
-  tools = tool_add(tools, "search", "Search the web", { query ->
-    return http_get("https://api.search.com?q=" + query).body
-  }, {query: "string"})
-
-  tools = tool_add(tools, "calculate", "Evaluate math", { expr ->
-    return shell("echo '" + expr + "' | bc").stdout
-  }, {expression: "string"})
-
-  // Generate a universal prompt that works with any LLM
-  let system = tool_prompt(tools)
-
-  let response = llm_call(task, system)
-
-  // Parse and dispatch tool calls from LLM output
-  let call = tool_parse_call(response)
-  if call != nil {
-    let tool = tool_find(tools, call.name)
-    let handler = tool.handler
-    let result = handler(call.arguments.query)
-    log(result)
+```harn
+let result = agent_loop(
+  "Fix the failing test and verify the change.",
+  "You are a senior engineer.",
+  {
+    persistent: true,
+    tools: ["read_file", "search", "edit", "run"],
+    max_iterations: 24
   }
-}
+)
+
+println(result.status)
+println(result.visible_text)
 ```
 
-## What the language looks like
+## What Ships In Harn v0.4.30
 
-### Data transformation with pipes
+- Typed workflow graphs via `workflow_graph(...)` and `workflow_execute(...)`
+  with explicit nodes, edges, validation, policy attachment, map/join style
+  stages, and resumable execution.
+- Typed artifacts and resources as the real context boundary. Context
+  selection is artifact-aware, budget-aware, and policy-driven rather than
+  raw prompt concatenation.
+- Durable run records with persisted stage transcripts, artifacts, policy
+  decisions, verification outcomes, and CLI inspection/replay/eval entrypoints.
+- Provider-normalized LLM output with `visible_text`, `private_reasoning`,
+  `tool_calls`, `blocks`, `provider`, `stop_reason`, and transcript events.
+- Structured transcript lifecycle support: continue, fork, compact,
+  summarize, render public-only output, or render full execution history.
+- Workflow meta-editing builtins such as `workflow.inspect`, clone/insert/
+  replace/rewire operations, per-node model/context/transcript policy edits,
+  diff, validate, and commit-style validation.
+- Capability ceiling enforcement for workflows and sub-orchestration:
+  internal plans may narrow capabilities but cannot exceed the host ceiling.
+- ACP/bridge queued-user-message handling modes for agent execution:
+  interrupt immediately, inject after the current operation, or defer until
+  the agent yields back to the human.
 
-```javascript
-pipeline default(task) {
-  let users = [
-    {name: "Alice", age: 30, role: "engineer"},
-    {name: "Bob", age: 25, role: "designer"},
-    {name: "Charlie", age: 35, role: "engineer"}
-  ]
+## Why This Matters
 
-  let senior_engineers = users
-    |> { list -> list.filter({ u -> u.role == "engineer" }) }
-    |> { list -> list.filter({ u -> u.age >= 30 }) }
-    |> { list -> list.map({ u -> u.name }) }
+Without a runtime boundary like Harn, application code tends to accumulate:
 
-  log(senior_engineers)  // ["Alice", "Charlie"]
-}
-```
+- provider-specific message/response parsing
+- transcript compaction and summarization logic
+- tool dispatch and retry behavior
+- workflow branching and repair loops
+- provenance, replay, and eval fixtures
+- host/editor queue semantics
 
-### Persistent agent loops
+Harn moves those concerns into a typed runtime layer so a host app such as
+Burin can stay focused on:
 
-The `agent_loop` builtin maintains conversation history across turns and
-keeps the agent working until it emits a `##DONE##` sentinel:
+- capabilities it wants to expose
+- top-level policy ceilings
+- workflow templates and product defaults
+- UI/session integration
 
-```javascript
-pipeline default(task) {
-  let result = agent_loop(
-    task,
-    "You are a coding assistant.",
-    {persistent: true, max_nudges: 3, max_iterations: 50}
-  )
-  log(result.text)
-}
-```
+## Workflow Runtime Example
 
-### Agent loops with tools
-
-`agent_loop` can execute tools during the conversation loop. Pass tool
-names as a string list to use built-in schemas, or provide a
-`tool_registry` or raw tool dicts. By default, tools are invoked via
-text-based `<tool_call>` XML tags, which works with any model. Set
-`tool_format: "native"` to use API-level function calling instead.
-
-```javascript
-pipeline default(task) {
-  let result = agent_loop(
-    task,
-    "You are a coding assistant. Use tools to complete the task.",
-    {
-      persistent: true,
-      tools: ["read_file", "search", "edit", "run"],
-      tool_format: "text",      // default; or "native" for function calling
-      max_iterations: 25
+```harn
+let graph = workflow_graph({
+  name: "review_and_repair",
+  entry: "plan",
+  nodes: {
+    plan: {
+      kind: "stage",
+      mode: "llm",
+      task_label: "Planning task",
+      model_policy: {model_tier: "small"},
+      context_policy: {include_kinds: ["summary", "resource"], max_tokens: 1200}
+    },
+    implement: {
+      kind: "stage",
+      mode: "agent",
+      tools: ["read_file", "edit", "run"],
+      model_policy: {model_tier: "mid"},
+      retry_policy: {max_attempts: 2}
+    },
+    verify: {
+      kind: "verify",
+      mode: "agent",
+      tools: ["run"],
+      verify: {assert_text: "PASS"}
     }
-  )
-  log(result.text)
-}
-```
+  },
+  edges: [
+    {from: "plan", to: "implement"},
+    {from: "implement", to: "verify"},
+    {from: "verify", to: "implement", branch: "failed"}
+  ]
+})
 
-Built-in tool schemas: `read_file`, `search`, `edit`, `run`, `outline`,
-`web_search`, `web_fetch`, `lsp_hover`, `lsp_definition`,
-`lsp_references`, `list_directory`.
-
-In ACP/bridge mode, `register_agent_loop_with_bridge()` wires tool
-execution through the host so the editor or CLI handles the actual I/O.
-
-### Parallel execution
-
-Run work concurrently without callbacks or async/await noise:
-
-```javascript
-pipeline default(task) {
-  let files = ["src/main.rs", "src/lib.rs", "src/utils.rs"]
-
-  let analyses = parallel_map(files) { file ->
-    llm_call(read_file(file), "Review this code for bugs")
-  }
-
-  for a in analyses {
-    log(a)
-  }
-}
-```
-
-### HTTP with retries and timeouts
-
-Production-ready HTTP with automatic retries and exponential backoff:
-
-```javascript
-pipeline default(task) {
-  // Full request with options
-  let r = http_request("POST", "https://api.example.com/data", {
-    body: json_stringify({query: task}),
-    headers: {content_type: "application/json"},
-    auth: "Bearer sk-...",
-    timeout: 5000,
-    retries: 3,
-    backoff: 1000
+let artifacts = [
+  artifact({
+    kind: "resource",
+    title: "Editor selection",
+    text: read_file("src/lib.rs"),
+    source: "workspace"
   })
+]
 
-  if r.ok {
-    log(json_parse(r.body))
-  }
+let run = workflow_execute(
+  "Refactor the parser error message and verify it.",
+  graph,
+  artifacts,
+  {max_steps: 8}
+)
 
-  // Shorthand helpers
-  let page = http_get("https://example.com")
-  let resp = http_post("https://api.example.com", json_stringify({x: 1}))
-}
+println(run.status)
+println(run.path)
+println(run.run.stages)
 ```
 
-### Structured logging
+## Transcript And Artifact Model
 
-JSON-structured logs with levels, fields, and trace context:
+`llm_call(...)` and `agent_loop(...)` now return a canonical schema that
+separates human-visible output from internal execution state:
 
-```javascript
-pipeline default(task) {
-  let span = trace_start("process_request")
+- `visible_text`: safe assistant-visible text
+- `private_reasoning`: provider reasoning metadata when available
+- `tool_calls`: normalized tool intent
+- `blocks`: canonical structured blocks across providers
+- `provider`: normalized provider identity
+- `transcript`: persisted transcript state with `messages` and `events`
 
-  log_info("processing", {task: task, step: "start"})
+Artifact records are durable typed objects with provenance:
 
-  // All log calls within a trace include trace_id automatically
-  log_debug("details", {verbose: true})
-  log_warn("slow response", {latency_ms: 500})
+```harn
+let note = artifact({
+  kind: "analysis_note",
+  title: "Parser regression risk",
+  text: "The lexer span mapping affects diagnostics and tree-sitter tests.",
+  source: "review",
+  relevance: 0.9,
+  metadata: {owner: "runtime"}
+})
 
-  trace_end(span)
-
-  // Filter by level
-  log_set_level("warn")  // only warn and error after this
-}
+let focused = artifact_select([note], {
+  include_kinds: ["analysis_note"],
+  max_tokens: 200
+})
 ```
 
-### Composable pipelines
+## Host Integration
 
-Pipelines can extend and override each other:
+Run Harn as an ACP backend:
 
-```javascript
-pipeline base(task) {
-  let context = read_file("README.md")
-  log("Context loaded")
-}
-
-pipeline deploy(task) extends base {
-  override fn setup() { /* custom setup */ }
-  log("Deploying...")
-}
+```bash
+harn acp
+harn acp agent.harn
 ```
 
-### Shared libraries
+Inspect persisted run records:
 
-Factor common logic into library files and import them:
-
-```javascript
-// lib/helpers.harn
-fn double(x) { return x * 2 }
-fn greet(name) { return "hello " + name }
+```bash
+harn runs inspect .harn-runs/<run>.json
+harn replay .harn-runs/<run>.json
+harn eval .harn-runs/<run>.json
 ```
 
-```javascript
-import "lib/helpers"
+Queued human messages can be delivered to an in-flight agent through host
+notifications:
 
-pipeline default(task) {
-  log(greet("world"))
-  log(double(21))
-}
-```
+- `interrupt_immediate`: stop the current deliberation boundary and inject now
+- `finish_step`: inject after the current tool/operation boundary
+- `wait_for_completion`: defer until the agent yields control
 
 ## Documentation
 
-- [Why Harn?](docs/why-harn.md) — what problem Harn solves, how it compares, who it's for
-- [Cookbook](docs/cookbook.md) — practical patterns for agentic programming with working examples
-- [Language basics](docs/language-basics.md) — syntax, types, operators, control flow, functions, collections
-- [LLM calls and agent loops](docs/llm-and-agents.md) — providers, API keys, `llm_call`, `agent_loop`, persistent mode
-- [Concurrency](docs/concurrency.md) — `spawn`/`await`, `parallel`, `parallel_map`, channels, atomics, mutex, deadline
-- [Error handling](docs/error-handling.md) — `try`/`catch`/`throw`, `retry`, typed catch
-- [Modules and imports](docs/modules.md) — library files, `import`, pipeline inheritance
-- [Builtin functions](docs/builtins.md) — complete reference for all built-in functions
-- [Language specification](spec/HARN_SPEC.md) — formal spec covering lexical rules, grammar, and semantics
-- [AST reference](spec/AST.md) — node types used by the parser
+- [Docs book](docs/src/introduction.md)
+- [Workflow runtime guide](docs/src/workflow-runtime.md)
+- [LLM calls and agent loops](docs/src/llm-and-agents.md)
+- [MCP and ACP integration](docs/src/mcp-and-acp.md)
+- [CLI reference](docs/src/cli-reference.md)
+- [Builtin reference](docs/src/builtins.md)
+- [Language spec](spec/HARN_SPEC.md)
 
-## Tooling
-
-Harn ships with built-in formatting, linting, and testing:
+## Development
 
 ```bash
-# Scaffold a new project
-harn init my-project
-
-# Format code (opinionated, 2-space indent)
-harn fmt myfile.harn
-harn fmt --check myfile.harn  # check without modifying
-
-# Lint code
-harn lint myfile.harn
-
-# Run tests (discovers test_* pipelines)
-harn test tests/
-harn test myfile_test.harn
-```
-
-The linter catches: unused variables, unreachable code, `var` that should
-be `let`, empty blocks, and shadowed variables.
-
-### Sandbox mode
-
-Run untrusted code with restricted filesystem and network access:
-
-```bash
-harn run --sandbox script.harn
-```
-
-In sandbox mode, file operations are confined to the working directory
-and network calls are disabled by default.
-
-Errors render with source context, like Rust:
-
-```text
-error: undefined variable `reponse`
-  --> pipeline.harn:12:15
-   |
-12 |   let output = reponse
-   |                ^^^^^^^ not found in this scope
-   |
-   = help: did you mean `response`?
-```
-
-### Editor support
-
-**VS Code** — syntax highlighting, hover, completions, signature help,
-go-to-definition, references, rename, workspace symbols, diagnostics,
-and linting:
-
-```bash
-cd editors/vscode
-npm install && npm run compile
-npx vsce package
-code --install-extension harn-lang-0.1.0.vsix
-```
-
-Or open `editors/vscode/` in VS Code and press F5 to launch a dev host.
-
-## For language designers
-
-Harn's execution pipeline, written in Rust:
-
-```text
-source -> Lexer -> Parser -> TypeChecker -> Compiler -> VM (bytecode)
-```
-
-The codebase is organized as a Cargo workspace:
-
-| Crate | Purpose |
-|---|---|
-| `harn-lexer` | Tokenizer with byte-offset span tracking |
-| `harn-parser` | Parser, spanned AST (`SNode`), type checker, diagnostic renderer |
-| `harn-vm` | Bytecode compiler, VM, and all builtin functions |
-| `harn-fmt` | Opinionated code formatter |
-| `harn-lint` | Linter with 6 rules |
-| `harn-cli` | CLI: `run`, `test`, `repl`, `init`, `fmt`, `lint`, `version`, `acp`, `serve` |
-| `harn-lsp` | LSP: completion, hover, signature help, go-to-def, rename, workspace symbols |
-| `harn-dap` | DAP: breakpoints (conditional), stepping, variable inspection, expression eval |
-| `harn-wasm` | WASM target (built separately with wasm-pack) |
-
-The [language specification](spec/HARN_SPEC.md) is the authoritative reference.
-The tree-sitter grammar for editor support is in `tree-sitter-harn/`.
-
-## For contributors
-
-```bash
-# Run everything: format, lint, test, conformance
+make fmt
+make lint
+make test
+make conformance
 make all
-
-# Individual checks
-make fmt          # auto-format
-make lint         # clippy (warnings are errors)
-make test         # Rust unit tests
-make conformance  # language conformance tests
 ```
 
-Conformance tests in `conformance/` are the primary way to verify language
-behavior. Each test is a `.harn` file paired with a `.expected` or `.error`
-file. Add one whenever you change the parser or VM.
+The workspace includes:
 
-Pre-commit hooks run `fmt` and `clippy` automatically. After cloning, set them up:
-
-```bash
-git config core.hooksPath .githooks
-```
-
-### LLM provider configuration
-
-To use `llm_call` or `agent_loop`, set the appropriate API key:
-
-```bash
-export ANTHROPIC_API_KEY="sk-ant-..."    # Anthropic (Claude)
-export OPENAI_API_KEY="sk-..."           # OpenAI (GPT)
-export OPENROUTER_API_KEY="sk-or-..."    # OpenRouter
-```
-
-Provider endpoints, model aliases, and inference rules are configured via
-`~/.config/harn/providers.toml` (or set `HARN_PROVIDERS_CONFIG` to a
-custom path). Built-in defaults cover Anthropic, OpenAI, OpenRouter,
-HuggingFace, and Ollama. See [docs/builtins.md](docs/builtins.md#provider-configuration)
-for the full TOML format.
-
-To add a new provider (e.g. Gemini), just add a section to your
-`providers.toml`:
-
-```toml
-[providers.gemini]
-base_url = "https://generativelanguage.googleapis.com/v1beta"
-auth_style = "query"
-auth_env = "GEMINI_API_KEY"
-chat_endpoint = "/models/{model}:generateContent"
-```
+- `harn-lexer`: scanner/tokenizer
+- `harn-parser`: parser, AST, type checker, diagnostics
+- `harn-vm`: compiler, interpreter, LLM/runtime/orchestration layer
+- `harn-fmt`: formatter
+- `harn-lint`: linter
+- `harn-cli`: CLI, ACP, A2A, conformance runner
+- `harn-lsp`: language server
+- `harn-dap`: debugger adapter
+- `tree-sitter-harn`: syntax grammar for editor integrations

@@ -336,6 +336,7 @@ pub(crate) fn new_transcript_with(
     metadata: Option<VmValue>,
 ) -> VmValue {
     let mut transcript = BTreeMap::new();
+    let events = transcript_events_from_messages(&messages);
     transcript.insert(
         "_type".to_string(),
         VmValue::String(Rc::from(TRANSCRIPT_TYPE)),
@@ -347,6 +348,7 @@ pub(crate) fn new_transcript_with(
         )),
     );
     transcript.insert("messages".to_string(), VmValue::List(Rc::new(messages)));
+    transcript.insert("events".to_string(), VmValue::List(Rc::new(events)));
     if let Some(summary) = summary {
         transcript.insert("summary".to_string(), VmValue::String(Rc::from(summary)));
     }
@@ -354,6 +356,59 @@ pub(crate) fn new_transcript_with(
         transcript.insert("metadata".to_string(), metadata);
     }
     VmValue::Dict(Rc::new(transcript))
+}
+
+fn transcript_event_from_message(message: &VmValue) -> VmValue {
+    let dict = message.as_dict().cloned().unwrap_or_default();
+    let role = dict
+        .get("role")
+        .map(|v| v.display())
+        .unwrap_or_else(|| "user".to_string());
+    let content = dict.get("content").map(|v| v.display()).unwrap_or_default();
+    let visibility = if role == "tool_result" {
+        "internal"
+    } else {
+        "public"
+    };
+    let kind = if role == "tool_result" {
+        "tool_result"
+    } else {
+        "message"
+    };
+    let mut event = BTreeMap::new();
+    event.insert(
+        "id".to_string(),
+        VmValue::String(Rc::from(uuid::Uuid::now_v7().to_string())),
+    );
+    event.insert("kind".to_string(), VmValue::String(Rc::from(kind)));
+    event.insert("role".to_string(), VmValue::String(Rc::from(role.as_str())));
+    event.insert(
+        "visibility".to_string(),
+        VmValue::String(Rc::from(visibility)),
+    );
+    event.insert(
+        "text".to_string(),
+        VmValue::String(Rc::from(content.as_str())),
+    );
+    event.insert(
+        "blocks".to_string(),
+        VmValue::List(Rc::new(vec![VmValue::Dict(Rc::new(BTreeMap::from([
+            ("type".to_string(), VmValue::String(Rc::from("text"))),
+            (
+                "text".to_string(),
+                VmValue::String(Rc::from(content.as_str())),
+            ),
+            (
+                "visibility".to_string(),
+                VmValue::String(Rc::from(visibility)),
+            ),
+        ])))])),
+    );
+    VmValue::Dict(Rc::new(event))
+}
+
+pub(crate) fn transcript_events_from_messages(messages: &[VmValue]) -> Vec<VmValue> {
+    messages.iter().map(transcript_event_from_message).collect()
 }
 
 pub(crate) fn transcript_to_vm(
@@ -400,11 +455,9 @@ pub(crate) fn vm_add_role_message(args: &[VmValue], role: &str) -> Result<VmValu
                 d.get("metadata").cloned(),
             ))
         }
-        _ => {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                "add_{role}: first argument must be a message list or transcript"
-            )))));
-        }
+        _ => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+            "add_{role}: first argument must be a message list or transcript"
+        ))))),
     }
 }
 

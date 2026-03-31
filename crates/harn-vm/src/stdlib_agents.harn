@@ -118,57 +118,54 @@ pub fn repair_task(original_task, verification, config) {
 }
 
 pub fn workflow(config) {
-  return filter_nil(config + {_type: "workflow"})
+  return workflow_graph(config ?? {})
 }
 
 pub fn task_run(task, flow, overrides) {
-  let act_config = stage_config(flow, overrides, "act")
-  let act_result = run_stage(task, act_config)
-
-  let verify_config = stage_config(flow, overrides, "verify")
-  let verification = verify_result(task, act_result, verify_config)
-  if verification == nil || verification?.ok == true {
-    return {
-      task: task,
-      workflow: flow?.name ?? "workflow",
-      status: act_result?.status ?? "done",
-      text: act_result?.text,
-      result: act_result,
-      act: act_result,
-      verification: verification,
-      transcript: act_result?.transcript,
-      context: act_config?.context
+  let graph = workflow_graph(flow ?? {})
+  let runtime = workflow_execute(task, graph, overrides?.artifacts ?? [], overrides)
+  let stages = runtime?.run?.stages ?? []
+  var act = nil
+  var verify = nil
+  var repair = nil
+  let artifacts = runtime?.artifacts ?? []
+  let latest_text = if len(artifacts) > 0 {
+    artifacts[len(artifacts) - 1]?.text
+  } else {
+    act?.visible_text
+  }
+  for stage in stages {
+    if act == nil {
+      act = stage
+      continue
+    }
+    if verify == nil && (stage?.node_id == "verify" || stage?.kind == "verify") {
+      verify = stage
+      continue
+    }
+    if repair == nil && stage?.node_id == "repair" {
+      repair = stage
     }
   }
-
-  let repair_config = stage_config(flow, overrides, "repair") + {
-    transcript: act_result?.transcript ?? act_config?.transcript
-  }
-  let repair_result = run_stage(repair_task(task, verification, repair_config), repair_config)
-  let final_verification = verify_result(task, repair_result, verify_config)
-  let status = if final_verification == nil || final_verification?.ok == true {
-    repair_result?.status ?? "repaired"
-  } else {
+  let status = if verify?.status == "failed" || repair != nil {
     "needs_attention"
+  } else {
+    runtime?.status ?? "completed"
   }
-
   return {
     task: task,
-    workflow: flow?.name ?? "workflow",
+    workflow: graph?.name ?? "workflow",
     status: status,
-    text: repair_result?.text,
-    result: repair_result,
-    act: act_result,
-    repair: repair_result,
-    verification: verification,
-    final_verification: final_verification,
-    transcript: repair_result?.transcript ?? act_result?.transcript,
-    context: act_config?.context
+    text: latest_text,
+    result: runtime,
+    act: act,
+    repair: repair,
+    verification: verify,
+    final_verification: verify,
+    transcript: runtime?.transcript,
+    run: runtime?.run,
+    artifacts: artifacts
   }
-}
-
-pub fn workflow_run(task, flow, overrides) {
-  return task_run(task, flow, overrides)
 }
 
 pub fn workflow_continue(prev, task, flow, overrides) {

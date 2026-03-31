@@ -1,0 +1,10 @@
+pipeline main() {
+  let result = llm_call("hello world", nil, {provider: "mock"})
+  println(result?.provider)
+  println(result?.visible_text != "")
+  println(result?.private_reasoning == nil)
+  println(len(result?.blocks) >= 1)
+  println(len(transcript_events(result?.transcript)) >= 2)
+  println(contains(transcript_render_visible(result?.transcript), "assistant:"))
+  println(contains(transcript_render_full(result?.transcript), "[public]"))
+}

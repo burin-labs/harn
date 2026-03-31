@@ -1,37 +1,15 @@
 import "std/agents"
+
 import "std/context"
 
 pipeline default() {
-  let flow = workflow({
-    name: "demo",
-    model_tier: "mid",
-    persistent: false,
-    act: {
-      mode: "llm",
-      context: context([
-        section("brief", "Stay concise.", nil)
-      ], nil)
-    },
-    verify: {
-      assert_text: "not present"
-    },
-    repair: {
-      mode: "llm",
-      model_tier: "frontier"
-    }
-  })
-
+  let flow = workflow({name: "demo", model_tier: "mid", persistent: false, act: {mode: "llm", context: context([section("brief", "Stay concise.", nil)], nil)}, verify: {assert_text: "not present"}, repair: {mode: "llm", model_tier: "frontier"}})
   let result = task_run("Write a note", flow, {provider: "mock"})
   println(result?.status)
   println(result?.repair != nil)
   println(result?.transcript?._type)
-
   let continued = workflow_continue(result, "Continue", flow, {provider: "mock"})
   println(continued?.transcript?._type)
-
-  let compacted = workflow_compact(continued, {
-    provider: "mock",
-    keep_last: 1
-  })
+  let compacted = workflow_compact(continued, {provider: "mock", keep_last: 1})
   println(transcript_summary(compacted) != nil)
 }

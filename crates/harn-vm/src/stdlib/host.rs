@@ -80,7 +80,7 @@ fn capability(description: &str, ops: &[(String, VmValue)]) -> VmValue {
     VmValue::Dict(Rc::new(entry))
 }
 
-fn require_param<'a>(params: &'a BTreeMap<String, VmValue>, key: &str) -> Result<String, VmError> {
+fn require_param(params: &BTreeMap<String, VmValue>, key: &str) -> Result<String, VmError> {
     params
         .get(key)
         .map(|v| v.display())
