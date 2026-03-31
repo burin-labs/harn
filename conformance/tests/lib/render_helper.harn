@@ -1,0 +1,3 @@
+pub fn load_greeting() {
+  return render("greeting.txt")
+}

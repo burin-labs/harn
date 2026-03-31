@@ -314,7 +314,7 @@ These are called on string values with dot notation: `"hello".uppercase()`.
 | `mkdir(path)` | path: string | nil | Create directory and all parent directories. Throws on failure |
 | `stat(path)` | path: string | dict | File metadata: `{size, is_file, is_dir, readonly, modified}`. Throws on failure |
 | `temp_dir()` | none | string | System temporary directory path |
-| `render(path, bindings?)` | path: string, bindings: dict | string | Read a template file relative to the current pipeline source file and replace `{{key}}` placeholders with values from bindings dict. Without bindings, just reads the file |
+| `render(path, bindings?)` | path: string, bindings: dict | string | Read a template file relative to the current module's source directory and replace `{{key}}` placeholders with values from bindings dict. When called from an imported module, resolves relative to that module's directory, not the entry pipeline. Without bindings, just reads the file |
 
 ## Environment and system
 

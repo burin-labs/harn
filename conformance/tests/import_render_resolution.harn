@@ -1,0 +1,6 @@
+import "lib/render_helper.harn"
+
+pipeline test(task) {
+  let text = load_greeting()
+  log(text)
+}

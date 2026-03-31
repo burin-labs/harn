@@ -84,6 +84,10 @@ pub enum VmValue {
 pub struct VmClosure {
     pub func: CompiledFunction,
     pub env: VmEnv,
+    /// Source directory for this closure's originating module.
+    /// When set, `render()` and other source-relative builtins resolve
+    /// paths relative to this directory instead of the entry pipeline.
+    pub source_dir: Option<std::path::PathBuf>,
 }
 
 /// VM environment for variable storage.

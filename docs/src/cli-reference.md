@@ -86,8 +86,10 @@ harn lint main.harn
 ## harn check
 
 Type-check a `.harn` file and run preflight validation without executing it.
-The preflight pass resolves imports, checks literal `render(...)` targets, and
-flags missing template resources that would otherwise fail only at runtime.
+The preflight pass resolves imports, checks literal `render(...)` targets,
+detects import symbol collisions across modules, validates `host_invoke(...)`
+capability/operation pairs, and flags missing template resources, execution
+directories, and worker repos that would otherwise fail only at runtime.
 
 ```bash
 harn check main.harn

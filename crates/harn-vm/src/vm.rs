@@ -38,6 +38,9 @@ pub(crate) struct CallFrame {
     pub(crate) fn_name: String,
     /// Number of arguments actually passed by the caller (for default arg support).
     pub(crate) argc: usize,
+    /// Saved VM_SOURCE_DIR to restore when this frame is popped.
+    /// Set when entering a closure that originated from an imported module.
+    pub(crate) saved_source_dir: Option<std::path::PathBuf>,
 }
 
 /// Exception handler for try/catch.
@@ -342,6 +345,9 @@ impl Vm {
             Ok(None) => Ok(None),
             Err(VmError::Return(val)) => {
                 if let Some(popped_frame) = self.frames.pop() {
+                    if let Some(ref dir) = popped_frame.saved_source_dir {
+                        crate::stdlib::set_thread_source_dir(dir);
+                    }
                     let current_depth = self.frames.len();
                     self.exception_handlers
                         .retain(|h| h.frame_depth <= current_depth);
@@ -381,6 +387,7 @@ impl Vm {
             saved_env: self.env.clone(),
             fn_name: String::new(),
             argc: 0,
+            saved_source_dir: None,
         });
     }
 
@@ -617,6 +624,16 @@ impl Vm {
                                 continue;
                             }
                         }
+                        // Check for import collision before compiling
+                        if let Some(VmValue::Closure(_)) = self.env.get(name) {
+                            let module = file_path
+                                .map(|p| p.display().to_string())
+                                .unwrap_or_else(|| "<stdlib>".to_string());
+                            return Err(VmError::Runtime(format!(
+                                "Import collision: '{name}' is already defined when importing {module}. \
+                                 Use selective imports to disambiguate: import {{ {name} }} from \"...\""
+                            )));
+                        }
                         // Compile the function body into a closure and define it
                         let mut compiler = crate::Compiler::new();
                         let func_chunk = compiler
@@ -625,6 +642,8 @@ impl Vm {
                         let closure = VmClosure {
                             func: func_chunk,
                             env: self.env.clone(),
+                            source_dir: file_path
+                                .and_then(|fp| fp.parent().map(|p| p.to_path_buf())),
                         };
                         self.env
                             .define(name, VmValue::Closure(Rc::new(closure)), false)?;
@@ -697,6 +716,9 @@ impl Vm {
             // Unwind call frames back to the handler's frame depth
             while self.frames.len() > handler.frame_depth {
                 if let Some(frame) = self.frames.pop() {
+                    if let Some(ref dir) = frame.saved_source_dir {
+                        crate::stdlib::set_thread_source_dir(dir);
+                    }
                     self.env = frame.saved_env;
                 }
             }
@@ -743,6 +765,7 @@ impl Vm {
             saved_env: self.env.clone(),
             fn_name: String::new(),
             argc,
+            saved_source_dir: None,
         });
 
         loop {
@@ -791,6 +814,9 @@ impl Vm {
                 Err(VmError::Return(val)) => {
                     // Pop the current frame
                     if let Some(popped_frame) = self.frames.pop() {
+                        if let Some(ref dir) = popped_frame.saved_source_dir {
+                            crate::stdlib::set_thread_source_dir(dir);
+                        }
                         // Clean up exception handlers from the returned frame
                         let current_depth = self.frames.len();
                         self.exception_handlers
@@ -903,6 +929,17 @@ impl Vm {
         }
         let saved_env = self.env.clone();
 
+        // If this closure originated from an imported module, switch
+        // the thread-local source dir so that render() and other
+        // source-relative builtins resolve relative to the module.
+        let saved_source_dir = if let Some(ref dir) = closure.source_dir {
+            let prev = crate::stdlib::process::VM_SOURCE_DIR.with(|sd| sd.borrow().clone());
+            crate::stdlib::set_thread_source_dir(dir);
+            prev
+        } else {
+            None
+        };
+
         let mut call_env = Self::merge_env_into_closure(&saved_env, closure);
         call_env.push_scope();
 
@@ -927,6 +964,7 @@ impl Vm {
             saved_env,
             fn_name: closure.func.name.clone(),
             argc: args.len(),
+            saved_source_dir,
         });
 
         Ok(())

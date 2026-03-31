@@ -220,7 +220,137 @@ fn collect_preflight_diagnostics(
     let mut visited = HashSet::new();
     let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     scan_program_preflight(&canonical, source, program, &mut visited, &mut diagnostics);
+
+    // Import collision detection: collect all names exported by each import
+    // and flag duplicates across different modules.
+    scan_import_collisions(&canonical, source, program, &mut diagnostics);
+
     diagnostics
+}
+
+/// Tracks the origin of an imported name for collision detection.
+struct ImportedName {
+    module_path: String,
+}
+
+/// Collect all function names that would be imported by each import statement
+/// in the program, and flag collisions.
+fn scan_import_collisions(
+    file_path: &Path,
+    source: &str,
+    program: &[SNode],
+    diagnostics: &mut Vec<PreflightDiagnostic>,
+) {
+    let mut imported_names: std::collections::HashMap<String, ImportedName> =
+        std::collections::HashMap::new();
+
+    for node in program {
+        match &node.node {
+            Node::ImportDecl { path } => {
+                if path.starts_with("std/") {
+                    continue;
+                }
+                let Some(import_path) = resolve_import_path(file_path, path) else {
+                    continue; // already diagnosed as unresolved
+                };
+                let import_str = import_path.to_string_lossy().to_string();
+                let Ok(import_source) = std::fs::read_to_string(&import_path) else {
+                    continue;
+                };
+                let names = collect_exported_names(&import_source);
+                for name in names {
+                    if let Some(existing) = imported_names.get(&name) {
+                        if existing.module_path != import_str {
+                            diagnostics.push(PreflightDiagnostic {
+                                path: file_path.display().to_string(),
+                                source: source.to_string(),
+                                span: node.span,
+                                message: format!(
+                                    "preflight: import collision — '{name}' is exported by both '{}' and '{path}'",
+                                    existing.module_path
+                                ),
+                                help: Some(format!(
+                                    "use selective imports to disambiguate: import {{ {name} }} from \"...\""
+                                )),
+                            });
+                        }
+                    } else {
+                        imported_names.insert(
+                            name,
+                            ImportedName {
+                                module_path: import_str.clone(),
+                            },
+                        );
+                    }
+                }
+            }
+            Node::SelectiveImport { names, path } => {
+                if path.starts_with("std/") {
+                    continue;
+                }
+                let module_path = resolve_import_path(file_path, path)
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_else(|| path.clone());
+                for name in names {
+                    if let Some(existing) = imported_names.get(name) {
+                        if existing.module_path != module_path {
+                            diagnostics.push(PreflightDiagnostic {
+                                path: file_path.display().to_string(),
+                                source: source.to_string(),
+                                span: node.span,
+                                message: format!(
+                                    "preflight: import collision — '{name}' is exported by both '{}' and '{path}'",
+                                    existing.module_path
+                                ),
+                                help: Some(
+                                    "rename one of the imported modules or avoid importing conflicting names"
+                                        .to_string(),
+                                ),
+                            });
+                        }
+                    } else {
+                        imported_names.insert(
+                            name.clone(),
+                            ImportedName {
+                                module_path: module_path.clone(),
+                            },
+                        );
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Parse a module source and extract the names it would export via wildcard import.
+fn collect_exported_names(source: &str) -> Vec<String> {
+    let mut lexer = harn_lexer::Lexer::new(source);
+    let tokens = match lexer.tokenize() {
+        Ok(t) => t,
+        Err(_) => return Vec::new(),
+    };
+    let mut parser = harn_parser::Parser::new(tokens);
+    let program = match parser.parse() {
+        Ok(p) => p,
+        Err(_) => return Vec::new(),
+    };
+    let has_pub = program
+        .iter()
+        .any(|n| matches!(&n.node, Node::FnDecl { is_pub: true, .. }));
+    program
+        .iter()
+        .filter_map(|n| match &n.node {
+            Node::FnDecl { name, is_pub, .. } => {
+                if has_pub && !is_pub {
+                    None
+                } else {
+                    Some(name.clone())
+                }
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 fn scan_program_preflight(
@@ -323,28 +453,45 @@ fn scan_node_preflight(
             scan_children(args, file_path, source, visited, diagnostics);
         }
         Node::FunctionCall { name, args } if name == "host_invoke" => {
-            if matches!(
-                (args.first().map(|arg| &arg.node), args.get(1).map(|arg| &arg.node)),
-                (Some(Node::StringLiteral(cap)), Some(Node::StringLiteral(op)))
-                    if cap == "template" && op == "render"
-            ) {
-                if let Some(template_path) = host_render_path_arg(args.get(2)) {
-                    let resolved = resolve_source_relative(file_path, &template_path);
-                    if !resolved.exists() {
-                        diagnostics.push(PreflightDiagnostic {
-                            path: file_path.display().to_string(),
-                            source: source.to_string(),
-                            span: args[2].span,
-                            message: format!(
-                                "preflight: host template render target '{}' does not exist at {}",
-                                template_path,
-                                resolved.display()
-                            ),
-                            help: Some(
-                                "verify the template path before ACP or embedded-host execution"
-                                    .to_string(),
-                            ),
-                        });
+            // Validate known capability/operation pairs
+            if let (Some(Node::StringLiteral(cap)), Some(Node::StringLiteral(op))) =
+                (args.first().map(|a| &a.node), args.get(1).map(|a| &a.node))
+            {
+                if !is_known_host_operation(cap, op) {
+                    diagnostics.push(PreflightDiagnostic {
+                        path: file_path.display().to_string(),
+                        source: source.to_string(),
+                        span: node.span,
+                        message: format!(
+                            "preflight: unknown host capability/operation '{cap}.{op}'"
+                        ),
+                        help: Some(
+                            "known capabilities: workspace (read_text, write_text, apply_edit, delete, exists, list), \
+                             process (exec), template (render), interaction (ask)"
+                                .to_string(),
+                        ),
+                    });
+                }
+                // Template render target check
+                if cap == "template" && op == "render" {
+                    if let Some(template_path) = host_render_path_arg(args.get(2)) {
+                        let resolved = resolve_source_relative(file_path, &template_path);
+                        if !resolved.exists() {
+                            diagnostics.push(PreflightDiagnostic {
+                                path: file_path.display().to_string(),
+                                source: source.to_string(),
+                                span: args[2].span,
+                                message: format!(
+                                    "preflight: host template render target '{}' does not exist at {}",
+                                    template_path,
+                                    resolved.display()
+                                ),
+                                help: Some(
+                                    "verify the template path before ACP or embedded-host execution"
+                                        .to_string(),
+                                ),
+                            });
+                        }
                     }
                 }
             }
@@ -595,6 +742,18 @@ fn resolve_source_relative(current_file: &Path, target: &str) -> PathBuf {
     }
 }
 
+fn is_known_host_operation(capability: &str, operation: &str) -> bool {
+    matches!(
+        (capability, operation),
+        (
+            "workspace",
+            "read_text" | "write_text" | "apply_edit" | "delete" | "exists" | "list"
+        ) | ("process", "exec")
+            | ("template", "render")
+            | ("interaction", "ask")
+    )
+}
+
 fn host_render_path_arg(arg: Option<&SNode>) -> Option<String> {
     let Node::DictLiteral(entries) = &arg?.node else {
         return None;
@@ -750,6 +909,144 @@ pipeline main() {
         let diagnostics = collect_preflight_diagnostics(&file, source, &program);
         assert_eq!(diagnostics.len(), 1);
         assert!(diagnostics[0].message.contains("worktree repo"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn preflight_detects_import_collision() {
+        let dir = unique_temp_dir("harn-check-collision");
+        std::fs::create_dir_all(dir.join("lib")).unwrap();
+        std::fs::write(dir.join("lib").join("a.harn"), "pub fn helper() { 1 }\n").unwrap();
+        std::fs::write(dir.join("lib").join("b.harn"), "pub fn helper() { 2 }\n").unwrap();
+        let file = dir.join("main.harn");
+        let source = r#"
+import "lib/a.harn"
+import "lib/b.harn"
+
+pipeline main() {
+  log(helper())
+}
+"#;
+        let program = parse_program(source);
+        let diagnostics = collect_preflight_diagnostics(&file, source, &program);
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("import collision")),
+            "expected import collision diagnostic, got: {:?}",
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn preflight_no_collision_with_selective_imports() {
+        let dir = unique_temp_dir("harn-check-selective");
+        std::fs::create_dir_all(dir.join("lib")).unwrap();
+        std::fs::write(
+            dir.join("lib").join("a.harn"),
+            "pub fn foo() { 1 }\npub fn shared() { 2 }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("lib").join("b.harn"),
+            "pub fn bar() { 3 }\npub fn shared() { 4 }\n",
+        )
+        .unwrap();
+        let file = dir.join("main.harn");
+        let source = r#"
+import { foo } from "lib/a.harn"
+import { bar } from "lib/b.harn"
+
+pipeline main() {
+  log(foo())
+  log(bar())
+}
+"#;
+        let program = parse_program(source);
+        let diagnostics = collect_preflight_diagnostics(&file, source, &program);
+        assert!(
+            diagnostics
+                .iter()
+                .all(|d| !d.message.contains("import collision")),
+            "unexpected collision: {:?}",
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn preflight_reports_unknown_host_capability() {
+        let dir = unique_temp_dir("harn-check-host");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("main.harn");
+        let source = r#"
+pipeline main() {
+  host_invoke("unknown_cap", "do_stuff", {})
+}
+"#;
+        let program = parse_program(source);
+        let diagnostics = collect_preflight_diagnostics(&file, source, &program);
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("unknown host capability")),
+            "expected unknown host capability diagnostic, got: {:?}",
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn preflight_accepts_known_host_capabilities() {
+        let dir = unique_temp_dir("harn-check-host-ok");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("main.harn");
+        let source = r#"
+pipeline main() {
+  host_invoke("workspace", "read_text", {path: "x.txt"})
+  host_invoke("process", "exec", {command: "ls"})
+}
+"#;
+        let program = parse_program(source);
+        let diagnostics = collect_preflight_diagnostics(&file, source, &program);
+        assert!(
+            diagnostics
+                .iter()
+                .all(|d| !d.message.contains("unknown host capability")),
+            "unexpected host cap diagnostic: {:?}",
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn preflight_validates_render_in_imported_module() {
+        let dir = unique_temp_dir("harn-check-import-render");
+        std::fs::create_dir_all(dir.join("lib")).unwrap();
+        // Module references a template that doesn't exist
+        std::fs::write(
+            dir.join("lib").join("tmpl.harn"),
+            "pub fn load() { render(\"missing_template.txt\") }\n",
+        )
+        .unwrap();
+        let file = dir.join("main.harn");
+        let source = r#"
+import "lib/tmpl.harn"
+
+pipeline main() {
+  log(load())
+}
+"#;
+        let program = parse_program(source);
+        let diagnostics = collect_preflight_diagnostics(&file, source, &program);
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("render target")),
+            "expected render target diagnostic for imported module, got: {:?}",
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

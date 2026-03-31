@@ -2,6 +2,21 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.3
+
+- Fixed `render(...)` resolution in imported modules: templates are now
+  resolved relative to the importing module's source directory, not the
+  entry pipeline. This applies consistently across source runs, bundled
+  runs, ACP execution, and `host_invoke("template", "render")`.
+- Added import symbol collision detection at both runtime and preflight.
+  When two wildcard imports export the same function name, Harn now emits
+  an actionable diagnostic with guidance to use selective imports.
+- Strengthened `harn check` preflight with host capability contract
+  validation: `host_invoke(...)` calls referencing unknown capabilities
+  or operations are now flagged before runtime.
+- Added conformance test for imported module render resolution and unit
+  tests for import collision detection and host capability validation.
+
 ## v0.5.2
 
 - Added worker execution profiles with cwd/env overlays and managed worktree

@@ -100,9 +100,11 @@ fn render_template(
     path: &str,
     bindings: Option<&BTreeMap<String, VmValue>>,
 ) -> Result<String, VmError> {
-    let template = std::fs::read_to_string(path).map_err(|e| {
+    let resolved = crate::stdlib::process::resolve_source_relative_path(path);
+    let template = std::fs::read_to_string(&resolved).map_err(|e| {
         VmError::Thrown(VmValue::String(Rc::from(format!(
-            "host_invoke render: failed to read template {path}: {e}"
+            "host_invoke render: failed to read template {}: {e}",
+            resolved.display()
         ))))
     })?;
     if let Some(bindings) = bindings {

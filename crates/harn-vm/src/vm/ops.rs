@@ -437,8 +437,22 @@ impl super::Vm {
                 let stack_base = popped.stack_base;
                 let parent_env = popped.saved_env;
 
+                // Restore the previous frame's source dir before switching
+                if let Some(ref dir) = popped.saved_source_dir {
+                    crate::stdlib::set_thread_source_dir(dir);
+                }
+
                 // Clear this frame's stack data
                 self.stack.truncate(stack_base);
+
+                // If this closure has its own source_dir, switch to it
+                let saved_source_dir = if let Some(ref dir) = closure.source_dir {
+                    let prev = crate::stdlib::process::VM_SOURCE_DIR.with(|sd| sd.borrow().clone());
+                    crate::stdlib::set_thread_source_dir(dir);
+                    prev
+                } else {
+                    None
+                };
 
                 // Set up the callee's environment
                 let mut call_env = Self::merge_env_into_closure(&parent_env, &closure);
@@ -466,6 +480,7 @@ impl super::Vm {
                     saved_env: parent_env,
                     fn_name: closure.func.name.clone(),
                     argc,
+                    saved_source_dir,
                 });
                 // Continue the loop — execution proceeds in the new frame
             } else {
@@ -495,6 +510,7 @@ impl super::Vm {
             let closure = VmClosure {
                 func,
                 env: self.env.clone(),
+                source_dir: None,
             };
             self.stack.push(VmValue::Closure(Rc::new(closure)));
         } else if op == Op::BuildList as u8 {

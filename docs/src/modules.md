@@ -234,6 +234,25 @@ import { extract_paths, parse_cells } from "std/text"
 3. Non-pipeline top-level statements (fn declarations, let bindings) are executed, making their values available
 4. Circular imports are detected and skipped (each file is imported at most once)
 5. The working directory is temporarily changed to the imported file's directory, so nested imports resolve correctly
+6. Source-relative builtins like `render(...)` inside imported functions resolve paths relative to the imported module's directory, not the entry pipeline
+
+## Import collision detection
+
+If two wildcard imports export a function with the same name, Harn will
+report an error at both runtime and during `harn check` preflight:
+
+```text
+Import collision: 'helper' is already defined when importing lib/b.harn.
+Use selective imports to disambiguate: import { helper } from "..."
+```
+
+To resolve collisions, use selective imports to import only the names
+you need from each module:
+
+```harn
+import { parse_output } from "lib/a"
+import { format_result } from "lib/b"
+```
 
 ## Pipeline inheritance
 

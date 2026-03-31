@@ -8,7 +8,7 @@ use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 thread_local! {
-    static VM_SOURCE_DIR: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+    pub(crate) static VM_SOURCE_DIR: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
     static VM_EXECUTION_CONTEXT: RefCell<Option<RunExecutionRecord>> = const { RefCell::new(None) };
 }
 

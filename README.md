@@ -84,11 +84,13 @@ println(result.visible_text)
   profiles can now pin delegated runs to a cwd, env overlay, or managed
   worktree so background execution is reproducible instead of ambient-cwd
   dependent.
-- Stronger preflight behavior via `harn check`: import graph resolution and
-  literal template/render path validation now fail before runtime, and
-  `render(...)` resolves relative to the pipeline source tree instead of the
-  ambient process cwd. Literal delegated execution roots and `exec_at(...)` /
-  `shell_at(...)` directories are also checked before launch.
+- Stronger preflight behavior via `harn check`: import graph resolution,
+  literal template/render path validation, import symbol collision detection,
+  and host capability contract validation all fail before runtime.
+  `render(...)` resolves relative to the module source tree (including inside
+  imported modules) instead of the ambient process cwd. Literal delegated
+  execution roots, `exec_at(...)` / `shell_at(...)` directories, and unknown
+  `host_invoke(...)` capability/operation pairs are also checked before launch.
 - Eval suite manifests and baseline comparisons via `eval_suite_manifest(...)`,
   `eval_suite_run(...)`, and `harn eval <manifest.json>`, so grouped replay
   regression suites are first-class runtime data instead of external scripts.
