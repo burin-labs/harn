@@ -430,7 +430,7 @@ pub(crate) fn build_text_tool_prompt(tools_val: Option<&VmValue>, include_format
     prompt.push_str(
         "Only the `### name(...)` headings above are tools. Parameter names like `path`, `pattern`, or `file_glob` are arguments, not standalone tools.\n\
          Example: use `search(pattern=\"parser\", file_glob=\"**/*.go\")`, never `file_glob(...)`.\n\
-         For `run`, pass one shell command string such as `run(command=\"go test ./internal/manifest/\")`; do not pass JSON arrays unless the tool schema explicitly asks for one.\n\n",
+         For `run`, pass one shell command string such as `run(command=\"<verification or build command here>\")`; do not pass JSON arrays unless the tool schema explicitly asks for one.\n\n",
     );
 
     if include_format {
@@ -453,7 +453,10 @@ pub(crate) fn build_text_tool_prompt(tools_val: Option<&VmValue>, include_format
              ````\n\
              You can make multiple tool calls in one response (each in its own block).\n\
              After each call, you will see the result in a <tool_result> tag.\n\
-             ALWAYS read files before modifying them.\n",
+             Use prompt context efficiently: if the prompt already includes the relevant file text, API signatures, directory inventory, or pattern examples you need, do not spend extra tool calls rediscovering the same information.\n\
+             If the prompt already names the target files or target directories, do not inspect `.` or unrelated parent directories just to find them again.\n\
+             `search(...)` is only for exact identifiers or literal code text. Do not use it to rediscover filenames, path strings, package declarations, directory inventory, or broad test names that are already visible in the prompt.\n\
+             Read before modifying existing code when you still need exact local details. For new files, if the prompt already provides enough grounded context, create the file directly and then verify.\n",
         );
     }
 

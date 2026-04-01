@@ -27,6 +27,7 @@ pub struct AgentLoopConfig {
     pub max_iterations: usize,
     pub max_nudges: usize,
     pub nudge: Option<String>,
+    pub done_sentinel: Option<String>,
     pub tool_retries: usize,
     pub tool_backoff_ms: u64,
     pub tool_format: String,
@@ -199,6 +200,10 @@ pub async fn run_agent_loop_internal(
     let persistent = config.persistent;
     let max_nudges = config.max_nudges;
     let custom_nudge = config.nudge;
+    let done_sentinel = config
+        .done_sentinel
+        .clone()
+        .unwrap_or_else(|| "##DONE##".to_string());
     let tool_retries = config.tool_retries;
     let tool_backoff_ms = config.tool_backoff_ms;
     let tool_format = config.tool_format;
@@ -235,11 +240,14 @@ pub async fn run_agent_loop_internal(
 
     if persistent {
         let system_prompt = opts.system.get_or_insert_with(String::new);
-        system_prompt.push_str(
+        system_prompt.push_str(&format!(
             "\n\nIMPORTANT: You MUST keep working until the task is complete. \
              Do NOT stop to explain or summarize — take action with tools. \
-             When you are done, output ##DONE## on its own line.",
-        );
+             When the requested work is complete and your verification has succeeded, \
+             stop immediately and output {done_sentinel} on its own line. \
+             Do not make additional tool calls after a passing verification result unless \
+             you still have concrete evidence that the task is incomplete or failing."
+        ));
     }
 
     let mut total_text = String::new();
@@ -361,13 +369,31 @@ pub async fn run_agent_loop_internal(
             }
         }
 
+        let mut tool_call_source = "none";
         let tool_calls = if !result.tool_calls.is_empty() {
+            tool_call_source = "native";
             result.tool_calls.clone()
-        } else if has_tools && tool_format == "text" {
-            parse_text_tool_calls(&text)
+        } else if has_tools {
+            // Prefer provider-native tool calls when available, but keep text-call
+            // parsing as a compatibility fallback. This lets workflows use
+            // tool_format="native" without breaking providers or models that still
+            // emit ```call blocks.
+            let parsed = parse_text_tool_calls(&text);
+            if !parsed.is_empty() {
+                tool_call_source = "text_fallback";
+            }
+            parsed
         } else {
             Vec::new()
         };
+        if std::env::var("BURIN_TRACE_HARN_TOOL_PARSE").as_deref() == Ok("1") {
+            eprintln!(
+                "[harn-vm] tool_call_source={} count={} text_len={}",
+                tool_call_source,
+                tool_calls.len(),
+                text.len()
+            );
+        }
 
         if !tool_calls.is_empty() {
             consecutive_text_only = 0;
@@ -387,6 +413,7 @@ pub async fn run_agent_loop_internal(
 
             let mut observations = String::new();
             let mut tools_used_this_iter = Vec::new();
+            let mut rejection_followups: Vec<String> = Vec::new();
             for tc in &tool_calls {
                 let tool_id = tc["id"].as_str().unwrap_or("");
                 let tool_name = tc["name"].as_str().unwrap_or("");
@@ -503,6 +530,9 @@ pub async fn run_agent_loop_internal(
                                     .and_then(|v| v.as_str())
                                     .unwrap_or("denied by host");
                                 let result_text = format!("REJECTED by host: {reason}");
+                                rejection_followups.push(format!(
+                                    "The previous tool call was rejected by the host. Treat this as a hard instruction and follow it exactly now.\n{reason}"
+                                ));
                                 if !rejected_tools.contains(&tool_name.to_string()) {
                                     rejected_tools.push(tool_name.to_string());
                                 }
@@ -694,6 +724,12 @@ pub async fn run_agent_loop_internal(
                     "content": observations.trim_end(),
                 }));
             }
+            if !rejection_followups.is_empty() {
+                opts.messages.push(serde_json::json!({
+                    "role": "user",
+                    "content": rejection_followups.join("\n\n"),
+                }));
+            }
             let finish_step_messages = inject_queued_user_messages(
                 bridge.as_ref(),
                 opts,
@@ -735,7 +771,7 @@ pub async fn run_agent_loop_internal(
             "content": text,
         }));
 
-        if persistent && text.contains("##DONE##") {
+        if persistent && text.contains(&done_sentinel) {
             break;
         }
         if !persistent && !daemon {
@@ -885,6 +921,7 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
             let tool_backoff_ms = opt_int(&options, "tool_backoff_ms").unwrap_or(1000) as u64;
             let tool_format =
                 opt_str(&options, "tool_format").unwrap_or_else(|| "text".to_string());
+            let done_sentinel = opt_str(&options, "done_sentinel");
             let daemon = opt_bool(&options, "daemon");
             let auto_compact = if opt_bool(&options, "auto_compact") {
                 let mut ac = crate::orchestration::AutoCompactConfig::default();
@@ -927,6 +964,7 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                     max_iterations,
                     max_nudges,
                     nudge: custom_nudge,
+                    done_sentinel,
                     tool_retries,
                     tool_backoff_ms,
                     tool_format,

@@ -915,6 +915,7 @@ pub struct WorkflowNode {
     pub prompt: Option<String>,
     pub system: Option<String>,
     pub task_label: Option<String>,
+    pub done_sentinel: Option<String>,
     pub tools: serde_json::Value,
     pub model_policy: ModelPolicy,
     pub transcript_policy: TranscriptPolicy,
@@ -1339,6 +1340,12 @@ pub fn normalize_workflow_value(value: &VmValue) -> Result<WorkflowGraph, VmErro
                 if node.mode.is_none() {
                     node.mode = as_dict
                         .get("mode")
+                        .map(|value| value.display())
+                        .filter(|value| !value.is_empty());
+                }
+                if node.done_sentinel.is_none() {
+                    node.done_sentinel = as_dict
+                        .get("done_sentinel")
                         .map(|value| value.display())
                         .filter(|value| !value.is_empty());
                 }
@@ -2488,6 +2495,11 @@ pub async fn execute_stage_node(
     let mut opts = extract_llm_options(&args)?;
 
     let llm_result = if node.mode.as_deref() == Some("agent") || !tool_names.is_empty() {
+        let tool_format = if !tool_names.is_empty() && opts.native_tools.is_some() {
+            "native".to_string()
+        } else {
+            "text".to_string()
+        };
         crate::llm::run_agent_loop_internal(
             &mut opts,
             crate::llm::AgentLoopConfig {
@@ -2495,9 +2507,10 @@ pub async fn execute_stage_node(
                 max_iterations: 12,
                 max_nudges: 3,
                 nudge: None,
+                done_sentinel: node.done_sentinel.clone(),
                 tool_retries: 0,
                 tool_backoff_ms: 1000,
-                tool_format: "text".to_string(),
+                tool_format,
                 auto_compact: None,
                 policy: None,
                 daemon: false,

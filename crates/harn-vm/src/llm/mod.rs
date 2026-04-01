@@ -279,6 +279,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
             serde_json::from_value::<crate::orchestration::CapabilityPolicy>(json)
                 .unwrap_or_default()
         });
+        let done_sentinel = opt_str(&options, "done_sentinel");
         let mut opts = extract_llm_options(&args)?;
         let result = run_agent_loop_internal(
             &mut opts,
@@ -287,6 +288,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                 max_iterations,
                 max_nudges,
                 nudge: custom_nudge,
+                done_sentinel,
                 tool_retries,
                 tool_backoff_ms,
                 tool_format,

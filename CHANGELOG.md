@@ -2,6 +2,21 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.18
+
+### Changed
+
+- **Agent workflows can now choose their own completion sentinel** — the VM
+  accepts `done_sentinel` in agent-loop and workflow-node options, threads it
+  through orchestration, and stops persistent agents on the configured marker
+  instead of the hard-coded `##DONE##`.
+- **Tool execution is more resilient across native and text-call providers** —
+  workflow agent stages now prefer provider-native tool calls when available
+  while still accepting fenced text-call fallbacks, rejected tool calls feed a
+  direct follow-up instruction back into the loop, and the text tool prompt is
+  stricter about avoiding redundant discovery calls when the prompt already
+  contains the needed file and path context.
+
 ## v0.5.17
 
 ### Changed
