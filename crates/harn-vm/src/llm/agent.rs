@@ -834,7 +834,7 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
             let tool_retries = opt_int(&options, "tool_retries").unwrap_or(0) as usize;
             let tool_backoff_ms = opt_int(&options, "tool_backoff_ms").unwrap_or(1000) as u64;
             let tool_format =
-                opt_str(&options, "tool_format").unwrap_or_else(|| "text".to_string());
+                opt_str(&options, "tool_format").unwrap_or_else(|| "native".to_string());
             let daemon = opt_bool(&options, "daemon");
             let auto_compact = if opt_bool(&options, "auto_compact") {
                 let mut ac = crate::orchestration::AutoCompactConfig::default();
