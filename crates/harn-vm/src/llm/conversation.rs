@@ -6,8 +6,9 @@ use crate::vm::Vm;
 
 use super::helpers::{
     extract_llm_options, is_transcript_value, new_transcript_with, new_transcript_with_events,
-    transcript_event, transcript_id, transcript_message_list, transcript_summary_text,
-    vm_add_role_message, vm_message, vm_value_to_json,
+    normalize_transcript_asset, transcript_asset_list, transcript_event, transcript_id,
+    transcript_message_list, transcript_summary_text, vm_add_role_message, vm_message_value,
+    vm_value_to_json,
 };
 
 /// Register conversation management builtins.
@@ -51,6 +52,66 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
             }
         };
         Ok(VmValue::List(Rc::new(transcript_message_list(transcript)?)))
+    });
+
+    vm.register_builtin("transcript_assets", |args, _out| {
+        let transcript = match args.first() {
+            Some(VmValue::Dict(d))
+                if d.get("_type").map(|v| v.display()).as_deref() == Some("transcript") =>
+            {
+                d
+            }
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "transcript_assets: argument must be a transcript",
+                ))));
+            }
+        };
+        Ok(VmValue::List(Rc::new(transcript_asset_list(transcript)?)))
+    });
+
+    vm.register_builtin("transcript_add_asset", |args, _out| {
+        let transcript = match args.first() {
+            Some(VmValue::Dict(d))
+                if d.get("_type").map(|v| v.display()).as_deref() == Some("transcript") =>
+            {
+                d
+            }
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "transcript_add_asset: first argument must be a transcript",
+                ))));
+            }
+        };
+        let asset_value = args.get(1).cloned().ok_or_else(|| {
+            VmError::Thrown(VmValue::String(Rc::from(
+                "transcript_add_asset: missing asset",
+            )))
+        })?;
+        let normalized = normalize_transcript_asset(&asset_value);
+        let asset_id = normalized
+            .as_dict()
+            .and_then(|dict| dict.get("id"))
+            .map(|value| value.display())
+            .unwrap_or_default();
+        let mut assets = transcript_asset_list(transcript)?;
+        assets.retain(|asset| {
+            asset
+                .as_dict()
+                .and_then(|dict| dict.get("id"))
+                .map(|value| value.display())
+                .unwrap_or_default()
+                != asset_id
+        });
+        assets.push(normalized);
+        Ok(rebuild_transcript(
+            transcript,
+            transcript_message_list(transcript)?,
+            transcript_summary_text(transcript),
+            assets,
+            Vec::new(),
+            transcript_state(transcript),
+        ))
     });
 
     vm.register_builtin("transcript_events", |args, _out| {
@@ -239,11 +300,19 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
         } else {
             None
         };
-        Ok(new_transcript_with(
-            None,
+        Ok(rebuild_transcript(
+            transcript,
             messages,
             summary,
-            transcript.get("metadata").cloned(),
+            transcript_asset_list(transcript)?,
+            vec![transcript_event(
+                "transcript_fork",
+                "system",
+                "internal",
+                "transcript forked",
+                None,
+            )],
+            Some("forked"),
         ))
     });
 
@@ -265,6 +334,7 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
                 "transcript reset",
                 None,
             )],
+            Vec::new(),
             Some("active"),
         ))
     });
@@ -283,11 +353,11 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
             }
         };
         let messages = transcript_message_list(transcript)?;
-        Ok(new_transcript_with_events(
-            transcript_id(transcript),
+        Ok(rebuild_transcript(
+            transcript,
             messages,
             transcript_summary_text(transcript),
-            transcript.get("metadata").cloned(),
+            transcript_asset_list(transcript)?,
             vec![transcript_event(
                 "transcript_archive",
                 "system",
@@ -312,11 +382,11 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
                 ))));
             }
         };
-        Ok(new_transcript_with_events(
-            transcript_id(transcript),
+        Ok(rebuild_transcript(
+            transcript,
             transcript_message_list(transcript)?,
             transcript_summary_text(transcript),
-            transcript.get("metadata").cloned(),
+            transcript_asset_list(transcript)?,
             vec![transcript_event(
                 "transcript_abandon",
                 "system",
@@ -341,11 +411,11 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
                 ))));
             }
         };
-        Ok(new_transcript_with_events(
-            transcript_id(transcript),
+        Ok(rebuild_transcript(
+            transcript,
             transcript_message_list(transcript)?,
             transcript_summary_text(transcript),
-            transcript.get("metadata").cloned(),
+            transcript_asset_list(transcript)?,
             vec![transcript_event(
                 "transcript_resume",
                 "system",
@@ -421,11 +491,13 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
             .rev()
             .collect::<Vec<_>>();
         let archived_count = transcript_message_list(transcript)?.len().saturating_sub(retained.len());
-        let mut compacted = match new_transcript_with(
-            transcript_id(transcript),
+        let mut compacted = match rebuild_transcript(
+            transcript,
             retained,
             Some(result.text.clone()),
-            transcript.get("metadata").cloned(),
+            transcript_asset_list(transcript)?,
+            Vec::new(),
+            transcript_state(transcript),
         ) {
             VmValue::Dict(d) => (*d).clone(),
             _ => BTreeMap::new(),
@@ -472,11 +544,13 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
             .and_then(|d| d.get("summary"))
             .map(|v| v.display())
             .or_else(|| transcript_summary_text(transcript));
-        let mut compacted = match new_transcript_with(
-            transcript_id(transcript),
+        let mut compacted = match rebuild_transcript(
+            transcript,
             retained,
             summary,
-            transcript.get("metadata").cloned(),
+            transcript_asset_list(transcript)?,
+            Vec::new(),
+            transcript_state(transcript),
         ) {
             VmValue::Dict(d) => (*d).clone(),
             _ => BTreeMap::new(),
@@ -491,23 +565,33 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
     vm.register_builtin("add_message", |args, _out| match args.first() {
         Some(VmValue::List(list)) => {
             let role = args.get(1).map(|a| a.display()).unwrap_or_default();
-            let content = args.get(2).map(|a| a.display()).unwrap_or_default();
             let mut new_messages = (**list).clone();
-            new_messages.push(vm_message(&role, &content));
+            new_messages.push(vm_message_value(
+                &role,
+                args.get(2)
+                    .cloned()
+                    .unwrap_or_else(|| VmValue::String(Rc::from(""))),
+            ));
             Ok(VmValue::List(Rc::new(new_messages)))
         }
         Some(VmValue::Dict(d))
             if d.get("_type").map(|v| v.display()).as_deref() == Some("transcript") =>
         {
             let role = args.get(1).map(|a| a.display()).unwrap_or_default();
-            let content = args.get(2).map(|a| a.display()).unwrap_or_default();
             let mut new_messages = transcript_message_list(d)?;
-            new_messages.push(vm_message(&role, &content));
-            Ok(new_transcript_with(
-                transcript_id(d),
+            new_messages.push(vm_message_value(
+                &role,
+                args.get(2)
+                    .cloned()
+                    .unwrap_or_else(|| VmValue::String(Rc::from(""))),
+            ));
+            Ok(rebuild_transcript(
+                d,
                 new_messages,
                 transcript_summary_text(d),
-                d.get("metadata").cloned(),
+                transcript_asset_list(d)?,
+                Vec::new(),
+                transcript_state(d),
             ))
         }
         _ => Err(VmError::Thrown(VmValue::String(Rc::from(
@@ -560,15 +644,66 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
             );
             let mut new_messages = transcript_message_list(d)?;
             new_messages.push(VmValue::Dict(Rc::new(msg)));
-            Ok(new_transcript_with(
-                transcript_id(d),
+            Ok(rebuild_transcript(
+                d,
                 new_messages,
                 transcript_summary_text(d),
-                d.get("metadata").cloned(),
+                transcript_asset_list(d)?,
+                Vec::new(),
+                transcript_state(d),
             ))
         }
         _ => Err(VmError::Thrown(VmValue::String(Rc::from(
             "add_tool_result: first argument must be a message list or transcript",
         )))),
     });
+}
+
+fn transcript_state(transcript: &BTreeMap<String, VmValue>) -> Option<&str> {
+    transcript.get("state").and_then(|value| match value {
+        VmValue::String(text) if !text.is_empty() => Some(text.as_ref()),
+        _ => None,
+    })
+}
+
+fn transcript_extra_events(transcript: &BTreeMap<String, VmValue>) -> Vec<VmValue> {
+    transcript
+        .get("events")
+        .and_then(|events| match events {
+            VmValue::List(list) => Some(
+                list.iter()
+                    .filter(|event| {
+                        event
+                            .as_dict()
+                            .and_then(|dict| dict.get("kind"))
+                            .map(|value| value.display())
+                            .is_some_and(|kind| kind != "message" && kind != "tool_result")
+                    })
+                    .cloned()
+                    .collect(),
+            ),
+            _ => None,
+        })
+        .unwrap_or_default()
+}
+
+fn rebuild_transcript(
+    transcript: &BTreeMap<String, VmValue>,
+    messages: Vec<VmValue>,
+    summary: Option<String>,
+    assets: Vec<VmValue>,
+    mut extra_events: Vec<VmValue>,
+    state: Option<&str>,
+) -> VmValue {
+    let mut preserved = transcript_extra_events(transcript);
+    preserved.append(&mut extra_events);
+    new_transcript_with_events(
+        transcript_id(transcript),
+        messages,
+        summary,
+        transcript.get("metadata").cloned(),
+        preserved,
+        assets,
+        state,
+    )
 }

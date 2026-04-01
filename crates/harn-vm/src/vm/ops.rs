@@ -78,6 +78,10 @@ impl super::Vm {
             let name = Self::const_string(&frame.chunk.constants[idx])?;
             let val = self.pop()?;
             self.env.define(&name, val, true)?;
+        } else if op == Op::PushScope as u8 {
+            self.env.push_scope();
+        } else if op == Op::PopScope as u8 {
+            self.env.pop_scope();
         } else if op == Op::SetVar as u8 {
             let frame = self.frames.last_mut().unwrap();
             let idx = frame.chunk.read_u16(frame.ip) as usize;
@@ -306,8 +310,7 @@ impl super::Vm {
                             .map(|t| t.load(std::sync::atomic::Ordering::SeqCst))
                             .unwrap_or(false);
                         self.stack.push(VmValue::Bool(cancelled));
-                    } else if let Some(VmValue::Closure(closure)) = self.env.get(&name) {
-                        // Check closures in env
+                    } else if let Some(closure) = self.resolve_named_closure(&name) {
                         if closure.func.is_generator {
                             let gen = self.create_generator(&closure, &args);
                             self.stack.push(gen);
@@ -377,7 +380,7 @@ impl super::Vm {
                             }
                         }
                         self.stack.push(VmValue::Nil);
-                    } else if let Some(VmValue::Closure(closure)) = self.env.get(&name) {
+                    } else if let Some(closure) = self.resolve_named_closure(&name) {
                         if closure.func.is_generator {
                             let gen = self.create_generator(&closure, &args);
                             self.stack.push(gen);
@@ -415,13 +418,7 @@ impl super::Vm {
             // Resolve the callee to a closure (or fall through to builtin)
             let resolved_closure = match &callee {
                 VmValue::Closure(cl) => Some(Rc::clone(cl)),
-                VmValue::String(name) => {
-                    if let Some(VmValue::Closure(cl)) = self.env.get(name) {
-                        Some(cl)
-                    } else {
-                        None
-                    }
-                }
+                VmValue::String(name) => self.resolve_named_closure(name),
                 _ => None,
             };
 
@@ -481,6 +478,7 @@ impl super::Vm {
                     fn_name: closure.func.name.clone(),
                     argc,
                     saved_source_dir,
+                    module_functions: closure.module_functions.clone(),
                 });
                 // Continue the loop — execution proceeds in the new frame
             } else {
@@ -511,6 +509,10 @@ impl super::Vm {
                 func,
                 env: self.env.clone(),
                 source_dir: None,
+                module_functions: self
+                    .frames
+                    .last()
+                    .and_then(|frame| frame.module_functions.clone()),
             };
             self.stack.push(VmValue::Closure(Rc::new(closure)));
         } else if op == Op::BuildList as u8 {
@@ -1087,6 +1089,7 @@ impl super::Vm {
                 catch_ip: catch_offset,
                 stack_depth: self.stack.len(),
                 frame_depth: self.frames.len(),
+                env_scope_depth: self.env.scope_depth(),
                 error_type,
             });
         } else if op == Op::PopHandler as u8 {

@@ -21,5 +21,6 @@ sha2 = "0.10"
 md-5 = "0.10"
 toml = "0.8"
 serde = { version = "1", features = ["derive"] }
+serde_path_to_error = "0.1"
 uuid = { version = "1", features = ["v7"] }
 tokio-util = { version = "0.7", features = ["io"] }

@@ -221,12 +221,9 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
     ("trace_summary", "trace_summary() -> string"),
     // Tool registry
     ("tool_registry", "tool_registry() -> registry"),
-    (
-        "tool_add",
-        "tool_add(registry, name, desc, handler, params?) -> nil",
-    ),
     ("tool_list", "tool_list(registry) -> list"),
     ("tool_find", "tool_find(registry, name) -> dict"),
+    ("tool_select", "tool_select(registry, names) -> registry"),
     ("tool_describe", "tool_describe(registry) -> string"),
     ("tool_remove", "tool_remove(registry, name) -> nil"),
     ("tool_count", "tool_count(registry) -> int"),
@@ -270,6 +267,11 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
     (
         "transcript_summarize",
         "transcript_summarize(transcript, options?) -> dict",
+    ),
+    ("transcript_assets", "transcript_assets(transcript) -> list"),
+    (
+        "transcript_add_asset",
+        "transcript_add_asset(transcript, asset) -> dict",
     ),
     (
         "transcript_auto_compact",
@@ -607,6 +609,8 @@ pub(crate) fn builtin_doc(name: &str) -> Option<String> {
         "metadata_save" => "**metadata_save()** → nil — Flush metadata to .burin/metadata/ files",
         "metadata_stale" => "**metadata_stale(project)** → dict — Check for stale metadata: {any_stale, tier1, tier2}",
         "metadata_status" => "**metadata_status(namespace?)** → dict — Summarize metadata directories, namespaces, missing hashes, and stale state",
+        "transcript_assets" => "**transcript_assets(transcript)** → list — Return transcript asset descriptors used by multimodal messages",
+        "transcript_add_asset" => "**transcript_add_asset(transcript, asset)** → dict — Register a durable asset reference and return the updated transcript",
         "metadata_refresh_hashes" => "**metadata_refresh_hashes()** → nil — Recompute content hashes",
         "compute_content_hash" => "**compute_content_hash(dir)** → string — Hash of directory contents for staleness detection",
         "invalidate_facts" => "**invalidate_facts(dir)** → nil — Mark cached facts as stale",

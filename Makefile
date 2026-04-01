@@ -29,14 +29,22 @@ lint-md:
 # Lint Harn conformance tests (check for warnings)
 lint-harn:
 	@echo "=== Linting Harn conformance tests ==="
-	@fail=0; for f in conformance/tests/*.harn; do \
-		output=$$(cargo run --quiet --bin harn -- check "$$f" 2>&1); \
-		if echo "$$output" | grep -qE '^.+: (warning|error)\['; then \
-			echo "$$output" | grep -v ": ok$$"; \
-			fail=1; \
-		fi; \
-	done; \
-	if [ "$$fail" = "1" ]; then echo "Lint issues found in conformance tests"; exit 1; fi
+	@cargo build --quiet --bin harn
+	@workers=$$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 8); \
+	tmp=$$(mktemp -d); \
+	status=0; \
+	find conformance/tests -name '*.harn' -print0 | \
+		TMP_RESULTS="$$tmp" xargs -0 -P "$$workers" -I{} sh -c '\
+			output=$$(target/debug/harn check "$$1" 2>&1); \
+			if echo "$$output" | grep -qE "^.+: (warning|error)\["; then \
+				printf "%s\n" "$$output" | grep -v ": ok$$" > "$$TMP_RESULTS/$$(basename "$$1").out"; \
+				exit 1; \
+			fi' sh {} || status=$$?; \
+	if ls "$$tmp"/*.out >/dev/null 2>&1; then \
+		cat "$$tmp"/*.out; \
+	fi; \
+	rm -rf "$$tmp"; \
+	if [ "$$status" -ne 0 ]; then echo "Lint issues found in conformance tests"; exit 1; fi
 	@echo "    Harn lint OK."
 
 # Check harn formatting on conformance tests (CI, not pre-commit)

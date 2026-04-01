@@ -30,6 +30,8 @@ struct LoopContext {
     handler_depth: usize,
     /// Number of pending finally bodies at loop entry.
     finally_depth: usize,
+    /// Lexical scope depth at loop entry.
+    scope_depth: usize,
 }
 
 /// Compiles an AST into bytecode.
@@ -49,6 +51,8 @@ pub struct Compiler {
     finally_bodies: Vec<Vec<SNode>>,
     /// Counter for unique temp variable names.
     temp_counter: usize,
+    /// Number of lexical block scopes currently active in this compiled frame.
+    scope_depth: usize,
 }
 
 impl Compiler {
@@ -63,6 +67,7 @@ impl Compiler {
             handler_depth: 0,
             finally_bodies: Vec::new(),
             temp_counter: 0,
+            scope_depth: 0,
         }
     }
 
@@ -85,7 +90,6 @@ impl Compiler {
                 _ => {}
             }
         }
-
         // Find entry pipeline
         let main = program
             .iter()
@@ -97,6 +101,7 @@ impl Compiler {
             });
 
         if let Some(sn) = main {
+            self.compile_top_level_declarations(program)?;
             if let Node::Pipeline { body, extends, .. } = &sn.node {
                 // If this pipeline extends another, compile the parent chain first
                 if let Some(parent_name) = extends {
@@ -146,12 +151,12 @@ impl Compiler {
                 self.compile_node(sn)?;
             }
         }
-
         let target = program
             .iter()
             .find(|sn| matches!(&sn.node, Node::Pipeline { name, .. } if name == pipeline_name));
 
         if let Some(sn) = target {
+            self.compile_top_level_declarations(program)?;
             if let Node::Pipeline { body, extends, .. } = &sn.node {
                 if let Some(parent_name) = extends {
                     self.compile_parent_pipeline(program, parent_name)?;
@@ -360,10 +365,7 @@ impl Compiler {
         if body.is_empty() {
             self.chunk.emit(Op::Nil, self.line);
         } else {
-            self.compile_block(body)?;
-            if !Self::produces_value(&body.last().unwrap().node) {
-                self.chunk.emit(Op::Nil, self.line);
-            }
+            self.compile_scoped_block(body)?;
         }
         Ok(())
     }
@@ -372,10 +374,7 @@ impl Compiler {
     fn compile_catch_binding(&mut self, error_var: &Option<String>) -> Result<(), CompileError> {
         if let Some(var_name) = error_var {
             let idx = self.chunk.add_constant(Constant::String(var_name.clone()));
-            // Catch bindings share the surrounding runtime scope with sibling
-            // try/catch blocks, so use a mutable slot to allow repeated
-            // `catch e { ... }` bindings in the same enclosing block.
-            self.chunk.emit_u16(Op::DefVar, idx, self.line);
+            self.chunk.emit_u16(Op::DefLet, idx, self.line);
         } else {
             self.chunk.emit(Op::Pop, self.line);
         }
@@ -385,7 +384,7 @@ impl Compiler {
     /// Compile finally body inline, discarding its result value.
     fn compile_finally_inline(&mut self, finally_body: &[SNode]) -> Result<(), CompileError> {
         if !finally_body.is_empty() {
-            self.compile_block(finally_body)?;
+            self.compile_scoped_block(finally_body)?;
             // Finally body's value is discarded — only the try/catch value matters
             if Self::produces_value(&finally_body.last().unwrap().node) {
                 self.chunk.emit(Op::Pop, self.line);
@@ -405,6 +404,48 @@ impl Compiler {
         let get_idx = self.chunk.add_constant(Constant::String(temp_name));
         self.chunk.emit_u16(Op::GetVar, get_idx, self.line);
         self.chunk.emit(Op::Throw, self.line);
+        Ok(())
+    }
+
+    fn begin_scope(&mut self) {
+        self.chunk.emit(Op::PushScope, self.line);
+        self.scope_depth += 1;
+    }
+
+    fn end_scope(&mut self) {
+        if self.scope_depth > 0 {
+            self.chunk.emit(Op::PopScope, self.line);
+            self.scope_depth -= 1;
+        }
+    }
+
+    fn unwind_scopes_to(&mut self, target_depth: usize) {
+        while self.scope_depth > target_depth {
+            self.chunk.emit(Op::PopScope, self.line);
+            self.scope_depth -= 1;
+        }
+    }
+
+    fn compile_scoped_block(&mut self, stmts: &[SNode]) -> Result<(), CompileError> {
+        self.begin_scope();
+        if stmts.is_empty() {
+            self.chunk.emit(Op::Nil, self.line);
+        } else {
+            self.compile_block(stmts)?;
+        }
+        self.end_scope();
+        Ok(())
+    }
+
+    fn compile_scoped_statements(&mut self, stmts: &[SNode]) -> Result<(), CompileError> {
+        self.begin_scope();
+        for sn in stmts {
+            self.compile_node(sn)?;
+            if Self::produces_value(&sn.node) {
+                self.chunk.emit(Op::Pop, self.line);
+            }
+        }
+        self.end_scope();
         Ok(())
     }
 
@@ -849,12 +890,12 @@ impl Compiler {
                 self.compile_node(condition)?;
                 let else_jump = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
                 self.chunk.emit(Op::Pop, self.line);
-                self.compile_block(then_body)?;
+                self.compile_scoped_block(then_body)?;
                 if let Some(else_body) = else_body {
                     let end_jump = self.chunk.emit_jump(Op::Jump, self.line);
                     self.chunk.patch_jump(else_jump);
                     self.chunk.emit(Op::Pop, self.line);
-                    self.compile_block(else_body)?;
+                    self.compile_scoped_block(else_body)?;
                     self.chunk.patch_jump(end_jump);
                 } else {
                     self.chunk.patch_jump(else_jump);
@@ -871,17 +912,12 @@ impl Compiler {
                     has_iterator: false,
                     handler_depth: self.handler_depth,
                     finally_depth: self.finally_bodies.len(),
+                    scope_depth: self.scope_depth,
                 });
                 self.compile_node(condition)?;
                 let exit_jump = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
                 self.chunk.emit(Op::Pop, self.line); // pop condition
-                                                     // Compile body statements, popping all results
-                for sn in body {
-                    self.compile_node(sn)?;
-                    if Self::produces_value(&sn.node) {
-                        self.chunk.emit(Op::Pop, self.line);
-                    }
-                }
+                self.compile_scoped_statements(body)?;
                 // Jump back to condition
                 self.chunk.emit_u16(Op::Jump, loop_start as u16, self.line);
                 self.chunk.patch_jump(exit_jump);
@@ -910,18 +946,20 @@ impl Compiler {
                     has_iterator: true,
                     handler_depth: self.handler_depth,
                     finally_depth: self.finally_bodies.len(),
+                    scope_depth: self.scope_depth,
                 });
                 // Try to get next item — jumps to end if exhausted
                 let exit_jump_pos = self.chunk.emit_jump(Op::IterNext, self.line);
+                self.begin_scope();
                 // Define loop variable(s) with current item (item is on stack from IterNext)
                 self.compile_destructuring(pattern, true)?;
-                // Compile body statements, popping all results
                 for sn in body {
                     self.compile_node(sn)?;
                     if Self::produces_value(&sn.node) {
                         self.chunk.emit(Op::Pop, self.line);
                     }
                 }
+                self.end_scope();
                 // Loop back
                 self.chunk.emit_u16(Op::Jump, loop_start as u16, self.line);
                 self.chunk.patch_jump(exit_jump_pos);
@@ -999,6 +1037,7 @@ impl Compiler {
                 let finally_depth = ctx.finally_depth;
                 let handler_depth = ctx.handler_depth;
                 let has_iterator = ctx.has_iterator;
+                let scope_depth = ctx.scope_depth;
                 // Pop exception handlers that were pushed inside the loop
                 for _ in handler_depth..self.handler_depth {
                     self.chunk.emit(Op::PopHandler, self.line);
@@ -1014,6 +1053,7 @@ impl Compiler {
                         self.compile_finally_inline(fb)?;
                     }
                 }
+                self.unwind_scopes_to(scope_depth);
                 if has_iterator {
                     self.chunk.emit(Op::PopIterator, self.line);
                 }
@@ -1036,6 +1076,7 @@ impl Compiler {
                 let finally_depth = ctx.finally_depth;
                 let handler_depth = ctx.handler_depth;
                 let loop_start = ctx.start_offset;
+                let scope_depth = ctx.scope_depth;
                 for _ in handler_depth..self.handler_depth {
                     self.chunk.emit(Op::PopHandler, self.line);
                 }
@@ -1049,6 +1090,7 @@ impl Compiler {
                         self.compile_finally_inline(fb)?;
                     }
                 }
+                self.unwind_scopes_to(scope_depth);
                 self.chunk.emit_u16(Op::Jump, loop_start as u16, self.line);
             }
 
@@ -1247,8 +1289,10 @@ impl Compiler {
                     match &arm.pattern.node {
                         // Wildcard `_` — always matches
                         Node::Identifier(name) if name == "_" => {
+                            self.begin_scope();
                             self.chunk.emit(Op::Pop, self.line); // pop match value
                             self.compile_match_body(&arm.body)?;
+                            self.end_scope();
                             end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
                         }
                         // Enum destructuring: EnumConstruct pattern
@@ -1274,6 +1318,7 @@ impl Compiler {
                             // Stack: [match_value, bool]
                             let skip = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
                             self.chunk.emit(Op::Pop, self.line); // pop bool
+                            self.begin_scope();
 
                             // Destructure: bind field variables from the enum's fields
                             // The match value is still on the stack; we need to extract fields
@@ -1298,6 +1343,7 @@ impl Compiler {
 
                             self.chunk.emit(Op::Pop, self.line); // pop match value
                             self.compile_match_body(&arm.body)?;
+                            self.end_scope();
                             end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
                             self.chunk.patch_jump(skip);
                             self.chunk.emit(Op::Pop, self.line); // pop bool
@@ -1325,8 +1371,10 @@ impl Compiler {
                             self.chunk.columns.push(self.column);
                             let skip = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
                             self.chunk.emit(Op::Pop, self.line); // pop bool
+                            self.begin_scope();
                             self.chunk.emit(Op::Pop, self.line); // pop match value
                             self.compile_match_body(&arm.body)?;
+                            self.end_scope();
                             end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
                             self.chunk.patch_jump(skip);
                             self.chunk.emit(Op::Pop, self.line); // pop bool
@@ -1359,6 +1407,7 @@ impl Compiler {
                             self.chunk.columns.push(self.column);
                             let skip = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
                             self.chunk.emit(Op::Pop, self.line); // pop bool
+                            self.begin_scope();
 
                             // Destructure: bind field variables
                             for (i, pat_arg) in pat_args.iter().enumerate() {
@@ -1381,18 +1430,21 @@ impl Compiler {
 
                             self.chunk.emit(Op::Pop, self.line); // pop match value
                             self.compile_match_body(&arm.body)?;
+                            self.end_scope();
                             end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
                             self.chunk.patch_jump(skip);
                             self.chunk.emit(Op::Pop, self.line); // pop bool
                         }
                         // Binding pattern: bare identifier (not a literal)
                         Node::Identifier(name) => {
+                            self.begin_scope();
                             // Bind the match value to this name, always matches
                             self.chunk.emit(Op::Dup, self.line); // dup for binding
                             let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
                             self.chunk.emit_u16(Op::DefLet, name_idx, self.line);
                             self.chunk.emit(Op::Pop, self.line); // pop match value
                             self.compile_match_body(&arm.body)?;
+                            self.end_scope();
                             end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
                         }
                         // Dict pattern: {key: literal, key: binding, ...}
@@ -1417,6 +1469,7 @@ impl Compiler {
                             // Check literal constraints
                             let mut constraint_skips = Vec::new();
                             let mut bindings = Vec::new();
+                            self.begin_scope();
                             for entry in entries {
                                 if let Node::StringLiteral(key) = &entry.key.node {
                                     match &entry.value.node {
@@ -1476,16 +1529,22 @@ impl Compiler {
 
                             self.chunk.emit(Op::Pop, self.line); // pop match value
                             self.compile_match_body(&arm.body)?;
+                            self.end_scope();
                             end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
 
-                            // All failures jump here: pop the false bool, leave match_value
-                            let fail_target = self.chunk.code.len();
+                            let type_fail_target = self.chunk.code.len();
                             self.chunk.emit(Op::Pop, self.line); // pop bool
-                                                                 // Patch all failure jumps to the shared cleanup point
+                            let next_arm_jump = self.chunk.emit_jump(Op::Jump, self.line);
+                            let scoped_fail_target = self.chunk.code.len();
+                            self.chunk.emit(Op::PopScope, self.line);
+                            self.chunk.emit(Op::Pop, self.line); // pop bool
+                            let next_arm_target = self.chunk.code.len();
+
                             for skip in constraint_skips {
-                                self.chunk.patch_jump_to(skip, fail_target);
+                                self.chunk.patch_jump_to(skip, scoped_fail_target);
                             }
-                            self.chunk.patch_jump_to(skip_type, fail_target);
+                            self.chunk.patch_jump_to(skip_type, type_fail_target);
+                            self.chunk.patch_jump_to(next_arm_jump, next_arm_target);
                         }
                         // List pattern: [literal, binding, ...]
                         Node::ListLiteral(elements) => {
@@ -1519,6 +1578,7 @@ impl Compiler {
                             // Check literal constraints and collect bindings
                             let mut constraint_skips = Vec::new();
                             let mut bindings = Vec::new();
+                            self.begin_scope();
                             for (i, elem) in elements.iter().enumerate() {
                                 match &elem.node {
                                     Node::Identifier(name) if name != "_" => {
@@ -1554,16 +1614,22 @@ impl Compiler {
 
                             self.chunk.emit(Op::Pop, self.line); // pop match value
                             self.compile_match_body(&arm.body)?;
+                            self.end_scope();
                             end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
 
-                            // All failures jump here: pop the false bool
-                            let fail_target = self.chunk.code.len();
+                            let pre_scope_fail_target = self.chunk.code.len();
                             self.chunk.emit(Op::Pop, self.line); // pop bool
+                            let next_arm_jump = self.chunk.emit_jump(Op::Jump, self.line);
+                            let scoped_fail_target = self.chunk.code.len();
+                            self.chunk.emit(Op::PopScope, self.line);
+                            self.chunk.emit(Op::Pop, self.line); // pop bool
+                            let next_arm_target = self.chunk.code.len();
                             for skip in constraint_skips {
-                                self.chunk.patch_jump_to(skip, fail_target);
+                                self.chunk.patch_jump_to(skip, scoped_fail_target);
                             }
-                            self.chunk.patch_jump_to(skip_len, fail_target);
-                            self.chunk.patch_jump_to(skip_type, fail_target);
+                            self.chunk.patch_jump_to(skip_len, pre_scope_fail_target);
+                            self.chunk.patch_jump_to(skip_type, pre_scope_fail_target);
+                            self.chunk.patch_jump_to(next_arm_jump, next_arm_target);
                         }
                         // Literal/expression pattern — compare with Equal
                         _ => {
@@ -1572,8 +1638,10 @@ impl Compiler {
                             self.chunk.emit(Op::Equal, self.line);
                             let skip = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
                             self.chunk.emit(Op::Pop, self.line); // pop bool
+                            self.begin_scope();
                             self.chunk.emit(Op::Pop, self.line); // pop match value
                             self.compile_match_body(&arm.body)?;
+                            self.end_scope();
                             end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
                             self.chunk.patch_jump(skip);
                             self.chunk.emit(Op::Pop, self.line); // pop bool
@@ -1618,7 +1686,7 @@ impl Compiler {
                 let skip_jump = self.chunk.emit_jump(Op::JumpIfTrue, self.line);
                 self.chunk.emit(Op::Pop, self.line); // pop condition
                                                      // Compile else_body
-                self.compile_block(else_body)?;
+                self.compile_scoped_block(else_body)?;
                 // Pop result of else_body (guard is a statement, not expression)
                 if !else_body.is_empty() && Self::produces_value(&else_body.last().unwrap().node) {
                     self.chunk.emit(Op::Pop, self.line);
@@ -1648,39 +1716,27 @@ impl Compiler {
             }
 
             Node::Block(stmts) => {
-                if stmts.is_empty() {
-                    self.chunk.emit(Op::Nil, self.line);
-                } else {
-                    self.compile_block(stmts)?;
-                }
+                self.compile_scoped_block(stmts)?;
             }
 
             Node::DeadlineBlock { duration, body } => {
                 self.compile_node(duration)?;
                 self.chunk.emit(Op::DeadlineSetup, self.line);
-                if body.is_empty() {
-                    self.chunk.emit(Op::Nil, self.line);
-                } else {
-                    self.compile_block(body)?;
-                }
+                self.compile_scoped_block(body)?;
                 self.chunk.emit(Op::DeadlineEnd, self.line);
             }
 
             Node::MutexBlock { body } => {
-                // v1: single-threaded, just compile the body
-                if body.is_empty() {
-                    self.chunk.emit(Op::Nil, self.line);
-                } else {
-                    // Compile body, but pop intermediate values and push nil at the end.
-                    // The body typically contains statements (assignments) that don't produce values.
-                    for sn in body {
-                        self.compile_node(sn)?;
-                        if Self::produces_value(&sn.node) {
-                            self.chunk.emit(Op::Pop, self.line);
-                        }
+                // v1: single-threaded, but still uses a lexical block scope.
+                self.begin_scope();
+                for sn in body {
+                    self.compile_node(sn)?;
+                    if Self::produces_value(&sn.node) {
+                        self.chunk.emit(Op::Pop, self.line);
                     }
-                    self.chunk.emit(Op::Nil, self.line);
                 }
+                self.chunk.emit(Op::Nil, self.line);
+                self.end_scope();
             }
 
             Node::YieldExpr { value } => {
@@ -1927,6 +1983,7 @@ impl Compiler {
 
                     // 4. Catch entry
                     self.chunk.patch_jump(catch_jump);
+                    self.begin_scope();
                     self.compile_catch_binding(error_var)?;
 
                     // 5. Inner try around catch body (so finally runs if catch throws)
@@ -1942,11 +1999,13 @@ impl Compiler {
                     self.handler_depth -= 1;
                     self.chunk.emit(Op::PopHandler, self.line);
                     self.compile_finally_inline(finally_body)?;
+                    self.end_scope();
                     let end_jump2 = self.chunk.emit_jump(Op::Jump, self.line);
 
                     // 8. Rethrow handler: save error, run finally, re-throw
                     self.chunk.patch_jump(rethrow_jump);
                     self.compile_rethrow_with_finally(finally_body)?;
+                    self.end_scope();
 
                     self.chunk.patch_jump(end_jump);
                     self.chunk.patch_jump(end_jump2);
@@ -1998,10 +2057,12 @@ impl Compiler {
 
                     // 4. Catch entry
                     self.chunk.patch_jump(catch_jump);
+                    self.begin_scope();
                     self.compile_catch_binding(error_var)?;
 
                     // 5. Compile catch body
                     self.compile_try_body(catch_body)?;
+                    self.end_scope();
 
                     // 6. Patch end
                     self.chunk.patch_jump(end_jump);
@@ -2271,6 +2332,7 @@ impl Compiler {
                     self.chunk.emit(Op::Equal, self.line);
                     let skip = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
                     self.chunk.emit(Op::Pop, self.line);
+                    self.begin_scope();
 
                     // Bind variable = result.value
                     let get_r2 = self
@@ -2285,6 +2347,7 @@ impl Compiler {
                     self.chunk.emit_u16(Op::DefLet, var_idx, self.line);
 
                     self.compile_try_body(&case.body)?;
+                    self.end_scope();
                     end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
                     self.chunk.patch_jump(skip);
                     self.chunk.emit(Op::Pop, self.line);
@@ -2483,15 +2546,16 @@ impl Compiler {
 
     /// Compile a match arm body, ensuring it always pushes exactly one value.
     fn compile_match_body(&mut self, body: &[SNode]) -> Result<(), CompileError> {
+        self.begin_scope();
         if body.is_empty() {
             self.chunk.emit(Op::Nil, self.line);
         } else {
             self.compile_block(body)?;
-            // If the last statement doesn't produce a value, push nil
             if !Self::produces_value(&body.last().unwrap().node) {
                 self.chunk.emit(Op::Nil, self.line);
             }
         }
+        self.end_scope();
         Ok(())
     }
 
@@ -2523,6 +2587,23 @@ impl Compiler {
             Node::SubscriptAccess { object, .. } => self.root_var_name(object),
             _ => None,
         }
+    }
+
+    fn compile_top_level_declarations(&mut self, program: &[SNode]) -> Result<(), CompileError> {
+        for sn in program {
+            if matches!(
+                &sn.node,
+                Node::FnDecl { .. }
+                    | Node::ImplBlock { .. }
+                    | Node::StructDecl { .. }
+                    | Node::EnumDecl { .. }
+                    | Node::InterfaceDecl { .. }
+                    | Node::TypeDecl { .. }
+            ) {
+                self.compile_node(sn)?;
+            }
+        }
+        Ok(())
     }
 }
 

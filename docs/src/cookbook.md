@@ -40,14 +40,20 @@ system prompt that describes them, then let the LLM call tools in a loop.
 pipeline default(task) {
   var tools = tool_registry()
 
-  tools = tool_add(tools, "read", "Read a file from disk", { path ->
-    return read_file(path)
-  }, {path: "string"})
+  tools = tool_define(tools, "read", "Read a file from disk", {
+    params: {path: {type: "string", description: "Path to read"}},
+    returns: {type: "string"},
+    handler: { path -> return read_file(path) }
+  })
 
-  tools = tool_add(tools, "search", "Search code for a pattern", { query ->
-    let result = shell("grep -r '" + query + "' src/ || true")
-    return result.stdout
-  }, {query: "string"})
+  tools = tool_define(tools, "search", "Search code for a pattern", {
+    params: {query: {type: "string", description: "Query to search"}},
+    returns: {type: "string"},
+    handler: { query ->
+      let result = shell("grep -r '" + query + "' src/ || true")
+      return result.stdout
+    }
+  })
 
   let system = tool_prompt(tools)
 
@@ -512,9 +518,11 @@ pipeline default(task) {
   // Build a tool registry from MCP tools
   var tools = tool_registry()
   for t in mcp_tool_list {
-    tools = tool_add(tools, t.name, t.description, { args ->
-      return mcp_call(client, t.name, args)
-    }, t.inputSchema)
+    tools = tool_define(tools, t.name, t.description, {
+      params: t.inputSchema?.properties ?? {},
+      returns: {type: "string"},
+      handler: { args -> return mcp_call(client, t.name, args) }
+    })
   }
 
   let result = agent_loop(

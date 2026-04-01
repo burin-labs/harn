@@ -324,9 +324,61 @@ let events = transcript_events(result.transcript)
 Use these when a host app needs to render human-visible chat separately from
 internal execution history.
 
+For chat/session lifecycle, `std/agents` now exposes a higher-level workflow
+session contract on top of raw transcripts and run records:
+
+```harn
+import "std/agents"
+
+let result = task_run("Write a note", some_flow, {provider: "mock"})
+let session = workflow_session(result)
+let forked = workflow_session_fork(session)
+let archived = workflow_session_archive(forked)
+let resumed = workflow_session_resume(archived)
+let persisted = workflow_session_persist(result, ".harn-runs/chat.json")
+let restored = workflow_session_restore(persisted.run.persisted_path)
+```
+
+Each workflow session also carries a normalized `usage` summary copied from the
+underlying run record when available:
+
+```harn
+println(session?.usage?.input_tokens)
+println(session?.usage?.output_tokens)
+println(session?.usage?.total_duration_ms)
+println(session?.usage?.call_count)
+```
+
+This is the intended host integration boundary:
+
+- hosts persist chat tabs, titles, and durable asset files
+- Harn persists transcript/run-record/session semantics
+- hosts should prefer restoring a Harn session or transcript over inventing a
+  parallel hidden memory format
+
 ## Workflow runtime
 
 For multi-stage orchestration, prefer the workflow runtime over product-side
+fn coding_tools() {
+  var tools = tool_registry()
+  tools = tool_define(tools, "read", "Read a file", {
+    params: {path: {type: "string"}},
+    returns: {type: "string"},
+    handler: nil
+  })
+  tools = tool_define(tools, "edit", "Edit a file", {
+    params: {path: {type: "string"}},
+    returns: {type: "string"},
+    handler: nil
+  })
+  tools = tool_define(tools, "run", "Run a command", {
+    params: {command: {type: "string"}},
+    returns: {type: "string"},
+    handler: nil
+  })
+  return tools
+}
+
 loop wiring:
 
 ```harn
@@ -334,8 +386,8 @@ let graph = workflow_graph({
   name: "review_and_repair",
   entry: "act",
   nodes: {
-    act: {kind: "stage", mode: "agent", tools: ["read_file", "edit", "run"]},
-    verify: {kind: "verify", mode: "agent", tools: ["run"]}
+    act: {kind: "stage", mode: "agent", tools: coding_tools()},
+    verify: {kind: "verify", mode: "agent", tools: tool_select(coding_tools(), ["run"])}
   },
   edges: [{from: "act", to: "verify"}]
 })

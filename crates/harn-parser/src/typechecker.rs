@@ -211,6 +211,7 @@ fn builtin_return_type(name: &str) -> InferredType {
         | "regex_captures"
         | "artifact_select"
         | "transcript_messages"
+        | "transcript_assets"
         | "transcript_events" => Some(TypeExpr::Named("list".into())),
         "stat"
         | "exec"
@@ -232,6 +233,7 @@ fn builtin_return_type(name: &str) -> InferredType {
         | "llm_pick_model"
         | "transcript"
         | "transcript_from_messages"
+        | "transcript_add_asset"
         | "transcript_reset"
         | "transcript_archive"
         | "transcript_abandon"
@@ -346,11 +348,13 @@ fn is_builtin(name: &str) -> bool {
             | "transcript"
             | "transcript_from_messages"
             | "transcript_messages"
+            | "transcript_assets"
             | "transcript_events"
             | "transcript_summary"
             | "transcript_id"
             | "transcript_export"
             | "transcript_import"
+            | "transcript_add_asset"
             | "transcript_fork"
             | "transcript_reset"
             | "transcript_archive"
@@ -2064,7 +2068,7 @@ add("hello", 2) }"#,
         let errs = errors(
             r#"pipeline t(task) {
   let flow = workflow_graph({name: "demo", entry: "act", nodes: {act: {kind: "stage"}}})
-  let report: dict = workflow_policy_report(flow, {tools: ["read"], capabilities: {workspace: ["read_text"]}})
+  let report: dict = workflow_policy_report(flow, {tools: tool_registry(), capabilities: {workspace: ["read_text"]}})
   let run: dict = workflow_execute("task", flow, [], {})
   let tree: dict = load_run_tree("run.json")
   let fixture: dict = run_record_fixture(run?.run)

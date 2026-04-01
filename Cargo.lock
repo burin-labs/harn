@@ -493,7 +493,7 @@ dependencies = [
 
 [[package]]
 name = "harn-cli"
-version = "0.5.6"
+version = "0.5.8"
 dependencies = [
  "harn-fmt",
  "harn-lexer",
@@ -511,7 +511,7 @@ dependencies = [
 
 [[package]]
 name = "harn-dap"
-version = "0.5.6"
+version = "0.5.8"
 dependencies = [
  "harn-lexer",
  "harn-parser",
@@ -523,7 +523,7 @@ dependencies = [
 
 [[package]]
 name = "harn-fmt"
-version = "0.5.6"
+version = "0.5.8"
 dependencies = [
  "harn-lexer",
  "harn-parser",
@@ -531,11 +531,11 @@ dependencies = [
 
 [[package]]
 name = "harn-lexer"
-version = "0.5.6"
+version = "0.5.8"
 
 [[package]]
 name = "harn-lint"
-version = "0.5.6"
+version = "0.5.8"
 dependencies = [
  "harn-lexer",
  "harn-parser",
@@ -544,7 +544,7 @@ dependencies = [
 
 [[package]]
 name = "harn-lsp"
-version = "0.5.6"
+version = "0.5.8"
 dependencies = [
  "harn-lexer",
  "harn-lint",
@@ -556,14 +556,14 @@ dependencies = [
 
 [[package]]
 name = "harn-parser"
-version = "0.5.6"
+version = "0.5.8"
 dependencies = [
  "harn-lexer",
 ]
 
 [[package]]
 name = "harn-vm"
-version = "0.5.6"
+version = "0.5.8"
 dependencies = [
  "base64",
  "harn-lexer",
@@ -575,6 +575,7 @@ dependencies = [
  "reqwest-eventsource",
  "serde",
  "serde_json",
+ "serde_path_to_error",
  "sha2",
  "tokio",
  "tokio-stream",
@@ -1657,6 +1658,17 @@ dependencies = [
  "serde",
  "serde_core",
  "zmij",
+]
+
+[[package]]
+name = "serde_path_to_error"
+version = "0.1.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "10a9ff822e371bb5403e391ecd83e182e0e77ba7f6fe0160b795797109d1b457"
+dependencies = [
+ "itoa",
+ "serde",
+ "serde_core",
 ]
 
 [[package]]

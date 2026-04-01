@@ -50,6 +50,24 @@ counter = counter + 1  // ok
 name = "Bob"           // error: immutable assignment
 ```
 
+Bindings are lexically scoped. Each `if` branch, loop body, `catch` body, and
+explicit `{ ... }` block gets its own scope, so inner bindings can shadow outer
+names without colliding:
+
+```harn
+let status = "outer"
+
+if true {
+  let status = "inner"
+  println(status)  // inner
+}
+
+println(status)    // outer
+```
+
+If you want to update an outer binding from inside a block, declare it with
+`var` outside the block and assign to it inside the branch or loop body.
+
 ## Types and values
 
 Harn is dynamically typed with optional type annotations.

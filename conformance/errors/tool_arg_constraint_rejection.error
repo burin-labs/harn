@@ -1,1 +1,0 @@
-Error [tool_rejected]: tool 'list_directory' argument '' does not match allowed patterns: ["src/*"]

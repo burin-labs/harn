@@ -1,0 +1,8 @@
+/// Return a greeting assembled via a private helper.
+pub fn greet() {
+  return render_greeting("world")
+}
+
+fn render_greeting(name) {
+  return "hello " + name
+}

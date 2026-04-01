@@ -1,13 +1,32 @@
+fn list_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "list_directory",
+    "List directory contents",
+    {
+    handler: nil,
+    params: {path: {type: "string", description: "Directory path"}},
+    returns: {type: "string"},
+  },
+  )
+  return tools
+}
+
 pipeline test(task) {
-  agent_loop(
+  let result = agent_loop(
     "Inspect the workspace",
     "You are helpful",
     {
     provider: "mock",
-    tools: ["list_directory"],
+    tools: list_tools(),
     tool_format: "native",
     max_iterations: 1,
     policy: {tool_arg_constraints: [{tool: "list_directory", arg_patterns: ["src/*"]}]},
   },
+  )
+  println(result?.rejected_tools[0])
+  println(
+    json_stringify(transcript_messages(result?.transcript)).contains("does not match allowed patterns"),
   )
 }

@@ -19,7 +19,11 @@ pipeline main() {
   let result = workflow_execute("Write a note", flow, [base], {max_steps: 4})
   println(result?.status)
   println(result?.run?._type)
+  println(len(transcript_messages(result?.transcript)) >= 2)
+  println(contains(transcript_render_visible(result?.transcript), "Mock response"))
   let saved = run_record_save(result?.run, "/tmp/harn-workflow-runtime.json")
   let loaded = run_record_load(saved?.path)
   println(loaded?._type)
+  println(len(transcript_messages(loaded?.transcript)) >= 2)
+  println(contains(transcript_render_visible(loaded?.transcript), "Mock response"))
 }

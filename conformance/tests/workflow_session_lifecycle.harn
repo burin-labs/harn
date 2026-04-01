@@ -1,0 +1,32 @@
+import "std/agents"
+
+import "std/context"
+
+pipeline default() {
+  let flow = workflow(
+    {
+    name: "session-demo",
+    model_tier: "mid",
+    persistent: false,
+    act: {mode: "llm", context: context([section("brief", "Stay concise.", nil)], nil)},
+  },
+  )
+  let result = task_run("Write a note", flow, {provider: "mock"})
+  let session = workflow_session(result)
+  println(session?._type == "workflow_session")
+  println(session?.message_count >= 1)
+  let forked = workflow_session_fork(session)
+  println(forked?.transcript_state == "forked")
+  let archived = workflow_session_archive(forked)
+  println(archived?.transcript_state == "archived")
+  let resumed = workflow_session_resume(archived)
+  println(resumed?.transcript_state == "active")
+  let compacted = workflow_session_compact(resumed, {provider: "mock", keep_last: 1})
+  println(compacted?.summary != nil)
+  let persisted = workflow_session_persist(result, ".harn-runs/conformance-session.json")
+  println(persisted?.run?.persisted_path != nil)
+  let restored = workflow_session_restore(persisted?.run?.persisted_path)
+  println(restored?.message_count >= 1)
+  let reset = workflow_session_reset(restored, true)
+  println(reset?.message_count == 0)
+}

@@ -5,13 +5,24 @@ pipeline test(task) {
     registry,
     "search_code",
     "Search for code patterns",
-    {params: {query: "string", path: "string"}, handler: { args -> "found: " + args.query }},
+    {
+    params: {
+    query: {type: "string", description: "Search query"},
+    path: {type: "string", description: "Optional path scope"},
+  },
+    returns: {type: "object", properties: {matches: {type: "array"}}},
+    handler: { args -> "found: " + args.query },
+  },
   )
   registry = tool_define(
     registry,
-    "read_file",
+    "read",
     "Read file contents",
-    {params: {path: "string"}, handler: { args -> "content of " + args.path }},
+    {
+    params: {path: {type: "string", description: "Path to read"}},
+    returns: {type: "string"},
+    handler: { args -> "content of " + args.path },
+  },
   )
   // Verify tools registered
   assert(tool_count(registry) == 2, "should have 2 tools")
@@ -20,6 +31,7 @@ pipeline test(task) {
   assert(search != nil, "should find search_code tool")
   assert(search.name == "search_code", "tool name should match")
   assert(search.description == "Search for code patterns", "description should match")
+  assert(search.outputSchema.type == "object", "tool output schema should be preserved")
   // Tool list
   let tools = tool_list(registry)
   assert(len(tools) == 2, "tool_list should return 2 tools")

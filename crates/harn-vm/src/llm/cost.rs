@@ -20,6 +20,10 @@ pub(crate) fn reset_cost_state() {
     LLM_ACCUMULATED_COST.with(|a| *a.borrow_mut() = 0.0);
 }
 
+pub(crate) fn peek_total_cost() -> f64 {
+    LLM_ACCUMULATED_COST.with(|acc| *acc.borrow())
+}
+
 /// Pricing per million tokens (input, output) in USD.
 fn model_pricing(model: &str) -> Option<(f64, f64)> {
     // Prices per million tokens as of early 2026

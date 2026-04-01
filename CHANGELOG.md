@@ -2,6 +2,47 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.8
+
+### Added
+
+- **Versioned multimodal transcript assets** — transcript values now preserve
+  durable asset descriptors alongside block-structured messages and canonical
+  events, so image/file/document attachments survive export, compaction, fork,
+  and replay without inlining large payloads.
+- **Workflow session helpers** — added `workflow_session_new(...)`,
+  `workflow_session_restore(...)`, `workflow_session_fork(...)`,
+  `workflow_session_archive(...)`, `workflow_session_resume(...)`,
+  `workflow_session_compact(...)`, `workflow_session_reset(...)`, and
+  `workflow_session_persist(...)` in `std/agents` for host-neutral chat/session
+  lifecycle management on top of transcripts and run records.
+- **Ad hoc run-record persistence helpers** — added
+  `workflow_result_text(...)`, `workflow_result_run(...)`, and
+  `workflow_result_persist(...)` so hosts can persist non-`workflow_execute`
+  agent results as first-class Harn run records instead of inventing parallel
+  session formats.
+- **Workflow/session usage summaries** — run records and `workflow_session(...)`
+  now preserve cumulative token/duration/call-count usage so host UIs can show
+  one canonical session cost summary instead of recomputing it from ad hoc
+  traces.
+
+### Changed
+
+- **Transcript messages and events now preserve structured blocks** — visible
+  text, tool calls/results, private reasoning, and multimodal references
+  round-trip through transcript import/export without flattening to plain text.
+- **Transcript lifecycle semantics are explicit** — fork/archive/resume/reset
+  operations now append canonical lifecycle events and retain asset state
+  consistently across worker snapshots and run records.
+- **Host-side session restore can now key off transcript visibility tiers** —
+  transcript events clearly distinguish `public`, `internal`, and `private`
+  execution history for clean IDE/UI presentation without duplicating
+  orchestration policy in the host.
+- **Trace/session usage plumbing is unified** — LLM trace summaries now feed
+  run-record stage usage and workflow session state consistently, making
+  replay, inspector views, and persisted chat summaries agree on the same
+  totals.
+
 ## v0.5.6
 
 ### Added
@@ -62,7 +103,7 @@ All notable changes to Harn are documented in this file.
 - **Auto-compaction defaults are semantic instead of truncation-only** —
   agent-loop compaction now preserves more task context by defaulting to an
   LLM summary rather than fixed-size message truncation.
-- **`harn check` preflight is host-extensible instead of Burin-hostile** —
+- **`harn check` preflight is host-extensible instead of host-hostile** —
   host adapter pipelines can declare their own capability surfaces rather than
   failing static validation on non-core host operations.
 

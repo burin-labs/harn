@@ -1,9 +1,24 @@
+fn list_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "list_directory",
+    "List directory contents",
+    {
+    handler: nil,
+    params: {path: {type: "string", description: "Directory path"}},
+    returns: {type: "string"},
+  },
+  )
+  return tools
+}
+
 pipeline test(task) {
   register_tool_hook({pattern: "list_directory", deny: "listing disabled"})
   let denied = agent_loop(
     "Inspect the workspace",
     "You are helpful",
-    {provider: "mock", tools: ["list_directory"], tool_format: "native", max_iterations: 1},
+    {provider: "mock", tools: list_tools(), tool_format: "native", max_iterations: 1},
   )
   println(denied?.rejected_tools[0])
   println(
@@ -17,7 +32,7 @@ pipeline test(task) {
   let truncated = agent_loop(
     "Inspect the workspace",
     "You are helpful",
-    {provider: "mock", tools: ["list_directory"], tool_format: "native", max_iterations: 1},
+    {provider: "mock", tools: list_tools(), tool_format: "native", max_iterations: 1},
   )
   println(json_stringify(transcript_messages(truncated?.transcript)).contains("snipped"))
   clear_tool_hooks()
@@ -43,7 +58,7 @@ pipeline test(task) {
     "You are helpful",
     {
     provider: "mock",
-    tools: ["list_directory"],
+    tools: list_tools(),
     tool_format: "native",
     max_iterations: 2,
     auto_compact: true,

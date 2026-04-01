@@ -1,182 +1,8 @@
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
+use super::vm_value_to_json;
 use crate::value::{VmError, VmValue};
-
-// =============================================================================
-// Built-in tool schemas
-// =============================================================================
-
-/// Built-in tool schemas for common agent tools. Maps short names
-/// (as used in Harn pipelines) to full OpenAI-compatible tool definitions.
-pub(crate) fn builtin_tool_schema(name: &str) -> Option<serde_json::Value> {
-    match name {
-        "read" | "read_file" => Some(serde_json::json!({
-            "name": "read_file",
-            "description": "Read the contents of a file. Use this to understand code before modifying it.",
-            "parameters": {
-                "path": {"type": "string", "description": "Relative file path to read"}
-            }
-        })),
-        "search" => Some(serde_json::json!({
-            "name": "search",
-            "description": "Search for a text pattern across project files. Returns matching lines with file paths.",
-            "parameters": {
-                "pattern": {"type": "string", "description": "Search pattern (regex supported)"},
-                "file_glob": {"type": "string", "description": "Optional glob to filter files (e.g. \"**/*.py\")"}
-            }
-        })),
-        "edit" => Some(serde_json::json!({
-            "name": "edit",
-            "description": "Create a file or make targeted edits. Use action=\"create\" with content for new/replacement files (set overwrite=true for existing). Use action=\"patch\" with old_string/new_string for precise find-and-replace.",
-            "parameters": {
-                "action": {"type": "string", "description": "create (write full file) or patch (find/replace)"},
-                "path": {"type": "string", "description": "File path"},
-                "content": {"type": "string", "description": "Full file content (for create action)"},
-                "old_string": {"type": "string", "description": "For patch: exact text to find"},
-                "new_string": {"type": "string", "description": "For patch: replacement text"},
-                "overwrite": {"type": "boolean", "description": "Set true to overwrite existing file (for create action)"}
-            }
-        })),
-        "run" | "exec" => Some(serde_json::json!({
-            "name": "run",
-            "description": "Execute a shell command and return its output.",
-            "parameters": {
-                "command": {"type": "string", "description": "Shell command to execute"}
-            }
-        })),
-        "outline" | "get_file_outline" => Some(serde_json::json!({
-            "name": "outline",
-            "description": "Get the structural outline of a file (function/class signatures).",
-            "parameters": {
-                "path": {"type": "string", "description": "File path to outline"}
-            }
-        })),
-        "web_search" => Some(serde_json::json!({
-            "name": "web_search",
-            "description": "Search the web for information.",
-            "parameters": {
-                "query": {"type": "string", "description": "Search query"}
-            }
-        })),
-        "web_fetch" => Some(serde_json::json!({
-            "name": "web_fetch",
-            "description": "Fetch content from a URL.",
-            "parameters": {
-                "url": {"type": "string", "description": "URL to fetch"}
-            }
-        })),
-        "lsp_hover" => Some(serde_json::json!({
-            "name": "lsp_hover",
-            "description": "Get type info and documentation for a symbol at a position.",
-            "parameters": {
-                "file": {"type": "string", "description": "File path"},
-                "line": {"type": "integer", "description": "Line number (1-based)"},
-                "col": {"type": "integer", "description": "Column number (1-based)"}
-            }
-        })),
-        "lsp_definition" => Some(serde_json::json!({
-            "name": "lsp_definition",
-            "description": "Jump to the definition of a symbol.",
-            "parameters": {
-                "file": {"type": "string", "description": "File path"},
-                "line": {"type": "integer", "description": "Line number (1-based)"},
-                "col": {"type": "integer", "description": "Column number (1-based)"}
-            }
-        })),
-        "lsp_references" => Some(serde_json::json!({
-            "name": "lsp_references",
-            "description": "Find all references to a symbol.",
-            "parameters": {
-                "file": {"type": "string", "description": "File path"},
-                "line": {"type": "integer", "description": "Line number (1-based)"},
-                "col": {"type": "integer", "description": "Column number (1-based)"}
-            }
-        })),
-        "list_directory" => Some(serde_json::json!({
-            "name": "list_directory",
-            "description": "List directory contents.",
-            "parameters": {
-                "path": {"type": "string", "description": "Directory path"}
-            }
-        })),
-        _ => None,
-    }
-}
-
-/// Convert a list of tool name strings (e.g. ["read", "search", "edit"]) into
-/// full tool definitions suitable for the LLM API.
-pub(crate) fn tool_names_to_schemas(names: &[String], provider: &str) -> Vec<serde_json::Value> {
-    let mut tools = Vec::new();
-    for name in names {
-        if let Some(schema) = builtin_tool_schema(name) {
-            let tool_name = schema["name"].as_str().unwrap_or(name);
-            let description = schema["description"].as_str().unwrap_or("");
-            let params = &schema["parameters"];
-            let input_schema = vm_build_json_schema_from_json(params);
-
-            match provider {
-                "openai" | "openrouter" => {
-                    tools.push(serde_json::json!({
-                        "type": "function",
-                        "function": {
-                            "name": tool_name,
-                            "description": description,
-                            "parameters": input_schema,
-                        }
-                    }));
-                }
-                _ => {
-                    // Anthropic format
-                    tools.push(serde_json::json!({
-                        "name": tool_name,
-                        "description": description,
-                        "input_schema": input_schema,
-                    }));
-                }
-            }
-        }
-    }
-    tools
-}
-
-/// Build a JSON Schema object from a parameters JSON value.
-fn vm_build_json_schema_from_json(params: &serde_json::Value) -> serde_json::Value {
-    let mut properties = serde_json::Map::new();
-    let mut required = Vec::new();
-
-    if let Some(obj) = params.as_object() {
-        for (name, type_val) in obj {
-            let type_str = type_val
-                .as_object()
-                .and_then(|o| o.get("type"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("string");
-            let desc = type_val
-                .as_object()
-                .and_then(|o| o.get("description"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-
-            let mut prop = serde_json::json!({"type": type_str});
-            if !desc.is_empty() {
-                prop["description"] = serde_json::json!(desc);
-            }
-            properties.insert(name.clone(), prop);
-
-            // First parameter is always required
-            if required.is_empty() {
-                required.push(serde_json::json!(name));
-            }
-        }
-    }
-
-    serde_json::json!({
-        "type": "object",
-        "properties": properties,
-        "required": required,
-    })
-}
 
 /// Build an assistant message with tool_calls for the conversation history.
 /// Format varies by provider (OpenAI vs Anthropic).
@@ -229,6 +55,30 @@ pub(crate) fn build_assistant_tool_message(
     }
 }
 
+/// Build a durable assistant message for transcript/run-record storage.
+/// Prefer canonical structured blocks when available so hosts can restore
+/// richer assistant state without reparsing visible text.
+pub(crate) fn build_assistant_response_message(
+    text: &str,
+    blocks: &[serde_json::Value],
+    tool_calls: &[serde_json::Value],
+    provider: &str,
+) -> serde_json::Value {
+    if !tool_calls.is_empty() {
+        return build_assistant_tool_message(text, tool_calls, provider);
+    }
+    if !blocks.is_empty() {
+        return serde_json::json!({
+            "role": "assistant",
+            "content": blocks,
+        });
+    }
+    serde_json::json!({
+        "role": "assistant",
+        "content": text,
+    })
+}
+
 /// Build a tool result message for the conversation history.
 pub(crate) fn build_tool_result_message(
     tool_call_id: &str,
@@ -254,52 +104,6 @@ pub(crate) fn build_tool_result_message(
                 }]
             })
         }
-    }
-}
-
-/// Resolve tools from any supported format:
-/// - String list: `["read", "search", "edit"]` -> static schema lookup
-/// - tool_registry: `{_type: "tool_registry", tools: [...]}` -> extract schemas
-/// - List of tool dicts: `[{name, description, parameters}, ...]` -> use directly
-pub(crate) fn resolve_tools_for_agent(
-    val: &VmValue,
-    provider: &str,
-) -> Result<Option<Vec<serde_json::Value>>, VmError> {
-    match val {
-        VmValue::List(list) if list.is_empty() => Ok(None),
-        VmValue::List(list) => {
-            // Check if this is a list of strings or a list of dicts
-            if matches!(list.first(), Some(VmValue::String(_))) {
-                // String name list -> static schema lookup
-                let names: Vec<String> = list.iter().map(|v| v.display()).collect();
-                let schemas = tool_names_to_schemas(&names, provider);
-                Ok(if schemas.is_empty() {
-                    None
-                } else {
-                    Some(schemas)
-                })
-            } else {
-                // List of tool definition dicts -> use vm_tools_to_native
-                let schemas = vm_tools_to_native(val, provider)?;
-                Ok(if schemas.is_empty() {
-                    None
-                } else {
-                    Some(schemas)
-                })
-            }
-        }
-        VmValue::Dict(d)
-            if d.get("_type").map(|v| v.display()).as_deref() == Some("tool_registry") =>
-        {
-            // tool_registry object -> extract tool schemas via vm_tools_to_native
-            let schemas = vm_tools_to_native(val, provider)?;
-            Ok(if schemas.is_empty() {
-                None
-            } else {
-                Some(schemas)
-            })
-        }
-        _ => Ok(None),
     }
 }
 
@@ -347,7 +151,137 @@ pub(crate) fn normalize_tool_args(name: &str, args: &serde_json::Value) -> serde
         }
     }
 
+    if name == "run" || name == "exec" {
+        if !obj.contains_key("command") {
+            if let Some(v) = obj.remove("args").or_else(|| obj.remove("argv")) {
+                obj.insert("command".to_string(), v);
+            }
+        }
+
+        let command_value = obj.get("command").cloned();
+        let args_value = obj
+            .get("args")
+            .cloned()
+            .or_else(|| obj.get("argv").cloned());
+        if let Some(command) = normalize_run_command(command_value.as_ref(), args_value.as_ref()) {
+            obj.insert("command".to_string(), serde_json::json!(command));
+        }
+        obj.remove("args");
+        obj.remove("argv");
+    }
+
     serde_json::Value::Object(obj)
+}
+
+fn normalize_run_command(
+    command_value: Option<&serde_json::Value>,
+    fallback_value: Option<&serde_json::Value>,
+) -> Option<String> {
+    let command_parts = command_value
+        .and_then(run_command_tokens)
+        .unwrap_or_default();
+    let fallback_parts = fallback_value
+        .and_then(run_command_tokens)
+        .unwrap_or_default();
+    let parts = if command_parts.is_empty() {
+        fallback_parts
+    } else if fallback_parts.is_empty() {
+        command_parts
+    } else {
+        let mut combined = fallback_parts;
+        combined.extend(command_parts);
+        combined
+    };
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(" "))
+    }
+}
+
+fn run_command_tokens(value: &serde_json::Value) -> Option<Vec<String>> {
+    match value {
+        serde_json::Value::Array(parts) => {
+            let tokens = parts
+                .iter()
+                .filter_map(|part| part.as_str())
+                .map(|part| part.trim().to_string())
+                .filter(|part| !part.is_empty())
+                .collect::<Vec<_>>();
+            (!tokens.is_empty()).then_some(tokens)
+        }
+        serde_json::Value::String(text) => run_command_tokens_from_str(text),
+        _ => None,
+    }
+}
+
+fn run_command_tokens_from_str(text: &str) -> Option<Vec<String>> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if trimmed.starts_with('[') && trimmed.ends_with(']') {
+        if let Ok(parts) = serde_json::from_str::<Vec<String>>(trimmed) {
+            let tokens = parts
+                .into_iter()
+                .map(|part| part.trim().to_string())
+                .filter(|part| !part.is_empty())
+                .collect::<Vec<_>>();
+            if !tokens.is_empty() {
+                return Some(tokens);
+            }
+        }
+    }
+
+    if (trimmed.contains('[') || trimmed.contains(']') || trimmed.contains("\\\""))
+        && trimmed.contains('"')
+    {
+        let tokens = extract_quoted_tokens(trimmed);
+        if !tokens.is_empty() {
+            return Some(tokens);
+        }
+    }
+
+    Some(vec![trimmed.to_string()])
+}
+
+fn extract_quoted_tokens(text: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut in_quote = false;
+    let mut escape = false;
+
+    for ch in text.chars() {
+        if !in_quote {
+            if ch == '"' {
+                in_quote = true;
+                current.clear();
+            }
+            continue;
+        }
+
+        if escape {
+            current.push(ch);
+            escape = false;
+            continue;
+        }
+
+        match ch {
+            '\\' => escape = true,
+            '"' => {
+                if !current.trim().is_empty() {
+                    tokens.push(current.trim().to_string());
+                }
+                current.clear();
+                in_quote = false;
+            }
+            _ => current.push(ch),
+        }
+    }
+
+    tokens
 }
 
 /// Handle read-only tools locally in the VM without bridging to the host.
@@ -402,35 +336,6 @@ pub(crate) fn handle_tool_locally(name: &str, args: &serde_json::Value) -> Optio
     }
 }
 
-/// Extract (name, description, [(param_name, type, description)]) from a JSON tool schema.
-fn extract_tool_info(
-    schema: &serde_json::Value,
-) -> (String, String, Vec<(String, String, String)>) {
-    let name = schema["name"].as_str().unwrap_or("").to_string();
-    let desc = schema["description"].as_str().unwrap_or("").to_string();
-    let mut params = Vec::new();
-    if let Some(obj) = schema["parameters"].as_object() {
-        for (pname, pval) in obj {
-            let ptype = pval
-                .get("type")
-                .and_then(|v| v.as_str())
-                .unwrap_or("string");
-            let type_str = match ptype {
-                "string" => "str",
-                "integer" => "int",
-                "boolean" => "bool",
-                other => other,
-            };
-            let pdesc = pval
-                .get("description")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            params.push((pname.clone(), type_str.to_string(), pdesc.to_string()));
-        }
-    }
-    (name, desc, params)
-}
-
 /// Extract parameter info from a Harn VmValue dict (tool_registry entry).
 fn extract_params_from_vm_dict(td: &BTreeMap<String, VmValue>) -> Vec<(String, String, String)> {
     let mut params = Vec::new();
@@ -462,18 +367,12 @@ fn extract_params_from_vm_dict(td: &BTreeMap<String, VmValue>) -> Vec<(String, S
 pub(crate) fn build_text_tool_prompt(tools_val: Option<&VmValue>, include_format: bool) -> String {
     let mut prompt = String::from("\n\n## Available tools\n\n");
 
-    // Collect tool schemas from any input format:
-    // - String list: look up builtin schema by name
-    // - tool_registry dict: extract inline schemas
-    // - List of tool dicts: use directly
+    // Collect tool schemas from a tool registry or a list of tool definition dicts.
     type ToolSchema = (String, String, Vec<(String, String, String)>);
     let schemas: Vec<ToolSchema> = match tools_val {
         Some(VmValue::List(list)) => list
             .iter()
             .filter_map(|v| match v {
-                VmValue::String(name) => {
-                    builtin_tool_schema(name).map(|schema| extract_tool_info(&schema))
-                }
                 VmValue::Dict(td) => {
                     let name = td.get("name")?.display();
                     let desc = td
@@ -527,6 +426,12 @@ pub(crate) fn build_text_tool_prompt(tools_val: Option<&VmValue>, include_format
         }
         prompt.push('\n');
     }
+
+    prompt.push_str(
+        "Only the `### name(...)` headings above are tools. Parameter names like `path`, `pattern`, or `file_glob` are arguments, not standalone tools.\n\
+         Example: use `search(pattern=\"parser\", file_glob=\"**/*.go\")`, never `file_glob(...)`.\n\
+         For `run`, pass one shell command string such as `run(command=\"go test ./internal/manifest/\")`; do not pass JSON arrays unless the tool schema explicitly asks for one.\n\n",
+    );
 
     if include_format {
         prompt.push_str(
@@ -637,7 +542,11 @@ fn parse_function_call_syntax(text: &str) -> Option<(String, serde_json::Value)>
         if let Some(eq_pos) = part.find('=') {
             let key = part[..eq_pos].trim().to_string();
             let val_str = part[eq_pos + 1..].trim();
-            let val = if val_str.starts_with("\"\"\"")
+            let val = if val_str.starts_with('[') && val_str.ends_with(']') {
+                serde_json::from_str(val_str).unwrap_or_else(|_| serde_json::json!(val_str))
+            } else if val_str.starts_with('{') && val_str.ends_with('}') {
+                serde_json::from_str(val_str).unwrap_or_else(|_| serde_json::json!(val_str))
+            } else if val_str.starts_with("\"\"\"")
                 && val_str.ends_with("\"\"\"")
                 && val_str.len() >= 6
             {
@@ -671,7 +580,11 @@ fn parse_function_call_syntax(text: &str) -> Option<(String, serde_json::Value)>
         } else if !part.is_empty() {
             // Positional argument: infer parameter name from tool + position
             let key = default_param_name(&name, positional_index).to_string();
-            let val = if part.starts_with("\"\"\"") && part.ends_with("\"\"\"") && part.len() >= 6 {
+            let val = if part.starts_with('[') && part.ends_with(']') {
+                serde_json::from_str(part).unwrap_or_else(|_| serde_json::json!(part))
+            } else if part.starts_with('{') && part.ends_with('}') {
+                serde_json::from_str(part).unwrap_or_else(|_| serde_json::json!(part))
+            } else if part.starts_with("\"\"\"") && part.ends_with("\"\"\"") && part.len() >= 6 {
                 let raw = &part[3..part.len() - 3];
                 serde_json::json!(raw.replace("\\\"", "\"").replace("\\\\", "\\"))
             } else if (part.starts_with('"') && part.ends_with('"'))
@@ -702,6 +615,8 @@ fn split_call_args(s: &str) -> Vec<String> {
     let mut in_quote = false;
     let mut quote_char = '"';
     let mut in_triple = false;
+    let mut bracket_depth = 0usize;
+    let mut brace_depth = 0usize;
     let chars: Vec<char> = s.chars().collect();
     let mut i = 0;
 
@@ -736,7 +651,19 @@ fn split_call_args(s: &str) -> Vec<String> {
         } else if in_quote && ch == quote_char && (i == 0 || chars[i - 1] != '\\') {
             in_quote = false;
             current.push(ch);
-        } else if !in_quote && ch == ',' {
+        } else if !in_quote && ch == '[' {
+            bracket_depth += 1;
+            current.push(ch);
+        } else if !in_quote && ch == ']' {
+            bracket_depth = bracket_depth.saturating_sub(1);
+            current.push(ch);
+        } else if !in_quote && ch == '{' {
+            brace_depth += 1;
+            current.push(ch);
+        } else if !in_quote && ch == '}' {
+            brace_depth = brace_depth.saturating_sub(1);
+            current.push(ch);
+        } else if !in_quote && bracket_depth == 0 && brace_depth == 0 && ch == ',' {
             parts.push(current.trim().to_string());
             current = String::new();
         } else {
@@ -748,6 +675,70 @@ fn split_call_args(s: &str) -> Vec<String> {
         parts.push(current.trim().to_string());
     }
     parts
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_tool_args, parse_text_tool_calls, split_call_args};
+    use serde_json::json;
+
+    #[test]
+    fn split_call_args_keeps_array_values_intact() {
+        let parts = split_call_args(r#"command=["ls","internal/manifest/"], timeout=30"#);
+        assert_eq!(
+            parts,
+            vec![r#"command=["ls","internal/manifest/"]"#, "timeout=30"]
+        );
+    }
+
+    #[test]
+    fn parse_text_tool_calls_supports_json_array_arguments() {
+        let calls = parse_text_tool_calls(
+            "```call\nrun(command=[\"ls\",\"internal/manifest/\"], timeout=30)\n```",
+        );
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0]["name"], json!("run"));
+        assert_eq!(
+            calls[0]["arguments"]["command"],
+            json!(["ls", "internal/manifest/"])
+        );
+        assert_eq!(calls[0]["arguments"]["timeout"], json!(30));
+    }
+
+    #[test]
+    fn normalize_tool_args_joins_run_command_arrays() {
+        let normalized =
+            normalize_tool_args("run", &json!({"command": ["ls", "internal/manifest/"]}));
+        assert_eq!(normalized["command"], json!("ls internal/manifest/"));
+    }
+
+    #[test]
+    fn normalize_tool_args_accepts_run_args_alias() {
+        let normalized = normalize_tool_args(
+            "run",
+            &json!({"args": ["go", "test", "./internal/manifest/"]}),
+        );
+        assert_eq!(normalized["command"], json!("go test ./internal/manifest/"));
+        assert!(normalized.get("args").is_none());
+    }
+
+    #[test]
+    fn normalize_tool_args_recovers_stringified_run_array() {
+        let normalized = normalize_tool_args(
+            "run",
+            &json!({"command": "[\"go\",\"test\",\"./internal/manifest/\"]"}),
+        );
+        assert_eq!(normalized["command"], json!("go test ./internal/manifest/"));
+    }
+
+    #[test]
+    fn normalize_tool_args_recovers_fragmented_run_array() {
+        let normalized = normalize_tool_args(
+            "run",
+            &json!({"command": "\"internal/manifest/\"]", "args": "[\"ls\""}),
+        );
+        assert_eq!(normalized["command"], json!("ls internal/manifest/"));
+    }
 }
 
 // =============================================================================
@@ -770,7 +761,7 @@ pub(crate) fn vm_tools_to_native(
         VmValue::List(list) => list.as_ref().clone(),
         _ => {
             return Err(VmError::Thrown(VmValue::String(Rc::from(
-                "tools must be a tool_registry or a list of tool definitions",
+                "tools must be a tool_registry or a list of tool definition dicts",
             ))));
         }
     };
@@ -778,32 +769,6 @@ pub(crate) fn vm_tools_to_native(
     let mut native_tools = Vec::new();
     for tool in &tools_list {
         match tool {
-            VmValue::String(name) => {
-                if let Some(schema) = builtin_tool_schema(name) {
-                    let tool_name = schema["name"].as_str().unwrap_or(name);
-                    let description = schema["description"].as_str().unwrap_or("");
-                    let input_schema = vm_build_json_schema_from_json(&schema["parameters"]);
-                    match provider {
-                        "openai" | "openrouter" => {
-                            native_tools.push(serde_json::json!({
-                                "type": "function",
-                                "function": {
-                                    "name": tool_name,
-                                    "description": description,
-                                    "parameters": input_schema,
-                                }
-                            }));
-                        }
-                        _ => {
-                            native_tools.push(serde_json::json!({
-                                "name": tool_name,
-                                "description": description,
-                                "input_schema": input_schema,
-                            }));
-                        }
-                    }
-                }
-            }
             VmValue::Dict(entry) => {
                 let name = entry.get("name").map(|v| v.display()).unwrap_or_default();
                 let description = entry
@@ -811,31 +776,49 @@ pub(crate) fn vm_tools_to_native(
                     .map(|v| v.display())
                     .unwrap_or_default();
                 let params = entry.get("parameters").and_then(|v| v.as_dict());
+                let output_schema = entry.get("outputSchema").map(vm_value_to_json);
 
                 let input_schema = vm_build_json_schema(params);
 
                 match provider {
                     "openai" | "openrouter" => {
-                        native_tools.push(serde_json::json!({
+                        let mut tool = serde_json::json!({
                             "type": "function",
                             "function": {
                                 "name": name,
                                 "description": description,
                                 "parameters": input_schema,
                             }
-                        }));
+                        });
+                        if let Some(output_schema) = output_schema.clone() {
+                            tool["function"]["x-harn-output-schema"] = output_schema;
+                        }
+                        native_tools.push(tool);
                     }
                     _ => {
                         // Anthropic format
-                        native_tools.push(serde_json::json!({
+                        let mut tool = serde_json::json!({
                             "name": name,
                             "description": description,
                             "input_schema": input_schema,
-                        }));
+                        });
+                        if let Some(output_schema) = output_schema {
+                            tool["x-harn-output-schema"] = output_schema;
+                        }
+                        native_tools.push(tool);
                     }
                 }
             }
-            _ => {}
+            VmValue::String(_) => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "tools must be declared as tool definition dicts or a tool_registry",
+                ))));
+            }
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "tools must contain only tool definition dicts",
+                ))));
+            }
         }
     }
     Ok(native_tools)

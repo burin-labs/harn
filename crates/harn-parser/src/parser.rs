@@ -211,12 +211,15 @@ impl Parser {
         // Check for selective import: import { foo, bar } from "module"
         if self.check(&TokenKind::LBrace) {
             self.advance(); // skip {
+            self.skip_newlines();
             let mut names = Vec::new();
             while !self.is_at_end() && !self.check(&TokenKind::RBrace) {
                 let name = self.consume_identifier("import name")?;
                 names.push(name);
+                self.skip_newlines();
                 if self.check(&TokenKind::Comma) {
                     self.advance();
+                    self.skip_newlines();
                 }
             }
             self.consume(&TokenKind::RBrace, "}")?;

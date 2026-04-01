@@ -1,3 +1,31 @@
+fn agent_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "read",
+    "Read a file",
+    {
+    handler: nil,
+    params: {path: {type: "string", description: "Path to read"}},
+    returns: {type: "string"},
+  },
+  )
+  tools = tool_define(
+    tools,
+    "search",
+    "Search project files",
+    {
+    handler: nil,
+    params: {
+    pattern: {type: "string", description: "Pattern to search"},
+    file_glob: {type: "string", description: "Optional file glob", required: false},
+  },
+    returns: {type: "string"},
+  },
+  )
+  return tools
+}
+
 pipeline test(task) {
   // Test agent() and agent_config() builtins.
   let classifier = agent(
@@ -7,7 +35,7 @@ pipeline test(task) {
     provider: "mock",
     model: "test-model",
     max_iterations: 5,
-    tools: ["read_file", "search"],
+    tools: agent_tools(),
   },
   )
   // Check agent dict shape

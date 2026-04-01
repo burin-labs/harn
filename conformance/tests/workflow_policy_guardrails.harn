@@ -1,4 +1,17 @@
 pipeline main() {
+  var stage_tools = tool_registry()
+  stage_tools = tool_define(
+    stage_tools,
+    "edit",
+    "Edit a file",
+    {handler: nil, params: {path: {type: "string"}}, returns: {type: "string"}},
+  )
+  stage_tools = tool_define(
+    stage_tools,
+    "run",
+    "Run a command",
+    {handler: nil, params: {command: {type: "string"}}, returns: {type: "string"}},
+  )
   let flow = workflow_graph(
     {
     name: "policy_guardrails",
@@ -8,7 +21,7 @@ pipeline main() {
     act: {
     kind: "stage",
     mode: "agent",
-    tools: ["edit", "run"],
+    tools: stage_tools,
     capability_policy: {capabilities: {workspace: ["write_text"], process: ["exec"]}, side_effect_level: "process_exec"},
   },
   },

@@ -1,0 +1,20 @@
+pipeline default() {
+  let outer = "outer"
+  if true {
+    let branch = "if-branch"
+    println(branch)
+  } else {
+    let branch = "else-branch"
+    println(branch)
+  }
+  for item in [1, 2] {
+    let loop_label = "loop-" + item
+    println(loop_label)
+  }
+  try {
+    throw "boom"
+  } catch (err) {
+    println(err)
+  }
+  println(outer)
+}

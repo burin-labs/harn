@@ -143,17 +143,35 @@ async fn main() {
         }
         "fmt" => {
             let check_mode = args.iter().any(|a| a == "--check");
+            let line_width: usize = args
+                .windows(2)
+                .find(|w| w[0] == "--line-width")
+                .and_then(|w| w[1].parse().ok())
+                .unwrap_or(100);
+            // Skip flags and their values; collect remaining as targets.
+            let mut skip_next = false;
             let targets: Vec<&str> = args
                 .iter()
                 .skip(2)
-                .filter(|a| !a.starts_with("--"))
+                .filter(|a| {
+                    if skip_next {
+                        skip_next = false;
+                        return false;
+                    }
+                    if *a == "--line-width" {
+                        skip_next = true;
+                        return false;
+                    }
+                    !a.starts_with("--")
+                })
                 .map(|s| s.as_str())
                 .collect();
             if targets.is_empty() {
-                eprintln!("Usage: harn fmt [--check] <file.harn|dir> [...]");
+                eprintln!("Usage: harn fmt [--check] [--line-width <N>] <file.harn|dir> [...]");
                 process::exit(1);
             }
-            commands::check::fmt_targets(&targets, check_mode);
+            let opts = harn_fmt::FmtOptions { line_width };
+            commands::check::fmt_targets(&targets, check_mode, &opts);
         }
         "test" => {
             // Parse test flags

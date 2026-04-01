@@ -52,12 +52,37 @@ println(result.visible_text)
 Persistent agent loop with tools:
 
 ```harn
+fn coding_tools() {
+  var tools = tool_registry()
+  tools = tool_define(tools, "read", "Read a file", {
+    params: {path: {type: "string", description: "Path to read"}},
+    returns: {type: "string"},
+    handler: nil,
+  })
+  tools = tool_define(tools, "search", "Search project files", {
+    params: {pattern: {type: "string", description: "Pattern to search"}},
+    returns: {type: "string"},
+    handler: nil,
+  })
+  tools = tool_define(tools, "edit", "Edit a file", {
+    params: {path: {type: "string", description: "Path to edit"}},
+    returns: {type: "string"},
+    handler: nil,
+  })
+  tools = tool_define(tools, "run", "Run a command", {
+    params: {command: {type: "string", description: "Command to run"}},
+    returns: {type: "string"},
+    handler: nil,
+  })
+  return tools
+}
+
 let result = agent_loop(
   "Fix the failing test and verify the change.",
   "You are a senior engineer.",
   {
     persistent: true,
-    tools: ["read_file", "search", "edit", "run"],
+    tools: coding_tools(),
     max_iterations: 24
   }
 )
@@ -161,8 +186,8 @@ Without a runtime boundary like Harn, application code tends to accumulate:
 - provenance, replay, and eval fixtures
 - host/editor queue semantics
 
-Harn moves those concerns into a typed runtime layer so a host app such as
-Burin can stay focused on:
+Harn moves those concerns into a typed runtime layer so a host app can stay
+focused on:
 
 - capabilities it wants to expose
 - top-level policy ceilings
@@ -186,14 +211,14 @@ let graph = workflow_graph({
     implement: {
       kind: "stage",
       mode: "agent",
-      tools: ["read_file", "edit", "run"],
+      tools: coding_tools(),
       model_policy: {model_tier: "mid"},
       retry_policy: {max_attempts: 2}
     },
     verify: {
       kind: "verify",
       mode: "agent",
-      tools: ["run"],
+      tools: tool_select(coding_tools(), ["run"]),
       verify: {assert_text: "PASS"}
     }
   },

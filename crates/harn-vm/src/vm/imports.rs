@@ -1,0 +1,236 @@
+use std::cell::RefCell;
+use std::collections::{BTreeMap, HashSet};
+use std::future::Future;
+use std::path::{Path, PathBuf};
+use std::pin::Pin;
+use std::rc::Rc;
+
+use crate::value::{ModuleFunctionRegistry, VmClosure, VmEnv, VmError, VmValue};
+
+use super::{LoadedModule, ScopeSpan, Vm};
+
+impl Vm {
+    fn export_loaded_module(
+        &mut self,
+        module_path: &Path,
+        loaded: &LoadedModule,
+        selected_names: Option<&[String]>,
+    ) -> Result<(), VmError> {
+        let export_names: Vec<String> = if let Some(names) = selected_names {
+            names.to_vec()
+        } else if !loaded.public_names.is_empty() {
+            loaded.public_names.iter().cloned().collect()
+        } else {
+            loaded.functions.keys().cloned().collect()
+        };
+
+        let module_name = module_path.display().to_string();
+        for name in export_names {
+            let Some(closure) = loaded.functions.get(&name) else {
+                return Err(VmError::Runtime(format!(
+                    "Import error: '{name}' is not defined in {module_name}"
+                )));
+            };
+            if let Some(VmValue::Closure(_)) = self.env.get(&name) {
+                return Err(VmError::Runtime(format!(
+                    "Import collision: '{name}' is already defined when importing {module_name}. \
+                     Use selective imports to disambiguate: import {{ {name} }} from \"...\""
+                )));
+            }
+            self.env
+                .define(&name, VmValue::Closure(Rc::clone(closure)), false)?;
+        }
+        Ok(())
+    }
+
+    /// Execute an import, reading and running the file's declarations.
+    pub(super) fn execute_import<'a>(
+        &'a mut self,
+        path: &'a str,
+        selected_names: Option<&'a [String]>,
+    ) -> Pin<Box<dyn Future<Output = Result<(), VmError>> + 'a>> {
+        Box::pin(async move {
+            let _import_span = ScopeSpan::new(crate::tracing::SpanKind::Import, path.to_string());
+
+            if let Some(module) = path.strip_prefix("std/") {
+                if let Some(source) = crate::stdlib_modules::get_stdlib_source(module) {
+                    let synthetic = PathBuf::from(format!("<stdlib>/{module}.harn"));
+                    if self.imported_paths.contains(&synthetic) {
+                        return Ok(());
+                    }
+                    if let Some(loaded) = self.module_cache.get(&synthetic).cloned() {
+                        return self.export_loaded_module(&synthetic, &loaded, selected_names);
+                    }
+                    self.imported_paths.push(synthetic.clone());
+
+                    let mut lexer = harn_lexer::Lexer::new(source);
+                    let tokens = lexer.tokenize().map_err(|e| {
+                        VmError::Runtime(format!("stdlib lex error in std/{module}: {e}"))
+                    })?;
+                    let mut parser = harn_parser::Parser::new(tokens);
+                    let program = parser.parse().map_err(|e| {
+                        VmError::Runtime(format!("stdlib parse error in std/{module}: {e}"))
+                    })?;
+
+                    let loaded = self.import_declarations(&program, None).await?;
+                    self.imported_paths.pop();
+                    self.module_cache.insert(synthetic.clone(), loaded.clone());
+                    self.export_loaded_module(&synthetic, &loaded, selected_names)?;
+                    return Ok(());
+                }
+                return Err(VmError::Runtime(format!(
+                    "Unknown stdlib module: std/{module}"
+                )));
+            }
+
+            let base = self
+                .source_dir
+                .clone()
+                .unwrap_or_else(|| PathBuf::from("."));
+            let mut file_path = base.join(path);
+
+            if !file_path.exists() && file_path.extension().is_none() {
+                file_path.set_extension("harn");
+            }
+
+            if !file_path.exists() {
+                for pkg_dir in [".harn/packages", ".burin/packages"] {
+                    let pkg_path = base.join(pkg_dir).join(path);
+                    if pkg_path.exists() {
+                        file_path = if pkg_path.is_dir() {
+                            let lib = pkg_path.join("lib.harn");
+                            if lib.exists() {
+                                lib
+                            } else {
+                                pkg_path
+                            }
+                        } else {
+                            pkg_path
+                        };
+                        break;
+                    }
+                    let mut pkg_harn = pkg_path.clone();
+                    pkg_harn.set_extension("harn");
+                    if pkg_harn.exists() {
+                        file_path = pkg_harn;
+                        break;
+                    }
+                }
+            }
+
+            let canonical = file_path
+                .canonicalize()
+                .unwrap_or_else(|_| file_path.clone());
+            if self.imported_paths.contains(&canonical) {
+                return Ok(());
+            }
+            if let Some(loaded) = self.module_cache.get(&canonical).cloned() {
+                return self.export_loaded_module(&canonical, &loaded, selected_names);
+            }
+            self.imported_paths.push(canonical.clone());
+
+            let source = std::fs::read_to_string(&file_path).map_err(|e| {
+                VmError::Runtime(format!(
+                    "Import error: cannot read '{}': {e}",
+                    file_path.display()
+                ))
+            })?;
+
+            let mut lexer = harn_lexer::Lexer::new(&source);
+            let tokens = lexer
+                .tokenize()
+                .map_err(|e| VmError::Runtime(format!("Import lex error: {e}")))?;
+            let mut parser = harn_parser::Parser::new(tokens);
+            let program = parser
+                .parse()
+                .map_err(|e| VmError::Runtime(format!("Import parse error: {e}")))?;
+
+            let loaded = self.import_declarations(&program, Some(&file_path)).await?;
+            self.imported_paths.pop();
+            self.module_cache.insert(canonical.clone(), loaded.clone());
+            self.export_loaded_module(&canonical, &loaded, selected_names)?;
+
+            Ok(())
+        })
+    }
+
+    /// Process top-level declarations from an imported module.
+    fn import_declarations<'a>(
+        &'a mut self,
+        program: &'a [harn_parser::SNode],
+        file_path: Option<&'a Path>,
+    ) -> Pin<Box<dyn Future<Output = Result<LoadedModule, VmError>> + 'a>> {
+        Box::pin(async move {
+            let caller_env = self.env.clone();
+            let old_source_dir = self.source_dir.clone();
+            self.env = VmEnv::new();
+            if let Some(fp) = file_path {
+                if let Some(parent) = fp.parent() {
+                    self.source_dir = Some(parent.to_path_buf());
+                }
+            }
+
+            for node in program {
+                match &node.node {
+                    harn_parser::Node::ImportDecl { path: sub_path } => {
+                        self.execute_import(sub_path, None).await?;
+                    }
+                    harn_parser::Node::SelectiveImport {
+                        names,
+                        path: sub_path,
+                    } => {
+                        self.execute_import(sub_path, Some(names)).await?;
+                    }
+                    _ => {}
+                }
+            }
+
+            let module_env = self.env.clone();
+            let registry: ModuleFunctionRegistry = Rc::new(RefCell::new(BTreeMap::new()));
+            let source_dir = file_path.and_then(|fp| fp.parent().map(|p| p.to_path_buf()));
+            let mut functions: BTreeMap<String, Rc<VmClosure>> = BTreeMap::new();
+            let mut public_names: HashSet<String> = HashSet::new();
+
+            for node in program {
+                let harn_parser::Node::FnDecl {
+                    name,
+                    params,
+                    body,
+                    is_pub,
+                    ..
+                } = &node.node
+                else {
+                    continue;
+                };
+
+                let mut compiler = crate::Compiler::new();
+                let func_chunk = compiler
+                    .compile_fn_body(params, body)
+                    .map_err(|e| VmError::Runtime(format!("Import compile error: {e}")))?;
+                let closure = Rc::new(VmClosure {
+                    func: func_chunk,
+                    env: module_env.clone(),
+                    source_dir: source_dir.clone(),
+                    module_functions: Some(Rc::clone(&registry)),
+                });
+                registry
+                    .borrow_mut()
+                    .insert(name.clone(), Rc::clone(&closure));
+                self.env
+                    .define(name, VmValue::Closure(Rc::clone(&closure)), false)?;
+                functions.insert(name.clone(), Rc::clone(&closure));
+                if *is_pub {
+                    public_names.insert(name.clone());
+                }
+            }
+
+            self.env = caller_env;
+            self.source_dir = old_source_dir;
+
+            Ok(LoadedModule {
+                functions,
+                public_names,
+            })
+        })
+    }
+}

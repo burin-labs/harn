@@ -28,6 +28,11 @@ pub fn take_trace() -> Vec<LlmTraceEntry> {
     LLM_TRACE.with(|v| std::mem::take(&mut *v.borrow_mut()))
 }
 
+/// Clone the current trace log without consuming it.
+pub fn peek_trace() -> Vec<LlmTraceEntry> {
+    LLM_TRACE.with(|v| v.borrow().clone())
+}
+
 /// Summarize trace usage without consuming entries.
 pub fn peek_trace_summary() -> (i64, i64, i64, i64) {
     LLM_TRACE.with(|v| {

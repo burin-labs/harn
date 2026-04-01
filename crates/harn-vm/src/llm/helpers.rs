@@ -4,6 +4,8 @@ use std::rc::Rc;
 use crate::value::{VmError, VmValue};
 
 const TRANSCRIPT_TYPE: &str = "transcript";
+const TRANSCRIPT_ASSET_TYPE: &str = "transcript_asset";
+const TRANSCRIPT_VERSION: i64 = 2;
 
 // =============================================================================
 // Option extraction helpers
@@ -217,7 +219,14 @@ pub(crate) fn vm_messages_to_json(msg_list: &[VmValue]) -> Result<Vec<serde_json
                 .get("role")
                 .map(|v| v.display())
                 .unwrap_or_else(|| "user".to_string());
-            let content = d.get("content").map(|v| v.display()).unwrap_or_default();
+            let content = d
+                .get("content")
+                .cloned()
+                .unwrap_or_else(|| VmValue::String(Rc::from("")));
+            let content_json = match &content {
+                VmValue::String(text) => serde_json::Value::String(text.to_string()),
+                other => vm_value_to_json(other),
+            };
 
             if role == "tool_result" {
                 // Anthropic tool result format
@@ -225,18 +234,22 @@ pub(crate) fn vm_messages_to_json(msg_list: &[VmValue]) -> Result<Vec<serde_json
                     .get("tool_use_id")
                     .map(|v| v.display())
                     .unwrap_or_default();
+                let rendered = match &content_json {
+                    serde_json::Value::String(text) => text.clone(),
+                    other => other.to_string(),
+                };
                 messages.push(serde_json::json!({
                     "role": "user",
                     "content": [{
                         "type": "tool_result",
                         "tool_use_id": tool_use_id,
-                        "content": content,
+                        "content": rendered,
                     }],
                 }));
             } else {
                 messages.push(serde_json::json!({
                     "role": role,
-                    "content": content,
+                    "content": content_json,
                 }));
             }
         }
@@ -251,6 +264,18 @@ pub(crate) fn transcript_message_list(
         Some(VmValue::List(list)) => Ok((**list).clone()),
         Some(_) => Err(VmError::Thrown(VmValue::String(Rc::from(
             "transcript.messages must be a list",
+        )))),
+        None => Ok(Vec::new()),
+    }
+}
+
+pub(crate) fn transcript_asset_list(
+    transcript: &BTreeMap<String, VmValue>,
+) -> Result<Vec<VmValue>, VmError> {
+    match transcript.get("assets") {
+        Some(VmValue::List(list)) => Ok((**list).clone()),
+        Some(_) => Err(VmError::Thrown(VmValue::String(Rc::from(
+            "transcript.assets must be a list",
         )))),
         None => Ok(Vec::new()),
     }
@@ -280,9 +305,13 @@ pub(crate) fn transcript_metadata(
 }
 
 pub(crate) fn vm_message(role: &str, content: &str) -> VmValue {
+    vm_message_value(role, VmValue::String(Rc::from(content)))
+}
+
+pub(crate) fn vm_message_value(role: &str, content: VmValue) -> VmValue {
     let mut msg = BTreeMap::new();
     msg.insert("role".to_string(), VmValue::String(Rc::from(role)));
-    msg.insert("content".to_string(), VmValue::String(Rc::from(content)));
+    msg.insert("content".to_string(), content);
     VmValue::Dict(Rc::new(msg))
 }
 
@@ -301,30 +330,41 @@ pub(crate) fn json_messages_to_vm(msg_list: &[serde_json::Value]) -> Vec<VmValue
                 return Some(vm_message(role, content));
             }
 
-            let blocks = msg.get("content")?.as_array()?;
-            if role == "user" {
-                for block in blocks {
-                    if block.get("type").and_then(|v| v.as_str()) == Some("tool_result") {
-                        let content = block
-                            .get("content")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or_default();
-                        let tool_use_id = block
-                            .get("tool_use_id")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or_default();
-                        let mut result = BTreeMap::new();
-                        result.insert("role".to_string(), VmValue::String(Rc::from("tool_result")));
-                        result.insert(
-                            "tool_use_id".to_string(),
-                            VmValue::String(Rc::from(tool_use_id)),
-                        );
-                        result.insert("content".to_string(), VmValue::String(Rc::from(content)));
-                        return Some(VmValue::Dict(Rc::new(result)));
+            if let Some(blocks) = msg.get("content").and_then(|v| v.as_array()) {
+                if role == "user" {
+                    for block in blocks {
+                        if block.get("type").and_then(|v| v.as_str()) == Some("tool_result") {
+                            let content = block
+                                .get("content")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or_default();
+                            let tool_use_id = block
+                                .get("tool_use_id")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or_default();
+                            let mut result = BTreeMap::new();
+                            result.insert(
+                                "role".to_string(),
+                                VmValue::String(Rc::from("tool_result")),
+                            );
+                            result.insert(
+                                "tool_use_id".to_string(),
+                                VmValue::String(Rc::from(tool_use_id)),
+                            );
+                            result
+                                .insert("content".to_string(), VmValue::String(Rc::from(content)));
+                            return Some(VmValue::Dict(Rc::new(result)));
+                        }
                     }
                 }
+                return Some(vm_message_value(
+                    role,
+                    crate::stdlib::json_to_vm_value(&serde_json::Value::Array(blocks.clone())),
+                ));
             }
-            None
+
+            msg.get("content")
+                .map(|content| vm_message_value(role, crate::stdlib::json_to_vm_value(content)))
         })
         .collect()
 }
@@ -335,7 +375,15 @@ pub(crate) fn new_transcript_with(
     summary: Option<String>,
     metadata: Option<VmValue>,
 ) -> VmValue {
-    new_transcript_with_events(id, messages, summary, metadata, Vec::new(), None)
+    new_transcript_with_events(
+        id,
+        messages,
+        summary,
+        metadata,
+        Vec::new(),
+        Vec::new(),
+        None,
+    )
 }
 
 pub(crate) fn new_transcript_with_events(
@@ -344,6 +392,7 @@ pub(crate) fn new_transcript_with_events(
     summary: Option<String>,
     metadata: Option<VmValue>,
     extra_events: Vec<VmValue>,
+    assets: Vec<VmValue>,
     state: Option<&str>,
 ) -> VmValue {
     let mut transcript = BTreeMap::new();
@@ -353,6 +402,7 @@ pub(crate) fn new_transcript_with_events(
         "_type".to_string(),
         VmValue::String(Rc::from(TRANSCRIPT_TYPE)),
     );
+    transcript.insert("version".to_string(), VmValue::Int(TRANSCRIPT_VERSION));
     transcript.insert(
         "id".to_string(),
         VmValue::String(Rc::from(
@@ -361,6 +411,7 @@ pub(crate) fn new_transcript_with_events(
     );
     transcript.insert("messages".to_string(), VmValue::List(Rc::new(messages)));
     transcript.insert("events".to_string(), VmValue::List(Rc::new(events)));
+    transcript.insert("assets".to_string(), VmValue::List(Rc::new(assets)));
     if let Some(summary) = summary {
         transcript.insert("summary".to_string(), VmValue::String(Rc::from(summary)));
     }
@@ -379,12 +430,9 @@ fn transcript_event_from_message(message: &VmValue) -> VmValue {
         .get("role")
         .map(|v| v.display())
         .unwrap_or_else(|| "user".to_string());
-    let content = dict.get("content").map(|v| v.display()).unwrap_or_default();
-    let visibility = if role == "tool_result" {
-        "internal"
-    } else {
-        "public"
-    };
+    let blocks = normalize_message_blocks(dict.get("content"), &role);
+    let text = render_blocks_text(&blocks);
+    let visibility = overall_visibility(&blocks, default_visibility_for_role(&role));
     let kind = if role == "tool_result" {
         "tool_result"
     } else {
@@ -401,38 +449,13 @@ fn transcript_event_from_message(message: &VmValue) -> VmValue {
         "visibility".to_string(),
         VmValue::String(Rc::from(visibility)),
     );
-    event.insert(
-        "text".to_string(),
-        VmValue::String(Rc::from(content.as_str())),
-    );
-    event.insert(
-        "blocks".to_string(),
-        VmValue::List(Rc::new(vec![VmValue::Dict(Rc::new(BTreeMap::from([
-            ("type".to_string(), VmValue::String(Rc::from("text"))),
-            (
-                "text".to_string(),
-                VmValue::String(Rc::from(content.as_str())),
-            ),
-            (
-                "visibility".to_string(),
-                VmValue::String(Rc::from(visibility)),
-            ),
-        ])))])),
-    );
+    event.insert("text".to_string(), VmValue::String(Rc::from(text)));
+    event.insert("blocks".to_string(), VmValue::List(Rc::new(blocks)));
     VmValue::Dict(Rc::new(event))
 }
 
 pub(crate) fn transcript_events_from_messages(messages: &[VmValue]) -> Vec<VmValue> {
     messages.iter().map(transcript_event_from_message).collect()
-}
-
-pub(crate) fn transcript_to_vm(
-    id: Option<String>,
-    summary: Option<String>,
-    metadata: Option<serde_json::Value>,
-    messages: &[serde_json::Value],
-) -> VmValue {
-    transcript_to_vm_with_events(id, summary, metadata, messages, Vec::new(), None)
 }
 
 pub(crate) fn transcript_to_vm_with_events(
@@ -441,6 +464,7 @@ pub(crate) fn transcript_to_vm_with_events(
     metadata: Option<serde_json::Value>,
     messages: &[serde_json::Value],
     extra_events: Vec<VmValue>,
+    assets: Vec<VmValue>,
     state: Option<&str>,
 ) -> VmValue {
     let metadata_vm = metadata.as_ref().map(crate::stdlib::json_to_vm_value);
@@ -450,6 +474,7 @@ pub(crate) fn transcript_to_vm_with_events(
         summary,
         metadata_vm,
         extra_events,
+        assets,
         state,
     )
 }
@@ -493,6 +518,39 @@ pub(crate) fn transcript_event(
     VmValue::Dict(Rc::new(event))
 }
 
+pub(crate) fn normalize_transcript_asset(value: &VmValue) -> VmValue {
+    let mut asset = value.as_dict().cloned().unwrap_or_default();
+    asset.insert(
+        "_type".to_string(),
+        VmValue::String(Rc::from(TRANSCRIPT_ASSET_TYPE)),
+    );
+    if !asset.contains_key("id") {
+        asset.insert(
+            "id".to_string(),
+            VmValue::String(Rc::from(uuid::Uuid::now_v7().to_string())),
+        );
+    }
+    if !asset.contains_key("kind") {
+        asset.insert("kind".to_string(), VmValue::String(Rc::from("blob")));
+    }
+    if !asset.contains_key("visibility") {
+        asset.insert(
+            "visibility".to_string(),
+            VmValue::String(Rc::from("internal")),
+        );
+    }
+    if value.as_dict().is_none() {
+        asset.insert(
+            "storage".to_string(),
+            VmValue::Dict(Rc::new(BTreeMap::from([(
+                "path".to_string(),
+                VmValue::String(Rc::from(value.display())),
+            )]))),
+        );
+    }
+    VmValue::Dict(Rc::new(asset))
+}
+
 pub(crate) fn is_transcript_value(value: &VmValue) -> bool {
     value
         .as_dict()
@@ -509,28 +567,168 @@ pub(crate) fn is_transcript_value(value: &VmValue) -> bool {
 pub(crate) fn vm_add_role_message(args: &[VmValue], role: &str) -> Result<VmValue, VmError> {
     match args.first() {
         Some(VmValue::List(list)) => {
-            let content = args.get(1).map(|a| a.display()).unwrap_or_default();
             let mut new_messages = (**list).clone();
-            new_messages.push(vm_message(role, &content));
+            new_messages.push(vm_message_value(
+                role,
+                args.get(1)
+                    .cloned()
+                    .unwrap_or_else(|| VmValue::String(Rc::from(""))),
+            ));
             Ok(VmValue::List(Rc::new(new_messages)))
         }
         Some(VmValue::Dict(d))
             if d.get("_type").map(|v| v.display()).as_deref() == Some(TRANSCRIPT_TYPE) =>
         {
-            let content = args.get(1).map(|a| a.display()).unwrap_or_default();
             let mut messages = transcript_message_list(d)?;
-            messages.push(vm_message(role, &content));
-            Ok(new_transcript_with(
+            messages.push(vm_message_value(
+                role,
+                args.get(1)
+                    .cloned()
+                    .unwrap_or_else(|| VmValue::String(Rc::from(""))),
+            ));
+            Ok(new_transcript_with_events(
                 transcript_id(d),
                 messages,
                 transcript_summary_text(d),
                 d.get("metadata").cloned(),
+                Vec::new(),
+                transcript_asset_list(d)?,
+                d.get("state").and_then(|value| match value {
+                    VmValue::String(text) if !text.is_empty() => Some(text.as_ref()),
+                    _ => None,
+                }),
             ))
         }
         _ => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
             "add_{role}: first argument must be a message list or transcript"
         ))))),
     }
+}
+
+fn default_visibility_for_role(role: &str) -> &'static str {
+    match role {
+        "tool_result" => "internal",
+        _ => "public",
+    }
+}
+
+fn normalize_message_blocks(content: Option<&VmValue>, role: &str) -> Vec<VmValue> {
+    let default_visibility = default_visibility_for_role(role);
+    match content {
+        Some(VmValue::List(items)) => items
+            .iter()
+            .map(|block| normalize_transcript_block(block, default_visibility))
+            .collect(),
+        Some(VmValue::Dict(block)) => {
+            vec![normalize_transcript_block(
+                &VmValue::Dict(block.clone()),
+                default_visibility,
+            )]
+        }
+        Some(VmValue::Nil) | None => Vec::new(),
+        Some(other) => vec![VmValue::Dict(Rc::new(BTreeMap::from([
+            ("type".to_string(), VmValue::String(Rc::from("text"))),
+            (
+                "text".to_string(),
+                VmValue::String(Rc::from(other.display())),
+            ),
+            (
+                "visibility".to_string(),
+                VmValue::String(Rc::from(default_visibility)),
+            ),
+        ])))],
+    }
+}
+
+fn normalize_transcript_block(block: &VmValue, default_visibility: &str) -> VmValue {
+    let mut normalized = block.as_dict().cloned().unwrap_or_else(|| {
+        BTreeMap::from([(
+            "text".to_string(),
+            VmValue::String(Rc::from(block.display())),
+        )])
+    });
+    if !normalized.contains_key("type") {
+        normalized.insert("type".to_string(), VmValue::String(Rc::from("text")));
+    }
+    if !normalized.contains_key("visibility") {
+        normalized.insert(
+            "visibility".to_string(),
+            VmValue::String(Rc::from(default_visibility)),
+        );
+    }
+    VmValue::Dict(Rc::new(normalized))
+}
+
+fn overall_visibility(blocks: &[VmValue], default_visibility: &str) -> String {
+    let mut resolved = default_visibility.to_string();
+    for block in blocks {
+        let Some(dict) = block.as_dict() else {
+            continue;
+        };
+        let visibility = dict
+            .get("visibility")
+            .map(|value| value.display())
+            .unwrap_or_else(|| default_visibility.to_string());
+        if visibility == "public" {
+            return visibility;
+        }
+        if visibility == "internal" {
+            resolved = visibility;
+        }
+    }
+    resolved
+}
+
+fn render_blocks_text(blocks: &[VmValue]) -> String {
+    let mut parts = Vec::new();
+    for block in blocks {
+        let Some(dict) = block.as_dict() else {
+            continue;
+        };
+        let kind = dict
+            .get("type")
+            .map(|value| value.display())
+            .unwrap_or_else(|| "text".to_string());
+        let text = match kind.as_str() {
+            "text" | "output_text" | "reasoning" => dict
+                .get("text")
+                .or_else(|| dict.get("content"))
+                .map(|value| value.display())
+                .unwrap_or_default(),
+            "tool_call" => {
+                let name = dict
+                    .get("name")
+                    .map(|value| value.display())
+                    .unwrap_or_else(|| "tool".to_string());
+                format!("<tool_call:{name}>")
+            }
+            "tool_result" => {
+                let name = dict
+                    .get("name")
+                    .map(|value| value.display())
+                    .unwrap_or_else(|| "tool".to_string());
+                format!("<tool_result:{name}>")
+            }
+            "image" | "input_image" => render_assetish_label("image", dict),
+            "file" | "document" | "attachment" => render_assetish_label(&kind, dict),
+            other => format!("<{other}>"),
+        };
+        if !text.is_empty() {
+            parts.push(text);
+        }
+    }
+    parts.join(" ")
+}
+
+fn render_assetish_label(kind: &str, dict: &BTreeMap<String, VmValue>) -> String {
+    let label = dict
+        .get("name")
+        .or_else(|| dict.get("title"))
+        .or_else(|| dict.get("path"))
+        .or_else(|| dict.get("asset_id"))
+        .map(|value| value.display())
+        .unwrap_or_else(|| kind.to_string());
+    format!("<{kind}:{label}>")
 }
 
 // =============================================================================
@@ -603,6 +801,7 @@ pub(crate) fn extract_llm_options(args: &[VmValue]) -> Result<super::api::LlmCal
     let response_format = opt_str(&options, "response_format");
     let timeout = opt_int(&options, "timeout").map(|t| t as u64);
     let cache = opt_bool(&options, "cache");
+    let output_validation = opt_str(&options, "output_validation");
 
     // Thinking: bool or {budget_tokens: N}
     let thinking = options
@@ -625,6 +824,11 @@ pub(crate) fn extract_llm_options(args: &[VmValue]) -> Result<super::api::LlmCal
     let json_schema = options
         .as_ref()
         .and_then(|o| o.get("schema"))
+        .and_then(|v| v.as_dict())
+        .map(vm_value_dict_to_json);
+    let output_schema = options
+        .as_ref()
+        .and_then(|o| o.get("output_schema").or_else(|| o.get("schema")))
         .and_then(|v| v.as_dict())
         .map(vm_value_dict_to_json);
 
@@ -704,7 +908,10 @@ pub(crate) fn extract_llm_options(args: &[VmValue]) -> Result<super::api::LlmCal
         presence_penalty,
         response_format,
         json_schema,
+        output_schema,
+        output_validation,
         thinking,
+        tools: tools_val,
         native_tools,
         tool_choice,
         cache,

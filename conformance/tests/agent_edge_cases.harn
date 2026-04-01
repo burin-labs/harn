@@ -1,3 +1,18 @@
+fn read_only_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "read",
+    "Read a file",
+    {
+    handler: nil,
+    params: {path: {type: "string", description: "Path to read"}},
+    returns: {type: "string"},
+  },
+  )
+  return tools
+}
+
 pipeline test(task) {
   // Test agent() edge cases
   // Agent with no config
@@ -17,7 +32,7 @@ pipeline test(task) {
     model: "test",
     max_iterations: 3,
     tool_format: "native",
-    tools: ["read_file"],
+    tools: read_only_tools(),
   },
   )
   let cfg2 = agent_config(a2, "test")

@@ -212,9 +212,26 @@ Workflow helpers built on transcripts and `agent_loop`:
 |---|---|
 | `workflow(config)` | Create a workflow config |
 | `task_run(task, flow, overrides?)` | Run an act/verify/repair workflow |
+| `workflow_result_text(result)` | Extract a visible text result from an LLM call, workflow wrapper, or ad hoc payload |
+| `workflow_result_run(task, workflow_name, result, artifacts?, options?)` | Normalize an ad hoc result into a reusable run record |
+| `workflow_result_persist(task, workflow_name, result, artifacts?, options?)` | Persist an ad hoc result as a run record without going through `workflow_execute` |
+| `workflow_session(prev)` | Normalize a task result or transcript into a reusable session object |
+| `workflow_session_new(metadata?)` | Create a new empty workflow session |
+| `workflow_session_restore(run_or_path)` | Restore a session from a run record or persisted run path |
+| `workflow_session_fork(prev)` | Fork a session transcript and mark it `forked` |
+| `workflow_session_archive(prev)` | Archive a session transcript |
+| `workflow_session_resume(prev)` | Resume an archived session transcript |
+| `workflow_session_compact(prev, options?)` | Summarize/compact a session transcript in place |
+| `workflow_session_reset(prev, carry_summary)` | Reset a session transcript, optionally carrying summary |
+| `workflow_session_persist(prev, path?)` | Persist the session run record and attach the saved path |
 | `workflow_continue(prev, task, flow, overrides?)` | Continue from an existing transcript |
 | `workflow_compact(prev, options?)` | Summarize and compact a transcript |
 | `workflow_reset(prev, carry_summary)` | Reset or summarize-then-reset a workflow transcript |
+
+`workflow_session(...)` returns a normalized session dict that includes the
+current transcript, message count, summary, persisted run metadata, and a
+`usage` object when the source run captured LLM totals:
+`{input_tokens, output_tokens, total_duration_ms, call_count}`.
 
 For background or delegated execution, use the worker lifecycle builtins
 (`spawn_agent`, `send_input`, `resume_agent`, `wait_agent`, `close_agent`, `list_agents`)

@@ -1,0 +1,39 @@
+# Host Boundary
+
+Harn is the orchestration layer. Hosts supply facts and platform effects.
+
+The boundary should stay narrow:
+
+- Hosts expose typed capabilities such as project scan data, editor state,
+  diagnostics, git facts, approval decisions, and persistence hooks.
+- Harn owns orchestration policy: workflow topology, retries, verification,
+  transcript lifecycle, context assembly, contract enforcement, replay, evals,
+  and worker semantics.
+
+What belongs in Harn `std/*` modules or the VM:
+
+- Generic host wrappers like `project_host_scan()` or `git_diff()`
+- Reusable project-state normalization and packaging
+- Transcript schemas, assets, compaction, and replay semantics
+- Context/artifact assembly rules that are product-agnostic
+- Structured contract enforcement and eval/replay helpers
+
+What should stay in host-side `.harn` scripts:
+
+- Product-specific prompts and instruction tone
+- IDE-specific flows such as edit application, approval UX, or bespoke tool
+  choreography
+- Proprietary ranking, routing, or heuristics tied to one host product
+- Features that depend on host-only commercial, account, or app lifecycle rules
+
+Rule of thumb:
+
+- If a behavior decides how an agent or workflow should think, continue,
+  verify, compact, replay, or select context, it probably belongs in Harn.
+- If a behavior fetches facts from a specific editor or app surface, asks the
+  user for approval, or performs a host-only side effect, it belongs in the
+  host.
+
+Keep advanced host-side `.harn` modules local to the host when they encode
+host-only UX, proprietary behavior, or app-specific heuristics. Move a helper
+into Harn only when it is general enough to be useful across hosts.

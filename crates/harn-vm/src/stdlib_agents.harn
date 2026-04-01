@@ -185,10 +185,274 @@ pub fn workflow_continue(prev, task, flow, overrides) {
   return task_run(task, flow, merged)
 }
 
+/// workflow_result_text.
+pub fn workflow_result_text(result) {
+  let raw = if type_of(result) == "string" {
+    result
+  } else {
+    result?.visible_text ?? result?.text ?? result?.result?.text ?? ""
+  }
+  if raw == nil || raw == "" {
+    return ""
+  }
+  if type_of(raw) == "string" {
+    return raw
+  }
+  return json_stringify(raw)
+}
+
+/// workflow_result_transcript.
+pub fn workflow_result_transcript(task, workflow_name, result, metadata) {
+  let existing = result?.run?.transcript ?? result?.transcript ?? result?.result?.transcript
+  if existing {
+    return existing
+  }
+  var built = transcript((metadata ?? {}) + {workflow: workflow_name})
+  if task {
+    built = add_user(
+      built,
+      [{type: "text", text: task, visibility: "public"}],
+    )
+  }
+  let text = workflow_result_text(result)
+  if text {
+    built = add_assistant(
+      built,
+      [{type: "output_text", text: text, visibility: "public"}],
+    )
+  }
+  return built
+}
+
+/// workflow_result_run.
+pub fn workflow_result_run(task, workflow_name, result, artifacts, options) {
+  let base_run = if result?._type == "run_record" {
+    result
+  } else {
+    result?.run ?? {}
+  }
+  let text = workflow_result_text(result)
+  let metadata = (base_run?.metadata ?? {}) + (options?.metadata ?? {})
+  let transcript = if result?.run?.transcript ?? result?.transcript ?? result?.result?.transcript {
+    result?.run?.transcript ?? result?.transcript ?? result?.result?.transcript
+  } else {
+    var built = transcript((metadata ?? {}) + {workflow: workflow_name})
+    if task {
+      built = add_user(
+        built,
+        [{type: "text", text: task, visibility: "public"}],
+      )
+    }
+    if text {
+      built = add_assistant(
+        built,
+        [{type: "output_text", text: text, visibility: "public"}],
+      )
+    }
+    built
+  }
+  var run_artifacts = base_run?.artifacts ?? result?.artifacts ?? artifacts ?? []
+  var has_visible_result_artifact = false
+  if text {
+    for item in run_artifacts {
+      if item?.text == text {
+        has_visible_result_artifact = true
+      }
+    }
+    if !has_visible_result_artifact {
+      run_artifacts = run_artifacts + [
+        artifact(
+          {
+          kind: "summary",
+          title: "Visible result",
+          text: text,
+          source: workflow_name,
+          freshness: "fresh",
+          relevance: 1.0,
+          metadata: {visibility: "public"},
+        },
+        ),
+      ]
+    }
+  }
+  return run_record(
+    base_run + {
+      workflow_id: base_run?.workflow_id ?? workflow_name,
+      workflow_name: base_run?.workflow_name ?? workflow_name,
+      task: task,
+      status: options?.status ?? base_run?.status ?? "completed",
+      transcript: transcript,
+      artifacts: run_artifacts,
+      metadata: metadata,
+    },
+  )
+}
+
+/// workflow_result_persist.
+pub fn workflow_result_persist(task, workflow_name, result, artifacts, options) {
+  let base_run = if result?._type == "run_record" {
+    result
+  } else {
+    result?.run ?? {}
+  }
+  let text = workflow_result_text(result)
+  let metadata = (base_run?.metadata ?? {}) + (options?.metadata ?? {})
+  let transcript = if result?.run?.transcript ?? result?.transcript ?? result?.result?.transcript {
+    result?.run?.transcript ?? result?.transcript ?? result?.result?.transcript
+  } else {
+    var built = transcript((metadata ?? {}) + {workflow: workflow_name})
+    if task {
+      built = add_user(
+        built,
+        [{type: "text", text: task, visibility: "public"}],
+      )
+    }
+    if text {
+      built = add_assistant(
+        built,
+        [{type: "output_text", text: text, visibility: "public"}],
+      )
+    }
+    built
+  }
+  var run_artifacts = base_run?.artifacts ?? result?.artifacts ?? artifacts ?? []
+  var has_visible_result_artifact = false
+  if text {
+    for item in run_artifacts {
+      if item?.text == text {
+        has_visible_result_artifact = true
+      }
+    }
+    if !has_visible_result_artifact {
+      run_artifacts = run_artifacts + [
+        artifact(
+          {
+          kind: "summary",
+          title: "Visible result",
+          text: text,
+          source: workflow_name,
+          freshness: "fresh",
+          relevance: 1.0,
+          metadata: {visibility: "public"},
+        },
+        ),
+      ]
+    }
+  }
+  let run = run_record(
+    base_run + {
+      workflow_id: base_run?.workflow_id ?? workflow_name,
+      workflow_name: base_run?.workflow_name ?? workflow_name,
+      task: task,
+      status: options?.status ?? base_run?.status ?? "completed",
+      transcript: transcript,
+      artifacts: run_artifacts,
+      metadata: metadata,
+    },
+  )
+  let persisted = run_record_save(run, options?.path)
+  return {
+    path: persisted?.path,
+    persisted_path: persisted?.path,
+    run: persisted?.run,
+    status: persisted?.run?.status ?? "completed",
+    transcript: persisted?.run?.transcript,
+    artifacts: persisted?.run?.artifacts ?? [],
+    visible_text: text,
+  }
+}
+
+/// workflow_session.
+pub fn workflow_session(prev) {
+  let transcript = prev?.transcript ?? prev?.result?.transcript ?? prev
+  let run = prev?.run ?? prev?.result?.run
+  let persisted_path = prev?.persisted_path ?? prev?.path ?? run?.persisted_path
+  return {
+    _type: "workflow_session",
+    transcript: transcript,
+    run: run,
+    persisted_path: persisted_path,
+    status: prev?.status ?? run?.status ?? transcript?.state ?? "active",
+    workflow: prev?.workflow ?? run?.workflow?.name,
+    task: prev?.task ?? run?.task,
+    summary: transcript_summary(transcript),
+    transcript_state: transcript?.state ?? "active",
+    message_count: len(transcript_messages(transcript)),
+    event_count: len(transcript_events(transcript)),
+    asset_count: len(transcript_assets(transcript)),
+    usage: run?.usage ?? prev?.usage,
+  }
+}
+
+/// workflow_session_new.
+pub fn workflow_session_new(metadata) {
+  return workflow_session(
+    {
+    status: "active",
+    transcript: transcript(metadata ?? {}),
+  },
+  )
+}
+
+/// workflow_session_restore.
+pub fn workflow_session_restore(source) {
+  let run = if type_of(source) == "string" {
+    run_record_load(source)
+  } else {
+    source?.run ?? source
+  }
+  return workflow_session(
+    {
+    status: run?.status ?? "restored",
+    run: run,
+    persisted_path: run?.persisted_path,
+    transcript: run?.transcript ?? transcript(),
+  },
+  )
+}
+
+/// workflow_session_fork.
+pub fn workflow_session_fork(prev) {
+  let session = workflow_session(prev)
+  return workflow_session(session + {transcript: transcript_fork(session?.transcript)})
+}
+
+/// workflow_session_archive.
+pub fn workflow_session_archive(prev) {
+  let session = workflow_session(prev)
+  return workflow_session(
+    session + {
+      status: "archived",
+      transcript: transcript_archive(session?.transcript),
+    },
+  )
+}
+
+/// workflow_session_resume.
+pub fn workflow_session_resume(prev) {
+  let session = workflow_session(prev)
+  return workflow_session(
+    session + {
+      status: "active",
+      transcript: transcript_resume(session?.transcript),
+    },
+  )
+}
+
 /// workflow_compact.
 pub fn workflow_compact(prev, options) {
   let transcript = prev?.transcript ?? prev
   return transcript_summarize(transcript, options)
+}
+
+/// workflow_session_compact.
+pub fn workflow_session_compact(prev, options) {
+  let session = workflow_session(prev)
+  return workflow_session(
+    session + {
+      transcript: transcript_summarize(session?.transcript, options),
+    },
+  )
 }
 
 /// workflow_reset.
@@ -198,4 +462,31 @@ pub fn workflow_reset(prev, carry_summary) {
     return transcript_compact(transcript, {keep_last: 0})
   }
   return transcript()
+}
+
+/// workflow_session_reset.
+pub fn workflow_session_reset(prev, carry_summary) {
+  let session = workflow_session(prev)
+  return workflow_session(
+    {
+    workflow: session?.workflow,
+    status: "active",
+    transcript: workflow_reset(session?.transcript, carry_summary),
+  },
+  )
+}
+
+/// workflow_session_persist.
+pub fn workflow_session_persist(prev, path) {
+  let session = workflow_session(prev)
+  if session?.run == nil {
+    return session
+  }
+  let persisted = run_record_save(session?.run, path)
+  return workflow_session(
+    session + {
+      run: persisted?.run,
+      persisted_path: persisted?.path,
+    },
+  )
 }

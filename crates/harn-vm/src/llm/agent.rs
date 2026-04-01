@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::value::{ErrorCategory, VmError, VmValue};
+use crate::value::{ErrorCategory, VmError};
 use crate::vm::Vm;
 
 use super::api::{vm_call_llm_full_streaming, DeltaSender};
@@ -8,8 +8,8 @@ use super::helpers::{
     extract_llm_options, opt_bool, opt_int, opt_str, transcript_event, transcript_to_vm_with_events,
 };
 use super::tools::{
-    build_assistant_tool_message, build_text_tool_prompt, build_tool_result_message,
-    handle_tool_locally, normalize_tool_args, parse_text_tool_calls, resolve_tools_for_agent,
+    build_assistant_response_message, build_assistant_tool_message, build_text_tool_prompt,
+    build_tool_result_message, handle_tool_locally, normalize_tool_args, parse_text_tool_calls,
 };
 use super::trace::{trace_llm_call, LlmTraceEntry};
 
@@ -72,16 +72,23 @@ pub(crate) fn agent_loop_result_from_llm(
     result: &super::api::LlmResult,
     opts: super::api::LlmCallOptions,
 ) -> serde_json::Value {
+    let mut transcript_messages = opts.messages.clone();
+    transcript_messages.push(build_assistant_response_message(
+        &result.text,
+        &result.blocks,
+        &result.tool_calls,
+        &opts.provider,
+    ));
     let mut events = vec![transcript_event(
         "provider_payload",
         "assistant",
         "internal",
         "",
         Some(serde_json::json!({
-            "model": result.model,
+            "model": result.model.clone(),
             "input_tokens": result.input_tokens,
             "output_tokens": result.output_tokens,
-            "tool_calls": result.tool_calls,
+            "tool_calls": result.tool_calls.clone(),
         })),
     )];
     if let Some(thinking) = result.thinking.clone() {
@@ -107,8 +114,9 @@ pub(crate) fn agent_loop_result_from_llm(
             opts.transcript_id,
             opts.transcript_summary,
             opts.transcript_metadata,
-            &opts.messages,
+            &transcript_messages,
             events,
+            Vec::new(),
             Some("active"),
         )),
     })
@@ -169,17 +177,13 @@ pub async fn run_agent_loop_internal(
         active: config.policy.is_some(),
     };
 
-    let tools_val = None::<VmValue>;
-    let tool_schemas = match &tools_val {
-        Some(val) => resolve_tools_for_agent(val, &opts.provider)?,
-        None => None,
-    };
+    let tools_val = opts.tools.as_ref();
     let has_tools = !opts
         .native_tools
         .as_ref()
         .map(|v| v.is_empty())
         .unwrap_or(true)
-        || tool_schemas.as_ref().is_some_and(|tools| !tools.is_empty());
+        || tools_val.is_some();
 
     if has_tools && tool_format != "native" {
         opts.native_tools = None;
@@ -188,7 +192,7 @@ pub async fn run_agent_loop_internal(
         let system_prompt = opts.system.get_or_insert_with(String::new);
         let has_examples = system_prompt.contains("```call");
         if !has_examples {
-            system_prompt.push_str(&build_text_tool_prompt(None, true));
+            system_prompt.push_str(&build_text_tool_prompt(tools_val, true));
         }
     }
 
@@ -350,14 +354,56 @@ pub async fn run_agent_loop_internal(
                 let tool_id = tc["id"].as_str().unwrap_or("");
                 let tool_name = tc["name"].as_str().unwrap_or("");
                 let mut tool_args = normalize_tool_args(tool_name, &tc["arguments"]);
+                if std::env::var("BURIN_TRACE_HARN_TOOL_PARSE").as_deref() == Ok("1") {
+                    eprintln!(
+                        "[harn-vm] parsed_tool_call name={} args={}",
+                        tool_name, tc["arguments"]
+                    );
+                }
 
-                // Policy enforcement
-                crate::orchestration::enforce_current_policy_for_tool(tool_name)?;
-                crate::orchestration::enforce_tool_arg_constraints(
-                    &crate::orchestration::current_execution_policy().unwrap_or_default(),
+                let policy_result = crate::orchestration::enforce_current_policy_for_tool(
                     tool_name,
-                    &tool_args,
-                )?;
+                )
+                .and_then(|_| {
+                    crate::orchestration::enforce_tool_arg_constraints(
+                        &crate::orchestration::current_execution_policy().unwrap_or_default(),
+                        tool_name,
+                        &tool_args,
+                    )
+                });
+                if let Err(error) = policy_result {
+                    let result_text = format!(
+                        "REJECTED: {}. Use one of the declared tools exactly as named and put extra fields inside that tool's arguments.",
+                        error
+                    );
+                    if !rejected_tools.contains(&tool_name.to_string()) {
+                        rejected_tools.push(tool_name.to_string());
+                    }
+                    transcript_events.push(transcript_event(
+                        "tool_execution",
+                        "tool",
+                        "internal",
+                        &result_text,
+                        Some(serde_json::json!({
+                            "tool_name": tool_name,
+                            "tool_use_id": tool_id,
+                            "rejected": true,
+                            "arguments": tool_args.clone(),
+                        })),
+                    ));
+                    if tool_format == "native" {
+                        opts.messages.push(build_tool_result_message(
+                            tool_id,
+                            &result_text,
+                            &opts.provider,
+                        ));
+                    } else {
+                        observations.push_str(&format!(
+                            "<tool_result name=\"{tool_name}\">\n{result_text}\n</tool_result>\n\n"
+                        ));
+                    }
+                    continue;
+                }
 
                 // PreToolUse hooks: in-process hooks first, then bridge gate
                 match crate::orchestration::run_pre_tool_hooks(tool_name, &tool_args) {
@@ -762,6 +808,7 @@ pub async fn run_agent_loop_internal(
             opts.transcript_metadata.clone(),
             &opts.messages,
             transcript_events,
+            Vec::new(),
             Some(if final_status == "done" { "active" } else { "paused" }),
         )),
     }))
@@ -911,20 +958,22 @@ pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Host
             );
 
             let mut transcript_messages = opts.messages.clone();
-            transcript_messages.push(serde_json::json!({
-                "role": "assistant",
-                "content": result.text.clone(),
-            }));
+            transcript_messages.push(build_assistant_response_message(
+                &result.text,
+                &result.blocks,
+                &result.tool_calls,
+                &opts.provider,
+            ));
             let mut extra_events = vec![transcript_event(
                 "provider_payload",
                 "assistant",
                 "internal",
                 "",
                 Some(serde_json::json!({
-                    "model": result.model,
+                    "model": result.model.clone(),
                     "input_tokens": result.input_tokens,
                     "output_tokens": result.output_tokens,
-                    "tool_calls": result.tool_calls,
+                    "tool_calls": result.tool_calls.clone(),
                 })),
             )];
             if let Some(thinking) = result.thinking.clone() {
@@ -944,6 +993,7 @@ pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Host
                 opts.transcript_metadata.clone(),
                 &transcript_messages,
                 extra_events,
+                Vec::new(),
                 Some("active"),
             );
 

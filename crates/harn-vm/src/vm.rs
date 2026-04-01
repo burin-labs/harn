@@ -1,4 +1,5 @@
 mod format;
+mod imports;
 mod methods;
 mod ops;
 
@@ -11,7 +12,8 @@ use std::time::Instant;
 
 use crate::chunk::{Chunk, CompiledFunction, Constant};
 use crate::value::{
-    ErrorCategory, VmAsyncBuiltinFn, VmBuiltinFn, VmClosure, VmEnv, VmError, VmTaskHandle, VmValue,
+    ErrorCategory, ModuleFunctionRegistry, VmAsyncBuiltinFn, VmBuiltinFn, VmClosure, VmEnv,
+    VmError, VmTaskHandle, VmValue,
 };
 
 thread_local! {
@@ -46,6 +48,8 @@ pub(crate) struct CallFrame {
     /// Saved VM_SOURCE_DIR to restore when this frame is popped.
     /// Set when entering a closure that originated from an imported module.
     pub(crate) saved_source_dir: Option<std::path::PathBuf>,
+    /// Module-local named functions available to symbolic calls within this frame.
+    pub(crate) module_functions: Option<ModuleFunctionRegistry>,
 }
 
 /// Exception handler for try/catch.
@@ -53,6 +57,7 @@ pub(crate) struct ExceptionHandler {
     pub(crate) catch_ip: usize,
     pub(crate) stack_depth: usize,
     pub(crate) frame_depth: usize,
+    pub(crate) env_scope_depth: usize,
     /// If non-empty, this catch only handles errors whose enum_name matches.
     pub(crate) error_type: String,
 }
@@ -90,6 +95,12 @@ pub(crate) enum IterState {
     },
 }
 
+#[derive(Clone)]
+pub(crate) struct LoadedModule {
+    pub(crate) functions: BTreeMap<String, Rc<VmClosure>>,
+    pub(crate) public_names: HashSet<String>,
+}
+
 /// The Harn bytecode virtual machine.
 pub struct Vm {
     pub(crate) stack: Vec<VmValue>,
@@ -121,8 +132,10 @@ pub struct Vm {
     pub(crate) last_line: usize,
     /// Source directory for resolving imports.
     pub(crate) source_dir: Option<std::path::PathBuf>,
-    /// Already-imported file paths (cycle prevention).
+    /// Modules currently being imported (cycle prevention).
     pub(crate) imported_paths: Vec<std::path::PathBuf>,
+    /// Loaded module cache keyed by canonical or synthetic module path.
+    pub(crate) module_cache: BTreeMap<std::path::PathBuf, LoadedModule>,
     /// Source file path for error reporting.
     pub(crate) source_file: Option<String>,
     /// Source text for error reporting.
@@ -167,6 +180,7 @@ impl Vm {
             last_line: 0,
             source_dir: None,
             imported_paths: Vec::new(),
+            module_cache: BTreeMap::new(),
             source_file: None,
             source_text: None,
             bridge: None,
@@ -393,6 +407,7 @@ impl Vm {
             fn_name: String::new(),
             argc: 0,
             saved_source_dir: None,
+            module_functions: None,
         });
     }
 
@@ -441,6 +456,7 @@ impl Vm {
             last_line: 0,
             source_dir: self.source_dir.clone(),
             imported_paths: Vec::new(),
+            module_cache: self.module_cache.clone(),
             source_file: self.source_file.clone(),
             source_text: self.source_text.clone(),
             bridge: self.bridge.clone(),
@@ -486,202 +502,6 @@ impl Vm {
     /// Stored separately from the environment so user-defined variables can shadow them.
     pub fn set_global(&mut self, name: &str, value: VmValue) {
         self.globals.insert(name.to_string(), value);
-    }
-
-    /// Execute an import, reading and running the file's declarations.
-    fn execute_import<'a>(
-        &'a mut self,
-        path: &'a str,
-        selected_names: Option<&'a [String]>,
-    ) -> Pin<Box<dyn Future<Output = Result<(), VmError>> + 'a>> {
-        Box::pin(async move {
-            use std::path::PathBuf;
-            let _import_span = ScopeSpan::new(crate::tracing::SpanKind::Import, path.to_string());
-
-            // ── Embedded stdlib modules (import "std/...") ──────────────
-            if let Some(module) = path.strip_prefix("std/") {
-                if let Some(source) = crate::stdlib_modules::get_stdlib_source(module) {
-                    let synthetic = PathBuf::from(format!("<stdlib>/{module}.harn"));
-                    if self.imported_paths.contains(&synthetic) {
-                        return Ok(());
-                    }
-                    self.imported_paths.push(synthetic);
-
-                    let mut lexer = harn_lexer::Lexer::new(source);
-                    let tokens = lexer.tokenize().map_err(|e| {
-                        VmError::Runtime(format!("stdlib lex error in std/{module}: {e}"))
-                    })?;
-                    let mut parser = harn_parser::Parser::new(tokens);
-                    let program = parser.parse().map_err(|e| {
-                        VmError::Runtime(format!("stdlib parse error in std/{module}: {e}"))
-                    })?;
-
-                    self.import_declarations(&program, selected_names, None)
-                        .await?;
-                    return Ok(());
-                }
-                return Err(VmError::Runtime(format!(
-                    "Unknown stdlib module: std/{module}"
-                )));
-            }
-
-            // ── Filesystem-based imports ────────────────────────────────
-            let base = self
-                .source_dir
-                .clone()
-                .unwrap_or_else(|| PathBuf::from("."));
-            let mut file_path = base.join(path);
-
-            // Try with .harn extension if no extension
-            if !file_path.exists() && file_path.extension().is_none() {
-                file_path.set_extension("harn");
-            }
-
-            // Try .harn/packages/ fallback (then .burin/packages/ for compat)
-            if !file_path.exists() {
-                for pkg_dir in [".harn/packages", ".burin/packages"] {
-                    let pkg_path = base.join(pkg_dir).join(path);
-                    if pkg_path.exists() {
-                        file_path = if pkg_path.is_dir() {
-                            let lib = pkg_path.join("lib.harn");
-                            if lib.exists() {
-                                lib
-                            } else {
-                                pkg_path
-                            }
-                        } else {
-                            pkg_path
-                        };
-                        break;
-                    }
-                    let mut pkg_harn = pkg_path.clone();
-                    pkg_harn.set_extension("harn");
-                    if pkg_harn.exists() {
-                        file_path = pkg_harn;
-                        break;
-                    }
-                }
-            }
-
-            // Cycle detection
-            let canonical = file_path
-                .canonicalize()
-                .unwrap_or_else(|_| file_path.clone());
-            if self.imported_paths.contains(&canonical) {
-                return Ok(()); // already imported
-            }
-            self.imported_paths.push(canonical);
-
-            // Read, lex, parse
-            let source = std::fs::read_to_string(&file_path).map_err(|e| {
-                VmError::Runtime(format!(
-                    "Import error: cannot read '{}': {e}",
-                    file_path.display()
-                ))
-            })?;
-
-            let mut lexer = harn_lexer::Lexer::new(&source);
-            let tokens = lexer
-                .tokenize()
-                .map_err(|e| VmError::Runtime(format!("Import lex error: {e}")))?;
-            let mut parser = harn_parser::Parser::new(tokens);
-            let program = parser
-                .parse()
-                .map_err(|e| VmError::Runtime(format!("Import parse error: {e}")))?;
-
-            self.import_declarations(&program, selected_names, Some(&file_path))
-                .await?;
-
-            Ok(())
-        })
-    }
-
-    /// Process top-level declarations from an imported module.
-    /// `file_path` is `None` for embedded stdlib modules.
-    fn import_declarations<'a>(
-        &'a mut self,
-        program: &'a [harn_parser::SNode],
-        selected_names: Option<&'a [String]>,
-        file_path: Option<&'a std::path::Path>,
-    ) -> Pin<Box<dyn Future<Output = Result<(), VmError>> + 'a>> {
-        Box::pin(async move {
-            let has_pub = program
-                .iter()
-                .any(|n| matches!(&n.node, harn_parser::Node::FnDecl { is_pub: true, .. }));
-
-            for node in program {
-                match &node.node {
-                    harn_parser::Node::FnDecl {
-                        name,
-                        params,
-                        body,
-                        is_pub,
-                        ..
-                    } => {
-                        // For selective imports: import any function that was explicitly named
-                        // For wildcard imports: if module has pub fns, only import pub ones;
-                        //   if no pub fns, import everything (backward compat)
-                        if selected_names.is_none() && has_pub && !is_pub {
-                            continue;
-                        }
-                        if let Some(names) = selected_names {
-                            if !names.contains(name) {
-                                continue;
-                            }
-                        }
-                        // Check for import collision before compiling
-                        if let Some(VmValue::Closure(_)) = self.env.get(name) {
-                            let module = file_path
-                                .map(|p| p.display().to_string())
-                                .unwrap_or_else(|| "<stdlib>".to_string());
-                            return Err(VmError::Runtime(format!(
-                                "Import collision: '{name}' is already defined when importing {module}. \
-                                 Use selective imports to disambiguate: import {{ {name} }} from \"...\""
-                            )));
-                        }
-                        // Compile the function body into a closure and define it
-                        let mut compiler = crate::Compiler::new();
-                        let func_chunk = compiler
-                            .compile_fn_body(params, body)
-                            .map_err(|e| VmError::Runtime(format!("Import compile error: {e}")))?;
-                        let closure = VmClosure {
-                            func: func_chunk,
-                            env: self.env.clone(),
-                            source_dir: file_path
-                                .and_then(|fp| fp.parent().map(|p| p.to_path_buf())),
-                        };
-                        self.env
-                            .define(name, VmValue::Closure(Rc::new(closure)), false)?;
-                    }
-                    harn_parser::Node::ImportDecl { path: sub_path } => {
-                        let old_dir = self.source_dir.clone();
-                        if let Some(fp) = file_path {
-                            if let Some(parent) = fp.parent() {
-                                self.source_dir = Some(parent.to_path_buf());
-                            }
-                        }
-                        self.execute_import(sub_path, None).await?;
-                        self.source_dir = old_dir;
-                    }
-                    harn_parser::Node::SelectiveImport {
-                        names,
-                        path: sub_path,
-                    } => {
-                        let old_dir = self.source_dir.clone();
-                        if let Some(fp) = file_path {
-                            if let Some(parent) = fp.parent() {
-                                self.source_dir = Some(parent.to_path_buf());
-                            }
-                        }
-                        self.execute_import(sub_path, Some(names)).await?;
-                        self.source_dir = old_dir;
-                    }
-                    _ => {} // Skip other top-level nodes (pipelines, enums, etc.)
-                }
-            }
-
-            Ok(())
-        })
     }
 
     /// Get the captured output.
@@ -737,6 +557,8 @@ impl Vm {
                 self.deadlines.pop();
             }
 
+            self.env.truncate_scopes(handler.env_scope_depth);
+
             // Restore stack to handler's depth
             self.stack.truncate(handler.stack_depth);
 
@@ -755,13 +577,15 @@ impl Vm {
     }
 
     async fn run_chunk(&mut self, chunk: &Chunk) -> Result<VmValue, VmError> {
-        self.run_chunk_with_argc(chunk, 0).await
+        self.run_chunk_entry(chunk, 0, None, None).await
     }
 
-    async fn run_chunk_with_argc(
+    async fn run_chunk_entry(
         &mut self,
         chunk: &Chunk,
         argc: usize,
+        saved_source_dir: Option<std::path::PathBuf>,
+        module_functions: Option<ModuleFunctionRegistry>,
     ) -> Result<VmValue, VmError> {
         self.frames.push(CallFrame {
             chunk: chunk.clone(),
@@ -770,7 +594,8 @@ impl Vm {
             saved_env: self.env.clone(),
             fn_name: String::new(),
             argc,
-            saved_source_dir: None,
+            saved_source_dir,
+            module_functions,
         });
 
         loop {
@@ -797,6 +622,9 @@ impl Vm {
             if frame.ip >= frame.chunk.code.len() {
                 let val = self.stack.pop().unwrap_or(VmValue::Nil);
                 let popped_frame = self.frames.pop().unwrap();
+                if let Some(ref dir) = popped_frame.saved_source_dir {
+                    crate::stdlib::set_thread_source_dir(dir);
+                }
 
                 if self.frames.is_empty() {
                     // We're done with the top-level chunk
@@ -922,6 +750,16 @@ impl Vm {
         call_env
     }
 
+    fn resolve_named_closure(&self, name: &str) -> Option<Rc<VmClosure>> {
+        if let Some(VmValue::Closure(closure)) = self.env.get(name) {
+            return Some(closure);
+        }
+        self.frames
+            .last()
+            .and_then(|frame| frame.module_functions.as_ref())
+            .and_then(|registry| registry.borrow().get(name).cloned())
+    }
+
     /// Push a new call frame for a closure invocation.
     fn push_closure_frame(
         &mut self,
@@ -970,6 +808,7 @@ impl Vm {
             fn_name: closure.func.name.clone(),
             argc: args.len(),
             saved_source_dir,
+            module_functions: closure.module_functions.clone(),
         });
 
         Ok(())
@@ -1005,10 +844,21 @@ impl Vm {
         child.env = call_env;
 
         let chunk = closure.func.chunk.clone();
+        let saved_source_dir = if let Some(ref dir) = closure.source_dir {
+            let prev = crate::stdlib::process::VM_SOURCE_DIR.with(|sd| sd.borrow().clone());
+            crate::stdlib::set_thread_source_dir(dir);
+            prev
+        } else {
+            None
+        };
+        let module_functions = closure.module_functions.clone();
+        let argc = args.len();
         // Spawn the generator body as an async task.
         // The task will execute until return, sending yielded values through the channel.
         tokio::task::spawn_local(async move {
-            let _ = child.run_chunk(&chunk).await;
+            let _ = child
+                .run_chunk_entry(&chunk, argc, saved_source_dir, module_functions)
+                .await;
             // When the generator body finishes (return or fall-through),
             // the sender is dropped, signaling completion to the receiver.
         });
@@ -1066,7 +916,21 @@ impl Vm {
 
             self.env = call_env;
             let argc = args.len();
-            let result = self.run_chunk_with_argc(&closure.func.chunk, argc).await;
+            let saved_source_dir = if let Some(ref dir) = closure.source_dir {
+                let prev = crate::stdlib::process::VM_SOURCE_DIR.with(|sd| sd.borrow().clone());
+                crate::stdlib::set_thread_source_dir(dir);
+                prev
+            } else {
+                None
+            };
+            let result = self
+                .run_chunk_entry(
+                    &closure.func.chunk,
+                    argc,
+                    saved_source_dir,
+                    closure.module_functions.clone(),
+                )
+                .await;
 
             self.env = saved_env;
             self.frames = saved_frames;
@@ -1939,6 +1803,47 @@ let results = parallel(2) { i ->
         assert!(
             msg.contains("not permitted"),
             "expected not permitted in parallel VM, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_if_else_has_lexical_block_scope() {
+        let out = run_output(
+            r#"pipeline t(task) {
+let x = "outer"
+if true {
+  let x = "inner"
+  log(x)
+} else {
+  let x = "other"
+  log(x)
+}
+log(x)
+}"#,
+        );
+        assert_eq!(out, "[harn] inner\n[harn] outer");
+    }
+
+    #[test]
+    fn test_loop_and_catch_bindings_are_block_scoped() {
+        let out = run_output(
+            r#"pipeline t(task) {
+let label = "outer"
+for item in [1, 2] {
+  let label = "loop " + item
+  log(label)
+}
+try {
+  throw("boom")
+} catch (label) {
+  log(label)
+}
+log(label)
+}"#,
+        );
+        assert_eq!(
+            out,
+            "[harn] loop 1\n[harn] loop 2\n[harn] boom\n[harn] outer"
         );
     }
 }

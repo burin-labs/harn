@@ -71,8 +71,32 @@ Format `.harn` source files. Accepts files or directories.
 ```bash
 harn fmt main.harn
 harn fmt src/
-harn fmt --check main.harn    # check mode (no changes, exit 1 if unformatted)
+harn fmt --check main.harn            # check mode (no changes, exit 1 if unformatted)
+harn fmt --line-width 80 main.harn    # custom line width
 ```
+
+| Flag | Description |
+|---|---|
+| `--check` | Check mode: exit 1 if any file would be reformatted, make no changes |
+| `--line-width <N>` | Maximum line width before wrapping (default: 100) |
+
+The formatter enforces a **100-character line width** by default (overridable with `--line-width`). When a line exceeds
+this limit the formatter wraps it automatically:
+
+- **Comma-separated forms** — function call arguments, function declaration
+  parameters, list literals, dict literals, struct construction fields,
+  enum constructor payloads, selective import names, interface method
+  parameters, and enum variant fields all wrap with one item per line and
+  trailing commas (except selective imports, which omit the trailing comma).
+- **Binary operator chains** — long expressions like `a + b + c + d` break
+  before the operator. Operators that the parser cannot resume across a bare
+  newline (`-`, `==`, `!=`, `<`, `>`, `<=`, `>=`, `in`, `not in`, `??`)
+  get an automatic backslash continuation (`\`); other operators (`+`, `*`,
+  `/`, `%`, `||`, `&&`, `|>`) break without one.
+- **Operator precedence parentheses** — the formatter inserts parentheses
+  to preserve semantics when the AST drops them (e.g. `a * (b + c)` stays
+  parenthesised) and for clarity when mixing `&&` / `||`
+  (e.g. `a && b || c` becomes `(a && b) || c`).
 
 ## harn lint
 
@@ -95,7 +119,7 @@ warning for undocumented `pub fn` APIs.
 
 ```bash
 harn check main.harn
-harn check --host-capabilities burin-host.json main.harn
+harn check --host-capabilities host-capabilities.json main.harn
 harn check --bundle-root .bundle main.harn
 ```
 

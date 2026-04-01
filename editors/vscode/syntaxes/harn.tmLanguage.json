@@ -117,7 +117,7 @@
         },
         {
           "name": "support.function.builtin.harn",
-          "match": "\\b(log|print|println|assert|assert_eq|assert_ne|type_of|to_string|to_int|to_float|len|push|pop|keys|values|has_key|delete|sort|reverse|join|split|trim|starts_with|ends_with|contains|replace|to_upper|to_lower|json_stringify|json_parse|read_file|write_file|file_exists|exec|env|timestamp|abs|min|max|floor|ceil|round|sqrt|pow|random|regex_match|regex_replace|http_get|http_post|http_request|llm_call|llm_stream|agent_loop|channel|send|receive|close|sleep|conversation|add_user|add_assistant|add_system|add_message|add_tool_result|tool_registry|tool_add|tool_list|tool_find|tool_remove|tool_count|tool_describe|tool_schema|tool_prompt|tool_parse_call|tool_format_result)\\b"
+          "match": "\\b(log|print|println|assert|assert_eq|assert_ne|type_of|to_string|to_int|to_float|len|push|pop|keys|values|has_key|delete|sort|reverse|join|split|trim|starts_with|ends_with|contains|replace|to_upper|to_lower|json_stringify|json_parse|read_file|write_file|file_exists|exec|env|timestamp|abs|min|max|floor|ceil|round|sqrt|pow|random|regex_match|regex_replace|http_get|http_post|http_request|llm_call|llm_stream|agent_loop|channel|send|receive|close|sleep|conversation|add_user|add_assistant|add_system|add_message|add_tool_result|tool_registry|tool_list|tool_find|tool_select|tool_remove|tool_count|tool_describe|tool_schema|tool_prompt|tool_parse_call|tool_format_result)\\b"
         }
       ]
     },

@@ -4,9 +4,30 @@ pipeline default(task) {
   var tools = tool_registry()
   println(type_of(tools))
   println(tool_count(tools))
-  // tool_add
-  tools = tool_add(tools, "greet", "Say hello", { args -> "hi " + args.name }, {name: "string"})
-  tools = tool_add(tools, "add", "Add numbers", { args -> args.a + args.b }, {a: "int", b: "int"})
+  // tool_define
+  tools = tool_define(
+    tools,
+    "greet",
+    "Say hello",
+    {
+    handler: { args -> "hi " + args.name },
+    params: {name: {type: "string", description: "Name to greet"}},
+    returns: {type: "string"},
+  },
+  )
+  tools = tool_define(
+    tools,
+    "add",
+    "Add numbers",
+    {
+    handler: { args -> args.a + args.b },
+    params: {
+    a: {type: "integer", description: "First operand"},
+    b: {type: "integer", description: "Second operand"},
+  },
+    returns: {type: "integer"},
+  },
+  )
   println(tool_count(tools))
   // tool_list
   let list = tool_list(tools)
@@ -16,6 +37,10 @@ pipeline default(task) {
   println(found != nil)
   let missing = tool_find(tools, "nonexistent")
   println(missing == nil)
+  let selected = tool_select(tools, ["add"])
+  println(tool_count(selected))
+  println(tool_find(selected, "add") != nil)
+  println(tool_find(selected, "greet") == nil)
   // tool_remove
   let smaller = tool_remove(tools, "add")
   println(tool_count(smaller))

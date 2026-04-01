@@ -747,10 +747,10 @@ registries programmatically. For MCP serving, see the `tool_define` /
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `tool_add(registry, name, desc, handler, params?)` | registry, name, desc: string, handler: closure, params: dict | dict | Add a tool to a registry (replaces if name exists) |
 | `tool_remove(registry, name)` | registry, name: string | dict | Remove a tool by name |
 | `tool_list(registry)` | registry: dict | list | List tools as `[{name, description, parameters}]` |
 | `tool_find(registry, name)` | registry, name: string | dict or nil | Find a tool entry by name |
+| `tool_select(registry, names)` | registry: dict, names: list | dict | Return a registry containing only the named tools |
 | `tool_count(registry)` | registry: dict | int | Number of tools in the registry |
 | `tool_describe(registry)` | registry: dict | string | Human-readable summary of all tools |
 | `tool_schema(registry, components?)` | registry, components: dict | dict | Generate JSON Schema for all tools |
@@ -766,7 +766,7 @@ registries programmatically. For MCP serving, see the `tool_define` /
 
 ## Metadata
 
-Project metadata store backed by `.burin/metadata/` sharded JSON files.
+Project metadata store backed by host-managed sharded JSON files.
 Supports hierarchical namespace resolution (child directories inherit
 from parents).
 
@@ -890,7 +890,8 @@ Tool annotations (MCP spec `annotations` field) can be passed in the
 
 ```harn
 tools = tool_define(tools, "search", "Search files", {
-  params: { query: "string" },
+  params: { query: {type: "string"} },
+  returns: {type: "string"},
   handler: { args -> "results for " + args.query },
   annotations: {
     title: "File Search",
@@ -906,7 +907,8 @@ Example (`agent.harn`):
 pipeline main(task) {
   var tools = tool_registry()
   tools = tool_define(tools, "greet", "Greet someone", {
-    params: { name: "string" },
+    params: { name: {type: "string"} },
+    returns: {type: "string"},
     handler: { args -> "Hello, " + args.name + "!" }
   })
   mcp_tools(tools)
@@ -1093,6 +1095,8 @@ and `plan`.
 |---|---|---|---|
 | `transcript(metadata?)` | metadata: any | transcript | Create an empty transcript |
 | `transcript_messages(transcript)` | transcript | list | Return transcript messages |
+| `transcript_assets(transcript)` | transcript | list | Return transcript asset descriptors |
+| `transcript_add_asset(transcript, asset)` | transcript, asset | transcript | Register a durable asset reference on a transcript |
 | `transcript_events(transcript)` | transcript | list | Return canonical transcript events |
 | `transcript_summary(transcript)` | transcript | string or nil | Return transcript summary |
 | `transcript_fork(transcript, options?)` | transcript, options | transcript | Fork transcript state |
@@ -1105,3 +1109,12 @@ and `plan`.
 | `transcript_auto_compact(messages, options?)` | messages, options | list | Apply the agent-loop compaction pipeline to a message list |
 | `transcript_render_visible(transcript)` | transcript | string | Render only public/human-visible messages |
 | `transcript_render_full(transcript)` | transcript | string | Render the full execution history |
+
+Transcript messages may now carry structured block content instead of plain
+text. Use `add_user(...)`, `add_assistant(...)`, or `add_message(...)` with a
+list of blocks such as `{type: "text", text: "..."}`,
+`{type: "image", asset_id: "..."}`, `{type: "file", asset_id: "..."}`, and
+`{type: "tool_call", ...}`, with per-block
+`visibility: "public" | "internal" | "private"`. Durable media belongs in
+`transcript.assets`, while message/event blocks should reference those assets
+by id or path.

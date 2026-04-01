@@ -10,8 +10,8 @@ pipeline default() {
     && false
   println(b)
   // Mixed multiline
-  let c = false || true
-    && true
+  let c = false || (true
+    && true)
   println(c)
   // Multiline + should work
   let d = "hello"

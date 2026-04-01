@@ -17,70 +17,6 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
         Ok(VmValue::Dict(Rc::new(registry)))
     });
 
-    vm.register_builtin("tool_add", |args, _out| {
-        if args.len() < 4 {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
-                "tool_add: requires registry, name, description, and handler",
-            ))));
-        }
-
-        let registry = match &args[0] {
-            VmValue::Dict(map) => (**map).clone(),
-            _ => {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(
-                    "tool_add: first argument must be a tool registry",
-                ))));
-            }
-        };
-
-        match registry.get("_type") {
-            Some(VmValue::String(t)) if &**t == "tool_registry" => {}
-            _ => {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(
-                    "tool_add: first argument must be a tool registry",
-                ))));
-            }
-        }
-
-        let name = args[1].display();
-        let description = args[2].display();
-        let handler = args[3].clone();
-        let parameters = if args.len() > 4 {
-            args[4].clone()
-        } else {
-            VmValue::Dict(Rc::new(BTreeMap::new()))
-        };
-
-        let mut tool_entry = BTreeMap::new();
-        tool_entry.insert("name".to_string(), VmValue::String(Rc::from(name.as_str())));
-        tool_entry.insert(
-            "description".to_string(),
-            VmValue::String(Rc::from(description)),
-        );
-        tool_entry.insert("handler".to_string(), handler);
-        tool_entry.insert("parameters".to_string(), parameters);
-
-        let mut tools: Vec<VmValue> = match registry.get("tools") {
-            Some(VmValue::List(list)) => list
-                .iter()
-                .filter(|t| {
-                    if let VmValue::Dict(e) = t {
-                        e.get("name").map(|v| v.display()).as_deref() != Some(name.as_str())
-                    } else {
-                        true
-                    }
-                })
-                .cloned()
-                .collect(),
-            _ => Vec::new(),
-        };
-        tools.push(VmValue::Dict(Rc::new(tool_entry)));
-
-        let mut new_registry = registry;
-        new_registry.insert("tools".to_string(), VmValue::List(Rc::new(tools)));
-        Ok(VmValue::Dict(Rc::new(new_registry)))
-    });
-
     vm.register_builtin("tool_list", |args, _out| {
         let registry = match args.first() {
             Some(VmValue::Dict(map)) => map,
@@ -105,6 +41,9 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
                 }
                 if let Some(parameters) = entry.get("parameters") {
                     desc.insert("parameters".to_string(), parameters.clone());
+                }
+                if let Some(output_schema) = entry.get("outputSchema") {
+                    desc.insert("outputSchema".to_string(), output_schema.clone());
                 }
                 result.push(VmValue::Dict(Rc::new(desc)));
             }
@@ -143,6 +82,49 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
         Ok(VmValue::Nil)
     });
 
+    vm.register_builtin("tool_select", |args, _out| {
+        if args.len() < 2 {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "tool_select: requires registry and names list",
+            ))));
+        }
+        let registry = match &args[0] {
+            VmValue::Dict(map) => map,
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "tool_select: first argument must be a tool registry",
+                ))));
+            }
+        };
+        vm_validate_registry("tool_select", registry)?;
+        let names = match &args[1] {
+            VmValue::List(list) => list
+                .iter()
+                .map(|value| value.display())
+                .collect::<std::collections::BTreeSet<_>>(),
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "tool_select: second argument must be a list of tool names",
+                ))));
+            }
+        };
+
+        let selected: Vec<VmValue> = vm_get_tools(registry)
+            .iter()
+            .filter(|tool| {
+                tool.as_dict()
+                    .and_then(|entry| entry.get("name"))
+                    .map(|name| names.contains(&name.display()))
+                    .unwrap_or(false)
+            })
+            .cloned()
+            .collect();
+
+        let mut new_registry = (**registry).clone();
+        new_registry.insert("tools".to_string(), VmValue::List(Rc::new(selected)));
+        Ok(VmValue::Dict(Rc::new(new_registry)))
+    });
+
     vm.register_builtin("tool_describe", |args, _out| {
         let registry = match args.first() {
             Some(VmValue::Dict(map)) => map,
@@ -160,7 +142,7 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
             return Ok(VmValue::String(Rc::from("Available tools:\n(none)")));
         }
 
-        let mut tool_infos: Vec<(String, String, String)> = Vec::new();
+        let mut tool_infos: Vec<(String, String, String, String)> = Vec::new();
         for tool in tools {
             if let VmValue::Dict(entry) = tool {
                 let name = entry.get("name").map(|v| v.display()).unwrap_or_default();
@@ -169,15 +151,19 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
                     .map(|v| v.display())
                     .unwrap_or_default();
                 let params_str = vm_format_parameters(entry.get("parameters"));
-                tool_infos.push((name, params_str, description));
+                let returns_str = vm_format_schema(entry.get("outputSchema"));
+                tool_infos.push((name, params_str, returns_str, description));
             }
         }
 
         tool_infos.sort_by(|a, b| a.0.cmp(&b.0));
 
         let mut lines = vec!["Available tools:".to_string()];
-        for (name, params, desc) in &tool_infos {
+        for (name, params, returns, desc) in &tool_infos {
             lines.push(format!("- {name}({params}): {desc}"));
+            if !returns.is_empty() {
+                lines.push(format!("  returns {returns}"));
+            }
         }
 
         Ok(VmValue::String(Rc::from(lines.join("\n"))))
@@ -269,6 +255,8 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
 
                 let input_schema =
                     vm_build_input_schema(entry.get("parameters"), components.as_ref());
+                let output_schema =
+                    vm_build_output_schema(entry.get("outputSchema"), components.as_ref());
 
                 let mut tool_def = BTreeMap::new();
                 tool_def.insert("name".to_string(), VmValue::String(Rc::from(name)));
@@ -277,6 +265,9 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
                     VmValue::String(Rc::from(description)),
                 );
                 tool_def.insert("inputSchema".to_string(), input_schema);
+                if let Some(output_schema) = output_schema {
+                    tool_def.insert("outputSchema".to_string(), output_schema);
+                }
                 tool_schemas.push(VmValue::Dict(Rc::new(tool_def)));
             }
         }
@@ -302,7 +293,7 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
 
     // tool_define(registry, name, description, config) -> registry
     // config is {params: {name: {type, description, required?, default?}}, handler: fn,
-    //            annotations?: {title?, readOnlyHint?, destructiveHint?, idempotentHint?, openWorldHint?}}
+    //            returns?: schema, annotations?: {title?, readOnlyHint?, destructiveHint?, idempotentHint?, openWorldHint?}}
     vm.register_builtin("tool_define", |args, _out| {
         if args.len() < 4 {
             return Err(VmError::Thrown(VmValue::String(Rc::from(
@@ -338,6 +329,7 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
             .get("params")
             .cloned()
             .unwrap_or(VmValue::Dict(Rc::new(BTreeMap::new())));
+        let output_schema = config.get("returns").cloned().unwrap_or(VmValue::Nil);
 
         let mut tool_entry = BTreeMap::new();
         tool_entry.insert("name".to_string(), VmValue::String(Rc::from(name.as_str())));
@@ -347,6 +339,9 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
         );
         tool_entry.insert("handler".to_string(), handler);
         tool_entry.insert("parameters".to_string(), parameters);
+        if !matches!(output_schema, VmValue::Nil) {
+            tool_entry.insert("outputSchema".to_string(), output_schema);
+        }
 
         // Optional MCP tool annotations (title, readOnlyHint, destructiveHint, etc.)
         if let Some(annotations) = config.get("annotations") {
@@ -460,11 +455,15 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
                 .map(|v| v.display())
                 .unwrap_or_default();
             let params_str = vm_format_parameters(entry.get("parameters"));
+            let returns_str = vm_format_schema(entry.get("outputSchema"));
 
             prompt.push_str(&format!("### {name}\n"));
             prompt.push_str(&format!("{description}\n"));
             if !params_str.is_empty() {
                 prompt.push_str(&format!("Parameters: {params_str}\n"));
+            }
+            if !returns_str.is_empty() {
+                prompt.push_str(&format!("Returns: {returns_str}\n"));
             }
             prompt.push('\n');
         }
@@ -496,6 +495,26 @@ fn vm_get_tools(dict: &BTreeMap<String, VmValue>) -> &[VmValue] {
 fn vm_format_parameters(params: Option<&VmValue>) -> String {
     match params {
         Some(VmValue::Dict(map)) if !map.is_empty() => {
+            let mut pairs: Vec<(String, String)> =
+                map.iter().map(|(k, v)| (k.clone(), v.display())).collect();
+            pairs.sort_by(|a, b| a.0.cmp(&b.0));
+            pairs
+                .iter()
+                .map(|(k, v)| format!("{k}: {v}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        }
+        _ => String::new(),
+    }
+}
+
+fn vm_format_schema(schema: Option<&VmValue>) -> String {
+    match schema {
+        Some(VmValue::String(type_name)) => type_name.to_string(),
+        Some(VmValue::Dict(map)) if !map.is_empty() => {
+            if let Some(VmValue::String(reference)) = map.get("$ref") {
+                return format!("$ref({reference})");
+            }
             let mut pairs: Vec<(String, String)> =
                 map.iter().map(|(k, v)| (k.clone(), v.display())).collect();
             pairs.sort_by(|a, b| a.0.cmp(&b.0));
@@ -553,6 +572,13 @@ fn vm_build_input_schema(
     }
 
     VmValue::Dict(Rc::new(schema))
+}
+
+fn vm_build_output_schema(
+    schema: Option<&VmValue>,
+    components: Option<&BTreeMap<String, VmValue>>,
+) -> Option<VmValue> {
+    schema.map(|value| vm_resolve_param_type(value, components))
 }
 
 fn vm_resolve_param_type(val: &VmValue, components: Option<&BTreeMap<String, VmValue>>) -> VmValue {

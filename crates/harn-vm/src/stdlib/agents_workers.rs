@@ -258,10 +258,10 @@ fn worker_config_from_json(value: &serde_json::Value) -> Result<WorkerConfig, Vm
             })
         }
         "stage" => {
-            let node: crate::orchestration::WorkflowNode = serde_json::from_value(
+            let node = crate::orchestration::parse_workflow_node_json(
                 value.get("node").cloned().unwrap_or_default(),
-            )
-            .map_err(|e| VmError::Runtime(format!("worker snapshot node parse error: {e}")))?;
+                "worker snapshot node",
+            )?;
             let artifacts: Vec<ArtifactRecord> =
                 serde_json::from_value(value.get("artifacts").cloned().unwrap_or_default())
                     .map_err(|e| {
@@ -599,9 +599,10 @@ pub(super) fn parse_worker_config(value: &VmValue) -> Result<WorkerInit, VmError
     let node_value = dict.get("node").ok_or_else(|| {
         VmError::Runtime("spawn_agent: config requires either graph or node".to_string())
     })?;
-    let node: crate::orchestration::WorkflowNode =
-        serde_json::from_value(crate::llm::vm_value_to_json(node_value))
-            .map_err(|e| VmError::Runtime(format!("spawn_agent node: {e}")))?;
+    let node = crate::orchestration::parse_workflow_node_json(
+        crate::llm::vm_value_to_json(node_value),
+        "spawn_agent node",
+    )?;
     let artifacts = parse_artifact_list(dict.get("artifacts"))?;
     let transcript = dict.get("transcript").cloned();
     Ok(WorkerInit {

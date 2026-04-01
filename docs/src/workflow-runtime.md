@@ -25,6 +25,26 @@ the worker lifecycle, attach worker metadata to their stage records, and tag
 their produced artifacts with delegated provenance so parent workflows can
 inspect and reduce child results explicitly.
 
+fn coding_tools() {
+  var tools = tool_registry()
+  tools = tool_define(tools, "read", "Read a file", {
+    params: {path: {type: "string"}},
+    returns: {type: "string"},
+    handler: nil
+  })
+  tools = tool_define(tools, "edit", "Edit a file", {
+    params: {path: {type: "string"}},
+    returns: {type: "string"},
+    handler: nil
+  })
+  tools = tool_define(tools, "run", "Run a command", {
+    params: {command: {type: "string"}},
+    returns: {type: "string"},
+    handler: nil
+  })
+  return tools
+}
+
 Validation is explicit:
 
 ```harn
@@ -32,9 +52,9 @@ let graph = workflow_graph({
   name: "repair_loop",
   entry: "act",
   nodes: {
-    act: {kind: "stage", mode: "agent", tools: ["read_file", "edit", "run"]},
-    verify: {kind: "verify", mode: "agent", tools: ["run"]},
-    repair: {kind: "stage", mode: "agent", tools: ["edit", "run"]}
+    act: {kind: "stage", mode: "agent", tools: coding_tools()},
+    verify: {kind: "verify", mode: "agent", tools: tool_select(coding_tools(), ["run"])},
+    repair: {kind: "stage", mode: "agent", tools: tool_select(coding_tools(), ["edit", "run"])}
   },
   edges: [
     {from: "act", to: "verify"},

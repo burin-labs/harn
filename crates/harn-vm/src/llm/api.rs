@@ -51,11 +51,14 @@ pub(crate) struct LlmCallOptions {
     // --- Structured output ---
     pub response_format: Option<String>,
     pub json_schema: Option<serde_json::Value>,
+    pub output_schema: Option<serde_json::Value>,
+    pub output_validation: Option<String>,
 
     // --- Thinking ---
     pub thinking: Option<ThinkingConfig>,
 
     // --- Tools ---
+    pub tools: Option<VmValue>,
     pub native_tools: Option<Vec<serde_json::Value>>,
     pub tool_choice: Option<serde_json::Value>,
 

@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Arc;
+use std::{cell::RefCell, path::PathBuf};
 
 use crate::chunk::CompiledFunction;
 use crate::mcp::VmMcpClientHandle;
@@ -87,8 +88,14 @@ pub struct VmClosure {
     /// Source directory for this closure's originating module.
     /// When set, `render()` and other source-relative builtins resolve
     /// paths relative to this directory instead of the entry pipeline.
-    pub source_dir: Option<std::path::PathBuf>,
+    pub source_dir: Option<PathBuf>,
+    /// Module-local named functions that should resolve before builtin fallback.
+    /// This lets selectively imported functions keep private sibling helpers
+    /// without exporting them into the caller's environment.
+    pub module_functions: Option<ModuleFunctionRegistry>,
 }
+
+pub type ModuleFunctionRegistry = Rc<RefCell<BTreeMap<String, Rc<VmClosure>>>>;
 
 /// VM environment for variable storage.
 #[derive(Debug, Clone)]
@@ -120,6 +127,23 @@ impl VmEnv {
         self.scopes.push(Scope {
             vars: BTreeMap::new(),
         });
+    }
+
+    pub fn pop_scope(&mut self) {
+        if self.scopes.len() > 1 {
+            self.scopes.pop();
+        }
+    }
+
+    pub fn scope_depth(&self) -> usize {
+        self.scopes.len()
+    }
+
+    pub fn truncate_scopes(&mut self, target_depth: usize) {
+        let min_depth = target_depth.max(1);
+        while self.scopes.len() > min_depth {
+            self.scopes.pop();
+        }
     }
 
     pub fn get(&self, name: &str) -> Option<VmValue> {

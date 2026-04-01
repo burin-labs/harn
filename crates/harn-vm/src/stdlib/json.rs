@@ -269,7 +269,11 @@ struct ValidationResult {
     errors: Vec<String>,
 }
 
-fn schema_result_value(data: &VmValue, schema: &VmValue, apply_defaults: bool) -> VmValue {
+pub(crate) fn schema_result_value(
+    data: &VmValue,
+    schema: &VmValue,
+    apply_defaults: bool,
+) -> VmValue {
     let schema_dict = match schema.as_dict() {
         Some(dict) => dict,
         None => return result_err_value(vec!["schema must be a dict".to_string()], None),

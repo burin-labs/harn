@@ -25,14 +25,92 @@ mod trace;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use crate::stdlib::json_to_vm_value;
+use crate::stdlib::{json_to_vm_value, schema_result_value};
 use crate::value::{VmChannelHandle, VmValue};
 use crate::vm::Vm;
 
 use self::api::{vm_build_llm_result, vm_call_completion_full};
-use self::helpers::{extract_json, opt_bool, opt_int, opt_str, transcript_to_vm};
+use self::helpers::{
+    extract_json, opt_bool, opt_int, opt_str, transcript_event, transcript_to_vm_with_events,
+};
 use self::stream::vm_stream_llm;
+use self::tools::build_assistant_response_message;
 use self::trace::trace_llm_call;
+
+fn output_validation_mode(opts: &api::LlmCallOptions) -> &str {
+    opts.output_validation.as_deref().unwrap_or("off")
+}
+
+fn schema_validation_errors(result: &VmValue) -> Vec<String> {
+    match result {
+        VmValue::EnumVariant {
+            enum_name,
+            variant,
+            fields,
+        } if enum_name == "Result" && variant == "Err" => fields
+            .first()
+            .and_then(|payload| payload.as_dict())
+            .and_then(|payload| payload.get("errors"))
+            .and_then(|errors| match errors {
+                VmValue::List(items) => Some(items.iter().map(|err| err.display()).collect()),
+                _ => None,
+            })
+            .unwrap_or_else(|| vec!["schema validation failed".to_string()]),
+        _ => Vec::new(),
+    }
+}
+
+fn validated_output_data(
+    data: &VmValue,
+    opts: &api::LlmCallOptions,
+) -> Result<Option<VmValue>, VmValue> {
+    let Some(schema_json) = &opts.output_schema else {
+        return Ok(Some(data.clone()));
+    };
+    let schema_vm = json_to_vm_value(&normalize_validation_schema(schema_json.clone()));
+    let validation = schema_result_value(data, &schema_vm, false);
+    let errors = schema_validation_errors(&validation);
+    if errors.is_empty() {
+        return Ok(Some(data.clone()));
+    }
+    let message = format!("LLM output failed schema validation: {}", errors.join("; "));
+    match output_validation_mode(opts) {
+        "warn" => {
+            eprintln!("[harn] warning: {message}");
+            Ok(Some(data.clone()))
+        }
+        "error" => Err(VmValue::String(Rc::from(message))),
+        _ => Ok(Some(data.clone())),
+    }
+}
+
+fn normalize_validation_schema(value: serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Object(map) => {
+            let mut normalized = serde_json::Map::new();
+            for (key, child) in map {
+                if key == "type" {
+                    let normalized_type = match child.as_str() {
+                        Some("object") => serde_json::Value::String("dict".to_string()),
+                        Some("array") => serde_json::Value::String("list".to_string()),
+                        Some("integer") => serde_json::Value::String("int".to_string()),
+                        Some("number") => serde_json::Value::String("float".to_string()),
+                        Some("boolean") => serde_json::Value::String("bool".to_string()),
+                        _ => normalize_validation_schema(child),
+                    };
+                    normalized.insert(key, normalized_type);
+                } else {
+                    normalized.insert(key, normalize_validation_schema(child));
+                }
+            }
+            serde_json::Value::Object(normalized)
+        }
+        serde_json::Value::Array(items) => {
+            serde_json::Value::Array(items.into_iter().map(normalize_validation_schema).collect())
+        }
+        other => other,
+    }
+}
 
 // =============================================================================
 // Public re-exports (used by other crates/modules)
@@ -46,7 +124,7 @@ pub(crate) use self::api::vm_call_llm_full;
 pub(crate) use self::helpers::extract_llm_options;
 pub use self::helpers::vm_value_to_json;
 pub use self::mock::{set_replay_mode, LlmReplayMode};
-pub use self::trace::{enable_tracing, peek_trace_summary, take_trace, LlmTraceEntry};
+pub use self::trace::{enable_tracing, peek_trace, peek_trace_summary, take_trace, LlmTraceEntry};
 
 /// Reset all thread-local LLM state (cost, trace, mock). Call between test runs.
 pub fn reset_llm_state() {
@@ -65,15 +143,43 @@ pub fn register_llm_builtins(vm: &mut Vm) {
         let start = std::time::Instant::now();
         let result = vm_call_llm_full(&opts).await?;
         let mut transcript_messages = opts.messages.clone();
-        transcript_messages.push(serde_json::json!({
-            "role": "assistant",
-            "content": result.text.clone(),
-        }));
-        let transcript = transcript_to_vm(
+        transcript_messages.push(build_assistant_response_message(
+            &result.text,
+            &result.blocks,
+            &result.tool_calls,
+            &opts.provider,
+        ));
+        let mut extra_events = vec![transcript_event(
+            "provider_payload",
+            "assistant",
+            "internal",
+            "",
+            Some(serde_json::json!({
+                "model": result.model.clone(),
+                "input_tokens": result.input_tokens,
+                "output_tokens": result.output_tokens,
+                "tool_calls": result.tool_calls.clone(),
+            })),
+        )];
+        if let Some(thinking) = result.thinking.clone() {
+            if !thinking.is_empty() {
+                extra_events.push(transcript_event(
+                    "private_reasoning",
+                    "assistant",
+                    "private",
+                    &thinking,
+                    None,
+                ));
+            }
+        }
+        let transcript = transcript_to_vm_with_events(
             opts.transcript_id.clone(),
             opts.transcript_summary.clone(),
             opts.transcript_metadata.clone(),
             &transcript_messages,
+            extra_events,
+            Vec::new(),
+            Some("active"),
         );
         trace_llm_call(LlmTraceEntry {
             model: result.model.clone(),
@@ -82,13 +188,21 @@ pub fn register_llm_builtins(vm: &mut Vm) {
             duration_ms: start.elapsed().as_millis() as u64,
         });
 
-        // If response_format is "json", parse the response
+        // If response_format is "json", parse the response and optionally
+        // validate it against a configured output contract.
         if opts.response_format.as_deref() == Some("json") {
             let json_str = extract_json(&result.text);
             let parsed = serde_json::from_str::<serde_json::Value>(json_str)
                 .ok()
                 .map(|jv| json_to_vm_value(&jv));
-            return Ok(vm_build_llm_result(&result, parsed, Some(transcript)));
+            let validated = match parsed.as_ref() {
+                Some(data) => match validated_output_data(data, &opts) {
+                    Ok(value) => value,
+                    Err(error) => return Err(crate::value::VmError::Thrown(error)),
+                },
+                None => parsed,
+            };
+            return Ok(vm_build_llm_result(&result, validated, Some(transcript)));
         }
 
         Ok(vm_build_llm_result(&result, None, Some(transcript)))
@@ -240,4 +354,69 @@ fn register_llm_stream(vm: &mut Vm) {
         };
         Ok(VmValue::Channel(handle))
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::api::LlmCallOptions;
+    use super::validated_output_data;
+    use crate::value::VmValue;
+    use std::rc::Rc;
+
+    fn base_opts() -> LlmCallOptions {
+        LlmCallOptions {
+            provider: "mock".to_string(),
+            model: "mock".to_string(),
+            api_key: String::new(),
+            messages: Vec::new(),
+            system: None,
+            transcript_id: None,
+            transcript_summary: None,
+            transcript_metadata: None,
+            max_tokens: 128,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop: None,
+            seed: None,
+            frequency_penalty: None,
+            presence_penalty: None,
+            response_format: Some("json".to_string()),
+            json_schema: None,
+            output_schema: Some(serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"}
+                }
+            })),
+            output_validation: Some("error".to_string()),
+            thinking: None,
+            tools: None,
+            native_tools: None,
+            tool_choice: None,
+            cache: false,
+            timeout: None,
+            provider_overrides: None,
+        }
+    }
+
+    #[test]
+    fn output_validation_accepts_matching_schema() {
+        let opts = base_opts();
+        let mut map = std::collections::BTreeMap::new();
+        map.insert("name".to_string(), VmValue::String(Rc::from("Ada")));
+        let data = VmValue::Dict(Rc::new(map));
+        let validated = validated_output_data(&data, &opts).expect("schema should pass");
+        assert!(validated.is_some());
+    }
+
+    #[test]
+    fn output_validation_rejects_mismatched_schema_in_error_mode() {
+        let opts = base_opts();
+        let mut map = std::collections::BTreeMap::new();
+        map.insert("name".to_string(), VmValue::Int(42));
+        let data = VmValue::Dict(Rc::new(map));
+        let error = validated_output_data(&data, &opts).expect_err("schema should fail");
+        assert!(error.display().contains("schema validation"));
+    }
 }

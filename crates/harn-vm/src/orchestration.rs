@@ -877,7 +877,7 @@ pub struct WorkflowNode {
     pub prompt: Option<String>,
     pub system: Option<String>,
     pub task_label: Option<String>,
-    pub tools: Vec<String>,
+    pub tools: serde_json::Value,
     pub model_policy: ModelPolicy,
     pub transcript_policy: TranscriptPolicy,
     pub context_policy: ContextPolicy,
@@ -892,6 +892,37 @@ pub struct WorkflowNode {
     pub escalation_policy: EscalationPolicy,
     pub verify: Option<serde_json::Value>,
     pub metadata: BTreeMap<String, serde_json::Value>,
+}
+
+pub fn workflow_tool_names(value: &serde_json::Value) -> Vec<String> {
+    match value {
+        serde_json::Value::Null => Vec::new(),
+        serde_json::Value::Array(items) => items
+            .iter()
+            .filter_map(|item| match item {
+                serde_json::Value::Object(map) => map
+                    .get("name")
+                    .and_then(|value| value.as_str())
+                    .filter(|name| !name.is_empty())
+                    .map(|name| name.to_string()),
+                _ => None,
+            })
+            .collect(),
+        serde_json::Value::Object(map) => {
+            if map.get("_type").and_then(|value| value.as_str()) == Some("tool_registry") {
+                return map
+                    .get("tools")
+                    .map(workflow_tool_names)
+                    .unwrap_or_default();
+            }
+            map.get("name")
+                .and_then(|value| value.as_str())
+                .filter(|name| !name.is_empty())
+                .map(|name| vec![name.to_string()])
+                .unwrap_or_default()
+        }
+        _ => Vec::new(),
+    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -932,6 +963,17 @@ pub struct WorkflowAuditEntry {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
+pub struct LlmUsageRecord {
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub total_duration_ms: i64,
+    pub call_count: i64,
+    pub total_cost: f64,
+    pub models: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
 pub struct RunStageRecord {
     pub id: String,
     pub node_id: String,
@@ -945,6 +987,7 @@ pub struct RunStageRecord {
     pub private_reasoning: Option<String>,
     pub transcript: Option<serde_json::Value>,
     pub verification: Option<serde_json::Value>,
+    pub usage: Option<LlmUsageRecord>,
     pub artifacts: Vec<ArtifactRecord>,
     pub consumed_artifact_ids: Vec<String>,
     pub produced_artifact_ids: Vec<String>,
@@ -1112,6 +1155,7 @@ pub struct RunRecord {
     pub policy: CapabilityPolicy,
     pub execution: Option<RunExecutionRecord>,
     pub transcript: Option<serde_json::Value>,
+    pub usage: Option<LlmUsageRecord>,
     pub replay_fixture: Option<ReplayFixture>,
     pub metadata: BTreeMap<String, serde_json::Value>,
     pub persisted_path: Option<String>,
@@ -1156,9 +1200,49 @@ pub struct WorkflowValidationReport {
     pub reachable_nodes: Vec<String>,
 }
 
+fn parse_json_payload<T: for<'de> Deserialize<'de>>(
+    json: serde_json::Value,
+    label: &str,
+) -> Result<T, VmError> {
+    let payload = json.to_string();
+    let mut deserializer = serde_json::Deserializer::from_str(&payload);
+    let mut tracker = serde_path_to_error::Track::new();
+    let path_deserializer = serde_path_to_error::Deserializer::new(&mut deserializer, &mut tracker);
+    T::deserialize(path_deserializer).map_err(|error| {
+        let snippet = if payload.len() > 600 {
+            format!("{}...", &payload[..600])
+        } else {
+            payload.clone()
+        };
+        VmError::Runtime(format!(
+            "{label} parse error at {}: {} | payload={}",
+            tracker.path(),
+            error,
+            snippet
+        ))
+    })
+}
+
 fn parse_json_value<T: for<'de> Deserialize<'de>>(value: &VmValue) -> Result<T, VmError> {
-    serde_json::from_value(vm_value_to_json(value))
-        .map_err(|e| VmError::Runtime(format!("orchestration parse error: {e}")))
+    parse_json_payload(vm_value_to_json(value), "orchestration")
+}
+
+pub fn parse_workflow_node_value(value: &VmValue, label: &str) -> Result<WorkflowNode, VmError> {
+    parse_json_payload(vm_value_to_json(value), label)
+}
+
+pub fn parse_workflow_node_json(
+    json: serde_json::Value,
+    label: &str,
+) -> Result<WorkflowNode, VmError> {
+    parse_json_payload(json, label)
+}
+
+pub fn parse_workflow_edge_json(
+    json: serde_json::Value,
+    label: &str,
+) -> Result<WorkflowEdge, VmError> {
+    parse_json_payload(json, label)
 }
 
 pub fn normalize_workflow_value(value: &VmValue) -> Result<WorkflowGraph, VmError> {
@@ -1577,7 +1661,24 @@ pub fn normalize_artifact(value: &VmValue) -> Result<ArtifactRecord, VmError> {
 }
 
 pub fn normalize_run_record(value: &VmValue) -> Result<RunRecord, VmError> {
-    let mut run: RunRecord = parse_json_value(value)?;
+    let json = vm_value_to_json(value);
+    let payload = json.to_string();
+    let mut deserializer = serde_json::Deserializer::from_str(&payload);
+    let mut tracker = serde_path_to_error::Track::new();
+    let path_deserializer = serde_path_to_error::Deserializer::new(&mut deserializer, &mut tracker);
+    let mut run: RunRecord = RunRecord::deserialize(path_deserializer).map_err(|error| {
+        let snippet = if payload.len() > 600 {
+            format!("{}...", &payload[..600])
+        } else {
+            payload.clone()
+        };
+        VmError::Runtime(format!(
+            "orchestration parse error at {}: {} | payload={}",
+            tracker.path(),
+            error,
+            snippet
+        ))
+    })?;
     if run.type_name.is_empty() {
         run.type_name = "run_record".to_string();
     }
@@ -2323,15 +2424,11 @@ pub async fn execute_stage_node(
     if let Some(max_tokens) = node.model_policy.max_tokens {
         options.insert("max_tokens".to_string(), VmValue::Int(max_tokens));
     }
-    if !node.tools.is_empty() {
+    let tool_names = workflow_tool_names(&node.tools);
+    if !matches!(node.tools, serde_json::Value::Null) && !tool_names.is_empty() {
         options.insert(
             "tools".to_string(),
-            VmValue::List(Rc::new(
-                node.tools
-                    .iter()
-                    .map(|tool| VmValue::String(Rc::from(tool.clone())))
-                    .collect(),
-            )),
+            crate::stdlib::json_to_vm_value(&node.tools),
         );
     }
     if let Some(transcript) = transcript.clone() {
@@ -2348,7 +2445,7 @@ pub async fn execute_stage_node(
     ];
     let mut opts = extract_llm_options(&args)?;
 
-    let llm_result = if node.mode.as_deref() == Some("agent") || !node.tools.is_empty() {
+    let llm_result = if node.mode.as_deref() == Some("agent") || !tool_names.is_empty() {
         crate::llm::run_agent_loop_internal(
             &mut opts,
             crate::llm::AgentLoopConfig {
@@ -2589,6 +2686,31 @@ mod tests {
     }
 
     #[test]
+    fn workflow_normalization_accepts_tool_registry_nodes() {
+        let value = crate::stdlib::json_to_vm_value(&serde_json::json!({
+            "name": "registry_tools",
+            "entry": "implement",
+            "nodes": {
+                "implement": {
+                    "kind": "stage",
+                    "mode": "agent",
+                    "tools": {
+                        "_type": "tool_registry",
+                        "tools": [
+                            {"name": "read", "description": "Read files"},
+                            {"name": "run", "description": "Run commands"}
+                        ]
+                    }
+                }
+            },
+            "edges": []
+        }));
+        let graph = normalize_workflow_value(&value).unwrap();
+        let node = graph.nodes.get("implement").unwrap();
+        assert_eq!(workflow_tool_names(&node.tools), vec!["read", "run"]);
+    }
+
+    #[test]
     fn artifact_selection_honors_budget_and_priority() {
         let policy = ContextPolicy {
             max_artifacts: Some(2),
@@ -2689,6 +2811,7 @@ mod tests {
                 private_reasoning: None,
                 transcript: None,
                 verification: None,
+                usage: None,
                 artifacts: vec![ArtifactRecord {
                     type_name: "artifact".to_string(),
                     id: "a1".to_string(),
@@ -2712,6 +2835,7 @@ mod tests {
             policy: CapabilityPolicy::default(),
             execution: None,
             transcript: None,
+            usage: None,
             replay_fixture: None,
             metadata: BTreeMap::new(),
             persisted_path: None,

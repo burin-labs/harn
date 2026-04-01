@@ -6,6 +6,12 @@ pipeline default() {
   println(len(paths))
   println(paths[0])
   println(paths[1])
+  let punctuated = extract_paths(
+    "Touch internal/manifest/parser.go. Then create internal/manifest/parser_extra_test.go, not validation.",
+  )
+  println(len(punctuated))
+  println(punctuated[0])
+  println(punctuated[1])
   // parse_cells
   let response = "Here is code:\n```go\nfmt.Println(\"hi\")\n```\nAnd a call:\n```call python\nwrite_file(\"test.py\", code)\n```\nDone"
   let cells = parse_cells(response)

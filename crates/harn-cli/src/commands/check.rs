@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process;
 
-use harn_fmt::format_source;
+use harn_fmt::{format_source_opts, FmtOptions};
 use harn_lint::LintSeverity;
 use harn_parser::{DiagnosticSeverity, Node, SNode, TypeChecker};
 
@@ -129,7 +129,7 @@ pub(crate) fn lint_file(path: &str, config: &CheckConfig) {
 }
 
 /// Format one or more files or directories. Accepts multiple targets.
-pub(crate) fn fmt_targets(targets: &[&str], check_mode: bool) {
+pub(crate) fn fmt_targets(targets: &[&str], check_mode: bool, opts: &FmtOptions) {
     let mut files = Vec::new();
     for target in targets {
         let path = std::path::Path::new(target);
@@ -146,7 +146,7 @@ pub(crate) fn fmt_targets(targets: &[&str], check_mode: bool) {
     let mut has_error = false;
     for file in &files {
         let path_str = file.to_string_lossy();
-        if !fmt_file_inner(&path_str, check_mode) {
+        if !fmt_file_inner(&path_str, check_mode, opts) {
             has_error = true;
         }
     }
@@ -172,7 +172,7 @@ fn collect_harn_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) 
 }
 
 /// Format a single file. Returns true on success, false on error.
-fn fmt_file_inner(path: &str, check_mode: bool) -> bool {
+fn fmt_file_inner(path: &str, check_mode: bool, opts: &FmtOptions) -> bool {
     let source = match std::fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) => {
@@ -181,7 +181,7 @@ fn fmt_file_inner(path: &str, check_mode: bool) -> bool {
         }
     };
 
-    let formatted = match format_source(&source) {
+    let formatted = match format_source_opts(&source, opts) {
         Ok(f) => f,
         Err(e) => {
             eprintln!("{path}: {e}");

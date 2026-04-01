@@ -15,7 +15,11 @@ pub fn extract_paths(text) {
   var seen = []
   return lines.flat_map({ line ->
     return split(trim(line), " ").map({ word ->
-      return regex_replace("^[\"'`,;:()\\[\\]{}><]+|[\"'`,;:()\\[\\]{}><]+$", "", trim(word))
+      var clean = regex_replace("^[\"'`,;:()\\[\\]{}><]+|[\"'`,;:()\\[\\]{}><]+$", "", trim(word))
+      while ends_with(clean, ".") || ends_with(clean, ",") || ends_with(clean, ":") || ends_with(clean, ";") {
+        clean = substring(clean, 0, len(clean) - 1)
+      }
+      return clean
     }).filter({ clean ->
       if !contains(clean, "/") && !contains(clean, ".") { return false }
       let ext = extname(clean)

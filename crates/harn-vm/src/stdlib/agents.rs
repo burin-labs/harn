@@ -26,9 +26,9 @@ use crate::orchestration::{
     normalize_workflow_value, pop_execution_policy, push_execution_policy,
     render_artifacts_context, render_unified_diff, replay_fixture_from_run, save_run_record,
     select_artifacts, validate_workflow, ArtifactRecord, CapabilityPolicy, ContextPolicy,
-    ReplayFixture, RunCheckpointRecord, RunChildRecord, RunExecutionRecord, RunRecord,
-    RunStageAttemptRecord, RunStageRecord, RunTransitionRecord, TranscriptPolicy, WorkflowEdge,
-    WorkflowGraph,
+    LlmUsageRecord, ReplayFixture, RunCheckpointRecord, RunChildRecord, RunExecutionRecord,
+    RunRecord, RunStageAttemptRecord, RunStageRecord, RunTransitionRecord, TranscriptPolicy,
+    WorkflowEdge, WorkflowGraph,
 };
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -412,7 +412,7 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
             "workflow_policy": graph.capability_policy,
             "ceiling": effective_ceiling,
             "validation": report,
-            "nodes": graph.nodes.iter().map(|(node_id, node)| serde_json::json!({
+                "nodes": graph.nodes.iter().map(|(node_id, node)| serde_json::json!({
                 "node_id": node_id,
                 "policy": node.capability_policy,
                 "tools": node.tools,
@@ -440,8 +440,8 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
             .get(1)
             .ok_or_else(|| VmError::Runtime("workflow_insert_node: missing node".to_string()))?;
         let node_json = crate::llm::vm_value_to_json(node_value);
-        let mut node: crate::orchestration::WorkflowNode = serde_json::from_value(node_json)
-            .map_err(|e| VmError::Runtime(format!("workflow_insert_node: {e}")))?;
+        let mut node =
+            crate::orchestration::parse_workflow_node_json(node_json, "workflow_insert_node")?;
         let node_id = node
             .id
             .clone()
@@ -456,8 +456,10 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
         graph.nodes.insert(node_id.clone(), node);
         if let Some(VmValue::Dict(edge_dict)) = args.get(2) {
             let edge_json = crate::llm::vm_value_to_json(&VmValue::Dict(edge_dict.clone()));
-            let edge: WorkflowEdge = serde_json::from_value(edge_json)
-                .map_err(|e| VmError::Runtime(format!("workflow_insert_node edge: {e}")))?;
+            let edge = crate::orchestration::parse_workflow_edge_json(
+                edge_json,
+                "workflow_insert_node edge",
+            )?;
             graph.edges.push(edge);
         }
         append_audit_entry(
@@ -481,8 +483,8 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
             crate::llm::vm_value_to_json(args.get(2).ok_or_else(|| {
                 VmError::Runtime("workflow_replace_node: missing node".to_string())
             })?);
-        let mut node: crate::orchestration::WorkflowNode = serde_json::from_value(node_json)
-            .map_err(|e| VmError::Runtime(format!("workflow_replace_node: {e}")))?;
+        let mut node =
+            crate::orchestration::parse_workflow_node_json(node_json, "workflow_replace_node")?;
         node.id = Some(node_id.clone());
         graph.nodes.insert(node_id.clone(), node);
         append_audit_entry(
@@ -1477,10 +1479,53 @@ fn apply_runtime_node_overrides(
             .filter(|value| !value.is_empty());
     }
     if !node.capability_policy.tools.is_empty() {
-        node.tools
-            .retain(|tool| node.capability_policy.tools.contains(tool));
+        node.tools = filter_workflow_tools(&node.tools, &node.capability_policy.tools);
     }
     node
+}
+
+fn filter_workflow_tools(tools: &serde_json::Value, allowed: &[String]) -> serde_json::Value {
+    match tools {
+        serde_json::Value::Null => serde_json::Value::Null,
+        serde_json::Value::Array(items) => serde_json::Value::Array(
+            items
+                .iter()
+                .filter(|item| match item {
+                    serde_json::Value::Object(map) => map
+                        .get("name")
+                        .and_then(|value| value.as_str())
+                        .map(|name| allowed.iter().any(|allowed_name| allowed_name == name))
+                        .unwrap_or(false),
+                    _ => false,
+                })
+                .cloned()
+                .collect(),
+        ),
+        serde_json::Value::Object(map)
+            if map.get("_type").and_then(|value| value.as_str()) == Some("tool_registry") =>
+        {
+            let mut filtered = map.clone();
+            let tool_items = map
+                .get("tools")
+                .map(|value| filter_workflow_tools(value, allowed))
+                .unwrap_or_else(|| serde_json::Value::Array(Vec::new()));
+            filtered.insert("tools".to_string(), tool_items);
+            serde_json::Value::Object(filtered)
+        }
+        serde_json::Value::Object(map) => {
+            let keep = map
+                .get("name")
+                .and_then(|value| value.as_str())
+                .map(|name| allowed.iter().any(|allowed_name| allowed_name == name))
+                .unwrap_or(false);
+            if keep {
+                tools.clone()
+            } else {
+                serde_json::Value::Null
+            }
+        }
+        _ => serde_json::Value::Null,
+    }
 }
 
 #[derive(Debug)]
@@ -1492,9 +1537,60 @@ struct ExecutedStage {
     artifacts: Vec<ArtifactRecord>,
     transcript: Option<VmValue>,
     verification: Option<serde_json::Value>,
+    usage: LlmUsageRecord,
     error: Option<String>,
     attempts: Vec<RunStageAttemptRecord>,
     consumed_artifact_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+struct UsageSnapshot {
+    input_tokens: i64,
+    output_tokens: i64,
+    total_duration_ms: i64,
+    call_count: i64,
+    total_cost: f64,
+    trace_len: usize,
+}
+
+fn llm_usage_snapshot() -> UsageSnapshot {
+    let (input_tokens, output_tokens, total_duration_ms, call_count) = crate::llm::peek_trace_summary();
+    let total_cost = crate::llm::cost::peek_total_cost();
+    let trace_len = crate::llm::peek_trace().len();
+    UsageSnapshot {
+        input_tokens,
+        output_tokens,
+        total_duration_ms,
+        call_count,
+        total_cost,
+        trace_len,
+    }
+}
+
+fn llm_usage_delta(before: &UsageSnapshot, after: &UsageSnapshot) -> LlmUsageRecord {
+    let trace = crate::llm::peek_trace();
+    let start = before.trace_len.min(trace.len());
+    let models = trace[start..]
+        .iter()
+        .map(|entry| entry.model.clone())
+        .filter(|model| !model.is_empty())
+        .fold(Vec::<String>::new(), |mut acc, model| {
+            if !acc.iter().any(|existing| existing == &model) {
+                acc.push(model);
+            }
+            acc
+        });
+
+    LlmUsageRecord {
+        input_tokens: after.input_tokens.saturating_sub(before.input_tokens),
+        output_tokens: after.output_tokens.saturating_sub(before.output_tokens),
+        total_duration_ms: after
+            .total_duration_ms
+            .saturating_sub(before.total_duration_ms),
+        call_count: after.call_count.saturating_sub(before.call_count),
+        total_cost: (after.total_cost - before.total_cost).max(0.0),
+        models,
+    }
 }
 
 fn replay_stage(
@@ -1527,6 +1623,7 @@ fn replay_stage(
             .as_ref()
             .map(crate::stdlib::json_to_vm_value),
         verification: stage.verification.clone(),
+        usage: stage.usage.clone().unwrap_or_default(),
         error: stage
             .metadata
             .get("error")
@@ -1657,6 +1754,20 @@ fn parse_execution_record(value: Option<&VmValue>) -> Result<Option<RunExecution
     }
 }
 
+fn optional_string_option(options: &BTreeMap<String, VmValue>, key: &str) -> Option<String> {
+    options.get(key).and_then(|value| match value {
+        VmValue::Nil => None,
+        _ => {
+            let rendered = value.display();
+            if rendered.is_empty() || rendered == "nil" {
+                None
+            } else {
+                Some(rendered)
+            }
+        }
+    })
+}
+
 fn load_run_tree(path: &str) -> Result<serde_json::Value, VmError> {
     let run = load_run_record(std::path::Path::new(path))?;
     let mut children = Vec::new();
@@ -1783,6 +1894,7 @@ async fn execute_stage_attempts(
 
     for attempt in 1..=max_attempts {
         let started_at = uuid::Uuid::now_v7().to_string();
+        let usage_before = llm_usage_snapshot();
         let attempt_task = if attempt == 1 {
             task.to_string()
         } else {
@@ -2013,6 +2125,7 @@ async fn execute_stage_attempts(
 
         match execution {
             Ok((result, produced, next_transcript, outcome, branch, verification)) => {
+                let usage = llm_usage_delta(&usage_before, &llm_usage_snapshot());
                 let success = !matches!(branch.as_deref(), Some("failed"));
                 attempts.push(RunStageAttemptRecord {
                     attempt,
@@ -2037,6 +2150,7 @@ async fn execute_stage_attempts(
                         artifacts: produced,
                         transcript: next_transcript,
                         verification,
+                        usage,
                         error: None,
                         attempts,
                         consumed_artifact_ids,
@@ -2045,6 +2159,7 @@ async fn execute_stage_attempts(
                 last_error = Some("verification failed".to_string());
             }
             Err(error) => {
+                let usage = llm_usage_delta(&usage_before, &llm_usage_snapshot());
                 let error_message = error.to_string();
                 attempts.push(RunStageAttemptRecord {
                     attempt,
@@ -2056,7 +2171,22 @@ async fn execute_stage_attempts(
                     started_at,
                     finished_at: Some(uuid::Uuid::now_v7().to_string()),
                 });
-                last_error = Some(error_message);
+                last_error = Some(error_message.clone());
+                if attempt == max_attempts {
+                    return Ok(ExecutedStage {
+                        status: "failed".to_string(),
+                        outcome: "failed".to_string(),
+                        branch: Some("failed".to_string()),
+                        result: serde_json::json!({"status": "failed", "text": ""}),
+                        artifacts: Vec::new(),
+                        transcript: transcript.clone(),
+                        verification: None,
+                        usage,
+                        error: Some(error_message),
+                        attempts,
+                        consumed_artifact_ids,
+                    });
+                }
             }
         }
     }
@@ -2069,6 +2199,7 @@ async fn execute_stage_attempts(
         artifacts: Vec::new(),
         transcript,
         verification: None,
+        usage: LlmUsageRecord::default(),
         error: last_error,
         attempts,
         consumed_artifact_ids,
@@ -2081,6 +2212,8 @@ async fn execute_workflow(
     mut artifacts: Vec<ArtifactRecord>,
     options: BTreeMap<String, VmValue>,
 ) -> Result<VmValue, VmError> {
+    crate::llm::enable_tracing();
+    let run_usage_before = llm_usage_snapshot();
     let report = validate_workflow(&graph, Some(&builtin_ceiling()));
     if !report.valid {
         return Err(VmError::Runtime(format!(
@@ -2089,46 +2222,39 @@ async fn execute_workflow(
         )));
     }
 
-    let resumed_run = match options.get("resume_path").map(|v| v.display()) {
+    let resumed_run = match optional_string_option(&options, "resume_path") {
         Some(path) if !path.is_empty() => Some(load_run_record(std::path::Path::new(&path))?),
         _ => match options.get("resume_run") {
             Some(value) => Some(normalize_run_record(value)?),
             None => None,
         },
     };
-    let replay_source = match options.get("replay_path").map(|v| v.display()) {
+    let replay_source = match optional_string_option(&options, "replay_path") {
         Some(path) if !path.is_empty() => Some(load_run_record(std::path::Path::new(&path))?),
         _ => match options.get("replay_run") {
             Some(value) => Some(normalize_run_record(value)?),
             None => None,
         },
     };
-    let replay_mode = options
-        .get("replay_mode")
-        .map(|value| value.display())
-        .filter(|value| !value.is_empty());
+    let replay_mode = options.get("replay_mode").and_then(|value| match value {
+        VmValue::Nil => None,
+        _ => {
+            let rendered = value.display();
+            if rendered.is_empty() || rendered == "nil" {
+                None
+            } else {
+                Some(rendered)
+            }
+        }
+    });
 
-    let persist_path = options
-        .get("persist_path")
-        .map(|value| value.display())
-        .filter(|path| !path.is_empty())
-        .or_else(|| {
-            options
-                .get("resume_path")
-                .map(|value| value.display())
-                .filter(|path| !path.is_empty())
-        })
+    let persist_path = optional_string_option(&options, "persist_path")
+        .or_else(|| optional_string_option(&options, "resume_path"))
         .unwrap_or_else(|| format!(".harn-runs/{}.json", uuid::Uuid::now_v7()));
     let execution = parse_execution_record(options.get("execution"))?;
-    let parent_run_id = options
-        .get("parent_run_id")
-        .map(|value| value.display())
-        .filter(|value| !value.is_empty());
-    let root_run_id = options
-        .get("root_run_id")
-        .map(|value| value.display())
-        .filter(|value| !value.is_empty())
-        .or_else(|| parent_run_id.clone());
+    let parent_run_id = optional_string_option(&options, "parent_run_id");
+    let root_run_id =
+        optional_string_option(&options, "root_run_id").or_else(|| parent_run_id.clone());
 
     let mut run = resumed_run.unwrap_or_else(|| RunRecord {
         type_name: "run_record".to_string(),
@@ -2151,10 +2277,16 @@ async fn execute_workflow(
         policy: builtin_ceiling(),
         execution: execution.clone(),
         transcript: None,
+        usage: None,
         replay_fixture: None,
         metadata: BTreeMap::new(),
         persisted_path: None,
     });
+    if run.transcript.is_none() {
+        if let Some(seed_transcript) = options.get("transcript") {
+            run.transcript = Some(crate::llm::vm_value_to_json(seed_transcript));
+        }
+    }
     run.workflow_id = graph.id.clone();
     run.workflow_name = graph.name.clone();
     run.task = task.clone();
@@ -2400,6 +2532,7 @@ async fn execute_workflow(
                 .as_ref()
                 .map(crate::llm::vm_value_to_json),
             verification: executed.verification.clone(),
+            usage: Some(executed.usage.clone()),
             artifacts: executed.artifacts.clone(),
             consumed_artifact_ids: executed.consumed_artifact_ids.clone(),
             produced_artifact_ids: produced_artifact_ids.clone(),
@@ -2439,6 +2572,7 @@ async fn execute_workflow(
         "paused".to_string()
     };
     run.finished_at = Some(uuid::Uuid::now_v7().to_string());
+    run.usage = Some(llm_usage_delta(&run_usage_before, &llm_usage_snapshot()));
     run.replay_fixture = Some(replay_fixture_from_run(&run));
     checkpoint_run(
         &mut run,

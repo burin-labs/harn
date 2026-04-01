@@ -22,6 +22,10 @@ pub enum Op {
     DefVar, // arg: u16 constant index (name)
     /// Assign to an existing mutable variable. Pops value from stack.
     SetVar, // arg: u16 constant index (name)
+    /// Push a new lexical scope onto the environment stack.
+    PushScope,
+    /// Pop the current lexical scope from the environment stack.
+    PopScope,
 
     // --- Arithmetic ---
     Add,
@@ -427,6 +431,8 @@ impl Chunk {
                         idx, self.constants[idx as usize]
                     ));
                 }
+                x if x == Op::PushScope as u8 => out.push_str("PUSH_SCOPE\n"),
+                x if x == Op::PopScope as u8 => out.push_str("POP_SCOPE\n"),
                 x if x == Op::Add as u8 => out.push_str("ADD\n"),
                 x if x == Op::Sub as u8 => out.push_str("SUB\n"),
                 x if x == Op::Mul as u8 => out.push_str("MUL\n"),

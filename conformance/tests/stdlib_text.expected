@@ -2,6 +2,9 @@
 ./lib/test.go
 /src/main.rs
 2
+internal/manifest/parser.go
+internal/manifest/parser_extra_test.go
+2
 code
 go
 fmt.Println("hi")
