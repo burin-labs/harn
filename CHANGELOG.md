@@ -2,6 +2,19 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.13
+
+### Changed
+
+- **Workspace HTTP clients now prefer Rustls over native TLS** — `harn-vm`
+  and `harn-cli` both disable `reqwest`'s default TLS stack and use
+  `rustls-tls` explicitly, folding in the local Burin-agent fix and reducing
+  OpenSSL-related friction in cross-platform builds and release automation.
+- **The next patch release explicitly includes locally discovered release
+  fixes** — release hygiene now treats local integration fixes as first-class
+  patch content instead of leaving them stranded as untracked or unreviewed
+  machine-local changes.
+
 ## v0.5.12
 
 ### Added
