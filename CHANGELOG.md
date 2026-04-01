@@ -2,6 +2,15 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.10
+
+### Changed
+
+- **`match` now parses correctly as an expression** — fixed the parser entry
+  point so bindings like `let x = match value { ... }` compile correctly,
+  including match arms that declare local `let` bindings before yielding a
+  final expression.
+
 ## v0.5.9
 
 ### Added

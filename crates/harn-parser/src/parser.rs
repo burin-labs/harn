@@ -1736,6 +1736,7 @@ impl Parser {
             TokenKind::Ask => self.parse_ask_expr(),
             TokenKind::Deadline => self.parse_deadline(),
             TokenKind::Try => self.parse_try_catch(),
+            TokenKind::Match => self.parse_match(),
             TokenKind::Fn => self.parse_fn_expr(),
             _ => Err(self.error("expression")),
         }
@@ -2399,5 +2400,35 @@ impl Parser {
 
     fn error(&self, expected: &str) -> ParserError {
         self.make_error(expected)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use harn_lexer::Lexer;
+
+    fn parse_source(source: &str) -> Result<Vec<SNode>, ParserError> {
+        let mut lexer = Lexer::new(source);
+        let tokens = lexer.tokenize().unwrap();
+        let mut parser = Parser::new(tokens);
+        parser.parse()
+    }
+
+    #[test]
+    fn parses_match_expression_with_let_in_arm_body() {
+        let source = r#"
+pipeline p() {
+  let x = match 1 {
+    1 -> {
+      let a = 1
+      a
+    }
+    _ -> { 0 }
+  }
+}
+"#;
+
+        assert!(parse_source(source).is_ok());
     }
 }
