@@ -25,9 +25,78 @@ pub fn host_project_root() -> string {
   return host_invoke("workspace", "project_root", {}) ?? ""
 }
 
+/// workspace_roots.
+pub fn workspace_roots() {
+  if host_has("workspace", "roots") {
+    return host_invoke("workspace", "roots", {}) ?? []
+  }
+  let root = host_project_root()
+  return root ? [root] : []
+}
+
+/// workspace_read_text.
+pub fn workspace_read_text(path: string) {
+  return host_invoke("workspace", "read_text", {path: path})
+}
+
+/// workspace_write_text.
+pub fn workspace_write_text(path: string, content) {
+  return host_invoke("workspace", "write_text", {path: path, content: content})
+}
+
+/// workspace_apply_edit.
+pub fn workspace_apply_edit(path: string, old_string: string, new_string: string) {
+  return host_invoke(
+    "workspace",
+    "apply_edit",
+    {path: path, old_string: old_string, new_string: new_string},
+  )
+}
+
+/// workspace_delete.
+pub fn workspace_delete(path: string) {
+  return host_invoke("workspace", "delete", {path: path})
+}
+
+/// workspace_list.
+pub fn workspace_list(path) {
+  return host_invoke("workspace", "list", {path: path ?? "."}) ?? []
+}
+
+/// workspace_exists.
+pub fn workspace_exists(path: string) -> bool {
+  return host_invoke("workspace", "exists", {path: path}) ?? false
+}
+
+/// workspace_file_exists.
+pub fn workspace_file_exists(path: string) -> bool {
+  if host_has("workspace", "file_exists") {
+    return host_invoke("workspace", "file_exists", {path: path}) ?? false
+  }
+  return workspace_exists(path)
+}
+
 /// approved_plan.
 pub fn approved_plan() -> string {
   return host_invoke("runtime", "approved_plan", {}) ?? ""
+}
+
+/// process_exec.
+pub fn process_exec(command: string, timeout_ms = nil) {
+  let params = {command: command}
+  if timeout_ms != nil {
+    return host_invoke("process", "exec", params + {timeout: timeout_ms})
+  }
+  return host_invoke("process", "exec", params)
+}
+
+/// interaction_ask.
+pub fn interaction_ask(question: string, kind = nil) -> string {
+  let params = {question: question}
+  if kind != nil {
+    return host_invoke("interaction", "ask", params + {type: kind}) ?? ""
+  }
+  return host_invoke("interaction", "ask", params) ?? ""
 }
 
 /// record_run_metadata.
@@ -41,6 +110,13 @@ pub fn record_run_metadata(run, workflow_name) {
       path: run?.path,
       status: run?.status ?? "",
       fixture_type: run?.run?.replay_fixture?._type,
+      usage: run?.usage,
+      persisted_path: run?.persisted_path,
+      summary: transcript_summary(run?.transcript),
+      transcript_state: run?.transcript?.state ?? "",
+      message_count: len(transcript_messages(run?.transcript)),
+      event_count: len(transcript_events(run?.transcript)),
+      asset_count: len(transcript_assets(run?.transcript)),
     },
     )
   }
@@ -104,6 +180,7 @@ pub fn project_host_mcp_config() {
 pub fn project_host_state() {
   return {
     project_root: host_project_root(),
+    workspace_roots: workspace_roots(),
     root_package: project_root_package(),
     scan: project_host_scan(),
     test_commands: project_host_test_commands(),

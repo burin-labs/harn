@@ -203,6 +203,16 @@ Project metadata and scanner helpers built on `metadata_*` and `scan_directory(.
 | `project_stale(namespace?)` | Return the stale summary from `metadata_status(...)` |
 | `project_stale_dirs(namespace?)` | Return the tier1+tier2 stale directory list |
 | `project_requires_refresh(namespace?)` | Return `true` when stale or missing hashes require refresh |
+| `workspace_roots()` | Return the host workspace roots, falling back to the current project root |
+| `workspace_read_text(path)` | Read text through the typed workspace host contract |
+| `workspace_write_text(path, content)` | Write text through the typed workspace host contract |
+| `workspace_apply_edit(path, old, new)` | Apply a substring patch through the typed workspace host contract |
+| `workspace_delete(path)` | Delete a workspace path through the typed workspace host contract |
+| `workspace_list(path?)` | List entries through the typed workspace host contract |
+| `workspace_exists(path)` | Check path existence through `workspace.exists` |
+| `workspace_file_exists(path)` | Check file existence through `workspace.file_exists`, falling back to `workspace.exists` |
+| `process_exec(command, timeout_ms?)` | Execute a process through the typed host contract |
+| `interaction_ask(question, kind?)` | Ask the host/user a question through the typed interaction contract |
 
 ### std/agents
 

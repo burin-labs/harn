@@ -722,9 +722,9 @@ async fn execute_chunk(
     register_acp_builtins(&mut vm, bridge.clone());
 
     // Set up bridge delegation so unknown builtins are forwarded to the ACP
-    // client as `builtin_call` JSON-RPC requests.  This reuses the same
-    // pending map and stdout lock as the AcpBridge, so responses from the
-    // client's stdin reader are dispatched correctly.
+    // client as `builtin_call` JSON-RPC requests. This remains the stable ACP
+    // behavior until host-local pseudo-builtins are fully migrated to typed
+    // host capabilities and explicit Harn stdlib wrappers.
     host_bridge.set_script_name(pipeline_name);
     vm.set_bridge(host_bridge.clone());
 
@@ -914,7 +914,9 @@ fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Rc<AcpBridge>) {
                                 harn_vm::VmValue::String(Rc::from("apply_edit")),
                                 harn_vm::VmValue::String(Rc::from("delete")),
                                 harn_vm::VmValue::String(Rc::from("exists")),
+                                harn_vm::VmValue::String(Rc::from("file_exists")),
                                 harn_vm::VmValue::String(Rc::from("list")),
+                                harn_vm::VmValue::String(Rc::from("project_root")),
                             ])),
                         ),
                     ]))),
@@ -976,7 +978,16 @@ fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Rc<AcpBridge>) {
             ("workspace", None)
                 | (
                     "workspace",
-                    Some("read_text" | "write_text" | "apply_edit" | "delete" | "exists" | "list"),
+                    Some(
+                        "read_text"
+                            | "write_text"
+                            | "apply_edit"
+                            | "delete"
+                            | "exists"
+                            | "file_exists"
+                            | "list"
+                            | "project_root"
+                    ),
                 )
                 | ("process", None)
                 | ("process", Some("exec"))

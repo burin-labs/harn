@@ -12,11 +12,13 @@ The boundary should stay narrow:
 
 What belongs in Harn `std/*` modules or the VM:
 
-- Generic host wrappers like `project_host_scan()` or `git_diff()`
+- Generic host wrappers like `project_host_scan()`, `git_diff()`,
+  `workspace_read_text()`, or `process_exec()`
 - Reusable project-state normalization and packaging
 - Transcript schemas, assets, compaction, and replay semantics
 - Context/artifact assembly rules that are product-agnostic
 - Structured contract enforcement and eval/replay helpers
+- Multi-root workspace contracts and fallbacks such as `workspace_roots()`
 
 What should stay in host-side `.harn` scripts:
 

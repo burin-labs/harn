@@ -535,6 +535,10 @@ assert_eq(resp.status, 200)
 | `host_has(capability, op?)` | capability: string, op: string | bool | Check whether a typed host capability/operation exists |
 | `host_invoke(capability, op, params?)` | capability: string, op: string, params: dict | any | Invoke a typed host operation such as workspace or process |
 
+Common workspace ops surfaced by hosts include `read_text`, `write_text`,
+`apply_edit`, `delete`, `exists`, `file_exists`, `list`, `project_root`, and
+optionally `roots` for multi-root workspaces.
+
 ## Async and timing
 
 | Function | Parameters | Returns | Description |

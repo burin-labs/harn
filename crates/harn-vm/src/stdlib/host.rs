@@ -21,7 +21,16 @@ fn capability_manifest() -> VmValue {
                 op("apply_edit", "Replace a substring in a text file."),
                 op("delete", "Delete a file."),
                 op("exists", "Check whether a path exists."),
+                op("file_exists", "Alias for exists, for host parity."),
                 op("list", "List direct children of a directory."),
+                op(
+                    "project_root",
+                    "Return the resolved project root for the current execution context.",
+                ),
+                op(
+                    "roots",
+                    "Return workspace roots; local execution reports a single root.",
+                ),
             ],
         ),
     );
@@ -94,6 +103,14 @@ fn require_param(params: &BTreeMap<String, VmValue>, key: &str) -> Result<String
 
 fn resolve_path(path: &str) -> PathBuf {
     crate::stdlib::process::resolve_source_relative_path(path)
+}
+
+fn current_project_root() -> Option<PathBuf> {
+    crate::stdlib::process::current_execution_context()
+        .and_then(|context| context.cwd.map(PathBuf::from))
+        .or_else(|| crate::stdlib::process::VM_SOURCE_DIR.with(|sd| sd.borrow().clone()))
+        .or_else(|| std::env::current_dir().ok())
+        .and_then(|base| crate::stdlib::process::find_project_root(&base).or(Some(base)))
 }
 
 fn render_template(
@@ -216,6 +233,10 @@ pub(crate) fn register_host_builtins(vm: &mut Vm) {
                 let path = require_param(&params, "path")?;
                 Ok(VmValue::Bool(resolve_path(&path).exists()))
             }
+            ("workspace", "file_exists") => {
+                let path = require_param(&params, "path")?;
+                Ok(VmValue::Bool(resolve_path(&path).exists()))
+            }
             ("workspace", "list") => {
                 let path = params
                     .get("path")
@@ -249,6 +270,19 @@ pub(crate) fn register_host_builtins(vm: &mut Vm) {
                         .unwrap_or_default()
                 });
                 Ok(VmValue::List(Rc::new(values)))
+            }
+            ("workspace", "project_root") => Ok(current_project_root()
+                .map(|root| VmValue::String(Rc::from(root.to_string_lossy().to_string())))
+                .unwrap_or(VmValue::Nil)),
+            ("workspace", "roots") => {
+                let roots = current_project_root()
+                    .map(|root| {
+                        vec![VmValue::String(Rc::from(
+                            root.to_string_lossy().to_string(),
+                        ))]
+                    })
+                    .unwrap_or_default();
+                Ok(VmValue::List(Rc::new(roots)))
             }
             ("process", "exec") => {
                 let command = require_param(&params, "command")?;
@@ -324,6 +358,9 @@ mod tests {
             .and_then(|v| v.as_dict())
             .expect("operations dict");
         assert!(operations.get("read_text").is_some());
+        assert!(operations.get("file_exists").is_some());
         assert!(operations.get("list").is_some());
+        assert!(operations.get("project_root").is_some());
+        assert!(operations.get("roots").is_some());
     }
 }

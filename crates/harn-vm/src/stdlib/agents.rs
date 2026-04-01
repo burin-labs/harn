@@ -1554,7 +1554,8 @@ struct UsageSnapshot {
 }
 
 fn llm_usage_snapshot() -> UsageSnapshot {
-    let (input_tokens, output_tokens, total_duration_ms, call_count) = crate::llm::peek_trace_summary();
+    let (input_tokens, output_tokens, total_duration_ms, call_count) =
+        crate::llm::peek_trace_summary();
     let total_cost = crate::llm::cost::peek_total_cost();
     let trace_len = crate::llm::peek_trace().len();
     UsageSnapshot {

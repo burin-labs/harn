@@ -100,32 +100,36 @@ this limit the formatter wraps it automatically:
 
 ## harn lint
 
-Lint a `.harn` file for common issues (unused variables, unreachable code,
-empty blocks, missing `///` HarnDoc on public functions, etc.).
+Lint one or more `.harn` files or directories for common issues (unused
+variables, unreachable code, empty blocks, missing `///` HarnDoc on public
+functions, etc.).
 
 ```bash
 harn lint main.harn
+harn lint src/ tests/
 ```
 
 ## harn check
 
-Type-check a `.harn` file and run preflight validation without executing it.
-The preflight pass resolves imports, checks literal `render(...)` targets,
-detects import symbol collisions across modules, validates `host_invoke(...)`
-capability/operation pairs, and flags missing template resources, execution
-directories, and worker repos that would otherwise fail only at runtime.
-Source-aware lint rules run as part of `check`, including the `missing-harndoc`
-warning for undocumented `pub fn` APIs.
+Type-check one or more `.harn` files or directories and run preflight
+validation without executing them. The preflight pass resolves imports, checks
+literal `render(...)` targets, detects import symbol collisions across
+modules, validates `host_invoke(...)` capability/operation pairs, and flags
+missing template resources, execution directories, and worker repos that would
+otherwise fail only at runtime. Source-aware lint rules run as part of
+`check`, including the `missing-harndoc` warning for undocumented `pub fn`
+APIs.
 
 ```bash
 harn check main.harn
+harn check src/ tests/
 harn check --host-capabilities host-capabilities.json main.harn
 harn check --bundle-root .bundle main.harn
 ```
 
 | Flag | Description |
 |---|---|
-| `--host-capabilities <file>` | Load extra host capability/operation pairs for preflight validation |
+| `--host-capabilities <file>` | Load a host capability manifest for preflight validation. Supports plain `{capability: [ops...]}` objects, nested `{capabilities: ...}` wrappers, and per-op metadata dictionaries. |
 | `--bundle-root <dir>` | Validate `render(...)` and template paths against an alternate bundled layout root |
 
 ## harn init

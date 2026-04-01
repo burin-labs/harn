@@ -9,6 +9,18 @@ use harn_parser::{DiagnosticSeverity, Node, SNode, TypeChecker};
 use crate::package::CheckConfig;
 use crate::parse_source_file;
 
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct CommandOutcome {
+    pub has_error: bool,
+    pub has_warning: bool,
+}
+
+impl CommandOutcome {
+    pub(crate) fn should_fail(self, strict: bool) -> bool {
+        self.has_error || (strict && self.has_warning)
+    }
+}
+
 fn print_lint_diagnostics(path: &str, diagnostics: &[harn_lint::LintDiagnostic]) -> bool {
     let mut has_error = false;
     for diag in diagnostics {
@@ -30,8 +42,9 @@ fn print_lint_diagnostics(path: &str, diagnostics: &[harn_lint::LintDiagnostic])
     has_error
 }
 
-pub(crate) fn check_file(path: &str, config: &CheckConfig) {
-    let (source, program) = parse_source_file(path);
+pub(crate) fn check_file_inner(path: &Path, config: &CheckConfig) -> CommandOutcome {
+    let path_str = path.to_string_lossy().to_string();
+    let (source, program) = parse_source_file(&path_str);
 
     let mut has_error = false;
     let mut has_warning = false;
@@ -54,7 +67,7 @@ pub(crate) fn check_file(path: &str, config: &CheckConfig) {
         if let Some(span) = &diag.span {
             let rendered = harn_parser::diagnostic::render_diagnostic(
                 &source,
-                path,
+                &path_str,
                 span,
                 severity,
                 &diag.message,
@@ -77,12 +90,11 @@ pub(crate) fn check_file(path: &str, config: &CheckConfig) {
     {
         has_warning = true;
     }
-    if print_lint_diagnostics(path, &lint_diagnostics) {
+    if print_lint_diagnostics(&path_str, &lint_diagnostics) {
         has_error = true;
     }
 
-    let preflight_diagnostics =
-        collect_preflight_diagnostics(Path::new(path), &source, &program, config);
+    let preflight_diagnostics = collect_preflight_diagnostics(path, &source, &program, config);
     for diag in &preflight_diagnostics {
         has_error = true;
         diagnostic_count += 1;
@@ -99,32 +111,35 @@ pub(crate) fn check_file(path: &str, config: &CheckConfig) {
     }
 
     if diagnostic_count == 0 {
-        println!("{path}: ok");
+        println!("{path_str}: ok");
     }
 
-    if has_error || (config.strict && has_warning) {
-        process::exit(1);
+    CommandOutcome {
+        has_error,
+        has_warning,
     }
 }
 
-pub(crate) fn lint_file(path: &str, config: &CheckConfig) {
-    let (source, program) = parse_source_file(path);
+pub(crate) fn lint_file_inner(path: &Path, config: &CheckConfig) -> CommandOutcome {
+    let path_str = path.to_string_lossy().to_string();
+    let (source, program) = parse_source_file(&path_str);
 
     let diagnostics =
         harn_lint::lint_with_config_and_source(&program, &config.disable_rules, Some(&source));
 
     if diagnostics.is_empty() {
-        println!("{path}: no issues found");
-        return;
+        println!("{path_str}: no issues found");
+        return CommandOutcome::default();
     }
 
     let has_warning = diagnostics
         .iter()
         .any(|d| d.severity == LintSeverity::Warning);
-    let has_error = print_lint_diagnostics(path, &diagnostics);
+    let has_error = print_lint_diagnostics(&path_str, &diagnostics);
 
-    if has_error || (config.strict && has_warning) {
-        process::exit(1);
+    CommandOutcome {
+        has_error,
+        has_warning,
     }
 }
 
@@ -169,6 +184,21 @@ fn collect_harn_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) 
             }
         }
     }
+}
+
+pub(crate) fn collect_harn_targets(targets: &[&str]) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    for target in targets {
+        let path = Path::new(target);
+        if path.is_dir() {
+            collect_harn_files(path, &mut files);
+        } else {
+            files.push(path.to_path_buf());
+        }
+    }
+    files.sort();
+    files.dedup();
+    files
 }
 
 /// Format a single file. Returns true on success, false on error.
@@ -1300,7 +1330,10 @@ fn default_host_capabilities() -> HashMap<String, HashSet<String>> {
                 "apply_edit".to_string(),
                 "delete".to_string(),
                 "exists".to_string(),
+                "file_exists".to_string(),
                 "list".to_string(),
+                "project_root".to_string(),
+                "roots".to_string(),
             ]),
         ),
         ("process".to_string(), HashSet::from(["exec".to_string()])),
@@ -1311,6 +1344,52 @@ fn default_host_capabilities() -> HashMap<String, HashSet<String>> {
         (
             "interaction".to_string(),
             HashSet::from(["ask".to_string()]),
+        ),
+        (
+            "runtime".to_string(),
+            HashSet::from([
+                "approved_plan".to_string(),
+                "dry_run".to_string(),
+                "pipeline_input".to_string(),
+                "record_run".to_string(),
+                "set_result".to_string(),
+                "task".to_string(),
+            ]),
+        ),
+        (
+            "project".to_string(),
+            HashSet::from([
+                "agent_instructions".to_string(),
+                "code_patterns".to_string(),
+                "ide_context".to_string(),
+                "lessons".to_string(),
+                "mcp_config".to_string(),
+                "scan".to_string(),
+                "test_commands".to_string(),
+            ]),
+        ),
+        (
+            "editor".to_string(),
+            HashSet::from([
+                "get_active_file".to_string(),
+                "get_selection".to_string(),
+                "get_visible_files".to_string(),
+            ]),
+        ),
+        (
+            "diagnostics".to_string(),
+            HashSet::from(["get_causal_traces".to_string(), "get_errors".to_string()]),
+        ),
+        (
+            "git".to_string(),
+            HashSet::from(["get_branch".to_string(), "get_diff".to_string()]),
+        ),
+        (
+            "learning".to_string(),
+            HashSet::from([
+                "get_learned_rules".to_string(),
+                "report_correction".to_string(),
+            ]),
         ),
     ])
 }
@@ -1705,6 +1784,63 @@ pipeline main() {
             diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn preflight_accepts_workspace_project_root_and_file_exists_ops() {
+        let dir = unique_temp_dir("harn-check-host-workspace");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("main.harn");
+        let source = r#"
+pipeline main() {
+  host_invoke("workspace", "project_root", {})
+  host_invoke("workspace", "file_exists", {path: "x.txt"})
+}
+"#;
+        let program = parse_program(source);
+        let diagnostics =
+            collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+        assert!(
+            diagnostics
+                .iter()
+                .all(|d| !d.message.contains("unknown host capability")),
+            "unexpected host cap diagnostic: {:?}",
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn collect_harn_targets_recurses_directories_and_deduplicates() {
+        let dir = unique_temp_dir("harn-check-targets");
+        std::fs::create_dir_all(dir.join("nested")).unwrap();
+        std::fs::write(dir.join("a.harn"), "pipeline a() {}\n").unwrap();
+        std::fs::write(dir.join("nested").join("b.harn"), "pipeline b() {}\n").unwrap();
+        std::fs::write(dir.join("nested").join("ignore.txt"), "x\n").unwrap();
+
+        let target_dir = dir.display().to_string();
+        let target_file = dir.join("a.harn").display().to_string();
+        let files = collect_harn_targets(&[target_dir.as_str(), target_file.as_str()]);
+
+        assert_eq!(files.len(), 2);
+        assert!(files.contains(&dir.join("a.harn")));
+        assert!(files.contains(&dir.join("nested").join("b.harn")));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn parse_host_capability_value_accepts_top_level_object_schema() {
+        let value = serde_json::json!({
+            "workspace": ["project_root", "file_exists"],
+            "runtime": {
+                "operations": ["task", "pipeline_input"]
+            }
+        });
+        let parsed = parse_host_capability_value(&value);
+        assert!(parsed["workspace"].contains("project_root"));
+        assert!(parsed["workspace"].contains("file_exists"));
+        assert!(parsed["runtime"].contains("task"));
+        assert!(parsed["runtime"].contains("pipeline_input"));
     }
 
     #[test]

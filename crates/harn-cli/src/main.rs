@@ -97,48 +97,76 @@ async fn main() {
             }
         }
         "check" => {
-            let flag_vals: std::collections::HashSet<&str> = args
-                .windows(2)
-                .filter(|w| w[0] == "--host-capabilities" || w[0] == "--bundle-root")
-                .map(|w| w[1].as_str())
+            let host_capabilities = flag_value(&args, "--host-capabilities");
+            let bundle_root = flag_value(&args, "--bundle-root");
+            let mut skip_next = false;
+            let targets: Vec<&str> = args
+                .iter()
+                .skip(2)
+                .filter(|a| {
+                    if skip_next {
+                        skip_next = false;
+                        return false;
+                    }
+                    if *a == "--host-capabilities" || *a == "--bundle-root" {
+                        skip_next = true;
+                        return false;
+                    }
+                    !a.starts_with("--")
+                })
+                .map(|s| s.as_str())
                 .collect();
-            let file = args.iter().skip(2).find(|a| {
-                (a.ends_with(".harn") || !a.starts_with("--")) && !flag_vals.contains(a.as_str())
-            });
-            match file {
-                Some(f) => {
-                    let mut config =
-                        package::load_check_config(Some(std::path::Path::new(f.as_str())));
-                    if let Some(path) = flag_value(&args, "--host-capabilities") {
-                        config.host_capabilities_path = Some(path);
-                    }
-                    if let Some(path) = flag_value(&args, "--bundle-root") {
-                        config.bundle_root = Some(path);
-                    }
-                    commands::check::check_file(f, &config);
+            if targets.is_empty() {
+                eprintln!(
+                    "Usage: harn check [--host-capabilities <file>] [--bundle-root <dir>] <file.harn|dir> [...]"
+                );
+                process::exit(1);
+            }
+            let files = commands::check::collect_harn_targets(&targets);
+            if files.is_empty() {
+                eprintln!("No .harn files found");
+                process::exit(1);
+            }
+            let mut should_fail = false;
+            for file in &files {
+                let mut config = package::load_check_config(Some(file));
+                if let Some(path) = host_capabilities.as_ref() {
+                    config.host_capabilities_path = Some(path.clone());
                 }
-                None => {
-                    eprintln!(
-                        "Usage: harn check [--host-capabilities <file>] [--bundle-root <dir>] <file.harn>"
-                    );
-                    process::exit(1);
+                if let Some(path) = bundle_root.as_ref() {
+                    config.bundle_root = Some(path.clone());
                 }
+                let outcome = commands::check::check_file_inner(file, &config);
+                should_fail |= outcome.should_fail(config.strict);
+            }
+            if should_fail {
+                process::exit(1);
             }
         }
         "lint" => {
-            let file = args
+            let targets: Vec<&str> = args
                 .iter()
                 .skip(2)
-                .find(|a| a.ends_with(".harn") || !a.starts_with("--"));
-            match file {
-                Some(f) => {
-                    let config = package::load_check_config(Some(std::path::Path::new(f.as_str())));
-                    commands::check::lint_file(f, &config);
-                }
-                None => {
-                    eprintln!("Usage: harn lint <file.harn>");
-                    process::exit(1);
-                }
+                .filter(|a| !a.starts_with("--"))
+                .map(|s| s.as_str())
+                .collect();
+            if targets.is_empty() {
+                eprintln!("Usage: harn lint <file.harn|dir> [...]");
+                process::exit(1);
+            }
+            let files = commands::check::collect_harn_targets(&targets);
+            if files.is_empty() {
+                eprintln!("No .harn files found");
+                process::exit(1);
+            }
+            let mut should_fail = false;
+            for file in &files {
+                let config = package::load_check_config(Some(file));
+                let outcome = commands::check::lint_file_inner(file, &config);
+                should_fail |= outcome.should_fail(config.strict);
+            }
+            if should_fail {
+                process::exit(1);
             }
         }
         "fmt" => {

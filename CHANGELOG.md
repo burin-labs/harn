@@ -2,6 +2,39 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.9
+
+### Added
+
+- **Reusable typed host wrappers in `std/project`** — added
+  `workspace_roots(...)`, `workspace_read_text(...)`,
+  `workspace_write_text(...)`, `workspace_apply_edit(...)`,
+  `workspace_delete(...)`, `workspace_list(...)`,
+  `workspace_exists(...)`, `workspace_file_exists(...)`,
+  `process_exec(...)`, and `interaction_ask(...)` so hosts can share one
+  portable adapter surface instead of redefining generic workspace/process
+  helpers in host-local modules.
+- **Richer run-record metadata handoff** — `record_run_metadata(...)` now
+  forwards usage totals, transcript counts, summary text, and persisted-path
+  metadata alongside workflow/status fields so host bridges can adopt session
+  cost and continuity UIs without re-deriving that data from raw traces.
+- **Linux ARM64 release assets** — the GitHub release workflow now builds and
+  packages `aarch64-unknown-linux-gnu` tarballs alongside the existing macOS
+  and Linux x64 artifacts.
+
+### Changed
+
+- **`harn check` and `harn lint` now operate on multiple files/directories** —
+  the CLI now matches `harn fmt` target semantics, recursively collecting
+  `.harn` files from directories and aggregating failures across all targets.
+- **Host-capability preflight aligns with typed host integrations** — the
+  checker now recognizes the common workspace/runtime/project/editor/git/
+  diagnostics/learning capability families and fully honors external
+  host-capability manifests for multi-file validation.
+- **ACP and local host manifests are more consistent** — workspace capability
+  aliases such as `file_exists` and `project_root` now round-trip through the
+  local VM host adapter, ACP manifest reporting, and `host_has(...)` checks.
+
 ## v0.5.8
 
 ### Added
