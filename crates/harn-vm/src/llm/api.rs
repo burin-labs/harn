@@ -72,6 +72,60 @@ pub(crate) struct LlmCallOptions {
     pub provider_overrides: Option<serde_json::Value>,
 }
 
+/// Send-safe subset of `LlmCallOptions` used for provider transport.
+#[derive(Clone, Debug)]
+pub(crate) struct LlmRequestPayload {
+    pub provider: String,
+    pub model: String,
+    pub api_key: String,
+    pub messages: Vec<serde_json::Value>,
+    pub system: Option<String>,
+    pub max_tokens: i64,
+    pub temperature: Option<f64>,
+    pub top_p: Option<f64>,
+    pub top_k: Option<i64>,
+    pub stop: Option<Vec<String>>,
+    pub seed: Option<i64>,
+    pub frequency_penalty: Option<f64>,
+    pub presence_penalty: Option<f64>,
+    pub response_format: Option<String>,
+    pub json_schema: Option<serde_json::Value>,
+    pub thinking: Option<ThinkingConfig>,
+    pub native_tools: Option<Vec<serde_json::Value>>,
+    pub tool_choice: Option<serde_json::Value>,
+    pub cache: bool,
+    pub timeout: Option<u64>,
+    pub provider_overrides: Option<serde_json::Value>,
+}
+
+impl From<&LlmCallOptions> for LlmRequestPayload {
+    fn from(opts: &LlmCallOptions) -> Self {
+        Self {
+            provider: opts.provider.clone(),
+            model: opts.model.clone(),
+            api_key: opts.api_key.clone(),
+            messages: opts.messages.clone(),
+            system: opts.system.clone(),
+            max_tokens: opts.max_tokens,
+            temperature: opts.temperature,
+            top_p: opts.top_p,
+            top_k: opts.top_k,
+            stop: opts.stop.clone(),
+            seed: opts.seed,
+            frequency_penalty: opts.frequency_penalty,
+            presence_penalty: opts.presence_penalty,
+            response_format: opts.response_format.clone(),
+            json_schema: opts.json_schema.clone(),
+            thinking: opts.thinking.clone(),
+            native_tools: opts.native_tools.clone(),
+            tool_choice: opts.tool_choice.clone(),
+            cache: opts.cache,
+            timeout: opts.timeout,
+            provider_overrides: opts.provider_overrides.clone(),
+        }
+    }
+}
+
 // =============================================================================
 // LLM response type
 // =============================================================================
@@ -183,6 +237,25 @@ pub(crate) async fn vm_call_llm_full_streaming(
     vm_call_llm_full_inner(opts, Some(delta_tx)).await
 }
 
+/// Execute provider I/O on Tokio's multithreaded scheduler while keeping
+/// VM-local values and transcript assembly on the caller's LocalSet.
+pub(crate) async fn vm_call_llm_full_streaming_offthread(
+    opts: &LlmCallOptions,
+    delta_tx: DeltaSender,
+) -> Result<LlmResult, VmError> {
+    let request = LlmRequestPayload::from(opts);
+    tokio::task::spawn(
+        async move { vm_call_llm_full_inner_offthread(&request, Some(delta_tx)).await },
+    )
+    .await
+    .map_err(|join_err| {
+        VmError::Thrown(VmValue::String(Rc::from(format!(
+            "llm_call background task failed: {join_err}"
+        ))))
+    })?
+    .map_err(|message| VmError::Thrown(VmValue::String(Rc::from(message))))
+}
+
 /// Execute a text completion / fill-in-the-middle call owned by Harn.
 pub(crate) async fn vm_call_completion_full(
     opts: &LlmCallOptions,
@@ -207,17 +280,25 @@ async fn vm_call_llm_full_inner(
     opts: &LlmCallOptions,
     delta_tx: Option<DeltaSender>,
 ) -> Result<LlmResult, VmError> {
+    let request = LlmRequestPayload::from(opts);
+    vm_call_llm_full_inner_request(&request, delta_tx).await
+}
+
+async fn vm_call_llm_full_inner_request(
+    request: &LlmRequestPayload,
+    delta_tx: Option<DeltaSender>,
+) -> Result<LlmResult, VmError> {
     // Mock provider: return deterministic response without API call.
-    if opts.provider == "mock" {
+    if request.provider == "mock" {
         return Ok(mock_llm_response(
-            &opts.messages,
-            opts.system.as_deref(),
-            opts.native_tools.as_deref(),
+            &request.messages,
+            request.system.as_deref(),
+            request.native_tools.as_deref(),
         ));
     }
 
     let replay_mode = get_replay_mode();
-    let hash = fixture_hash(&opts.model, &opts.messages, opts.system.as_deref());
+    let hash = fixture_hash(&request.model, &request.messages, request.system.as_deref());
 
     // In replay mode, return cached fixture
     if replay_mode == LlmReplayMode::Replay {
@@ -231,43 +312,23 @@ async fn vm_call_llm_full_inner(
 
     eprintln!(
         "[llm-debug] Starting API call provider={} model={}",
-        opts.provider, opts.model
+        request.provider, request.model
     );
-    let result = vm_call_llm_api(opts, delta_tx).await;
+    let result = vm_call_llm_api(request, delta_tx).await;
     eprintln!(
         "[llm-debug] API call finished provider={} model={} ok={}",
-        opts.provider,
-        opts.model,
+        request.provider,
+        request.model,
         result.is_ok()
     );
 
-    // On failure, check for provider fallback chain
-    let result = match result {
-        Ok(r) => r,
-        Err(primary_err) => {
-            if let Some(pdef) = crate::llm_config::provider_config(&opts.provider) {
-                if let Some(ref fallback_provider) = pdef.fallback {
-                    let fb_key =
-                        super::helpers::vm_resolve_api_key(fallback_provider).unwrap_or_default();
-                    if !fb_key.is_empty() {
-                        let mut fb_opts = opts.clone();
-                        fb_opts.provider = fallback_provider.clone();
-                        fb_opts.api_key = fb_key;
-                        let fb_result = vm_call_llm_api(&fb_opts, None).await;
-                        match fb_result {
-                            Ok(r) => r,
-                            Err(_) => return Err(primary_err),
-                        }
-                    } else {
-                        return Err(primary_err);
-                    }
-                } else {
-                    return Err(primary_err);
-                }
-            } else {
-                return Err(primary_err);
-            }
-        }
+    // On failure, check for provider fallback chain without carrying the VM
+    // error across the off-thread await boundary.
+    let primary_message = result.as_ref().err().map(ToString::to_string);
+    let result = match (result, primary_message) {
+        (Ok(r), _) => r,
+        (Err(_), Some(message)) => fallback_or_primary_error(request, message).await?,
+        (Err(_), None) => unreachable!("error branch must capture a message"),
     };
 
     // In record mode, save the fixture
@@ -279,6 +340,94 @@ async fn vm_call_llm_full_inner(
     super::cost::accumulate_cost(&result.model, result.input_tokens, result.output_tokens)?;
 
     Ok(result)
+}
+
+async fn vm_call_llm_full_inner_offthread(
+    request: &LlmRequestPayload,
+    delta_tx: Option<DeltaSender>,
+) -> Result<LlmResult, String> {
+    if request.provider == "mock" {
+        return Ok(mock_llm_response(
+            &request.messages,
+            request.system.as_deref(),
+            request.native_tools.as_deref(),
+        ));
+    }
+
+    let replay_mode = get_replay_mode();
+    let hash = fixture_hash(&request.model, &request.messages, request.system.as_deref());
+
+    if replay_mode == LlmReplayMode::Replay {
+        return load_fixture(&hash).ok_or_else(|| {
+            format!("No fixture found for LLM call (hash: {hash}). Run with --record first.")
+        });
+    }
+
+    let result = vm_call_llm_api(request, delta_tx)
+        .await
+        .map_err(|err| err.to_string());
+    let result = match result {
+        Ok(result) => result,
+        Err(message) => fallback_or_primary_message(request, message).await?,
+    };
+
+    if replay_mode == LlmReplayMode::Record {
+        save_fixture(&hash, &result);
+    }
+
+    super::cost::accumulate_cost(&result.model, result.input_tokens, result.output_tokens)
+        .map_err(|err| err.to_string())?;
+
+    Ok(result)
+}
+
+async fn fallback_or_primary_error(
+    request: &LlmRequestPayload,
+    primary_message: String,
+) -> Result<LlmResult, VmError> {
+    let Some(pdef) = crate::llm_config::provider_config(&request.provider) else {
+        return Err(VmError::Thrown(VmValue::String(Rc::from(primary_message))));
+    };
+    let Some(ref fallback_provider) = pdef.fallback else {
+        return Err(VmError::Thrown(VmValue::String(Rc::from(primary_message))));
+    };
+
+    let fb_key = super::helpers::vm_resolve_api_key(fallback_provider).unwrap_or_default();
+    if fb_key.is_empty() {
+        return Err(VmError::Thrown(VmValue::String(Rc::from(primary_message))));
+    }
+
+    let mut fb_request = request.clone();
+    fb_request.provider = fallback_provider.clone();
+    fb_request.api_key = fb_key;
+    match vm_call_llm_api(&fb_request, None).await {
+        Ok(result) => Ok(result),
+        Err(_) => Err(VmError::Thrown(VmValue::String(Rc::from(primary_message)))),
+    }
+}
+
+async fn fallback_or_primary_message(
+    request: &LlmRequestPayload,
+    primary_message: String,
+) -> Result<LlmResult, String> {
+    let Some(pdef) = crate::llm_config::provider_config(&request.provider) else {
+        return Err(primary_message);
+    };
+    let Some(ref fallback_provider) = pdef.fallback else {
+        return Err(primary_message);
+    };
+
+    let fb_key = super::helpers::vm_resolve_api_key(fallback_provider).unwrap_or_default();
+    if fb_key.is_empty() {
+        return Err(primary_message);
+    }
+
+    let mut fb_request = request.clone();
+    fb_request.provider = fallback_provider.clone();
+    fb_request.api_key = fb_key;
+    vm_call_llm_api(&fb_request, None)
+        .await
+        .map_err(|_| primary_message)
 }
 
 fn mock_completion_response(prefix: &str, suffix: Option<&str>) -> LlmResult {
@@ -632,7 +781,7 @@ fn normalize_openai_style_messages(
 }
 
 async fn vm_call_llm_api(
-    opts: &LlmCallOptions,
+    opts: &LlmRequestPayload,
     delta_tx: Option<DeltaSender>,
 ) -> Result<LlmResult, VmError> {
     let provider = &opts.provider;
@@ -1309,4 +1458,157 @@ async fn vm_call_llm_api_ndjson_from_response(
         stop_reason: None,
         blocks,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{vm_call_llm_full_streaming_offthread, LlmCallOptions, LlmRequestPayload};
+    use crate::value::VmValue;
+    use std::rc::Rc;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn base_opts(provider: &str) -> LlmCallOptions {
+        LlmCallOptions {
+            provider: provider.to_string(),
+            model: "test-model".to_string(),
+            api_key: String::new(),
+            messages: vec![serde_json::json!({"role": "user", "content": "hello"})],
+            system: None,
+            transcript_id: Some("tx-1".to_string()),
+            transcript_summary: Some("summary".to_string()),
+            transcript_metadata: Some(serde_json::json!({"scope": "test"})),
+            max_tokens: 64,
+            temperature: Some(0.2),
+            top_p: Some(0.8),
+            top_k: Some(40),
+            stop: Some(vec!["STOP".to_string()]),
+            seed: Some(7),
+            frequency_penalty: Some(0.1),
+            presence_penalty: Some(0.2),
+            response_format: Some("json".to_string()),
+            json_schema: Some(serde_json::json!({"type": "object"})),
+            output_schema: Some(serde_json::json!({"type": "object"})),
+            output_validation: Some("error".to_string()),
+            thinking: None,
+            tools: Some(VmValue::String(Rc::from("vm-local-tools"))),
+            native_tools: Some(vec![
+                serde_json::json!({"type": "function", "function": {"name": "tool"}}),
+            ]),
+            tool_choice: Some(serde_json::json!({
+                "type": "function",
+                "function": {"name": "tool"}
+            })),
+            cache: true,
+            timeout: Some(5),
+            provider_overrides: Some(serde_json::json!({"custom_flag": true})),
+        }
+    }
+
+    fn assert_send<T: Send>() {}
+
+    #[test]
+    fn request_payload_is_send_safe_and_drops_vm_local_fields() {
+        let payload = LlmRequestPayload::from(&base_opts("openai"));
+        assert_send::<LlmRequestPayload>();
+        assert_eq!(payload.provider, "openai");
+        assert_eq!(payload.model, "test-model");
+        assert!(payload.native_tools.is_some());
+        assert!(payload.tool_choice.is_some());
+        assert_eq!(
+            payload.provider_overrides,
+            Some(serde_json::json!({"custom_flag": true}))
+        );
+    }
+
+    fn spawn_ollama_stub() -> (std::net::SocketAddr, std::thread::JoinHandle<()>) {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind ollama stub");
+        let addr = listener.local_addr().expect("stub addr");
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept request");
+            let mut buf = vec![0u8; 8192];
+            let n = stream.read(&mut buf).expect("read request");
+            let request = String::from_utf8_lossy(&buf[..n]);
+            assert!(request.starts_with("POST /api/chat HTTP/1.1\r\n"));
+
+            let body = concat!(
+                "{\"message\":{\"role\":\"assistant\",\"content\":\"hello \"},\"done\":false,\"model\":\"stub-model\"}\n",
+                "{\"message\":{\"role\":\"assistant\",\"content\":\"world\"},\"done\":false}\n",
+                "{\"done\":true,\"prompt_eval_count\":3,\"eval_count\":2,\"model\":\"stub-model\"}\n"
+            );
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/x-ndjson\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("write response");
+        });
+        (addr, handle)
+    }
+
+    #[test]
+    fn offthread_streaming_completes_inside_localset() {
+        let _guard = env_lock().lock().expect("env lock");
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .worker_threads(2)
+            .build()
+            .expect("runtime");
+
+        runtime.block_on(async {
+            let (addr, server) = spawn_ollama_stub();
+            let prev_ollama_host = std::env::var("OLLAMA_HOST").ok();
+            unsafe {
+                std::env::set_var("OLLAMA_HOST", format!("http://{addr}"));
+            }
+
+            let local = tokio::task::LocalSet::new();
+            let result = local
+                .run_until(async {
+                    let opts = base_opts("ollama");
+                    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+                    let result = tokio::time::timeout(
+                        std::time::Duration::from_secs(5),
+                        vm_call_llm_full_streaming_offthread(&opts, tx),
+                    )
+                    .await
+                    .expect("llm call timed out")
+                    .expect("llm call should succeed");
+
+                    let mut deltas = Vec::new();
+                    while let Ok(delta) = rx.try_recv() {
+                        deltas.push(delta);
+                    }
+                    (result, deltas)
+                })
+                .await;
+
+            match prev_ollama_host {
+                Some(value) => unsafe {
+                    std::env::set_var("OLLAMA_HOST", value);
+                },
+                None => unsafe {
+                    std::env::remove_var("OLLAMA_HOST");
+                },
+            }
+
+            server.join().expect("stub server");
+
+            let (result, deltas) = result;
+            assert_eq!(result.text, "hello world");
+            assert_eq!(result.model, "stub-model");
+            assert_eq!(result.input_tokens, 3);
+            assert_eq!(result.output_tokens, 2);
+            assert_eq!(deltas.join(""), "hello world");
+        });
+    }
 }

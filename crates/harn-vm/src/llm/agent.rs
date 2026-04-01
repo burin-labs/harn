@@ -3,7 +3,7 @@ use std::rc::Rc;
 use crate::value::{ErrorCategory, VmError};
 use crate::vm::Vm;
 
-use super::api::{vm_call_llm_full_streaming, DeltaSender};
+use super::api::{vm_call_llm_full_streaming, vm_call_llm_full_streaming_offthread, DeltaSender};
 use super::helpers::{
     extract_llm_options, opt_bool, opt_int, opt_str, transcript_event, transcript_to_vm_with_events,
 };
@@ -975,7 +975,7 @@ pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Host
 
             let start = std::time::Instant::now();
             let delta_tx = spawn_progress_forwarder(&bridge, call_id.clone());
-            let llm_result = vm_call_llm_full_streaming(&opts, delta_tx).await;
+            let llm_result = vm_call_llm_full_streaming_offthread(&opts, delta_tx).await;
             let duration_ms = start.elapsed().as_millis() as u64;
             let result = match llm_result {
                 Ok(r) => r,

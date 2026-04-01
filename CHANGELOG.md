@@ -2,6 +2,25 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.16
+
+### Changed
+
+- **ACP bridge `llm_call` no longer runs provider I/O on the LocalSet** —
+  bridge-aware LLM calls now split VM-local options from a Send-safe transport
+  payload and execute the actual HTTP/TLS request on Tokio's multithreaded
+  scheduler before returning to the LocalSet for transcript assembly and host
+  notifications. This fixes the nested ACP sub-VM hang against cloud HTTPS
+  providers while preserving the existing bridge event model.
+- **The LLM transport boundary is now explicit and testable** — added a
+  dedicated `LlmRequestPayload` transport struct plus a LocalSet regression
+  test that drives an Ollama-style streaming response through the off-thread
+  path, so this scheduling bug is pinned down by executable coverage instead of
+  a local repro only.
+- **`harn-vm` explicitly enables Tokio's multithread runtime** — the VM crate
+  now declares `rt-multi-thread` in its Tokio feature set so the same runtime
+  topology used by ACP is available in verification and release builds.
+
 ## v0.5.15
 
 ### Changed
