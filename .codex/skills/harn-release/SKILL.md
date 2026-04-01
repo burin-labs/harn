@@ -8,7 +8,7 @@ version bump, tagging, release notes prep, or crates publish flow.
 Always prefer the repo command:
 
 ```bash
-./scripts/release_gate.sh <audit|prepare|publish|full> ...
+./scripts/release_gate.sh <audit|prepare|publish|notes|full> ...
 ```
 
 Do not re-invent the release ritual from memory if the script can do it.
@@ -25,7 +25,9 @@ Do not re-invent the release ritual from memory if the script can do it.
 4. If the user wants publication, run
    `./scripts/release_gate.sh publish --dry-run` first unless they explicitly
    ask for real publish immediately.
-5. For an all-in-one dry run, use:
+5. Before tagging or creating the GitHub release, render the changelog-backed
+   release body with `./scripts/release_gate.sh notes`.
+6. For an all-in-one dry run, use:
 
 ```bash
 ./scripts/release_gate.sh full --bump patch --dry-run
@@ -49,4 +51,7 @@ Do not re-invent the release ritual from memory if the script can do it.
 ## Notes
 
 - `scripts/publish.sh` remains the crates.io publisher.
+- `CHANGELOG.md` is the release-language source of truth. Use
+  `scripts/render_release_notes.py` or `./scripts/release_gate.sh notes` to
+  produce the exact GitHub release body from it.
 - GitHub release artifacts are produced by the existing release workflow once the tag is pushed.

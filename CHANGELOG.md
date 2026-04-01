@@ -2,6 +2,46 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.12
+
+### Added
+
+- **Mutation-session audit metadata across the runtime** — workflow runs,
+  delegated workers, and bridge tool hooks now carry structured mutation
+  session context so hosts can group writes, approvals, and artifacts under a
+  coherent trust boundary.
+- **Executable release gate and publish ritual** — added
+  `scripts/release_gate.sh` plus reusable Codex wrappers so audit, version
+  bump, publish, tagging, and release prep follow one repo-native workflow.
+- **Language-spec verification loop** — added `scripts/verify_language_spec.py`
+  and `scripts/sync_language_spec.sh`, promoted `spec/HARN_SPEC.md` into the
+  release gate, and hosted the spec from the mdBook site via
+  `docs/src/language-spec.md`.
+- **Strict tree-sitter conformance sweep** — added
+  `scripts/verify_tree_sitter_parse.py` to run the positive `.harn` corpus
+  through the executable tree-sitter grammar as part of the final verification
+  loop.
+- **Layout-aware tree-sitter scanner** — added
+  `tree-sitter-harn/src/scanner.c` so multiline layout-sensitive constructs can
+  be parsed consistently in the editor grammar.
+
+### Changed
+
+- **Bridge and worker lifecycle payloads are richer and more host-friendly** —
+  worker updates now include structured lifecycle metadata, child-run linkage,
+  timing, snapshot paths, and mutation-session context instead of leaving hosts
+  to infer those details from logs.
+- **Tree-sitter grammar now handles multiline and postfix forms more
+  consistently** — fixed multiline calls, multiline operators, interpolated
+  strings, property/method postfix chains, and related recovery drift.
+- **Release notes can now be sourced from `CHANGELOG.md`** — the repo can
+  render version-specific GitHub release notes locally so the release page does
+  not depend on GitHub’s auto-generated summary.
+- **Security and host-boundary docs are more explicit** — documentation now
+  covers remote MCP OAuth implications, proposal-first write guidance,
+  worktree-first autonomous execution, and the division of responsibility
+  between Harn and host integrations such as Burin.
+
 ## v0.5.11
 
 ### Added

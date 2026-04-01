@@ -10,12 +10,14 @@ Usage:
   ./scripts/release_gate.sh audit
   ./scripts/release_gate.sh prepare --bump patch|minor|major
   ./scripts/release_gate.sh publish [--dry-run]
+  ./scripts/release_gate.sh notes [--version vX.Y.Z] [--output file]
   ./scripts/release_gate.sh full --bump patch|minor|major [--dry-run]
 
 Commands:
   audit    Run the release-quality verification gate and docs audit.
   prepare  Bump the workspace version locally and print next tag/release steps.
   publish  Publish crates with scripts/publish.sh and print tag/release follow-up.
+  notes    Render GitHub release notes for a version from CHANGELOG.md.
   full     Run audit, prepare, and publish in sequence.
 EOF
 }
@@ -233,7 +235,38 @@ cmd_publish() {
   echo "Follow-up:"
   echo "  git tag v$version"
   echo "  git push origin v$version"
-  echo "  Review generated GitHub release notes"
+  echo "  Review changelog-backed GitHub release notes"
+}
+
+cmd_notes() {
+  local version=""
+  local output=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --version)
+        version="${2:-}"
+        shift 2
+        ;;
+      --output)
+        output="${2:-}"
+        shift 2
+        ;;
+      *)
+        echo "error: unknown notes arg: $1"
+        usage
+        exit 1
+        ;;
+    esac
+  done
+  if [[ -z "$version" ]]; then
+    version="$(current_version)"
+  fi
+  if [[ -n "$output" ]]; then
+    python3 scripts/render_release_notes.py --version "$version" --output "$output"
+    echo "Rendered release notes for ${version#v} -> $output"
+  else
+    python3 scripts/render_release_notes.py --version "$version"
+  fi
 }
 
 cmd_full() {
@@ -273,6 +306,10 @@ case "${1:-}" in
   publish)
     shift
     cmd_publish "$@"
+    ;;
+  notes)
+    shift
+    cmd_notes "$@"
     ;;
   full)
     shift

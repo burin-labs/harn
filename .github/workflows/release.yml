@@ -68,8 +68,14 @@ jobs:
           path: artifacts
           merge-multiple: true
 
+      - name: Render release notes from changelog
+        run: |
+          python3 scripts/render_release_notes.py \
+            --version "${GITHUB_REF_NAME#v}" \
+            --output release-notes.md
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
         with:
-          generate_release_notes: true
+          body_path: release-notes.md
           files: artifacts/*.tar.gz
