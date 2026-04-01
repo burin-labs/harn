@@ -109,6 +109,16 @@ This creates a directory with `harn.toml` (project config) and
 harn run main.harn
 ```
 
+## Remote MCP quick start
+
+If you want to use a cloud MCP server such as Notion, authorize it once with
+the CLI and then reference it from `harn.toml`:
+
+```bash
+harn mcp redirect-uri
+harn mcp login https://mcp.notion.com/mcp --scope "read write"
+```
+
 ## Next steps
 
 - **[Why Harn?](./why-harn.md)** -- What problems Harn solves

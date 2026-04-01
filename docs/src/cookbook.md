@@ -163,6 +163,14 @@ pipeline default(task) {
 You can also declare MCP servers in `harn.toml` for automatic connection.
 See [MCP and ACP Integration](./mcp-and-acp.md) for details.
 
+For remote HTTP MCP servers, authorize once with the CLI and then reuse the
+stored token automatically from `harn.toml`:
+
+```bash
+harn mcp redirect-uri
+harn mcp login https://mcp.notion.com/mcp --scope "read write"
+```
+
 ## 5. Filtering with `in` and `not in`
 
 Use the `in` and `not in` operators to filter collections by membership.

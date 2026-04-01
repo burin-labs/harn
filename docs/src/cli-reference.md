@@ -217,6 +217,38 @@ harn mcp-serve agent.harn
 See [MCP and ACP Integration](./mcp-and-acp.md) for details on defining
 tools, resources, and prompts.
 
+## harn mcp
+
+Manage standalone OAuth state for remote HTTP MCP servers.
+
+```bash
+harn mcp redirect-uri
+harn mcp login notion
+harn mcp login https://mcp.notion.com/mcp
+harn mcp login my-server --url https://example.com/mcp --client-id <id> --client-secret <secret>
+harn mcp status notion
+harn mcp logout notion
+```
+
+`harn mcp login` resolves the server from the nearest `harn.toml` when you pass
+an MCP server name, or uses the explicit URL when you pass `--url` or a raw
+`https://...` target. The CLI:
+
+- discovers OAuth protected resource and authorization server metadata
+- prefers pre-registered `client_id` / `client_secret` values when supplied
+- falls back to dynamic client registration when supported by the server
+- stores tokens in the local OS keychain and refreshes them automatically
+
+Relevant flags:
+
+| Flag | Description |
+|---|---|
+| `--url <url>` | Explicit MCP server URL when logging in/out by a custom name |
+| `--client-id <id>` | Use a pre-registered client ID instead of dynamic registration |
+| `--client-secret <secret>` | Optional client secret for `client_secret_post` / `client_secret_basic` servers |
+| `--scope <scopes>` | Override or provide requested OAuth scopes |
+| `--redirect-uri <uri>` | Override the default loopback redirect URI (default shown by `harn mcp redirect-uri`) |
+
 ## harn add
 
 Add a dependency to `harn.toml`.

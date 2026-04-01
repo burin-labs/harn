@@ -5,6 +5,7 @@ use std::process;
 
 use harn_parser::DiagnosticSeverity;
 
+use crate::commands::mcp::{self, AuthResolution};
 use crate::package;
 use crate::parse_source_file;
 
@@ -167,7 +168,31 @@ async fn connect_mcp_servers(servers: &[package::McpServerConfig], vm: &mut harn
     let mut mcp_dict: BTreeMap<String, harn_vm::VmValue> = BTreeMap::new();
 
     for server in servers {
-        match harn_vm::connect_mcp_server(&server.name, &server.command, &server.args).await {
+        let resolved_auth = match mcp::resolve_auth_for_server(server).await {
+            Ok(resolution) => resolution,
+            Err(error) => {
+                eprintln!(
+                    "warning: mcp: failed to load auth for '{}': {}",
+                    server.name, error
+                );
+                AuthResolution::None
+            }
+        };
+        let spec = serde_json::json!({
+            "name": server.name,
+            "transport": server.transport.clone().unwrap_or_else(|| "stdio".to_string()),
+            "command": server.command,
+            "args": server.args,
+            "env": server.env,
+            "url": server.url,
+            "auth_token": match resolved_auth {
+                AuthResolution::Bearer(token) => Some(token),
+                AuthResolution::None => server.auth_token.clone(),
+            },
+            "protocol_version": server.protocol_version,
+            "proxy_server_name": server.proxy_server_name,
+        });
+        match harn_vm::connect_mcp_server_from_json(&spec).await {
             Ok(handle) => {
                 eprintln!("[harn] mcp: connected to '{}'", server.name);
                 mcp_dict.insert(server.name.clone(), harn_vm::VmValue::McpClient(handle));

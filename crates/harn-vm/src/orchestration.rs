@@ -2455,7 +2455,7 @@ pub async fn execute_stage_node(
                 nudge: None,
                 tool_retries: 0,
                 tool_backoff_ms: 1000,
-                tool_format: "native".to_string(),
+                tool_format: "text".to_string(),
                 auto_compact: None,
                 policy: None,
                 daemon: false,

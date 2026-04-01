@@ -5,7 +5,7 @@
 //! etc.).  Communication is JSON-RPC 2.0 over stdin/stdout, following the same
 //! structural pattern as the existing `--bridge` mode.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::Write;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -718,6 +718,11 @@ async fn execute_chunk(
         harn_vm::VmValue::String(Rc::from(cwd.to_string_lossy().as_ref())),
     );
 
+    let mcp_globals = load_host_mcp_clients(host_bridge.clone()).await;
+    if !mcp_globals.is_empty() {
+        vm.set_global("mcp", harn_vm::VmValue::Dict(Rc::new(mcp_globals)));
+    }
+
     // Register ACP-specific builtins that delegate file I/O to the editor.
     register_acp_builtins(&mut vm, bridge.clone());
 
@@ -743,6 +748,51 @@ async fn execute_chunk(
             Err(formatted)
         }
     }
+}
+
+async fn load_host_mcp_clients(
+    host_bridge: Rc<harn_vm::bridge::HostBridge>,
+) -> BTreeMap<String, harn_vm::VmValue> {
+    let mut mcp_dict = BTreeMap::new();
+    let response = match host_bridge
+        .call(
+            "host/invoke",
+            serde_json::json!({
+                "capability": "project",
+                "op": "mcp_config",
+                "args": {}
+            }),
+        )
+        .await
+    {
+        Ok(value) => value,
+        Err(err) => {
+            eprintln!("warning: mcp: failed to load host MCP config: {err}");
+            return mcp_dict;
+        }
+    };
+
+    let Some(servers) = response.as_array() else {
+        return mcp_dict;
+    };
+
+    for server in servers {
+        match harn_vm::connect_mcp_server_from_json(server).await {
+            Ok(handle) => {
+                eprintln!("[harn] mcp: connected to '{}'", handle.name);
+                mcp_dict.insert(handle.name.clone(), harn_vm::VmValue::McpClient(handle));
+            }
+            Err(err) => {
+                let name = server
+                    .get("name")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("unknown");
+                eprintln!("warning: mcp: failed to connect to '{}': {}", name, err);
+            }
+        }
+    }
+
+    mcp_dict
 }
 
 /// Register builtins that delegate to the ACP client (editor).

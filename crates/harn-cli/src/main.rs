@@ -345,6 +345,9 @@ async fn main() {
                 }
             }
         }
+        "mcp" => {
+            commands::mcp::handle_mcp_command(&args[2..]).await;
+        }
         "watch" => {
             if args.len() < 3 {
                 eprintln!("Usage: harn watch [--deny <builtins>] [--allow <builtins>] <file.harn>");
@@ -463,6 +466,7 @@ fn print_help() {
     println!("    \x1b[1;32mserve\x1b[0m [--port N] <file> Serve as an A2A agent over HTTP");
     println!("    \x1b[1;32macp\x1b[0m [file]              Start ACP server on stdio");
     println!("    \x1b[1;32mmcp-serve\x1b[0m <file>        Serve tools as MCP server on stdio");
+    println!("    \x1b[1;32mmcp\x1b[0m <subcommand>       Manage remote MCP OAuth tokens");
     println!("    \x1b[1;32mruns\x1b[0m inspect <file>    Inspect a persisted workflow run record");
     println!("    \x1b[1;32mreplay\x1b[0m <file>           Replay a saved run record from persisted output");
     println!(
@@ -495,6 +499,7 @@ fn print_help() {
     println!("    harn init my-project");
     println!("    harn fmt --check src/");
     println!("    harn check --host-capabilities burin-host.json agent.harn");
+    println!("    harn mcp login notion");
     println!("    harn runs inspect .harn-runs/<run>.json");
     println!();
     println!("Docs: \x1b[4;36mhttps://github.com/burin-labs/harn\x1b[0m");

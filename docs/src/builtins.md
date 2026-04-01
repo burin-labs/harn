@@ -791,8 +791,9 @@ from parents).
 ## MCP (Model Context Protocol)
 
 Connect to external tool servers using the
-[Model Context Protocol](https://modelcontextprotocol.io). Supports stdio
-transport (spawns a child process).
+[Model Context Protocol](https://modelcontextprotocol.io). Harn supports
+stdio transport (spawns a child process) and HTTP transport for remote
+MCP servers.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
@@ -853,8 +854,15 @@ Each entry requires:
 | Field | Type | Description |
 |---|---|---|
 | `name` | string | Identifier used to access the client (e.g., `mcp.filesystem`) |
-| `command` | string | Executable to spawn |
-| `args` | list of strings | Command-line arguments (default: empty) |
+| `command` | string | Executable to spawn for stdio transports |
+| `args` | list of strings | Command-line arguments for stdio transports (default: empty) |
+| `transport` | string | `stdio` (default) or `http` |
+| `url` | string | Remote MCP server URL for HTTP transports |
+| `auth_token` | string | Optional explicit bearer token for HTTP transports |
+| `client_id` | string | Optional pre-registered OAuth client ID for HTTP transports |
+| `client_secret` | string | Optional pre-registered OAuth client secret |
+| `scopes` | string | Optional OAuth scope string for login/consent |
+| `protocol_version` | string | Optional MCP protocol version override |
 
 The connected clients are available as properties on the `mcp` global dict:
 
@@ -872,6 +880,14 @@ If a server fails to connect, a warning is printed to stderr and that
 server is omitted from the `mcp` dict. Other servers still connect
 normally. The `mcp` global is only defined when at least one server
 connects successfully.
+
+For HTTP MCP servers, use the CLI to establish OAuth once and let Harn
+reuse the stored token automatically:
+
+```bash
+harn mcp redirect-uri
+harn mcp login notion
+```
 
 ### MCP Server Mode
 

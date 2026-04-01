@@ -39,6 +39,13 @@ harn run main.harn
 harn test tests/
 ```
 
+Remote MCP OAuth:
+
+```bash
+harn mcp redirect-uri
+harn mcp login https://mcp.notion.com/mcp
+```
+
 Simple LLM call:
 
 ```harn
@@ -146,6 +153,9 @@ println(result.visible_text)
 - ACP/bridge queued-user-message handling modes for agent execution:
   interrupt immediately, inject after the current operation, or defer until
   the agent yields back to the human.
+- Remote MCP over stdio and HTTP, including OAuth metadata discovery, stored
+  bearer tokens for standalone CLI use, and automatic token reuse for HTTP MCP
+  servers declared in `harn.toml`.
 - Runtime semantic cleanup for older surfaces: repeated `catch e { ... }`
   bindings now work within the same enclosing block, and float division keeps
   IEEE `NaN`/`Infinity` behavior instead of raising runtime errors.

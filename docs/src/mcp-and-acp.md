@@ -7,7 +7,8 @@ covers how to use each from both client and server perspectives.
 ## MCP Client (Connecting to MCP Servers)
 
 Connect to any MCP-compatible tool server, list its capabilities, and
-call tools from within a Harn program.
+call tools from within a Harn program. Harn supports both stdio MCP
+servers and remote HTTP MCP servers.
 
 ### Connecting manually
 
@@ -69,6 +70,12 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
 name = "github"
 command = "npx"
 args = ["-y", "@modelcontextprotocol/server-github"]
+
+[[mcp]]
+name = "notion"
+transport = "http"
+url = "https://mcp.notion.com/mcp"
+scopes = "read write"
 ```
 
 Use them in your pipeline:
@@ -84,6 +91,29 @@ pipeline default(task) {
 If a server fails to connect, a warning is printed to stderr and that
 server is omitted from the `mcp` dict. Other servers still connect
 normally.
+
+For HTTP MCP servers, Harn can reuse OAuth tokens stored with the CLI:
+
+```bash
+harn mcp redirect-uri
+harn mcp login notion
+```
+
+If the server uses a pre-registered OAuth client, you can provide those
+values in `harn.toml` or on the CLI:
+
+```toml
+[[mcp]]
+name = "internal"
+transport = "http"
+url = "https://mcp.example.com"
+client_id = "https://client.example.com/metadata.json"
+client_secret = "super-secret"
+scopes = "read:docs write:docs"
+```
+
+When no `client_id` is provided, Harn will attempt dynamic client
+registration if the authorization server advertises it.
 
 ### Example: filesystem MCP server
 

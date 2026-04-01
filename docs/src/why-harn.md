@@ -72,6 +72,10 @@ Harn has built-in support for the
 MCP server, or expose your Harn pipeline as one. ACP integration lets
 editors use Harn as a coding agent backend.
 
+That includes remote HTTP MCP servers with standalone OAuth handled by the
+CLI, so cloud MCP integrations can be treated as normal runtime dependencies
+instead of host-specific glue.
+
 ```harn
 let client = mcp_connect("npx", ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
 let tools = mcp_list_tools(client)

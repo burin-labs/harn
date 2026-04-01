@@ -537,6 +537,90 @@ async fn vm_call_completion_fallback(
     vm_call_llm_full(&fallback_opts).await
 }
 
+fn render_openai_message_content_as_text(content: &serde_json::Value) -> String {
+    match content {
+        serde_json::Value::String(text) => text.clone(),
+        serde_json::Value::Array(blocks) => {
+            let mut rendered = String::new();
+            for block in blocks {
+                let block_type = block.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                match block_type {
+                    "text" | "output_text" => {
+                        if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
+                            rendered.push_str(text);
+                        }
+                    }
+                    "tool_result" => {
+                        let content = block
+                            .get("content")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default();
+                        if !rendered.is_empty() {
+                            rendered.push_str("\n\n");
+                        }
+                        rendered.push_str("[Result] ");
+                        rendered.push_str(content);
+                    }
+                    "reasoning" | "thinking" => {
+                        if let Some(text) = block
+                            .get("text")
+                            .and_then(|v| v.as_str())
+                            .or_else(|| block.get("thinking").and_then(|v| v.as_str()))
+                        {
+                            if !rendered.is_empty() {
+                                rendered.push('\n');
+                            }
+                            rendered.push_str(text);
+                        }
+                    }
+                    _ => {
+                        if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
+                            if !rendered.is_empty() {
+                                rendered.push('\n');
+                            }
+                            rendered.push_str(text);
+                        } else if !block.is_null() {
+                            if !rendered.is_empty() {
+                                rendered.push('\n');
+                            }
+                            rendered.push_str(&block.to_string());
+                        }
+                    }
+                }
+            }
+            rendered
+        }
+        serde_json::Value::Null => String::new(),
+        other => other.to_string(),
+    }
+}
+
+fn normalize_openai_style_messages(
+    messages: Vec<serde_json::Value>,
+    force_string_content: bool,
+) -> Vec<serde_json::Value> {
+    messages
+        .into_iter()
+        .map(|message| {
+            let Some(object) = message.as_object() else {
+                return message;
+            };
+            let mut normalized = object.clone();
+            if force_string_content {
+                let content = normalized
+                    .get("content")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::String(String::new()));
+                normalized.insert(
+                    "content".to_string(),
+                    serde_json::Value::String(render_openai_message_content_as_text(&content)),
+                );
+            }
+            serde_json::Value::Object(normalized)
+        })
+        .collect()
+}
+
 async fn vm_call_llm_api(
     opts: &LlmCallOptions,
     delta_tx: Option<DeltaSender>,
@@ -558,6 +642,7 @@ async fn vm_call_llm_api(
 
     let resolved = super::helpers::ResolvedProvider::resolve(provider);
     let is_ollama = provider == "ollama" || resolved.endpoint.contains("/api/chat");
+    let use_stream_transport = streaming || is_ollama;
 
     // Build request body based on API style
     let mut body = if resolved.is_anthropic_style {
@@ -631,6 +716,7 @@ async fn vm_call_llm_api(
             msgs.push(serde_json::json!({"role": "system", "content": sys}));
         }
         msgs.extend(opts.messages.iter().cloned());
+        msgs = normalize_openai_style_messages(msgs, is_ollama);
 
         let mut body = serde_json::json!({
             "model": model,
@@ -699,10 +785,10 @@ async fn vm_call_llm_api(
         }
     }
 
-    if streaming {
+    if use_stream_transport {
         body["stream"] = serde_json::json!(true);
         // OpenAI-style: request usage in the final streaming chunk.
-        if !resolved.is_anthropic_style {
+        if !resolved.is_anthropic_style && !is_ollama {
             body["stream_options"] = serde_json::json!({"include_usage": true});
         }
     }
@@ -714,8 +800,13 @@ async fn vm_call_llm_api(
         .json(&body);
     let req = resolved.apply_headers(req, &opts.api_key);
 
-    if streaming {
-        let tx = delta_tx.unwrap();
+    if use_stream_transport {
+        let tx = if let Some(tx) = delta_tx {
+            tx
+        } else {
+            let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+            tx
+        };
         let response = req.send().await.map_err(|e| {
             VmError::Thrown(VmValue::String(Rc::from(format!(
                 "{provider} stream error: {e}"

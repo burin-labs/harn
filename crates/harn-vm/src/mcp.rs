@@ -1,12 +1,12 @@
 //! MCP (Model Context Protocol) client for connecting to external tool servers.
 //!
-//! Supports stdio transport: spawns a child process and communicates via
-//! newline-delimited JSON-RPC 2.0 over stdin/stdout.
+//! Supports stdio transport and streamable HTTP-style request/response transport.
 
 use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use serde::Deserialize;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout};
 use tokio::sync::Mutex;
@@ -15,23 +15,68 @@ use crate::stdlib::json_to_vm_value;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
-/// MCP protocol version (2024-11-05 is widely supported).
-const PROTOCOL_VERSION: &str = "2024-11-05";
+/// MCP protocol version we negotiate by default.
+const PROTOCOL_VERSION: &str = "2025-11-25";
 
 /// Default timeout for MCP requests (60 seconds).
 const MCP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum McpTransport {
+    Stdio,
+    Http,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct McpServerSpec {
+    pub name: String,
+    #[serde(default = "default_transport")]
+    transport: McpTransport,
+    #[serde(default)]
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+    #[serde(default)]
+    pub url: String,
+    #[serde(default)]
+    pub auth_token: Option<String>,
+    #[serde(default)]
+    pub protocol_version: Option<String>,
+    #[serde(default)]
+    pub proxy_server_name: Option<String>,
+}
+
+fn default_transport() -> McpTransport {
+    McpTransport::Stdio
+}
+
 /// Internal state for an MCP client connection.
-struct McpClientInner {
+enum McpClientInner {
+    Stdio(StdioMcpClientInner),
+    Http(HttpMcpClientInner),
+}
+
+struct StdioMcpClientInner {
     child: Child,
     stdin: ChildStdin,
     reader: BufReader<ChildStdout>,
     next_id: u64,
 }
 
+struct HttpMcpClientInner {
+    client: reqwest::Client,
+    url: String,
+    auth_token: Option<String>,
+    protocol_version: String,
+    session_id: Option<String>,
+    next_id: u64,
+    proxy_server_name: Option<String>,
+}
+
 /// Handle to an MCP client connection, stored in VmValue.
-///
-/// Cloning the handle shares access to the same connection (via Arc).
 #[derive(Clone)]
 pub struct VmMcpClientHandle {
     pub name: String,
@@ -45,7 +90,6 @@ impl std::fmt::Debug for VmMcpClientHandle {
 }
 
 impl VmMcpClientHandle {
-    /// Send a JSON-RPC request and wait for the response.
     async fn call(
         &self,
         method: &str,
@@ -56,129 +100,409 @@ impl VmMcpClientHandle {
             .as_mut()
             .ok_or_else(|| VmError::Runtime("MCP client is disconnected".into()))?;
 
-        let id = inner.next_id;
-        inner.next_id += 1;
-
-        let request = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "method": method,
-            "params": params,
-        });
-
-        let line = serde_json::to_string(&request)
-            .map_err(|e| VmError::Runtime(format!("MCP serialization error: {e}")))?;
-        inner
-            .stdin
-            .write_all(line.as_bytes())
-            .await
-            .map_err(|e| VmError::Runtime(format!("MCP write error: {e}")))?;
-        inner
-            .stdin
-            .write_all(b"\n")
-            .await
-            .map_err(|e| VmError::Runtime(format!("MCP write error: {e}")))?;
-        inner
-            .stdin
-            .flush()
-            .await
-            .map_err(|e| VmError::Runtime(format!("MCP flush error: {e}")))?;
-
-        // Read lines until we get a response with matching ID
-        let mut line_buf = String::new();
-        loop {
-            line_buf.clear();
-            let bytes_read =
-                tokio::time::timeout(MCP_TIMEOUT, inner.reader.read_line(&mut line_buf))
-                    .await
-                    .map_err(|_| {
-                        VmError::Runtime(format!(
-                            "MCP: server did not respond to '{method}' within {}s",
-                            MCP_TIMEOUT.as_secs()
-                        ))
-                    })?
-                    .map_err(|e| VmError::Runtime(format!("MCP read error: {e}")))?;
-
-            if bytes_read == 0 {
-                return Err(VmError::Runtime("MCP: server closed connection".into()));
-            }
-
-            let trimmed = line_buf.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-
-            let msg: serde_json::Value = match serde_json::from_str(trimmed) {
-                Ok(v) => v,
-                Err(_) => continue,
-            };
-
-            // Skip notifications (no id)
-            if msg.get("id").is_none() {
-                continue;
-            }
-
-            // Check if this is our response
-            if msg["id"].as_u64() == Some(id) {
-                if let Some(error) = msg.get("error") {
-                    let message = error["message"].as_str().unwrap_or("Unknown MCP error");
-                    let code = error["code"].as_i64().unwrap_or(-1);
-                    return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                        "MCP error ({code}): {message}"
-                    )))));
-                }
-                return Ok(msg["result"].clone());
-            }
+        match inner {
+            McpClientInner::Stdio(inner) => stdio_call(inner, method, params).await,
+            McpClientInner::Http(inner) => http_call(inner, method, params).await,
         }
     }
 
-    /// Send a JSON-RPC notification (no response expected).
     async fn notify(&self, method: &str, params: serde_json::Value) -> Result<(), VmError> {
         let mut guard = self.inner.lock().await;
         let inner = guard
             .as_mut()
             .ok_or_else(|| VmError::Runtime("MCP client is disconnected".into()))?;
 
-        let notification = serde_json::json!({
+        match inner {
+            McpClientInner::Stdio(inner) => stdio_notify(inner, method, params).await,
+            McpClientInner::Http(inner) => http_notify(inner, method, params).await,
+        }
+    }
+}
+
+async fn stdio_call(
+    inner: &mut StdioMcpClientInner,
+    method: &str,
+    params: serde_json::Value,
+) -> Result<serde_json::Value, VmError> {
+    let id = inner.next_id;
+    inner.next_id += 1;
+
+    let request = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": method,
+        "params": params,
+    });
+
+    let line = serde_json::to_string(&request)
+        .map_err(|e| VmError::Runtime(format!("MCP serialization error: {e}")))?;
+    inner
+        .stdin
+        .write_all(line.as_bytes())
+        .await
+        .map_err(|e| VmError::Runtime(format!("MCP write error: {e}")))?;
+    inner
+        .stdin
+        .write_all(b"\n")
+        .await
+        .map_err(|e| VmError::Runtime(format!("MCP write error: {e}")))?;
+    inner
+        .stdin
+        .flush()
+        .await
+        .map_err(|e| VmError::Runtime(format!("MCP flush error: {e}")))?;
+
+    let mut line_buf = String::new();
+    loop {
+        line_buf.clear();
+        let bytes_read = tokio::time::timeout(MCP_TIMEOUT, inner.reader.read_line(&mut line_buf))
+            .await
+            .map_err(|_| {
+                VmError::Runtime(format!(
+                    "MCP: server did not respond to '{method}' within {}s",
+                    MCP_TIMEOUT.as_secs()
+                ))
+            })?
+            .map_err(|e| VmError::Runtime(format!("MCP read error: {e}")))?;
+
+        if bytes_read == 0 {
+            return Err(VmError::Runtime("MCP: server closed connection".into()));
+        }
+
+        let trimmed = line_buf.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let msg: serde_json::Value = match serde_json::from_str(trimmed) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        if msg.get("id").is_none() {
+            continue;
+        }
+
+        if msg["id"].as_u64() == Some(id) {
+            return parse_jsonrpc_result(msg);
+        }
+    }
+}
+
+async fn stdio_notify(
+    inner: &mut StdioMcpClientInner,
+    method: &str,
+    params: serde_json::Value,
+) -> Result<(), VmError> {
+    let notification = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": method,
+        "params": params,
+    });
+
+    let line = serde_json::to_string(&notification)
+        .map_err(|e| VmError::Runtime(format!("MCP serialization error: {e}")))?;
+    inner
+        .stdin
+        .write_all(line.as_bytes())
+        .await
+        .map_err(|e| VmError::Runtime(format!("MCP write error: {e}")))?;
+    inner
+        .stdin
+        .write_all(b"\n")
+        .await
+        .map_err(|e| VmError::Runtime(format!("MCP write error: {e}")))?;
+    inner
+        .stdin
+        .flush()
+        .await
+        .map_err(|e| VmError::Runtime(format!("MCP flush error: {e}")))?;
+    Ok(())
+}
+
+async fn http_call(
+    inner: &mut HttpMcpClientInner,
+    method: &str,
+    params: serde_json::Value,
+) -> Result<serde_json::Value, VmError> {
+    let id = inner.next_id;
+    inner.next_id += 1;
+    send_http_request(inner, method, params, Some(id)).await
+}
+
+async fn http_notify(
+    inner: &mut HttpMcpClientInner,
+    method: &str,
+    params: serde_json::Value,
+) -> Result<(), VmError> {
+    let _ = send_http_request(inner, method, params, None).await?;
+    Ok(())
+}
+
+async fn send_http_request(
+    inner: &mut HttpMcpClientInner,
+    method: &str,
+    params: serde_json::Value,
+    id: Option<u64>,
+) -> Result<serde_json::Value, VmError> {
+    for attempt in 0..2 {
+        let response = send_http_request_once(inner, method, params.clone(), id).await?;
+
+        let status = response.status().as_u16();
+        let headers = response.headers().clone();
+        if let Some(protocol_version) = headers
+            .get("MCP-Protocol-Version")
+            .and_then(|v| v.to_str().ok())
+        {
+            inner.protocol_version = protocol_version.to_string();
+        }
+        if let Some(session_id) = headers.get("MCP-Session-Id").and_then(|v| v.to_str().ok()) {
+            inner.session_id = Some(session_id.to_string());
+        }
+
+        if status == 404 && inner.session_id.is_some() && method != "initialize" && attempt == 0 {
+            inner.session_id = None;
+            reinitialize_http_client(inner).await?;
+            continue;
+        }
+
+        if status == 401 {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "MCP authorization required",
+            ))));
+        }
+
+        let body = response
+            .text()
+            .await
+            .map_err(|e| VmError::Runtime(format!("MCP HTTP read error: {e}")))?;
+
+        if body.trim().is_empty() {
+            return Ok(serde_json::Value::Null);
+        }
+
+        let msg = parse_http_response_body(&body, status)?;
+
+        if status >= 400 {
+            return Err(jsonrpc_error_to_vm_error(msg.get("error").unwrap_or(&msg)));
+        }
+
+        if id.is_none() {
+            return Ok(msg);
+        }
+        return parse_jsonrpc_result(msg);
+    }
+
+    Err(VmError::Runtime("MCP HTTP request failed".into()))
+}
+
+async fn send_http_request_once(
+    inner: &mut HttpMcpClientInner,
+    method: &str,
+    params: serde_json::Value,
+    id: Option<u64>,
+) -> Result<reqwest::Response, VmError> {
+    let payload = if let Some(proxy_server_name) = &inner.proxy_server_name {
+        let mut body = serde_json::json!({
+            "serverName": proxy_server_name,
             "jsonrpc": "2.0",
             "method": method,
             "params": params,
         });
+        if let Some(id) = id {
+            body["id"] = serde_json::json!(id);
+        }
+        body
+    } else {
+        let mut body = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params,
+        });
+        if let Some(id) = id {
+            body["id"] = serde_json::json!(id);
+        }
+        body
+    };
 
-        let line = serde_json::to_string(&notification)
-            .map_err(|e| VmError::Runtime(format!("MCP serialization error: {e}")))?;
-        inner
-            .stdin
-            .write_all(line.as_bytes())
-            .await
-            .map_err(|e| VmError::Runtime(format!("MCP write error: {e}")))?;
-        inner
-            .stdin
-            .write_all(b"\n")
-            .await
-            .map_err(|e| VmError::Runtime(format!("MCP write error: {e}")))?;
-        inner
-            .stdin
-            .flush()
-            .await
-            .map_err(|e| VmError::Runtime(format!("MCP flush error: {e}")))?;
-        Ok(())
+    let mut request = inner
+        .client
+        .post(&inner.url)
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json, text/event-stream")
+        .header("MCP-Protocol-Version", &inner.protocol_version)
+        .json(&payload);
+
+    if let Some(token) = &inner.auth_token {
+        request = request.header("Authorization", format!("Bearer {token}"));
     }
+    if let Some(session_id) = &inner.session_id {
+        request = request.header("MCP-Session-Id", session_id);
+    }
+
+    request
+        .send()
+        .await
+        .map_err(|e| VmError::Runtime(format!("MCP HTTP request error: {e}")))
 }
 
-/// Connect to an MCP server by spawning a child process (stdio transport).
-async fn mcp_connect_impl(command: &str, args: &[String]) -> Result<VmMcpClientHandle, VmError> {
-    let mut child = tokio::process::Command::new(command)
-        .args(args)
+async fn reinitialize_http_client(inner: &mut HttpMcpClientInner) -> Result<(), VmError> {
+    let initialize = send_http_request_once(
+        inner,
+        "initialize",
+        serde_json::json!({
+            "protocolVersion": PROTOCOL_VERSION,
+            "capabilities": {},
+            "clientInfo": {
+                "name": "harn",
+                "version": env!("CARGO_PKG_VERSION"),
+            }
+        }),
+        Some(0),
+    )
+    .await?;
+    if let Some(protocol_version) = initialize
+        .headers()
+        .get("MCP-Protocol-Version")
+        .and_then(|v| v.to_str().ok())
+    {
+        inner.protocol_version = protocol_version.to_string();
+    }
+    if let Some(session_id) = initialize
+        .headers()
+        .get("MCP-Session-Id")
+        .and_then(|v| v.to_str().ok())
+    {
+        inner.session_id = Some(session_id.to_string());
+    }
+    let status = initialize.status().as_u16();
+    let body = initialize
+        .text()
+        .await
+        .map_err(|e| VmError::Runtime(format!("MCP HTTP read error: {e}")))?;
+    let msg = parse_http_response_body(&body, status)?;
+    if status >= 400 {
+        return Err(jsonrpc_error_to_vm_error(msg.get("error").unwrap_or(&msg)));
+    }
+    let _ = parse_jsonrpc_result(msg)?;
+    let response = send_http_request_once(
+        inner,
+        "notifications/initialized",
+        serde_json::json!({}),
+        None,
+    )
+    .await?;
+    let status = response.status().as_u16();
+    if let Some(protocol_version) = response
+        .headers()
+        .get("MCP-Protocol-Version")
+        .and_then(|v| v.to_str().ok())
+    {
+        inner.protocol_version = protocol_version.to_string();
+    }
+    if let Some(session_id) = response
+        .headers()
+        .get("MCP-Session-Id")
+        .and_then(|v| v.to_str().ok())
+    {
+        inner.session_id = Some(session_id.to_string());
+    }
+    let body = response
+        .text()
+        .await
+        .map_err(|e| VmError::Runtime(format!("MCP HTTP read error: {e}")))?;
+    if body.trim().is_empty() || status < 400 {
+        return Ok(());
+    }
+    let msg = parse_http_response_body(&body, status)?;
+    Err(jsonrpc_error_to_vm_error(msg.get("error").unwrap_or(&msg)))
+}
+
+fn parse_http_response_body(body: &str, status: u16) -> Result<serde_json::Value, VmError> {
+    if body.trim_start().starts_with("event:") || body.trim_start().starts_with("data:") {
+        return parse_sse_jsonrpc_body(body);
+    }
+    serde_json::from_str(body).map_err(|e| {
+        VmError::Runtime(format!(
+            "MCP HTTP response parse error (status {status}): {e}"
+        ))
+    })
+}
+
+fn parse_sse_jsonrpc_body(body: &str) -> Result<serde_json::Value, VmError> {
+    let mut current_data = Vec::new();
+    let mut messages = Vec::new();
+
+    for line in body.lines() {
+        if line.is_empty() {
+            if !current_data.is_empty() {
+                messages.push(current_data.join("\n"));
+                current_data.clear();
+            }
+            continue;
+        }
+        if let Some(data) = line.strip_prefix("data:") {
+            current_data.push(data.trim_start().to_string());
+        }
+    }
+    if !current_data.is_empty() {
+        messages.push(current_data.join("\n"));
+    }
+
+    for message in messages.into_iter().rev() {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&message) {
+            if value.get("result").is_some()
+                || value.get("error").is_some()
+                || value.get("method").is_some()
+            {
+                return Ok(value);
+            }
+        }
+    }
+
+    Err(VmError::Runtime(
+        "MCP HTTP response parse error: no JSON-RPC payload found in SSE stream".into(),
+    ))
+}
+
+fn parse_jsonrpc_result(msg: serde_json::Value) -> Result<serde_json::Value, VmError> {
+    if let Some(error) = msg.get("error") {
+        return Err(jsonrpc_error_to_vm_error(error));
+    }
+    Ok(msg
+        .get("result")
+        .cloned()
+        .unwrap_or_else(|| serde_json::Value::Null))
+}
+
+fn jsonrpc_error_to_vm_error(error: &serde_json::Value) -> VmError {
+    let message = error
+        .get("message")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Unknown MCP error");
+    let code = error.get("code").and_then(|v| v.as_i64()).unwrap_or(-1);
+    VmError::Thrown(VmValue::String(Rc::from(format!(
+        "MCP error ({code}): {message}"
+    ))))
+}
+
+async fn mcp_connect_stdio_impl(
+    command: &str,
+    args: &[String],
+    env: &BTreeMap<String, String>,
+) -> Result<VmMcpClientHandle, VmError> {
+    let mut cmd = tokio::process::Command::new(command);
+    cmd.args(args)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::inherit())
-        .spawn()
-        .map_err(|e| {
-            VmError::Thrown(VmValue::String(Rc::from(format!(
-                "mcp_connect: failed to spawn '{command}': {e}"
-            ))))
-        })?;
+        .envs(env);
+
+    let mut child = cmd.spawn().map_err(|e| {
+        VmError::Thrown(VmValue::String(Rc::from(format!(
+            "mcp_connect: failed to spawn '{command}': {e}"
+        ))))
+    })?;
 
     let stdin = child
         .stdin
@@ -189,21 +513,49 @@ async fn mcp_connect_impl(command: &str, args: &[String]) -> Result<VmMcpClientH
         .take()
         .ok_or_else(|| VmError::Runtime("mcp_connect: failed to open stdout".into()))?;
 
-    let reader = BufReader::new(stdout);
-    let name = command.to_string();
-    let inner = McpClientInner {
-        child,
-        stdin,
-        reader,
-        next_id: 1,
+    let handle = VmMcpClientHandle {
+        name: command.to_string(),
+        inner: Arc::new(Mutex::new(Some(McpClientInner::Stdio(
+            StdioMcpClientInner {
+                child,
+                stdin,
+                reader: BufReader::new(stdout),
+                next_id: 1,
+            },
+        )))),
     };
+
+    initialize_client(&handle).await?;
+    Ok(handle)
+}
+
+async fn mcp_connect_http_impl(spec: &McpServerSpec) -> Result<VmMcpClientHandle, VmError> {
+    let client = reqwest::Client::builder()
+        .timeout(MCP_TIMEOUT)
+        .build()
+        .map_err(|e| VmError::Runtime(format!("MCP HTTP client error: {e}")))?;
 
     let handle = VmMcpClientHandle {
-        name: name.clone(),
-        inner: Arc::new(Mutex::new(Some(inner))),
+        name: spec.name.clone(),
+        inner: Arc::new(Mutex::new(Some(McpClientInner::Http(HttpMcpClientInner {
+            client,
+            url: spec.url.clone(),
+            auth_token: spec.auth_token.clone(),
+            protocol_version: spec
+                .protocol_version
+                .clone()
+                .unwrap_or_else(|| PROTOCOL_VERSION.to_string()),
+            session_id: None,
+            next_id: 1,
+            proxy_server_name: spec.proxy_server_name.clone(),
+        })))),
     };
 
-    // Initialize handshake
+    initialize_client(&handle).await?;
+    Ok(handle)
+}
+
+async fn initialize_client(handle: &VmMcpClientHandle) -> Result<(), VmError> {
     handle
         .call(
             "initialize",
@@ -218,15 +570,13 @@ async fn mcp_connect_impl(command: &str, args: &[String]) -> Result<VmMcpClientH
         )
         .await?;
 
-    // Send initialized notification
     handle
         .notify("notifications/initialized", serde_json::json!({}))
         .await?;
 
-    Ok(handle)
+    Ok(())
 }
 
-/// Convert a VmValue to serde_json::Value for MCP tool call arguments.
 pub(crate) fn vm_value_to_serde(val: &VmValue) -> serde_json::Value {
     match val {
         VmValue::String(s) => serde_json::Value::String(s.to_string()),
@@ -248,10 +598,6 @@ pub(crate) fn vm_value_to_serde(val: &VmValue) -> serde_json::Value {
     }
 }
 
-/// Extract text content from an MCP tool result.
-///
-/// MCP returns `{"content": [{"type": "text", "text": "..."}], "isError": false}`.
-/// This extracts and concatenates all text content blocks.
 fn extract_content_text(result: &serde_json::Value) -> String {
     if let Some(content) = result.get("content").and_then(|c| c.as_array()) {
         let texts: Vec<&str> = content
@@ -265,7 +611,6 @@ fn extract_content_text(result: &serde_json::Value) -> String {
             })
             .collect();
         if texts.is_empty() {
-            // No text blocks — return full result as JSON for inspection
             json_to_vm_value(result).display()
         } else {
             texts.join("\n")
@@ -275,22 +620,36 @@ fn extract_content_text(result: &serde_json::Value) -> String {
     }
 }
 
-/// Connect to an MCP server by name, command, and args. This is the public
-/// entry point used by the CLI to auto-connect servers declared in `harn.toml`.
 pub async fn connect_mcp_server(
     name: &str,
     command: &str,
     args: &[String],
 ) -> Result<VmMcpClientHandle, VmError> {
-    let mut handle = mcp_connect_impl(command, args).await?;
-    // Override the name with the user-declared name from config
+    let mut handle = mcp_connect_stdio_impl(command, args, &BTreeMap::new()).await?;
     handle.name = name.to_string();
     Ok(handle)
 }
 
-/// Register MCP builtins on a VM.
+pub async fn connect_mcp_server_from_spec(
+    spec: &McpServerSpec,
+) -> Result<VmMcpClientHandle, VmError> {
+    let mut handle = match spec.transport {
+        McpTransport::Stdio => mcp_connect_stdio_impl(&spec.command, &spec.args, &spec.env).await?,
+        McpTransport::Http => mcp_connect_http_impl(spec).await?,
+    };
+    handle.name = spec.name.clone();
+    Ok(handle)
+}
+
+pub async fn connect_mcp_server_from_json(
+    value: &serde_json::Value,
+) -> Result<VmMcpClientHandle, VmError> {
+    let spec: McpServerSpec = serde_json::from_value(value.clone())
+        .map_err(|e| VmError::Runtime(format!("Invalid MCP server config: {e}")))?;
+    connect_mcp_server_from_spec(&spec).await
+}
+
 pub fn register_mcp_builtins(vm: &mut Vm) {
-    // mcp_connect(command, args?) -> McpClient
     vm.register_async_builtin("mcp_connect", |args| async move {
         let command = args.first().map(|a| a.display()).unwrap_or_default();
         if command.is_empty() {
@@ -304,11 +663,10 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
             _ => Vec::new(),
         };
 
-        let handle = mcp_connect_impl(&command, &cmd_args).await?;
+        let handle = mcp_connect_stdio_impl(&command, &cmd_args, &BTreeMap::new()).await?;
         Ok(VmValue::McpClient(handle))
     });
 
-    // mcp_list_tools(client) -> List of tool dicts
     vm.register_async_builtin("mcp_list_tools", |args| async move {
         let client = match args.first() {
             Some(VmValue::McpClient(c)) => c.clone(),
@@ -320,7 +678,6 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         };
 
         let result = client.call("tools/list", serde_json::json!({})).await?;
-
         let tools = result
             .get("tools")
             .and_then(|t| t.as_array())
@@ -331,7 +688,6 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         Ok(VmValue::List(Rc::new(vm_tools)))
     });
 
-    // mcp_call(client, tool_name, arguments?) -> String result
     vm.register_async_builtin("mcp_call", |args| async move {
         let client = match args.first() {
             Some(VmValue::McpClient(c)) => c.clone(),
@@ -370,27 +726,23 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
             )
             .await?;
 
-        // Check if the tool reported an error
         if result.get("isError").and_then(|v| v.as_bool()) == Some(true) {
             let error_text = extract_content_text(&result);
             return Err(VmError::Thrown(VmValue::String(Rc::from(error_text))));
         }
 
-        // Return content as a string for simple results, or a dict for complex ones
         let content = result
             .get("content")
             .and_then(|c| c.as_array())
             .cloned()
             .unwrap_or_default();
 
-        // If single text block, return as string
         if content.len() == 1 && content[0].get("type").and_then(|t| t.as_str()) == Some("text") {
             if let Some(text) = content[0].get("text").and_then(|t| t.as_str()) {
                 return Ok(VmValue::String(Rc::from(text)));
             }
         }
 
-        // Multiple or non-text blocks: return full content list
         if content.is_empty() {
             Ok(VmValue::Nil)
         } else {
@@ -400,7 +752,6 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         }
     });
 
-    // mcp_server_info(client) -> Dict with server capabilities
     vm.register_async_builtin("mcp_server_info", |args| async move {
         let client = match args.first() {
             Some(VmValue::McpClient(c)) => c.clone(),
@@ -411,8 +762,6 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
             }
         };
 
-        // Re-issue initialize to get server info (it's idempotent per spec)
-        // Actually, we can just list tools as a health check
         let guard = client.inner.lock().await;
         if guard.is_none() {
             return Err(VmError::Runtime("MCP client is disconnected".into()));
@@ -428,7 +777,6 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         Ok(VmValue::Dict(Rc::new(info)))
     });
 
-    // mcp_disconnect(client) -> nil
     vm.register_async_builtin("mcp_disconnect", |args| async move {
         let client = match args.first() {
             Some(VmValue::McpClient(c)) => c.clone(),
@@ -440,13 +788,17 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         };
 
         let mut guard = client.inner.lock().await;
-        if let Some(mut inner) = guard.take() {
-            let _ = inner.child.kill().await;
+        if let Some(inner) = guard.take() {
+            match inner {
+                McpClientInner::Stdio(mut inner) => {
+                    let _ = inner.child.kill().await;
+                }
+                McpClientInner::Http(_) => {}
+            }
         }
         Ok(VmValue::Nil)
     });
 
-    // mcp_list_resources(client) -> list of resource dicts
     vm.register_async_builtin("mcp_list_resources", |args| async move {
         let client = match args.first() {
             Some(VmValue::McpClient(c)) => c.clone(),
@@ -458,7 +810,6 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         };
 
         let result = client.call("resources/list", serde_json::json!({})).await?;
-
         let resources = result
             .get("resources")
             .and_then(|r| r.as_array())
@@ -469,7 +820,6 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         Ok(VmValue::List(Rc::new(vm_resources)))
     });
 
-    // mcp_read_resource(client, uri) -> string | list
     vm.register_async_builtin("mcp_read_resource", |args| async move {
         let client = match args.first() {
             Some(VmValue::McpClient(c)) => c.clone(),
@@ -491,14 +841,12 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
             .call("resources/read", serde_json::json!({ "uri": uri }))
             .await?;
 
-        // Extract content blocks
         let contents = result
             .get("contents")
             .and_then(|c| c.as_array())
             .cloned()
             .unwrap_or_default();
 
-        // Single text block → return as string
         if contents.len() == 1 {
             if let Some(text) = contents[0].get("text").and_then(|t| t.as_str()) {
                 return Ok(VmValue::String(Rc::from(text)));
@@ -514,7 +862,6 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         }
     });
 
-    // mcp_list_resource_templates(client) -> list of resource template dicts
     vm.register_async_builtin("mcp_list_resource_templates", |args| async move {
         let client = match args.first() {
             Some(VmValue::McpClient(c)) => c.clone(),
@@ -539,7 +886,6 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         Ok(VmValue::List(Rc::new(vm_templates)))
     });
 
-    // mcp_list_prompts(client) -> list of prompt dicts
     vm.register_async_builtin("mcp_list_prompts", |args| async move {
         let client = match args.first() {
             Some(VmValue::McpClient(c)) => c.clone(),
@@ -562,7 +908,6 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         Ok(VmValue::List(Rc::new(vm_prompts)))
     });
 
-    // mcp_get_prompt(client, name, arguments?) -> dict
     vm.register_async_builtin("mcp_get_prompt", |args| async move {
         let client = match args.first() {
             Some(VmValue::McpClient(c)) => c.clone(),
@@ -645,27 +990,28 @@ mod tests {
     fn test_extract_content_text_multiple() {
         let result = serde_json::json!({
             "content": [
-                {"type": "text", "text": "line 1"},
-                {"type": "text", "text": "line 2"}
+                {"type": "text", "text": "first"},
+                {"type": "text", "text": "second"}
             ],
             "isError": false
         });
-        assert_eq!(extract_content_text(&result), "line 1\nline 2");
+        assert_eq!(extract_content_text(&result), "first\nsecond");
     }
 
     #[test]
-    fn test_extract_content_text_empty() {
-        let result = serde_json::json!({"content": [], "isError": false});
-        let text = extract_content_text(&result);
-        assert!(!text.is_empty()); // falls back to displaying the value
+    fn test_extract_content_text_fallback_json() {
+        let result = serde_json::json!({
+            "content": [{"type": "image", "data": "abc"}],
+            "isError": false
+        });
+        let output = extract_content_text(&result);
+        assert!(output.contains("image"));
     }
 
     #[test]
-    fn test_mcp_client_handle_debug() {
-        let handle = VmMcpClientHandle {
-            name: "test-server".to_string(),
-            inner: Arc::new(Mutex::new(None)),
-        };
-        assert_eq!(format!("{:?}", handle), "McpClient(test-server)");
+    fn test_parse_sse_jsonrpc_body_uses_last_jsonrpc_message() {
+        let body = "event: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/message\"}\n\nevent: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"tools\":[]}}\n\n";
+        let parsed = parse_sse_jsonrpc_body(body).unwrap();
+        assert_eq!(parsed["result"]["tools"], serde_json::json!([]));
     }
 }

@@ -2,6 +2,44 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.11
+
+### Added
+
+- **Standalone remote MCP OAuth in the CLI** — added `harn mcp login`,
+  `harn mcp logout`, `harn mcp status`, and `harn mcp redirect-uri` so Harn
+  can authorize directly against remote MCP servers instead of requiring hosts
+  to inject bearer tokens manually.
+- **Manifest-level remote MCP OAuth config** — `[[mcp]]` entries can now set
+  `transport = "http"` plus `url`, `client_id`, `client_secret`, and
+  `scopes`, allowing pre-registered OAuth clients and advanced deployments to
+  supply their own credentials while still benefiting from metadata discovery
+  and token refresh.
+- **ACP host-provided MCP loading** — ACP sessions now automatically consume
+  host-provided MCP server config and expose connected clients through the
+  global `mcp` dict, aligning embedded editor flows with standalone manifest
+  execution.
+
+### Changed
+
+- **Remote MCP clients now auto-load stored OAuth tokens** — `harn run` will
+  reuse and refresh previously stored tokens for HTTP MCP servers declared in
+  `harn.toml`, so remote servers behave like first-class runtime dependencies
+  instead of ad hoc per-run configuration.
+- **HTTP MCP transport is more resilient** — the VM now recovers from expired
+  MCP HTTP sessions by re-running the initialize handshake, and it auto-detects
+  SSE-framed JSON-RPC responses in addition to plain JSON bodies.
+- **OAuth metadata discovery is path-aware** — Harn now checks protected
+  resource metadata and authorization server metadata using the latest MCP
+  discovery patterns instead of assuming only origin-root well-known URLs.
+- **Agent tool output defaults are simpler** — the runtime now defaults tool
+  formatting to `text` instead of `native`, reducing structured-wrapper noise
+  in common agent transcripts.
+- **OpenAI-style provider normalization is stricter for Ollama-compatible
+  responses** — OpenAI-style message blocks are normalized into text for
+  Ollama-compatible transports, and stream handling is enabled consistently for
+  those providers.
+
 ## v0.5.10
 
 ### Changed

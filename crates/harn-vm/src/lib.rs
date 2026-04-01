@@ -23,7 +23,10 @@ pub use chunk::*;
 pub use compiler::*;
 pub use http::{register_http_builtins, reset_http_state};
 pub use llm::register_llm_builtins;
-pub use mcp::{connect_mcp_server, register_mcp_builtins};
+pub use mcp::{
+    connect_mcp_server, connect_mcp_server_from_json, connect_mcp_server_from_spec,
+    register_mcp_builtins,
+};
 pub use mcp_server::{
     take_mcp_serve_prompts, take_mcp_serve_registry, take_mcp_serve_resource_templates,
     take_mcp_serve_resources, tool_registry_to_mcp_tools, McpServer,
