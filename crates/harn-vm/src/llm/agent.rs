@@ -50,6 +50,43 @@ pub(crate) fn current_host_bridge() -> Option<Rc<crate::bridge::HostBridge>> {
     CURRENT_HOST_BRIDGE.with(|slot| slot.borrow().clone())
 }
 
+fn classify_tool_mutation(tool_name: &str) -> &'static str {
+    match tool_name {
+        "write_file" | "edit" | "create_file" | "apply_patch" | "insert_function"
+        | "replace_body" | "add_import" => "apply_workspace",
+        "delete_file" | "remove_file" | "move_file" | "rename_file" => "destructive",
+        "exec" | "shell" | "exec_at" | "shell_at" | "run" => "ambient_side_effect",
+        _ if tool_name.starts_with("mcp_") => "host_defined",
+        _ => "read_only",
+    }
+}
+
+fn declared_paths(tool_args: &serde_json::Value) -> Vec<String> {
+    let Some(map) = tool_args.as_object() else {
+        return Vec::new();
+    };
+    let mut paths = Vec::new();
+    for key in ["path", "file", "cwd", "repo", "target", "destination"] {
+        if let Some(value) = map.get(key).and_then(|value| value.as_str()) {
+            if !value.is_empty() {
+                paths.push(value.to_string());
+            }
+        }
+    }
+    if let Some(items) = map.get("paths").and_then(|value| value.as_array()) {
+        for item in items {
+            if let Some(value) = item.as_str() {
+                if !value.is_empty() {
+                    paths.push(value.to_string());
+                }
+            }
+        }
+    }
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
 async fn inject_queued_user_messages(
     bridge: Option<&Rc<crate::bridge::HostBridge>>,
     opts: &mut super::api::LlmCallOptions,
@@ -437,6 +474,8 @@ pub async fn run_agent_loop_internal(
 
                 // Bridge-level PreToolUse gate: host can allow/deny/modify
                 if let Some(bridge) = bridge.as_ref() {
+                    let mutation = crate::orchestration::current_mutation_session();
+                    let mutation_classification = classify_tool_mutation(tool_name);
                     if let Ok(response) = bridge
                         .call(
                             "tool/pre_use",
@@ -444,6 +483,11 @@ pub async fn run_agent_loop_internal(
                                 "tool_name": tool_name,
                                 "tool_use_id": tool_id,
                                 "args": tool_args,
+                                "mutation": {
+                                    "classification": mutation_classification,
+                                    "session": mutation,
+                                    "declared_paths": declared_paths(&tool_args),
+                                },
                             }),
                         )
                         .await
@@ -588,6 +632,7 @@ pub async fn run_agent_loop_internal(
 
                 // Bridge-level PostToolUse gate: host can inspect/modify result
                 let result_text = if let Some(bridge) = bridge.as_ref() {
+                    let mutation = crate::orchestration::current_mutation_session();
                     if let Ok(response) = bridge
                         .call(
                             "tool/post_use",
@@ -596,6 +641,11 @@ pub async fn run_agent_loop_internal(
                                 "tool_use_id": tool_id,
                                 "result": result_text,
                                 "rejected": is_rejected,
+                                "mutation": {
+                                    "classification": classify_tool_mutation(tool_name),
+                                    "session": mutation,
+                                    "declared_paths": declared_paths(&tool_args),
+                                },
                             }),
                         )
                         .await

@@ -66,6 +66,7 @@ pub(super) struct WorkerInit {
     pub(super) wait: bool,
     pub(super) carry_policy: WorkerCarryPolicy,
     pub(super) execution: WorkerExecutionProfile,
+    pub(super) audit: MutationSessionRecord,
 }
 
 pub(super) struct WorkerState {
@@ -92,6 +93,7 @@ pub(super) struct WorkerState {
     pub(super) carry_policy: WorkerCarryPolicy,
     pub(super) execution: WorkerExecutionProfile,
     pub(super) snapshot_path: String,
+    pub(super) audit: MutationSessionRecord,
 }
 
 thread_local! {
@@ -146,6 +148,7 @@ pub(super) fn clone_worker_state(state: &WorkerState) -> serde_json::Value {
         "child_run_path": state.child_run_path,
         "execution": state.execution,
         "snapshot_path": state.snapshot_path,
+        "audit": state.audit,
     })
 }
 
@@ -164,6 +167,7 @@ fn worker_bridge_metadata(state: &WorkerState) -> serde_json::Value {
         "child_run_path": state.child_run_path,
         "execution": state.execution,
         "snapshot_path": state.snapshot_path,
+        "audit": state.audit,
         "error": state.latest_error,
     })
 }
@@ -171,7 +175,13 @@ fn worker_bridge_metadata(state: &WorkerState) -> serde_json::Value {
 pub(super) fn emit_worker_event(state: &WorkerState, status: &str) {
     if let Some(bridge) = crate::llm::current_host_bridge() {
         let metadata = worker_bridge_metadata(state);
-        bridge.send_worker_update(&state.id, &state.name, status, metadata.clone());
+        bridge.send_worker_update(
+            &state.id,
+            &state.name,
+            status,
+            metadata.clone(),
+            Some(&state.audit),
+        );
         bridge.send_progress(
             "worker",
             &format!("{} {}", state.name, status),
@@ -310,6 +320,7 @@ pub(super) fn persist_worker_state_snapshot(state: &WorkerState) -> Result<(), V
         },
         "execution": state.execution,
         "snapshot_path": state.snapshot_path,
+        "audit": state.audit,
     });
     let path = PathBuf::from(&state.snapshot_path);
     if let Some(parent) = path.parent() {
@@ -354,6 +365,9 @@ pub(super) fn load_worker_state_snapshot(target: &str) -> Result<WorkerState, Vm
     };
     let config =
         worker_config_from_json(payload.get("config").unwrap_or(&serde_json::Value::Null))?;
+    let audit: MutationSessionRecord =
+        serde_json::from_value(payload.get("audit").cloned().unwrap_or_default())
+            .unwrap_or_default();
     let execution: WorkerExecutionProfile =
         serde_json::from_value(payload.get("execution").cloned().unwrap_or_default())
             .map_err(|e| VmError::Runtime(format!("worker snapshot execution parse error: {e}")))?;
@@ -449,6 +463,7 @@ pub(super) fn load_worker_state_snapshot(target: &str) -> Result<WorkerState, Vm
         carry_policy,
         execution,
         snapshot_path: path.to_string_lossy().to_string(),
+        audit: audit.normalize(),
     })
 }
 
@@ -516,6 +531,43 @@ pub(super) fn parse_worker_carry_policy(
     })
 }
 
+fn parse_worker_audit(dict: &BTreeMap<String, VmValue>) -> Result<MutationSessionRecord, VmError> {
+    let audit_value = dict
+        .get("audit")
+        .cloned()
+        .unwrap_or_else(|| VmValue::Dict(Rc::new(BTreeMap::new())));
+    let parent_session = crate::orchestration::current_mutation_session();
+    let mut audit: MutationSessionRecord =
+        serde_json::from_value(crate::llm::vm_value_to_json(&audit_value))
+            .map_err(|e| VmError::Runtime(format!("worker audit parse error: {e}")))?;
+    if audit.parent_session_id.is_none() {
+        audit.parent_session_id = parent_session
+            .as_ref()
+            .map(|session| session.session_id.clone());
+    }
+    if audit.run_id.is_none() {
+        audit.run_id = parent_session
+            .as_ref()
+            .and_then(|session| session.run_id.clone());
+    }
+    if audit.execution_kind.is_none() {
+        audit.execution_kind = Some("worker".to_string());
+    }
+    if audit.mutation_scope.is_empty() {
+        audit.mutation_scope = parent_session
+            .as_ref()
+            .map(|session| session.mutation_scope.clone())
+            .unwrap_or_else(|| "read_only".to_string());
+    }
+    if audit.approval_mode.is_empty() {
+        audit.approval_mode = parent_session
+            .as_ref()
+            .map(|session| session.approval_mode.clone())
+            .unwrap_or_else(|| "host_enforced".to_string());
+    }
+    Ok(audit.normalize())
+}
+
 fn parse_worker_execution_profile(
     value: Option<&VmValue>,
 ) -> Result<WorkerExecutionProfile, VmError> {
@@ -573,6 +625,7 @@ pub(super) fn parse_worker_config(value: &VmValue) -> Result<WorkerInit, VmError
     let wait = matches!(dict.get("wait"), Some(VmValue::Bool(true)));
     let carry_policy = parse_worker_carry_policy(dict)?;
     let execution = parse_worker_execution_profile(dict.get("execution"))?;
+    let audit = parse_worker_audit(dict)?;
 
     if let Some(graph_value) = dict.get("graph") {
         let graph = normalize_workflow_value(graph_value)?;
@@ -593,6 +646,7 @@ pub(super) fn parse_worker_config(value: &VmValue) -> Result<WorkerInit, VmError
             wait,
             carry_policy,
             execution,
+            audit,
         });
     }
 
@@ -616,6 +670,7 @@ pub(super) fn parse_worker_config(value: &VmValue) -> Result<WorkerInit, VmError
         wait,
         carry_policy,
         execution,
+        audit,
     })
 }
 
@@ -723,10 +778,13 @@ async fn execute_worker_config(
     task: String,
     config: WorkerConfig,
     mut execution: WorkerExecutionProfile,
+    audit: MutationSessionRecord,
 ) -> Result<WorkerExecutionResult, VmError> {
     ensure_worker_worktree(&worker_id, &mut execution)?;
     let execution_record = execution_record(&execution);
     crate::stdlib::process::set_thread_execution_context(Some(execution_record.clone()));
+    crate::orchestration::install_current_mutation_session(Some(audit));
+    let _mutation_guard = WorkerMutationSessionResetGuard;
     match config {
         WorkerConfig::Workflow {
             mut graph,
@@ -810,8 +868,16 @@ async fn execute_worker_config(
     }
 }
 
+struct WorkerMutationSessionResetGuard;
+
+impl Drop for WorkerMutationSessionResetGuard {
+    fn drop(&mut self) {
+        crate::orchestration::install_current_mutation_session(None);
+    }
+}
+
 pub(super) fn spawn_worker_task(state: Rc<RefCell<WorkerState>>) {
-    let (worker_id, task, config, execution, cancel_token, worker_policy) = {
+    let (worker_id, task, config, execution, cancel_token, worker_policy, audit) = {
         let worker = state.borrow();
         if worker.carry_policy.persist_state {
             persist_worker_state_snapshot(&worker).ok();
@@ -824,6 +890,7 @@ pub(super) fn spawn_worker_task(state: Rc<RefCell<WorkerState>>) {
             worker.execution.clone(),
             worker.cancel_token.clone(),
             worker.carry_policy.policy.clone(),
+            worker.audit.clone(),
         )
     };
 
@@ -840,7 +907,7 @@ pub(super) fn spawn_worker_task(state: Rc<RefCell<WorkerState>>) {
         if let Some(ref policy) = worker_policy {
             push_execution_policy(policy.clone());
         }
-        let result = execute_worker_config(worker_id, task, config, execution).await;
+        let result = execute_worker_config(worker_id, task, config, execution, audit).await;
         if worker_policy.is_some() {
             pop_execution_policy();
         }
@@ -866,6 +933,9 @@ pub(super) fn spawn_worker_task(state: Rc<RefCell<WorkerState>>) {
                         .get("path")
                         .and_then(|value| value.as_str())
                         .map(|value| value.to_string());
+                    if let Some(run_id) = &worker.child_run_id {
+                        worker.audit.run_id = Some(run_id.clone());
+                    }
                     if worker.carry_policy.persist_state {
                         persist_worker_state_snapshot(&worker).ok();
                     }
@@ -993,6 +1063,14 @@ pub(super) async fn execute_delegated_stage(
         },
         execution,
         snapshot_path: worker_snapshot_path(&worker_id),
+        audit: MutationSessionRecord {
+            parent_session_id: Some(node_id.to_string()),
+            mutation_scope: "read_only".to_string(),
+            approval_mode: "host_enforced".to_string(),
+            execution_kind: Some("delegated_stage".to_string()),
+            ..Default::default()
+        }
+        .normalize(),
     }));
     {
         let worker = state.borrow();
@@ -1116,6 +1194,16 @@ mod tests {
             },
             execution: WorkerExecutionProfile::default(),
             snapshot_path: snapshot_path.clone(),
+            audit: MutationSessionRecord {
+                session_id: "session_worker_test".to_string(),
+                parent_session_id: Some("session_parent".to_string()),
+                run_id: Some("run_1".to_string()),
+                worker_id: Some("worker_test".to_string()),
+                execution_kind: Some("workflow".to_string()),
+                mutation_scope: "apply_worktree".to_string(),
+                approval_mode: "host_enforced".to_string(),
+            }
+            .normalize(),
         };
 
         persist_worker_state_snapshot(&state).unwrap();
@@ -1132,6 +1220,8 @@ mod tests {
             loaded.carry_policy.transcript_policy.mode.as_deref(),
             Some("reset")
         );
+        assert_eq!(loaded.audit.session_id, "session_worker_test");
+        assert_eq!(loaded.audit.mutation_scope, "apply_worktree");
 
         let _ = std::fs::remove_dir_all(&dir);
         unsafe { std::env::remove_var("HARN_WORKER_STATE_DIR") };

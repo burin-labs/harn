@@ -1,3 +1,5 @@
+<!-- Generated from spec/HARN_SPEC.md by scripts/sync_language_spec.sh -->
+
 # Harn language specification
 
 Version: 1.0 (derived from implementation, 2026-04-01)

@@ -30,7 +30,8 @@ pipeline build() {
         variable: (identifier)
         iterable: (identifier)
         body: (block
-          (call_expression
-            function: (identifier)
-            (argument_list
-              (identifier))))))))
+          (expression_statement
+            (call_expression
+              function: (identifier)
+              (argument_list
+                (identifier)))))))))

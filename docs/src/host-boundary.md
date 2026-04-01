@@ -19,12 +19,15 @@ What belongs in Harn `std/*` modules or the VM:
 - Context/artifact assembly rules that are product-agnostic
 - Structured contract enforcement and eval/replay helpers
 - Multi-root workspace contracts and fallbacks such as `workspace_roots()`
+- Mutation-session identity and audit provenance for write-capable workflows
+  and delegated workers
 
 What should stay in host-side `.harn` scripts:
 
 - Product-specific prompts and instruction tone
 - IDE-specific flows such as edit application, approval UX, or bespoke tool
   choreography
+- Concrete undo/redo stacks and editor-native mutation application
 - Proprietary ranking, routing, or heuristics tied to one host product
 - Features that depend on host-only commercial, account, or app lifecycle rules
 
@@ -39,3 +42,19 @@ Rule of thumb:
 Keep advanced host-side `.harn` modules local to the host when they encode
 host-only UX, proprietary behavior, or app-specific heuristics. Move a helper
 into Harn only when it is general enough to be useful across hosts.
+
+## Trust boundary
+
+Harn should own the audit contract for mutations:
+
+- mutation-session IDs
+- workflow/worker/session lineage
+- tool-gate mutation classification and declared scope
+- artifact and run-record provenance
+
+Hosts should own the concrete UX:
+
+- apply/approve/deny flows
+- patch previews
+- editor undo/redo semantics
+- trust UI around which worker or session produced a change

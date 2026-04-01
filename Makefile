@@ -1,4 +1,4 @@
-.PHONY: check fmt fmt-harn lint lint-md lint-harn test conformance all
+.PHONY: check fmt fmt-harn lint lint-md lint-harn test conformance all release-gate
 
 # Full quality check: format first, then lint/test in parallel.
 # Usage: make all -j       (parallel checks after formatting)
@@ -56,3 +56,6 @@ fmt-harn:
 # Format check (no changes, for CI)
 fmt-check:
 	cargo fmt --all -- --check
+
+release-gate:
+	./scripts/release_gate.sh audit

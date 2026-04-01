@@ -142,6 +142,9 @@ Options currently include:
 - `replay_path`
 - `replay_run`
 - `replay_mode: "deterministic"`
+- `audit`
+- `mutation_scope`
+- `approval_mode`
 
 Resuming is practical rather than magical: if a saved run has unfinished
 successor stages, Harn continues from persisted ready-node checkpoints with
@@ -158,6 +161,20 @@ from child execution without reconstructing that structure from plain text.
 Persisted runs also retain explicit `parent_run_id`, `root_run_id`, and
 `child_runs` lineage, and `load_run_tree(path)` materializes that hierarchy
 recursively for inspection or host-side task views.
+
+Runs may also include `metadata.mutation_session`, a normalized audit record
+used to tie tool gates, workers, and artifacts back to one mutation boundary:
+
+- `session_id`
+- `parent_session_id`
+- `run_id`
+- `worker_id`
+- `execution_kind`
+- `mutation_scope`
+- `approval_mode`
+
+This is not an editor undo stack. It is the runtime-side provenance contract
+that hosts can map onto their own approval and undo/redo UX.
 
 ## Transcript policy
 

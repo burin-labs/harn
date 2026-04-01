@@ -48,9 +48,10 @@ guide: install Harn, write a program, and run it in under five minutes.
 - **[MCP and ACP Integration](./mcp-and-acp.md)** -- MCP client/server, ACP, and A2A protocols
 - **[CLI Reference](./cli-reference.md)** -- All CLI commands and flags
 - **[Builtin Functions](./builtins.md)** -- Complete reference for all built-in functions
+- **[Language Specification](./language-spec.md)** -- Formal grammar and runtime semantics
 - **[Cookbook](./cookbook.md)** -- Practical recipes and patterns
 
 ## Links
 
 - [GitHub](https://github.com/burin-labs/harn)
-- [Language Specification](https://github.com/burin-labs/harn/blob/main/spec/HARN_SPEC.md)
+- [Language Specification](./language-spec.md)

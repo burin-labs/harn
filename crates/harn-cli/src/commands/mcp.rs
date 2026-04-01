@@ -276,14 +276,16 @@ async fn login(options: LoginOptions) -> Result<(), String> {
     let code = wait_for_oauth_code(callback_listener, &options.redirect_uri, &state)?;
     let token = exchange_authorization_code(
         &discovery.metadata,
-        &client_id,
-        client_secret.clone(),
-        &token_auth_method,
-        &options.redirect_uri,
-        &server.url,
-        options.scopes.as_deref().or(server.scopes.as_deref()),
-        &code,
-        &code_verifier,
+        AuthorizationCodeExchange {
+            client_id: &client_id,
+            client_secret: client_secret.as_deref(),
+            token_auth_method: &token_auth_method,
+            redirect_uri: &options.redirect_uri,
+            resource: &server.url,
+            scopes: options.scopes.as_deref().or(server.scopes.as_deref()),
+            code: &code,
+            code_verifier: &code_verifier,
+        },
     )
     .await?;
 
@@ -643,36 +645,40 @@ fn wait_for_oauth_code(
 
 async fn exchange_authorization_code(
     metadata: &OAuthServerMetadata,
-    client_id: &str,
-    client_secret: Option<String>,
-    token_auth_method: &str,
-    redirect_uri: &str,
-    resource: &str,
-    scopes: Option<&str>,
-    code: &str,
-    code_verifier: &str,
+    request: AuthorizationCodeExchange<'_>,
 ) -> Result<TokenResponse, String> {
     let client = reqwest::Client::new();
     let mut form = vec![
         ("grant_type", "authorization_code".to_string()),
-        ("code", code.to_string()),
-        ("redirect_uri", redirect_uri.to_string()),
-        ("client_id", client_id.to_string()),
-        ("code_verifier", code_verifier.to_string()),
-        ("resource", resource.to_string()),
+        ("code", request.code.to_string()),
+        ("redirect_uri", request.redirect_uri.to_string()),
+        ("client_id", request.client_id.to_string()),
+        ("code_verifier", request.code_verifier.to_string()),
+        ("resource", request.resource.to_string()),
     ];
-    if let Some(scopes) = scopes {
+    if let Some(scopes) = request.scopes {
         form.push(("scope", scopes.to_string()));
     }
     request_token(
         &client,
         &metadata.token_endpoint,
-        token_auth_method,
-        client_id,
-        client_secret.as_deref(),
+        request.token_auth_method,
+        request.client_id,
+        request.client_secret,
         &form,
     )
     .await
+}
+
+struct AuthorizationCodeExchange<'a> {
+    client_id: &'a str,
+    client_secret: Option<&'a str>,
+    token_auth_method: &'a str,
+    redirect_uri: &'a str,
+    resource: &'a str,
+    scopes: Option<&'a str>,
+    code: &'a str,
+    code_verifier: &'a str,
 }
 
 async fn refresh_token_if_needed(token: &StoredOAuthToken) -> Result<StoredOAuthToken, String> {

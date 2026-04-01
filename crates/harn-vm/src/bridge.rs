@@ -13,6 +13,7 @@ use std::time::Duration;
 use tokio::io::AsyncBufReadExt;
 use tokio::sync::{oneshot, Mutex};
 
+use crate::orchestration::MutationSessionRecord;
 use crate::value::{ErrorCategory, VmError, VmValue};
 
 /// Default timeout for bridge calls (5 minutes).
@@ -509,6 +510,7 @@ impl HostBridge {
         worker_name: &str,
         status: &str,
         metadata: serde_json::Value,
+        audit: Option<&MutationSessionRecord>,
     ) {
         let session_id = self.get_session_id();
         let script = self.get_script_name();
@@ -517,6 +519,13 @@ impl HostBridge {
         let snapshot_path = metadata.get("snapshot_path").cloned().unwrap_or_default();
         let run_id = metadata.get("child_run_id").cloned().unwrap_or_default();
         let run_path = metadata.get("child_run_path").cloned().unwrap_or_default();
+        let lifecycle = serde_json::json!({
+            "event": status,
+            "worker_id": worker_id,
+            "worker_name": worker_name,
+            "started_at": started_at,
+            "finished_at": finished_at,
+        });
         self.notify(
             "session/update",
             serde_json::json!({
@@ -533,6 +542,8 @@ impl HostBridge {
                         "snapshot_path": snapshot_path,
                         "run_id": run_id,
                         "run_path": run_path,
+                        "lifecycle": lifecycle,
+                        "audit": audit,
                         "metadata": metadata,
                     },
                 },

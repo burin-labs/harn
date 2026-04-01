@@ -279,11 +279,32 @@ Runtime behavior:
 - `interrupt_immediate`: inject on the next agent loop boundary immediately
 - Worker lifecycle updates are emitted as structured `session/update` payloads with
   worker id/name, status, lineage metadata, artifact counts, transcript presence,
-  snapshot path, execution metadata, and child run ids/paths when applicable.
+  snapshot path, execution metadata, child run ids/paths, lifecycle summaries,
+  and audit-session metadata when applicable.
   Hosts can render these as background task notifications instead of scraping
   stdout.
 - `finish_step`: inject after the current tool/operation completes
 - `wait_for_completion`: defer until the current agent interaction yields
+
+## Security notes
+
+### Remote MCP OAuth
+
+`harn mcp login` stores remote MCP OAuth tokens in the local OS keychain for
+standalone CLI reuse. Treat that as durable delegated access:
+
+- prefer the narrowest scopes the server supports
+- treat configured `client_secret` values as secrets
+- review remote MCP capabilities before wiring them into autonomous workflows
+
+### Safer write defaults
+
+Harn now propagates mutation-session audit metadata through workflow runs,
+delegated workers, and bridge tool gates. Recommended host defaults remain:
+
+- proposal-first application for direct workspace edits
+- worktree-backed execution for autonomous/background workers
+- explicit approval for destructive or broad-scope mutation tools
 
 ### Bridge mode
 

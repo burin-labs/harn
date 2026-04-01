@@ -7,6 +7,7 @@
 - [Getting Started](./getting-started.md)
 - [Why Harn?](./why-harn.md)
 - [Language Basics](./language-basics.md)
+- [Language Specification](./language-spec.md)
 - [Error Handling](./error-handling.md)
 - [Modules and Imports](./modules.md)
 - [Concurrency](./concurrency.md)

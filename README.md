@@ -182,8 +182,35 @@ println(result.visible_text)
 - Host-aware static preflight: `harn check` can load host-specific capability
   schemas and alternate bundle roots from `harn.toml` or CLI flags so host
   adapters and bundled template layouts validate cleanly.
+- Mutation-session audit metadata for workflows, delegated workers, and bridge
+  tool gates so hosts can group write-capable operations under one trust
+  boundary without forcing one edit-application UX.
 - String method aliases for case normalization: `.lower()`, `.upper()`,
   `.to_lower()`, and `.to_upper()`.
+
+## Trust Boundary
+
+Harn owns orchestration and provenance. Hosts own concrete mutation UX.
+
+- Harn owns workflow execution, transcript lifecycle, replay/eval, worker
+  lineage, artifact provenance, and mutation-session audit metadata.
+- Hosts own approvals, patch/apply UX, concrete file mutations, and editor
+  undo/redo semantics.
+
+For autonomous or background edits, the recommended default is worktree-backed
+execution plus explicit host approval for destructive operations.
+
+## Release Workflow
+
+Maintainers can run the comprehensive docs audit, verification gate, version
+bump flow, and publish ritual through:
+
+```bash
+./scripts/release_gate.sh audit
+./scripts/release_gate.sh full --bump patch --dry-run
+```
+
+`scripts/publish.sh` remains the crates.io publisher used by the gate.
 
 ## Why This Matters
 
@@ -323,6 +350,7 @@ notifications:
 - [CLI reference](docs/src/cli-reference.md)
 - [Builtin reference](docs/src/builtins.md)
 - [Language spec](spec/HARN_SPEC.md)
+- [Hosted language spec](docs/src/language-spec.md)
 
 ## Development
 

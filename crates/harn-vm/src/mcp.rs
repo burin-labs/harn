@@ -472,7 +472,7 @@ fn parse_jsonrpc_result(msg: serde_json::Value) -> Result<serde_json::Value, VmE
     Ok(msg
         .get("result")
         .cloned()
-        .unwrap_or_else(|| serde_json::Value::Null))
+        .unwrap_or(serde_json::Value::Null))
 }
 
 fn jsonrpc_error_to_vm_error(error: &serde_json::Value) -> VmError {

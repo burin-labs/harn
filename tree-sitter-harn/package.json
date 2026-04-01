@@ -17,8 +17,8 @@
     "tree-sitter-cli": "^0.26.7"
   },
   "scripts": {
-    "build": "tree-sitter generate && tree-sitter build",
-    "test": "tree-sitter test",
-    "parse": "tree-sitter parse"
+    "build": "./scripts/tree-sitter-cli.sh generate && ./scripts/tree-sitter-cli.sh build",
+    "test": "./scripts/tree-sitter-cli.sh test",
+    "parse": "./scripts/tree-sitter-cli.sh parse"
   }
 }

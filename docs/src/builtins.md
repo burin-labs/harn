@@ -1035,6 +1035,9 @@ These builtins expose Harn's typed orchestration runtime.
 - `parent_run_id`
 - `root_run_id`
 - `execution` (`{cwd?, env?, worktree?}` for isolated delegated execution)
+- `audit` (seed mutation-session metadata for trust/audit grouping)
+- `mutation_scope`
+- `approval_mode`
 
 ### Tool lifecycle hooks
 
@@ -1069,6 +1072,7 @@ These builtins expose Harn's typed orchestration runtime.
 - `{task, node, artifacts?, transcript?, name?, wait?}` for delegated stage runs
 - Either shape may also include `execution: {cwd?, env?, worktree?}` where
   `worktree` accepts `{repo, path?, branch?, base_ref?, cleanup?}`.
+- Either shape may also include `audit: {session_id?, parent_session_id?, mutation_scope?, approval_mode?}`
 
 Worker configs may also include `carry` to control continuation behavior:
 
@@ -1077,8 +1081,8 @@ Worker configs may also include `carry` to control continuation behavior:
 - `carry: {resume_workflow?: bool, persist_state?: bool}`
 
 Workers return handle dicts with an `id`, lifecycle timestamps, `status`,
-`mode`, result/error fields, transcript presence, produced artifact count, and
-snapshot/child-run paths when available.
+`mode`, result/error fields, transcript presence, produced artifact count,
+snapshot/child-run paths, and `audit` mutation-session metadata when available.
 
 ### Artifacts and context
 

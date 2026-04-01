@@ -1,0 +1,79 @@
+==================
+Multiline Call Arguments
+==================
+
+fn collect() {
+  capture(
+    first,
+    second,
+    third,
+  )
+}
+
+---
+
+(source_file
+  (fn_declaration
+    name: (identifier)
+    body: (block
+      (expression_statement
+        (call_expression
+          function: (identifier)
+          (argument_list
+            (identifier)
+            (identifier)
+            (identifier)))))))
+
+==================
+Property Call Chains
+==================
+
+pipeline test(task) {
+  log("hello world".replace("world", "harn"))
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (parameter_list
+      (typed_parameter
+        name: (identifier)))
+    (block
+      (expression_statement
+        (call_expression
+          function: (identifier)
+          (argument_list
+            (call_expression
+              function: (property_access
+                object: (string_literal)
+                property: (identifier))
+              (argument_list
+                (string_literal)
+                (string_literal)))))))))
+
+==================
+Interpolated String
+==================
+
+fn greet(self) {
+  return "Hello ${self.name}"
+}
+
+---
+
+(source_file
+  (fn_declaration
+    name: (identifier)
+    (parameter_list
+      (typed_parameter
+        name: (identifier)))
+    body: (block
+      (return_statement
+        (interpolated_string
+          (string_content)
+          (interpolation
+            (property_access
+              object: (identifier)
+              property: (identifier))))))))

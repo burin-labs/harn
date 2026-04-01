@@ -21,14 +21,14 @@ use self::agents_workers::{
 };
 use crate::orchestration::{
     append_audit_entry, builtin_ceiling, diff_run_records, evaluate_run_against_fixture,
-    evaluate_run_suite, evaluate_run_suite_manifest, load_run_record, next_nodes_for,
-    normalize_artifact, normalize_eval_suite_manifest, normalize_run_record,
-    normalize_workflow_value, pop_execution_policy, push_execution_policy,
+    evaluate_run_suite, evaluate_run_suite_manifest, install_current_mutation_session,
+    load_run_record, next_nodes_for, normalize_artifact, normalize_eval_suite_manifest,
+    normalize_run_record, normalize_workflow_value, pop_execution_policy, push_execution_policy,
     render_artifacts_context, render_unified_diff, replay_fixture_from_run, save_run_record,
     select_artifacts, validate_workflow, ArtifactRecord, CapabilityPolicy, ContextPolicy,
-    LlmUsageRecord, ReplayFixture, RunCheckpointRecord, RunChildRecord, RunExecutionRecord,
-    RunRecord, RunStageAttemptRecord, RunStageRecord, RunTransitionRecord, TranscriptPolicy,
-    WorkflowEdge, WorkflowGraph,
+    LlmUsageRecord, MutationSessionRecord, ReplayFixture, RunCheckpointRecord, RunChildRecord,
+    RunExecutionRecord, RunRecord, RunStageAttemptRecord, RunStageRecord, RunTransitionRecord,
+    TranscriptPolicy, WorkflowEdge, WorkflowGraph,
 };
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -38,6 +38,14 @@ fn parse_transcript_policy(value: Option<&VmValue>) -> Result<TranscriptPolicy, 
         Some(value) => serde_json::from_value(crate::llm::vm_value_to_json(value))
             .map_err(|e| VmError::Runtime(format!("transcript policy parse error: {e}"))),
         None => Ok(TranscriptPolicy::default()),
+    }
+}
+
+struct MutationSessionResetGuard;
+
+impl Drop for MutationSessionResetGuard {
+    fn drop(&mut self) {
+        install_current_mutation_session(None);
     }
 }
 
@@ -143,6 +151,9 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
             WorkerConfig::Stage { .. } => "stage",
         }
         .to_string();
+        let mut audit = init.audit.clone().normalize();
+        audit.worker_id = Some(worker_id.clone());
+        audit.execution_kind = Some(mode.clone());
         let state = Rc::new(RefCell::new(WorkerState {
             id: worker_id.clone(),
             name: init.name,
@@ -167,6 +178,7 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
             carry_policy: init.carry_policy,
             execution: init.execution,
             snapshot_path: worker_snapshot_path(&worker_id),
+            audit,
         }));
         {
             let worker = state.borrow();
@@ -1810,6 +1822,26 @@ fn append_child_run_record(run: &mut RunRecord, stage_id: &str, stage: &serde_js
             .unwrap_or("worker")
             .to_string(),
         parent_stage_id: Some(stage_id.to_string()),
+        session_id: worker
+            .get("audit")
+            .and_then(|value| value.get("session_id"))
+            .and_then(|value| value.as_str())
+            .map(|value| value.to_string()),
+        parent_session_id: worker
+            .get("audit")
+            .and_then(|value| value.get("parent_session_id"))
+            .and_then(|value| value.as_str())
+            .map(|value| value.to_string()),
+        mutation_scope: worker
+            .get("audit")
+            .and_then(|value| value.get("mutation_scope"))
+            .and_then(|value| value.as_str())
+            .map(|value| value.to_string()),
+        approval_mode: worker
+            .get("audit")
+            .and_then(|value| value.get("approval_mode"))
+            .and_then(|value| value.as_str())
+            .map(|value| value.to_string()),
         task: worker
             .get("task")
             .and_then(|value| value.as_str())
@@ -2283,6 +2315,38 @@ async fn execute_workflow(
         metadata: BTreeMap::new(),
         persisted_path: None,
     });
+    let requested_mutation_scope = optional_string_option(&options, "mutation_scope")
+        .unwrap_or_else(|| {
+            execution
+                .as_ref()
+                .and_then(|record| record.adapter.clone())
+                .map(|adapter| {
+                    if adapter == "worktree" {
+                        "apply_worktree".to_string()
+                    } else {
+                        "read_only".to_string()
+                    }
+                })
+                .unwrap_or_else(|| "read_only".to_string())
+        });
+    let mutation_approval_mode = optional_string_option(&options, "approval_mode")
+        .unwrap_or_else(|| "host_enforced".to_string());
+    let audit_input = options
+        .get("audit")
+        .cloned()
+        .unwrap_or_else(|| VmValue::Dict(Rc::new(BTreeMap::new())));
+    let mut mutation_session: MutationSessionRecord =
+        serde_json::from_value(crate::llm::vm_value_to_json(&audit_input))
+            .map_err(|e| VmError::Runtime(format!("workflow_execute: audit parse error: {e}")))?;
+    mutation_session.run_id = Some(run.id.clone());
+    mutation_session.execution_kind = Some("workflow".to_string());
+    if mutation_session.mutation_scope.is_empty() {
+        mutation_session.mutation_scope = requested_mutation_scope;
+    }
+    if mutation_session.approval_mode.is_empty() {
+        mutation_session.approval_mode = mutation_approval_mode;
+    }
+    mutation_session = mutation_session.normalize();
     if run.transcript.is_none() {
         if let Some(seed_transcript) = options.get("transcript") {
             run.transcript = Some(crate::llm::vm_value_to_json(seed_transcript));
@@ -2343,6 +2407,10 @@ async fn execute_workflow(
             serde_json::to_value(execution).unwrap_or_default(),
         );
     }
+    run.metadata.insert(
+        "mutation_session".to_string(),
+        serde_json::to_value(&mutation_session).unwrap_or_default(),
+    );
     if !graph.metadata.is_empty() {
         run.metadata.insert(
             "workflow_metadata".to_string(),
@@ -2396,6 +2464,8 @@ async fn execute_workflow(
     let mut replay_stages = replay_source
         .as_ref()
         .map(|source| VecDeque::from(source.stages.clone()));
+    install_current_mutation_session(Some(mutation_session.clone()));
+    let _mutation_session_guard = MutationSessionResetGuard;
     checkpoint_run(
         &mut run,
         &ready_nodes,

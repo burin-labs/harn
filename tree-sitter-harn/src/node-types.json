@@ -476,19 +476,7 @@
           "named": true
         },
         {
-          "type": "binary_expression",
-          "named": true
-        },
-        {
           "type": "break_statement",
-          "named": true
-        },
-        {
-          "type": "call_expression",
-          "named": true
-        },
-        {
-          "type": "closure",
           "named": true
         },
         {
@@ -504,31 +492,15 @@
           "named": true
         },
         {
-          "type": "dict_literal",
-          "named": true
-        },
-        {
-          "type": "duration_literal",
-          "named": true
-        },
-        {
           "type": "enum_declaration",
           "named": true
         },
         {
-          "type": "false",
-          "named": true
-        },
-        {
-          "type": "float_literal",
+          "type": "expression_statement",
           "named": true
         },
         {
           "type": "fn_declaration",
-          "named": true
-        },
-        {
-          "type": "fn_expression",
           "named": true
         },
         {
@@ -540,10 +512,6 @@
           "named": true
         },
         {
-          "type": "identifier",
-          "named": true
-        },
-        {
           "type": "if_statement",
           "named": true
         },
@@ -552,15 +520,7 @@
           "named": true
         },
         {
-          "type": "integer_literal",
-          "named": true
-        },
-        {
           "type": "interface_declaration",
-          "named": true
-        },
-        {
-          "type": "interpolated_string",
           "named": true
         },
         {
@@ -568,27 +528,11 @@
           "named": true
         },
         {
-          "type": "list_literal",
-          "named": true
-        },
-        {
           "type": "match_statement",
           "named": true
         },
         {
-          "type": "method_call",
-          "named": true
-        },
-        {
           "type": "mutex_block",
-          "named": true
-        },
-        {
-          "type": "nil",
-          "named": true
-        },
-        {
-          "type": "nil_coalescing_expression",
           "named": true
         },
         {
@@ -608,22 +552,6 @@
           "named": true
         },
         {
-          "type": "parenthesized_expression",
-          "named": true
-        },
-        {
-          "type": "pipe_expression",
-          "named": true
-        },
-        {
-          "type": "property_access",
-          "named": true
-        },
-        {
-          "type": "range_expression",
-          "named": true
-        },
-        {
           "type": "retry_statement",
           "named": true
         },
@@ -636,27 +564,7 @@
           "named": true
         },
         {
-          "type": "slice_expression",
-          "named": true
-        },
-        {
-          "type": "spawn_expression",
-          "named": true
-        },
-        {
-          "type": "string_literal",
-          "named": true
-        },
-        {
           "type": "struct_declaration",
-          "named": true
-        },
-        {
-          "type": "subscript_expression",
-          "named": true
-        },
-        {
-          "type": "ternary_expression",
           "named": true
         },
         {
@@ -664,27 +572,11 @@
           "named": true
         },
         {
-          "type": "true",
-          "named": true
-        },
-        {
           "type": "try_catch_statement",
           "named": true
         },
         {
-          "type": "try_expression",
-          "named": true
-        },
-        {
-          "type": "try_unwrap_expression",
-          "named": true
-        },
-        {
           "type": "type_declaration",
-          "named": true
-        },
-        {
-          "type": "unary_expression",
           "named": true
         },
         {
@@ -703,6 +595,11 @@
     }
   },
   {
+    "type": "break_statement",
+    "named": true,
+    "fields": {}
+  },
+  {
     "type": "call_expression",
     "named": true,
     "fields": {
@@ -711,83 +608,7 @@
         "required": true,
         "types": [
           {
-            "type": "binary_expression",
-            "named": true
-          },
-          {
-            "type": "call_expression",
-            "named": true
-          },
-          {
-            "type": "closure",
-            "named": true
-          },
-          {
-            "type": "deadline_block",
-            "named": true
-          },
-          {
-            "type": "dict_literal",
-            "named": true
-          },
-          {
-            "type": "duration_literal",
-            "named": true
-          },
-          {
-            "type": "false",
-            "named": true
-          },
-          {
-            "type": "float_literal",
-            "named": true
-          },
-          {
-            "type": "fn_expression",
-            "named": true
-          },
-          {
             "type": "identifier",
-            "named": true
-          },
-          {
-            "type": "if_statement",
-            "named": true
-          },
-          {
-            "type": "integer_literal",
-            "named": true
-          },
-          {
-            "type": "interpolated_string",
-            "named": true
-          },
-          {
-            "type": "list_literal",
-            "named": true
-          },
-          {
-            "type": "method_call",
-            "named": true
-          },
-          {
-            "type": "nil",
-            "named": true
-          },
-          {
-            "type": "nil_coalescing_expression",
-            "named": true
-          },
-          {
-            "type": "parallel_expression",
-            "named": true
-          },
-          {
-            "type": "parallel_map_expression",
-            "named": true
-          },
-          {
-            "type": "parallel_settle_expression",
             "named": true
           },
           {
@@ -795,55 +616,11 @@
             "named": true
           },
           {
-            "type": "pipe_expression",
-            "named": true
-          },
-          {
             "type": "property_access",
             "named": true
           },
           {
-            "type": "range_expression",
-            "named": true
-          },
-          {
-            "type": "retry_statement",
-            "named": true
-          },
-          {
-            "type": "slice_expression",
-            "named": true
-          },
-          {
-            "type": "spawn_expression",
-            "named": true
-          },
-          {
-            "type": "string_literal",
-            "named": true
-          },
-          {
             "type": "subscript_expression",
-            "named": true
-          },
-          {
-            "type": "ternary_expression",
-            "named": true
-          },
-          {
-            "type": "true",
-            "named": true
-          },
-          {
-            "type": "try_expression",
-            "named": true
-          },
-          {
-            "type": "try_unwrap_expression",
-            "named": true
-          },
-          {
-            "type": "unary_expression",
             "named": true
           }
         ]
@@ -873,19 +650,7 @@
           "named": true
         },
         {
-          "type": "binary_expression",
-          "named": true
-        },
-        {
           "type": "break_statement",
-          "named": true
-        },
-        {
-          "type": "call_expression",
-          "named": true
-        },
-        {
-          "type": "closure",
           "named": true
         },
         {
@@ -901,31 +666,15 @@
           "named": true
         },
         {
-          "type": "dict_literal",
-          "named": true
-        },
-        {
-          "type": "duration_literal",
-          "named": true
-        },
-        {
           "type": "enum_declaration",
           "named": true
         },
         {
-          "type": "false",
-          "named": true
-        },
-        {
-          "type": "float_literal",
+          "type": "expression_statement",
           "named": true
         },
         {
           "type": "fn_declaration",
-          "named": true
-        },
-        {
-          "type": "fn_expression",
           "named": true
         },
         {
@@ -937,10 +686,6 @@
           "named": true
         },
         {
-          "type": "identifier",
-          "named": true
-        },
-        {
           "type": "if_statement",
           "named": true
         },
@@ -949,15 +694,7 @@
           "named": true
         },
         {
-          "type": "integer_literal",
-          "named": true
-        },
-        {
           "type": "interface_declaration",
-          "named": true
-        },
-        {
-          "type": "interpolated_string",
           "named": true
         },
         {
@@ -965,27 +702,11 @@
           "named": true
         },
         {
-          "type": "list_literal",
-          "named": true
-        },
-        {
           "type": "match_statement",
           "named": true
         },
         {
-          "type": "method_call",
-          "named": true
-        },
-        {
           "type": "mutex_block",
-          "named": true
-        },
-        {
-          "type": "nil",
-          "named": true
-        },
-        {
-          "type": "nil_coalescing_expression",
           "named": true
         },
         {
@@ -1009,22 +730,6 @@
           "named": true
         },
         {
-          "type": "parenthesized_expression",
-          "named": true
-        },
-        {
-          "type": "pipe_expression",
-          "named": true
-        },
-        {
-          "type": "property_access",
-          "named": true
-        },
-        {
-          "type": "range_expression",
-          "named": true
-        },
-        {
           "type": "retry_statement",
           "named": true
         },
@@ -1037,27 +742,7 @@
           "named": true
         },
         {
-          "type": "slice_expression",
-          "named": true
-        },
-        {
-          "type": "spawn_expression",
-          "named": true
-        },
-        {
-          "type": "string_literal",
-          "named": true
-        },
-        {
           "type": "struct_declaration",
-          "named": true
-        },
-        {
-          "type": "subscript_expression",
-          "named": true
-        },
-        {
-          "type": "ternary_expression",
           "named": true
         },
         {
@@ -1065,27 +750,11 @@
           "named": true
         },
         {
-          "type": "true",
-          "named": true
-        },
-        {
           "type": "try_catch_statement",
           "named": true
         },
         {
-          "type": "try_expression",
-          "named": true
-        },
-        {
-          "type": "try_unwrap_expression",
-          "named": true
-        },
-        {
           "type": "type_declaration",
-          "named": true
-        },
-        {
-          "type": "unary_expression",
           "named": true
         },
         {
@@ -1294,6 +963,11 @@
         ]
       }
     }
+  },
+  {
+    "type": "continue_statement",
+    "named": true,
+    "fields": {}
   },
   {
     "type": "deadline_block",
@@ -1519,6 +1193,10 @@
           },
           {
             "type": "interpolated_string",
+            "named": true
+          },
+          {
+            "type": "keyword_identifier",
             "named": true
           },
           {
@@ -1776,7 +1454,7 @@
     "fields": {},
     "children": {
       "multiple": true,
-      "required": true,
+      "required": false,
       "types": [
         {
           "type": "dict_pattern_field",
@@ -1851,6 +1529,158 @@
         }
       ]
     }
+  },
+  {
+    "type": "expression_statement",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "binary_expression",
+          "named": true
+        },
+        {
+          "type": "call_expression",
+          "named": true
+        },
+        {
+          "type": "closure",
+          "named": true
+        },
+        {
+          "type": "deadline_block",
+          "named": true
+        },
+        {
+          "type": "dict_literal",
+          "named": true
+        },
+        {
+          "type": "duration_literal",
+          "named": true
+        },
+        {
+          "type": "false",
+          "named": true
+        },
+        {
+          "type": "float_literal",
+          "named": true
+        },
+        {
+          "type": "fn_expression",
+          "named": true
+        },
+        {
+          "type": "identifier",
+          "named": true
+        },
+        {
+          "type": "if_statement",
+          "named": true
+        },
+        {
+          "type": "integer_literal",
+          "named": true
+        },
+        {
+          "type": "interpolated_string",
+          "named": true
+        },
+        {
+          "type": "list_literal",
+          "named": true
+        },
+        {
+          "type": "method_call",
+          "named": true
+        },
+        {
+          "type": "nil",
+          "named": true
+        },
+        {
+          "type": "nil_coalescing_expression",
+          "named": true
+        },
+        {
+          "type": "parallel_expression",
+          "named": true
+        },
+        {
+          "type": "parallel_map_expression",
+          "named": true
+        },
+        {
+          "type": "parallel_settle_expression",
+          "named": true
+        },
+        {
+          "type": "parenthesized_expression",
+          "named": true
+        },
+        {
+          "type": "pipe_expression",
+          "named": true
+        },
+        {
+          "type": "property_access",
+          "named": true
+        },
+        {
+          "type": "range_expression",
+          "named": true
+        },
+        {
+          "type": "retry_statement",
+          "named": true
+        },
+        {
+          "type": "slice_expression",
+          "named": true
+        },
+        {
+          "type": "spawn_expression",
+          "named": true
+        },
+        {
+          "type": "string_literal",
+          "named": true
+        },
+        {
+          "type": "subscript_expression",
+          "named": true
+        },
+        {
+          "type": "ternary_expression",
+          "named": true
+        },
+        {
+          "type": "true",
+          "named": true
+        },
+        {
+          "type": "try_expression",
+          "named": true
+        },
+        {
+          "type": "try_unwrap_expression",
+          "named": true
+        },
+        {
+          "type": "unary_expression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "false",
+    "named": true,
+    "fields": {}
   },
   {
     "type": "fn_declaration",
@@ -2578,6 +2408,10 @@
         {
           "type": "string_content",
           "named": true
+        },
+        {
+          "type": "string_dollar",
+          "named": true
         }
       ]
     }
@@ -2728,6 +2562,11 @@
         }
       ]
     }
+  },
+  {
+    "type": "keyword_identifier",
+    "named": true,
+    "fields": {}
   },
   {
     "type": "let_binding",
@@ -3062,7 +2901,7 @@
     "fields": {},
     "children": {
       "multiple": true,
-      "required": true,
+      "required": false,
       "types": [
         {
           "type": "list_pattern_element",
@@ -3413,6 +3252,10 @@
           {
             "type": "identifier",
             "named": true
+          },
+          {
+            "type": "keyword_identifier",
+            "named": true
           }
         ]
       },
@@ -3585,6 +3428,11 @@
         ]
       }
     }
+  },
+  {
+    "type": "nil",
+    "named": true,
+    "fields": {}
   },
   {
     "type": "nil_coalescing_expression",
@@ -3935,23 +3783,7 @@
           "named": true
         },
         {
-          "type": "binary_expression",
-          "named": true
-        },
-        {
           "type": "break_statement",
-          "named": true
-        },
-        {
-          "type": "call_expression",
-          "named": true
-        },
-        {
-          "type": "closure",
-          "named": true
-        },
-        {
-          "type": "comment",
           "named": true
         },
         {
@@ -3967,31 +3799,15 @@
           "named": true
         },
         {
-          "type": "dict_literal",
-          "named": true
-        },
-        {
-          "type": "duration_literal",
-          "named": true
-        },
-        {
           "type": "enum_declaration",
           "named": true
         },
         {
-          "type": "false",
-          "named": true
-        },
-        {
-          "type": "float_literal",
+          "type": "expression_statement",
           "named": true
         },
         {
           "type": "fn_declaration",
-          "named": true
-        },
-        {
-          "type": "fn_expression",
           "named": true
         },
         {
@@ -4003,10 +3819,6 @@
           "named": true
         },
         {
-          "type": "identifier",
-          "named": true
-        },
-        {
           "type": "if_statement",
           "named": true
         },
@@ -4015,15 +3827,7 @@
           "named": true
         },
         {
-          "type": "integer_literal",
-          "named": true
-        },
-        {
           "type": "interface_declaration",
-          "named": true
-        },
-        {
-          "type": "interpolated_string",
           "named": true
         },
         {
@@ -4031,27 +3835,11 @@
           "named": true
         },
         {
-          "type": "list_literal",
-          "named": true
-        },
-        {
           "type": "match_statement",
           "named": true
         },
         {
-          "type": "method_call",
-          "named": true
-        },
-        {
           "type": "mutex_block",
-          "named": true
-        },
-        {
-          "type": "nil",
-          "named": true
-        },
-        {
-          "type": "nil_coalescing_expression",
           "named": true
         },
         {
@@ -4071,22 +3859,6 @@
           "named": true
         },
         {
-          "type": "parenthesized_expression",
-          "named": true
-        },
-        {
-          "type": "pipe_expression",
-          "named": true
-        },
-        {
-          "type": "property_access",
-          "named": true
-        },
-        {
-          "type": "range_expression",
-          "named": true
-        },
-        {
           "type": "retry_statement",
           "named": true
         },
@@ -4099,27 +3871,7 @@
           "named": true
         },
         {
-          "type": "slice_expression",
-          "named": true
-        },
-        {
-          "type": "spawn_expression",
-          "named": true
-        },
-        {
-          "type": "string_literal",
-          "named": true
-        },
-        {
           "type": "struct_declaration",
-          "named": true
-        },
-        {
-          "type": "subscript_expression",
-          "named": true
-        },
-        {
-          "type": "ternary_expression",
           "named": true
         },
         {
@@ -4127,27 +3879,11 @@
           "named": true
         },
         {
-          "type": "true",
-          "named": true
-        },
-        {
           "type": "try_catch_statement",
           "named": true
         },
         {
-          "type": "try_expression",
-          "named": true
-        },
-        {
-          "type": "try_unwrap_expression",
-          "named": true
-        },
-        {
           "type": "type_declaration",
-          "named": true
-        },
-        {
-          "type": "unary_expression",
           "named": true
         },
         {
@@ -4331,23 +4067,7 @@
           "named": true
         },
         {
-          "type": "binary_expression",
-          "named": true
-        },
-        {
           "type": "break_statement",
-          "named": true
-        },
-        {
-          "type": "call_expression",
-          "named": true
-        },
-        {
-          "type": "closure",
-          "named": true
-        },
-        {
-          "type": "comment",
           "named": true
         },
         {
@@ -4363,31 +4083,15 @@
           "named": true
         },
         {
-          "type": "dict_literal",
-          "named": true
-        },
-        {
-          "type": "duration_literal",
-          "named": true
-        },
-        {
           "type": "enum_declaration",
           "named": true
         },
         {
-          "type": "false",
-          "named": true
-        },
-        {
-          "type": "float_literal",
+          "type": "expression_statement",
           "named": true
         },
         {
           "type": "fn_declaration",
-          "named": true
-        },
-        {
-          "type": "fn_expression",
           "named": true
         },
         {
@@ -4399,10 +4103,6 @@
           "named": true
         },
         {
-          "type": "identifier",
-          "named": true
-        },
-        {
           "type": "if_statement",
           "named": true
         },
@@ -4411,15 +4111,7 @@
           "named": true
         },
         {
-          "type": "integer_literal",
-          "named": true
-        },
-        {
           "type": "interface_declaration",
-          "named": true
-        },
-        {
-          "type": "interpolated_string",
           "named": true
         },
         {
@@ -4427,27 +4119,11 @@
           "named": true
         },
         {
-          "type": "list_literal",
-          "named": true
-        },
-        {
           "type": "match_statement",
           "named": true
         },
         {
-          "type": "method_call",
-          "named": true
-        },
-        {
           "type": "mutex_block",
-          "named": true
-        },
-        {
-          "type": "nil",
-          "named": true
-        },
-        {
-          "type": "nil_coalescing_expression",
           "named": true
         },
         {
@@ -4467,22 +4143,6 @@
           "named": true
         },
         {
-          "type": "parenthesized_expression",
-          "named": true
-        },
-        {
-          "type": "pipe_expression",
-          "named": true
-        },
-        {
-          "type": "property_access",
-          "named": true
-        },
-        {
-          "type": "range_expression",
-          "named": true
-        },
-        {
           "type": "retry_statement",
           "named": true
         },
@@ -4495,27 +4155,7 @@
           "named": true
         },
         {
-          "type": "slice_expression",
-          "named": true
-        },
-        {
-          "type": "spawn_expression",
-          "named": true
-        },
-        {
-          "type": "string_literal",
-          "named": true
-        },
-        {
           "type": "struct_declaration",
-          "named": true
-        },
-        {
-          "type": "subscript_expression",
-          "named": true
-        },
-        {
-          "type": "ternary_expression",
           "named": true
         },
         {
@@ -4523,27 +4163,11 @@
           "named": true
         },
         {
-          "type": "true",
-          "named": true
-        },
-        {
           "type": "try_catch_statement",
           "named": true
         },
         {
-          "type": "try_expression",
-          "named": true
-        },
-        {
-          "type": "try_unwrap_expression",
-          "named": true
-        },
-        {
           "type": "type_declaration",
-          "named": true
-        },
-        {
-          "type": "unary_expression",
           "named": true
         },
         {
@@ -4727,23 +4351,7 @@
           "named": true
         },
         {
-          "type": "binary_expression",
-          "named": true
-        },
-        {
           "type": "break_statement",
-          "named": true
-        },
-        {
-          "type": "call_expression",
-          "named": true
-        },
-        {
-          "type": "closure",
-          "named": true
-        },
-        {
-          "type": "comment",
           "named": true
         },
         {
@@ -4759,31 +4367,15 @@
           "named": true
         },
         {
-          "type": "dict_literal",
-          "named": true
-        },
-        {
-          "type": "duration_literal",
-          "named": true
-        },
-        {
           "type": "enum_declaration",
           "named": true
         },
         {
-          "type": "false",
-          "named": true
-        },
-        {
-          "type": "float_literal",
+          "type": "expression_statement",
           "named": true
         },
         {
           "type": "fn_declaration",
-          "named": true
-        },
-        {
-          "type": "fn_expression",
           "named": true
         },
         {
@@ -4795,10 +4387,6 @@
           "named": true
         },
         {
-          "type": "identifier",
-          "named": true
-        },
-        {
           "type": "if_statement",
           "named": true
         },
@@ -4807,15 +4395,7 @@
           "named": true
         },
         {
-          "type": "integer_literal",
-          "named": true
-        },
-        {
           "type": "interface_declaration",
-          "named": true
-        },
-        {
-          "type": "interpolated_string",
           "named": true
         },
         {
@@ -4823,27 +4403,11 @@
           "named": true
         },
         {
-          "type": "list_literal",
-          "named": true
-        },
-        {
           "type": "match_statement",
           "named": true
         },
         {
-          "type": "method_call",
-          "named": true
-        },
-        {
           "type": "mutex_block",
-          "named": true
-        },
-        {
-          "type": "nil",
-          "named": true
-        },
-        {
-          "type": "nil_coalescing_expression",
           "named": true
         },
         {
@@ -4863,22 +4427,6 @@
           "named": true
         },
         {
-          "type": "parenthesized_expression",
-          "named": true
-        },
-        {
-          "type": "pipe_expression",
-          "named": true
-        },
-        {
-          "type": "property_access",
-          "named": true
-        },
-        {
-          "type": "range_expression",
-          "named": true
-        },
-        {
           "type": "retry_statement",
           "named": true
         },
@@ -4891,27 +4439,7 @@
           "named": true
         },
         {
-          "type": "slice_expression",
-          "named": true
-        },
-        {
-          "type": "spawn_expression",
-          "named": true
-        },
-        {
-          "type": "string_literal",
-          "named": true
-        },
-        {
           "type": "struct_declaration",
-          "named": true
-        },
-        {
-          "type": "subscript_expression",
-          "named": true
-        },
-        {
-          "type": "ternary_expression",
           "named": true
         },
         {
@@ -4919,27 +4447,11 @@
           "named": true
         },
         {
-          "type": "true",
-          "named": true
-        },
-        {
           "type": "try_catch_statement",
           "named": true
         },
         {
-          "type": "try_expression",
-          "named": true
-        },
-        {
-          "type": "try_unwrap_expression",
-          "named": true
-        },
-        {
           "type": "type_declaration",
-          "named": true
-        },
-        {
-          "type": "unary_expression",
           "named": true
         },
         {
@@ -5458,6 +4970,10 @@
         "types": [
           {
             "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "keyword_identifier",
             "named": true
           }
         ]
@@ -6768,19 +6284,7 @@
           "named": true
         },
         {
-          "type": "binary_expression",
-          "named": true
-        },
-        {
           "type": "break_statement",
-          "named": true
-        },
-        {
-          "type": "call_expression",
-          "named": true
-        },
-        {
-          "type": "closure",
           "named": true
         },
         {
@@ -6796,31 +6300,15 @@
           "named": true
         },
         {
-          "type": "dict_literal",
-          "named": true
-        },
-        {
-          "type": "duration_literal",
-          "named": true
-        },
-        {
           "type": "enum_declaration",
           "named": true
         },
         {
-          "type": "false",
-          "named": true
-        },
-        {
-          "type": "float_literal",
+          "type": "expression_statement",
           "named": true
         },
         {
           "type": "fn_declaration",
-          "named": true
-        },
-        {
-          "type": "fn_expression",
           "named": true
         },
         {
@@ -6829,10 +6317,6 @@
         },
         {
           "type": "guard_statement",
-          "named": true
-        },
-        {
-          "type": "identifier",
           "named": true
         },
         {
@@ -6848,15 +6332,7 @@
           "named": true
         },
         {
-          "type": "integer_literal",
-          "named": true
-        },
-        {
           "type": "interface_declaration",
-          "named": true
-        },
-        {
-          "type": "interpolated_string",
           "named": true
         },
         {
@@ -6864,27 +6340,11 @@
           "named": true
         },
         {
-          "type": "list_literal",
-          "named": true
-        },
-        {
           "type": "match_statement",
           "named": true
         },
         {
-          "type": "method_call",
-          "named": true
-        },
-        {
           "type": "mutex_block",
-          "named": true
-        },
-        {
-          "type": "nil",
-          "named": true
-        },
-        {
-          "type": "nil_coalescing_expression",
           "named": true
         },
         {
@@ -6904,23 +6364,7 @@
           "named": true
         },
         {
-          "type": "parenthesized_expression",
-          "named": true
-        },
-        {
-          "type": "pipe_expression",
-          "named": true
-        },
-        {
           "type": "pipeline_declaration",
-          "named": true
-        },
-        {
-          "type": "property_access",
-          "named": true
-        },
-        {
-          "type": "range_expression",
           "named": true
         },
         {
@@ -6936,27 +6380,7 @@
           "named": true
         },
         {
-          "type": "slice_expression",
-          "named": true
-        },
-        {
-          "type": "spawn_expression",
-          "named": true
-        },
-        {
-          "type": "string_literal",
-          "named": true
-        },
-        {
           "type": "struct_declaration",
-          "named": true
-        },
-        {
-          "type": "subscript_expression",
-          "named": true
-        },
-        {
-          "type": "ternary_expression",
           "named": true
         },
         {
@@ -6964,27 +6388,11 @@
           "named": true
         },
         {
-          "type": "true",
-          "named": true
-        },
-        {
           "type": "try_catch_statement",
           "named": true
         },
         {
-          "type": "try_expression",
-          "named": true
-        },
-        {
-          "type": "try_unwrap_expression",
-          "named": true
-        },
-        {
           "type": "type_declaration",
-          "named": true
-        },
-        {
-          "type": "unary_expression",
           "named": true
         },
         {
@@ -7799,6 +7207,11 @@
         }
       ]
     }
+  },
+  {
+    "type": "true",
+    "named": true,
+    "fields": {}
   },
   {
     "type": "try_catch_statement",
@@ -9019,8 +8432,12 @@
     "named": false
   },
   {
-    "type": "break_statement",
-    "named": true
+    "type": "ask",
+    "named": false
+  },
+  {
+    "type": "break",
+    "named": false
   },
   {
     "type": "catch",
@@ -9032,8 +8449,8 @@
     "extra": true
   },
   {
-    "type": "continue_statement",
-    "named": true
+    "type": "continue",
+    "named": false
   },
   {
     "type": "deadline",
@@ -9061,7 +8478,7 @@
   },
   {
     "type": "false",
-    "named": true
+    "named": false
   },
   {
     "type": "finally",
@@ -9129,7 +8546,7 @@
   },
   {
     "type": "nil",
-    "named": true
+    "named": false
   },
   {
     "type": "not",
@@ -9160,6 +8577,10 @@
     "named": false
   },
   {
+    "type": "require",
+    "named": false
+  },
+  {
     "type": "retry",
     "named": false
   },
@@ -9177,6 +8598,10 @@
   },
   {
     "type": "string_content",
+    "named": true
+  },
+  {
+    "type": "string_dollar",
     "named": true
   },
   {
@@ -9201,7 +8626,7 @@
   },
   {
     "type": "true",
-    "named": true
+    "named": false
   },
   {
     "type": "try",

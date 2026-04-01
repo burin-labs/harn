@@ -18,7 +18,18 @@ Request payload:
 {
   "tool_name": "list_directory",
   "tool_use_id": "call_123",
-  "args": {"path": "."}
+  "args": {"path": "."},
+  "mutation": {
+    "classification": "read_only",
+    "declared_paths": ["."],
+    "session": {
+      "session_id": "session_123",
+      "run_id": "run_123",
+      "worker_id": null,
+      "mutation_scope": "read_only",
+      "approval_mode": "host_enforced"
+    }
+  }
 }
 ```
 
@@ -27,6 +38,9 @@ Response payload:
 - `{ "action": "allow" }`: continue unchanged
 - `{ "action": "deny", "reason": "..." }`: reject the tool call and surface the rejection in the transcript
 - `{ "action": "modify", "args": {...} }`: replace arguments before execution
+
+`mutation.classification` is advisory runtime metadata from Harn. Hosts may
+apply stricter local policy.
 
 ### `tool/post_use`
 
@@ -39,7 +53,18 @@ Request payload:
   "tool_name": "list_directory",
   "tool_use_id": "call_123",
   "result": "...tool output...",
-  "rejected": false
+  "rejected": false,
+  "mutation": {
+    "classification": "read_only",
+    "declared_paths": ["."],
+    "session": {
+      "session_id": "session_123",
+      "run_id": "run_123",
+      "worker_id": null,
+      "mutation_scope": "read_only",
+      "approval_mode": "host_enforced"
+    }
+  }
 }
 ```
 
@@ -47,6 +72,13 @@ Response payload:
 
 - `{ "result": "..." }`: replace the visible tool result text
 - any other payload: leave the result unchanged
+
+## Worker lifecycle notifications
+
+Delegated workers emit `session/update` notifications with `worker_update`
+content. Those payloads include lifecycle timing, child run/snapshot paths,
+and audit-session metadata so hosts can render background work without
+scraping plain-text logs.
 
 ## Daemon idle/resume notifications
 

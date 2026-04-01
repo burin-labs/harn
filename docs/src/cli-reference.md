@@ -249,6 +249,22 @@ Relevant flags:
 | `--scope <scopes>` | Override or provide requested OAuth scopes |
 | `--redirect-uri <uri>` | Override the default loopback redirect URI (default shown by `harn mcp redirect-uri`) |
 
+Security guidance:
+
+- prefer the narrowest scopes the remote MCP server supports
+- treat configured `client_secret` values as secrets
+- review remote MCP capabilities before using them in autonomous workflows
+
+## Release gate
+
+For repo maintainers, the comprehensive docs audit, verification gate, version
+bump flow, and publish sequence are orchestrated by:
+
+```bash
+./scripts/release_gate.sh audit
+./scripts/release_gate.sh full --bump patch --dry-run
+```
+
 ## harn add
 
 Add a dependency to `harn.toml`.

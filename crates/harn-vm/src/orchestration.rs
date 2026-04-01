@@ -30,6 +30,44 @@ fn default_run_dir() -> PathBuf {
 thread_local! {
     static EXECUTION_POLICY_STACK: RefCell<Vec<CapabilityPolicy>> = const { RefCell::new(Vec::new()) };
     static TOOL_HOOKS: RefCell<Vec<ToolHook>> = const { RefCell::new(Vec::new()) };
+    static CURRENT_MUTATION_SESSION: RefCell<Option<MutationSessionRecord>> = const { RefCell::new(None) };
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct MutationSessionRecord {
+    pub session_id: String,
+    pub parent_session_id: Option<String>,
+    pub run_id: Option<String>,
+    pub worker_id: Option<String>,
+    pub execution_kind: Option<String>,
+    pub mutation_scope: String,
+    pub approval_mode: String,
+}
+
+impl MutationSessionRecord {
+    pub fn normalize(mut self) -> Self {
+        if self.session_id.is_empty() {
+            self.session_id = new_id("session");
+        }
+        if self.mutation_scope.is_empty() {
+            self.mutation_scope = "read_only".to_string();
+        }
+        if self.approval_mode.is_empty() {
+            self.approval_mode = "host_enforced".to_string();
+        }
+        self
+    }
+}
+
+pub fn install_current_mutation_session(session: Option<MutationSessionRecord>) {
+    CURRENT_MUTATION_SESSION.with(|slot| {
+        *slot.borrow_mut() = session.map(MutationSessionRecord::normalize);
+    });
+}
+
+pub fn current_mutation_session() -> Option<MutationSessionRecord> {
+    CURRENT_MUTATION_SESSION.with(|slot| slot.borrow().clone())
 }
 
 // ── Tool lifecycle hooks ──────────────────────────────────────────────
@@ -1167,6 +1205,10 @@ pub struct RunChildRecord {
     pub worker_id: String,
     pub worker_name: String,
     pub parent_stage_id: Option<String>,
+    pub session_id: Option<String>,
+    pub parent_session_id: Option<String>,
+    pub mutation_scope: Option<String>,
+    pub approval_mode: Option<String>,
     pub task: String,
     pub status: String,
     pub started_at: String,
@@ -2621,6 +2663,31 @@ mod tests {
         };
         let error = ceiling.intersect(&requested).unwrap_err();
         assert!(error.contains("host ceiling"));
+    }
+
+    #[test]
+    fn mutation_session_normalize_fills_defaults() {
+        let normalized = MutationSessionRecord::default().normalize();
+        assert!(normalized.session_id.starts_with("session_"));
+        assert_eq!(normalized.mutation_scope, "read_only");
+        assert_eq!(normalized.approval_mode, "host_enforced");
+    }
+
+    #[test]
+    fn install_current_mutation_session_round_trips() {
+        install_current_mutation_session(Some(MutationSessionRecord {
+            session_id: "session_test".to_string(),
+            mutation_scope: "apply_workspace".to_string(),
+            approval_mode: "explicit".to_string(),
+            ..Default::default()
+        }));
+        let current = current_mutation_session().expect("session installed");
+        assert_eq!(current.session_id, "session_test");
+        assert_eq!(current.mutation_scope, "apply_workspace");
+        assert_eq!(current.approval_mode, "explicit");
+
+        install_current_mutation_session(None);
+        assert!(current_mutation_session().is_none());
     }
 
     #[test]

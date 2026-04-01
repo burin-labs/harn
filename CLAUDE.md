@@ -73,6 +73,13 @@ Use `scripts/publish.sh` for crate releases — it publishes all 8 crates
 to crates.io in dependency order with rate-limit retry logic. Supports
 `--dry-run` and `--allow-dirty` flags.
 
+For the full maintainer ritual, prefer:
+
+```bash
+./scripts/release_gate.sh audit
+./scripts/release_gate.sh full --bump patch --dry-run
+```
+
 ## Architecture
 
 Execution pipeline:
