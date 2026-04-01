@@ -952,7 +952,12 @@ pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Host
     vm.register_async_builtin("llm_call", move |args| {
         let bridge = b.clone();
         async move {
+            eprintln!("[llm-debug] llm_call entered, extracting options");
             let opts = extract_llm_options(&args)?;
+            eprintln!(
+                "[llm-debug] Options extracted: provider={} model={}",
+                opts.provider, opts.model
+            );
 
             let call_id = next_call_id();
             let prompt_chars: usize = opts
