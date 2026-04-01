@@ -2,6 +2,20 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.14
+
+### Changed
+
+- **Release binaries no longer depend on Linux DBus development headers** —
+  `harn-cli` now uses the native Linux `keyring` backend without the
+  `sync-secret-service` DBus feature, which fixes the GitHub release workflow's
+  Linux packaging failure while preserving native macOS, Windows, and Linux
+  credential storage support.
+- **Release automation is closer to fully hands-off again** — the remaining
+  post-`0.5.13` failure mode in the binary release workflow was traced to
+  `libdbus-sys` packaging requirements rather than OpenSSL/TLS, and this patch
+  removes that blocker from the default CLI build.
+
 ## v0.5.13
 
 ### Changed

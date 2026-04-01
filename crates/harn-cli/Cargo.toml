@@ -28,5 +28,5 @@ sha2 = "0.10"
 base64 = "0.22"
 url = "2"
 webbrowser = "1"
-keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native", "sync-secret-service"] }
+keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native"] }
 rand = "0.8"
