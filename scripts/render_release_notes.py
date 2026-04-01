@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-from __future__ import annotations
-
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -74,13 +73,8 @@ def detect_repo(explicit_repo: str | None) -> str | None:
 
 
 def os_environ(name: str) -> str | None:
-    return subprocess.run(
-        ["zsh", "-lc", f"printf '%s' \"${name}\""],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    ).stdout.strip() or None
+    value = os.environ.get(name, "")
+    return value or None
 
 
 def render_notes(section: str, repo: str | None, prev: str | None, version: str) -> str:

@@ -5,6 +5,31 @@ use std::process;
 use crate::execute;
 use crate::test_runner;
 
+fn normalize_expected_output(text: &str) -> String {
+    text.lines()
+        .map(normalize_output_line)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn normalize_actual_output(text: &str) -> String {
+    text.lines()
+        .map(normalize_output_line)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn normalize_output_line(line: &str) -> String {
+    if let Some(prefix) = line.strip_suffix("ms") {
+        if let Some((head, _millis)) = prefix.rsplit_once(": ") {
+            if head.starts_with("[timer] ") {
+                return format!("{head}: <ms>");
+            }
+        }
+    }
+    line.to_string()
+}
+
 /// Produce a simple line diff between expected and actual.
 fn simple_diff(expected: &str, actual: &str) -> String {
     let mut result = String::new();
@@ -143,7 +168,7 @@ pub(crate) async fn run_conformance_tests(
                     }
                 };
                 let expected = match fs::read_to_string(&expected_file) {
-                    Ok(s) => s.trim_end().to_string(),
+                    Ok(s) => normalize_expected_output(s.trim_end()),
                     Err(e) => {
                         println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
                         let msg = format!("{rel_path}: IO error reading expected: {e}");
@@ -167,7 +192,7 @@ pub(crate) async fn run_conformance_tests(
 
                 match result {
                     Ok(Ok(output)) => {
-                        let actual = output.trim_end().to_string();
+                        let actual = normalize_actual_output(output.trim_end());
                         if actual == expected {
                             if verbose {
                                 println!("  \x1b[32mPASS\x1b[0m  {rel_path} ({duration_ms} ms)");

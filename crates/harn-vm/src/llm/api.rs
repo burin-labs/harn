@@ -229,7 +229,17 @@ async fn vm_call_llm_full_inner(
         )))));
     }
 
+    eprintln!(
+        "[llm-debug] Starting API call provider={} model={}",
+        opts.provider, opts.model
+    );
     let result = vm_call_llm_api(opts, delta_tx).await;
+    eprintln!(
+        "[llm-debug] API call finished provider={} model={} ok={}",
+        opts.provider,
+        opts.model,
+        result.is_ok()
+    );
 
     // On failure, check for provider fallback chain
     let result = match result {

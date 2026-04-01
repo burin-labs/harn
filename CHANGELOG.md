@@ -2,6 +2,25 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.15
+
+### Changed
+
+- **Changelog-backed release-note rendering now works on GitHub runners** —
+  `scripts/render_release_notes.py` no longer shells out to `zsh` to discover
+  `GITHUB_REPOSITORY`, so the `Create Release` workflow can render notes on the
+  stock Ubuntu runner and complete the release automatically.
+- **Release automation is fully wired end to end again** — the remaining
+  `v0.5.14` failure mode was isolated to the release-notes renderer rather than
+  the build matrix, and this patch removes that final workflow portability bug.
+- **Conformance output comparison is stable for timer lines** — the Harn test
+  runner now normalizes `[timer] ...: Nms` output before comparing against
+  `.expected` files, eliminating clock-jitter flakes in `conformance`.
+- **Local LLM API debug tracing was folded into the patch sweep** — the current
+  local debug logging in `crates/harn-vm/src/llm/api.rs` is now included in the
+  audited release candidate instead of being left behind as a machine-local
+  change.
+
 ## v0.5.14
 
 ### Changed
