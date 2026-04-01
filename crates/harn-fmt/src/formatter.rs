@@ -68,8 +68,8 @@ impl Formatter {
     }
 
     /// Format selective import names, wrapping across lines when necessary.
-    /// Unlike `format_comma_sequence`, this does NOT emit a trailing comma
-    /// on the last item (the Harn parser rejects trailing commas in imports).
+    /// Wrapped imports follow the same trailing-comma convention as other
+    /// multiline comma-separated forms.
     fn format_selective_import_names(&self, names: &[String], path: &str) -> String {
         let inline = names.join(", ");
         let prefix_len = self.indent * 2 + 9; // "import { "
@@ -78,13 +78,10 @@ impl Formatter {
             let item_indent = "  ".repeat(self.indent + 1);
             let close_indent = "  ".repeat(self.indent);
             let mut inner = String::from("\n");
-            for (i, name) in names.iter().enumerate() {
+            for name in names {
                 inner.push_str(&item_indent);
                 inner.push_str(name);
-                if i + 1 < names.len() {
-                    inner.push(',');
-                }
-                inner.push('\n');
+                inner.push_str(",\n");
             }
             inner.push_str(&close_indent);
             format!("import {{{inner}}} from \"{path}\"")

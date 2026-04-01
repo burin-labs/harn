@@ -208,7 +208,7 @@ impl Parser {
         let start = self.current_span();
         self.consume(&TokenKind::Import, "import")?;
 
-        // Check for selective import: import { foo, bar } from "module"
+        // Check for selective import: import { foo, bar, } from "module"
         if self.check(&TokenKind::LBrace) {
             self.advance(); // skip {
             self.skip_newlines();

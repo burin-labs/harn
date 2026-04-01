@@ -35,3 +35,20 @@ pipeline build() {
               function: (identifier)
               (argument_list
                 (identifier)))))))))
+
+==================
+Import With Trailing Comma
+==================
+
+import {
+  helper,
+  render,
+} from "lib/helpers"
+
+---
+
+(source_file
+  (import_declaration
+    (identifier)
+    (identifier)
+    (string_literal)))

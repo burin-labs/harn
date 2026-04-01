@@ -94,7 +94,26 @@ module.exports = grammar({
     import_declaration: ($) =>
       choice(
         seq("import", $.string_literal),
-        seq("import", "{", commaSep1($.identifier), "}", "from", $.string_literal)
+        seq(
+          "import",
+          "{",
+          commaSep1($.identifier),
+          optional(","),
+          "}",
+          "from",
+          $.string_literal
+        ),
+        seq(
+          "import",
+          "{",
+          $._newline,
+          $.identifier,
+          repeat(seq(",", $._newline, $.identifier)),
+          optional(seq(",", $._newline)),
+          "}",
+          "from",
+          $.string_literal
+        )
       ),
 
     enum_declaration: ($) =>

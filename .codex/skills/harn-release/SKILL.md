@@ -1,3 +1,8 @@
+---
+name: harn-release
+description: Use this skill when asked to run the final Harn docs audit, verification gate, version bump, tagging, release notes prep, or crates publish flow for this repository.
+---
+
 # Harn Release Gate
 
 Use this skill when asked to run the final Harn docs audit, verification gate,

@@ -2,6 +2,19 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.17
+
+### Changed
+
+- **Wrapped selective imports now use standard trailing commas** — long
+  `import { ... } from "..."` declarations now format one imported name per
+  line with a trailing comma before `}`, matching the formatter's other
+  multiline comma-separated forms and the parser's accepted syntax.
+- **Tree-sitter and release tooling now match the formatter's import layout** —
+  the editor grammar accepts trailing-comma selective imports, the corpus
+  covers the wrapped form, and the local `harn-release` skill now has valid
+  YAML frontmatter so release automation can load it cleanly.
+
 ## v0.5.16
 
 ### Changed

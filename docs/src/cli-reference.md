@@ -87,7 +87,7 @@ this limit the formatter wraps it automatically:
   parameters, list literals, dict literals, struct construction fields,
   enum constructor payloads, selective import names, interface method
   parameters, and enum variant fields all wrap with one item per line and
-  trailing commas (except selective imports, which omit the trailing comma).
+  trailing commas.
 - **Binary operator chains** — long expressions like `a + b + c + d` break
   before the operator. Operators that the parser cannot resume across a bare
   newline (`-`, `==`, `!=`, `<`, `>`, `<=`, `>=`, `in`, `not in`, `??`)

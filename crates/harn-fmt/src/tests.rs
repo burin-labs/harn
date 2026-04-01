@@ -267,10 +267,9 @@ pipeline default(task) { log(1) }"#;
         result.contains("  first_really_long_name,\n"),
         "Expected selective import names to wrap, got:\n{result}"
     );
-    // Last item should NOT have trailing comma
     assert!(
-        result.contains("  fourth_really_long_name\n"),
-        "Expected no trailing comma on last import name, got:\n{result}"
+        result.contains("  fourth_really_long_name,\n"),
+        "Expected trailing comma on last import name, got:\n{result}"
     );
     assert_roundtrip(source);
 }
@@ -485,7 +484,7 @@ fn test_already_wrapped_import_stable() {
   first_really_long_name,
   second_really_long_name,
   third_really_long_name,
-  fourth_really_long_name
+  fourth_really_long_name,
 } from "some/module"
 pipeline default(task) { log(1) }"#;
     assert_roundtrip(source);
@@ -597,6 +596,19 @@ fn test_custom_line_width_idempotent() {
     let first = format_source_opts(source, &opts).unwrap();
     let second = format_source_opts(&first, &opts).unwrap();
     assert_eq!(first, second, "Custom-width formatter is not idempotent");
+}
+
+#[test]
+fn test_custom_line_width_wraps_selective_import_with_trailing_comma() {
+    let source = r#"import { first_really_long_name, second_really_long_name, third_really_long_name } from "module"
+pipeline default() {
+  log(1)
+}"#;
+    let result = fmt_opts(source, 50);
+    assert!(
+        result.contains("  third_really_long_name,\n"),
+        "Expected wrapped import with trailing comma at width 50, got:\n{result}"
+    );
 }
 
 // --- Short lines stay inline ---
