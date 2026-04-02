@@ -534,10 +534,20 @@ assert_eq(resp.status, 200)
 | `host_capabilities()` | — | dict | Typed host capability manifest |
 | `host_has(capability, op?)` | capability: string, op: string | bool | Check whether a typed host capability/operation exists |
 | `host_invoke(capability, op, params?)` | capability: string, op: string, params: dict | any | Invoke a typed host operation such as workspace or process |
+| `host_mock(capability, op, response_or_config, params?)` | capability: string, op: string, response_or_config: any or dict, params: dict | nil | Register a runtime mock for a typed host operation |
+| `host_mock_clear()` | — | nil | Clear registered typed host mocks and recorded mock invocations |
+| `host_mock_calls()` | — | list | Return recorded typed host mock invocations |
 
 Common workspace ops surfaced by hosts include `read_text`, `write_text`,
 `apply_edit`, `delete`, `exists`, `file_exists`, `list`, `project_root`, and
 optionally `roots` for multi-root workspaces.
+
+`host_mock(...)` is intended for tests and local conformance runs. The third
+argument may be either a direct result value or a config dict containing
+`result`, `params`, and/or `error`. Mock matching is last-write-wins and only
+requires the declared `params` subset to match the actual `host_invoke(...)`
+call. Matched calls are recorded in `host_mock_calls()` as
+`{capability, operation, params}` dictionaries.
 
 ## Async and timing
 

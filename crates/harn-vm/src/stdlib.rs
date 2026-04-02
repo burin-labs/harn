@@ -111,4 +111,5 @@ pub fn stdlib_builtin_names() -> Vec<String> {
 pub fn reset_stdlib_state() {
     logging::reset_logging_state();
     process::reset_process_state();
+    host::reset_host_state();
 }

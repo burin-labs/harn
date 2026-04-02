@@ -132,6 +132,9 @@ registry instead of duplicating the same ceilings in separate node config.
   imported modules) instead of the ambient process cwd. Literal delegated
   execution roots, `exec_at(...)` / `shell_at(...)` directories, and unknown
   `host_invoke(...)` capability/operation pairs are also checked before launch.
+- Runtime-local typed host mocking for tests via `host_mock(...)`,
+  `host_mock_clear()`, and `host_mock_calls()`, so `.harn` conformance and VM
+  tests can exercise host-backed flows without requiring a live bridge host.
 - Eval suite manifests and baseline comparisons via `eval_suite_manifest(...)`,
   `eval_suite_run(...)`, and `harn eval <manifest.json>`, so grouped replay
   regression suites are first-class runtime data instead of external scripts.

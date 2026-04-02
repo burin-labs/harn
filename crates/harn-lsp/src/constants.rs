@@ -69,6 +69,12 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
     ),
     ("http_mock_clear", "http_mock_clear() -> nil"),
     ("http_mock_calls", "http_mock_calls() -> list"),
+    (
+        "host_mock",
+        "host_mock(capability, op, response_or_config, params?) -> nil",
+    ),
+    ("host_mock_clear", "host_mock_clear() -> nil"),
+    ("host_mock_calls", "host_mock_calls() -> list"),
     // LLM
     ("llm_call", "llm_call(prompt, system?, options?) -> dict"),
     (
@@ -664,6 +670,9 @@ pub(crate) fn builtin_doc(name: &str) -> Option<String> {
         "host_capabilities" => "**host_capabilities()** → dict — Typed host capability manifest",
         "host_has" => "**host_has(capability, op?)** → bool — Check host capability support",
         "host_invoke" => "**host_invoke(capability, op, params?)** → any — Invoke a typed host operation",
+        "host_mock" => "**host_mock(capability, op, response_or_config, params?)** → nil — Register a typed host mock for tests. The third argument may be a direct result value or a config dict containing `result`, `params`, and/or `error`.",
+        "host_mock_clear" => "**host_mock_clear()** → nil — Clear typed host mocks and recorded mock invocations",
+        "host_mock_calls" => "**host_mock_calls()** → list — Return recorded typed host mock invocations",
         "workflow_policy_report" => "**workflow_policy_report(graph, ceiling?)** → dict — Show effective workflow and node policies against a ceiling",
         "artifact_workspace_file" => "**artifact_workspace_file(path, content, extra?)** → dict — Build a normalized workspace-file artifact with path provenance",
         "artifact_workspace_snapshot" => "**artifact_workspace_snapshot(paths, summary?, extra?)** → dict — Build a workspace snapshot artifact for host/editor context handoff",

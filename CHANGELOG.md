@@ -2,6 +2,16 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.22
+
+### Added
+
+- **Typed host mocks for VM and conformance tests** — `host_mock(...)`,
+  `host_mock_clear()`, and `host_mock_calls()` now let Harn programs register
+  runtime host-operation fixtures, override specific capability/operation
+  pairs by matching on partial params, inspect recorded invocations, and
+  simulate host-thrown errors without requiring a bridge host.
+
 ## v0.5.21
 
 ### Changed

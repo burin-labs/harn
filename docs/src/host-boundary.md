@@ -19,6 +19,8 @@ What belongs in Harn `std/*` modules or the VM:
 - Context/artifact assembly rules that are product-agnostic
 - Structured contract enforcement and eval/replay helpers
 - Multi-root workspace contracts and fallbacks such as `workspace_roots()`
+- Test-time typed host mocks such as `host_mock(...)` when the behavior is a
+  runtime fixture for host-backed flows rather than a product-specific bridge
 - Mutation-session identity and audit provenance for write-capable workflows
   and delegated workers
 

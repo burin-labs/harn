@@ -1,0 +1,22 @@
+pipeline test(task) {
+  host_mock_clear()
+  host_mock("project", "metadata_get", {result: {value: "fallback"}})
+  host_mock("project", "metadata_get", {result: {value: "facts"}, params: {namespace: "facts"}})
+  host_mock("project", "metadata_set", {error: "write denied", params: {dir: "pkg"}})
+  let capabilities = host_capabilities()
+  println(host_has("project", "metadata_get"))
+  println(capabilities?.project?.operations?.metadata_get?.description != nil)
+  let facts = host_invoke("project", "metadata_get", {dir: "pkg", namespace: "facts"})
+  println(facts?.value)
+  let fallback = host_invoke("project", "metadata_get", {dir: "pkg", namespace: "classification"})
+  println(fallback?.value)
+  let denied = try {
+    host_invoke("project", "metadata_set", {dir: "pkg", namespace: "facts", value: {}})
+  }
+  println(is_err(denied))
+  let calls = host_mock_calls()
+  println(calls?.count ?? 0)
+  println(calls[0]?.capability)
+  println(calls[0]?.operation)
+  println(calls[0]?.params?.namespace)
+}

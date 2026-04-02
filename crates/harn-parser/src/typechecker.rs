@@ -281,7 +281,7 @@ fn builtin_return_type(name: &str) -> InferredType {
         | "transcript_compact"
         | "transcript_summarize"
         | "host_capabilities" => Some(TypeExpr::Named("dict".into())),
-        "metadata_entries" => Some(TypeExpr::Named("list".into())),
+        "metadata_entries" | "host_mock_calls" => Some(TypeExpr::Named("list".into())),
         "transcript_render_visible"
         | "transcript_render_full"
         | "artifact_context"
@@ -297,7 +297,9 @@ fn builtin_return_type(name: &str) -> InferredType {
         | "metadata_refresh_hashes"
         | "invalidate_facts"
         | "log_json"
-        | "mcp_disconnect" => Some(TypeExpr::Named("nil".into())),
+        | "mcp_disconnect"
+        | "host_mock"
+        | "host_mock_clear" => Some(TypeExpr::Named("nil".into())),
         "env" | "regex_match" => Some(TypeExpr::Union(vec![
             TypeExpr::Named("string".into()),
             TypeExpr::Named("nil".into()),
@@ -367,6 +369,9 @@ fn is_builtin(name: &str) -> bool {
             | "host_capabilities"
             | "host_has"
             | "host_invoke"
+            | "host_mock"
+            | "host_mock_clear"
+            | "host_mock_calls"
             | "workflow_graph"
             | "workflow_validate"
             | "workflow_inspect"
