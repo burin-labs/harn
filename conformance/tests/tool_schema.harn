@@ -7,7 +7,7 @@ pipeline default() {
     "Search the web",
     {
     handler: { query -> return "results for: " + query },
-    params: {query: {type: "string", description: "Search query"}},
+    parameters: {query: {type: "string", description: "Search query"}},
     returns: {type: "object", properties: {results: {type: "array"}}},
   },
   )
@@ -17,7 +17,7 @@ pipeline default() {
     "Evaluate math",
     {
     handler: { _expr -> return "42" },
-    params: {
+    parameters: {
     expression: {type: "string", description: "Expression to evaluate"},
     precision: {type: "integer", description: "Optional decimal precision"},
   },

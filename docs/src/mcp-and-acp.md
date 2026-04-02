@@ -149,12 +149,12 @@ pipeline main(task) {
   var tools = tool_registry()
 
   tools = tool_define(tools, "greet", "Greet someone", {
-    params: {name: "string"},
+    parameters: {name: "string"},
     handler: { args -> "Hello, " + args.name + "!" }
   })
 
   tools = tool_define(tools, "search", "Search files", {
-    params: {query: "string"},
+    parameters: {query: "string"},
     handler: { args -> "results for " + args.query },
     annotations: {
       title: "File Search",

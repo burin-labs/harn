@@ -6,7 +6,7 @@ pipeline test(task) {
     "echo",
     "Echo input",
     {
-    params: {text: "string"},
+    parameters: {text: "string"},
     handler: { args -> args.text },
     annotations: {title: "Echo Tool", readOnlyHint: true, destructiveHint: false},
   },

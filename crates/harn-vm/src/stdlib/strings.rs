@@ -1,7 +1,77 @@
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use crate::value::{values_equal, VmError, VmValue};
 use crate::vm::Vm;
+
+fn template_truthy(value: &VmValue) -> bool {
+    match value {
+        VmValue::Nil => false,
+        VmValue::Bool(v) => *v,
+        VmValue::Int(v) => *v != 0,
+        VmValue::Float(v) => *v != 0.0,
+        VmValue::String(v) => !v.trim().is_empty(),
+        VmValue::List(items) => !items.is_empty(),
+        VmValue::Dict(items) => !items.is_empty(),
+        _ => true,
+    }
+}
+
+fn render_template_segment(
+    template: &str,
+    bindings: Option<&BTreeMap<String, VmValue>>,
+    start: usize,
+    stop_on_end: bool,
+) -> (String, usize) {
+    let mut rendered = String::with_capacity(template.len().saturating_sub(start));
+    let mut cursor = start;
+    while let Some(open_rel) = template[cursor..].find("{{") {
+        let open = cursor + open_rel;
+        rendered.push_str(&template[cursor..open]);
+        let Some(close_rel) = template[open + 2..].find("}}") else {
+            rendered.push_str(&template[open..]);
+            return (rendered, template.len());
+        };
+        let close = open + 2 + close_rel;
+        let token = template[open + 2..close].trim();
+        cursor = close + 2;
+
+        if token == "end" {
+            if stop_on_end {
+                return (rendered, cursor);
+            }
+            rendered.push_str(&template[open..cursor]);
+            continue;
+        }
+
+        if let Some(key) = token.strip_prefix("if ").map(str::trim) {
+            let (inner, next_cursor) = render_template_segment(template, bindings, cursor, true);
+            if bindings
+                .and_then(|map| map.get(key))
+                .is_some_and(template_truthy)
+            {
+                rendered.push_str(&inner);
+            }
+            cursor = next_cursor;
+            continue;
+        }
+
+        if let Some(value) = bindings.and_then(|map| map.get(token)) {
+            rendered.push_str(&value.display());
+        } else {
+            rendered.push_str(&template[open..cursor]);
+        }
+    }
+    rendered.push_str(&template[cursor..]);
+    (rendered, template.len())
+}
+
+pub(crate) fn render_template_text(
+    template: &str,
+    bindings: Option<&BTreeMap<String, VmValue>>,
+) -> String {
+    render_template_segment(template, bindings, 0, false).0
+}
 
 pub(crate) fn register_string_builtins(vm: &mut Vm) {
     vm.register_builtin("format", |args, _out| {
@@ -187,13 +257,14 @@ pub(crate) fn register_string_builtins(vm: &mut Vm) {
             ))))
         })?;
         if let Some(bindings) = args.get(1).and_then(|a| a.as_dict()) {
-            let mut result = template;
-            for (key, val) in bindings.iter() {
-                result = result.replace(&format!("{{{{{key}}}}}"), &val.display());
-            }
-            Ok(VmValue::String(Rc::from(result)))
+            Ok(VmValue::String(Rc::from(render_template_text(
+                &template,
+                Some(bindings),
+            ))))
         } else {
-            Ok(VmValue::String(Rc::from(template)))
+            Ok(VmValue::String(Rc::from(render_template_text(
+                &template, None,
+            ))))
         }
     });
 }

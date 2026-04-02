@@ -6,7 +6,7 @@ fn agent_tools() {
     "Read a file",
     {
     handler: nil,
-    params: {path: {type: "string", description: "Path to read"}},
+    parameters: {path: {type: "string", description: "Path to read"}},
     returns: {type: "string"},
   },
   )
@@ -16,7 +16,7 @@ fn agent_tools() {
     "Search project files",
     {
     handler: nil,
-    params: {
+    parameters: {
     pattern: {type: "string", description: "Pattern to search"},
     file_glob: {type: "string", description: "Optional file glob", required: false},
   },

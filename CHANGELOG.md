@@ -2,6 +2,23 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.23
+
+### Added
+
+- **Dict iteration helpers and conditional template sections** — Harn now
+  ships `keys(dict)`, `values(dict)`, and `entries(dict)` builtins for
+  dictionary introspection, and `render(...)` / dict-backed `format(...)`
+  templates can now include `{{if key}}...{{end}}` blocks that render only
+  when the bound value is truthy.
+
+### Changed
+
+- **`tool_define(...)` now requires `parameters` instead of legacy `params`**
+  — tool registries normalize JSON Schema input definitions under the
+  `parameters` key, reject the old `params` spelling with an explicit runtime
+  error, and the public docs/examples now match the enforced schema.
+
 ## v0.5.22
 
 ### Added

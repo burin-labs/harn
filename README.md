@@ -62,22 +62,22 @@ Persistent agent loop with tools:
 fn coding_tools() {
   var tools = tool_registry()
   tools = tool_define(tools, "read", "Read a file", {
-    params: {path: {type: "string", description: "Path to read"}},
+    parameters: {path: {type: "string", description: "Path to read"}},
     returns: {type: "string"},
     handler: nil,
   })
   tools = tool_define(tools, "search", "Search project files", {
-    params: {pattern: {type: "string", description: "Pattern to search"}},
+    parameters: {pattern: {type: "string", description: "Pattern to search"}},
     returns: {type: "string"},
     handler: nil,
   })
   tools = tool_define(tools, "edit", "Edit a file", {
-    params: {path: {type: "string", description: "Path to edit"}},
+    parameters: {path: {type: "string", description: "Path to edit"}},
     returns: {type: "string"},
     handler: nil,
   })
   tools = tool_define(tools, "run", "Run a command", {
-    params: {command: {type: "string", description: "Command to run"}},
+    parameters: {command: {type: "string", description: "Command to run"}},
     returns: {type: "string"},
     handler: nil,
   })

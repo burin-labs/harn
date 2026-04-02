@@ -371,7 +371,7 @@ These are called on string values with dot notation: `"hello".uppercase()`.
 | `mkdir(path)` | path: string | nil | Create directory and all parent directories. Throws on failure |
 | `stat(path)` | path: string | dict | File metadata: `{size, is_file, is_dir, readonly, modified}`. Throws on failure |
 | `temp_dir()` | none | string | System temporary directory path |
-| `render(path, bindings?)` | path: string, bindings: dict | string | Read a template file relative to the current module's source directory and replace `{{key}}` placeholders with values from bindings dict. When called from an imported module, resolves relative to that module's directory, not the entry pipeline. Without bindings, just reads the file |
+| `render(path, bindings?)` | path: string, bindings: dict | string | Read a template file relative to the current module's source directory and replace `{{key}}` placeholders with values from bindings dict. Templates also support conditional sections via `{{if key}}...{{end}}`, where empty strings, `nil`, `false`, `0`, and empty lists/dicts are falsey. When called from an imported module, resolves relative to that module's directory, not the entry pipeline. Without bindings, just reads the file |
 
 ## Environment and system
 
@@ -909,7 +909,7 @@ or any MCP client.
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `tool_registry()` | — | dict | Create an empty tool registry |
-| `tool_define(registry, name, desc, config)` | registry, name, desc: string, config: dict | dict | Add a tool (config: `{params, handler, returns?, annotations?, ...}`) |
+| `tool_define(registry, name, desc, config)` | registry, name, desc: string, config: dict | dict | Add a tool (config: `{parameters, handler, returns?, annotations?, ...}`) |
 | `mcp_tools(registry)` | registry: dict | nil | Register tools for MCP serving |
 | `mcp_resource(config)` | config: dict | nil | Register a static resource (`{uri, name, text, description?, mime_type?}`) |
 | `mcp_resource_template(config)` | config: dict | nil | Register a resource template (`{uri_template, name, handler, description?, mime_type?}`) |
@@ -920,7 +920,7 @@ Tool annotations (MCP spec `annotations` field) can be passed in the
 
 ```harn
 tools = tool_define(tools, "search", "Search files", {
-  params: { query: {type: "string"} },
+  parameters: { query: {type: "string"} },
   returns: {type: "string"},
   handler: { args -> "results for " + args.query },
   annotations: {
@@ -937,7 +937,7 @@ for example:
 
 ```harn
 tools = tool_define(tools, "read", "Read files", {
-  params: { path: {type: "string"} },
+  parameters: { path: {type: "string"} },
   returns: {type: "string"},
   handler: nil,
   policy: {
@@ -959,7 +959,7 @@ Example (`agent.harn`):
 pipeline main(task) {
   var tools = tool_registry()
   tools = tool_define(tools, "greet", "Greet someone", {
-    params: { name: {type: "string"} },
+    parameters: { name: {type: "string"} },
     returns: {type: "string"},
     handler: { args -> "Hello, " + args.name + "!" }
   })

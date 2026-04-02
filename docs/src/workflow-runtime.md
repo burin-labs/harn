@@ -28,7 +28,7 @@ inspect and reduce child results explicitly.
 fn coding_tools() {
   var tools = tool_registry()
   tools = tool_define(tools, "read", "Read a file", {
-    params: {path: {type: "string"}},
+    parameters: {path: {type: "string"}},
     returns: {type: "string"},
     handler: nil,
     policy: {
@@ -39,7 +39,7 @@ fn coding_tools() {
     }
   })
   tools = tool_define(tools, "edit", "Edit a file", {
-    params: {path: {type: "string"}},
+    parameters: {path: {type: "string"}},
     returns: {type: "string"},
     handler: nil,
     policy: {
@@ -50,7 +50,7 @@ fn coding_tools() {
     }
   })
   tools = tool_define(tools, "run", "Run a command", {
-    params: {command: {type: "string"}},
+    parameters: {command: {type: "string"}},
     returns: {type: "string"},
     handler: nil,
     policy: {

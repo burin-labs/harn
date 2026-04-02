@@ -286,7 +286,7 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
     });
 
     // tool_define(registry, name, description, config) -> registry
-    // config is {params: {name: {type, description, required?, default?}}, handler: fn,
+    // config is {parameters: {name: {type, description, required?, default?}}, handler: fn,
     //            returns?: schema, annotations?: {title?, readOnlyHint?, destructiveHint?, idempotentHint?, openWorldHint?}}
     // Unknown config keys are preserved on the tool entry verbatim so integrators
     // can attach runtime-agnostic metadata such as policy/effect descriptors.
@@ -314,15 +314,21 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
             VmValue::Dict(map) => map,
             _ => {
                 return Err(VmError::Thrown(VmValue::String(Rc::from(
-                    "tool_define: config must be a dict with params and handler",
+                    "tool_define: config must be a dict with parameters and handler",
                 ))));
             }
         };
 
         let handler = config.get("handler").cloned().unwrap_or(VmValue::Nil);
 
+        if config.contains_key("params") && !config.contains_key("parameters") {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "tool_define: use 'parameters', not 'params'",
+            ))));
+        }
+
         let parameters = config
-            .get("params")
+            .get("parameters")
             .cloned()
             .unwrap_or(VmValue::Dict(Rc::new(BTreeMap::new())));
         let output_schema = config.get("returns").cloned().unwrap_or(VmValue::Nil);
@@ -347,7 +353,7 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
         for (key, value) in config.iter() {
             if matches!(
                 key.as_str(),
-                "handler" | "params" | "returns" | "annotations"
+                "handler" | "parameters" | "returns" | "annotations"
             ) {
                 continue;
             }

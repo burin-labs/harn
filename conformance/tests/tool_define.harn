@@ -6,7 +6,7 @@ pipeline test(task) {
     "search_code",
     "Search for code patterns",
     {
-    params: {
+    parameters: {
     query: {type: "string", description: "Search query"},
     path: {type: "string", description: "Optional path scope"},
   },
@@ -19,7 +19,7 @@ pipeline test(task) {
     "read",
     "Read file contents",
     {
-    params: {path: {type: "string", description: "Path to read"}},
+    parameters: {path: {type: "string", description: "Path to read"}},
     returns: {type: "string"},
     handler: { args -> "content of " + args.path },
   },
@@ -31,6 +31,11 @@ pipeline test(task) {
   assert(search != nil, "should find search_code tool")
   assert(search.name == "search_code", "tool name should match")
   assert(search.description == "Search for code patterns", "description should match")
+  assert(
+    search.parameters.query.type == "string",
+    "parameters should be normalized on the tool entry",
+  )
+  assert(search.params == nil, "legacy params key should not appear on the normalized tool entry")
   assert(search.outputSchema.type == "object", "tool output schema should be preserved")
   // Tool list
   let tools = tool_list(registry)

@@ -5,6 +5,40 @@ use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 pub(crate) fn register_shape_builtins(vm: &mut Vm) {
+    vm.register_builtin("keys", |args, _out| {
+        match args.first().cloned().unwrap_or(VmValue::Nil) {
+            VmValue::Dict(map) => Ok(VmValue::List(Rc::new(
+                map.keys()
+                    .map(|k| VmValue::String(Rc::from(k.as_str())))
+                    .collect(),
+            ))),
+            _ => Ok(VmValue::List(Rc::new(Vec::new()))),
+        }
+    });
+
+    vm.register_builtin("values", |args, _out| {
+        match args.first().cloned().unwrap_or(VmValue::Nil) {
+            VmValue::Dict(map) => Ok(VmValue::List(Rc::new(map.values().cloned().collect()))),
+            _ => Ok(VmValue::List(Rc::new(Vec::new()))),
+        }
+    });
+
+    vm.register_builtin("entries", |args, _out| {
+        match args.first().cloned().unwrap_or(VmValue::Nil) {
+            VmValue::Dict(map) => Ok(VmValue::List(Rc::new(
+                map.iter()
+                    .map(|(k, v)| {
+                        VmValue::Dict(Rc::new(BTreeMap::from([
+                            ("key".to_string(), VmValue::String(Rc::from(k.as_str()))),
+                            ("value".to_string(), v.clone()),
+                        ])))
+                    })
+                    .collect(),
+            ))),
+            _ => Ok(VmValue::List(Rc::new(Vec::new()))),
+        }
+    });
+
     // Runtime interface enforcement: check that a value has all required methods
     // Args: value, param_name, interface_name, method_names_csv
     vm.register_builtin("__assert_interface", |args, _out| {

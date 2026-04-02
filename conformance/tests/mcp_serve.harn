@@ -7,7 +7,7 @@ pipeline test(task) {
     tools,
     "echo",
     "Echo input back",
-    {params: {text: "string"}, handler: { args -> args.text }},
+    {parameters: {text: "string"}, handler: { args -> args.text }},
   )
   // mcp_serve stores the registry and returns nil
   let result = mcp_serve(tools)

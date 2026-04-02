@@ -41,13 +41,13 @@ pipeline default(task) {
   var tools = tool_registry()
 
   tools = tool_define(tools, "read", "Read a file from disk", {
-    params: {path: {type: "string", description: "Path to read"}},
+    parameters: {path: {type: "string", description: "Path to read"}},
     returns: {type: "string"},
     handler: { path -> return read_file(path) }
   })
 
   tools = tool_define(tools, "search", "Search code for a pattern", {
-    params: {query: {type: "string", description: "Query to search"}},
+    parameters: {query: {type: "string", description: "Query to search"}},
     returns: {type: "string"},
     handler: { query ->
       let result = shell("grep -r '" + query + "' src/ || true")
@@ -527,7 +527,7 @@ pipeline default(task) {
   var tools = tool_registry()
   for t in mcp_tool_list {
     tools = tool_define(tools, t.name, t.description, {
-      params: t.inputSchema?.properties ?? {},
+      parameters: t.inputSchema?.properties ?? {},
       returns: {type: "string"},
       handler: { args -> return mcp_call(client, t.name, args) }
     })

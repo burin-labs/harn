@@ -11,7 +11,7 @@ pipeline default(task) {
     "Say hello",
     {
     handler: { args -> "hi " + args.name },
-    params: {name: {type: "string", description: "Name to greet"}},
+    parameters: {name: {type: "string", description: "Name to greet"}},
     returns: {type: "string"},
   },
   )
@@ -21,7 +21,7 @@ pipeline default(task) {
     "Add numbers",
     {
     handler: { args -> args.a + args.b },
-    params: {
+    parameters: {
     a: {type: "integer", description: "First operand"},
     b: {type: "integer", description: "Second operand"},
   },
