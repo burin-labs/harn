@@ -19,6 +19,30 @@ pub(crate) fn op_precedence(op: &str) -> u8 {
     }
 }
 
+/// Whether `node` needs parentheses when used as the object of a postfix
+/// operation (method call, property access, subscript, optional chain, try, slice).
+pub(crate) fn needs_parens_as_postfix_object(node: &Node) -> bool {
+    matches!(
+        node,
+        Node::BinaryOp { .. }
+            | Node::UnaryOp { .. }
+            | Node::Ternary { .. }
+            | Node::RangeExpr { .. }
+            | Node::Assignment { .. }
+    )
+}
+
+/// Whether `node` needs parentheses as the operand of a unary prefix (`!`, `-`).
+pub(crate) fn needs_parens_as_unary_operand(node: &Node) -> bool {
+    matches!(
+        node,
+        Node::BinaryOp { .. }
+            | Node::Ternary { .. }
+            | Node::RangeExpr { .. }
+            | Node::Assignment { .. }
+    )
+}
+
 /// Determine whether a child BinaryOp needs parentheses when nested inside
 /// a parent BinaryOp.  Covers both correctness (semantics-preserving) and
 /// clarity (`&&` / `||` mixing).

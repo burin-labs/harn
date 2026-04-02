@@ -2,6 +2,23 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.20
+
+### Added
+
+- **LLM API transcript capture** — full LLM call request/response payloads are now
+  optionally written to `llm_transcript.jsonl` in a directory set by
+  `HARN_LLM_TRANSCRIPT_DIR`, including call metadata, token usage, and
+  request/response content.
+
+### Changed
+
+- **Formatter precedence rendering for postfix chains and unary operands** — `harn-fmt`
+  now preserves parentheses around complex expressions before method calls, property
+  access, optional chaining, indexing/slicing, and try postfixes, while also
+  preserving parentheses for appropriate operands of unary operators to keep output
+  both valid and stable.
+
 ## v0.5.19
 
 ### Added

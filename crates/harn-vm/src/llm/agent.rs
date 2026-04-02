@@ -95,6 +95,77 @@ fn extract_retry_after_ms(err: &VmError) -> Option<u64> {
     None
 }
 
+/// Write the full LLM request payload to a JSONL transcript file.
+/// Enabled by setting HARN_LLM_TRANSCRIPT_DIR to a directory path.
+fn dump_llm_request(iteration: usize, call_id: &str, opts: &super::api::LlmCallOptions) {
+    let dir = match std::env::var("HARN_LLM_TRANSCRIPT_DIR") {
+        Ok(d) if !d.is_empty() => d,
+        _ => return,
+    };
+    let _ = std::fs::create_dir_all(&dir);
+    let path = format!("{dir}/llm_transcript.jsonl");
+    let entry = serde_json::json!({
+        "type": "request",
+        "iteration": iteration,
+        "call_id": call_id,
+        "timestamp": chrono_now(),
+        "model": opts.model,
+        "provider": opts.provider,
+        "system": opts.system,
+        "messages": opts.messages,
+        "max_tokens": opts.max_tokens,
+        "temperature": opts.temperature,
+        "tool_format": std::env::var("HARN_AGENT_TOOL_FORMAT").unwrap_or_else(|_| "text".to_string()),
+    });
+    if let Ok(line) = serde_json::to_string(&entry) {
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+        {
+            let _ = writeln!(f, "{line}");
+        }
+    }
+}
+
+fn dump_llm_response(iteration: usize, call_id: &str, result: &super::api::LlmResult) {
+    let dir = match std::env::var("HARN_LLM_TRANSCRIPT_DIR") {
+        Ok(d) if !d.is_empty() => d,
+        _ => return,
+    };
+    let path = format!("{dir}/llm_transcript.jsonl");
+    let entry = serde_json::json!({
+        "type": "response",
+        "iteration": iteration,
+        "call_id": call_id,
+        "timestamp": chrono_now(),
+        "model": result.model,
+        "text": result.text,
+        "tool_calls": result.tool_calls,
+        "input_tokens": result.input_tokens,
+        "output_tokens": result.output_tokens,
+        "thinking": result.thinking,
+    });
+    if let Ok(line) = serde_json::to_string(&entry) {
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+        {
+            let _ = writeln!(f, "{line}");
+        }
+    }
+}
+
+fn chrono_now() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    format!("{}.{:03}", now.as_secs(), now.subsec_millis())
+}
+
 pub(crate) fn install_current_host_bridge(bridge: Rc<crate::bridge::HostBridge>) {
     CURRENT_HOST_BRIDGE.with(|slot| {
         *slot.borrow_mut() = Some(bridge);
@@ -359,11 +430,13 @@ pub async fn run_agent_loop_internal(
                         "llm_attempt": llm_attempt,
                     }),
                 );
+                dump_llm_request(iteration, &llm_call_id, opts);
                 let delta_tx = spawn_progress_forwarder(bridge, llm_call_id.clone());
                 let llm_result = vm_call_llm_full_streaming(opts, delta_tx).await;
                 let llm_duration = start.elapsed().as_millis() as u64;
                 match llm_result {
                     Ok(result) => {
+                        dump_llm_response(iteration, &llm_call_id, &result);
                         bridge.send_call_end(
                             &llm_call_id,
                             "llm",

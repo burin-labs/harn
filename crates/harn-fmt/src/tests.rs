@@ -611,6 +611,176 @@ pipeline default() {
     );
 }
 
+// --- Postfix and unary precedence parens ---
+
+#[test]
+fn test_parens_binary_op_method_call() {
+    let source = r#"pipeline default(task) {
+  let x = (a ?? b).split("\n")
+}"#;
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains(r#"(a ?? b).split("\n")"#),
+        "Expected parens preserved for ?? as method call object, got:\n{result}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
+fn test_parens_binary_op_property_access() {
+    let source = r#"pipeline default(task) {
+  let x = (a + b).length
+}"#;
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("(a + b).length"),
+        "Expected parens preserved for + as property access object, got:\n{result}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
+fn test_parens_binary_op_subscript() {
+    let source = r#"pipeline default(task) {
+  let x = (a ?? b)[0]
+}"#;
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("(a ?? b)[0]"),
+        "Expected parens preserved for ?? as subscript object, got:\n{result}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
+fn test_parens_unary_op_method_call() {
+    let source = r#"pipeline default(task) {
+  let x = (-a).abs()
+}"#;
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("(-a).abs()"),
+        "Expected parens for unary-op as method call object, got:\n{result}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
+fn test_parens_unary_op_property_access() {
+    let source = r#"pipeline default(task) {
+  let x = (!flag).description
+}"#;
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("(!flag).description"),
+        "Expected parens for unary-op as property access object, got:\n{result}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
+fn test_parens_ternary_method_call() {
+    let source = r#"pipeline default(task) {
+  let x = (a ? b : c).method()
+}"#;
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("(a ? b : c).method()"),
+        "Expected parens for ternary as method call object, got:\n{result}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
+fn test_parens_unary_binary_operand() {
+    let source = r#"pipeline default(task) {
+  let x = !(a + b)
+}"#;
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("!(a + b)"),
+        "Expected parens for binary op as unary operand, got:\n{result}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
+fn test_parens_chained_unary_method_on_binary() {
+    // !(a ?? b).trim() — the unary wraps a method call whose object is a binary op
+    let source = r#"pipeline default(task) {
+  let x = !(a ?? b).trim()
+}"#;
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("!(a ?? b).trim()"),
+        "Expected parens preserved in chained unary+method+binary, got:\n{result}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
+fn test_parens_chained_postfix_on_binary() {
+    let source = r#"pipeline default(task) {
+  let x = (a + b)[0].method()
+}"#;
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("(a + b)[0].method()"),
+        "Expected parens for chained postfix on binary op, got:\n{result}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
+fn test_parens_binary_op_optional_method() {
+    let source = r#"pipeline default(task) {
+  let x = (a ?? b)?.method()
+}"#;
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("(a ?? b)?.method()"),
+        "Expected parens for ?? as optional method call object, got:\n{result}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
+fn test_parens_binary_op_optional_property() {
+    let source = r#"pipeline default(task) {
+  let x = (a ?? b)?.length
+}"#;
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("(a ?? b)?.length"),
+        "Expected parens for ?? as optional property access object, got:\n{result}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
+fn test_parens_long_binary_op_method_call_roundtrip() {
+    let source = r#"pipeline default(task) {
+  let x = (first_really_long_name ?? second_really_long_name).split("x")
+}"#;
+    assert_roundtrip(source);
+}
+
+#[test]
+fn test_no_unnecessary_parens_on_simple_method_call() {
+    // Normal method calls on identifiers, literals, etc. should NOT get parens
+    let source = r#"pipeline default(task) {
+  let x = text.split("\n")
+  let y = items[0].name
+  let z = obj?.method()
+}"#;
+    let result = format_source(source).unwrap();
+    assert!(
+        !result.contains("(text)"),
+        "Should not add parens to simple identifier, got:\n{result}"
+    );
+    assert_roundtrip(source);
+}
+
 // --- Short lines stay inline ---
 
 #[test]

@@ -593,11 +593,19 @@ impl Formatter {
             }
             Node::UnaryOp { op, operand } => {
                 let expr = self.format_expr(operand);
-                format!("{op}{expr}")
+                if needs_parens_as_unary_operand(&operand.node) {
+                    format!("{op}({expr})")
+                } else {
+                    format!("{op}{expr}")
+                }
             }
             Node::TryOperator { operand } => {
                 let expr = self.format_expr(operand);
-                format!("{expr}?")
+                if needs_parens_as_postfix_object(&operand.node) {
+                    format!("({expr})?")
+                } else {
+                    format!("{expr}?")
+                }
             }
             Node::FunctionCall { name, args } => {
                 let args_str = self.format_call_args(args, name.len() + 1);
@@ -608,7 +616,10 @@ impl Formatter {
                 method,
                 args,
             } => {
-                let obj = self.format_expr(object);
+                let mut obj = self.format_expr(object);
+                if needs_parens_as_postfix_object(&object.node) {
+                    obj = format!("({obj})");
+                }
                 let args_str = self.format_call_args(args, obj.len() + method.len() + 2);
                 if object.span.end_line > 0 && node.span.end_line > object.span.end_line {
                     let pad = "  ".repeat(self.indent + 1);
@@ -622,7 +633,10 @@ impl Formatter {
                 method,
                 args,
             } => {
-                let obj = self.format_expr(object);
+                let mut obj = self.format_expr(object);
+                if needs_parens_as_postfix_object(&object.node) {
+                    obj = format!("({obj})");
+                }
                 let args_str = self.format_call_args(args, obj.len() + method.len() + 3);
                 if object.span.end_line > 0 && node.span.end_line > object.span.end_line {
                     let pad = "  ".repeat(self.indent + 1);
@@ -632,20 +646,32 @@ impl Formatter {
                 }
             }
             Node::PropertyAccess { object, property } => {
-                let obj = self.format_expr(object);
+                let mut obj = self.format_expr(object);
+                if needs_parens_as_postfix_object(&object.node) {
+                    obj = format!("({obj})");
+                }
                 format!("{obj}.{property}")
             }
             Node::OptionalPropertyAccess { object, property } => {
-                let obj = self.format_expr(object);
+                let mut obj = self.format_expr(object);
+                if needs_parens_as_postfix_object(&object.node) {
+                    obj = format!("({obj})");
+                }
                 format!("{obj}?.{property}")
             }
             Node::SubscriptAccess { object, index } => {
-                let obj = self.format_expr(object);
+                let mut obj = self.format_expr(object);
+                if needs_parens_as_postfix_object(&object.node) {
+                    obj = format!("({obj})");
+                }
                 let idx = self.format_expr(index);
                 format!("{obj}[{idx}]")
             }
             Node::SliceAccess { object, start, end } => {
-                let obj = self.format_expr(object);
+                let mut obj = self.format_expr(object);
+                if needs_parens_as_postfix_object(&object.node) {
+                    obj = format!("({obj})");
+                }
                 let s = start
                     .as_ref()
                     .map(|n| self.format_expr(n))
