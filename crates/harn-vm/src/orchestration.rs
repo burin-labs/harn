@@ -271,9 +271,7 @@ pub fn microcompact_tool_output(output: &str, max_chars: usize) -> String {
                     }
                     i += 1;
                 }
-                found_colon
-                    && i + 1 < bytes.len()
-                    && bytes[i + 1].is_ascii_digit()
+                found_colon && i + 1 < bytes.len() && bytes[i + 1].is_ascii_digit()
             };
             // keyword-based diagnostics
             let has_keyword = trimmed.contains("error")
@@ -2591,14 +2589,23 @@ pub async fn execute_stage_node(
             "system_prompt".to_string(),
             serde_json::json!(node.system.clone().unwrap_or_default()),
         );
-        payload.insert("rendered_context".to_string(), serde_json::json!(rendered_context));
+        payload.insert(
+            "rendered_context".to_string(),
+            serde_json::json!(rendered_context),
+        );
         payload.insert(
             "selected_artifact_ids".to_string(),
-            serde_json::json!(selected.iter().map(|artifact| artifact.id.clone()).collect::<Vec<_>>()),
+            serde_json::json!(selected
+                .iter()
+                .map(|artifact| artifact.id.clone())
+                .collect::<Vec<_>>()),
         );
         payload.insert(
             "selected_artifact_titles".to_string(),
-            serde_json::json!(selected.iter().map(|artifact| artifact.title.clone()).collect::<Vec<_>>()),
+            serde_json::json!(selected
+                .iter()
+                .map(|artifact| artifact.title.clone())
+                .collect::<Vec<_>>()),
         );
         payload.insert(
             "tool_calling_mode".to_string(),

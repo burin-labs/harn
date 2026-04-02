@@ -2,6 +2,40 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.19
+
+### Added
+
+- **LLM call retry logic** — transient errors (HTTP 429, 500, 502, 503, 529,
+  connection timeouts) are retried with exponential backoff. Configurable via
+  `llm_retries` (default 2) and `llm_backoff_ms` (default 2000). Retry-After
+  headers are parsed and respected. Non-retryable errors (400, 401, 403) abort
+  immediately.
+- **Graceful shutdown** — CLI installs SIGTERM/SIGINT handler that gives the VM
+  2 seconds to flush run records before exit(124).
+- **Atomic run record persistence** — `save_run_record` writes to a `.tmp` file
+  then renames, preventing corruption from mid-write kills.
+- **Enhanced microcompaction diagnostics** — file:line pattern recognition,
+  expanded keyword set (cannot find, not found, unresolved, missing, mismatch,
+  unused), increased diagnostic line limit from 24 to 32.
+- **Runtime-owned tool-calling contract** — system prompt injection declares the
+  active mode (`text` or `native`) and overrides any stale prompt text.
+- **Text fallback trace logging** — emits a warning when native mode falls back
+  to text-call parsing.
+- **Ollama runtime overrides** — `BURIN_OLLAMA_NUM_CTX`, `OLLAMA_NUM_CTX`,
+  `BURIN_OLLAMA_KEEP_ALIVE`, and `OLLAMA_KEEP_ALIVE` env vars are injected into
+  Ollama API requests.
+- **Workflow stage metadata** — stage results now include prompt, system_prompt,
+  rendered_context, selected artifacts, and tool_calling_mode for inspection.
+
+### Changed
+
+- **Stage outcome classification refactored** — extracted into
+  `classify_stage_outcome()` with correct handling of `stuck` and `done` agent
+  statuses.
+- **Agent loop nudge messages** — text-mode nudges now include concrete
+  `​```call` examples instead of generic "use tools" instructions.
+
 ## v0.5.18
 
 ### Changed

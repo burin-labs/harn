@@ -1480,7 +1480,11 @@ async fn vm_call_llm_api_ndjson_from_response(
 }
 
 fn ollama_num_ctx_override() -> Option<u64> {
-    for key in ["BURIN_OLLAMA_NUM_CTX", "OLLAMA_CONTEXT_LENGTH", "OLLAMA_NUM_CTX"] {
+    for key in [
+        "BURIN_OLLAMA_NUM_CTX",
+        "OLLAMA_CONTEXT_LENGTH",
+        "OLLAMA_NUM_CTX",
+    ] {
         if let Ok(raw) = std::env::var(key) {
             if let Ok(parsed) = raw.trim().parse::<u64>() {
                 if parsed > 0 {
@@ -1778,8 +1782,7 @@ mod tests {
                 .expect("captured body")
                 .clone()
                 .expect("request body");
-            let json: serde_json::Value =
-                serde_json::from_str(&body).expect("valid request json");
+            let json: serde_json::Value = serde_json::from_str(&body).expect("valid request json");
             assert_eq!(json["keep_alive"].as_str(), Some("-1"));
             assert_eq!(json["options"]["num_ctx"].as_u64(), Some(131072));
         });

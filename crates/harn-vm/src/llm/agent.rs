@@ -381,7 +381,13 @@ pub async fn run_agent_loop_internal(
                     Err(error) => {
                         let retryable = is_retryable_llm_error(&error);
                         let can_retry = retryable && llm_attempt < config.llm_retries;
-                        let status = if can_retry { "retrying" } else if retryable { "retries_exhausted" } else { "error" };
+                        let status = if can_retry {
+                            "retrying"
+                        } else if retryable {
+                            "retries_exhausted"
+                        } else {
+                            "error"
+                        };
                         bridge.send_call_end(
                             &llm_call_id,
                             "llm",

@@ -2169,8 +2169,7 @@ async fn execute_stage_attempts(
                 )
                 .await?;
                 let verification = evaluate_verification(node, &result);
-                let (outcome, branch) =
-                    classify_stage_outcome(&node.kind, &result, &verification);
+                let (outcome, branch) = classify_stage_outcome(&node.kind, &result, &verification);
                 Ok((
                     result,
                     produced,
@@ -2608,10 +2607,16 @@ async fn execute_workflow(
             stage_metadata.insert("rendered_context".to_string(), rendered_context.clone());
         }
         if let Some(selected_artifact_ids) = executed.result.get("selected_artifact_ids") {
-            stage_metadata.insert("selected_artifact_ids".to_string(), selected_artifact_ids.clone());
+            stage_metadata.insert(
+                "selected_artifact_ids".to_string(),
+                selected_artifact_ids.clone(),
+            );
         }
         if let Some(selected_artifact_titles) = executed.result.get("selected_artifact_titles") {
-            stage_metadata.insert("selected_artifact_titles".to_string(), selected_artifact_titles.clone());
+            stage_metadata.insert(
+                "selected_artifact_titles".to_string(),
+                selected_artifact_titles.clone(),
+            );
         }
         if let Some(tool_calling_mode) = executed.result.get("tool_calling_mode") {
             stage_metadata.insert("tool_calling_mode".to_string(), tool_calling_mode.clone());
