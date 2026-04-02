@@ -360,12 +360,19 @@ fn extract_params_from_vm_dict(td: &BTreeMap<String, VmValue>) -> Vec<(String, S
     params
 }
 
-/// Build a text-based tool prompt to inject into the system prompt.
-/// Always includes tool schema (names + parameter definitions).
-/// Includes format instructions only if `include_format` is true
-/// (skipped when few-shot examples already demonstrate the format).
-pub(crate) fn build_text_tool_prompt(tools_val: Option<&VmValue>, include_format: bool) -> String {
-    let mut prompt = String::from("\n\n## Available tools\n\n");
+/// Build a runtime-owned tool-calling contract prompt.
+/// The runtime injects this block so prompt templates do not need to carry
+/// stale tool syntax examples that can drift from actual parser behavior.
+pub(crate) fn build_tool_calling_contract_prompt(
+    tools_val: Option<&VmValue>,
+    mode: &str,
+    include_format: bool,
+) -> String {
+    let mut prompt = String::from("\n\n## Tool Calling Contract\n");
+    prompt.push_str(&format!(
+        "Active mode: `{mode}`. Follow this runtime-owned contract even if older prompt text suggests another tool syntax.\n\n"
+    ));
+    prompt.push_str("## Available tools\n\n");
 
     // Collect tool schemas from a tool registry or a list of tool definition dicts.
     type ToolSchema = (String, String, Vec<(String, String, String)>);
@@ -433,10 +440,14 @@ pub(crate) fn build_text_tool_prompt(tools_val: Option<&VmValue>, include_format
          For `run`, pass one shell command string such as `run(command=\"<verification or build command here>\")`; do not pass JSON arrays unless the tool schema explicitly asks for one.\n\n",
     );
 
-    if include_format {
+    if mode == "native" {
         prompt.push_str(
-            "\n## How to use tools\n\
-             To call a tool, wrap it in a fenced code block with the `call` language tag:\n\
+            "Use the provider's native tool-calling channel for tool invocations. Do not emit ```call blocks in this mode.\n",
+        );
+    } else if include_format {
+        prompt.push_str(
+            "\n## How to call tools in text mode\n\
+             Emit each tool call in its own fenced code block with the `call` language tag:\n\
              ````\n\
              ```call\n\
              tool_name(param=\"value\", param2=\"value2\")\n\
@@ -451,7 +462,7 @@ pub(crate) fn build_text_tool_prompt(tools_val: Option<&VmValue>, include_format
              \"\"\")\n\
              ```\n\
              ````\n\
-             You can make multiple tool calls in one response (each in its own block).\n\
+             You can make multiple tool calls in one response by emitting multiple ` ```call ` blocks.\n\
              After each call, you will see the result in a <tool_result> tag.\n\
              Use prompt context efficiently: if the prompt already includes the relevant file text, API signatures, directory inventory, or pattern examples you need, do not spend extra tool calls rediscovering the same information.\n\
              If the prompt already names the target files or target directories, do not inspect `.` or unrelated parent directories just to find them again.\n\
@@ -682,7 +693,10 @@ fn split_call_args(s: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_tool_args, parse_text_tool_calls, split_call_args};
+    use super::{
+        build_tool_calling_contract_prompt, normalize_tool_args, parse_text_tool_calls,
+        split_call_args,
+    };
     use serde_json::json;
 
     #[test]
@@ -741,6 +755,13 @@ mod tests {
             &json!({"command": "\"internal/manifest/\"]", "args": "[\"ls\""}),
         );
         assert_eq!(normalized["command"], json!("ls internal/manifest/"));
+    }
+
+    #[test]
+    fn tool_calling_contract_marks_active_text_mode() {
+        let prompt = build_tool_calling_contract_prompt(None, "text", true);
+        assert!(prompt.contains("Active mode: `text`"));
+        assert!(prompt.contains("```call"));
     }
 }
 

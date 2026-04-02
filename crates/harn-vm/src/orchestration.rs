@@ -254,6 +254,62 @@ pub fn microcompact_tool_output(output: &str, max_chars: usize) -> String {
     if output.len() <= max_chars || max_chars < 200 {
         return output.to_string();
     }
+    let diagnostic_lines = output
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            let lower = trimmed.to_lowercase();
+            // file:line pattern (e.g. "src/main.rs:42:" or "foo.go:10:5:")
+            let has_file_line = {
+                let bytes = trimmed.as_bytes();
+                let mut i = 0;
+                let mut found_colon = false;
+                while i < bytes.len() {
+                    if bytes[i] == b':' {
+                        found_colon = true;
+                        break;
+                    }
+                    i += 1;
+                }
+                found_colon
+                    && i + 1 < bytes.len()
+                    && bytes[i + 1].is_ascii_digit()
+            };
+            // keyword-based diagnostics
+            let has_keyword = trimmed.contains("error")
+                || trimmed.contains("FAIL")
+                || trimmed.contains("panic")
+                || trimmed.contains("undefined")
+                || trimmed.contains("expected")
+                || trimmed.contains("got")
+                || lower.contains("cannot find")
+                || lower.contains("not found")
+                || lower.contains("no such")
+                || lower.contains("unresolved")
+                || lower.contains("missing")
+                || lower.contains("declared but not used")
+                || lower.contains("unused")
+                || lower.contains("mismatch");
+            let positional = lower.contains(" error ")
+                || lower.starts_with("error:")
+                || lower.starts_with("fail")
+                || lower.contains("panic:");
+            (has_file_line && has_keyword) || positional
+        })
+        .take(32)
+        .collect::<Vec<_>>();
+    if !diagnostic_lines.is_empty() {
+        let diagnostics = diagnostic_lines.join("\n");
+        let budget = max_chars.saturating_sub(diagnostics.len() + 64);
+        let keep = budget / 2;
+        if keep >= 80 && output.len() > keep * 2 {
+            let head = &output[..keep];
+            let tail = &output[output.len() - keep..];
+            return format!(
+                "{head}\n\n[diagnostic lines preserved]\n{diagnostics}\n\n[... output compacted ...]\n\n{tail}"
+            );
+        }
+    }
     let keep = max_chars / 2;
     let head = &output[..keep];
     let tail = &output[output.len() - keep..];
@@ -1889,8 +1945,15 @@ pub fn save_run_record(run: &RunRecord, path: Option<&str>) -> Result<String, Vm
     }
     let json = serde_json::to_string_pretty(run)
         .map_err(|e| VmError::Runtime(format!("failed to encode run record: {e}")))?;
-    std::fs::write(&path, json)
+    // Atomic write: write to .tmp then rename to prevent corruption on kill.
+    let tmp_path = path.with_extension("json.tmp");
+    std::fs::write(&tmp_path, &json)
         .map_err(|e| VmError::Runtime(format!("failed to persist run record: {e}")))?;
+    std::fs::rename(&tmp_path, &path).map_err(|e| {
+        // Fallback: if rename fails (cross-device), write directly.
+        let _ = std::fs::write(&path, &json);
+        VmError::Runtime(format!("failed to finalize run record: {e}"))
+    })?;
     Ok(path.to_string_lossy().to_string())
 }
 
@@ -2485,7 +2548,7 @@ pub async fn execute_stage_node(
     }
 
     let args = vec![
-        VmValue::String(Rc::from(prompt)),
+        VmValue::String(Rc::from(prompt.clone())),
         node.system
             .clone()
             .map(|s| VmValue::String(Rc::from(s)))
@@ -2494,12 +2557,11 @@ pub async fn execute_stage_node(
     ];
     let mut opts = extract_llm_options(&args)?;
 
-    let llm_result = if node.mode.as_deref() == Some("agent") || !tool_names.is_empty() {
-        let tool_format = if !tool_names.is_empty() && opts.native_tools.is_some() {
-            "native".to_string()
-        } else {
-            "text".to_string()
-        };
+    let tool_format = std::env::var("HARN_AGENT_TOOL_FORMAT")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "text".to_string());
+    let mut llm_result = if node.mode.as_deref() == Some("agent") || !tool_names.is_empty() {
         crate::llm::run_agent_loop_internal(
             &mut opts,
             crate::llm::AgentLoopConfig {
@@ -2510,10 +2572,12 @@ pub async fn execute_stage_node(
                 done_sentinel: node.done_sentinel.clone(),
                 tool_retries: 0,
                 tool_backoff_ms: 1000,
-                tool_format,
+                tool_format: tool_format.clone(),
                 auto_compact: None,
                 policy: None,
                 daemon: false,
+                llm_retries: 2,
+                llm_backoff_ms: 2000,
             },
         )
         .await?
@@ -2521,6 +2585,26 @@ pub async fn execute_stage_node(
         let result = vm_call_llm_full(&opts).await?;
         crate::llm::agent_loop_result_from_llm(&result, opts)
     };
+    if let Some(payload) = llm_result.as_object_mut() {
+        payload.insert("prompt".to_string(), serde_json::json!(prompt));
+        payload.insert(
+            "system_prompt".to_string(),
+            serde_json::json!(node.system.clone().unwrap_or_default()),
+        );
+        payload.insert("rendered_context".to_string(), serde_json::json!(rendered_context));
+        payload.insert(
+            "selected_artifact_ids".to_string(),
+            serde_json::json!(selected.iter().map(|artifact| artifact.id.clone()).collect::<Vec<_>>()),
+        );
+        payload.insert(
+            "selected_artifact_titles".to_string(),
+            serde_json::json!(selected.iter().map(|artifact| artifact.title.clone()).collect::<Vec<_>>()),
+        );
+        payload.insert(
+            "tool_calling_mode".to_string(),
+            serde_json::json!(tool_format.clone()),
+        );
+    }
 
     let visible_text = llm_result["text"].as_str().unwrap_or_default().to_string();
     let transcript = llm_result

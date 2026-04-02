@@ -1889,6 +1889,54 @@ fn enqueue_unique(queue: &mut VecDeque<String>, node_id: String) {
     }
 }
 
+fn classify_stage_outcome(
+    node_kind: &str,
+    result: &serde_json::Value,
+    verification: &serde_json::Value,
+) -> (String, Option<String>) {
+    let verified_ok = verification
+        .get("ok")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(true);
+    let result_status = result
+        .get("status")
+        .and_then(|value| value.as_str())
+        .unwrap_or("completed");
+    let stage_succeeded = if node_kind == "verify" {
+        verified_ok
+    } else {
+        result_status == "done" || result_status == "completed"
+    };
+
+    let outcome = if node_kind == "verify" {
+        if verified_ok {
+            "verified".to_string()
+        } else {
+            "verification_failed".to_string()
+        }
+    } else if !stage_succeeded {
+        result_status.to_string()
+    } else if node_kind == "subagent" {
+        "subagent_completed".to_string()
+    } else {
+        "success".to_string()
+    };
+
+    let branch = if node_kind == "verify" {
+        Some(if verified_ok {
+            "passed".to_string()
+        } else {
+            "failed".to_string()
+        })
+    } else if stage_succeeded {
+        Some("success".to_string())
+    } else {
+        Some("failed".to_string())
+    };
+
+    (outcome, branch)
+}
+
 fn effective_node_policy(
     graph: &WorkflowGraph,
     node: &crate::orchestration::WorkflowNode,
@@ -2121,30 +2169,8 @@ async fn execute_stage_attempts(
                 )
                 .await?;
                 let verification = evaluate_verification(node, &result);
-                let verified_ok = verification
-                    .get("ok")
-                    .and_then(|value| value.as_bool())
-                    .unwrap_or(true);
-                let outcome = if node.kind == "verify" {
-                    if verified_ok {
-                        "verified".to_string()
-                    } else {
-                        "verification_failed".to_string()
-                    }
-                } else if node.kind == "subagent" {
-                    "subagent_completed".to_string()
-                } else {
-                    "success".to_string()
-                };
-                let branch = if node.kind == "verify" {
-                    Some(if verified_ok {
-                        "passed".to_string()
-                    } else {
-                        "failed".to_string()
-                    })
-                } else {
-                    Some("success".to_string())
-                };
+                let (outcome, branch) =
+                    classify_stage_outcome(&node.kind, &result, &verification);
                 Ok((
                     result,
                     produced,
@@ -2572,6 +2598,24 @@ async fn execute_workflow(
         if let Some(error) = executed.error.clone() {
             stage_metadata.insert("error".to_string(), serde_json::json!(error));
         }
+        if let Some(prompt) = executed.result.get("prompt") {
+            stage_metadata.insert("prompt".to_string(), prompt.clone());
+        }
+        if let Some(system_prompt) = executed.result.get("system_prompt") {
+            stage_metadata.insert("system_prompt".to_string(), system_prompt.clone());
+        }
+        if let Some(rendered_context) = executed.result.get("rendered_context") {
+            stage_metadata.insert("rendered_context".to_string(), rendered_context.clone());
+        }
+        if let Some(selected_artifact_ids) = executed.result.get("selected_artifact_ids") {
+            stage_metadata.insert("selected_artifact_ids".to_string(), selected_artifact_ids.clone());
+        }
+        if let Some(selected_artifact_titles) = executed.result.get("selected_artifact_titles") {
+            stage_metadata.insert("selected_artifact_titles".to_string(), selected_artifact_titles.clone());
+        }
+        if let Some(tool_calling_mode) = executed.result.get("tool_calling_mode") {
+            stage_metadata.insert("tool_calling_mode".to_string(), tool_calling_mode.clone());
+        }
 
         let produced_artifact_ids = executed
             .artifacts
@@ -2666,6 +2710,28 @@ async fn execute_workflow(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn classify_stage_outcome_fails_when_agent_loop_is_stuck() {
+        let (outcome, branch) = classify_stage_outcome(
+            "stage",
+            &serde_json::json!({"status": "stuck"}),
+            &serde_json::json!({"ok": true}),
+        );
+        assert_eq!(outcome, "stuck");
+        assert_eq!(branch.as_deref(), Some("failed"));
+    }
+
+    #[test]
+    fn classify_stage_outcome_accepts_done_status_for_mutating_stage() {
+        let (outcome, branch) = classify_stage_outcome(
+            "stage",
+            &serde_json::json!({"status": "done"}),
+            &serde_json::json!({"ok": true}),
+        );
+        assert_eq!(outcome, "success");
+        assert_eq!(branch.as_deref(), Some("success"));
+    }
 
     #[test]
     fn load_run_tree_recurses_into_child_runs() {

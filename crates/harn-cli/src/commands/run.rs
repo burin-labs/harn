@@ -2,6 +2,8 @@ use std::collections::HashSet;
 use std::io::{self, Write};
 use std::path::Path;
 use std::process;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use harn_parser::DiagnosticSeverity;
 
@@ -134,6 +136,34 @@ pub(crate) async fn run_file(path: &str, trace: bool, denied_builtins: HashSet<S
         }
     }
 
+    // Install signal handler for graceful shutdown: flush run records before exit.
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let cancelled_clone = cancelled.clone();
+    tokio::spawn(async move {
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{signal, SignalKind};
+            let mut sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler");
+            let mut sigint = signal(SignalKind::interrupt()).expect("SIGINT handler");
+            tokio::select! {
+                _ = sigterm.recv() => {},
+                _ = sigint.recv() => {},
+            }
+            cancelled_clone.store(true, Ordering::SeqCst);
+            eprintln!("[harn] signal received, flushing state...");
+            // Give the VM a moment to flush, then exit with timeout code.
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            process::exit(124);
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = tokio::signal::ctrl_c().await;
+            cancelled_clone.store(true, Ordering::SeqCst);
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            process::exit(124);
+        }
+    });
+
     // Run inside a LocalSet so spawn_local works for concurrency builtins.
     let local = tokio::task::LocalSet::new();
     local
@@ -147,6 +177,9 @@ pub(crate) async fn run_file(path: &str, trace: bool, denied_builtins: HashSet<S
                 }
                 Err(e) => {
                     eprint!("{}", vm.format_runtime_error(&e));
+                    if cancelled.load(Ordering::SeqCst) {
+                        process::exit(124);
+                    }
                     process::exit(1);
                 }
             }

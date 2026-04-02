@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::value::{ErrorCategory, VmError};
+use crate::value::{ErrorCategory, VmError, VmValue};
 use crate::vm::Vm;
 
 use super::api::{vm_call_llm_full_streaming, vm_call_llm_full_streaming_offthread, DeltaSender};
@@ -8,8 +8,9 @@ use super::helpers::{
     extract_llm_options, opt_bool, opt_int, opt_str, transcript_event, transcript_to_vm_with_events,
 };
 use super::tools::{
-    build_assistant_response_message, build_assistant_tool_message, build_text_tool_prompt,
-    build_tool_result_message, handle_tool_locally, normalize_tool_args, parse_text_tool_calls,
+    build_assistant_response_message, build_assistant_tool_message,
+    build_tool_calling_contract_prompt, build_tool_result_message, handle_tool_locally,
+    normalize_tool_args, parse_text_tool_calls,
 };
 use super::trace::{trace_llm_call, LlmTraceEntry};
 
@@ -39,6 +40,59 @@ pub struct AgentLoopConfig {
     /// Daemon mode: agent stays alive waiting for user messages instead of
     /// terminating after the LLM produces text without tool calls.
     pub daemon: bool,
+    /// LLM call retry count for transient errors (429, 5xx, connection).
+    pub llm_retries: usize,
+    /// Base backoff in milliseconds between LLM retries.
+    pub llm_backoff_ms: u64,
+}
+
+/// Classify whether a VmError from an LLM call is transient and worth retrying.
+fn is_retryable_llm_error(err: &VmError) -> bool {
+    let msg = match err {
+        VmError::Thrown(VmValue::String(s)) => s.to_lowercase(),
+        VmError::CategorizedError { category, .. } => {
+            return matches!(
+                category,
+                crate::value::ErrorCategory::RateLimit | crate::value::ErrorCategory::Timeout
+            );
+        }
+        VmError::Runtime(s) => s.to_lowercase(),
+        _ => return false,
+    };
+    // Retryable HTTP status codes
+    msg.contains("http 429")
+        || msg.contains("http 500")
+        || msg.contains("http 502")
+        || msg.contains("http 503")
+        || msg.contains("http 529")
+        || msg.contains("overloaded")
+        || msg.contains("rate limit")
+        || msg.contains("too many requests")
+        // Connection/timeout errors
+        || msg.contains("stream error")
+        || msg.contains("connection")
+        || msg.contains("timed out")
+        || msg.contains("timeout")
+}
+
+/// Extract retry-after delay from error message if present (e.g. "retry-after: 5").
+fn extract_retry_after_ms(err: &VmError) -> Option<u64> {
+    let msg = match err {
+        VmError::Thrown(VmValue::String(s)) => s.as_ref(),
+        VmError::Runtime(s) => s.as_str(),
+        _ => return None,
+    };
+    let lower = msg.to_lowercase();
+    if let Some(pos) = lower.find("retry-after:") {
+        let after = &msg[pos + "retry-after:".len()..];
+        let trimmed = after.trim_start();
+        if let Some(num_str) = trimmed.split_whitespace().next() {
+            if let Ok(secs) = num_str.parse::<f64>() as Result<f64, _> {
+                return Some((secs * 1000.0) as u64);
+            }
+        }
+    }
+    None
 }
 
 pub(crate) fn install_current_host_bridge(bridge: Rc<crate::bridge::HostBridge>) {
@@ -230,12 +284,13 @@ pub async fn run_agent_loop_internal(
     if has_tools && tool_format != "native" {
         opts.native_tools = None;
     }
-    if has_tools && tool_format == "text" {
+    if has_tools {
         let system_prompt = opts.system.get_or_insert_with(String::new);
-        let has_examples = system_prompt.contains("```call");
-        if !has_examples {
-            system_prompt.push_str(&build_text_tool_prompt(tools_val, true));
-        }
+        system_prompt.push_str(&build_tool_calling_contract_prompt(
+            tools_val,
+            &tool_format,
+            tool_format == "text",
+        ));
     }
 
     if persistent {
@@ -284,52 +339,73 @@ pub async fn run_agent_loop_internal(
         }
         let start = std::time::Instant::now();
         let result = if let Some(bridge) = bridge.as_ref() {
-            let llm_call_id = next_call_id();
-            let prompt_chars: usize = opts
-                .messages
-                .iter()
-                .filter_map(|m| m.get("content").and_then(|c| c.as_str()))
-                .map(|s| s.len())
-                .sum();
-            bridge.send_call_start(
-                &llm_call_id,
-                "llm",
-                "llm_call",
-                serde_json::json!({
-                    "model": opts.model,
-                    "prompt_chars": prompt_chars,
-                    "iteration": iteration,
-                }),
-            );
-            let delta_tx = spawn_progress_forwarder(bridge, llm_call_id.clone());
-            let llm_result = vm_call_llm_full_streaming(opts, delta_tx).await;
-            let llm_duration = start.elapsed().as_millis() as u64;
-            match llm_result {
-                Ok(result) => {
-                    bridge.send_call_end(
-                        &llm_call_id,
-                        "llm",
-                        "llm_call",
-                        llm_duration,
-                        "ok",
-                        serde_json::json!({
-                            "model": result.model,
-                            "input_tokens": result.input_tokens,
-                            "output_tokens": result.output_tokens,
-                        }),
-                    );
-                    result
-                }
-                Err(error) => {
-                    bridge.send_call_end(
-                        &llm_call_id,
-                        "llm",
-                        "llm_call",
-                        llm_duration,
-                        "error",
-                        serde_json::json!({"error": error.to_string()}),
-                    );
-                    return Err(error);
+            let mut llm_attempt = 0usize;
+            loop {
+                let llm_call_id = next_call_id();
+                let prompt_chars: usize = opts
+                    .messages
+                    .iter()
+                    .filter_map(|m| m.get("content").and_then(|c| c.as_str()))
+                    .map(|s| s.len())
+                    .sum();
+                bridge.send_call_start(
+                    &llm_call_id,
+                    "llm",
+                    "llm_call",
+                    serde_json::json!({
+                        "model": opts.model,
+                        "prompt_chars": prompt_chars,
+                        "iteration": iteration,
+                        "llm_attempt": llm_attempt,
+                    }),
+                );
+                let delta_tx = spawn_progress_forwarder(bridge, llm_call_id.clone());
+                let llm_result = vm_call_llm_full_streaming(opts, delta_tx).await;
+                let llm_duration = start.elapsed().as_millis() as u64;
+                match llm_result {
+                    Ok(result) => {
+                        bridge.send_call_end(
+                            &llm_call_id,
+                            "llm",
+                            "llm_call",
+                            llm_duration,
+                            "ok",
+                            serde_json::json!({
+                                "model": result.model,
+                                "input_tokens": result.input_tokens,
+                                "output_tokens": result.output_tokens,
+                            }),
+                        );
+                        break result;
+                    }
+                    Err(error) => {
+                        let retryable = is_retryable_llm_error(&error);
+                        let can_retry = retryable && llm_attempt < config.llm_retries;
+                        let status = if can_retry { "retrying" } else if retryable { "retries_exhausted" } else { "error" };
+                        bridge.send_call_end(
+                            &llm_call_id,
+                            "llm",
+                            "llm_call",
+                            llm_duration,
+                            status,
+                            serde_json::json!({
+                                "error": error.to_string(),
+                                "retryable": retryable,
+                                "attempt": llm_attempt,
+                            }),
+                        );
+                        if !can_retry {
+                            return Err(error);
+                        }
+                        llm_attempt += 1;
+                        let backoff = extract_retry_after_ms(&error)
+                            .unwrap_or(config.llm_backoff_ms * (1 << llm_attempt.min(4)) as u64);
+                        eprintln!(
+                            "[harn] LLM call failed ({}), retrying in {}ms (attempt {}/{})",
+                            error, backoff, llm_attempt, config.llm_retries
+                        );
+                        tokio::time::sleep(std::time::Duration::from_millis(backoff)).await;
+                    }
                 }
             }
         } else {
@@ -355,6 +431,7 @@ pub async fn run_agent_loop_internal(
                 "input_tokens": result.input_tokens,
                 "output_tokens": result.output_tokens,
                 "tool_calls": result.tool_calls,
+                "tool_calling_mode": tool_format.clone(),
             })),
         ));
         if let Some(thinking) = result.thinking.clone() {
@@ -381,6 +458,12 @@ pub async fn run_agent_loop_internal(
             let parsed = parse_text_tool_calls(&text);
             if !parsed.is_empty() {
                 tool_call_source = "text_fallback";
+                if tool_format == "native" {
+                    eprintln!(
+                        "[harn] text_fallback_triggered: model emitted {} text call(s) in native mode",
+                        parsed.len()
+                    );
+                }
             }
             parsed
         } else {
@@ -854,10 +937,21 @@ pub async fn run_agent_loop_internal(
 
         let nudge = custom_nudge.clone().unwrap_or_else(|| {
             if consecutive_text_only == 1 {
-                "You must use tools to complete this task. Start with the best available tool."
-                    .to_string()
+                if tool_format == "native" {
+                    "You must use tools to complete this task. Start with the best available tool."
+                        .to_string()
+                } else {
+                    "You must use tools to complete this task. Respond with a real ```call block, not a prose description of the tool you intend to use.\nExample:\n```call\nread(path=\"relative/path\")\n```"
+                        .to_string()
+                }
             } else if consecutive_text_only <= 3 {
-                "STOP explaining and USE TOOLS NOW. Include a concrete tool call.".to_string()
+                if tool_format == "native" {
+                    "STOP explaining and USE TOOLS NOW. Include a concrete tool call."
+                        .to_string()
+                } else {
+                    "STOP explaining and USE TOOLS NOW. A plain-English plan is a failure here. Reply with one or more actual ```call blocks only.\nExample:\n```call\nrun(command=\"<scoped verification command>\")\n```"
+                        .to_string()
+                }
             } else {
                 "FINAL WARNING: call a tool now or the task will fail.".to_string()
             }
@@ -887,6 +981,7 @@ pub async fn run_agent_loop_internal(
         "duration_ms": loop_start.elapsed().as_millis() as i64,
         "tools_used": all_tools_used,
         "rejected_tools": rejected_tools,
+        "tool_calling_mode": tool_format,
         "deferred_user_messages": deferred_user_messages,
         "transcript": super::helpers::vm_value_to_json(&transcript_to_vm_with_events(
             opts.transcript_id.clone(),
@@ -971,6 +1066,8 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                     auto_compact,
                     policy,
                     daemon,
+                    llm_retries: opt_int(&options, "llm_retries").unwrap_or(2) as usize,
+                    llm_backoff_ms: opt_int(&options, "llm_backoff_ms").unwrap_or(2000) as u64,
                 },
             )
             .await?;

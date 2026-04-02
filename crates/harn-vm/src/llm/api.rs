@@ -585,6 +585,9 @@ async fn vm_call_completion_ollama(
         .unwrap_or("/api/generate");
 
     let mut options = serde_json::Map::new();
+    if let Some(num_ctx) = ollama_num_ctx_override() {
+        options.insert("num_ctx".to_string(), serde_json::json!(num_ctx));
+    }
     if let Some(temp) = opts.temperature {
         options.insert("temperature".to_string(), serde_json::json!(temp));
     }
@@ -617,6 +620,9 @@ async fn vm_call_completion_ollama(
     }
     if let Some(system) = &opts.system {
         body["system"] = serde_json::json!(system);
+    }
+    if let Some(keep_alive) = ollama_keep_alive_override() {
+        body["keep_alive"] = serde_json::json!(keep_alive);
     }
     if let Some(overrides) = &opts.provider_overrides {
         if let Some(obj) = overrides.as_object() {
@@ -927,6 +933,12 @@ async fn vm_call_llm_api(
 
     // Ollama thinking support
     if is_ollama {
+        if let Some(num_ctx) = ollama_num_ctx_override() {
+            body["options"]["num_ctx"] = serde_json::json!(num_ctx);
+        }
+        if let Some(keep_alive) = ollama_keep_alive_override() {
+            body["keep_alive"] = serde_json::json!(keep_alive);
+        }
         if let Some(ref thinking) = opts.thinking {
             body["think"] = serde_json::json!(matches!(
                 thinking,
@@ -973,10 +985,17 @@ async fn vm_call_llm_api(
         })?;
         if !response.status().is_success() {
             let status = response.status();
+            let retry_after = response
+                .headers()
+                .get("retry-after")
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.to_string());
             let body = response.text().await.unwrap_or_default();
-            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                "{provider} HTTP {status}: {body}"
-            )))));
+            let mut msg = format!("{provider} HTTP {status}: {body}");
+            if let Some(ra) = retry_after {
+                msg.push_str(&format!(" (retry-after: {ra})"));
+            }
+            return Err(VmError::Thrown(VmValue::String(Rc::from(msg))));
         }
         let ct = response
             .headers()
@@ -1460,9 +1479,41 @@ async fn vm_call_llm_api_ndjson_from_response(
     })
 }
 
+fn ollama_num_ctx_override() -> Option<u64> {
+    for key in ["BURIN_OLLAMA_NUM_CTX", "OLLAMA_CONTEXT_LENGTH", "OLLAMA_NUM_CTX"] {
+        if let Ok(raw) = std::env::var(key) {
+            if let Ok(parsed) = raw.trim().parse::<u64>() {
+                if parsed > 0 {
+                    return Some(parsed);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn ollama_keep_alive_override() -> Option<String> {
+    for key in ["BURIN_OLLAMA_KEEP_ALIVE", "OLLAMA_KEEP_ALIVE"] {
+        if let Ok(raw) = std::env::var(key) {
+            let trimmed = raw.trim();
+            if !trimmed.is_empty() {
+                return Some(match trimmed.to_ascii_lowercase().as_str() {
+                    "default" => "30m".to_string(),
+                    "forever" | "infinite" => "-1".to_string(),
+                    _ => trimmed.to_string(),
+                });
+            }
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{vm_call_llm_full_streaming_offthread, LlmCallOptions, LlmRequestPayload};
+    use super::{
+        ollama_keep_alive_override, ollama_num_ctx_override, vm_call_llm_full_streaming_offthread,
+        LlmCallOptions, LlmRequestPayload,
+    };
     use crate::value::VmValue;
     use std::rc::Rc;
     use std::sync::{Mutex, OnceLock};
@@ -1555,6 +1606,69 @@ mod tests {
         (addr, handle)
     }
 
+    fn spawn_ollama_stub_with_body_capture(
+        captured: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+    ) -> (std::net::SocketAddr, std::thread::JoinHandle<()>) {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind ollama stub");
+        let addr = listener.local_addr().expect("stub addr");
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept request");
+            let mut buf = vec![0u8; 16384];
+            let n = stream.read(&mut buf).expect("read request");
+            let request = String::from_utf8_lossy(&buf[..n]).to_string();
+            let body = request
+                .split("\r\n\r\n")
+                .nth(1)
+                .unwrap_or_default()
+                .to_string();
+            *captured.lock().expect("capture body") = Some(body);
+
+            let body = concat!(
+                "{\"message\":{\"role\":\"assistant\",\"content\":\"ok\"},\"done\":false}\n",
+                "{\"done\":true,\"prompt_eval_count\":1,\"eval_count\":1}\n"
+            );
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/x-ndjson\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("write response");
+        });
+        (addr, handle)
+    }
+
+    #[test]
+    fn ollama_num_ctx_override_prefers_burin_env() {
+        let _guard = env_lock().lock().expect("env lock");
+        unsafe {
+            std::env::set_var("BURIN_OLLAMA_NUM_CTX", "131072");
+            std::env::remove_var("OLLAMA_CONTEXT_LENGTH");
+            std::env::remove_var("OLLAMA_NUM_CTX");
+        }
+        assert_eq!(ollama_num_ctx_override(), Some(131072));
+        unsafe {
+            std::env::remove_var("BURIN_OLLAMA_NUM_CTX");
+        }
+    }
+
+    #[test]
+    fn ollama_keep_alive_override_normalizes_forever() {
+        let _guard = env_lock().lock().expect("env lock");
+        unsafe {
+            std::env::set_var("BURIN_OLLAMA_KEEP_ALIVE", "forever");
+            std::env::remove_var("OLLAMA_KEEP_ALIVE");
+        }
+        assert_eq!(ollama_keep_alive_override().as_deref(), Some("-1"));
+        unsafe {
+            std::env::remove_var("BURIN_OLLAMA_KEEP_ALIVE");
+        }
+    }
+
     #[test]
     fn offthread_streaming_completes_inside_localset() {
         let _guard = env_lock().lock().expect("env lock");
@@ -1609,6 +1723,65 @@ mod tests {
             assert_eq!(result.input_tokens, 3);
             assert_eq!(result.output_tokens, 2);
             assert_eq!(deltas.join(""), "hello world");
+        });
+    }
+
+    #[test]
+    fn ollama_chat_applies_env_runtime_overrides() {
+        let _guard = env_lock().lock().expect("env lock");
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .worker_threads(2)
+            .build()
+            .expect("runtime");
+
+        runtime.block_on(async {
+            let captured = std::sync::Arc::new(std::sync::Mutex::new(None));
+            let (addr, server) = spawn_ollama_stub_with_body_capture(captured.clone());
+            let prev_ollama_host = std::env::var("OLLAMA_HOST").ok();
+            let prev_num_ctx = std::env::var("BURIN_OLLAMA_NUM_CTX").ok();
+            let prev_keep_alive = std::env::var("BURIN_OLLAMA_KEEP_ALIVE").ok();
+            unsafe {
+                std::env::set_var("OLLAMA_HOST", format!("http://{addr}"));
+                std::env::set_var("BURIN_OLLAMA_NUM_CTX", "131072");
+                std::env::set_var("BURIN_OLLAMA_KEEP_ALIVE", "forever");
+            }
+
+            let local = tokio::task::LocalSet::new();
+            let result = local
+                .run_until(async {
+                    let opts = base_opts("ollama");
+                    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+                    vm_call_llm_full_streaming_offthread(&opts, tx)
+                        .await
+                        .expect("llm call should succeed")
+                })
+                .await;
+
+            match prev_ollama_host {
+                Some(value) => unsafe { std::env::set_var("OLLAMA_HOST", value) },
+                None => unsafe { std::env::remove_var("OLLAMA_HOST") },
+            }
+            match prev_num_ctx {
+                Some(value) => unsafe { std::env::set_var("BURIN_OLLAMA_NUM_CTX", value) },
+                None => unsafe { std::env::remove_var("BURIN_OLLAMA_NUM_CTX") },
+            }
+            match prev_keep_alive {
+                Some(value) => unsafe { std::env::set_var("BURIN_OLLAMA_KEEP_ALIVE", value) },
+                None => unsafe { std::env::remove_var("BURIN_OLLAMA_KEEP_ALIVE") },
+            }
+
+            server.join().expect("stub server");
+            assert_eq!(result.text, "ok");
+            let body = captured
+                .lock()
+                .expect("captured body")
+                .clone()
+                .expect("request body");
+            let json: serde_json::Value =
+                serde_json::from_str(&body).expect("valid request json");
+            assert_eq!(json["keep_alive"].as_str(), Some("-1"));
+            assert_eq!(json["options"]["num_ctx"].as_u64(), Some(131072));
         });
     }
 }

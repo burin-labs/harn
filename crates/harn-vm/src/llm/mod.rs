@@ -295,6 +295,8 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                 auto_compact,
                 policy,
                 daemon,
+                llm_retries: opt_int(&options, "llm_retries").unwrap_or(2) as usize,
+                llm_backoff_ms: opt_int(&options, "llm_backoff_ms").unwrap_or(2000) as u64,
             },
         )
         .await?;
