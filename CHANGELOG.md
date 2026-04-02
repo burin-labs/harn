@@ -2,6 +2,22 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.26
+
+### Changed
+
+- **Conformance test targeting now behaves like a real selector** — `harn test
+  conformance <file-or-dir>` now resolves a concrete file or subtree under
+  `conformance/`, rejects missing or out-of-tree targets, and no longer falls
+  back to running the entire suite when the user intended a narrow run.
+- **Conformance discovery now recurses through the whole suite tree** — the CLI
+  walks nested directories instead of only the root plus one level of
+  subdirectories, so deeper conformance fixtures are picked up consistently.
+- **CLI help and docs now document targeted conformance runs** — the built-in
+  help, README, and CLI reference now show the supported single-file workflow,
+  and `harn test` rejects extra positional arguments instead of silently
+  ignoring them.
+
 ## v0.5.25
 
 ### Changed

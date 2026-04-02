@@ -33,6 +33,8 @@ Run tests.
 
 ```bash
 harn test conformance                  # run conformance test suite
+harn test conformance tests/parser.harn # run one conformance file
+harn test conformance tests/exprs/      # run a conformance subtree
 harn test tests/                       # run user tests in directory
 harn test tests/ --filter "auth*"      # filter by pattern
 harn test tests/ --parallel            # run tests concurrently
@@ -54,7 +56,9 @@ harn test tests/ --replay              # replay LLM fixtures
 | `--replay` | Replay recorded LLM responses |
 
 When no path is given, `harn test` auto-discovers a `tests/` directory
-in the current folder.
+in the current folder. Conformance targets must resolve to a file or directory
+inside `conformance/`; the CLI now errors instead of silently falling back to
+the full suite when a requested target is missing.
 
 ## harn repl
 

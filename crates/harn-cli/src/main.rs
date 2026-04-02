@@ -248,15 +248,29 @@ async fn main() {
                 .map(|w| w[1].as_str())
                 .collect();
 
-            let target = args
+            let positional_args: Vec<&str> = args
                 .iter()
                 .skip(2)
-                .find(|a| !a.starts_with("--") && !flag_values.contains(a.as_str()));
+                .filter(|a| !a.starts_with("--") && !flag_values.contains(a.as_str()))
+                .map(|s| s.as_str())
+                .collect();
+
+            let target = positional_args.first().copied();
 
             if let Some(t) = target {
+                let allowed_positionals = if t == "conformance" { 2 } else { 1 };
+                if positional_args.len() > allowed_positionals {
+                    eprintln!(
+                        "Usage: harn test [path] [--filter <pattern>] [--watch] [--parallel]"
+                    );
+                    eprintln!("       harn test conformance [file-or-dir]");
+                    process::exit(1);
+                }
                 if t == "conformance" {
+                    let selection = positional_args.get(1).copied();
                     commands::test::run_conformance_tests(
                         t,
+                        selection,
                         filter.as_deref(),
                         junit_path.as_deref(),
                         timeout_ms,
@@ -278,7 +292,7 @@ async fn main() {
                     eprintln!(
                         "Usage: harn test [path] [--filter <pattern>] [--watch] [--parallel]"
                     );
-                    eprintln!("       harn test conformance");
+                    eprintln!("       harn test conformance [file-or-dir]");
                     eprintln!("\nNo path specified and no tests/ directory found.");
                     process::exit(1);
                 };
@@ -496,6 +510,7 @@ fn print_help() {
     println!("\x1b[1;33mEXAMPLES:\x1b[0m");
     println!("    harn run main.harn");
     println!("    harn test tests/");
+    println!("    harn test conformance tests/worktree_runtime.harn");
     println!("    harn init my-project");
     println!("    harn fmt --check src/");
     println!("    harn check --host-capabilities burin-host.json agent.harn");

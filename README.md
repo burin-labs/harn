@@ -371,6 +371,7 @@ make fmt
 make lint
 make test
 make conformance
+harn test conformance tests/worktree_runtime.harn
 make all
 ```
 

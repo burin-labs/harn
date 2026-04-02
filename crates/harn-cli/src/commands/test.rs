@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process;
 
 use crate::execute;
@@ -94,8 +94,85 @@ fn write_junit_xml(path: &str, results: &[(String, bool, String, u64)]) {
     }
 }
 
+fn collect_harn_files_recursive(dir: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    let Ok(entries) = fs::read_dir(dir) else {
+        return files;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false) {
+            files.extend(collect_harn_files_recursive(&path));
+        } else if path.extension().is_some_and(|ext| ext == "harn") {
+            files.push(path);
+        }
+    }
+
+    files.sort();
+    files
+}
+
+fn canonicalize_or_err(path: &Path) -> Result<PathBuf, String> {
+    path.canonicalize()
+        .map_err(|error| format!("Failed to canonicalize {}: {error}", path.display()))
+}
+
+fn resolve_conformance_selection(
+    suite_root: &Path,
+    selection: Option<&str>,
+) -> Result<Vec<PathBuf>, String> {
+    let suite_root = canonicalize_or_err(suite_root)?;
+
+    let Some(selection) = selection else {
+        return Ok(collect_harn_files_recursive(&suite_root));
+    };
+
+    let raw = PathBuf::from(selection);
+    let mut candidates = vec![raw.clone()];
+    if !raw.is_absolute() && !raw.starts_with(&suite_root) {
+        candidates.push(suite_root.join(&raw));
+    }
+
+    let Some(candidate) = candidates.into_iter().find(|path| path.exists()) else {
+        return Err(format!(
+            "Conformance target not found: {selection}. Expected a file or directory under {}",
+            suite_root.display()
+        ));
+    };
+
+    let canonical = canonicalize_or_err(&candidate)?;
+    if !canonical.starts_with(&suite_root) {
+        return Err(format!(
+            "Conformance target must be inside {}: {}",
+            suite_root.display(),
+            candidate.display()
+        ));
+    }
+
+    if canonical.is_file() {
+        if canonical.extension().is_some_and(|ext| ext == "harn") {
+            return Ok(vec![canonical]);
+        }
+        return Err(format!(
+            "Conformance target must be a .harn file or directory: {}",
+            candidate.display()
+        ));
+    }
+
+    let files = collect_harn_files_recursive(&canonical);
+    if files.is_empty() {
+        return Err(format!(
+            "No .harn conformance tests found under {}",
+            candidate.display()
+        ));
+    }
+    Ok(files)
+}
+
 pub(crate) async fn run_conformance_tests(
     dir: &str,
+    selection: Option<&str>,
     filter: Option<&str>,
     junit_path: Option<&str>,
     timeout_ms: u64,
@@ -106,6 +183,10 @@ pub(crate) async fn run_conformance_tests(
         eprintln!("Directory not found: {dir}");
         process::exit(1);
     }
+    let suite_root = canonicalize_or_err(&dir_path).unwrap_or_else(|error| {
+        eprintln!("{error}");
+        process::exit(1);
+    });
 
     let suite_start = std::time::Instant::now();
 
@@ -115,169 +196,68 @@ pub(crate) async fn run_conformance_tests(
     // (name, passed, error_msg, duration_ms)
     let mut junit_results: Vec<(String, bool, String, u64)> = Vec::new();
 
-    let mut test_dirs = Vec::new();
-    if let Ok(entries) = fs::read_dir(&dir_path) {
-        for entry in entries.flatten() {
-            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                test_dirs.push(entry.path());
+    let harn_files =
+        resolve_conformance_selection(&suite_root, selection).unwrap_or_else(|error| {
+            eprintln!("{error}");
+            process::exit(1);
+        });
+
+    for harn_file in &harn_files {
+        let expected_file = harn_file.with_extension("expected");
+        let error_file = harn_file.with_extension("error");
+
+        let rel_path = harn_file
+            .strip_prefix(&suite_root)
+            .unwrap_or(harn_file)
+            .display()
+            .to_string();
+
+        // Apply filter
+        if let Some(pattern) = filter {
+            if !rel_path.contains(pattern) {
+                continue;
             }
         }
-    }
-    test_dirs.sort();
-    test_dirs.insert(0, dir_path.clone());
 
-    for test_dir in &test_dirs {
-        let mut harn_files: Vec<PathBuf> = Vec::new();
-        if let Ok(entries) = fs::read_dir(test_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().map(|e| e == "harn").unwrap_or(false) {
-                    harn_files.push(path);
-                }
-            }
-        }
-        harn_files.sort();
-
-        for harn_file in &harn_files {
-            let expected_file = harn_file.with_extension("expected");
-            let error_file = harn_file.with_extension("error");
-
-            let rel_path = harn_file
-                .strip_prefix(&dir_path)
-                .unwrap_or(harn_file)
-                .display()
-                .to_string();
-
-            // Apply filter
-            if let Some(pattern) = filter {
-                if !rel_path.contains(pattern) {
+        if expected_file.exists() {
+            let source = match fs::read_to_string(harn_file) {
+                Ok(s) => s,
+                Err(e) => {
+                    println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
+                    let msg = format!("{rel_path}: IO error reading source: {e}");
+                    errors.push(msg.clone());
+                    junit_results.push((rel_path, false, msg, 0));
+                    failed += 1;
                     continue;
                 }
-            }
-
-            if expected_file.exists() {
-                let source = match fs::read_to_string(harn_file) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
-                        let msg = format!("{rel_path}: IO error reading source: {e}");
-                        errors.push(msg.clone());
-                        junit_results.push((rel_path, false, msg, 0));
-                        failed += 1;
-                        continue;
-                    }
-                };
-                let expected = match fs::read_to_string(&expected_file) {
-                    Ok(s) => normalize_expected_output(s.trim_end()),
-                    Err(e) => {
-                        println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
-                        let msg = format!("{rel_path}: IO error reading expected: {e}");
-                        errors.push(msg.clone());
-                        junit_results.push((rel_path, false, msg, 0));
-                        failed += 1;
-                        continue;
-                    }
-                };
-
-                // Reset thread-local state between conformance tests
-                harn_vm::reset_thread_local_state();
-
-                let start = std::time::Instant::now();
-                let result = tokio::time::timeout(
-                    std::time::Duration::from_millis(timeout_ms),
-                    execute(&source, Some(harn_file.as_path())),
-                )
-                .await;
-                let duration_ms = start.elapsed().as_millis() as u64;
-
-                match result {
-                    Ok(Ok(output)) => {
-                        let actual = normalize_actual_output(output.trim_end());
-                        if actual == expected {
-                            if verbose {
-                                println!("  \x1b[32mPASS\x1b[0m  {rel_path} ({duration_ms} ms)");
-                            } else {
-                                println!("  \x1b[32mPASS\x1b[0m  {rel_path}");
-                            }
-                            junit_results.push((rel_path, true, String::new(), duration_ms));
-                            passed += 1;
-                        } else {
-                            if verbose {
-                                println!("  \x1b[31mFAIL\x1b[0m  {rel_path} ({duration_ms} ms)");
-                            } else {
-                                println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
-                            }
-                            let diff = simple_diff(&expected, &actual);
-                            let msg = if verbose {
-                                format!(
-                                    "{rel_path}:\n  expected:\n    {}\n  actual:\n    {}\n  diff:\n{diff}",
-                                    expected.lines().collect::<Vec<_>>().join("\n    "),
-                                    actual.lines().collect::<Vec<_>>().join("\n    "),
-                                )
-                            } else {
-                                format!("{rel_path}:\n{diff}")
-                            };
-                            errors.push(msg.clone());
-                            junit_results.push((rel_path, false, msg, duration_ms));
-                            failed += 1;
-                        }
-                    }
-                    Ok(Err(e)) => {
-                        if verbose {
-                            println!("  \x1b[31mFAIL\x1b[0m  {rel_path} ({duration_ms} ms)");
-                        } else {
-                            println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
-                        }
-                        let msg = format!("{rel_path}: runtime error: {e}");
-                        errors.push(msg.clone());
-                        junit_results.push((rel_path, false, msg, duration_ms));
-                        failed += 1;
-                    }
-                    Err(_) => {
-                        println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
-                        let msg = format!("{rel_path}: timed out after {timeout_ms}ms");
-                        errors.push(msg.clone());
-                        junit_results.push((rel_path, false, msg, timeout_ms));
-                        failed += 1;
-                    }
+            };
+            let expected = match fs::read_to_string(&expected_file) {
+                Ok(s) => normalize_expected_output(s.trim_end()),
+                Err(e) => {
+                    println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
+                    let msg = format!("{rel_path}: IO error reading expected: {e}");
+                    errors.push(msg.clone());
+                    junit_results.push((rel_path, false, msg, 0));
+                    failed += 1;
+                    continue;
                 }
-            } else if error_file.exists() {
-                let source = match fs::read_to_string(harn_file) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
-                        let msg = format!("{rel_path}: IO error reading source: {e}");
-                        errors.push(msg.clone());
-                        junit_results.push((rel_path, false, msg, 0));
-                        failed += 1;
-                        continue;
-                    }
-                };
-                let expected_error = match fs::read_to_string(&error_file) {
-                    Ok(s) => s.trim_end().to_string(),
-                    Err(e) => {
-                        println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
-                        let msg = format!("{rel_path}: IO error reading expected error: {e}");
-                        errors.push(msg.clone());
-                        junit_results.push((rel_path, false, msg, 0));
-                        failed += 1;
-                        continue;
-                    }
-                };
+            };
 
-                // Reset thread-local state between conformance tests
-                harn_vm::reset_thread_local_state();
+            // Reset thread-local state between conformance tests
+            harn_vm::reset_thread_local_state();
 
-                let start = std::time::Instant::now();
-                let result = tokio::time::timeout(
-                    std::time::Duration::from_millis(timeout_ms),
-                    execute(&source, Some(harn_file.as_path())),
-                )
-                .await;
-                let duration_ms = start.elapsed().as_millis() as u64;
+            let start = std::time::Instant::now();
+            let result = tokio::time::timeout(
+                std::time::Duration::from_millis(timeout_ms),
+                execute(&source, Some(harn_file.as_path())),
+            )
+            .await;
+            let duration_ms = start.elapsed().as_millis() as u64;
 
-                match result {
-                    Ok(Err(ref err)) if err.contains(&expected_error) => {
+            match result {
+                Ok(Ok(output)) => {
+                    let actual = normalize_actual_output(output.trim_end());
+                    if actual == expected {
                         if verbose {
                             println!("  \x1b[32mPASS\x1b[0m  {rel_path} ({duration_ms} ms)");
                         } else {
@@ -285,36 +265,119 @@ pub(crate) async fn run_conformance_tests(
                         }
                         junit_results.push((rel_path, true, String::new(), duration_ms));
                         passed += 1;
-                    }
-                    Ok(Err(err)) => {
+                    } else {
                         if verbose {
                             println!("  \x1b[31mFAIL\x1b[0m  {rel_path} ({duration_ms} ms)");
                         } else {
                             println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
                         }
-                        let msg = format!(
-                            "{rel_path}:\n  expected error containing: {expected_error}\n  actual error: {err}"
-                        );
+                        let diff = simple_diff(&expected, &actual);
+                        let msg = if verbose {
+                            format!(
+                                "{rel_path}:\n  expected:\n    {}\n  actual:\n    {}\n  diff:\n{diff}",
+                                expected.lines().collect::<Vec<_>>().join("\n    "),
+                                actual.lines().collect::<Vec<_>>().join("\n    "),
+                            )
+                        } else {
+                            format!("{rel_path}:\n{diff}")
+                        };
                         errors.push(msg.clone());
                         junit_results.push((rel_path, false, msg, duration_ms));
                         failed += 1;
                     }
-                    Ok(Ok(_)) => {
+                }
+                Ok(Err(e)) => {
+                    if verbose {
+                        println!("  \x1b[31mFAIL\x1b[0m  {rel_path} ({duration_ms} ms)");
+                    } else {
                         println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
-                        let msg = format!(
-                            "{rel_path}: expected error containing '{expected_error}', but succeeded"
-                        );
-                        errors.push(msg.clone());
-                        junit_results.push((rel_path, false, msg, duration_ms));
-                        failed += 1;
                     }
-                    Err(_) => {
+                    let msg = format!("{rel_path}: runtime error: {e}");
+                    errors.push(msg.clone());
+                    junit_results.push((rel_path, false, msg, duration_ms));
+                    failed += 1;
+                }
+                Err(_) => {
+                    println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
+                    let msg = format!("{rel_path}: timed out after {timeout_ms}ms");
+                    errors.push(msg.clone());
+                    junit_results.push((rel_path, false, msg, timeout_ms));
+                    failed += 1;
+                }
+            }
+        } else if error_file.exists() {
+            let source = match fs::read_to_string(harn_file) {
+                Ok(s) => s,
+                Err(e) => {
+                    println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
+                    let msg = format!("{rel_path}: IO error reading source: {e}");
+                    errors.push(msg.clone());
+                    junit_results.push((rel_path, false, msg, 0));
+                    failed += 1;
+                    continue;
+                }
+            };
+            let expected_error = match fs::read_to_string(&error_file) {
+                Ok(s) => s.trim_end().to_string(),
+                Err(e) => {
+                    println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
+                    let msg = format!("{rel_path}: IO error reading expected error: {e}");
+                    errors.push(msg.clone());
+                    junit_results.push((rel_path, false, msg, 0));
+                    failed += 1;
+                    continue;
+                }
+            };
+
+            // Reset thread-local state between conformance tests
+            harn_vm::reset_thread_local_state();
+
+            let start = std::time::Instant::now();
+            let result = tokio::time::timeout(
+                std::time::Duration::from_millis(timeout_ms),
+                execute(&source, Some(harn_file.as_path())),
+            )
+            .await;
+            let duration_ms = start.elapsed().as_millis() as u64;
+
+            match result {
+                Ok(Err(ref err)) if err.contains(&expected_error) => {
+                    if verbose {
+                        println!("  \x1b[32mPASS\x1b[0m  {rel_path} ({duration_ms} ms)");
+                    } else {
+                        println!("  \x1b[32mPASS\x1b[0m  {rel_path}");
+                    }
+                    junit_results.push((rel_path, true, String::new(), duration_ms));
+                    passed += 1;
+                }
+                Ok(Err(err)) => {
+                    if verbose {
+                        println!("  \x1b[31mFAIL\x1b[0m  {rel_path} ({duration_ms} ms)");
+                    } else {
                         println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
-                        let msg = format!("{rel_path}: timed out after {timeout_ms}ms");
-                        errors.push(msg.clone());
-                        junit_results.push((rel_path, false, msg, timeout_ms));
-                        failed += 1;
                     }
+                    let msg = format!(
+                        "{rel_path}:\n  expected error containing: {expected_error}\n  actual error: {err}"
+                    );
+                    errors.push(msg.clone());
+                    junit_results.push((rel_path, false, msg, duration_ms));
+                    failed += 1;
+                }
+                Ok(Ok(_)) => {
+                    println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
+                    let msg = format!(
+                        "{rel_path}: expected error containing '{expected_error}', but succeeded"
+                    );
+                    errors.push(msg.clone());
+                    junit_results.push((rel_path, false, msg, duration_ms));
+                    failed += 1;
+                }
+                Err(_) => {
+                    println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
+                    let msg = format!("{rel_path}: timed out after {timeout_ms}ms");
+                    errors.push(msg.clone());
+                    junit_results.push((rel_path, false, msg, timeout_ms));
+                    failed += 1;
                 }
             }
         }
@@ -498,5 +561,110 @@ pub(crate) async fn run_watch_tests(
             }
             Err(_) => break,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{collect_harn_files_recursive, resolve_conformance_selection};
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct TempTestDir {
+        path: PathBuf,
+    }
+
+    impl TempTestDir {
+        fn new() -> Self {
+            let unique = format!(
+                "harn-cli-test-{}-{}",
+                std::process::id(),
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            );
+            let path = std::env::temp_dir().join(unique);
+            fs::create_dir_all(&path).unwrap();
+            Self { path }
+        }
+
+        fn write(&self, relative: &str) {
+            let path = self.path.join(relative);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).unwrap();
+            }
+            fs::write(path, "// test").unwrap();
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TempTestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    #[test]
+    fn collect_harn_files_recursive_descends_and_sorts() {
+        let temp = TempTestDir::new();
+        temp.write("suite/zeta.harn");
+        temp.write("suite/alpha.harn");
+        temp.write("suite/nested/beta.harn");
+        fs::write(temp.path().join("suite/ignore.txt"), "").unwrap();
+
+        let files = collect_harn_files_recursive(&temp.path().join("suite"));
+        let relative: Vec<String> = files
+            .iter()
+            .map(|path| {
+                path.strip_prefix(temp.path())
+                    .unwrap()
+                    .display()
+                    .to_string()
+            })
+            .collect();
+
+        assert_eq!(
+            relative,
+            vec![
+                "suite/alpha.harn",
+                "suite/nested/beta.harn",
+                "suite/zeta.harn"
+            ]
+        );
+    }
+
+    #[test]
+    fn resolve_conformance_selection_accepts_suite_relative_file() {
+        let temp = TempTestDir::new();
+        temp.write("conformance/tests/sample.harn");
+
+        let files = resolve_conformance_selection(
+            &temp.path().join("conformance"),
+            Some("tests/sample.harn"),
+        )
+        .unwrap();
+
+        assert_eq!(files.len(), 1);
+        assert!(files[0].ends_with("conformance/tests/sample.harn"));
+    }
+
+    #[test]
+    fn resolve_conformance_selection_rejects_paths_outside_suite_root() {
+        let temp = TempTestDir::new();
+        temp.write("conformance/tests/sample.harn");
+        temp.write("outside.harn");
+
+        let error = resolve_conformance_selection(
+            &temp.path().join("conformance"),
+            Some("../outside.harn"),
+        )
+        .unwrap_err();
+
+        assert!(error.contains("must be inside"));
     }
 }
