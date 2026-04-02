@@ -1,7 +1,8 @@
 import "std/worktree"
 
 pipeline main() {
-  let base = path_join(temp_dir(), "harn-worktree-runtime-" + to_string(to_int(timestamp())))
+  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
+  let base = path_join(temp_dir(), "harn-worktree-runtime-" + unique)
   mkdir(base)
   let repo = path_join(base, "repo")
   mkdir(repo)

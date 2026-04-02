@@ -13,6 +13,10 @@ All notable changes to Harn are documented in this file.
 - **Scalar argument parsing remains type-stable in text mode** — floating-point,
   boolean, integer, and `null` values in ` ```call ` blocks continue to round-trip
   as structured JSON values instead of silently degrading into strings.
+- **Worktree conformance uses collision-resistant temp paths** — the runtime
+  worktree fixture now adds a random suffix instead of relying on second-level
+  timestamps alone, which removes flaky temp-directory collisions during rapid
+  audit and release reruns.
 
 ## v0.5.24
 
