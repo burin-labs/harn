@@ -469,11 +469,14 @@ pub(crate) fn build_tool_calling_contract_prompt(
         prompt.push('\n');
     }
 
-    prompt.push_str(
-        "Only the `### name(...)` headings above are tools. Parameter names like `path`, `pattern`, or `file_glob` are arguments, not standalone tools.\n\
-         Example: use `search(pattern=\"parser\", file_glob=\"**/*.go\")`, never `file_glob(...)`.\n\
-         For `run`, pass one shell command string such as `run(command=\"<verification or build command here>\")`; do not pass JSON arrays unless the tool schema explicitly asks for one.\n\n",
-    );
+    // Strict tool boundary: tell the model exactly what exists
+    if !schemas.is_empty() {
+        let names_list: Vec<&str> = schemas.iter().map(|(n, _, _)| n.as_str()).collect();
+        prompt.push_str(&format!(
+            "You may ONLY use these tools: {}. Any other tool name will be rejected.\n\n",
+            names_list.join(", ")
+        ));
+    }
 
     if mode == "native" {
         prompt.push_str(
@@ -491,7 +494,7 @@ pub(crate) fn build_tool_calling_contract_prompt(
              For multiline string values (like file content), use triple quotes:\n\
              ````\n\
              ```call\n\
-             edit(action=\"create\", path=\"file.py\", content=\"\"\"\n\
+             tool_name(param=\"value\", long_param=\"\"\"\n\
              line 1\n\
              line 2\n\
              \"\"\")\n\
@@ -499,10 +502,9 @@ pub(crate) fn build_tool_calling_contract_prompt(
              ````\n\
              You can make multiple tool calls in one response by emitting multiple ` ```call ` blocks.\n\
              After each call, you will see the result in a <tool_result> tag.\n\
-             Use prompt context efficiently: if the prompt already includes the relevant file text, API signatures, directory inventory, or pattern examples you need, do not spend extra tool calls rediscovering the same information.\n\
-             If the prompt already names the target files or target directories, do not inspect `.` or unrelated parent directories just to find them again.\n\
-             `search(...)` is only for exact identifiers or literal code text. Do not use it to rediscover filenames, path strings, package declarations, directory inventory, or broad test names that are already visible in the prompt.\n\
-             Read before modifying existing code when you still need exact local details. For new files, if the prompt already provides enough grounded context, use the creation tool the prompt specifies directly rather than spending turns rediscovering context, then verify.\n",
+             Only the `### name(...)` headings above are tools. Parameter names like `path`, `pattern`, or `file_glob` are arguments, not standalone tools.\n\
+             Example: use `search(pattern=\"parser\", file_glob=\"**/*.go\")`, never `file_glob(...)`.\n\
+             For `run`, pass one shell command string such as `run(command=\"<verification or build command here>\")`; do not pass JSON arrays unless the tool schema explicitly asks for one.\n",
         );
     }
 
@@ -620,7 +622,11 @@ fn parse_function_call_syntax(text: &str) -> Option<(String, serde_json::Value)>
                 serde_json::json!(true)
             } else if val_str == "false" {
                 serde_json::json!(false)
+            } else if val_str == "null" {
+                serde_json::Value::Null
             } else if let Ok(n) = val_str.parse::<i64>() {
+                serde_json::json!(n)
+            } else if let Ok(n) = val_str.parse::<f64>() {
                 serde_json::json!(n)
             } else {
                 serde_json::json!(val_str)
@@ -725,84 +731,6 @@ fn split_call_args(s: &str) -> Vec<String> {
     }
     parts
 }
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        build_tool_calling_contract_prompt, normalize_tool_args, parse_text_tool_calls,
-        split_call_args,
-    };
-    use serde_json::json;
-
-    #[test]
-    fn split_call_args_keeps_array_values_intact() {
-        let parts = split_call_args(r#"command=["ls","internal/manifest/"], timeout=30"#);
-        assert_eq!(
-            parts,
-            vec![r#"command=["ls","internal/manifest/"]"#, "timeout=30"]
-        );
-    }
-
-    #[test]
-    fn parse_text_tool_calls_supports_json_array_arguments() {
-        let calls = parse_text_tool_calls(
-            "```call\nrun(command=[\"ls\",\"internal/manifest/\"], timeout=30)\n```",
-        );
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0]["name"], json!("run"));
-        assert_eq!(
-            calls[0]["arguments"]["command"],
-            json!(["ls", "internal/manifest/"])
-        );
-        assert_eq!(calls[0]["arguments"]["timeout"], json!(30));
-    }
-
-    #[test]
-    fn normalize_tool_args_joins_run_command_arrays() {
-        let normalized =
-            normalize_tool_args("run", &json!({"command": ["ls", "internal/manifest/"]}));
-        assert_eq!(normalized["command"], json!("ls internal/manifest/"));
-    }
-
-    #[test]
-    fn normalize_tool_args_accepts_run_args_alias() {
-        let normalized = normalize_tool_args(
-            "run",
-            &json!({"args": ["go", "test", "./internal/manifest/"]}),
-        );
-        assert_eq!(normalized["command"], json!("go test ./internal/manifest/"));
-        assert!(normalized.get("args").is_none());
-    }
-
-    #[test]
-    fn normalize_tool_args_recovers_stringified_run_array() {
-        let normalized = normalize_tool_args(
-            "run",
-            &json!({"command": "[\"go\",\"test\",\"./internal/manifest/\"]"}),
-        );
-        assert_eq!(normalized["command"], json!("go test ./internal/manifest/"));
-    }
-
-    #[test]
-    fn normalize_tool_args_recovers_fragmented_run_array() {
-        let normalized = normalize_tool_args(
-            "run",
-            &json!({"command": "\"internal/manifest/\"]", "args": "[\"ls\""}),
-        );
-        assert_eq!(normalized["command"], json!("ls internal/manifest/"));
-    }
-
-    #[test]
-    fn tool_calling_contract_marks_active_text_mode() {
-        let prompt = build_tool_calling_contract_prompt(None, "text", true);
-        assert!(prompt.contains("Active mode: `text`"));
-        assert!(prompt.contains("```call"));
-    }
-}
-
-// =============================================================================
-// Convert tool_registry to native tool definitions
-// =============================================================================
 
 pub(crate) fn vm_tools_to_native(
     tools_val: &VmValue,
@@ -909,4 +837,134 @@ fn vm_build_json_schema(params: Option<&BTreeMap<String, VmValue>>) -> serde_jso
         "required": required,
         "additionalProperties": false,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        build_tool_calling_contract_prompt, normalize_tool_args, parse_text_tool_calls,
+        split_call_args,
+    };
+    use crate::value::VmValue;
+    use serde_json::json;
+    use std::collections::BTreeMap;
+    use std::rc::Rc;
+
+    #[test]
+    fn split_call_args_keeps_array_values_intact() {
+        let parts = split_call_args(r#"command=["ls","internal/manifest/"], timeout=30"#);
+        assert_eq!(
+            parts,
+            vec![r#"command=["ls","internal/manifest/"]"#, "timeout=30"]
+        );
+    }
+
+    #[test]
+    fn parse_text_tool_calls_supports_json_array_arguments() {
+        let calls = parse_text_tool_calls(
+            "```call\nrun(command=[\"ls\",\"internal/manifest/\"], timeout=30)\n```",
+        );
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0]["name"], json!("run"));
+        assert_eq!(
+            calls[0]["arguments"]["command"],
+            json!(["ls", "internal/manifest/"])
+        );
+        assert_eq!(calls[0]["arguments"]["timeout"], json!(30));
+    }
+
+    #[test]
+    fn parse_text_tool_calls_preserves_scalar_json_types() {
+        let calls = parse_text_tool_calls(
+            "```call\nsearch(score=0.5, limit=3, exact=false, note=null)\n```",
+        );
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0]["arguments"]["score"], json!(0.5));
+        assert_eq!(calls[0]["arguments"]["limit"], json!(3));
+        assert_eq!(calls[0]["arguments"]["exact"], json!(false));
+        assert_eq!(calls[0]["arguments"]["note"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn normalize_tool_args_joins_run_command_arrays() {
+        let normalized =
+            normalize_tool_args("run", &json!({"command": ["ls", "internal/manifest/"]}));
+        assert_eq!(normalized["command"], json!("ls internal/manifest/"));
+    }
+
+    #[test]
+    fn normalize_tool_args_accepts_run_args_alias() {
+        let normalized = normalize_tool_args(
+            "run",
+            &json!({"args": ["go", "test", "./internal/manifest/"]}),
+        );
+        assert_eq!(normalized["command"], json!("go test ./internal/manifest/"));
+        assert!(normalized.get("args").is_none());
+    }
+
+    #[test]
+    fn normalize_tool_args_recovers_stringified_run_array() {
+        let normalized = normalize_tool_args(
+            "run",
+            &json!({"command": "[\"go\",\"test\",\"./internal/manifest/\"]"}),
+        );
+        assert_eq!(normalized["command"], json!("go test ./internal/manifest/"));
+    }
+
+    #[test]
+    fn normalize_tool_args_recovers_fragmented_run_array() {
+        let normalized = normalize_tool_args(
+            "run",
+            &json!({"command": "\"internal/manifest/\"]", "args": "[\"ls\""}),
+        );
+        assert_eq!(normalized["command"], json!("ls internal/manifest/"));
+    }
+
+    #[test]
+    fn tool_calling_contract_marks_active_text_mode() {
+        let prompt = build_tool_calling_contract_prompt(None, "text", true);
+        assert!(prompt.contains("Active mode: `text`"));
+        assert!(prompt.contains("```call"));
+    }
+
+    #[test]
+    fn tool_calling_contract_lists_tools_and_text_mode_guardrails() {
+        let tools = VmValue::List(Rc::new(vec![VmValue::Dict(
+            BTreeMap::from([
+                ("name".into(), VmValue::String(Rc::from("search"))),
+                (
+                    "description".into(),
+                    VmValue::String(Rc::from("Find matching files")),
+                ),
+                (
+                    "parameters".into(),
+                    VmValue::Dict(Rc::new(BTreeMap::from([
+                        (
+                            "pattern".into(),
+                            VmValue::Dict(Rc::new(BTreeMap::from([
+                                ("type".into(), VmValue::String(Rc::from("str"))),
+                                (
+                                    "description".into(),
+                                    VmValue::String(Rc::from("Literal search text")),
+                                ),
+                            ]))),
+                        ),
+                        (
+                            "file_glob".into(),
+                            VmValue::Dict(Rc::new(BTreeMap::from([(
+                                "type".into(),
+                                VmValue::String(Rc::from("str")),
+                            )]))),
+                        ),
+                    ]))),
+                ),
+            ])
+            .into(),
+        )]));
+
+        let prompt = build_tool_calling_contract_prompt(Some(&tools), "text", true);
+        assert!(prompt.contains("You may ONLY use these tools: search."));
+        assert!(prompt.contains("Only the `### name(...)` headings above are tools."));
+        assert!(prompt.contains("never `file_glob(...)`"));
+    }
 }

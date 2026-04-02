@@ -2,6 +2,20 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.24
+
+### Changed
+
+- **Text-mode tool calling is stricter and more type-stable** — the
+  runtime-owned tool contract now explicitly lists the allowed tool names while
+  still warning models not to treat argument names like `file_glob` as tools,
+  and text-call parsing now preserves floating-point, boolean, integer, and
+  `null` scalar argument types instead of degrading some values into strings.
+- **Tool-contract coverage now pins the prompt and parser behavior together** —
+  `harn-vm` adds regression tests for JSON-array command recovery, scalar JSON
+  parsing, and tool-registry prompt rendering so text-call behavior is checked
+  under the same stricter quality gates used by release audit.
+
 ## v0.5.23
 
 ### Added

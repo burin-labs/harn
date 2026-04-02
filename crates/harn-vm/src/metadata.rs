@@ -958,12 +958,12 @@ mod tests {
         let base = temp_path("resolve");
         let mut state = MetadataState::new(&base);
         state.set_namespace(
-            "".into(),
+            "",
             "classification",
             BTreeMap::from([("language".into(), serde_json::json!("rust"))]),
         );
         state.set_namespace(
-            "src".into(),
+            "src",
             "classification",
             BTreeMap::from([("owner".into(), serde_json::json!("vm"))]),
         );
