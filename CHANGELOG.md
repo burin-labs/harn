@@ -2,6 +2,23 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.27
+
+### Changed
+
+- **`harn-cli` now uses a declarative clap command graph instead of hand-rolled
+  argv parsing** — top-level commands, `mcp` subcommands, and `add` now share a
+  single typed parser with conflict validation, structured help text, and
+  parser coverage tests instead of ad hoc `env::args()` scanning.
+- **CLI validation is stricter and less error-prone** — conflicting flag
+  combinations such as `--deny` plus `--allow` are enforced by the parser, `run`
+  now requires exactly one of inline code or a file, and nested command surfaces
+  reject malformed input before reaching runtime handlers.
+- **Operator-facing help is now generated from command metadata** — `harn help`
+  and subcommand help output now describe each command and option directly from
+  the source-of-truth CLI definitions, removing the duplicate hand-maintained
+  help implementation.
+
 ## v0.5.26
 
 ### Changed

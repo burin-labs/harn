@@ -1,127 +1,69 @@
 mod a2a;
 mod acp;
+mod cli;
 mod commands;
 mod package;
 mod test_runner;
 
+use clap::{error::ErrorKind, CommandFactory, Parser as ClapParser};
 use std::path::{Path, PathBuf};
 use std::{env, fs, process};
 
+use cli::{Cli, Command, RunsCommand};
 use harn_lexer::Lexer;
 use harn_parser::{DiagnosticSeverity, Parser, TypeChecker};
 
 #[tokio::main]
 async fn main() {
-    let args: Vec<String> = env::args().collect();
-
-    if args.len() < 2
-        || matches!(
-            args.get(1).map(|s| s.as_str()),
-            Some("help" | "--help" | "-h")
-        )
-    {
-        print_help();
-        process::exit(if args.len() < 2 { 1 } else { 0 });
+    let raw_args: Vec<String> = env::args().collect();
+    if raw_args.len() == 2 && raw_args[1].ends_with(".harn") {
+        commands::run::run_file(&raw_args[1], false, std::collections::HashSet::new()).await;
+        return;
     }
 
-    match args[1].as_str() {
-        "version" | "--version" | "-v" => {
-            println!(
-                r#"
-  ╱▔▔╲
- ╱    ╲    harn v{}
- │ ◆  │    the agent harness language
- │    │
- ╰──╯╱    by burin
-   ╱╱
-"#,
-                env!("CARGO_PKG_VERSION")
-            );
-        }
-        "run" => {
-            let trace = args.iter().any(|a| a == "--trace");
-            let deny_csv = args
-                .windows(2)
-                .find(|w| w[0] == "--deny")
-                .map(|w| w[1].clone());
-            let allow_csv = args
-                .windows(2)
-                .find(|w| w[0] == "--allow")
-                .map(|w| w[1].clone());
-
-            if deny_csv.is_some() && allow_csv.is_some() {
-                eprintln!("error: --deny and --allow cannot be used together");
-                process::exit(1);
+    let cli = match Cli::try_parse_from(&raw_args) {
+        Ok(cli) => cli,
+        Err(error) => {
+            if matches!(
+                error.kind(),
+                ErrorKind::DisplayHelp | ErrorKind::DisplayVersion
+            ) {
+                error.exit();
             }
+            error.exit();
+        }
+    };
 
-            // Check for -e inline expression
-            let inline_code = args.windows(2).find(|w| w[0] == "-e").map(|w| w[1].clone());
+    match cli.command.expect("clap requires a command") {
+        Command::Version => print_version(),
+        Command::Run(args) => {
+            let denied =
+                commands::run::build_denied_builtins(args.deny.as_deref(), args.allow.as_deref());
 
-            // Find the .harn file (skip flag values)
-            let flag_vals: std::collections::HashSet<&str> = args
-                .windows(2)
-                .filter(|w| w[0] == "--deny" || w[0] == "--allow" || w[0] == "-e")
-                .map(|w| w[1].as_str())
-                .collect();
-            let file = args
-                .iter()
-                .skip(2)
-                .find(|a| !a.starts_with("--") && *a != "-e" && !flag_vals.contains(a.as_str()));
-
-            // Build the denied builtins set from --deny or --allow flags.
-            let denied: std::collections::HashSet<String> =
-                commands::run::build_denied_builtins(deny_csv.as_deref(), allow_csv.as_deref());
-
-            if let Some(code) = inline_code {
-                // Write inline code to a temp file and run it
-                let wrapped = format!("pipeline main(task) {{\n{code}\n}}");
-                let tmp_dir = std::env::temp_dir();
-                let tmp_path = tmp_dir.join("__harn_eval__.harn");
-                fs::write(&tmp_path, &wrapped).unwrap_or_else(|e| {
-                    eprintln!("error: failed to write temp file: {e}");
-                    process::exit(1);
-                });
-                let tmp_str = tmp_path.to_string_lossy().to_string();
-                commands::run::run_file(&tmp_str, trace, denied).await;
-                let _ = fs::remove_file(&tmp_path);
-            } else {
-                match file {
-                    Some(f) => {
-                        commands::run::run_file(f, trace, denied).await;
-                    }
-                    None => {
-                        eprintln!("Usage: harn run [--trace] [--deny <builtins>] [--allow <builtins>] [-e <code>] <file.harn>");
+            match (args.eval.as_deref(), args.file.as_deref()) {
+                (Some(code), None) => {
+                    let wrapped = format!("pipeline main(task) {{\n{code}\n}}");
+                    let tmp_dir = std::env::temp_dir();
+                    let tmp_path = tmp_dir.join("__harn_eval__.harn");
+                    fs::write(&tmp_path, &wrapped).unwrap_or_else(|e| {
+                        eprintln!("error: failed to write temp file: {e}");
                         process::exit(1);
-                    }
+                    });
+                    let tmp_str = tmp_path.to_string_lossy().to_string();
+                    commands::run::run_file(&tmp_str, args.trace, denied).await;
+                    let _ = fs::remove_file(&tmp_path);
+                }
+                (None, Some(file)) => commands::run::run_file(file, args.trace, denied).await,
+                (Some(_), Some(_)) => command_error(
+                    "`harn run` accepts either `-e <code>` or `<file.harn>`, not both",
+                ),
+                (None, None) => {
+                    command_error("`harn run` requires either `-e <code>` or `<file.harn>`")
                 }
             }
         }
-        "check" => {
-            let host_capabilities = flag_value(&args, "--host-capabilities");
-            let bundle_root = flag_value(&args, "--bundle-root");
-            let mut skip_next = false;
-            let targets: Vec<&str> = args
-                .iter()
-                .skip(2)
-                .filter(|a| {
-                    if skip_next {
-                        skip_next = false;
-                        return false;
-                    }
-                    if *a == "--host-capabilities" || *a == "--bundle-root" {
-                        skip_next = true;
-                        return false;
-                    }
-                    !a.starts_with("--")
-                })
-                .map(|s| s.as_str())
-                .collect();
-            if targets.is_empty() {
-                eprintln!(
-                    "Usage: harn check [--host-capabilities <file>] [--bundle-root <dir>] <file.harn|dir> [...]"
-                );
-                process::exit(1);
-            }
+        Command::Check(args) => {
+            let targets: Vec<&str> = args.targets.iter().map(String::as_str).collect();
             let files = commands::check::collect_harn_targets(&targets);
             if files.is_empty() {
                 eprintln!("No .harn files found");
@@ -130,10 +72,10 @@ async fn main() {
             let mut should_fail = false;
             for file in &files {
                 let mut config = package::load_check_config(Some(file));
-                if let Some(path) = host_capabilities.as_ref() {
+                if let Some(path) = args.host_capabilities.as_ref() {
                     config.host_capabilities_path = Some(path.clone());
                 }
-                if let Some(path) = bundle_root.as_ref() {
+                if let Some(path) = args.bundle_root.as_ref() {
                     config.bundle_root = Some(path.clone());
                 }
                 let outcome = commands::check::check_file_inner(file, &config);
@@ -143,17 +85,8 @@ async fn main() {
                 process::exit(1);
             }
         }
-        "lint" => {
-            let targets: Vec<&str> = args
-                .iter()
-                .skip(2)
-                .filter(|a| !a.starts_with("--"))
-                .map(|s| s.as_str())
-                .collect();
-            if targets.is_empty() {
-                eprintln!("Usage: harn lint <file.harn|dir> [...]");
-                process::exit(1);
-            }
+        Command::Lint(args) => {
+            let targets: Vec<&str> = args.targets.iter().map(String::as_str).collect();
             let files = commands::check::collect_harn_targets(&targets);
             if files.is_empty() {
                 eprintln!("No .harn files found");
@@ -169,359 +102,134 @@ async fn main() {
                 process::exit(1);
             }
         }
-        "fmt" => {
-            let check_mode = args.iter().any(|a| a == "--check");
-            let line_width: usize = args
-                .windows(2)
-                .find(|w| w[0] == "--line-width")
-                .and_then(|w| w[1].parse().ok())
-                .unwrap_or(100);
-            // Skip flags and their values; collect remaining as targets.
-            let mut skip_next = false;
-            let targets: Vec<&str> = args
-                .iter()
-                .skip(2)
-                .filter(|a| {
-                    if skip_next {
-                        skip_next = false;
-                        return false;
-                    }
-                    if *a == "--line-width" {
-                        skip_next = true;
-                        return false;
-                    }
-                    !a.starts_with("--")
-                })
-                .map(|s| s.as_str())
-                .collect();
-            if targets.is_empty() {
-                eprintln!("Usage: harn fmt [--check] [--line-width <N>] <file.harn|dir> [...]");
-                process::exit(1);
-            }
-            let opts = harn_fmt::FmtOptions { line_width };
-            commands::check::fmt_targets(&targets, check_mode, &opts);
+        Command::Fmt(args) => {
+            let targets: Vec<&str> = args.targets.iter().map(String::as_str).collect();
+            let opts = harn_fmt::FmtOptions {
+                line_width: args.line_width,
+            };
+            commands::check::fmt_targets(&targets, args.check, &opts);
         }
-        "test" => {
-            // Parse test flags
-            let filter = args
-                .windows(2)
-                .find(|w| w[0] == "--filter")
-                .map(|w| w[1].clone());
-            let junit_path = args
-                .windows(2)
-                .find(|w| w[0] == "--junit")
-                .map(|w| w[1].clone());
-            let timeout_ms: u64 = args
-                .windows(2)
-                .find(|w| w[0] == "--timeout")
-                .and_then(|w| w[1].parse().ok())
-                .unwrap_or(30_000);
-            let parallel = args.iter().any(|a| a == "--parallel");
-            let watch = args.iter().any(|a| a == "--watch");
-            let verbose = args.iter().any(|a| a == "--verbose" || a == "-v");
-            let record = args.iter().any(|a| a == "--record");
-            let replay = args.iter().any(|a| a == "--replay");
-
-            // Set up LLM replay mode
-            if record {
+        Command::Test(args) => {
+            if args.record {
                 harn_vm::llm::set_replay_mode(
                     harn_vm::llm::LlmReplayMode::Record,
                     ".harn-fixtures",
                 );
-            } else if replay {
+            } else if args.replay {
                 harn_vm::llm::set_replay_mode(
                     harn_vm::llm::LlmReplayMode::Replay,
                     ".harn-fixtures",
                 );
             }
 
-            // Collect flag values to exclude from target search
-            let flag_values: std::collections::HashSet<&str> = args
-                .windows(2)
-                .filter(|w| {
-                    w[0].starts_with("--")
-                        && !matches!(
-                            w[0].as_str(),
-                            "--parallel" | "--watch" | "--verbose" | "-v" | "--record" | "--replay"
-                        )
-                })
-                .map(|w| w[1].as_str())
-                .collect();
-
-            let positional_args: Vec<&str> = args
-                .iter()
-                .skip(2)
-                .filter(|a| !a.starts_with("--") && !flag_values.contains(a.as_str()))
-                .map(|s| s.as_str())
-                .collect();
-
-            let target = positional_args.first().copied();
-
-            if let Some(t) = target {
-                let allowed_positionals = if t == "conformance" { 2 } else { 1 };
-                if positional_args.len() > allowed_positionals {
-                    eprintln!(
-                        "Usage: harn test [path] [--filter <pattern>] [--watch] [--parallel]"
-                    );
-                    eprintln!("       harn test conformance [file-or-dir]");
-                    process::exit(1);
-                }
+            if let Some(t) = args.target.as_deref() {
                 if t == "conformance" {
-                    let selection = positional_args.get(1).copied();
                     commands::test::run_conformance_tests(
                         t,
-                        selection,
-                        filter.as_deref(),
-                        junit_path.as_deref(),
-                        timeout_ms,
-                        verbose,
+                        args.selection.as_deref(),
+                        args.filter.as_deref(),
+                        args.junit.as_deref(),
+                        args.timeout,
+                        args.verbose,
                     )
                     .await;
-                } else if watch {
-                    commands::test::run_watch_tests(t, filter.as_deref(), timeout_ms, parallel)
-                        .await;
+                } else if args.selection.is_some() {
+                    command_error(
+                        "only `harn test conformance` accepts a second positional target",
+                    );
+                } else if args.watch {
+                    commands::test::run_watch_tests(
+                        t,
+                        args.filter.as_deref(),
+                        args.timeout,
+                        args.parallel,
+                    )
+                    .await;
                 } else {
-                    commands::test::run_user_tests(t, filter.as_deref(), timeout_ms, parallel)
-                        .await;
+                    commands::test::run_user_tests(
+                        t,
+                        args.filter.as_deref(),
+                        args.timeout,
+                        args.parallel,
+                    )
+                    .await;
                 }
             } else {
-                // Auto-discover tests/ directory
                 let test_dir = if PathBuf::from("tests").is_dir() {
                     "tests".to_string()
                 } else {
-                    eprintln!(
-                        "Usage: harn test [path] [--filter <pattern>] [--watch] [--parallel]"
-                    );
-                    eprintln!("       harn test conformance [file-or-dir]");
-                    eprintln!("\nNo path specified and no tests/ directory found.");
-                    process::exit(1);
+                    command_error("no path specified and no tests/ directory found");
                 };
-                if watch {
+                if args.selection.is_some() {
+                    command_error(
+                        "only `harn test conformance` accepts a second positional target",
+                    );
+                }
+                if args.watch {
                     commands::test::run_watch_tests(
                         &test_dir,
-                        filter.as_deref(),
-                        timeout_ms,
-                        parallel,
+                        args.filter.as_deref(),
+                        args.timeout,
+                        args.parallel,
                     )
                     .await;
                 } else {
                     commands::test::run_user_tests(
                         &test_dir,
-                        filter.as_deref(),
-                        timeout_ms,
-                        parallel,
+                        args.filter.as_deref(),
+                        args.timeout,
+                        args.parallel,
                     )
                     .await;
                 }
             }
         }
-        "init" => {
-            let name = args.get(2).map(|s| s.as_str());
-            commands::init::init_project(name);
+        Command::Init(args) => commands::init::init_project(args.name.as_deref()),
+        Command::Serve(args) => a2a::run_a2a_server(&args.file, args.port).await,
+        Command::Acp(args) => acp::run_acp_server(args.pipeline.as_deref()).await,
+        Command::McpServe(args) => commands::run::run_file_mcp_serve(&args.file).await,
+        Command::Mcp(args) => commands::mcp::handle_mcp_command(&args.command).await,
+        Command::Watch(args) => {
+            let denied =
+                commands::run::build_denied_builtins(args.deny.as_deref(), args.allow.as_deref());
+            commands::run::run_watch(&args.file, denied).await;
         }
-        "serve" => {
-            let port: u16 = args
-                .windows(2)
-                .find(|w| w[0] == "--port")
-                .and_then(|w| w[1].parse().ok())
-                .unwrap_or(8080);
-
-            let flag_values: std::collections::HashSet<&str> = args
-                .windows(2)
-                .filter(|w| w[0] == "--port")
-                .map(|w| w[1].as_str())
-                .collect();
-
-            let file = args
-                .iter()
-                .skip(2)
-                .find(|a| !a.starts_with("--") && !flag_values.contains(a.as_str()));
-
-            match file {
-                Some(f) => a2a::run_a2a_server(f, port).await,
-                None => {
-                    eprintln!("Usage: harn serve [--port N] <file.harn>");
-                    process::exit(1);
-                }
-            }
-        }
-        "acp" => {
-            let pipeline = args.get(2).map(|s| s.as_str());
-            acp::run_acp_server(pipeline).await;
-        }
-        "mcp-serve" => {
-            let file = args.iter().skip(2).find(|a| !a.starts_with("--"));
-            match file {
-                Some(f) => commands::run::run_file_mcp_serve(f).await,
-                None => {
-                    eprintln!("Usage: harn mcp-serve <file.harn>");
-                    process::exit(1);
-                }
-            }
-        }
-        "mcp" => {
-            commands::mcp::handle_mcp_command(&args[2..]).await;
-        }
-        "watch" => {
-            if args.len() < 3 {
-                eprintln!("Usage: harn watch [--deny <builtins>] [--allow <builtins>] <file.harn>");
-                process::exit(1);
-            }
-            let deny_csv = args
-                .windows(2)
-                .find(|w| w[0] == "--deny")
-                .map(|w| w[1].clone());
-            let allow_csv = args
-                .windows(2)
-                .find(|w| w[0] == "--allow")
-                .map(|w| w[1].clone());
-            let flag_vals: std::collections::HashSet<&str> = args
-                .windows(2)
-                .filter(|w| w[0] == "--deny" || w[0] == "--allow")
-                .map(|w| w[1].as_str())
-                .collect();
-            let file = args
-                .iter()
-                .skip(2)
-                .find(|a| !a.starts_with("--") && !flag_vals.contains(a.as_str()));
-            match file {
-                Some(f) => {
-                    let denied = commands::run::build_denied_builtins(
-                        deny_csv.as_deref(),
-                        allow_csv.as_deref(),
-                    );
-                    commands::run::run_watch(f, denied).await;
-                }
-                None => {
-                    eprintln!(
-                        "Usage: harn watch [--deny <builtins>] [--allow <builtins>] <file.harn>"
-                    );
-                    process::exit(1);
-                }
-            }
-        }
-        "runs" => match (
-            args.get(2).map(|s| s.as_str()),
-            args.get(3).map(|s| s.as_str()),
-        ) {
-            (Some("inspect"), Some(path)) => {
-                let compare = flag_value(&args[4..], "--compare");
-                inspect_run_record(path, compare.as_deref());
-            }
-            _ => {
-                eprintln!("Usage: harn runs inspect <run.json> [--compare <other.json>]");
-                process::exit(1);
+        Command::Runs(args) => match args.command {
+            RunsCommand::Inspect(inspect) => {
+                inspect_run_record(&inspect.path, inspect.compare.as_deref())
             }
         },
-        "replay" => {
-            let path = args.get(2).map(|s| s.as_str());
-            match path {
-                Some(path) => replay_run_record(path),
-                None => {
-                    eprintln!("Usage: harn replay <run.json>");
-                    process::exit(1);
-                }
-            }
-        }
-        "eval" => {
-            let path = args.get(2).map(|s| s.as_str());
-            match path {
-                Some(path) => {
-                    let compare = flag_value(&args[3..], "--compare");
-                    eval_run_record(path, compare.as_deref());
-                }
-                None => {
-                    eprintln!(
-                        "Usage: harn eval <run.json|dir|manifest.json> [--compare <baseline.json>]"
-                    );
-                    process::exit(1);
-                }
-            }
-        }
-        "repl" => commands::repl::run_repl().await,
-        "install" => package::install_packages(),
-        "add" => package::add_package(&args[2..]),
-        _ => {
-            if args[1].ends_with(".harn") {
-                commands::run::run_file(&args[1], false, std::collections::HashSet::new()).await;
-            } else {
-                eprintln!(
-                    "\x1b[31merror:\x1b[0m unknown command \x1b[1m{}\x1b[0m",
-                    args[1]
-                );
-                eprintln!();
-                eprintln!("Run \x1b[36mharn help\x1b[0m for a list of commands.");
-                process::exit(1);
-            }
-        }
+        Command::Replay(args) => replay_run_record(&args.path),
+        Command::Eval(args) => eval_run_record(&args.path, args.compare.as_deref()),
+        Command::Repl => commands::repl::run_repl().await,
+        Command::Install => package::install_packages(),
+        Command::Add(args) => package::add_package(
+            &args.name,
+            args.git.as_deref(),
+            args.tag.as_deref(),
+            args.path.as_deref(),
+        ),
     }
 }
 
-fn print_help() {
-    let v = env!("CARGO_PKG_VERSION");
-    println!("\x1b[1;36mharn\x1b[0m v{v} — the agent harness language\n");
-    println!("\x1b[1;33mUSAGE:\x1b[0m");
-    println!("    harn <command> [options]\n");
-    println!("\x1b[1;33mCOMMANDS:\x1b[0m");
-    println!("    \x1b[1;32mrun\x1b[0m <file>             Execute a .harn file");
+fn print_version() {
     println!(
-        "    \x1b[1;32mtest\x1b[0m [path]            Run test_* pipelines (auto-discovers tests/)"
+        r#"
+  ╱▔▔╲
+ ╱    ╲    harn v{}
+ │ ◆  │    the agent harness language
+ │    │
+ ╰──╯╱    by burin
+   ╱╱
+"#,
+        env!("CARGO_PKG_VERSION")
     );
-    println!(
-        "    \x1b[1;32mrepl\x1b[0m                   Interactive REPL with syntax highlighting"
-    );
-    println!("    \x1b[1;32minit\x1b[0m [name]            Scaffold a new project with harn.toml");
-    println!(
-        "    \x1b[1;32mfmt\x1b[0m [--check] <files..> Format source code (files or directories)"
-    );
-    println!("    \x1b[1;32mlint\x1b[0m <file>             Lint for common issues");
-    println!("    \x1b[1;32mcheck\x1b[0m <file>            Type-check without executing");
-    println!("    \x1b[1;32mwatch\x1b[0m <file>            Watch for changes and re-run");
-    println!("    \x1b[1;32mserve\x1b[0m [--port N] <file> Serve as an A2A agent over HTTP");
-    println!("    \x1b[1;32macp\x1b[0m [file]              Start ACP server on stdio");
-    println!("    \x1b[1;32mmcp-serve\x1b[0m <file>        Serve tools as MCP server on stdio");
-    println!("    \x1b[1;32mmcp\x1b[0m <subcommand>       Manage remote MCP OAuth tokens");
-    println!("    \x1b[1;32mruns\x1b[0m inspect <file>    Inspect a persisted workflow run record");
-    println!("    \x1b[1;32mreplay\x1b[0m <file>           Replay a saved run record from persisted output");
-    println!(
-        "    \x1b[1;32meval\x1b[0m <path>             Evaluate a run record, run directory, or eval manifest"
-    );
-    println!("    \x1b[1;32madd\x1b[0m <name> --git <url>  Add a dependency to harn.toml");
-    println!("    \x1b[1;32minstall\x1b[0m                 Install dependencies from harn.toml");
-    println!("    \x1b[1;32mversion\x1b[0m                 Show version info");
-    println!("    \x1b[1;32mhelp\x1b[0m                    Show this help");
-    println!();
-    println!("\x1b[1;33mRUN OPTIONS:\x1b[0m");
-    println!("    --trace              Print LLM trace summary after execution");
-    println!("    --deny <builtins>    Deny specific builtins (comma-separated)");
-    println!("    --allow <builtins>   Allow only specific builtins (comma-separated)");
-    println!();
-    println!("\x1b[1;33mTEST OPTIONS:\x1b[0m");
-    println!("    --filter <pattern>   Only run tests matching pattern");
-    println!("    --watch              Re-run tests on file changes");
-    println!("    --parallel           Run tests concurrently");
-    println!("    --verbose / -v       Show per-test timing and detailed failures");
-    println!("    --record / --replay  Record or replay LLM fixtures");
-    println!();
-    println!("\x1b[1;33mCHECK OPTIONS:\x1b[0m");
-    println!("    --host-capabilities <file>  Extra host capability schema for preflight");
-    println!("    --bundle-root <dir>         Alternate root for render/template path checks");
-    println!();
-    println!("\x1b[1;33mEXAMPLES:\x1b[0m");
-    println!("    harn run main.harn");
-    println!("    harn test tests/");
-    println!("    harn test conformance tests/worktree_runtime.harn");
-    println!("    harn init my-project");
-    println!("    harn fmt --check src/");
-    println!("    harn check --host-capabilities burin-host.json agent.harn");
-    println!("    harn mcp login notion");
-    println!("    harn runs inspect .harn-runs/<run>.json");
-    println!();
-    println!("Docs: \x1b[4;36mhttps://github.com/burin-labs/harn\x1b[0m");
 }
 
-fn flag_value(args: &[String], flag: &str) -> Option<String> {
-    args.windows(2).find(|w| w[0] == flag).map(|w| w[1].clone())
+fn command_error(message: &str) -> ! {
+    Cli::command()
+        .error(ErrorKind::ValueValidation, message)
+        .exit()
 }
 
 fn load_run_record_or_exit(path: &Path) -> harn_vm::orchestration::RunRecord {

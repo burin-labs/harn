@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use url::Url;
 
+use crate::cli::{McpCommand, McpLoginArgs, McpServerRefArgs};
 use crate::package::{self, McpServerConfig};
 
 const DEFAULT_REDIRECT_URI: &str = "http://127.0.0.1:9783/oauth/callback";
@@ -78,32 +79,19 @@ pub(crate) enum AuthResolution {
     Bearer(String),
 }
 
-struct LoginOptions {
-    target: Option<String>,
-    explicit_url: Option<String>,
-    client_id: Option<String>,
-    client_secret: Option<String>,
-    scopes: Option<String>,
-    redirect_uri: String,
-}
-
-pub(crate) async fn handle_mcp_command(args: &[String]) {
-    match args.first().map(|value| value.as_str()) {
-        Some("login") => {
-            let options = parse_login_options(&args[1..]);
+pub(crate) async fn handle_mcp_command(command: &McpCommand) {
+    match command {
+        McpCommand::Login(options) => {
             if let Err(error) = login(options).await {
                 eprintln!("error: {error}");
                 process::exit(1);
             }
         }
-        Some("logout") => {
-            let target = args.get(1).cloned();
-            let explicit_url = flag_value(&args[2..], "--url");
-            let server = resolve_server_reference(target.as_ref(), explicit_url.as_ref())
-                .unwrap_or_else(|error| {
-                    eprintln!("error: {error}");
-                    process::exit(1);
-                });
+        McpCommand::Logout(server_ref) => {
+            let server = resolve_server_reference(server_ref).unwrap_or_else(|error| {
+                eprintln!("error: {error}");
+                process::exit(1);
+            });
             delete_stored_token(&server.url).unwrap_or_else(|error| {
                 eprintln!("error: {error}");
                 process::exit(1);
@@ -113,14 +101,11 @@ pub(crate) async fn handle_mcp_command(args: &[String]) {
                 server.name, server.url
             );
         }
-        Some("status") => {
-            let target = args.get(1).cloned();
-            let explicit_url = flag_value(&args[2..], "--url");
-            let server = resolve_server_reference(target.as_ref(), explicit_url.as_ref())
-                .unwrap_or_else(|error| {
-                    eprintln!("error: {error}");
-                    process::exit(1);
-                });
+        McpCommand::Status(server_ref) => {
+            let server = resolve_server_reference(server_ref).unwrap_or_else(|error| {
+                eprintln!("error: {error}");
+                process::exit(1);
+            });
             match load_stored_token(&server.url) {
                 Ok(Some(token)) => {
                     println!("Server: {}", server.name);
@@ -148,16 +133,8 @@ pub(crate) async fn handle_mcp_command(args: &[String]) {
                 }
             }
         }
-        Some("redirect-uri") => {
+        McpCommand::RedirectUri => {
             println!("{DEFAULT_REDIRECT_URI}");
-        }
-        _ => {
-            eprintln!("Usage:");
-            eprintln!("  harn mcp login <name|url> [--url <url>] [--client-id <id>] [--client-secret <secret>] [--scope <scopes>] [--redirect-uri <uri>]");
-            eprintln!("  harn mcp logout <name|url> [--url <url>]");
-            eprintln!("  harn mcp status <name|url> [--url <url>]");
-            eprintln!("  harn mcp redirect-uri");
-            process::exit(1);
         }
     }
 }
@@ -188,24 +165,11 @@ pub(crate) async fn resolve_auth_for_server(
     Ok(AuthResolution::Bearer(stored.access_token))
 }
 
-fn parse_login_options(args: &[String]) -> LoginOptions {
-    let target = args
-        .first()
-        .filter(|value| !value.starts_with("--"))
-        .cloned();
-    LoginOptions {
-        target,
-        explicit_url: flag_value(args, "--url"),
-        client_id: flag_value(args, "--client-id"),
-        client_secret: flag_value(args, "--client-secret"),
-        scopes: flag_value(args, "--scope"),
-        redirect_uri: flag_value(args, "--redirect-uri")
-            .unwrap_or_else(|| DEFAULT_REDIRECT_URI.to_string()),
-    }
-}
-
-async fn login(options: LoginOptions) -> Result<(), String> {
-    let server = resolve_server_reference(options.target.as_ref(), options.explicit_url.as_ref())?;
+async fn login(options: &McpLoginArgs) -> Result<(), String> {
+    let server = resolve_server_reference(&McpServerRefArgs {
+        target: options.target.clone(),
+        url: options.url.clone(),
+    })?;
     let discovery = discover_oauth_server(&server.url).await?;
     ensure_pkce_support(&discovery.metadata)?;
 
@@ -232,7 +196,7 @@ async fn login(options: LoginOptions) -> Result<(), String> {
         let registration = dynamic_client_registration(
             registration_endpoint,
             &options.redirect_uri,
-            options.scopes.as_deref().or(server.scopes.as_deref()),
+            options.scope.as_deref().or(server.scopes.as_deref()),
         )
         .await?;
         let auth_method = registration
@@ -261,7 +225,7 @@ async fn login(options: LoginOptions) -> Result<(), String> {
         &state,
         &code_challenge,
         &server.url,
-        options.scopes.as_deref().or(server.scopes.as_deref()),
+        options.scope.as_deref().or(server.scopes.as_deref()),
     )?;
 
     println!("Server: {} ({})", server.name, server.url);
@@ -282,7 +246,7 @@ async fn login(options: LoginOptions) -> Result<(), String> {
             token_auth_method: &token_auth_method,
             redirect_uri: &options.redirect_uri,
             resource: &server.url,
-            scopes: options.scopes.as_deref().or(server.scopes.as_deref()),
+            scopes: options.scope.as_deref().or(server.scopes.as_deref()),
             code: &code,
             code_verifier: &code_verifier,
         },
@@ -300,20 +264,20 @@ async fn login(options: LoginOptions) -> Result<(), String> {
         client_secret,
         token_endpoint_auth_method: token_auth_method,
         resource: server.url.clone(),
-        scopes: options.scopes.or(server.scopes),
+        scopes: options.scope.clone().or(server.scopes),
     };
     save_stored_token(&stored)?;
     println!("OAuth token stored for {}.", server.name);
     Ok(())
 }
 
-fn resolve_server_reference(
-    target: Option<&String>,
-    explicit_url: Option<&String>,
-) -> Result<ResolvedMcpServer, String> {
-    if let Some(url) = explicit_url {
+fn resolve_server_reference(server_ref: &McpServerRefArgs) -> Result<ResolvedMcpServer, String> {
+    if let Some(url) = &server_ref.url {
         return Ok(ResolvedMcpServer {
-            name: target.cloned().unwrap_or_else(|| infer_name_from_url(url)),
+            name: server_ref
+                .target
+                .clone()
+                .unwrap_or_else(|| infer_name_from_url(url)),
             url: url.clone(),
             client_id: None,
             client_secret: None,
@@ -321,7 +285,10 @@ fn resolve_server_reference(
         });
     }
 
-    let target = target.ok_or_else(|| "Missing MCP server name or URL".to_string())?;
+    let target = server_ref
+        .target
+        .as_ref()
+        .ok_or_else(|| "Missing MCP server name or URL".to_string())?;
     if target.starts_with("http://") || target.starts_with("https://") {
         return Ok(ResolvedMcpServer {
             name: infer_name_from_url(target),
@@ -891,12 +858,6 @@ p {{ margin: 0; color: #c6cfdb; font-size: 15px; line-height: 1.55; }}
         badge = badge,
         message = message
     )
-}
-
-fn flag_value(args: &[String], flag: &str) -> Option<String> {
-    args.windows(2)
-        .find(|window| window[0] == flag)
-        .map(|window| window[1].clone())
 }
 
 struct OAuthDiscoveryResult {

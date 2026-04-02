@@ -516,27 +516,7 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
 }
 
 /// `harn add <name> --git <url> [--tag <tag>]` — add a dependency to harn.toml.
-pub fn add_package(args: &[String]) {
-    if args.is_empty() {
-        eprintln!("Usage: harn add <name> --git <url> [--tag <tag>]");
-        eprintln!("       harn add <name> --path <local-path>");
-        process::exit(1);
-    }
-
-    let name = &args[0];
-    let git_url = args
-        .windows(2)
-        .find(|w| w[0] == "--git")
-        .map(|w| w[1].clone());
-    let tag = args
-        .windows(2)
-        .find(|w| w[0] == "--tag")
-        .map(|w| w[1].clone());
-    let local_path = args
-        .windows(2)
-        .find(|w| w[0] == "--path")
-        .map(|w| w[1].clone());
-
+pub fn add_package(name: &str, git_url: Option<&str>, tag: Option<&str>, local_path: Option<&str>) {
     if git_url.is_none() && local_path.is_none() {
         eprintln!("Must specify --git <url> or --path <local-path>");
         process::exit(1);
@@ -556,14 +536,14 @@ pub fn add_package(args: &[String]) {
     }
 
     // Build dependency line
-    let dep_line = if let Some(url) = &git_url {
-        if let Some(t) = &tag {
+    let dep_line = if let Some(url) = git_url {
+        if let Some(t) = tag {
             format!("{name} = {{ git = \"{url}\", tag = \"{t}\" }}")
         } else {
             format!("{name} = {{ git = \"{url}\" }}")
         }
     } else {
-        let p = local_path.as_deref().unwrap();
+        let p = local_path.unwrap();
         format!("{name} = {{ path = \"{p}\" }}")
     };
 
