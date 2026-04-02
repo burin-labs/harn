@@ -622,7 +622,7 @@ async fn vm_call_completion_ollama(
         body["system"] = serde_json::json!(system);
     }
     if let Some(keep_alive) = ollama_keep_alive_override() {
-        body["keep_alive"] = serde_json::json!(keep_alive);
+        body["keep_alive"] = keep_alive;
     }
     if let Some(overrides) = &opts.provider_overrides {
         if let Some(obj) = overrides.as_object() {
@@ -937,7 +937,7 @@ async fn vm_call_llm_api(
             body["options"]["num_ctx"] = serde_json::json!(num_ctx);
         }
         if let Some(keep_alive) = ollama_keep_alive_override() {
-            body["keep_alive"] = serde_json::json!(keep_alive);
+            body["keep_alive"] = keep_alive;
         }
         if let Some(ref thinking) = opts.thinking {
             body["think"] = serde_json::json!(matches!(
@@ -1496,15 +1496,21 @@ fn ollama_num_ctx_override() -> Option<u64> {
     None
 }
 
-fn ollama_keep_alive_override() -> Option<String> {
+fn ollama_keep_alive_override() -> Option<serde_json::Value> {
     for key in ["BURIN_OLLAMA_KEEP_ALIVE", "OLLAMA_KEEP_ALIVE"] {
         if let Ok(raw) = std::env::var(key) {
             let trimmed = raw.trim();
             if !trimmed.is_empty() {
                 return Some(match trimmed.to_ascii_lowercase().as_str() {
-                    "default" => "30m".to_string(),
-                    "forever" | "infinite" => "-1".to_string(),
-                    _ => trimmed.to_string(),
+                    "default" => serde_json::json!("30m"),
+                    "forever" | "infinite" | "-1" => serde_json::json!(-1),
+                    _ => {
+                        if let Ok(n) = trimmed.parse::<i64>() {
+                            serde_json::json!(n)
+                        } else {
+                            serde_json::json!(trimmed)
+                        }
+                    }
                 });
             }
         }
@@ -1667,7 +1673,7 @@ mod tests {
             std::env::set_var("BURIN_OLLAMA_KEEP_ALIVE", "forever");
             std::env::remove_var("OLLAMA_KEEP_ALIVE");
         }
-        assert_eq!(ollama_keep_alive_override().as_deref(), Some("-1"));
+        assert_eq!(ollama_keep_alive_override(), Some(serde_json::json!(-1)));
         unsafe {
             std::env::remove_var("BURIN_OLLAMA_KEEP_ALIVE");
         }
@@ -1783,7 +1789,7 @@ mod tests {
                 .clone()
                 .expect("request body");
             let json: serde_json::Value = serde_json::from_str(&body).expect("valid request json");
-            assert_eq!(json["keep_alive"].as_str(), Some("-1"));
+            assert_eq!(json["keep_alive"].as_i64(), Some(-1));
             assert_eq!(json["options"]["num_ctx"].as_u64(), Some(131072));
         });
     }
