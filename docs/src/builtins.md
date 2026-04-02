@@ -899,7 +899,7 @@ or any MCP client.
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `tool_registry()` | — | dict | Create an empty tool registry |
-| `tool_define(registry, name, desc, config)` | registry, name, desc: string, config: dict | dict | Add a tool (config: `{params, handler, annotations?}`) |
+| `tool_define(registry, name, desc, config)` | registry, name, desc: string, config: dict | dict | Add a tool (config: `{params, handler, returns?, annotations?, ...}`) |
 | `mcp_tools(registry)` | registry: dict | nil | Register tools for MCP serving |
 | `mcp_resource(config)` | config: dict | nil | Register a static resource (`{uri, name, text, description?, mime_type?}`) |
 | `mcp_resource_template(config)` | config: dict | nil | Register a resource template (`{uri_template, name, handler, description?, mime_type?}`) |
@@ -920,6 +920,28 @@ tools = tool_define(tools, "search", "Search files", {
   }
 })
 ```
+
+Unknown `tool_define` config keys are preserved on the tool entry. Workflow
+graphs use this to carry runtime policy metadata directly on a tool registry,
+for example:
+
+```harn
+tools = tool_define(tools, "read", "Read files", {
+  params: { path: {type: "string"} },
+  returns: {type: "string"},
+  handler: nil,
+  policy: {
+    capabilities: {workspace: ["read_text"]},
+    side_effect_level: "read_only",
+    path_params: ["path"],
+    mutation_classification: "read_only"
+  }
+})
+```
+
+When a workflow node uses that registry, Harn intersects the declared tool
+policy with the graph, node, and host ceilings during validation and at
+execution time.
 
 Example (`agent.harn`):
 
@@ -1038,6 +1060,12 @@ These builtins expose Harn's typed orchestration runtime.
 - `audit` (seed mutation-session metadata for trust/audit grouping)
 - `mutation_scope`
 - `approval_mode`
+
+`verify` nodes may also define execution checks inside `node.verify`, including:
+
+- `command` to execute via the host shell in the current execution context
+- `assert_text` to require visible output to contain a substring
+- `expect_status` to require a specific exit status
 
 ### Tool lifecycle hooks
 

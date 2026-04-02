@@ -30,17 +30,34 @@ fn coding_tools() {
   tools = tool_define(tools, "read", "Read a file", {
     params: {path: {type: "string"}},
     returns: {type: "string"},
-    handler: nil
+    handler: nil,
+    policy: {
+      capabilities: {workspace: ["read_text"]},
+      side_effect_level: "read_only",
+      path_params: ["path"],
+      mutation_classification: "read_only"
+    }
   })
   tools = tool_define(tools, "edit", "Edit a file", {
     params: {path: {type: "string"}},
     returns: {type: "string"},
-    handler: nil
+    handler: nil,
+    policy: {
+      capabilities: {workspace: ["write_text"]},
+      side_effect_level: "workspace_write",
+      path_params: ["path"],
+      mutation_classification: "apply_workspace"
+    }
   })
   tools = tool_define(tools, "run", "Run a command", {
     params: {command: {type: "string"}},
     returns: {type: "string"},
-    handler: nil
+    handler: nil,
+    policy: {
+      capabilities: {process: ["exec"]},
+      side_effect_level: "process_exec",
+      mutation_classification: "ambient_side_effect"
+    }
   })
   return tools
 }
@@ -66,6 +83,11 @@ let graph = workflow_graph({
 let report = workflow_validate(graph)
 assert(report.valid)
 ```
+
+When tool entries include `policy`, Harn folds that metadata into workflow
+validation and execution automatically. That keeps the registry itself as the
+source of truth for capability requirements instead of forcing products to
+repeat the same information in both tool definitions and node policy blocks.
 
 ### Artifacts and resources
 
@@ -132,6 +154,23 @@ println(run.status)
 println(run.path)
 println(run.run.stages)
 ```
+
+`verify` nodes can also run deterministic checks without an LLM loop:
+
+```harn
+verify: {
+  kind: "verify",
+  verify: {
+    command: "cargo test --workspace --quiet",
+    expect_status: 0,
+    assert_text: "test result: ok"
+  }
+}
+```
+
+Command-based verification records `stdout`, `stderr`, `exit_status`, and a
+derived success flag on the stage result while still flowing through the same
+workflow branch/outcome machinery as LLM-backed verification.
 
 Options currently include:
 

@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::value::{ErrorCategory, VmError, VmValue};
+use crate::value::{ErrorCategory, VmClosure, VmError, VmValue};
 use crate::vm::Vm;
 
 use super::api::{vm_call_llm_full_streaming, vm_call_llm_full_streaming_offthread, DeltaSender};
@@ -16,6 +16,33 @@ use super::trace::{trace_llm_call, LlmTraceEntry};
 
 fn next_call_id() -> String {
     uuid::Uuid::now_v7().to_string()
+}
+
+/// Look up the Harn-defined handler closure for a tool, if any.
+/// Returns `None` if the tool has no handler (handler is Nil) or isn't found.
+fn find_tool_handler(tools_val: Option<&VmValue>, tool_name: &str) -> Option<Rc<VmClosure>> {
+    let dict = tools_val?.as_dict()?;
+    let tools_list = match dict.get("tools") {
+        Some(VmValue::List(l)) => l,
+        _ => return None,
+    };
+    for tool in tools_list.iter() {
+        let entry: &std::collections::BTreeMap<String, VmValue> = match tool {
+            VmValue::Dict(d) => d,
+            _ => continue,
+        };
+        let name = match entry.get("name") {
+            Some(v) => v.display(),
+            None => continue,
+        };
+        if name == tool_name {
+            if let Some(VmValue::Closure(c)) = entry.get("handler") {
+                return Some(Rc::clone(c));
+            }
+            return None;
+        }
+    }
+    None
 }
 
 thread_local! {
@@ -176,41 +203,12 @@ pub(crate) fn current_host_bridge() -> Option<Rc<crate::bridge::HostBridge>> {
     CURRENT_HOST_BRIDGE.with(|slot| slot.borrow().clone())
 }
 
-fn classify_tool_mutation(tool_name: &str) -> &'static str {
-    match tool_name {
-        "write_file" | "edit" | "create_file" | "apply_patch" | "insert_function"
-        | "replace_body" | "add_import" => "apply_workspace",
-        "delete_file" | "remove_file" | "move_file" | "rename_file" => "destructive",
-        "exec" | "shell" | "exec_at" | "shell_at" | "run" => "ambient_side_effect",
-        _ if tool_name.starts_with("mcp_") => "host_defined",
-        _ => "read_only",
-    }
+fn classify_tool_mutation(tool_name: &str) -> String {
+    crate::orchestration::current_tool_mutation_classification(tool_name)
 }
 
-fn declared_paths(tool_args: &serde_json::Value) -> Vec<String> {
-    let Some(map) = tool_args.as_object() else {
-        return Vec::new();
-    };
-    let mut paths = Vec::new();
-    for key in ["path", "file", "cwd", "repo", "target", "destination"] {
-        if let Some(value) = map.get(key).and_then(|value| value.as_str()) {
-            if !value.is_empty() {
-                paths.push(value.to_string());
-            }
-        }
-    }
-    if let Some(items) = map.get("paths").and_then(|value| value.as_array()) {
-        for item in items {
-            if let Some(value) = item.as_str() {
-                if !value.is_empty() {
-                    paths.push(value.to_string());
-                }
-            }
-        }
-    }
-    paths.sort();
-    paths.dedup();
-    paths
+fn declared_paths(tool_name: &str, tool_args: &serde_json::Value) -> Vec<String> {
+    crate::orchestration::current_tool_declared_paths(tool_name, tool_args)
 }
 
 async fn inject_queued_user_messages(
@@ -344,7 +342,8 @@ pub async fn run_agent_loop_internal(
         active: config.policy.is_some(),
     };
 
-    let tools_val = opts.tools.as_ref();
+    let tools_owned = opts.tools.clone();
+    let tools_val = tools_owned.as_ref();
     let has_tools = !opts
         .native_tools
         .as_ref()
@@ -675,7 +674,7 @@ pub async fn run_agent_loop_internal(
                                 "mutation": {
                                     "classification": mutation_classification,
                                     "session": mutation,
-                                    "declared_paths": declared_paths(&tool_args),
+                                    "declared_paths": declared_paths(tool_name, &tool_args),
                                 },
                             }),
                         )
@@ -744,6 +743,43 @@ pub async fn run_agent_loop_internal(
                             handle_tool_locally(tool_name, &tool_args)
                         {
                             Ok(serde_json::Value::String(local_result))
+                        } else if let Some(handler) = find_tool_handler(tools_val, tool_name) {
+                            // Harn-defined tool handler — invoke via child VM
+                            match crate::vm::take_async_builtin_child_vm() {
+                                Some(mut vm) => {
+                                    let args_vm = crate::stdlib::json_to_vm_value(&tool_args);
+                                    let handler_result =
+                                        vm.call_closure_pub(&handler, &[args_vm], &[]).await;
+                                    crate::vm::restore_async_builtin_child_vm(vm);
+                                    match handler_result {
+                                        Ok(val) => Ok(serde_json::Value::String(val.display())),
+                                        Err(e) => {
+                                            Ok(serde_json::Value::String(format!("Error: {e}")))
+                                        }
+                                    }
+                                }
+                                None => {
+                                    // No child VM available — fall through to bridge
+                                    if let Some(bridge) = bridge.as_ref() {
+                                        bridge
+                                            .call(
+                                                "builtin_call",
+                                                serde_json::json!({
+                                                    "name": tool_name,
+                                                    "args": [tool_args],
+                                                }),
+                                            )
+                                            .await
+                                    } else {
+                                        Err(VmError::CategorizedError {
+                                            message: format!(
+                                                "tool handler requires VM context: {tool_name}"
+                                            ),
+                                            category: ErrorCategory::ToolRejected,
+                                        })
+                                    }
+                                }
+                            }
                         } else if let Some(bridge) = bridge.as_ref() {
                             bridge
                                 .call(
@@ -836,7 +872,7 @@ pub async fn run_agent_loop_internal(
                                 "mutation": {
                                     "classification": classify_tool_mutation(tool_name),
                                     "session": mutation,
-                                    "declared_paths": declared_paths(&tool_args),
+                                    "declared_paths": declared_paths(tool_name, &tool_args),
                                 },
                             }),
                         )

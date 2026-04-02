@@ -2,6 +2,26 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.21
+
+### Changed
+
+- **Workflow tool registries now carry enforceable runtime policy metadata** —
+  `tool_define(...)` entries can now include policy descriptors such as
+  capabilities, side-effect level, mutation classification, and declared path
+  parameters, and workflow validation/execution intersects those descriptors
+  with the active ceiling automatically instead of relying only on manually
+  duplicated node policy blocks.
+- **Verify stages can execute commands directly and assert exit status** —
+  workflow `verify` nodes may now run a shell command inside the current
+  execution context, record stdout/stderr on the stage result, and evaluate
+  both `assert_text` and `expect_status` checks without routing verification
+  through an LLM/tool loop.
+- **Local tool execution now respects workflow execution context more
+  consistently** — ACP chunk execution seeds the runtime execution context, and
+  VM-local `read_file` / `list_directory` resolution now honors the current
+  working directory when workflows or delegated runs provide one.
+
 ## v0.5.20
 
 ### Added

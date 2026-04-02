@@ -25,10 +25,10 @@ use crate::orchestration::{
     load_run_record, next_nodes_for, normalize_artifact, normalize_eval_suite_manifest,
     normalize_run_record, normalize_workflow_value, pop_execution_policy, push_execution_policy,
     render_artifacts_context, render_unified_diff, replay_fixture_from_run, save_run_record,
-    select_artifacts, validate_workflow, ArtifactRecord, CapabilityPolicy, ContextPolicy,
-    LlmUsageRecord, MutationSessionRecord, ReplayFixture, RunCheckpointRecord, RunChildRecord,
-    RunExecutionRecord, RunRecord, RunStageAttemptRecord, RunStageRecord, RunTransitionRecord,
-    TranscriptPolicy, WorkflowEdge, WorkflowGraph,
+    select_artifacts, validate_workflow, workflow_tool_policy_from_tools, ArtifactRecord,
+    CapabilityPolicy, ContextPolicy, LlmUsageRecord, MutationSessionRecord, ReplayFixture,
+    RunCheckpointRecord, RunChildRecord, RunExecutionRecord, RunRecord, RunStageAttemptRecord,
+    RunStageRecord, RunTransitionRecord, TranscriptPolicy, WorkflowEdge, WorkflowGraph,
 };
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -1657,22 +1657,46 @@ fn evaluate_verification(
         .and_then(|value| value.as_str())
         .unwrap_or_default()
         .to_string();
-    node.verify
-        .as_ref()
-        .and_then(|verify| verify.as_object())
-        .and_then(|verify| {
-            verify
-                .get("assert_text")
-                .and_then(|value| value.as_str())
-                .map(|needle| {
-                    serde_json::json!({
-                        "kind": "assert_text",
-                        "ok": visible_text.contains(needle),
-                        "expected": needle,
-                    })
-                })
-        })
-        .unwrap_or_else(|| serde_json::json!({"kind": "none", "ok": true}))
+    let exit_status = result
+        .get("exit_status")
+        .or_else(|| result.get("status_code"))
+        .or_else(|| result.get("status"))
+        .and_then(|value| value.as_i64());
+    let Some(verify) = node.verify.as_ref().and_then(|verify| verify.as_object()) else {
+        return serde_json::json!({"kind": "none", "ok": true});
+    };
+
+    let mut checks = Vec::new();
+    if let Some(needle) = verify.get("assert_text").and_then(|value| value.as_str()) {
+        checks.push(serde_json::json!({
+            "kind": "assert_text",
+            "ok": visible_text.contains(needle),
+            "expected": needle,
+        }));
+    }
+    if let Some(expected_status) = verify.get("expect_status").and_then(|value| value.as_i64()) {
+        checks.push(serde_json::json!({
+            "kind": "expect_status",
+            "ok": exit_status == Some(expected_status),
+            "expected": expected_status,
+            "actual": exit_status,
+        }));
+    }
+    if checks.is_empty() {
+        return serde_json::json!({"kind": "none", "ok": true});
+    }
+
+    let ok = checks.iter().all(|check| {
+        check
+            .get("ok")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false)
+    });
+    serde_json::json!({
+        "kind": "composite",
+        "ok": ok,
+        "checks": checks,
+    })
 }
 
 fn evaluate_condition(
@@ -1945,8 +1969,11 @@ fn effective_node_policy(
     let graph_policy = builtin
         .intersect(&graph.capability_policy)
         .map_err(VmError::Runtime)?;
-    graph_policy
+    let node_policy = graph_policy
         .intersect(&node.capability_policy)
+        .map_err(VmError::Runtime)?;
+    node_policy
+        .intersect(&workflow_tool_policy_from_tools(&node.tools))
         .map_err(VmError::Runtime)
 }
 

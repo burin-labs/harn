@@ -284,6 +284,19 @@ fn extract_quoted_tokens(text: &str) -> Vec<String> {
     tokens
 }
 
+fn resolve_local_tool_path(path: &str) -> std::path::PathBuf {
+    let candidate = std::path::PathBuf::from(path);
+    if candidate.is_absolute() {
+        return candidate;
+    }
+    if let Some(cwd) =
+        crate::stdlib::process::current_execution_context().and_then(|context| context.cwd)
+    {
+        return std::path::PathBuf::from(cwd).join(candidate);
+    }
+    crate::stdlib::process::resolve_source_relative_path(path)
+}
+
 /// Handle read-only tools locally in the VM without bridging to the host.
 /// This reduces latency and split-brain for passive operations.
 pub(crate) fn handle_tool_locally(name: &str, args: &serde_json::Value) -> Option<String> {
@@ -297,7 +310,28 @@ pub(crate) fn handle_tool_locally(name: &str, args: &serde_json::Value) -> Optio
             if path.is_empty() {
                 return Some("Error: missing path parameter".to_string());
             }
-            match std::fs::read_to_string(path) {
+            let resolved = resolve_local_tool_path(path);
+            if resolved.is_dir() {
+                return match std::fs::read_dir(&resolved) {
+                    Ok(entries) => {
+                        let mut names: Vec<String> = entries
+                            .filter_map(|e| e.ok())
+                            .map(|e| {
+                                let name = e.file_name().to_string_lossy().to_string();
+                                if e.path().is_dir() {
+                                    format!("{}/", name)
+                                } else {
+                                    name
+                                }
+                            })
+                            .collect();
+                        names.sort();
+                        Some(names.join("\n"))
+                    }
+                    Err(e) => Some(format!("Error: cannot list directory '{}': {}", path, e)),
+                };
+            }
+            match std::fs::read_to_string(&resolved) {
                 Ok(content) => {
                     // Add line numbers like the Swift read_file does
                     let numbered: String = content
@@ -313,7 +347,8 @@ pub(crate) fn handle_tool_locally(name: &str, args: &serde_json::Value) -> Optio
         }
         "list_directory" => {
             let path = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
-            match std::fs::read_dir(path) {
+            let resolved = resolve_local_tool_path(path);
+            match std::fs::read_dir(&resolved) {
                 Ok(entries) => {
                     let mut names: Vec<String> = entries
                         .filter_map(|e| e.ok())
@@ -467,7 +502,7 @@ pub(crate) fn build_tool_calling_contract_prompt(
              Use prompt context efficiently: if the prompt already includes the relevant file text, API signatures, directory inventory, or pattern examples you need, do not spend extra tool calls rediscovering the same information.\n\
              If the prompt already names the target files or target directories, do not inspect `.` or unrelated parent directories just to find them again.\n\
              `search(...)` is only for exact identifiers or literal code text. Do not use it to rediscover filenames, path strings, package declarations, directory inventory, or broad test names that are already visible in the prompt.\n\
-             Read before modifying existing code when you still need exact local details. For new files, if the prompt already provides enough grounded context, create the file directly and then verify.\n",
+             Read before modifying existing code when you still need exact local details. For new files, if the prompt already provides enough grounded context, use the creation tool the prompt specifies directly rather than spending turns rediscovering context, then verify.\n",
         );
     }
 

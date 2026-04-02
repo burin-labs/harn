@@ -741,13 +741,23 @@ async fn execute_chunk(
     // Override llm_call with bridge-aware version for call_start/call_end observability.
     harn_vm::llm::register_llm_call_with_bridge(&mut vm, host_bridge);
 
-    match vm.execute(&chunk).await {
+    let execution = harn_vm::orchestration::RunExecutionRecord {
+        cwd: Some(cwd.to_string_lossy().to_string()),
+        source_dir: source_path
+            .and_then(|p| p.parent())
+            .map(|p| p.to_string_lossy().to_string()),
+        ..Default::default()
+    };
+    harn_vm::stdlib::process::set_thread_execution_context(Some(execution));
+    let result = match vm.execute(&chunk).await {
         Ok(_) => Ok(vm.output().to_string()),
         Err(e) => {
             let formatted = vm.format_runtime_error(&e);
             Err(formatted)
         }
-    }
+    };
+    harn_vm::stdlib::process::set_thread_execution_context(None);
+    result
 }
 
 async fn load_host_mcp_clients(

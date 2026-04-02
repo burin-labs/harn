@@ -98,6 +98,10 @@ println(result.status)
 println(result.visible_text)
 ```
 
+`tool_define(...)` also preserves extra config keys such as `policy`, so
+workflow runtimes can enforce capability metadata attached directly to the tool
+registry instead of duplicating the same ceilings in separate node config.
+
 ## Core Capabilities
 
 - Typed workflow graphs via `workflow_graph(...)` and `workflow_execute(...)`
@@ -254,9 +258,11 @@ let graph = workflow_graph({
     },
     verify: {
       kind: "verify",
-      mode: "agent",
-      tools: tool_select(coding_tools(), ["run"]),
-      verify: {assert_text: "PASS"}
+      verify: {
+        command: "cargo test --workspace --quiet",
+        expect_status: 0,
+        assert_text: "test result: ok"
+      }
     }
   },
   edges: [
@@ -286,6 +292,9 @@ println(run.status)
 println(run.path)
 println(run.run.stages)
 ```
+
+`verify` nodes can either run an explicit command as shown above or use an
+agent/LLM mode when verification should stay provider-driven.
 
 ## Transcript And Artifact Model
 

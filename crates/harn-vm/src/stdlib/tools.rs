@@ -33,17 +33,11 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
         for tool in tools {
             if let VmValue::Dict(entry) = tool {
                 let mut desc = BTreeMap::new();
-                if let Some(name) = entry.get("name") {
-                    desc.insert("name".to_string(), name.clone());
-                }
-                if let Some(description) = entry.get("description") {
-                    desc.insert("description".to_string(), description.clone());
-                }
-                if let Some(parameters) = entry.get("parameters") {
-                    desc.insert("parameters".to_string(), parameters.clone());
-                }
-                if let Some(output_schema) = entry.get("outputSchema") {
-                    desc.insert("outputSchema".to_string(), output_schema.clone());
+                for (key, value) in entry.iter() {
+                    if key == "handler" {
+                        continue;
+                    }
+                    desc.insert(key.clone(), value.clone());
                 }
                 result.push(VmValue::Dict(Rc::new(desc)));
             }
@@ -294,6 +288,8 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
     // tool_define(registry, name, description, config) -> registry
     // config is {params: {name: {type, description, required?, default?}}, handler: fn,
     //            returns?: schema, annotations?: {title?, readOnlyHint?, destructiveHint?, idempotentHint?, openWorldHint?}}
+    // Unknown config keys are preserved on the tool entry verbatim so integrators
+    // can attach runtime-agnostic metadata such as policy/effect descriptors.
     vm.register_builtin("tool_define", |args, _out| {
         if args.len() < 4 {
             return Err(VmError::Thrown(VmValue::String(Rc::from(
@@ -346,6 +342,16 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
         // Optional MCP tool annotations (title, readOnlyHint, destructiveHint, etc.)
         if let Some(annotations) = config.get("annotations") {
             tool_entry.insert("annotations".to_string(), annotations.clone());
+        }
+
+        for (key, value) in config.iter() {
+            if matches!(
+                key.as_str(),
+                "handler" | "params" | "returns" | "annotations"
+            ) {
+                continue;
+            }
+            tool_entry.insert(key.clone(), value.clone());
         }
 
         let mut tools: Vec<VmValue> = match registry.get("tools") {

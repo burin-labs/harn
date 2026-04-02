@@ -17,7 +17,7 @@ pub(crate) fn set_thread_source_dir(dir: &std::path::Path) {
     VM_SOURCE_DIR.with(|sd| *sd.borrow_mut() = Some(dir.to_path_buf()));
 }
 
-pub(crate) fn set_thread_execution_context(context: Option<RunExecutionRecord>) {
+pub fn set_thread_execution_context(context: Option<RunExecutionRecord>) {
     VM_EXECUTION_CONTEXT.with(|current| *current.borrow_mut() = context);
 }
 

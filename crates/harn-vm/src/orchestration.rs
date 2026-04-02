@@ -664,6 +664,15 @@ fn freshness_rank(value: Option<&str>) -> i64 {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
+pub struct ToolRuntimePolicyMetadata {
+    pub capabilities: BTreeMap<String, Vec<String>>,
+    pub side_effect_level: Option<String>,
+    pub path_params: Vec<String>,
+    pub mutation_classification: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
 pub struct CapabilityPolicy {
     pub tools: Vec<String>,
     pub capabilities: BTreeMap<String, Vec<String>>,
@@ -673,6 +682,8 @@ pub struct CapabilityPolicy {
     /// Argument-level constraints for specific tools.
     #[serde(default)]
     pub tool_arg_constraints: Vec<ToolArgConstraint>,
+    #[serde(default)]
+    pub tool_metadata: BTreeMap<String, ToolRuntimePolicyMetadata>,
 }
 
 impl CapabilityPolicy {
@@ -780,6 +791,18 @@ impl CapabilityPolicy {
         let mut tool_arg_constraints = self.tool_arg_constraints.clone();
         tool_arg_constraints.extend(requested.tool_arg_constraints.clone());
 
+        let tool_metadata = tools
+            .iter()
+            .filter_map(|tool| {
+                requested
+                    .tool_metadata
+                    .get(tool)
+                    .or_else(|| self.tool_metadata.get(tool))
+                    .cloned()
+                    .map(|metadata| (tool.clone(), metadata))
+            })
+            .collect();
+
         Ok(CapabilityPolicy {
             tools,
             capabilities,
@@ -787,6 +810,7 @@ impl CapabilityPolicy {
             side_effect_level,
             recursion_limit,
             tool_arg_constraints,
+            tool_metadata,
         })
     }
 }
@@ -1015,6 +1039,141 @@ pub fn workflow_tool_names(value: &serde_json::Value) -> Vec<String> {
                 .unwrap_or_default()
         }
         _ => Vec::new(),
+    }
+}
+
+fn max_side_effect_level(levels: impl Iterator<Item = String>) -> Option<String> {
+    fn rank(v: &str) -> usize {
+        match v {
+            "none" => 0,
+            "read_only" => 1,
+            "workspace_write" => 2,
+            "process_exec" => 3,
+            "network" => 4,
+            _ => 5,
+        }
+    }
+    levels.max_by_key(|level| rank(level))
+}
+
+fn parse_tool_runtime_policy(
+    map: &serde_json::Map<String, serde_json::Value>,
+) -> ToolRuntimePolicyMetadata {
+    let Some(policy) = map.get("policy").and_then(|value| value.as_object()) else {
+        return ToolRuntimePolicyMetadata::default();
+    };
+
+    let capabilities = policy
+        .get("capabilities")
+        .and_then(|value| value.as_object())
+        .map(|caps| {
+            caps.iter()
+                .map(|(capability, ops)| {
+                    let values = ops
+                        .as_array()
+                        .map(|items| {
+                            items
+                                .iter()
+                                .filter_map(|item| item.as_str().map(|s| s.to_string()))
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default();
+                    (capability.clone(), values)
+                })
+                .collect::<BTreeMap<_, _>>()
+        })
+        .unwrap_or_default();
+
+    let path_params = policy
+        .get("path_params")
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str().map(|s| s.to_string()))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    ToolRuntimePolicyMetadata {
+        capabilities,
+        side_effect_level: policy
+            .get("side_effect_level")
+            .and_then(|value| value.as_str())
+            .map(|s| s.to_string()),
+        path_params,
+        mutation_classification: policy
+            .get("mutation_classification")
+            .and_then(|value| value.as_str())
+            .map(|s| s.to_string()),
+    }
+}
+
+pub fn workflow_tool_metadata(
+    value: &serde_json::Value,
+) -> BTreeMap<String, ToolRuntimePolicyMetadata> {
+    match value {
+        serde_json::Value::Null => BTreeMap::new(),
+        serde_json::Value::Array(items) => items
+            .iter()
+            .filter_map(|item| match item {
+                serde_json::Value::Object(map) => map
+                    .get("name")
+                    .and_then(|value| value.as_str())
+                    .filter(|name| !name.is_empty())
+                    .map(|name| (name.to_string(), parse_tool_runtime_policy(map))),
+                _ => None,
+            })
+            .collect(),
+        serde_json::Value::Object(map) => {
+            if map.get("_type").and_then(|value| value.as_str()) == Some("tool_registry") {
+                return map
+                    .get("tools")
+                    .map(workflow_tool_metadata)
+                    .unwrap_or_default();
+            }
+            map.get("name")
+                .and_then(|value| value.as_str())
+                .filter(|name| !name.is_empty())
+                .map(|name| {
+                    let mut metadata = BTreeMap::new();
+                    metadata.insert(name.to_string(), parse_tool_runtime_policy(map));
+                    metadata
+                })
+                .unwrap_or_default()
+        }
+        _ => BTreeMap::new(),
+    }
+}
+
+pub fn workflow_tool_policy_from_tools(value: &serde_json::Value) -> CapabilityPolicy {
+    let tools = workflow_tool_names(value);
+    let tool_metadata = workflow_tool_metadata(value);
+    let mut capabilities: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for metadata in tool_metadata.values() {
+        for (capability, ops) in &metadata.capabilities {
+            let entry = capabilities.entry(capability.clone()).or_default();
+            for op in ops {
+                if !entry.contains(op) {
+                    entry.push(op.clone());
+                }
+            }
+            entry.sort();
+        }
+    }
+    let side_effect_level = max_side_effect_level(
+        tool_metadata
+            .values()
+            .filter_map(|metadata| metadata.side_effect_level.clone()),
+    );
+    CapabilityPolicy {
+        tools,
+        capabilities,
+        workspace_roots: Vec::new(),
+        side_effect_level,
+        recursion_limit: None,
+        tool_arg_constraints: Vec::new(),
+        tool_metadata,
     }
 }
 
@@ -2190,6 +2349,10 @@ pub fn current_execution_policy() -> Option<CapabilityPolicy> {
     EXECUTION_POLICY_STACK.with(|stack| stack.borrow().last().cloned())
 }
 
+pub fn current_tool_metadata(tool: &str) -> Option<ToolRuntimePolicyMetadata> {
+    current_execution_policy().and_then(|policy| policy.tool_metadata.get(tool).cloned())
+}
+
 fn policy_allows_tool(policy: &CapabilityPolicy, tool: &str) -> bool {
     policy.tools.is_empty() || policy.tools.iter().any(|allowed| allowed == tool)
 }
@@ -2225,6 +2388,86 @@ fn reject_policy(reason: String) -> Result<(), VmError> {
         message: reason,
         category: crate::value::ErrorCategory::ToolRejected,
     })
+}
+
+fn fallback_mutation_classification(tool_name: &str) -> String {
+    let lower = tool_name.to_ascii_lowercase();
+    if lower.starts_with("mcp_") {
+        return "host_defined".to_string();
+    }
+    if lower == "exec"
+        || lower == "shell"
+        || lower == "exec_at"
+        || lower == "shell_at"
+        || lower == "run"
+        || lower.starts_with("run_")
+    {
+        return "ambient_side_effect".to_string();
+    }
+    if lower.starts_with("delete")
+        || lower.starts_with("remove")
+        || lower.starts_with("move")
+        || lower.starts_with("rename")
+    {
+        return "destructive".to_string();
+    }
+    if lower.contains("write")
+        || lower.contains("edit")
+        || lower.contains("patch")
+        || lower.contains("create")
+        || lower.contains("scaffold")
+        || lower.starts_with("insert")
+        || lower.starts_with("replace")
+        || lower == "add_import"
+    {
+        return "apply_workspace".to_string();
+    }
+    "read_only".to_string()
+}
+
+pub fn current_tool_mutation_classification(tool_name: &str) -> String {
+    current_tool_metadata(tool_name)
+        .and_then(|metadata| metadata.mutation_classification)
+        .unwrap_or_else(|| fallback_mutation_classification(tool_name))
+}
+
+pub fn current_tool_declared_paths(tool_name: &str, args: &serde_json::Value) -> Vec<String> {
+    let Some(map) = args.as_object() else {
+        return Vec::new();
+    };
+    let path_keys = current_tool_metadata(tool_name)
+        .map(|metadata| metadata.path_params)
+        .filter(|keys| !keys.is_empty())
+        .unwrap_or_else(|| {
+            vec![
+                "path".to_string(),
+                "file".to_string(),
+                "cwd".to_string(),
+                "repo".to_string(),
+                "target".to_string(),
+                "destination".to_string(),
+            ]
+        });
+    let mut paths = Vec::new();
+    for key in path_keys {
+        if let Some(value) = map.get(&key).and_then(|value| value.as_str()) {
+            if !value.is_empty() {
+                paths.push(value.to_string());
+            }
+        }
+    }
+    if let Some(items) = map.get("paths").and_then(|value| value.as_array()) {
+        for item in items {
+            if let Some(value) = item.as_str() {
+                if !value.is_empty() {
+                    paths.push(value.to_string());
+                }
+            }
+        }
+    }
+    paths.sort();
+    paths.dedup();
+    paths
 }
 
 pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Result<(), VmError> {
@@ -2348,6 +2591,24 @@ pub fn enforce_current_policy_for_tool(tool_name: &str) -> Result<(), VmError> {
     };
     if !policy_allows_tool(&policy, tool_name) {
         return reject_policy(format!("tool '{tool_name}' exceeds tool ceiling"));
+    }
+    if let Some(metadata) = policy.tool_metadata.get(tool_name) {
+        for (capability, ops) in &metadata.capabilities {
+            for op in ops {
+                if !policy_allows_capability(&policy, capability, op) {
+                    return reject_policy(format!(
+                        "tool '{tool_name}' exceeds capability ceiling: {capability}.{op}"
+                    ));
+                }
+            }
+        }
+        if let Some(side_effect_level) = metadata.side_effect_level.as_deref() {
+            if !policy_allows_side_effect(&policy, side_effect_level) {
+                return reject_policy(format!(
+                    "tool '{tool_name}' exceeds side-effect ceiling: {side_effect_level}"
+                ));
+            }
+        }
     }
     Ok(())
 }
@@ -2509,79 +2770,139 @@ pub async fn execute_stage_node(
         )
     };
 
-    let mut options = BTreeMap::new();
-    if let Some(provider) = &node.model_policy.provider {
-        options.insert(
-            "provider".to_string(),
-            VmValue::String(Rc::from(provider.clone())),
-        );
-    }
-    if let Some(model) = &node.model_policy.model {
-        options.insert(
-            "model".to_string(),
-            VmValue::String(Rc::from(model.clone())),
-        );
-    }
-    if let Some(model_tier) = &node.model_policy.model_tier {
-        options.insert(
-            "model_tier".to_string(),
-            VmValue::String(Rc::from(model_tier.clone())),
-        );
-    }
-    if let Some(temperature) = node.model_policy.temperature {
-        options.insert("temperature".to_string(), VmValue::Float(temperature));
-    }
-    if let Some(max_tokens) = node.model_policy.max_tokens {
-        options.insert("max_tokens".to_string(), VmValue::Int(max_tokens));
-    }
-    let tool_names = workflow_tool_names(&node.tools);
-    if !matches!(node.tools, serde_json::Value::Null) && !tool_names.is_empty() {
-        options.insert(
-            "tools".to_string(),
-            crate::stdlib::json_to_vm_value(&node.tools),
-        );
-    }
-    if let Some(transcript) = transcript.clone() {
-        options.insert("transcript".to_string(), transcript);
-    }
-
-    let args = vec![
-        VmValue::String(Rc::from(prompt.clone())),
-        node.system
-            .clone()
-            .map(|s| VmValue::String(Rc::from(s)))
-            .unwrap_or(VmValue::Nil),
-        VmValue::Dict(Rc::new(options)),
-    ];
-    let mut opts = extract_llm_options(&args)?;
-
     let tool_format = std::env::var("HARN_AGENT_TOOL_FORMAT")
         .ok()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| "text".to_string());
-    let mut llm_result = if node.mode.as_deref() == Some("agent") || !tool_names.is_empty() {
-        crate::llm::run_agent_loop_internal(
-            &mut opts,
-            crate::llm::AgentLoopConfig {
-                persistent: true,
-                max_iterations: 12,
-                max_nudges: 3,
-                nudge: None,
-                done_sentinel: node.done_sentinel.clone(),
-                tool_retries: 0,
-                tool_backoff_ms: 1000,
-                tool_format: tool_format.clone(),
-                auto_compact: None,
-                policy: None,
-                daemon: false,
-                llm_retries: 2,
-                llm_backoff_ms: 2000,
-            },
-        )
-        .await?
+    let mut llm_result = if node.kind == "verify" {
+        if let Some(command) = node
+            .verify
+            .as_ref()
+            .and_then(|verify| verify.as_object())
+            .and_then(|verify| verify.get("command"))
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            let mut process = if cfg!(target_os = "windows") {
+                let mut cmd = tokio::process::Command::new("cmd");
+                cmd.arg("/C").arg(command);
+                cmd
+            } else {
+                let mut cmd = tokio::process::Command::new("/bin/sh");
+                cmd.arg("-lc").arg(command);
+                cmd
+            };
+            process.stdin(std::process::Stdio::null());
+            if let Some(context) = crate::stdlib::process::current_execution_context() {
+                if let Some(cwd) = context.cwd.filter(|cwd| !cwd.is_empty()) {
+                    process.current_dir(cwd);
+                }
+                if !context.env.is_empty() {
+                    process.envs(context.env);
+                }
+            }
+            let output = process
+                .output()
+                .await
+                .map_err(|e| VmError::Runtime(format!("workflow verify exec failed: {e}")))?;
+            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            let combined = if stderr.is_empty() {
+                stdout.clone()
+            } else if stdout.is_empty() {
+                stderr.clone()
+            } else {
+                format!("{stdout}\n{stderr}")
+            };
+            serde_json::json!({
+                "status": "completed",
+                "text": combined,
+                "visible_text": combined,
+                "command": command,
+                "stdout": stdout,
+                "stderr": stderr,
+                "exit_status": output.status.code().unwrap_or(-1),
+                "success": output.status.success(),
+            })
+        } else {
+            serde_json::json!({
+                "status": "completed",
+                "text": "",
+                "visible_text": "",
+            })
+        }
     } else {
-        let result = vm_call_llm_full(&opts).await?;
-        crate::llm::agent_loop_result_from_llm(&result, opts)
+        let mut options = BTreeMap::new();
+        if let Some(provider) = &node.model_policy.provider {
+            options.insert(
+                "provider".to_string(),
+                VmValue::String(Rc::from(provider.clone())),
+            );
+        }
+        if let Some(model) = &node.model_policy.model {
+            options.insert(
+                "model".to_string(),
+                VmValue::String(Rc::from(model.clone())),
+            );
+        }
+        if let Some(model_tier) = &node.model_policy.model_tier {
+            options.insert(
+                "model_tier".to_string(),
+                VmValue::String(Rc::from(model_tier.clone())),
+            );
+        }
+        if let Some(temperature) = node.model_policy.temperature {
+            options.insert("temperature".to_string(), VmValue::Float(temperature));
+        }
+        if let Some(max_tokens) = node.model_policy.max_tokens {
+            options.insert("max_tokens".to_string(), VmValue::Int(max_tokens));
+        }
+        let tool_names = workflow_tool_names(&node.tools);
+        if !matches!(node.tools, serde_json::Value::Null) && !tool_names.is_empty() {
+            options.insert(
+                "tools".to_string(),
+                crate::stdlib::json_to_vm_value(&node.tools),
+            );
+        }
+        if let Some(transcript) = transcript.clone() {
+            options.insert("transcript".to_string(), transcript);
+        }
+
+        let args = vec![
+            VmValue::String(Rc::from(prompt.clone())),
+            node.system
+                .clone()
+                .map(|s| VmValue::String(Rc::from(s)))
+                .unwrap_or(VmValue::Nil),
+            VmValue::Dict(Rc::new(options)),
+        ];
+        let mut opts = extract_llm_options(&args)?;
+
+        if node.mode.as_deref() == Some("agent") || !tool_names.is_empty() {
+            crate::llm::run_agent_loop_internal(
+                &mut opts,
+                crate::llm::AgentLoopConfig {
+                    persistent: true,
+                    max_iterations: 12,
+                    max_nudges: 3,
+                    nudge: None,
+                    done_sentinel: node.done_sentinel.clone(),
+                    tool_retries: 0,
+                    tool_backoff_ms: 1000,
+                    tool_format: tool_format.clone(),
+                    auto_compact: None,
+                    policy: None,
+                    daemon: false,
+                    llm_retries: 2,
+                    llm_backoff_ms: 2000,
+                },
+            )
+            .await?
+        } else {
+            let result = vm_call_llm_full(&opts).await?;
+            crate::llm::agent_loop_result_from_llm(&result, opts)
+        }
     };
     if let Some(payload) = llm_result.as_object_mut() {
         payload.insert("prompt".to_string(), serde_json::json!(prompt));
@@ -2713,21 +3034,9 @@ pub fn append_audit_entry(
 
 pub fn builtin_ceiling() -> CapabilityPolicy {
     CapabilityPolicy {
-        tools: vec![
-            "read".to_string(),
-            "read_file".to_string(),
-            "search".to_string(),
-            "edit".to_string(),
-            "run".to_string(),
-            "exec".to_string(),
-            "outline".to_string(),
-            "list_directory".to_string(),
-            "lsp_hover".to_string(),
-            "lsp_definition".to_string(),
-            "lsp_references".to_string(),
-            "web_search".to_string(),
-            "web_fetch".to_string(),
-        ],
+        // Runtime-owned ceiling is capability-based, not product-tool-based.
+        // Integrators define concrete tool surfaces in workflow graphs / registries.
+        tools: Vec::new(),
         capabilities: BTreeMap::from([
             (
                 "workspace".to_string(),
@@ -2746,6 +3055,7 @@ pub fn builtin_ceiling() -> CapabilityPolicy {
         side_effect_level: Some("network".to_string()),
         recursion_limit: Some(8),
         tool_arg_constraints: Vec::new(),
+        tool_metadata: BTreeMap::new(),
     }
 }
 
