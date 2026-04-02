@@ -2,6 +2,18 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.25
+
+### Changed
+
+- **Text-mode tool calling no longer bakes in IDE-specific tool names** — the
+  runtime-owned contract and agent nudge examples now stay generic, and
+  positional text-call parsing only infers a parameter name from the live tool
+  schema when a tool declares exactly one parameter.
+- **Scalar argument parsing remains type-stable in text mode** — floating-point,
+  boolean, integer, and `null` values in ` ```call ` blocks continue to round-trip
+  as structured JSON values instead of silently degrading into strings.
+
 ## v0.5.24
 
 ### Changed

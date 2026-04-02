@@ -10,7 +10,7 @@ use super::helpers::{
 use super::tools::{
     build_assistant_response_message, build_assistant_tool_message,
     build_tool_calling_contract_prompt, build_tool_result_message, handle_tool_locally,
-    normalize_tool_args, parse_text_tool_calls,
+    normalize_tool_args, parse_text_tool_calls_with_tools,
 };
 use super::trace::{trace_llm_call, LlmTraceEntry};
 
@@ -533,7 +533,7 @@ pub async fn run_agent_loop_internal(
             // parsing as a compatibility fallback. This lets workflows use
             // tool_format="native" without breaking providers or models that still
             // emit ```call blocks.
-            let parsed = parse_text_tool_calls(&text);
+            let parsed = parse_text_tool_calls_with_tools(&text, tools_val);
             if !parsed.is_empty() {
                 tool_call_source = "text_fallback";
                 if tool_format == "native" {
@@ -1056,7 +1056,7 @@ pub async fn run_agent_loop_internal(
                     "You must use tools to complete this task. Start with the best available tool."
                         .to_string()
                 } else {
-                    "You must use tools to complete this task. Respond with a real ```call block, not a prose description of the tool you intend to use.\nExample:\n```call\nread(path=\"relative/path\")\n```"
+                    "You must use tools to complete this task. Respond with a real ```call block, not a prose description of the tool you intend to use.\nExample:\n```call\ntool_name(param=\"value\")\n```"
                         .to_string()
                 }
             } else if consecutive_text_only <= 3 {
@@ -1064,7 +1064,7 @@ pub async fn run_agent_loop_internal(
                     "STOP explaining and USE TOOLS NOW. Include a concrete tool call."
                         .to_string()
                 } else {
-                    "STOP explaining and USE TOOLS NOW. A plain-English plan is a failure here. Reply with one or more actual ```call blocks only.\nExample:\n```call\nrun(command=\"<scoped verification command>\")\n```"
+                    "STOP explaining and USE TOOLS NOW. A plain-English plan is a failure here. Reply with one or more actual ```call blocks only.\nExample:\n```call\ntool_name(param=\"value\")\n```"
                         .to_string()
                 }
             } else {

@@ -395,23 +395,11 @@ fn extract_params_from_vm_dict(td: &BTreeMap<String, VmValue>) -> Vec<(String, S
     params
 }
 
-/// Build a runtime-owned tool-calling contract prompt.
-/// The runtime injects this block so prompt templates do not need to carry
-/// stale tool syntax examples that can drift from actual parser behavior.
-pub(crate) fn build_tool_calling_contract_prompt(
-    tools_val: Option<&VmValue>,
-    mode: &str,
-    include_format: bool,
-) -> String {
-    let mut prompt = String::from("\n\n## Tool Calling Contract\n");
-    prompt.push_str(&format!(
-        "Active mode: `{mode}`. Follow this runtime-owned contract even if older prompt text suggests another tool syntax.\n\n"
-    ));
-    prompt.push_str("## Available tools\n\n");
+type ToolParamSchema = (String, String, String);
+type ToolSchema = (String, String, Vec<ToolParamSchema>);
 
-    // Collect tool schemas from a tool registry or a list of tool definition dicts.
-    type ToolSchema = (String, String, Vec<(String, String, String)>);
-    let schemas: Vec<ToolSchema> = match tools_val {
+fn collect_tool_schemas(tools_val: Option<&VmValue>) -> Vec<ToolSchema> {
+    match tools_val {
         Some(VmValue::List(list)) => list
             .iter()
             .filter_map(|v| match v {
@@ -428,12 +416,11 @@ pub(crate) fn build_tool_calling_contract_prompt(
             })
             .collect(),
         Some(VmValue::Dict(d)) => {
-            // tool_registry -- extract from tools list
             if let Some(VmValue::List(tools)) = d.get("tools") {
                 tools
                     .iter()
-                    .filter_map(|v| {
-                        if let VmValue::Dict(td) = v {
+                    .filter_map(|v| match v {
+                        VmValue::Dict(td) => {
                             let name = td.get("name")?.display();
                             let desc = td
                                 .get("description")
@@ -441,9 +428,8 @@ pub(crate) fn build_tool_calling_contract_prompt(
                                 .unwrap_or_default();
                             let params = extract_params_from_vm_dict(td);
                             Some((name, desc, params))
-                        } else {
-                            None
                         }
+                        _ => None,
                     })
                     .collect()
             } else {
@@ -451,7 +437,43 @@ pub(crate) fn build_tool_calling_contract_prompt(
             }
         }
         _ => Vec::new(),
-    };
+    }
+}
+
+fn positional_param_name(tool_name: &str, position: usize, tools_val: Option<&VmValue>) -> String {
+    let param_names = collect_tool_schemas(tools_val)
+        .into_iter()
+        .find(|(name, _, _)| name == tool_name)
+        .map(|(_, _, params)| {
+            params
+                .into_iter()
+                .map(|(name, _, _)| name)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    if position == 0 && param_names.len() == 1 {
+        return param_names[0].clone();
+    }
+
+    format!("arg{}", position + 1)
+}
+
+/// Build a runtime-owned tool-calling contract prompt.
+/// The runtime injects this block so prompt templates do not need to carry
+/// stale tool syntax examples that can drift from actual parser behavior.
+pub(crate) fn build_tool_calling_contract_prompt(
+    tools_val: Option<&VmValue>,
+    mode: &str,
+    include_format: bool,
+) -> String {
+    let mut prompt = String::from("\n\n## Tool Calling Contract\n");
+    prompt.push_str(&format!(
+        "Active mode: `{mode}`. Follow this runtime-owned contract even if older prompt text suggests another tool syntax.\n\n"
+    ));
+    prompt.push_str("## Available tools\n\n");
+
+    let schemas = collect_tool_schemas(tools_val);
 
     // Present tools as Python-like function signatures
     for (tool_name, desc, params) in &schemas {
@@ -467,15 +489,6 @@ pub(crate) fn build_tool_calling_contract_prompt(
             }
         }
         prompt.push('\n');
-    }
-
-    // Strict tool boundary: tell the model exactly what exists
-    if !schemas.is_empty() {
-        let names_list: Vec<&str> = schemas.iter().map(|(n, _, _)| n.as_str()).collect();
-        prompt.push_str(&format!(
-            "You may ONLY use these tools: {}. Any other tool name will be rejected.\n\n",
-            names_list.join(", ")
-        ));
     }
 
     if mode == "native" {
@@ -502,9 +515,9 @@ pub(crate) fn build_tool_calling_contract_prompt(
              ````\n\
              You can make multiple tool calls in one response by emitting multiple ` ```call ` blocks.\n\
              After each call, you will see the result in a <tool_result> tag.\n\
-             Only the `### name(...)` headings above are tools. Parameter names like `path`, `pattern`, or `file_glob` are arguments, not standalone tools.\n\
-             Example: use `search(pattern=\"parser\", file_glob=\"**/*.go\")`, never `file_glob(...)`.\n\
-             For `run`, pass one shell command string such as `run(command=\"<verification or build command here>\")`; do not pass JSON arrays unless the tool schema explicitly asks for one.\n",
+             Only the `### name(...)` headings above are tools. Parameter names listed under those headings are arguments, not standalone tools.\n\
+             Use named arguments unless the tool signature above has exactly one parameter; positional calls beyond that are ambiguous and may be rejected.\n\
+             If a parameter expects a string command or path, pass that value as a normal string unless the tool schema explicitly requests a list or object.\n",
         );
     }
 
@@ -516,7 +529,15 @@ pub(crate) fn build_tool_calling_contract_prompt(
 ///   ```call
 ///   tool_name(param="value", param2="value2")
 ///   ```
-pub(crate) fn parse_text_tool_calls(text: &str) -> Vec<serde_json::Value> {
+#[cfg(test)]
+fn parse_text_tool_calls(text: &str) -> Vec<serde_json::Value> {
+    parse_text_tool_calls_with_tools(text, None)
+}
+
+pub(crate) fn parse_text_tool_calls_with_tools(
+    text: &str,
+    tools_val: Option<&VmValue>,
+) -> Vec<serde_json::Value> {
     let mut calls = Vec::new();
     let mut search_from = 0;
 
@@ -531,7 +552,7 @@ pub(crate) fn parse_text_tool_calls(text: &str) -> Vec<serde_json::Value> {
         if let Some(end_offset) = text[content_start..].find("```") {
             let content_end = content_start + end_offset;
             let call_text = text[content_start..content_end].trim();
-            if let Some((name, arguments)) = parse_function_call_syntax(call_text) {
+            if let Some((name, arguments)) = parse_function_call_syntax(call_text, tools_val) {
                 calls.push(serde_json::json!({
                     "id": format!("tc_{}", calls.len()),
                     "name": name,
@@ -547,32 +568,13 @@ pub(crate) fn parse_text_tool_calls(text: &str) -> Vec<serde_json::Value> {
     calls
 }
 
-/// Infer the default parameter name for a positional argument.
-/// When the model writes `read_file("foo.py")` instead of `read_file(path="foo.py")`,
-/// this maps the positional value to the correct named parameter.
-fn default_param_name(tool_name: &str, position: usize) -> &'static str {
-    match (tool_name, position) {
-        ("read_file" | "read", 0) => "path",
-        ("search", 0) => "pattern",
-        ("search", 1) => "file_glob",
-        ("edit", 0) => "action",
-        ("edit", 1) => "path",
-        ("edit", 2) => "content",
-        ("run" | "exec", 0) => "command",
-        ("outline" | "get_file_outline", 0) => "path",
-        ("list_directory", 0) => "path",
-        ("web_search", 0) => "query",
-        ("web_fetch", 0) => "url",
-        ("lsp_hover" | "lsp_definition" | "lsp_references", 0) => "file",
-        ("lsp_hover" | "lsp_definition" | "lsp_references", 1) => "line",
-        ("lsp_hover" | "lsp_definition" | "lsp_references", 2) => "col",
-        _ => "arg",
-    }
-}
-
 /// Parse function-call syntax: `name(key="value", key2="value2")`
-/// Also handles positional args: `read_file("foo.py")` -> `{path: "foo.py"}`
-fn parse_function_call_syntax(text: &str) -> Option<(String, serde_json::Value)> {
+/// Also handles positional args for single-parameter tools declared in the
+/// active tool schema.
+fn parse_function_call_syntax(
+    text: &str,
+    tools_val: Option<&VmValue>,
+) -> Option<(String, serde_json::Value)> {
     let text = text.trim();
     let paren_start = text.find('(')?;
     let name = text[..paren_start].trim().to_string();
@@ -633,8 +635,8 @@ fn parse_function_call_syntax(text: &str) -> Option<(String, serde_json::Value)>
             };
             args.insert(key, val);
         } else if !part.is_empty() {
-            // Positional argument: infer parameter name from tool + position
-            let key = default_param_name(&name, positional_index).to_string();
+            // Positional arguments are only schema-driven for single-parameter tools.
+            let key = positional_param_name(&name, positional_index, tools_val);
             let val = if part.starts_with('[') && part.ends_with(']') {
                 serde_json::from_str(part).unwrap_or_else(|_| serde_json::json!(part))
             } else if part.starts_with('{') && part.ends_with('}') {
@@ -843,7 +845,7 @@ fn vm_build_json_schema(params: Option<&BTreeMap<String, VmValue>>) -> serde_jso
 mod tests {
     use super::{
         build_tool_calling_contract_prompt, normalize_tool_args, parse_text_tool_calls,
-        split_call_args,
+        parse_text_tool_calls_with_tools, split_call_args,
     };
     use crate::value::VmValue;
     use serde_json::json;
@@ -862,10 +864,10 @@ mod tests {
     #[test]
     fn parse_text_tool_calls_supports_json_array_arguments() {
         let calls = parse_text_tool_calls(
-            "```call\nrun(command=[\"ls\",\"internal/manifest/\"], timeout=30)\n```",
+            "```call\nexecute(command=[\"ls\",\"internal/manifest/\"], timeout=30)\n```",
         );
         assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0]["name"], json!("run"));
+        assert_eq!(calls[0]["name"], json!("execute"));
         assert_eq!(
             calls[0]["arguments"]["command"],
             json!(["ls", "internal/manifest/"])
@@ -876,13 +878,38 @@ mod tests {
     #[test]
     fn parse_text_tool_calls_preserves_scalar_json_types() {
         let calls = parse_text_tool_calls(
-            "```call\nsearch(score=0.5, limit=3, exact=false, note=null)\n```",
+            "```call\nlookup(score=0.5, limit=3, exact=false, note=null)\n```",
         );
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0]["arguments"]["score"], json!(0.5));
         assert_eq!(calls[0]["arguments"]["limit"], json!(3));
         assert_eq!(calls[0]["arguments"]["exact"], json!(false));
         assert_eq!(calls[0]["arguments"]["note"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn parse_text_tool_calls_uses_schema_for_single_positional_argument() {
+        let tools = VmValue::List(Rc::new(vec![VmValue::Dict(
+            BTreeMap::from([
+                ("name".into(), VmValue::String(Rc::from("lookup"))),
+                (
+                    "parameters".into(),
+                    VmValue::Dict(Rc::new(BTreeMap::from([(
+                        "target".into(),
+                        VmValue::Dict(Rc::new(BTreeMap::from([(
+                            "type".into(),
+                            VmValue::String(Rc::from("str")),
+                        )]))),
+                    )]))),
+                ),
+            ])
+            .into(),
+        )]));
+
+        let calls =
+            parse_text_tool_calls_with_tools("```call\nlookup(\"README.md\")\n```", Some(&tools));
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0]["arguments"]["target"], json!("README.md"));
     }
 
     #[test]
@@ -931,40 +958,32 @@ mod tests {
     fn tool_calling_contract_lists_tools_and_text_mode_guardrails() {
         let tools = VmValue::List(Rc::new(vec![VmValue::Dict(
             BTreeMap::from([
-                ("name".into(), VmValue::String(Rc::from("search"))),
+                ("name".into(), VmValue::String(Rc::from("lookup"))),
                 (
                     "description".into(),
-                    VmValue::String(Rc::from("Find matching files")),
+                    VmValue::String(Rc::from("Fetch one resource")),
                 ),
                 (
                     "parameters".into(),
-                    VmValue::Dict(Rc::new(BTreeMap::from([
-                        (
-                            "pattern".into(),
-                            VmValue::Dict(Rc::new(BTreeMap::from([
-                                ("type".into(), VmValue::String(Rc::from("str"))),
-                                (
-                                    "description".into(),
-                                    VmValue::String(Rc::from("Literal search text")),
-                                ),
-                            ]))),
-                        ),
-                        (
-                            "file_glob".into(),
-                            VmValue::Dict(Rc::new(BTreeMap::from([(
-                                "type".into(),
-                                VmValue::String(Rc::from("str")),
-                            )]))),
-                        ),
-                    ]))),
+                    VmValue::Dict(Rc::new(BTreeMap::from([(
+                        "target".into(),
+                        VmValue::Dict(Rc::new(BTreeMap::from([
+                            ("type".into(), VmValue::String(Rc::from("str"))),
+                            (
+                                "description".into(),
+                                VmValue::String(Rc::from("Resource identifier")),
+                            ),
+                        ]))),
+                    )]))),
                 ),
             ])
             .into(),
         )]));
 
         let prompt = build_tool_calling_contract_prompt(Some(&tools), "text", true);
-        assert!(prompt.contains("You may ONLY use these tools: search."));
         assert!(prompt.contains("Only the `### name(...)` headings above are tools."));
-        assert!(prompt.contains("never `file_glob(...)`"));
+        assert!(prompt.contains(
+            "Use named arguments unless the tool signature above has exactly one parameter"
+        ));
     }
 }
