@@ -273,19 +273,19 @@ fn build_router(state: Arc<PortalState>) -> Router {
 }
 
 async fn index() -> Html<&'static str> {
-    Html(include_str!("../../../portal/index.html"))
+    Html(include_str!("../../portal/index.html"))
 }
 
 async fn styles() -> impl IntoResponse {
     asset_response(
-        include_str!("../../../portal/styles.css"),
+        include_str!("../../portal/styles.css"),
         "text/css; charset=utf-8",
     )
 }
 
 async fn app_js() -> impl IntoResponse {
     asset_response(
-        include_str!("../../../portal/app.js"),
+        include_str!("../../portal/app.js"),
         "application/javascript; charset=utf-8",
     )
 }
