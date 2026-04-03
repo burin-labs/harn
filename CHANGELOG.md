@@ -2,6 +2,20 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.32
+
+### Changed
+
+- **Text-mode tool calling is more resilient to multiline edits and heredocs**
+  — the parser now supports heredoc-style multiline arguments, reports malformed
+  ```call``` blocks back to the model instead of silently dropping them, and
+  preserves phase-loop exit sentinels even when a response also contains tool
+  calls.
+- **`apply_edit` now retries dedented multiline patches across both local and
+  ACP-backed workspaces** — multiline patch requests that drift in leading
+  indentation are retried with a common-indent-stripped old/new pair, so host
+  editors and local runs recover the same way from heredoc indentation mismatch.
+
 ## v0.5.31
 
 ### Changed

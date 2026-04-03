@@ -280,6 +280,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                 .unwrap_or_default()
         });
         let done_sentinel = opt_str(&options, "done_sentinel");
+        let break_unless_phase = opt_str(&options, "break_unless_phase");
         let mut opts = extract_llm_options(&args)?;
         let result = run_agent_loop_internal(
             &mut opts,
@@ -289,6 +290,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                 max_nudges,
                 nudge: custom_nudge,
                 done_sentinel,
+                break_unless_phase,
                 tool_retries,
                 tool_backoff_ms,
                 tool_format,

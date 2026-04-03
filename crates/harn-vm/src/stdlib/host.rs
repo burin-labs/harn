@@ -7,6 +7,60 @@ use std::rc::Rc;
 use crate::value::{values_equal, VmError, VmValue};
 use crate::vm::Vm;
 
+fn common_leading_whitespace_prefix<'a>(left: &'a str, right: &str) -> &'a str {
+    let mut matched_bytes = 0usize;
+    for ((left_idx, left_ch), right_ch) in left.char_indices().zip(right.chars()) {
+        if !left_ch.is_whitespace() || !right_ch.is_whitespace() || left_ch != right_ch {
+            break;
+        }
+        matched_bytes = left_idx + left_ch.len_utf8();
+    }
+    &left[..matched_bytes]
+}
+
+fn dedent_multiline_patch_text(text: &str) -> Option<String> {
+    if !text.contains('\n') {
+        return None;
+    }
+
+    let mut lines = text.lines().collect::<Vec<_>>();
+    let non_empty = lines
+        .iter()
+        .copied()
+        .filter(|line| !line.trim().is_empty())
+        .collect::<Vec<_>>();
+    let first = non_empty.first()?;
+    let mut common = first
+        .chars()
+        .take_while(|ch| ch.is_whitespace())
+        .collect::<String>();
+    if common.is_empty() {
+        return None;
+    }
+
+    for line in non_empty.iter().skip(1) {
+        let leading = line
+            .chars()
+            .take_while(|ch| ch.is_whitespace())
+            .collect::<String>();
+        common = common_leading_whitespace_prefix(&common, &leading).to_string();
+        if common.is_empty() {
+            return None;
+        }
+    }
+
+    for line in &mut lines {
+        if line.trim().is_empty() {
+            continue;
+        }
+        if let Some(stripped) = line.strip_prefix(&common) {
+            *line = stripped;
+        }
+    }
+
+    Some(lines.join("\n"))
+}
+
 #[derive(Clone)]
 struct HostMock {
     capability: String,
@@ -441,12 +495,24 @@ pub(crate) fn register_host_builtins(vm: &mut Vm) {
                 let content = std::fs::read_to_string(&full_path).map_err(|e| {
                     VmError::Runtime(format!("host_invoke workspace.apply_edit: {e}"))
                 })?;
-                if !content.contains(&old_string) {
+                let (matched_old, replacement_new) = if content.contains(&old_string) {
+                    (old_string, new_string)
+                } else if let Some(dedented_old) = dedent_multiline_patch_text(&old_string) {
+                    if content.contains(&dedented_old) {
+                        let dedented_new =
+                            dedent_multiline_patch_text(&new_string).unwrap_or(new_string);
+                        (dedented_old, dedented_new)
+                    } else {
+                        return Err(VmError::Runtime(format!(
+                            "host_invoke workspace.apply_edit: '{old_string}' not found in {path}"
+                        )));
+                    }
+                } else {
                     return Err(VmError::Runtime(format!(
                         "host_invoke workspace.apply_edit: '{old_string}' not found in {path}"
                     )));
-                }
-                let updated = content.replacen(&old_string, &new_string, 1);
+                };
+                let updated = content.replacen(&matched_old, &replacement_new, 1);
                 std::fs::write(&full_path, updated).map_err(|e| {
                     VmError::Runtime(format!("host_invoke workspace.apply_edit: {e}"))
                 })?;
@@ -576,8 +642,8 @@ pub(crate) fn register_host_builtins(vm: &mut Vm) {
 #[cfg(test)]
 mod tests {
     use super::{
-        capability_manifest_with_mocks, mock_host_invoke, push_host_mock, reset_host_state,
-        HostMock,
+        capability_manifest_with_mocks, dedent_multiline_patch_text, mock_host_invoke,
+        push_host_mock, reset_host_state, HostMock,
     };
     use std::collections::BTreeMap;
     use std::rc::Rc;
@@ -685,5 +751,20 @@ mod tests {
             other => panic!("unexpected result: {other:?}"),
         }
         reset_host_state();
+    }
+
+    #[test]
+    fn dedent_multiline_patch_text_removes_common_indent() {
+        let text = "    @pytest.fixture\n    def event_loop():\n        yield loop\n";
+        let dedented = dedent_multiline_patch_text(text).expect("dedented");
+        assert_eq!(
+            dedented,
+            "@pytest.fixture\ndef event_loop():\n    yield loop"
+        );
+    }
+
+    #[test]
+    fn dedent_multiline_patch_text_keeps_already_aligned_text() {
+        assert!(dedent_multiline_patch_text("def event_loop():\n    yield loop").is_none());
     }
 }

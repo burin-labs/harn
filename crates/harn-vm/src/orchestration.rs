@@ -2888,6 +2888,7 @@ pub async fn execute_stage_node(
                     max_nudges: 3,
                     nudge: None,
                     done_sentinel: node.done_sentinel.clone(),
+                    break_unless_phase: None,
                     tool_retries: 0,
                     tool_backoff_ms: 1000,
                     tool_format: tool_format.clone(),

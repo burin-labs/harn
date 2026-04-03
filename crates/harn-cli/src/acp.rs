@@ -27,6 +27,70 @@ struct Session {
     host_bridge: Option<Rc<harn_vm::bridge::HostBridge>>,
 }
 
+fn common_leading_whitespace_prefix<'a>(left: &'a str, right: &str) -> &'a str {
+    let mut matched_bytes = 0usize;
+    for ((left_idx, left_ch), right_ch) in left.char_indices().zip(right.chars()) {
+        if !left_ch.is_whitespace() || !right_ch.is_whitespace() || left_ch != right_ch {
+            break;
+        }
+        matched_bytes = left_idx + left_ch.len_utf8();
+    }
+    &left[..matched_bytes]
+}
+
+fn dedent_multiline_patch_text(text: &str) -> Option<String> {
+    if !text.contains('\n') {
+        return None;
+    }
+
+    let mut lines = text.lines().collect::<Vec<_>>();
+    let non_empty = lines
+        .iter()
+        .copied()
+        .filter(|line| !line.trim().is_empty())
+        .collect::<Vec<_>>();
+    let first = non_empty.first()?;
+    let mut common = first
+        .chars()
+        .take_while(|ch| ch.is_whitespace())
+        .collect::<String>();
+    if common.is_empty() {
+        return None;
+    }
+
+    for line in non_empty.iter().skip(1) {
+        let leading = line
+            .chars()
+            .take_while(|ch| ch.is_whitespace())
+            .collect::<String>();
+        common = common_leading_whitespace_prefix(&common, &leading).to_string();
+        if common.is_empty() {
+            return None;
+        }
+    }
+
+    for line in &mut lines {
+        if line.trim().is_empty() {
+            continue;
+        }
+        if let Some(stripped) = line.strip_prefix(&common) {
+            *line = stripped;
+        }
+    }
+
+    Some(lines.join("\n"))
+}
+
+fn dedented_edit_retry(old_string: &str, new_string: &str) -> Option<(String, String)> {
+    let dedented_old = dedent_multiline_patch_text(old_string)?;
+    if dedented_old == old_string {
+        return None;
+    }
+    let dedented_new =
+        dedent_multiline_patch_text(new_string).unwrap_or_else(|| new_string.to_string());
+    Some((dedented_old, dedented_new))
+}
+
 // ---------------------------------------------------------------------------
 // AcpServer
 // ---------------------------------------------------------------------------
@@ -641,6 +705,43 @@ impl AcpBridge {
             }
         }
     }
+
+    async fn call_client_apply_edit(
+        &self,
+        path: &str,
+        old_string: &str,
+        new_string: &str,
+    ) -> Result<serde_json::Value, harn_vm::VmError> {
+        let request = |old_string: &str, new_string: &str| {
+            serde_json::json!({
+                "sessionId": self.session_id,
+                "path": path,
+                "old_string": old_string,
+                "new_string": new_string,
+            })
+        };
+
+        match self
+            .call_client("fs/apply_edit", request(old_string, new_string))
+            .await
+        {
+            Ok(result) => Ok(result),
+            Err(first_error) => {
+                let Some((dedented_old, dedented_new)) =
+                    dedented_edit_retry(old_string, new_string)
+                else {
+                    return Err(first_error);
+                };
+                match self
+                    .call_client("fs/apply_edit", request(&dedented_old, &dedented_new))
+                    .await
+                {
+                    Ok(result) => Ok(result),
+                    Err(_) => Err(first_error),
+                }
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -925,15 +1026,7 @@ async fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Rc<AcpBridge>) {
             let old_str = args.get(1).map(|a| a.display()).unwrap_or_default();
             let new_str = args.get(2).map(|a| a.display()).unwrap_or_default();
             bridge
-                .call_client(
-                    "fs/apply_edit",
-                    serde_json::json!({
-                        "sessionId": bridge.session_id,
-                        "path": file,
-                        "old_string": old_str,
-                        "new_string": new_str,
-                    }),
-                )
+                .call_client_apply_edit(&file, &old_str, &new_str)
                 .await?;
             Ok(harn_vm::VmValue::Nil)
         }
@@ -1096,15 +1189,7 @@ async fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Rc<AcpBridge>) {
                         .and_then(|v| v.as_str())
                         .unwrap_or_default();
                     let result = bridge
-                        .call_client(
-                            "fs/apply_edit",
-                            serde_json::json!({
-                                "sessionId": bridge.session_id,
-                                "path": path,
-                                "old_string": old_string,
-                                "new_string": new_string,
-                            }),
-                        )
+                        .call_client_apply_edit(path, old_string, new_string)
                         .await?;
                     Ok(harn_vm::bridge::json_result_to_vm_value(&result))
                 }
@@ -1638,7 +1723,9 @@ pub async fn run_acp_server(pipeline: Option<&str>) {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_host_capability_manifest;
+    use super::{
+        dedent_multiline_patch_text, dedented_edit_retry, normalize_host_capability_manifest,
+    };
     use harn_vm::VmValue;
     use std::collections::BTreeMap;
     use std::rc::Rc;
@@ -1670,5 +1757,25 @@ mod tests {
         assert!(ops
             .iter()
             .any(|value| value.display() == "scope_test_command"));
+    }
+
+    #[test]
+    fn dedent_multiline_patch_text_removes_common_indent() {
+        let text = "        @pytest.fixture\n        def event_loop():\n            yield loop";
+        let dedented = dedent_multiline_patch_text(text).expect("dedented");
+        assert_eq!(
+            dedented,
+            "@pytest.fixture\ndef event_loop():\n    yield loop"
+        );
+    }
+
+    #[test]
+    fn dedented_edit_retry_returns_both_old_and_new_variants() {
+        let old_string = "        old line\n            nested";
+        let new_string = "        new line\n            nested";
+        let (dedented_old, dedented_new) =
+            dedented_edit_retry(old_string, new_string).expect("retry payload");
+        assert_eq!(dedented_old, "old line\n    nested");
+        assert_eq!(dedented_new, "new line\n    nested");
     }
 }

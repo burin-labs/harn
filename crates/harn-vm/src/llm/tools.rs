@@ -605,13 +605,27 @@ pub(crate) fn build_tool_calling_contract_prompt(
              tool_name(param=\"value\", param2=\"value2\")\n\
              ```\n\
              ````\n\
-             For multiline string values (like file content), use triple quotes:\n\
+             For multiline string values (like file content or code), use heredoc syntax:\n\
              ````\n\
              ```call\n\
-             tool_name(param=\"value\", long_param=\"\"\"\n\
+             tool_name(param=\"value\", long_param=<<'EOF'\n\
              line 1\n\
              line 2\n\
-             \"\"\")\n\
+             EOF\n\
+             )\n\
+             ```\n\
+             ````\n\
+             The heredoc tag (EOF, BODY, etc.) can be any word. Content between the opening and closing tag is passed raw with no escaping needed.\n\
+             You can use multiple heredocs in one call:\n\
+             ````\n\
+             ```call\n\
+             edit(action=\"patch\", path=\"foo.py\", old_string=<<'OLD'\n\
+             old code\n\
+             OLD\n\
+             new_string=<<'NEW'\n\
+             new code\n\
+             NEW\n\
+             )\n\
              ```\n\
              ````\n\
              You can make multiple tool calls in one response by emitting multiple ` ```call ` blocks.\n\
@@ -632,14 +646,73 @@ pub(crate) fn build_tool_calling_contract_prompt(
 ///   ```
 #[cfg(test)]
 fn parse_text_tool_calls(text: &str) -> Vec<serde_json::Value> {
-    parse_text_tool_calls_with_tools(text, None)
+    parse_text_tool_calls_with_tools(text, None).calls
+}
+
+/// Find the end of a ```call block starting from `s`, skipping over heredoc bodies
+/// so that triple backticks inside heredoc content don't close the block early.
+/// Returns the byte offset within `s` where the closing ``` begins, or None.
+fn find_call_block_end(s: &str) -> Option<usize> {
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        // Check for heredoc opener: <<'TAG' or <<TAG
+        if i + 1 < bytes.len() && bytes[i] == b'<' && bytes[i + 1] == b'<' {
+            let mut j = i + 2;
+            let quoted = j < bytes.len() && bytes[j] == b'\'';
+            if quoted {
+                j += 1;
+            }
+            let tag_start = j;
+            while j < bytes.len() && bytes[j] != b'\n' {
+                if quoted && bytes[j] == b'\'' {
+                    break;
+                }
+                j += 1;
+            }
+            let tag = &s[tag_start..j];
+            if quoted && j < bytes.len() && bytes[j] == b'\'' {
+                j += 1;
+            }
+            // Skip to end of the <<'TAG' line
+            while j < bytes.len() && bytes[j] != b'\n' {
+                j += 1;
+            }
+            if j < bytes.len() && bytes[j] == b'\n' {
+                j += 1;
+            }
+            // Skip body until closing tag alone on a line
+            let closing = format!("{}\n", tag);
+            let rest = &s[j..];
+            if let Some(pos) = rest.find(&closing) {
+                i = j + pos + closing.len();
+            } else {
+                // No closing tag: skip to end
+                i = bytes.len();
+            }
+            continue;
+        }
+        // Check for closing ```
+        if i + 2 < bytes.len() && bytes[i] == b'`' && bytes[i + 1] == b'`' && bytes[i + 2] == b'`' {
+            return Some(i);
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Result of parsing text tool calls: successfully parsed calls + diagnostics for failures.
+pub(crate) struct TextToolParseResult {
+    pub calls: Vec<serde_json::Value>,
+    pub errors: Vec<String>,
 }
 
 pub(crate) fn parse_text_tool_calls_with_tools(
     text: &str,
     tools_val: Option<&VmValue>,
-) -> Vec<serde_json::Value> {
+) -> TextToolParseResult {
     let mut calls = Vec::new();
+    let mut errors = Vec::new();
     let mut search_from = 0;
 
     while let Some(start_offset) = text[search_from..].find("```call") {
@@ -650,7 +723,7 @@ pub(crate) fn parse_text_tool_calls_with_tools(
         } else {
             after_marker
         };
-        if let Some(end_offset) = text[content_start..].find("```") {
+        if let Some(end_offset) = find_call_block_end(&text[content_start..]) {
             let content_end = content_start + end_offset;
             let call_text = text[content_start..content_end].trim();
             if let Some((name, arguments)) = parse_function_call_syntax(call_text, tools_val) {
@@ -659,14 +732,28 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                     "name": name,
                     "arguments": arguments,
                 }));
+            } else {
+                // Call block found but couldn't parse the function syntax
+                let preview: String = call_text.chars().take(120).collect();
+                errors.push(format!(
+                    "TOOL CALL PARSE ERROR: Could not parse tool call from: `{preview}...`\n\
+                     Check: missing closing `)`, unmatched quotes, or malformed arguments.\n\
+                     For multiline string values, use heredoc syntax: param=<<'EOF'\\n...\\nEOF"
+                ));
             }
             search_from = content_end + "```".len();
         } else {
+            // Found ```call but no closing ``` — unclosed block
+            let preview: String = text[content_start..].chars().take(80).collect();
+            errors.push(format!(
+                "TOOL CALL PARSE ERROR: Found ```call block but no closing ```. Content starts with: `{preview}...`\n\
+                 Make sure every ```call block has a matching closing ```."
+            ));
             break;
         }
     }
 
-    calls
+    TextToolParseResult { calls, errors }
 }
 
 /// Parse function-call syntax: `name(key="value", key2="value2")`
@@ -699,44 +786,49 @@ fn parse_function_call_syntax(
         if let Some(eq_pos) = part.find('=') {
             let key = part[..eq_pos].trim().to_string();
             let val_str = part[eq_pos + 1..].trim();
-            let val = if val_str.starts_with('[') && val_str.ends_with(']') {
-                serde_json::from_str(val_str).unwrap_or_else(|_| serde_json::json!(val_str))
-            } else if val_str.starts_with('{') && val_str.ends_with('}') {
-                serde_json::from_str(val_str).unwrap_or_else(|_| serde_json::json!(val_str))
-            } else if val_str.starts_with("\"\"\"")
-                && val_str.ends_with("\"\"\"")
-                && val_str.len() >= 6
-            {
-                // Triple-quoted string: mostly raw, but process \" -> " and \\ -> \
-                // so models can include literal """ inside the block by writing \"\"\".
-                // Must be checked BEFORE single-quote to avoid stripping only 1 char.
-                let raw = &val_str[3..val_str.len() - 3];
-                let unescaped = raw.replace("\\\"", "\"").replace("\\\\", "\\");
-                serde_json::json!(unescaped)
-            } else if (val_str.starts_with('"') && val_str.ends_with('"'))
-                || (val_str.starts_with('\'') && val_str.ends_with('\''))
-            {
-                let inner = &val_str[1..val_str.len() - 1];
-                let unescaped = inner
-                    .replace("\\n", "\n")
-                    .replace("\\t", "\t")
-                    .replace("\\\"", "\"")
-                    .replace("\\'", "'")
-                    .replace("\\\\", "\\");
-                serde_json::json!(unescaped)
-            } else if val_str == "true" {
-                serde_json::json!(true)
-            } else if val_str == "false" {
-                serde_json::json!(false)
-            } else if val_str == "null" {
-                serde_json::Value::Null
-            } else if let Ok(n) = val_str.parse::<i64>() {
-                serde_json::json!(n)
-            } else if let Ok(n) = val_str.parse::<f64>() {
-                serde_json::json!(n)
-            } else {
-                serde_json::json!(val_str)
-            };
+            let val =
+                if val_str.starts_with("\x00H") && val_str.ends_with("\x00H") && val_str.len() >= 4
+                {
+                    // Heredoc content: completely raw, no unescaping
+                    serde_json::json!(&val_str[2..val_str.len() - 2])
+                } else if val_str.starts_with('[') && val_str.ends_with(']') {
+                    serde_json::from_str(val_str).unwrap_or_else(|_| serde_json::json!(val_str))
+                } else if val_str.starts_with('{') && val_str.ends_with('}') {
+                    serde_json::from_str(val_str).unwrap_or_else(|_| serde_json::json!(val_str))
+                } else if val_str.starts_with("\"\"\"")
+                    && val_str.ends_with("\"\"\"")
+                    && val_str.len() >= 6
+                {
+                    // Triple-quoted string: mostly raw, but process \" -> " and \\ -> \
+                    // so models can include literal """ inside the block by writing \"\"\".
+                    // Must be checked BEFORE single-quote to avoid stripping only 1 char.
+                    let raw = &val_str[3..val_str.len() - 3];
+                    let unescaped = raw.replace("\\\"", "\"").replace("\\\\", "\\");
+                    serde_json::json!(unescaped)
+                } else if (val_str.starts_with('"') && val_str.ends_with('"'))
+                    || (val_str.starts_with('\'') && val_str.ends_with('\''))
+                {
+                    let inner = &val_str[1..val_str.len() - 1];
+                    let unescaped = inner
+                        .replace("\\n", "\n")
+                        .replace("\\t", "\t")
+                        .replace("\\\"", "\"")
+                        .replace("\\'", "'")
+                        .replace("\\\\", "\\");
+                    serde_json::json!(unescaped)
+                } else if val_str == "true" {
+                    serde_json::json!(true)
+                } else if val_str == "false" {
+                    serde_json::json!(false)
+                } else if val_str == "null" {
+                    serde_json::Value::Null
+                } else if let Ok(n) = val_str.parse::<i64>() {
+                    serde_json::json!(n)
+                } else if let Ok(n) = val_str.parse::<f64>() {
+                    serde_json::json!(n)
+                } else {
+                    serde_json::json!(val_str)
+                };
             args.insert(key, val);
         } else if !part.is_empty() {
             // Positional arguments are only schema-driven for single-parameter tools.
@@ -783,6 +875,103 @@ fn split_call_args(s: &str) -> Vec<String> {
 
     while i < chars.len() {
         let ch = chars[i];
+        // Heredoc detection: <<'TAG' or <<TAG outside any quote/triple mode
+        if !in_quote && !in_triple && i + 1 < chars.len() && chars[i] == '<' && chars[i + 1] == '<'
+        {
+            // Parse the tag — skip past <<
+            let mut j = i + 2;
+            // Strip optional surrounding quotes on the tag
+            let quoted_tag = j < chars.len() && chars[j] == '\'';
+            if quoted_tag {
+                j += 1;
+            }
+            let tag_start = j;
+            while j < chars.len() && chars[j] != '\n' {
+                if quoted_tag && chars[j] == '\'' {
+                    break;
+                }
+                j += 1;
+            }
+            let tag: String = chars[tag_start..j].iter().collect();
+            if quoted_tag && j < chars.len() && chars[j] == '\'' {
+                j += 1; // skip closing quote
+            }
+            // Skip to end of the <<'TAG' line (past the newline)
+            while j < chars.len() && chars[j] != '\n' {
+                j += 1;
+            }
+            if j < chars.len() && chars[j] == '\n' {
+                j += 1;
+            }
+            // Now collect body lines until the closing tag appears alone on a line
+            let mut body = String::new();
+            let rest: String = chars[j..].iter().collect();
+            let closing = format!("{}\n", tag);
+            let closing_eoi = tag.as_str(); // closing at end with no trailing newline
+            let end_offset = if let Some(pos) = rest.find(&closing) {
+                // found tag followed by newline
+                let body_part = &rest[..pos];
+                body.push_str(body_part);
+                // strip trailing newline from body (heredoc convention)
+                if body.ends_with('\n') {
+                    body.pop();
+                }
+                j + pos + closing.len()
+            } else if rest.trim_end() == closing_eoi
+                || rest.ends_with(&format!("\n{}", closing_eoi))
+            {
+                // closing tag at very end of input with no trailing newline
+                let tag_at_end = format!("\n{}", closing_eoi);
+                if let Some(pos) = rest.rfind(&tag_at_end) {
+                    let body_part = &rest[..pos];
+                    body.push_str(body_part);
+                    j + pos + tag_at_end.len()
+                } else {
+                    body.push_str(&rest);
+                    j + rest.len()
+                }
+            } else {
+                // no closing tag found; treat rest as body
+                body.push_str(&rest);
+                j + rest.len()
+            };
+            // Encode as heredoc marker
+            current.push('\x00');
+            current.push('H');
+            current.push_str(&body);
+            current.push('\x00');
+            current.push('H');
+            // A heredoc is always a complete value — push the part now so the
+            // next key=value (with no preceding comma) starts fresh.
+            if !current.trim().is_empty() {
+                parts.push(current.trim().to_string());
+                current = String::new();
+            }
+            // Skip an optional comma + whitespace after the closing tag line
+            let rest_chars: Vec<char> = chars[end_offset..].to_vec();
+            let mut skip = 0;
+            while skip < rest_chars.len()
+                && (rest_chars[skip] == ' '
+                    || rest_chars[skip] == '\t'
+                    || rest_chars[skip] == '\n'
+                    || rest_chars[skip] == '\r')
+            {
+                skip += 1;
+            }
+            if skip < rest_chars.len() && rest_chars[skip] == ',' {
+                skip += 1;
+                while skip < rest_chars.len()
+                    && (rest_chars[skip] == ' '
+                        || rest_chars[skip] == '\t'
+                        || rest_chars[skip] == '\n'
+                        || rest_chars[skip] == '\r')
+                {
+                    skip += 1;
+                }
+            }
+            i = end_offset + skip;
+            continue;
+        }
         if !in_quote
             && i + 2 < chars.len()
             && chars[i] == '"'
@@ -1010,10 +1199,10 @@ mod tests {
             .into(),
         )]));
 
-        let calls =
+        let result =
             parse_text_tool_calls_with_tools("```call\nlookup(\"README.md\")\n```", Some(&tools));
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0]["arguments"]["target"], json!("README.md"));
+        assert_eq!(result.calls.len(), 1);
+        assert_eq!(result.calls[0]["arguments"]["target"], json!("README.md"));
     }
 
     #[test]
@@ -1130,5 +1319,51 @@ mod tests {
         assert!(prompt.contains("### lookup("));
         assert!(prompt.contains("query: string"));
         assert!(prompt.contains("folder: string"));
+    }
+
+    #[test]
+    fn parse_text_tool_calls_handles_heredoc_syntax() {
+        let calls = parse_text_tool_calls(
+            "```call\nedit(action=\"create\", path=\"test.py\", content=<<'EOF'\n\"\"\"Tests.\"\"\"\n\nimport pytest\nEOF\n)\n```",
+        );
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0]["name"], json!("edit"));
+        assert_eq!(calls[0]["arguments"]["action"], json!("create"));
+        assert_eq!(calls[0]["arguments"]["path"], json!("test.py"));
+        let content = calls[0]["arguments"]["content"].as_str().unwrap();
+        assert!(
+            content.contains("\"\"\"Tests.\"\"\""),
+            "should preserve Python docstrings raw"
+        );
+        assert!(content.contains("import pytest"));
+    }
+
+    #[test]
+    fn parse_text_tool_calls_handles_multiple_heredocs() {
+        let calls = parse_text_tool_calls(
+            "```call\nedit(action=\"patch\", path=\"foo.py\", old_string=<<'OLD'\ndef hello():\n    pass\nOLD\nnew_string=<<'NEW'\ndef hello():\n    print(\"hi\")\nNEW\n)\n```",
+        );
+        assert_eq!(calls.len(), 1);
+        assert_eq!(
+            calls[0]["arguments"]["old_string"],
+            json!("def hello():\n    pass")
+        );
+        assert_eq!(
+            calls[0]["arguments"]["new_string"],
+            json!("def hello():\n    print(\"hi\")")
+        );
+    }
+
+    #[test]
+    fn parse_text_tool_calls_heredoc_preserves_triple_backticks() {
+        let calls = parse_text_tool_calls(
+            "```call\nedit(action=\"create\", path=\"README.md\", content=<<'EOF'\n# Title\n```python\nprint(\"hello\")\n```\nEOF\n)\n```",
+        );
+        assert_eq!(calls.len(), 1);
+        let content = calls[0]["arguments"]["content"].as_str().unwrap();
+        assert!(
+            content.contains("```python"),
+            "should preserve triple backticks in content"
+        );
     }
 }

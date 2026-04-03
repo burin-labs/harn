@@ -56,6 +56,7 @@ pub struct AgentLoopConfig {
     pub max_nudges: usize,
     pub nudge: Option<String>,
     pub done_sentinel: Option<String>,
+    pub break_unless_phase: Option<String>,
     pub tool_retries: usize,
     pub tool_backoff_ms: u64,
     pub tool_format: String,
@@ -120,6 +121,26 @@ fn extract_retry_after_ms(err: &VmError) -> Option<u64> {
         }
     }
     None
+}
+
+fn loop_state_requests_phase_change(text: &str, current_phase: &str) -> bool {
+    if current_phase.trim().is_empty() {
+        return false;
+    }
+
+    let current_phase = current_phase.trim();
+    let mut last_next_phase: Option<&str> = None;
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("next_phase:") {
+            let phase = rest.trim();
+            if !phase.is_empty() {
+                last_next_phase = Some(phase);
+            }
+        }
+    }
+
+    last_next_phase.is_some_and(|phase| phase != current_phase)
 }
 
 /// Write the full LLM request payload to a JSONL transcript file.
@@ -330,6 +351,7 @@ pub async fn run_agent_loop_internal(
         .done_sentinel
         .clone()
         .unwrap_or_else(|| "##DONE##".to_string());
+    let break_unless_phase = config.break_unless_phase.clone();
     let tool_retries = config.tool_retries;
     let tool_backoff_ms = config.tool_backoff_ms;
     let tool_format = config.tool_format;
@@ -527,6 +549,7 @@ pub async fn run_agent_loop_internal(
         }
 
         let mut tool_call_source = "none";
+        let mut tool_parse_errors: Vec<String> = Vec::new();
         let tool_calls = if !result.tool_calls.is_empty() {
             tool_call_source = "native";
             result.tool_calls.clone()
@@ -535,17 +558,18 @@ pub async fn run_agent_loop_internal(
             // parsing as a compatibility fallback. This lets workflows use
             // tool_format="native" without breaking providers or models that still
             // emit ```call blocks.
-            let parsed = parse_text_tool_calls_with_tools(&text, tools_val);
-            if !parsed.is_empty() {
+            let parse_result = parse_text_tool_calls_with_tools(&text, tools_val);
+            if !parse_result.calls.is_empty() {
                 tool_call_source = "text_fallback";
                 if tool_format == "native" {
                     eprintln!(
                         "[harn] text_fallback_triggered: model emitted {} text call(s) in native mode",
-                        parsed.len()
+                        parse_result.calls.len()
                     );
                 }
             }
-            parsed
+            tool_parse_errors = parse_result.errors;
+            parse_result.calls
         } else {
             Vec::new()
         };
@@ -557,6 +581,15 @@ pub async fn run_agent_loop_internal(
                 text.len()
             );
         }
+
+        // Check done_sentinel on EVERY response, not just text-only ones.
+        // If present alongside tool calls, we still process the tools (so their
+        // results land in the conversation), but mark the loop to exit afterward.
+        let sentinel_hit = persistent
+            && (text.contains(&done_sentinel)
+                || break_unless_phase
+                    .as_deref()
+                    .is_some_and(|phase| loop_state_requests_phase_change(&text, phase)));
 
         if !tool_calls.is_empty() {
             consecutive_text_only = 0;
@@ -946,6 +979,9 @@ pub async fn run_agent_loop_internal(
                 }
             }
 
+            if sentinel_hit {
+                break;
+            }
             continue;
         }
 
@@ -954,9 +990,26 @@ pub async fn run_agent_loop_internal(
             "content": text,
         }));
 
-        if persistent && text.contains(&done_sentinel) {
+        // Sentinel check for text-only responses (no tool calls)
+        if sentinel_hit {
             break;
         }
+
+        // If the model attempted tool calls but parsing failed, send diagnostics
+        // back so it can fix its syntax instead of being silently nudged.
+        if !tool_parse_errors.is_empty() {
+            let error_msg = tool_parse_errors.join("\n\n");
+            opts.messages.push(serde_json::json!({
+                "role": "user",
+                "content": error_msg,
+            }));
+            tool_parse_errors.clear();
+            consecutive_text_only = 0;
+            continue;
+        }
+
+        // done_sentinel already checked before tool dispatch above;
+        // this path only reached for text-only responses without sentinel.
         if !persistent && !daemon {
             break;
         }
@@ -1117,6 +1170,7 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
             let tool_format =
                 opt_str(&options, "tool_format").unwrap_or_else(|| "text".to_string());
             let done_sentinel = opt_str(&options, "done_sentinel");
+            let break_unless_phase = opt_str(&options, "break_unless_phase");
             let daemon = opt_bool(&options, "daemon");
             let auto_compact = if opt_bool(&options, "auto_compact") {
                 let mut ac = crate::orchestration::AutoCompactConfig::default();
@@ -1160,6 +1214,7 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                     max_nudges,
                     nudge: custom_nudge,
                     done_sentinel,
+                    break_unless_phase,
                     tool_retries,
                     tool_backoff_ms,
                     tool_format,
@@ -1174,6 +1229,18 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
             Ok(crate::stdlib::json_to_vm_value(&result))
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::loop_state_requests_phase_change;
+
+    #[test]
+    fn detects_phase_change_from_latest_loop_state_footer() {
+        let text = "First\n\n## LOOP_STATE\nphase: assess\nnext_phase: ground\n## END_LOOP_STATE\n\nSecond\n\n## LOOP_STATE\nphase: ground\nnext_phase: execute\n## END_LOOP_STATE";
+        assert!(loop_state_requests_phase_change(text, "ground"));
+        assert!(!loop_state_requests_phase_change(text, "execute"));
+    }
 }
 
 /// Register a bridge-aware `llm_call` that emits call_start/call_end notifications.
