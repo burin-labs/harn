@@ -1195,9 +1195,10 @@ impl Compiler {
                             self.chunk.emit_u16(Op::Constant, idx, self.line);
                             part_count += 1;
                         }
-                        StringSegment::Expression(expr_str) => {
+                        StringSegment::Expression(expr_str, expr_line, expr_col) => {
                             // Parse and compile the embedded expression
-                            let mut lexer = harn_lexer::Lexer::new(expr_str);
+                            let mut lexer =
+                                harn_lexer::Lexer::with_position(expr_str, *expr_line, *expr_col);
                             if let Ok(tokens) = lexer.tokenize() {
                                 let mut parser = harn_parser::Parser::new(tokens);
                                 if let Ok(snode) = parser.parse_single_expression() {

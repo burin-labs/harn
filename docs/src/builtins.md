@@ -538,6 +538,11 @@ assert_eq(resp.status, 200)
 | `host_mock_clear()` | — | nil | Clear registered typed host mocks and recorded mock invocations |
 | `host_mock_calls()` | — | list | Return recorded typed host mock invocations |
 
+`host_capabilities()` returns the capability manifest surfaced by the active
+host bridge. The local runtime exposes the standard `workspace`, `process`,
+`template`, and `interaction` capabilities, and ACP/editor hosts may add
+additional capabilities or operations.
+
 Common workspace ops surfaced by hosts include `read_text`, `write_text`,
 `apply_edit`, `delete`, `exists`, `file_exists`, `list`, `project_root`, and
 optionally `roots` for multi-root workspaces.

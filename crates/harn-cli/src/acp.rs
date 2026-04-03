@@ -724,7 +724,7 @@ async fn execute_chunk(
     }
 
     // Register ACP-specific builtins that delegate file I/O to the editor.
-    register_acp_builtins(&mut vm, bridge.clone());
+    register_acp_builtins(&mut vm, bridge.clone()).await;
 
     // Set up bridge delegation so unknown builtins are forwarded to the ACP
     // client as `builtin_call` JSON-RPC requests. This remains the stable ACP
@@ -805,8 +805,44 @@ async fn load_host_mcp_clients(
     mcp_dict
 }
 
+fn normalize_host_capability_manifest(value: harn_vm::VmValue) -> harn_vm::VmValue {
+    let Some(root) = value.as_dict() else {
+        return harn_vm::VmValue::Dict(Rc::new(BTreeMap::new()));
+    };
+
+    let mut normalized = BTreeMap::new();
+    for (capability, entry) in root.iter() {
+        match entry {
+            harn_vm::VmValue::Dict(_) => {
+                normalized.insert(capability.clone(), entry.clone());
+            }
+            harn_vm::VmValue::List(list) => {
+                let mut dict = BTreeMap::new();
+                dict.insert("ops".to_string(), harn_vm::VmValue::List(list.clone()));
+                normalized.insert(capability.clone(), harn_vm::VmValue::Dict(Rc::new(dict)));
+            }
+            _ => {}
+        }
+    }
+
+    harn_vm::VmValue::Dict(Rc::new(normalized))
+}
+
 /// Register builtins that delegate to the ACP client (editor).
-fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Rc<AcpBridge>) {
+async fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Rc<AcpBridge>) {
+    let host_capability_manifest = bridge
+        .call_client(
+            "host/capabilities",
+            serde_json::json!({
+                "sessionId": bridge.session_id,
+            }),
+        )
+        .await
+        .map(|result| {
+            normalize_host_capability_manifest(harn_vm::bridge::json_result_to_vm_value(&result))
+        })
+        .unwrap_or_else(|_| harn_vm::VmValue::Dict(Rc::new(std::collections::BTreeMap::new())));
+
     // Override sync file builtins so async versions take precedence.
     for name in ["read_file", "write_file"] {
         vm.unregister_builtin(name);
@@ -954,108 +990,39 @@ fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Rc<AcpBridge>) {
 
     // --- Typed host capabilities ---
 
-    vm.register_builtin("host_capabilities", |_args, _out| {
-        Ok(harn_vm::VmValue::Dict(Rc::new(
-            std::collections::BTreeMap::from([
-                (
-                    "workspace".to_string(),
-                    harn_vm::VmValue::Dict(Rc::new(std::collections::BTreeMap::from([
-                        (
-                            "description".to_string(),
-                            harn_vm::VmValue::String(Rc::from(
-                                "Workspace file and directory operations.",
-                            )),
-                        ),
-                        (
-                            "ops".to_string(),
-                            harn_vm::VmValue::List(Rc::new(vec![
-                                harn_vm::VmValue::String(Rc::from("read_text")),
-                                harn_vm::VmValue::String(Rc::from("write_text")),
-                                harn_vm::VmValue::String(Rc::from("apply_edit")),
-                                harn_vm::VmValue::String(Rc::from("delete")),
-                                harn_vm::VmValue::String(Rc::from("exists")),
-                                harn_vm::VmValue::String(Rc::from("file_exists")),
-                                harn_vm::VmValue::String(Rc::from("list")),
-                                harn_vm::VmValue::String(Rc::from("project_root")),
-                            ])),
-                        ),
-                    ]))),
-                ),
-                (
-                    "process".to_string(),
-                    harn_vm::VmValue::Dict(Rc::new(std::collections::BTreeMap::from([
-                        (
-                            "description".to_string(),
-                            harn_vm::VmValue::String(Rc::from("Process execution.")),
-                        ),
-                        (
-                            "ops".to_string(),
-                            harn_vm::VmValue::List(Rc::new(vec![harn_vm::VmValue::String(
-                                Rc::from("exec"),
-                            )])),
-                        ),
-                    ]))),
-                ),
-                (
-                    "template".to_string(),
-                    harn_vm::VmValue::Dict(Rc::new(std::collections::BTreeMap::from([
-                        (
-                            "description".to_string(),
-                            harn_vm::VmValue::String(Rc::from("Template rendering.")),
-                        ),
-                        (
-                            "ops".to_string(),
-                            harn_vm::VmValue::List(Rc::new(vec![harn_vm::VmValue::String(
-                                Rc::from("render"),
-                            )])),
-                        ),
-                    ]))),
-                ),
-                (
-                    "interaction".to_string(),
-                    harn_vm::VmValue::Dict(Rc::new(std::collections::BTreeMap::from([
-                        (
-                            "description".to_string(),
-                            harn_vm::VmValue::String(Rc::from("User interaction.")),
-                        ),
-                        (
-                            "ops".to_string(),
-                            harn_vm::VmValue::List(Rc::new(vec![harn_vm::VmValue::String(
-                                Rc::from("ask"),
-                            )])),
-                        ),
-                    ]))),
-                ),
-            ]),
-        )))
+    let host_capabilities_cache = host_capability_manifest.clone();
+    vm.register_builtin("host_capabilities", move |_args, _out| {
+        Ok(host_capabilities_cache.clone())
     });
 
-    vm.register_builtin("host_has", |args, _out| {
+    let host_has_cache = host_capability_manifest.clone();
+    vm.register_builtin("host_has", move |args, _out| {
         let capability = args.first().map(|a| a.display()).unwrap_or_default();
         let op = args.get(1).map(|a| a.display());
-        let valid = matches!(
-            (capability.as_str(), op.as_deref()),
-            ("workspace", None)
-                | (
-                    "workspace",
-                    Some(
-                        "read_text"
-                            | "write_text"
-                            | "apply_edit"
-                            | "delete"
-                            | "exists"
-                            | "file_exists"
-                            | "list"
-                            | "project_root"
-                    ),
-                )
-                | ("process", None)
-                | ("process", Some("exec"))
-                | ("template", None)
-                | ("template", Some("render"))
-                | ("interaction", None)
-                | ("interaction", Some("ask"))
-        );
+        let valid = if let Some(manifest) = host_has_cache.as_dict() {
+            if let Some(value) = manifest.get(&capability) {
+                if let Some(cap) = value.as_dict() {
+                    if let Some(op) = op {
+                        cap.get("ops")
+                            .and_then(|ops| match ops {
+                                harn_vm::VmValue::List(list) => {
+                                    Some(list.iter().any(|item| item.display() == op))
+                                }
+                                _ => None,
+                            })
+                            .unwrap_or(false)
+                    } else {
+                        true
+                    }
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        } else {
+            false
+        };
         Ok(harn_vm::VmValue::Bool(valid))
     });
 
@@ -1098,17 +1065,22 @@ fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Rc<AcpBridge>) {
                         .get("content")
                         .and_then(|v| v.as_str())
                         .unwrap_or_default();
-                    bridge
+                    let overwrite = params_json
+                        .get("overwrite")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    let result = bridge
                         .call_client(
                             "fs/write_text_file",
                             serde_json::json!({
                                 "sessionId": bridge.session_id,
                                 "path": path,
                                 "content": content,
+                                "overwrite": overwrite,
                             }),
                         )
                         .await?;
-                    Ok(harn_vm::VmValue::Nil)
+                    Ok(harn_vm::bridge::json_result_to_vm_value(&result))
                 }
                 ("workspace", "apply_edit") => {
                     let path = params_json
@@ -1123,7 +1095,7 @@ fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Rc<AcpBridge>) {
                         .get("new_string")
                         .and_then(|v| v.as_str())
                         .unwrap_or_default();
-                    bridge
+                    let result = bridge
                         .call_client(
                             "fs/apply_edit",
                             serde_json::json!({
@@ -1134,7 +1106,7 @@ fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Rc<AcpBridge>) {
                             }),
                         )
                         .await?;
-                    Ok(harn_vm::VmValue::Nil)
+                    Ok(harn_vm::bridge::json_result_to_vm_value(&result))
                 }
                 ("workspace", "delete") => {
                     let path = params_json
@@ -1662,4 +1634,41 @@ pub async fn run_acp_server(pipeline: Option<&str>) {
             }
         })
         .await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_host_capability_manifest;
+    use harn_vm::VmValue;
+    use std::collections::BTreeMap;
+    use std::rc::Rc;
+
+    #[test]
+    fn normalize_host_capabilities_wraps_array_entries_in_ops_dicts() {
+        let mut root = BTreeMap::new();
+        root.insert(
+            "project".to_string(),
+            VmValue::List(Rc::new(vec![VmValue::String(Rc::from(
+                "scope_test_command",
+            ))])),
+        );
+
+        let normalized = normalize_host_capability_manifest(VmValue::Dict(Rc::new(root)));
+        let manifest = normalized.as_dict().expect("dict manifest");
+        let project = manifest
+            .get("project")
+            .and_then(|value| value.as_dict())
+            .expect("project capability dict");
+        let ops = project
+            .get("ops")
+            .and_then(|value| match value {
+                VmValue::List(list) => Some(list),
+                _ => None,
+            })
+            .expect("ops list");
+
+        assert!(ops
+            .iter()
+            .any(|value| value.display() == "scope_test_command"));
+    }
 }

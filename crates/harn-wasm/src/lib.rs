@@ -528,8 +528,8 @@ impl SyncInterpreter {
                 for seg in segments {
                     match seg {
                         StringSegment::Literal(s) => result.push_str(s),
-                        StringSegment::Expression(expr) => {
-                            let mut lexer = Lexer::new(expr);
+                        StringSegment::Expression(expr, line, col) => {
+                            let mut lexer = Lexer::with_position(expr, *line, *col);
                             let tokens = lexer.tokenize().map_err(|e| EvalStop::Error(e.to_string()))?;
                             let mut parser = Parser::new(tokens);
                             let node = parser.parse_single_expression().map_err(|e| EvalStop::Error(e.to_string()))?;

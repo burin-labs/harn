@@ -4,14 +4,15 @@ use std::fmt;
 #[derive(Debug, Clone, PartialEq)]
 pub enum StringSegment {
     Literal(String),
-    Expression(String),
+    /// An interpolated expression with its source position (line, column).
+    Expression(String, usize, usize),
 }
 
 impl fmt::Display for StringSegment {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             StringSegment::Literal(s) => write!(f, "{s}"),
-            StringSegment::Expression(e) => write!(f, "${{{e}}}"),
+            StringSegment::Expression(e, _, _) => write!(f, "${{{e}}}"),
         }
     }
 }

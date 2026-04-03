@@ -567,7 +567,7 @@ impl Formatter {
                 for seg in segments {
                     match seg {
                         StringSegment::Literal(s) => result.push_str(&escape_string(s)),
-                        StringSegment::Expression(e) => {
+                        StringSegment::Expression(e, _, _) => {
                             result.push_str(&format!("${{{e}}}"));
                         }
                     }

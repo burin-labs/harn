@@ -2,6 +2,26 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.29
+
+### Changed
+
+- **ACP host capability discovery now reflects the actual editor bridge**
+  instead of a hard-coded manifest — `host_capabilities()` and `host_has(...)`
+  now normalize the live `host/capabilities` response from the ACP client, so
+  host-specific capabilities and operations are visible to Harn programs while
+  still preserving the typed host contract shape expected by the runtime.
+- **ACP workspace mutations now preserve host result payloads** —
+  `host_invoke("workspace", "write_text", ...)` now forwards an `overwrite`
+  flag when provided and returns the editor bridge's result, and
+  `host_invoke("workspace", "apply_edit", ...)` now returns the host response
+  instead of discarding it.
+- **Interpolated string diagnostics now point at the embedded expression's real
+  source location** — lexer string segments now retain line/column metadata, and
+  the VM and WASM evaluators re-lex `${...}` expressions from their original
+  source position so parse failures inside interpolation report the correct
+  location.
+
 ## v0.5.28
 
 ### Changed

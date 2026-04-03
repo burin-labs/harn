@@ -47,6 +47,18 @@ impl Lexer {
         }
     }
 
+    /// Create a lexer that starts counting from the given source position.
+    /// Useful for re-lexing interpolated expressions at their original location.
+    pub fn with_position(source: &str, line: usize, column: usize) -> Self {
+        Self {
+            source: source.chars().collect(),
+            pos: 0,
+            byte_pos: 0,
+            line,
+            column,
+        }
+    }
+
     /// Tokenize source code, including comment tokens.
     pub fn tokenize_with_comments(&mut self) -> Result<Vec<Token>, LexerError> {
         self.tokenize_inner(true)
@@ -282,6 +294,8 @@ impl Lexer {
                 }
                 self.advance(); // skip $
                 self.advance(); // skip {
+                let expr_line = self.line;
+                let expr_col = self.column;
                 let mut depth = 1;
                 let mut expr = String::new();
                 while self.pos < self.source.len() && depth > 0 {
@@ -312,7 +326,7 @@ impl Lexer {
                         ),
                     ));
                 }
-                segments.push(StringSegment::Expression(expr));
+                segments.push(StringSegment::Expression(expr, expr_line, expr_col));
                 continue;
             }
 
@@ -716,7 +730,7 @@ mod tests {
         if let TokenKind::InterpolatedString(segs) = &tokens[0].kind {
             assert_eq!(segs.len(), 3);
             assert_eq!(segs[0], StringSegment::Literal("hello ".into()));
-            assert_eq!(segs[1], StringSegment::Expression("name".into()));
+            assert!(matches!(&segs[1], StringSegment::Expression(e, _, _) if e == "name"));
             assert_eq!(segs[2], StringSegment::Literal("!".into()));
         } else {
             panic!("Expected interpolated string");

@@ -682,7 +682,7 @@ impl<'a> Linter<'a> {
 
             Node::InterpolatedString(segments) => {
                 for seg in segments {
-                    if let StringSegment::Expression(expr) = seg {
+                    if let StringSegment::Expression(expr, _, _) = seg {
                         // Extract the root identifier from expressions like
                         // "name", "opts.host", "x + 1", etc.
                         // We split on non-identifier chars and record any
