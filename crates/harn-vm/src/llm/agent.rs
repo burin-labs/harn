@@ -131,6 +131,8 @@ fn dump_llm_request(iteration: usize, call_id: &str, opts: &super::api::LlmCallO
     };
     let _ = std::fs::create_dir_all(&dir);
     let path = format!("{dir}/llm_transcript.jsonl");
+    let tool_schemas =
+        crate::llm::tools::collect_tool_schemas(opts.tools.as_ref(), opts.native_tools.as_deref());
     let entry = serde_json::json!({
         "type": "request",
         "iteration": iteration,
@@ -142,6 +144,7 @@ fn dump_llm_request(iteration: usize, call_id: &str, opts: &super::api::LlmCallO
         "messages": opts.messages,
         "max_tokens": opts.max_tokens,
         "temperature": opts.temperature,
+        "tool_schemas": tool_schemas,
         "tool_format": std::env::var("HARN_AGENT_TOOL_FORMAT").unwrap_or_else(|_| "text".to_string()),
     });
     if let Ok(line) = serde_json::to_string(&entry) {
@@ -344,12 +347,10 @@ pub async fn run_agent_loop_internal(
 
     let tools_owned = opts.tools.clone();
     let tools_val = tools_owned.as_ref();
-    let has_tools = !opts
-        .native_tools
-        .as_ref()
-        .map(|v| v.is_empty())
-        .unwrap_or(true)
-        || tools_val.is_some();
+    let native_tools_for_prompt = opts.native_tools.clone();
+    let rendered_schemas =
+        crate::llm::tools::collect_tool_schemas(tools_val, native_tools_for_prompt.as_deref());
+    let has_tools = !rendered_schemas.is_empty();
 
     if has_tools && tool_format != "native" {
         opts.native_tools = None;
@@ -358,6 +359,7 @@ pub async fn run_agent_loop_internal(
         let system_prompt = opts.system.get_or_insert_with(String::new);
         system_prompt.push_str(&build_tool_calling_contract_prompt(
             tools_val,
+            native_tools_for_prompt.as_deref(),
             &tool_format,
             tool_format == "text",
         ));
@@ -744,41 +746,24 @@ pub async fn run_agent_loop_internal(
                         {
                             Ok(serde_json::Value::String(local_result))
                         } else if let Some(handler) = find_tool_handler(tools_val, tool_name) {
-                            // Harn-defined tool handler — invoke via child VM
-                            match crate::vm::take_async_builtin_child_vm() {
-                                Some(mut vm) => {
-                                    let args_vm = crate::stdlib::json_to_vm_value(&tool_args);
-                                    let handler_result =
-                                        vm.call_closure_pub(&handler, &[args_vm], &[]).await;
-                                    crate::vm::restore_async_builtin_child_vm(vm);
-                                    match handler_result {
-                                        Ok(val) => Ok(serde_json::Value::String(val.display())),
-                                        Err(e) => {
-                                            Ok(serde_json::Value::String(format!("Error: {e}")))
-                                        }
-                                    }
+                            // Harn-defined tool handler — invoke via child VM.
+                            // Do not silently fall through to builtin_call. If a tool is
+                            // Harn-owned, it must execute in Harn or fail loudly.
+                            let mut vm = crate::vm::take_async_builtin_child_vm().ok_or_else(|| {
+                                VmError::CategorizedError {
+                                    message: format!(
+                                        "tool '{tool_name}' is Harn-owned but no child VM context was available; refusing to fall through to builtin_call"
+                                    ),
+                                    category: ErrorCategory::ToolRejected,
                                 }
-                                None => {
-                                    // No child VM available — fall through to bridge
-                                    if let Some(bridge) = bridge.as_ref() {
-                                        bridge
-                                            .call(
-                                                "builtin_call",
-                                                serde_json::json!({
-                                                    "name": tool_name,
-                                                    "args": [tool_args],
-                                                }),
-                                            )
-                                            .await
-                                    } else {
-                                        Err(VmError::CategorizedError {
-                                            message: format!(
-                                                "tool handler requires VM context: {tool_name}"
-                                            ),
-                                            category: ErrorCategory::ToolRejected,
-                                        })
-                                    }
-                                }
+                            })?;
+                            let args_vm = crate::stdlib::json_to_vm_value(&tool_args);
+                            let handler_result =
+                                vm.call_closure_pub(&handler, &[args_vm], &[]).await;
+                            crate::vm::restore_async_builtin_child_vm(vm);
+                            match handler_result {
+                                Ok(val) => Ok(serde_json::Value::String(val.display())),
+                                Err(e) => Ok(serde_json::Value::String(format!("Error: {e}"))),
                             }
                         } else if let Some(bridge) = bridge.as_ref() {
                             bridge

@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
 use super::vm_value_to_json;
@@ -396,56 +396,152 @@ fn extract_params_from_vm_dict(td: &BTreeMap<String, VmValue>) -> Vec<(String, S
 }
 
 type ToolParamSchema = (String, String, String);
-type ToolSchema = (String, String, Vec<ToolParamSchema>);
 
-fn collect_tool_schemas(tools_val: Option<&VmValue>) -> Vec<ToolSchema> {
-    match tools_val {
-        Some(VmValue::List(list)) => list
-            .iter()
-            .filter_map(|v| match v {
-                VmValue::Dict(td) => {
-                    let name = td.get("name")?.display();
-                    let desc = td
-                        .get("description")
-                        .map(|v| v.display())
-                        .unwrap_or_default();
-                    let params = extract_params_from_vm_dict(td);
-                    Some((name, desc, params))
-                }
-                _ => None,
-            })
-            .collect(),
+#[derive(Clone, Debug, serde::Serialize)]
+pub(crate) struct ToolSchema {
+    name: String,
+    description: String,
+    params: Vec<ToolParamSchema>,
+}
+
+fn collect_vm_tool_schemas(tools_val: Option<&VmValue>) -> Vec<ToolSchema> {
+    let entries: Vec<&VmValue> = match tools_val {
+        Some(VmValue::List(list)) => list.iter().collect(),
         Some(VmValue::Dict(d)) => {
             if let Some(VmValue::List(tools)) = d.get("tools") {
-                tools
-                    .iter()
-                    .filter_map(|v| match v {
-                        VmValue::Dict(td) => {
-                            let name = td.get("name")?.display();
-                            let desc = td
-                                .get("description")
-                                .map(|v| v.display())
-                                .unwrap_or_default();
-                            let params = extract_params_from_vm_dict(td);
-                            Some((name, desc, params))
-                        }
-                        _ => None,
-                    })
-                    .collect()
+                tools.iter().collect()
             } else {
                 Vec::new()
             }
         }
         _ => Vec::new(),
+    };
+
+    entries
+        .into_iter()
+        .filter_map(|value| match value {
+            VmValue::Dict(td) => {
+                let name = td.get("name")?.display();
+                let description = td
+                    .get("description")
+                    .map(|v| v.display())
+                    .unwrap_or_default();
+                let params = extract_params_from_vm_dict(td);
+                Some(ToolSchema {
+                    name,
+                    description,
+                    params,
+                })
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn schema_type_from_json(value: &serde_json::Value) -> String {
+    value
+        .as_str()
+        .map(ToString::to_string)
+        .or_else(|| {
+            value
+                .get("type")
+                .and_then(|inner| inner.as_str())
+                .map(ToString::to_string)
+        })
+        .unwrap_or_else(|| "string".to_string())
+}
+
+fn schema_description_from_json(value: &serde_json::Value) -> String {
+    value
+        .as_str()
+        .map(ToString::to_string)
+        .or_else(|| {
+            value
+                .get("description")
+                .and_then(|inner| inner.as_str())
+                .map(ToString::to_string)
+        })
+        .unwrap_or_default()
+}
+
+fn extract_params_from_native_schema(input_schema: &serde_json::Value) -> Vec<ToolParamSchema> {
+    input_schema
+        .get("properties")
+        .and_then(|value| value.as_object())
+        .map(|properties| {
+            let mut params = properties
+                .iter()
+                .map(|(name, value)| {
+                    (
+                        name.clone(),
+                        schema_type_from_json(value),
+                        schema_description_from_json(value),
+                    )
+                })
+                .collect::<Vec<_>>();
+            params.sort_by(|a, b| a.0.cmp(&b.0));
+            params
+        })
+        .unwrap_or_default()
+}
+
+fn collect_native_tool_schemas(native_tools: Option<&[serde_json::Value]>) -> Vec<ToolSchema> {
+    native_tools
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|tool| {
+            let function = tool.get("function");
+            let name = function
+                .and_then(|value| value.get("name"))
+                .or_else(|| tool.get("name"))
+                .and_then(|value| value.as_str())?;
+            let description = function
+                .and_then(|value| value.get("description"))
+                .or_else(|| tool.get("description"))
+                .and_then(|value| value.as_str())
+                .unwrap_or_default()
+                .to_string();
+            let input_schema = function
+                .and_then(|value| value.get("parameters"))
+                .or_else(|| tool.get("input_schema"))
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!({"type": "object"}));
+            Some(ToolSchema {
+                name: name.to_string(),
+                description,
+                params: extract_params_from_native_schema(&input_schema),
+            })
+        })
+        .collect()
+}
+
+pub(crate) fn collect_tool_schemas(
+    tools_val: Option<&VmValue>,
+    native_tools: Option<&[serde_json::Value]>,
+) -> Vec<ToolSchema> {
+    let mut merged = collect_vm_tool_schemas(tools_val);
+    let mut seen = merged
+        .iter()
+        .map(|schema| schema.name.clone())
+        .collect::<BTreeSet<_>>();
+
+    for schema in collect_native_tool_schemas(native_tools) {
+        if seen.insert(schema.name.clone()) {
+            merged.push(schema);
+        }
     }
+
+    merged.sort_by(|a, b| a.name.cmp(&b.name));
+    merged
 }
 
 fn positional_param_name(tool_name: &str, position: usize, tools_val: Option<&VmValue>) -> String {
-    let param_names = collect_tool_schemas(tools_val)
+    let param_names = collect_tool_schemas(tools_val, None)
         .into_iter()
-        .find(|(name, _, _)| name == tool_name)
-        .map(|(_, _, params)| {
-            params
+        .find(|schema| schema.name == tool_name)
+        .map(|schema| {
+            schema
+                .params
                 .into_iter()
                 .map(|(name, _, _)| name)
                 .collect::<Vec<_>>()
@@ -464,6 +560,7 @@ fn positional_param_name(tool_name: &str, position: usize, tools_val: Option<&Vm
 /// stale tool syntax examples that can drift from actual parser behavior.
 pub(crate) fn build_tool_calling_contract_prompt(
     tools_val: Option<&VmValue>,
+    native_tools: Option<&[serde_json::Value]>,
     mode: &str,
     include_format: bool,
 ) -> String {
@@ -473,17 +570,21 @@ pub(crate) fn build_tool_calling_contract_prompt(
     ));
     prompt.push_str("## Available tools\n\n");
 
-    let schemas = collect_tool_schemas(tools_val);
+    let schemas = collect_tool_schemas(tools_val, native_tools);
 
     // Present tools as Python-like function signatures
-    for (tool_name, desc, params) in &schemas {
-        let sig = params
+    for schema in &schemas {
+        let sig = schema
+            .params
             .iter()
             .map(|(pname, ptype, _)| format!("{pname}: {ptype}"))
             .collect::<Vec<_>>()
             .join(", ");
-        prompt.push_str(&format!("### {tool_name}({sig})\n{desc}\n"));
-        for (pname, _, pdesc) in params {
+        prompt.push_str(&format!(
+            "### {}({sig})\n{}\n",
+            schema.name, schema.description
+        ));
+        for (pname, _, pdesc) in &schema.params {
             if !pdesc.is_empty() {
                 prompt.push_str(&format!("- `{pname}`: {pdesc}\n"));
             }
@@ -949,7 +1050,7 @@ mod tests {
 
     #[test]
     fn tool_calling_contract_marks_active_text_mode() {
-        let prompt = build_tool_calling_contract_prompt(None, "text", true);
+        let prompt = build_tool_calling_contract_prompt(None, None, "text", true);
         assert!(prompt.contains("Active mode: `text`"));
         assert!(prompt.contains("```call"));
     }
@@ -980,10 +1081,34 @@ mod tests {
             .into(),
         )]));
 
-        let prompt = build_tool_calling_contract_prompt(Some(&tools), "text", true);
+        let prompt = build_tool_calling_contract_prompt(Some(&tools), None, "text", true);
         assert!(prompt.contains("Only the `### name(...)` headings above are tools."));
         assert!(prompt.contains(
             "Use named arguments unless the tool signature above has exactly one parameter"
         ));
+    }
+
+    #[test]
+    fn tool_calling_contract_renders_native_tools_when_vm_registry_is_missing() {
+        let native_tools = vec![serde_json::json!({
+            "type": "function",
+            "function": {
+                "name": "lookup",
+                "description": "Look up a symbol",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Symbol name"},
+                        "folder": {"type": "string", "description": "Optional folder scope"}
+                    },
+                    "required": []
+                }
+            }
+        })];
+
+        let prompt = build_tool_calling_contract_prompt(None, Some(&native_tools), "text", true);
+        assert!(prompt.contains("### lookup("));
+        assert!(prompt.contains("query: string"));
+        assert!(prompt.contains("folder: string"));
     }
 }

@@ -9,6 +9,7 @@ pub fn get_stdlib_source(module: &str) -> Option<&'static str> {
         "math" => Some(include_str!("stdlib_math.harn")),
         "path" => Some(include_str!("stdlib_path.harn")),
         "json" => Some(include_str!("stdlib_json.harn")),
+        "testing" => Some(include_str!("stdlib_testing.harn")),
         "context" => Some(include_str!("stdlib_context.harn")),
         "project" => Some(include_str!("stdlib_project.harn")),
         "async" => Some(include_str!("stdlib_async.harn")),

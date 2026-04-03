@@ -2,6 +2,34 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.30
+
+### Added
+
+- **`std/testing` now provides higher-level host-mock helpers for Harn tests**
+  — Harn scripts can import `clear_host_mocks()`, `mock_host_result(...)`,
+  `mock_host_error(...)`, `mock_host_response(...)`, and call assertion helpers
+  such as `assert_host_called(...)` and `assert_host_call_count(...)` instead
+  of wiring test expectations directly against the lower-level host mock
+  builtins.
+
+### Changed
+
+- **Text-mode tool prompting now renders schemas from native tools too** —
+  the tool-contract prompt and positional argument inference can now derive
+  parameter signatures from host/native tool schemas when a VM tool registry is
+  absent, so text-mode agent loops stay usable in native-tool configurations
+  instead of silently dropping tool shape information.
+- **Harn-owned tool handlers now fail closed without VM execution context** —
+  agent loops no longer fall through to bridge `builtin_call` for tools that
+  have Harn handler closures attached; if no child VM context is available, the
+  call is rejected explicitly so Harn-owned tool execution cannot be silently
+  rerouted through the host.
+- **LLM transcript dumps now retain resolved tool schema context** — request
+  transcript entries now capture the rendered tool schemas used for prompting,
+  which makes text-mode tool-call debugging and replay inspection more faithful
+  to the actual agent execution surface.
+
 ## v0.5.29
 
 ### Changed

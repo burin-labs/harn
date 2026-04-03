@@ -135,6 +135,9 @@ registry instead of duplicating the same ceilings in separate node config.
 - Runtime-local typed host mocking for tests via `host_mock(...)`,
   `host_mock_clear()`, and `host_mock_calls()`, so `.harn` conformance and VM
   tests can exercise host-backed flows without requiring a live bridge host.
+  `import "std/testing"` adds higher-level helpers such as
+  `mock_host_result(...)`, `mock_host_error(...)`, and
+  `assert_host_called(...)` for ordinary Harn tests.
 - Eval suite manifests and baseline comparisons via `eval_suite_manifest(...)`,
   `eval_suite_run(...)`, and `harn eval <manifest.json>`, so grouped replay
   regression suites are first-class runtime data instead of external scripts.

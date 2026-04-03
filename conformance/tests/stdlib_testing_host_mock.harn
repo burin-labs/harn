@@ -1,0 +1,41 @@
+import {
+  assert_host_called,
+  assert_host_call_count,
+  clear_host_mocks,
+  host_call_count,
+  host_call_count_for,
+  host_calls,
+  host_calls_for,
+  host_was_called,
+  mock_host_error,
+  mock_host_response,
+  mock_host_result,
+} from "std/testing"
+
+pipeline test(task) {
+  clear_host_mocks()
+  mock_host_result("workspace", "read_text", "hello", {path: "note.txt"})
+  mock_host_response(
+    "project",
+    "metadata_get",
+    {result: {value: "facts"}, params: {namespace: "facts"}},
+  )
+  mock_host_error("project", "metadata_set", "write denied", {dir: "pkg"})
+  let note = host_invoke("workspace", "read_text", {path: "note.txt"})
+  let facts = host_invoke("project", "metadata_get", {dir: "pkg", namespace: "facts"})
+  let denied = try {
+    host_invoke("project", "metadata_set", {dir: "pkg", namespace: "facts", value: {}})
+  }
+  assert_eq(note, "hello")
+  assert_eq(facts?.value, "facts")
+  assert(is_err(denied))
+  assert(host_was_called("workspace", "read_text", {path: "note.txt"}))
+  assert_host_called("project", "metadata_get", {namespace: "facts"}, nil)
+  assert_eq(host_call_count(), 3)
+  assert_eq(host_call_count_for("project", "metadata_get"), 1)
+  assert_eq(host_call_count_for("project", "metadata_set"), 1)
+  assert_eq(len(host_calls()), 3)
+  assert_eq(len(host_calls_for("project", "metadata_get")), 1)
+  assert_host_call_count(1, "workspace", "read_text", nil)
+  println("ok")
+}

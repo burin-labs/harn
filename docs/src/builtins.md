@@ -554,6 +554,26 @@ requires the declared `params` subset to match the actual `host_invoke(...)`
 call. Matched calls are recorded in `host_mock_calls()` as
 `{capability, operation, params}` dictionaries.
 
+For higher-level test helpers, import `std/testing`:
+
+```harn
+import {
+  assert_host_called,
+  clear_host_mocks,
+  mock_host_error,
+  mock_host_result,
+} from "std/testing"
+
+clear_host_mocks()
+mock_host_result("workspace", "read_text", "hello", {path: "note.txt"})
+assert_eq(host_invoke("workspace", "read_text", {path: "note.txt"}), "hello")
+assert_host_called("workspace", "read_text", {path: "note.txt"}, nil)
+
+mock_host_error("project", "scan", "scan failed", nil)
+let result = try { host_invoke("project", "scan", {}) }
+assert(is_err(result))
+```
+
 ## Async and timing
 
 | Function | Parameters | Returns | Description |
