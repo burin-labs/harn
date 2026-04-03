@@ -37,6 +37,7 @@ pub enum Node {
         params: Vec<String>,
         body: Vec<SNode>,
         extends: Option<String>,
+        is_pub: bool,
     },
     LetBinding {
         pattern: BindingPattern,
@@ -64,13 +65,16 @@ pub enum Node {
     EnumDecl {
         name: String,
         variants: Vec<EnumVariant>,
+        is_pub: bool,
     },
     StructDecl {
         name: String,
         fields: Vec<StructField>,
+        is_pub: bool,
     },
     InterfaceDecl {
         name: String,
+        type_params: Vec<TypeParam>,
         methods: Vec<InterfaceMethod>,
     },
     /// Impl block: impl TypeName { fn method(self, ...) { ... } ... }
@@ -330,6 +334,7 @@ pub struct StructField {
 #[derive(Debug, Clone, PartialEq)]
 pub struct InterfaceMethod {
     pub name: String,
+    pub type_params: Vec<TypeParam>,
     pub params: Vec<TypedParam>,
     pub return_type: Option<TypeExpr>,
 }

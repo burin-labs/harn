@@ -186,6 +186,7 @@ impl tower_lsp::LanguageServer for HarnLsp {
                 HarnSymbolKind::Parameter => (CompletionItemKind::VARIABLE, "parameter"),
                 HarnSymbolKind::Enum => (CompletionItemKind::ENUM, "enum"),
                 HarnSymbolKind::Struct => (CompletionItemKind::STRUCT, "struct"),
+                HarnSymbolKind::Interface => (CompletionItemKind::INTERFACE, "interface"),
             };
             items.push(CompletionItem {
                 label: sym.name.clone(),
@@ -252,6 +253,7 @@ impl tower_lsp::LanguageServer for HarnLsp {
                         | HarnSymbolKind::Parameter
                         | HarnSymbolKind::Enum
                         | HarnSymbolKind::Struct
+                        | HarnSymbolKind::Interface
                 )
             {
                 let range = span_to_full_range(&sym.def_span, &source);
@@ -334,6 +336,7 @@ impl tower_lsp::LanguageServer for HarnLsp {
                 HarnSymbolKind::Variable => SymbolKind::VARIABLE,
                 HarnSymbolKind::Enum => SymbolKind::ENUM,
                 HarnSymbolKind::Struct => SymbolKind::STRUCT,
+                HarnSymbolKind::Interface => SymbolKind::INTERFACE,
                 HarnSymbolKind::Parameter => continue, // skip params from outline
             };
             // Only show top-level and direct-child symbols
@@ -352,6 +355,7 @@ impl tower_lsp::LanguageServer for HarnLsp {
                 HarnSymbolKind::Variable => "variable",
                 HarnSymbolKind::Enum => "enum",
                 HarnSymbolKind::Struct => "struct",
+                HarnSymbolKind::Interface => "interface",
                 HarnSymbolKind::Parameter => "parameter",
             };
             doc_symbols.push(DocumentSymbol {
@@ -486,6 +490,7 @@ impl tower_lsp::LanguageServer for HarnLsp {
                         HarnSymbolKind::Parameter => "parameter",
                         HarnSymbolKind::Enum => "enum",
                         HarnSymbolKind::Struct => "struct",
+                        HarnSymbolKind::Interface => "interface",
                     };
                     hover_text.push_str(&format!("**{kind_str}** `{}`", sym.name));
                 }
@@ -651,6 +656,7 @@ impl tower_lsp::LanguageServer for HarnLsp {
                     HarnSymbolKind::Variable => SymbolKind::VARIABLE,
                     HarnSymbolKind::Enum => SymbolKind::ENUM,
                     HarnSymbolKind::Struct => SymbolKind::STRUCT,
+                    HarnSymbolKind::Interface => SymbolKind::INTERFACE,
                     HarnSymbolKind::Parameter => continue,
                 };
                 let name_lower = sym.name.to_lowercase();

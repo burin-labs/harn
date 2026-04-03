@@ -106,8 +106,16 @@
 (interface_declaration
   name: (identifier) @type)
 
+(interface_declaration
+  (generic_params
+    (identifier) @type))
+
 (interface_method
   name: (identifier) @function)
+
+(interface_method
+  (generic_params
+    (identifier) @type))
 
 ; Generic params
 (generic_params

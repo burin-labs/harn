@@ -72,6 +72,13 @@ fn test_roundtrip_interface() {
 }
 
 #[test]
+fn test_roundtrip_public_decls_and_generic_interface() {
+    assert_roundtrip(
+        "pub pipeline build(task) extends base {\n  return\n}\n\npub enum Result {\n  Ok(value: string)\n}\n\npub struct Config {\n  port?: int\n}\n\ninterface Repository<T> {\n  fn map<U>(value: T, f: fn(T) -> U) -> U\n}",
+    );
+}
+
+#[test]
 fn test_roundtrip_enum() {
     assert_roundtrip("enum Color {\n  Red\n  Green\n  Blue\n}\npipeline default(task) { log(1) }");
 }

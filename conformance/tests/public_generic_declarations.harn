@@ -1,0 +1,21 @@
+pub enum Status {
+  Ready(message: string)
+  Failed(message: string, code: int)
+}
+
+pub struct Config {
+  host: string
+  port?: int
+}
+
+interface Repository<T> {
+  fn get(self, id: string) -> T
+  fn map<U>(self, value: T, f: fn(T) -> U) -> U
+}
+
+pub pipeline default() {
+  let status = Status.Ready("ready")
+  let cfg = Config({host: "localhost"})
+  println(status.variant)
+  println(cfg.host)
+}

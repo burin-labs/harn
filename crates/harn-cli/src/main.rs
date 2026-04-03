@@ -607,9 +607,9 @@ pub(crate) fn parse_source_file(path: &str) -> (String, Vec<harn_parser::SNode>)
                     path,
                     &span,
                     "error",
-                    &e.to_string(),
-                    Some("unexpected token"),
-                    None,
+                    &harn_parser::diagnostic::parser_error_message(e),
+                    Some(harn_parser::diagnostic::parser_error_label(e)),
+                    harn_parser::diagnostic::parser_error_help(e),
                 );
                 eprint!("{diagnostic}");
             }
@@ -631,7 +631,7 @@ fn error_span_from_lex(e: &harn_lexer::LexerError) -> harn_lexer::Span {
 fn error_span_from_parse(e: &harn_parser::ParserError) -> harn_lexer::Span {
     match e {
         harn_parser::ParserError::Unexpected { span, .. } => *span,
-        harn_parser::ParserError::UnexpectedEof { .. } => harn_lexer::Span::dummy(),
+        harn_parser::ParserError::UnexpectedEof { span, .. } => *span,
     }
 }
 

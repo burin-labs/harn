@@ -374,7 +374,7 @@ fn classify_identifier(name: &str, span: &Span, symbols: &[SymbolInfo], source: 
             HarnSymbolKind::Parameter => sem::PARAMETER,
             HarnSymbolKind::Variable => sem::VARIABLE,
             HarnSymbolKind::Enum => sem::NAMESPACE,
-            HarnSymbolKind::Struct => sem::TYPE,
+            HarnSymbolKind::Struct | HarnSymbolKind::Interface => sem::TYPE,
         },
         None => {
             // Check if it's a builtin function

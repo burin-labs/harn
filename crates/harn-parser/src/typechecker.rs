@@ -560,15 +560,15 @@ impl TypeChecker {
                 Node::TypeDecl { name, type_expr } => {
                     scope.type_aliases.insert(name.clone(), type_expr.clone());
                 }
-                Node::EnumDecl { name, variants } => {
+                Node::EnumDecl { name, variants, .. } => {
                     let variant_names: Vec<String> =
                         variants.iter().map(|v| v.name.clone()).collect();
                     scope.enums.insert(name.clone(), variant_names);
                 }
-                Node::InterfaceDecl { name, methods } => {
+                Node::InterfaceDecl { name, methods, .. } => {
                     scope.interfaces.insert(name.clone(), methods.clone());
                 }
-                Node::StructDecl { name, fields } => {
+                Node::StructDecl { name, fields, .. } => {
                     let field_types: Vec<(String, InferredType)> = fields
                         .iter()
                         .map(|f| (f.name.clone(), f.type_expr.clone()))
@@ -851,12 +851,12 @@ impl TypeChecker {
                 scope.type_aliases.insert(name.clone(), type_expr.clone());
             }
 
-            Node::EnumDecl { name, variants } => {
+            Node::EnumDecl { name, variants, .. } => {
                 let variant_names: Vec<String> = variants.iter().map(|v| v.name.clone()).collect();
                 scope.enums.insert(name.clone(), variant_names);
             }
 
-            Node::StructDecl { name, fields } => {
+            Node::StructDecl { name, fields, .. } => {
                 let field_types: Vec<(String, InferredType)> = fields
                     .iter()
                     .map(|f| (f.name.clone(), f.type_expr.clone()))
@@ -864,7 +864,7 @@ impl TypeChecker {
                 scope.structs.insert(name.clone(), field_types);
             }
 
-            Node::InterfaceDecl { name, methods } => {
+            Node::InterfaceDecl { name, methods, .. } => {
                 scope.interfaces.insert(name.clone(), methods.clone());
             }
 

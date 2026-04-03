@@ -1,5 +1,7 @@
 use harn_lexer::Span;
 
+use crate::ParserError;
+
 /// Compute the Levenshtein edit distance between two strings.
 pub fn edit_distance(a: &str, b: &str) -> usize {
     let a_chars: Vec<char> = a.chars().collect();
@@ -113,6 +115,41 @@ pub fn render_diagnostic(
     out
 }
 
+pub fn parser_error_message(err: &ParserError) -> String {
+    match err {
+        ParserError::Unexpected { got, expected, .. } => {
+            format!("expected {expected}, found {got}")
+        }
+        ParserError::UnexpectedEof { expected, .. } => {
+            format!("unexpected end of file, expected {expected}")
+        }
+    }
+}
+
+pub fn parser_error_label(err: &ParserError) -> &'static str {
+    match err {
+        ParserError::Unexpected { got, .. } if got == "Newline" => "line break not allowed here",
+        ParserError::Unexpected { .. } => "unexpected token",
+        ParserError::UnexpectedEof { .. } => "file ends here",
+    }
+}
+
+pub fn parser_error_help(err: &ParserError) -> Option<&'static str> {
+    match err {
+        ParserError::UnexpectedEof { expected, .. } | ParserError::Unexpected { expected, .. } => {
+            match expected.as_str() {
+                "}" => Some("add a closing `}` to finish this block"),
+                ")" => Some("add a closing `)` to finish this expression or parameter list"),
+                "]" => Some("add a closing `]` to finish this list or subscript"),
+                "fn, struct, enum, or pipeline after pub" => {
+                    Some("use `pub fn`, `pub pipeline`, `pub enum`, or `pub struct`")
+                }
+                _ => None,
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -213,5 +250,22 @@ mod tests {
         );
         assert!(result.contains("help:"));
         assert!(result.contains("response"));
+    }
+
+    #[test]
+    fn test_parser_error_helpers_for_eof() {
+        let err = ParserError::UnexpectedEof {
+            expected: "}".into(),
+            span: Span::with_offsets(10, 10, 3, 1),
+        };
+        assert_eq!(
+            parser_error_message(&err),
+            "unexpected end of file, expected }"
+        );
+        assert_eq!(parser_error_label(&err), "file ends here");
+        assert_eq!(
+            parser_error_help(&err),
+            Some("add a closing `}` to finish this block")
+        );
     }
 }

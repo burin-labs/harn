@@ -52,3 +52,97 @@ import {
     (identifier)
     (identifier)
     (string_literal)))
+
+==================
+Public And Generic Declarations
+==================
+
+pub pipeline build(task) extends base {
+  return task
+}
+
+pub enum Result {
+  Ok(value: string),
+  Err(message: string, code: int),
+}
+
+pub struct Config {
+  host: string
+  port?: int
+}
+
+interface Repository<T> {
+  fn get(id: string) -> T
+  fn put<U>(id: string, value: U) -> U
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (parameter_list
+      (typed_parameter
+        name: (identifier)))
+    parent: (identifier)
+    (block
+      (return_statement
+        (identifier))))
+  (enum_declaration
+    name: (identifier)
+    (enum_variant
+      name: (identifier)
+      (parameter_list
+        (typed_parameter
+          name: (identifier)
+          type: (type_annotation
+            (identifier)))))
+    (enum_variant
+      name: (identifier)
+      (parameter_list
+        (typed_parameter
+          name: (identifier)
+          type: (type_annotation
+            (identifier)))
+        (typed_parameter
+          name: (identifier)
+          type: (type_annotation
+            (identifier))))))
+  (struct_declaration
+    name: (identifier)
+    (struct_field
+      name: (identifier)
+      type: (type_annotation
+        (identifier)))
+    (struct_field
+      name: (identifier)
+      type: (type_annotation
+        (identifier))))
+  (interface_declaration
+    name: (identifier)
+    (generic_params
+      (identifier))
+    (interface_method
+      name: (identifier)
+      (parameter_list
+        (typed_parameter
+          name: (identifier)
+          type: (type_annotation
+            (identifier))))
+      (type_annotation
+        (identifier)))
+    (interface_method
+      name: (identifier)
+      (generic_params
+        (identifier))
+      (parameter_list
+        (typed_parameter
+          name: (identifier)
+          type: (type_annotation
+            (identifier)))
+        (typed_parameter
+          name: (identifier)
+          type: (type_annotation
+            (identifier))))
+      (type_annotation
+        (identifier)))))

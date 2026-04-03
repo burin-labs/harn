@@ -1520,11 +1520,11 @@
       }
     },
     "children": {
-      "multiple": true,
+      "multiple": false,
       "required": false,
       "types": [
         {
-          "type": "type_annotation",
+          "type": "parameter_list",
           "named": true
         }
       ]
@@ -2357,6 +2357,10 @@
       "required": false,
       "types": [
         {
+          "type": "generic_params",
+          "named": true
+        },
+        {
           "type": "interface_method",
           "named": true
         }
@@ -2382,6 +2386,10 @@
       "multiple": true,
       "required": false,
       "types": [
+        {
+          "type": "generic_params",
+          "named": true
+        },
         {
           "type": "parameter_list",
           "named": true

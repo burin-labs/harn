@@ -1443,8 +1443,8 @@ async fn acp_terminal_exec(
         return Ok(harn_vm::VmValue::Dict(Rc::new(map)));
     }
 
-    // 2. Wait for the command to finish.
-    let _ = bridge
+    // 2. Wait for the command to finish — the result contains stdout/stderr/combined/exitCode.
+    let wait_result = bridge
         .call_client(
             "terminal/wait_for_exit",
             serde_json::json!({
@@ -1452,10 +1452,11 @@ async fn acp_terminal_exec(
                 "terminalId": terminal_id,
             }),
         )
-        .await;
+        .await
+        .unwrap_or(serde_json::json!({}));
 
-    // 3. Read the output.
-    let output_result = bridge
+    // 3. Read any remaining output (usually empty since wait_for_exit reads the pipes).
+    let _output_result = bridge
         .call_client(
             "terminal/output",
             serde_json::json!({
@@ -1465,6 +1466,9 @@ async fn acp_terminal_exec(
         )
         .await
         .unwrap_or(serde_json::json!({}));
+
+    // Use wait_for_exit result which has the actual stdout/stderr/combined.
+    let output_result = wait_result;
 
     // 4. Release the terminal.
     let _ = bridge
@@ -1497,6 +1501,7 @@ async fn acp_terminal_exec(
         if !normalized.contains_key("status") {
             let status = normalized
                 .get("exit_code")
+                .or_else(|| normalized.get("exitCode"))
                 .and_then(|v| v.as_int())
                 .unwrap_or(-1);
             normalized.insert("status".to_string(), harn_vm::VmValue::Int(status));

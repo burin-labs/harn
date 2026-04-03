@@ -12,6 +12,7 @@ pub enum ParserError {
     },
     UnexpectedEof {
         expected: String,
+        span: Span,
     },
 }
 
@@ -27,7 +28,7 @@ impl fmt::Display for ParserError {
                 "Expected {expected}, got {got} at {}:{}",
                 span.line, span.column
             ),
-            ParserError::UnexpectedEof { expected } => {
+            ParserError::UnexpectedEof { expected, .. } => {
                 write!(f, "Unexpected end of file, expected {expected}")
             }
         }
@@ -173,7 +174,7 @@ impl Parser {
 
     // --- Declarations ---
 
-    fn parse_pipeline(&mut self) -> Result<SNode, ParserError> {
+    fn parse_pipeline_with_pub(&mut self, is_pub: bool) -> Result<SNode, ParserError> {
         let start = self.current_span();
         self.consume(&TokenKind::Pipeline, "pipeline")?;
         let name = self.consume_identifier("pipeline name")?;
@@ -199,9 +200,14 @@ impl Parser {
                 params,
                 body,
                 extends,
+                is_pub,
             },
             Span::merge(start, self.prev_span()),
         ))
+    }
+
+    fn parse_pipeline(&mut self) -> Result<SNode, ParserError> {
+        self.parse_pipeline_with_pub(false)
     }
 
     fn parse_import(&mut self) -> Result<SNode, ParserError> {
@@ -268,6 +274,7 @@ impl Parser {
 
         let tok = self.current().ok_or_else(|| ParserError::UnexpectedEof {
             expected: "statement".into(),
+            span: self.prev_span(),
         })?;
 
         match &tok.kind {
@@ -291,9 +298,13 @@ impl Parser {
                 self.advance(); // consume 'pub'
                 let tok = self.current().ok_or_else(|| ParserError::UnexpectedEof {
                     expected: "fn, struct, enum, or pipeline after pub".into(),
+                    span: self.prev_span(),
                 })?;
                 match &tok.kind {
                     TokenKind::Fn => self.parse_fn_decl_with_pub(true),
+                    TokenKind::Pipeline => self.parse_pipeline_with_pub(true),
+                    TokenKind::Enum => self.parse_enum_decl_with_pub(true),
+                    TokenKind::Struct => self.parse_struct_decl_with_pub(true),
                     _ => Err(self.error("fn, struct, enum, or pipeline after pub")),
                 }
             }
@@ -891,7 +902,7 @@ impl Parser {
         ))
     }
 
-    fn parse_enum_decl(&mut self) -> Result<SNode, ParserError> {
+    fn parse_enum_decl_with_pub(&mut self, is_pub: bool) -> Result<SNode, ParserError> {
         let start = self.current_span();
         self.consume(&TokenKind::Enum, "enum")?;
         let name = self.consume_identifier("enum name")?;
@@ -922,12 +933,20 @@ impl Parser {
 
         self.consume(&TokenKind::RBrace, "}")?;
         Ok(spanned(
-            Node::EnumDecl { name, variants },
+            Node::EnumDecl {
+                name,
+                variants,
+                is_pub,
+            },
             Span::merge(start, self.prev_span()),
         ))
     }
 
-    fn parse_struct_decl(&mut self) -> Result<SNode, ParserError> {
+    fn parse_enum_decl(&mut self) -> Result<SNode, ParserError> {
+        self.parse_enum_decl_with_pub(false)
+    }
+
+    fn parse_struct_decl_with_pub(&mut self, is_pub: bool) -> Result<SNode, ParserError> {
         let start = self.current_span();
         self.consume(&TokenKind::Struct, "struct")?;
         let name = self.consume_identifier("struct name")?;
@@ -958,15 +977,29 @@ impl Parser {
 
         self.consume(&TokenKind::RBrace, "}")?;
         Ok(spanned(
-            Node::StructDecl { name, fields },
+            Node::StructDecl {
+                name,
+                fields,
+                is_pub,
+            },
             Span::merge(start, self.prev_span()),
         ))
+    }
+
+    fn parse_struct_decl(&mut self) -> Result<SNode, ParserError> {
+        self.parse_struct_decl_with_pub(false)
     }
 
     fn parse_interface_decl(&mut self) -> Result<SNode, ParserError> {
         let start = self.current_span();
         self.consume(&TokenKind::Interface, "interface")?;
         let name = self.consume_identifier("interface name")?;
+        let type_params = if self.check(&TokenKind::Lt) {
+            self.advance();
+            self.parse_type_param_list()?
+        } else {
+            Vec::new()
+        };
         self.consume(&TokenKind::LBrace, "{")?;
         self.skip_newlines();
 
@@ -974,6 +1007,12 @@ impl Parser {
         while !self.is_at_end() && !self.check(&TokenKind::RBrace) {
             self.consume(&TokenKind::Fn, "fn")?;
             let method_name = self.consume_identifier("method name")?;
+            let method_type_params = if self.check(&TokenKind::Lt) {
+                self.advance();
+                self.parse_type_param_list()?
+            } else {
+                Vec::new()
+            };
             self.consume(&TokenKind::LParen, "(")?;
             let params = self.parse_typed_param_list()?;
             self.consume(&TokenKind::RParen, ")")?;
@@ -986,6 +1025,7 @@ impl Parser {
             };
             methods.push(InterfaceMethod {
                 name: method_name,
+                type_params: method_type_params,
                 params,
                 return_type,
             });
@@ -994,7 +1034,11 @@ impl Parser {
 
         self.consume(&TokenKind::RBrace, "}")?;
         Ok(spanned(
-            Node::InterfaceDecl { name, methods },
+            Node::InterfaceDecl {
+                name,
+                type_params,
+                methods,
+            },
             Span::merge(start, self.prev_span()),
         ))
     }
@@ -1646,6 +1690,7 @@ impl Parser {
     fn parse_primary(&mut self) -> Result<SNode, ParserError> {
         let tok = self.current().ok_or_else(|| ParserError::UnexpectedEof {
             expected: "expression".into(),
+            span: self.prev_span(),
         })?;
         let start = self.current_span();
 
@@ -2384,6 +2429,7 @@ impl Parser {
             if tok.kind == TokenKind::Eof {
                 return ParserError::UnexpectedEof {
                     expected: expected.into(),
+                    span: tok.span,
                 };
             }
             ParserError::Unexpected {
@@ -2394,6 +2440,7 @@ impl Parser {
         } else {
             ParserError::UnexpectedEof {
                 expected: expected.into(),
+                span: self.prev_span(),
             }
         }
     }
@@ -2430,5 +2477,54 @@ pipeline p() {
 "#;
 
         assert!(parse_source(source).is_ok());
+    }
+
+    #[test]
+    fn parses_public_declarations_and_generic_interfaces() {
+        let source = r#"
+pub pipeline build(task) extends base {
+  return
+}
+
+pub enum Result {
+  Ok(value: string),
+  Err(message: string, code: int),
+}
+
+pub struct Config {
+  host: string
+  port?: int
+}
+
+interface Repository<T> {
+  fn get(id: string) -> T
+  fn map<U>(value: T, f: fn(T) -> U) -> U
+}
+"#;
+
+        let program = parse_source(source).expect("should parse");
+        assert!(matches!(
+            &program[0].node,
+            Node::Pipeline {
+                is_pub: true,
+                extends: Some(base),
+                ..
+            } if base == "base"
+        ));
+        assert!(matches!(
+            &program[1].node,
+            Node::EnumDecl { is_pub: true, .. }
+        ));
+        assert!(matches!(
+            &program[2].node,
+            Node::StructDecl { is_pub: true, .. }
+        ));
+        assert!(matches!(
+            &program[3].node,
+            Node::InterfaceDecl { type_params, methods, .. }
+                if type_params.len() == 1
+                    && methods.len() == 2
+                    && methods[1].type_params.len() == 1
+        ));
     }
 }

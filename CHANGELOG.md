@@ -2,6 +2,24 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.28
+
+### Changed
+
+- **Public declarations and generic interfaces are now supported consistently
+  across the language toolchain** — `pub pipeline`, `pub enum`, and `pub struct`
+  now parse in the Rust compiler path, generic interfaces and generic interface
+  methods are preserved in the AST/formatter/LSP, and the tree-sitter grammar
+  plus conformance coverage now match the formal language surface.
+- **Parser diagnostics now point at the real failure location** — unexpected EOF
+  errors carry source spans instead of collapsing to a dummy `0:0` location, and
+  the CLI/LSP now render parser-specific messages and EOF help text instead of a
+  single generic “unexpected token” label.
+- **Language docs and executable coverage were tightened together** — the
+  language basics guide now shows public declarations and generic interfaces,
+  and a new conformance case exercises the public declaration surface so future
+  parser/editor regressions are caught in release audit.
+
 ## v0.5.27
 
 ### Changed

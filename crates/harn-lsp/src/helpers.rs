@@ -1,5 +1,5 @@
 use harn_lexer::{LexerError, Span};
-use harn_parser::{format_type, ParserError};
+use harn_parser::{diagnostic, format_type, ParserError};
 use tower_lsp::lsp_types::*;
 
 use crate::symbols::SymbolInfo;
@@ -230,28 +230,27 @@ pub(crate) fn lexer_error_to_diagnostic(err: &LexerError) -> Diagnostic {
 
 pub(crate) fn parser_error_to_diagnostic(err: &ParserError) -> Diagnostic {
     match err {
-        ParserError::Unexpected {
-            got,
-            expected,
-            span,
-        } => Diagnostic {
+        ParserError::Unexpected { span, .. } => Diagnostic {
             range: Range {
                 start: Position::new((span.line - 1) as u32, (span.column - 1) as u32),
                 end: Position::new((span.line - 1) as u32, span.column as u32),
             },
             severity: Some(DiagnosticSeverity::ERROR),
             source: Some("harn".to_string()),
-            message: format!("Expected {expected}, got {got}"),
+            message: diagnostic::parser_error_message(err),
             ..Default::default()
         },
-        ParserError::UnexpectedEof { expected } => Diagnostic {
+        ParserError::UnexpectedEof { span, .. } => Diagnostic {
             range: Range {
-                start: Position::new(0, 0),
-                end: Position::new(0, 1),
+                start: Position::new(
+                    (span.line.saturating_sub(1)) as u32,
+                    (span.column.saturating_sub(1)) as u32,
+                ),
+                end: Position::new((span.line.saturating_sub(1)) as u32, span.column as u32),
             },
             severity: Some(DiagnosticSeverity::ERROR),
             source: Some("harn".to_string()),
-            message: format!("Unexpected end of file, expected {expected}"),
+            message: diagnostic::parser_error_message(err),
             ..Default::default()
         },
     }

@@ -156,15 +156,19 @@ impl Formatter {
                 params,
                 body,
                 extends,
+                is_pub,
             } => {
+                let pub_prefix = if *is_pub { "pub " } else { "" };
                 let ext = if let Some(base) = extends {
                     format!(" extends {base}")
                 } else {
                     String::new()
                 };
-                let prefix_len = self.indent * 2 + 9 + name.len() + 1;
+                let prefix_len = self.indent * 2 + pub_prefix.len() + 9 + name.len() + 1;
                 let params_str = self.format_string_list_wrapped(params, prefix_len);
-                self.writeln(&format!("pipeline {name}({params_str}){ext} {{"));
+                self.writeln(&format!(
+                    "{pub_prefix}pipeline {name}({params_str}){ext} {{"
+                ));
                 self.indent();
                 self.format_body(body, node_line);
                 self.dedent();
@@ -335,8 +339,13 @@ impl Formatter {
                 self.dedent();
                 self.writeln("}");
             }
-            Node::EnumDecl { name, variants } => {
-                self.writeln(&format!("enum {name} {{"));
+            Node::EnumDecl {
+                name,
+                variants,
+                is_pub,
+            } => {
+                let pub_prefix = if *is_pub { "pub " } else { "" };
+                self.writeln(&format!("{pub_prefix}enum {name} {{"));
                 self.indent();
                 for v in variants {
                     self.format_enum_variant(v);
@@ -344,8 +353,13 @@ impl Formatter {
                 self.dedent();
                 self.writeln("}");
             }
-            Node::StructDecl { name, fields } => {
-                self.writeln(&format!("struct {name} {{"));
+            Node::StructDecl {
+                name,
+                fields,
+                is_pub,
+            } => {
+                let pub_prefix = if *is_pub { "pub " } else { "" };
+                self.writeln(&format!("{pub_prefix}struct {name} {{"));
                 self.indent();
                 for f in fields {
                     self.format_struct_field(f);
@@ -353,21 +367,28 @@ impl Formatter {
                 self.dedent();
                 self.writeln("}");
             }
-            Node::InterfaceDecl { name, methods } => {
-                self.writeln(&format!("interface {name} {{"));
+            Node::InterfaceDecl {
+                name,
+                type_params,
+                methods,
+            } => {
+                let generics = format_type_params(type_params);
+                self.writeln(&format!("interface {name}{generics} {{"));
                 self.indent();
                 for m in methods {
-                    let prefix_len = self.indent * 2 + 3 + m.name.len() + 1;
+                    let method_generics = format_type_params(&m.type_params);
+                    let prefix_len = self.indent * 2 + 3 + m.name.len() + method_generics.len() + 1;
                     let params = self.format_typed_params_wrapped(&m.params, prefix_len);
                     if let Some(ret) = &m.return_type {
                         self.writeln(&format!(
-                            "fn {}({}) -> {}",
+                            "fn {}{}({}) -> {}",
                             m.name,
+                            method_generics,
                             params,
                             format_type_expr(ret)
                         ));
                     } else {
-                        self.writeln(&format!("fn {}({})", m.name, params));
+                        self.writeln(&format!("fn {}{}({})", m.name, method_generics, params));
                     }
                 }
                 self.dedent();

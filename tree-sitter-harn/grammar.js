@@ -82,6 +82,7 @@ module.exports = grammar({
 
     pipeline_declaration: ($) =>
       seq(
+        optional("pub"),
         "pipeline",
         field("name", $.identifier),
         "(",
@@ -118,6 +119,7 @@ module.exports = grammar({
 
     enum_declaration: ($) =>
       seq(
+        optional("pub"),
         "enum",
         field("name", $.identifier),
         "{",
@@ -128,11 +130,12 @@ module.exports = grammar({
     enum_variant: ($) =>
       seq(
         field("name", $.identifier),
-        optional(seq("(", commaSep1($.type_annotation), ")"))
+        optional(seq("(", optional($.parameter_list), ")"))
       ),
 
     struct_declaration: ($) =>
       seq(
+        optional("pub"),
         "struct",
         field("name", $.identifier),
         "{",
@@ -143,6 +146,7 @@ module.exports = grammar({
     struct_field: ($) =>
       seq(
         field("name", $.identifier),
+        optional("?"),
         ":",
         field("type", $.type_annotation)
       ),
@@ -386,6 +390,7 @@ module.exports = grammar({
       seq(
         "interface",
         field("name", $.identifier),
+        optional($.generic_params),
         "{",
         layoutSeparated($, $.interface_method),
         "}"
@@ -398,6 +403,7 @@ module.exports = grammar({
       seq(
         "fn",
         field("name", $.identifier),
+        optional($.generic_params),
         "(",
         optional($.parameter_list),
         ")",

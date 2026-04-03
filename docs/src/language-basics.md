@@ -698,6 +698,16 @@ interface Displayable {
 This says: any type that has a `display(self) -> string` method counts as
 `Displayable`.
 
+Interfaces can also be generic, and individual interface methods may declare
+their own type parameters when the contract needs them:
+
+```harn
+interface Repository<T> {
+  fn get(id: string) -> T
+  fn map<U>(value: T, f: fn(T) -> U) -> U
+}
+```
+
 ### Step 2: Create structs with matching methods
 
 ```harn
@@ -885,6 +895,20 @@ println("Hello, ${name}!")
 /// Use contiguous `///` lines directly above `pub fn`
 pub fn greet(name: string) -> string {
   return "Hello, " + name
+}
+
+pub pipeline deploy(task) {
+  return
+}
+
+pub enum Result {
+  Ok(value: string)
+  Err(message: string)
+}
+
+pub struct Config {
+  host: string
+  port?: int
 }
 
 /* Block comment

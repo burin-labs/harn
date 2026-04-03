@@ -1,5 +1,5 @@
 use harn_lexer::Span;
-use harn_parser::{format_type, DictEntry, Node, SNode, ShapeField, TypeExpr};
+use harn_parser::{format_type, DictEntry, Node, SNode, ShapeField, TypeExpr, TypeParam};
 
 // ---------------------------------------------------------------------------
 // Symbol table (AST-based)
@@ -13,6 +13,7 @@ pub(crate) enum HarnSymbolKind {
     Parameter,
     Enum,
     Struct,
+    Interface,
 }
 
 #[derive(Debug, Clone)]
@@ -148,12 +149,17 @@ fn collect_symbols(
 
     match &snode.node {
         Node::Pipeline {
-            name, params, body, ..
+            name,
+            params,
+            body,
+            is_pub,
+            ..
         } => {
+            let pub_prefix = if *is_pub { "pub " } else { "" };
             let sig = if params.is_empty() {
-                format!("pipeline {name}")
+                format!("{pub_prefix}pipeline {name}")
             } else {
-                format!("pipeline {name}({})", params.join(", "))
+                format!("{pub_prefix}pipeline {name}({})", params.join(", "))
             };
             symbols.push(SymbolInfo {
                 name: name.clone(),
@@ -255,19 +261,25 @@ fn collect_symbols(
             }
             recurse!(value, scope_span);
         }
-        Node::EnumDecl { name, .. } => {
+        Node::EnumDecl { name, is_pub, .. } => {
+            let pub_prefix = if *is_pub { "pub " } else { "" };
             symbols.push(SymbolInfo {
                 name: name.clone(),
                 kind: HarnSymbolKind::Enum,
                 def_span: snode.span,
                 type_info: None,
-                signature: Some(format!("enum {name}")),
+                signature: Some(format!("{pub_prefix}enum {name}")),
                 scope_span,
                 doc_comment: extract_doc_comment(source, &snode.span),
                 impl_type: None,
             });
         }
-        Node::StructDecl { name, fields } => {
+        Node::StructDecl {
+            name,
+            fields,
+            is_pub,
+        } => {
+            let pub_prefix = if *is_pub { "pub " } else { "" };
             let fields_str = fields
                 .iter()
                 .map(|f| {
@@ -284,32 +296,38 @@ fn collect_symbols(
                 kind: HarnSymbolKind::Struct,
                 def_span: snode.span,
                 type_info: None,
-                signature: Some(format!("struct {name} {{ {fields_str} }}")),
+                signature: Some(format!("{pub_prefix}struct {name} {{ {fields_str} }}")),
                 scope_span,
                 doc_comment: extract_doc_comment(source, &snode.span),
                 impl_type: None,
             });
         }
-        Node::InterfaceDecl { name, methods } => {
+        Node::InterfaceDecl {
+            name,
+            type_params,
+            methods,
+        } => {
+            let generics = format_type_params(type_params);
             let methods_str = methods
                 .iter()
                 .map(|m| {
+                    let method_generics = format_type_params(&m.type_params);
                     let params = m
                         .params
                         .iter()
                         .map(|p| p.name.as_str())
                         .collect::<Vec<_>>()
                         .join(", ");
-                    format!("fn {}({})", m.name, params)
+                    format!("fn {}{}({})", m.name, method_generics, params)
                 })
                 .collect::<Vec<_>>()
                 .join("; ");
             symbols.push(SymbolInfo {
                 name: name.clone(),
-                kind: HarnSymbolKind::Struct,
+                kind: HarnSymbolKind::Interface,
                 def_span: snode.span,
                 type_info: None,
-                signature: Some(format!("interface {name} {{ {methods_str} }}")),
+                signature: Some(format!("interface {name}{generics} {{ {methods_str} }}")),
                 scope_span,
                 doc_comment: extract_doc_comment(source, &snode.span),
                 impl_type: None,
@@ -747,5 +765,19 @@ pub(crate) fn format_shape_expanded(ty: &TypeExpr, indent: usize) -> String {
         lines.join("\n")
     } else {
         String::new()
+    }
+}
+fn format_type_params(type_params: &[TypeParam]) -> String {
+    if type_params.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "<{}>",
+            type_params
+                .iter()
+                .map(|tp| tp.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
     }
 }

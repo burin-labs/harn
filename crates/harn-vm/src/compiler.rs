@@ -2635,7 +2635,7 @@ impl Compiler {
     ) {
         for sn in nodes {
             match &sn.node {
-                Node::InterfaceDecl { name, methods } => {
+                Node::InterfaceDecl { name, methods, .. } => {
                     let method_names: Vec<String> =
                         methods.iter().map(|m| m.name.clone()).collect();
                     interfaces.insert(name.clone(), method_names);

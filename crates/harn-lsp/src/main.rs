@@ -234,4 +234,31 @@ mod tests {
         assert_eq!(sym.signature.as_deref(), Some("pipeline main"));
         assert_eq!(sym.doc_comment.as_deref(), Some("Main entry point."));
     }
+
+    #[test]
+    fn hover_public_pipeline_signature() {
+        let source = "pub pipeline build(task) extends base {\n  return\n}\n";
+        let state = DocumentState::new(source.to_string());
+        let sym = state
+            .symbols
+            .iter()
+            .find(|s| s.name == "build" && s.kind == HarnSymbolKind::Pipeline)
+            .expect("should find build pipeline");
+        assert_eq!(sym.signature.as_deref(), Some("pub pipeline build(task)"));
+    }
+
+    #[test]
+    fn hover_generic_interface_signature() {
+        let source = "interface Repository<T> {\n  fn map<U>(value: T, f: fn(T) -> U) -> U\n}\n";
+        let state = DocumentState::new(source.to_string());
+        let sym = state
+            .symbols
+            .iter()
+            .find(|s| s.name == "Repository" && s.kind == HarnSymbolKind::Interface)
+            .expect("should find Repository interface");
+        assert_eq!(
+            sym.signature.as_deref(),
+            Some("interface Repository<T> { fn map<U>(value, f) }")
+        );
+    }
 }
