@@ -676,6 +676,9 @@ fn parse_function_call_syntax(
     text: &str,
     tools_val: Option<&VmValue>,
 ) -> Option<(String, serde_json::Value)> {
+    // Strip whitespace, then trailing literal "\n" that models sometimes emit before closing ```
+    let text = text.trim();
+    let text = text.strip_suffix("\\n").unwrap_or(text);
     let text = text.trim();
     let paren_start = text.find('(')?;
     let name = text[..paren_start].trim().to_string();
@@ -1011,6 +1014,23 @@ mod tests {
             parse_text_tool_calls_with_tools("```call\nlookup(\"README.md\")\n```", Some(&tools));
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0]["arguments"]["target"], json!("README.md"));
+    }
+
+    #[test]
+    fn parse_text_tool_calls_handles_trailing_literal_backslash_n() {
+        // Models sometimes emit a literal \n before closing ```, which caused tool calls
+        // to be silently dropped because strip_suffix(')') failed.
+        let calls = parse_text_tool_calls(
+            "```call\nedit(action=\"patch\", path=\"foo.swift\", old_string=\"a\\nb\", new_string=\"c\\nd\")\\n```",
+        );
+        assert_eq!(
+            calls.len(),
+            1,
+            "tool call should be parsed despite trailing \\n"
+        );
+        assert_eq!(calls[0]["name"], json!("edit"));
+        assert_eq!(calls[0]["arguments"]["action"], json!("patch"));
+        assert_eq!(calls[0]["arguments"]["path"], json!("foo.swift"));
     }
 
     #[test]

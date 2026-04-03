@@ -12,11 +12,48 @@ ROOT = Path(__file__).resolve().parent.parent
 GRAMMAR_DIR = ROOT / "tree-sitter-harn"
 LIB_PATH = GRAMMAR_DIR / "harn.dylib"
 CLI = GRAMMAR_DIR / "scripts" / "tree-sitter-cli.sh"
+GRAMMAR_SOURCES = [
+    GRAMMAR_DIR / "grammar.js",
+    GRAMMAR_DIR / "grammar" / "keywords.js",
+    GRAMMAR_DIR / "src" / "parser.c",
+    GRAMMAR_DIR / "src" / "scanner.c",
+]
 SCAN_ROOTS = [
     ROOT / "conformance" / "tests",
     ROOT / "examples",
     ROOT / "tests" / "bridge",
 ]
+
+
+def ensure_compiled_library() -> int:
+    if not CLI.exists():
+        print(f"error: missing tree-sitter CLI wrapper at {CLI}", file=sys.stderr)
+        return 1
+
+    source_mtime = max(
+        path.stat().st_mtime for path in GRAMMAR_SOURCES if path.exists()
+    )
+    needs_build = not LIB_PATH.exists()
+    if not needs_build:
+        needs_build = LIB_PATH.stat().st_mtime < source_mtime
+
+    if not needs_build:
+        return 0
+
+    result = subprocess.run(
+        ["npm", "run", "build"],
+        cwd=GRAMMAR_DIR,
+        text=True,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        print("error: failed to rebuild tree-sitter shared library", file=sys.stderr)
+        if result.stdout:
+            print(result.stdout, file=sys.stderr, end="")
+        if result.stderr:
+            print(result.stderr, file=sys.stderr, end="")
+        return result.returncode
+    return 0
 
 
 def main() -> int:
@@ -32,11 +69,11 @@ def main() -> int:
         print("warning: tree-sitter-harn not present; skipping parse sweep")
         return 0
 
+    build_status = ensure_compiled_library()
+    if build_status != 0:
+        return build_status
     if not LIB_PATH.exists():
         print(f"error: missing compiled tree-sitter library at {LIB_PATH}", file=sys.stderr)
-        return 1
-    if not CLI.exists():
-        print(f"error: missing tree-sitter CLI wrapper at {CLI}", file=sys.stderr)
         return 1
 
     paths: list[Path] = []

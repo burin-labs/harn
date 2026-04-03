@@ -2,6 +2,19 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.31
+
+### Changed
+
+- **Tree-sitter parse verification now rebuilds its local parser library when
+  grammar sources changed** — `scripts/verify_tree_sitter_parse.py` no longer
+  trusts a stale ignored `tree-sitter-harn/harn.dylib`, so release audit stops
+  reporting false grammar drift after grammar or generated parser updates.
+- **Text-mode tool-call parsing now tolerates trailing literal `\n` before the
+  closing fence** — models that emit `edit(...)\\n` inside a ````call` block no
+  longer cause the call to be silently dropped when Harn parses function-call
+  syntax.
+
 ## v0.5.30
 
 ### Added
