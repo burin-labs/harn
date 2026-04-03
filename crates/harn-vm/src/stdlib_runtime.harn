@@ -1,0 +1,61 @@
+/// runtime_task.
+pub fn runtime_task() -> string {
+  return host_call("runtime.task", {}) ?? ""
+}
+
+/// runtime_pipeline_input.
+pub fn runtime_pipeline_input() {
+  return host_call("runtime.pipeline_input", {})
+}
+
+/// runtime_dry_run.
+pub fn runtime_dry_run() -> bool {
+  return host_call("runtime.dry_run", {}) ?? false
+}
+
+/// runtime_approved_plan.
+pub fn runtime_approved_plan() -> string {
+  return host_call("runtime.approved_plan", {}) ?? ""
+}
+
+/// process_exec.
+pub fn process_exec(command) {
+  return host_call("process.exec", {command: command})
+}
+
+/// process_exec_with_timeout.
+pub fn process_exec_with_timeout(command, timeout_ms) {
+  return host_call("process.exec", {command: command, timeout: timeout_ms})
+}
+
+/// interaction_ask.
+pub fn interaction_ask(question) -> string {
+  return host_call("interaction.ask", {question: question}) ?? ""
+}
+
+/// interaction_ask_with_kind.
+pub fn interaction_ask_with_kind(question, kind) -> string {
+  return host_call("interaction.ask", {question: question, type: kind}) ?? ""
+}
+
+/// record_run_metadata.
+pub fn record_run_metadata(run, workflow_name) {
+  if run?.path {
+    host_call(
+      "runtime.record_run",
+      {
+      workflow: workflow_name,
+      path: run?.path,
+      status: run?.status ?? "",
+      fixture_type: run?.run?.replay_fixture?._type,
+      usage: run?.usage,
+      persisted_path: run?.persisted_path,
+      summary: transcript_summary(run?.transcript),
+      transcript_state: run?.transcript?.state ?? "",
+      message_count: len(transcript_messages(run?.transcript)),
+      event_count: len(transcript_events(run?.transcript)),
+      asset_count: len(transcript_assets(run?.transcript)),
+    },
+    )
+  }
+}

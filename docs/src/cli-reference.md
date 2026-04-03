@@ -118,8 +118,8 @@ harn lint src/ tests/
 Type-check one or more `.harn` files or directories and run preflight
 validation without executing them. The preflight pass resolves imports, checks
 literal `render(...)` targets, detects import symbol collisions across
-modules, validates `host_invoke(...)` capability/operation pairs, and flags
-missing template resources, execution directories, and worker repos that would
+modules, validates `host_call("capability.operation", ...)` capability
+contracts, and flags missing template resources, execution directories, and worker repos that would
 otherwise fail only at runtime. Source-aware lint rules run as part of
 `check`, including the `missing-harndoc` warning for undocumented `pub fn`
 APIs.
@@ -164,6 +164,19 @@ harn acp pipeline.harn      # execute a pipeline per prompt
 ```
 
 See [MCP and ACP Integration](./mcp-and-acp.md) for protocol details.
+
+## harn portal
+
+Launch the local Harn observability portal for persisted runs.
+
+```bash
+harn portal
+harn portal --dir runs/archive
+harn portal --host 0.0.0.0 --port 4900
+harn portal --open false
+```
+
+See [Harn Portal](./portal.md) for the full guide.
 
 ## harn runs
 

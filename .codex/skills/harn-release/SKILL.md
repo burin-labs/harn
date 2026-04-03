@@ -34,7 +34,9 @@ mechanics.
 2. Read enough diff context to summarize the pending work accurately.
 3. Do a repo-consistency sweep before shipping. Update release-facing docs and
    operator guidance as needed, especially `README.md`, `CLAUDE.md`,
-   `docs/src/`, `spec/HARN_SPEC.md`, and `CHANGELOG.md`.
+   `docs/src/`, `spec/HARN_SPEC.md`, `CHANGELOG.md`, and any developer setup
+   surfaces such as `scripts/dev_setup.sh`, `Makefile`, `.githooks/`, and the
+   first-party `harn portal` docs.
 4. If syntax, parser, lexer, or tree-sitter changed, update
    `spec/HARN_SPEC.md` first. Treat it as the formal language-spec source of
    truth.
@@ -74,6 +76,11 @@ mechanics.
 - Treat repo consistency as part of the release gate, not an optional cleanup
   pass. If behavior changes, update human-facing docs in the same release when
   they describe that behavior.
+- If local development setup changed, keep `README.md`, `CONTRIBUTING.md`,
+  `scripts/dev_setup.sh`, and `Makefile` aligned so the bootstrap path stays
+  obvious and low-friction.
+- If observability surfaces changed, update `docs/src/portal.md` and any CLI
+  references that describe `harn portal`.
 - If grammar-related files changed, mention whether `spec/HARN_SPEC.md` was
   updated in the same batch.
 - The grammar/spec audit now includes `scripts/verify_language_spec.py`, which

@@ -1,65 +1,10 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 use std::process::Stdio;
 use std::rc::Rc;
 
 use crate::value::{values_equal, VmError, VmValue};
 use crate::vm::Vm;
-
-fn common_leading_whitespace_prefix<'a>(left: &'a str, right: &str) -> &'a str {
-    let mut matched_bytes = 0usize;
-    for ((left_idx, left_ch), right_ch) in left.char_indices().zip(right.chars()) {
-        if !left_ch.is_whitespace() || !right_ch.is_whitespace() || left_ch != right_ch {
-            break;
-        }
-        matched_bytes = left_idx + left_ch.len_utf8();
-    }
-    &left[..matched_bytes]
-}
-
-fn dedent_multiline_patch_text(text: &str) -> Option<String> {
-    if !text.contains('\n') {
-        return None;
-    }
-
-    let mut lines = text.lines().collect::<Vec<_>>();
-    let non_empty = lines
-        .iter()
-        .copied()
-        .filter(|line| !line.trim().is_empty())
-        .collect::<Vec<_>>();
-    let first = non_empty.first()?;
-    let mut common = first
-        .chars()
-        .take_while(|ch| ch.is_whitespace())
-        .collect::<String>();
-    if common.is_empty() {
-        return None;
-    }
-
-    for line in non_empty.iter().skip(1) {
-        let leading = line
-            .chars()
-            .take_while(|ch| ch.is_whitespace())
-            .collect::<String>();
-        common = common_leading_whitespace_prefix(&common, &leading).to_string();
-        if common.is_empty() {
-            return None;
-        }
-    }
-
-    for line in &mut lines {
-        if line.trim().is_empty() {
-            continue;
-        }
-        if let Some(stripped) = line.strip_prefix(&common) {
-            *line = stripped;
-        }
-    }
-
-    Some(lines.join("\n"))
-}
 
 #[derive(Clone)]
 struct HostMock {
@@ -89,32 +34,6 @@ pub(crate) fn reset_host_state() {
 
 fn capability_manifest_map() -> BTreeMap<String, VmValue> {
     let mut root = BTreeMap::new();
-    root.insert(
-        "workspace".to_string(),
-        capability(
-            "Workspace file and directory operations.",
-            &[
-                op("read_text", "Read a UTF-8 text file."),
-                op(
-                    "write_text",
-                    "Write a UTF-8 text file, creating parents as needed.",
-                ),
-                op("apply_edit", "Replace a substring in a text file."),
-                op("delete", "Delete a file."),
-                op("exists", "Check whether a path exists."),
-                op("file_exists", "Alias for exists, for host parity."),
-                op("list", "List direct children of a directory."),
-                op(
-                    "project_root",
-                    "Return the resolved project root for the current execution context.",
-                ),
-                op(
-                    "roots",
-                    "Return workspace roots; local execution reports a single root.",
-                ),
-            ],
-        ),
-    );
     root.insert(
         "process".to_string(),
         capability(
@@ -240,21 +159,9 @@ fn require_param(params: &BTreeMap<String, VmValue>, key: &str) -> Result<String
         .filter(|v| !v.is_empty())
         .ok_or_else(|| {
             VmError::Thrown(VmValue::String(Rc::from(format!(
-                "host_invoke: missing required parameter '{key}'"
+                "host_call: missing required parameter '{key}'"
             ))))
         })
-}
-
-fn resolve_path(path: &str) -> PathBuf {
-    crate::stdlib::process::resolve_source_relative_path(path)
-}
-
-fn current_project_root() -> Option<PathBuf> {
-    crate::stdlib::process::current_execution_context()
-        .and_then(|context| context.cwd.map(PathBuf::from))
-        .or_else(|| crate::stdlib::process::VM_SOURCE_DIR.with(|sd| sd.borrow().clone()))
-        .or_else(|| std::env::current_dir().ok())
-        .and_then(|base| crate::stdlib::process::find_project_root(&base).or(Some(base)))
 }
 
 fn render_template(
@@ -264,7 +171,7 @@ fn render_template(
     let resolved = crate::stdlib::process::resolve_source_relative_path(path);
     let template = std::fs::read_to_string(&resolved).map_err(|e| {
         VmError::Thrown(VmValue::String(Rc::from(format!(
-            "host_invoke render: failed to read template {}: {e}",
+            "host_call template.render: failed to read template {}: {e}",
             resolved.display()
         ))))
     })?;
@@ -369,7 +276,7 @@ fn record_mock_call(capability: &str, operation: &str, params: &BTreeMap<String,
     });
 }
 
-fn mock_host_invoke(
+fn mock_host_call(
     capability: &str,
     operation: &str,
     params: &BTreeMap<String, VmValue>,
@@ -392,6 +299,71 @@ fn mock_host_invoke(
         return Some(Err(VmError::Thrown(VmValue::String(Rc::from(error)))));
     }
     Some(Ok(matched.result.unwrap_or(VmValue::Nil)))
+}
+
+async fn dispatch_host_operation(
+    capability: &str,
+    operation: &str,
+    params: &BTreeMap<String, VmValue>,
+) -> Result<VmValue, VmError> {
+    if let Some(mocked) = mock_host_call(capability, operation, params) {
+        return mocked;
+    }
+
+    match (capability, operation) {
+        ("process", "exec") => {
+            let command = require_param(params, "command")?;
+            let output = tokio::process::Command::new("/bin/sh")
+                .arg("-lc")
+                .arg(&command)
+                .stdin(Stdio::null())
+                .output()
+                .await
+                .map_err(|e| VmError::Runtime(format!("host_call process.exec: {e}")))?;
+            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            let mut result = BTreeMap::new();
+            result.insert(
+                "stdout".to_string(),
+                VmValue::String(Rc::from(stdout.clone())),
+            );
+            result.insert(
+                "stderr".to_string(),
+                VmValue::String(Rc::from(stderr.clone())),
+            );
+            result.insert(
+                "combined".to_string(),
+                VmValue::String(Rc::from(format!("{stdout}{stderr}"))),
+            );
+            let status = output.status.code().unwrap_or(-1);
+            result.insert("status".to_string(), VmValue::Int(status as i64));
+            result.insert(
+                "success".to_string(),
+                VmValue::Bool(output.status.success()),
+            );
+            Ok(VmValue::Dict(Rc::new(result)))
+        }
+        ("template", "render") => {
+            let path = require_param(params, "path")?;
+            let bindings = params.get("bindings").and_then(|v| v.as_dict());
+            Ok(VmValue::String(Rc::from(render_template(&path, bindings)?)))
+        }
+        ("interaction", "ask") => {
+            let question = require_param(params, "question")?;
+            use std::io::BufRead;
+            print!("{question}");
+            let _ = std::io::Write::flush(&mut std::io::stdout());
+            let mut input = String::new();
+            if std::io::stdin().lock().read_line(&mut input).is_ok() {
+                Ok(VmValue::String(Rc::from(input.trim_end())))
+            } else {
+                Ok(VmValue::Nil)
+            }
+        }
+        _ => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+            "host_call: unsupported operation {capability}.{operation}"
+        ))))),
+    }
 }
 
 pub(crate) fn register_host_builtins(vm: &mut Vm) {
@@ -446,204 +418,26 @@ pub(crate) fn register_host_builtins(vm: &mut Vm) {
         Ok(VmValue::Bool(has))
     });
 
-    vm.register_async_builtin("host_invoke", |args| async move {
-        let capability = args.first().map(|a| a.display()).unwrap_or_default();
-        let operation = args.get(1).map(|a| a.display()).unwrap_or_default();
+    vm.register_async_builtin("host_call", |args| async move {
+        let name = args.first().map(|a| a.display()).unwrap_or_default();
         let params = args
-            .get(2)
+            .get(1)
             .and_then(|a| a.as_dict())
             .cloned()
             .unwrap_or_default();
-
-        if let Some(mocked) = mock_host_invoke(&capability, &operation, &params) {
-            return mocked;
-        }
-
-        match (capability.as_str(), operation.as_str()) {
-            ("workspace", "read_text") => {
-                let path = require_param(&params, "path")?;
-                let content = std::fs::read_to_string(resolve_path(&path)).map_err(|e| {
-                    VmError::Runtime(format!("host_invoke workspace.read_text: {e}"))
-                })?;
-                Ok(VmValue::String(Rc::from(content)))
-            }
-            ("workspace", "write_text") => {
-                let path = require_param(&params, "path")?;
-                let content = params
-                    .get("content")
-                    .map(|v| v.display())
-                    .unwrap_or_default();
-                let full_path = resolve_path(&path);
-                if let Some(parent) = full_path.parent() {
-                    std::fs::create_dir_all(parent).map_err(|e| {
-                        VmError::Runtime(format!("host_invoke workspace.write_text: {e}"))
-                    })?;
-                }
-                std::fs::write(&full_path, content).map_err(|e| {
-                    VmError::Runtime(format!("host_invoke workspace.write_text: {e}"))
-                })?;
-                Ok(VmValue::Nil)
-            }
-            ("workspace", "apply_edit") => {
-                let path = require_param(&params, "path")?;
-                let old_string = require_param(&params, "old_string")?;
-                let new_string = params
-                    .get("new_string")
-                    .map(|v| v.display())
-                    .unwrap_or_default();
-                let full_path = resolve_path(&path);
-                let content = std::fs::read_to_string(&full_path).map_err(|e| {
-                    VmError::Runtime(format!("host_invoke workspace.apply_edit: {e}"))
-                })?;
-                let (matched_old, replacement_new) = if content.contains(&old_string) {
-                    (old_string, new_string)
-                } else if let Some(dedented_old) = dedent_multiline_patch_text(&old_string) {
-                    if content.contains(&dedented_old) {
-                        let dedented_new =
-                            dedent_multiline_patch_text(&new_string).unwrap_or(new_string);
-                        (dedented_old, dedented_new)
-                    } else {
-                        return Err(VmError::Runtime(format!(
-                            "host_invoke workspace.apply_edit: '{old_string}' not found in {path}"
-                        )));
-                    }
-                } else {
-                    return Err(VmError::Runtime(format!(
-                        "host_invoke workspace.apply_edit: '{old_string}' not found in {path}"
-                    )));
-                };
-                let updated = content.replacen(&matched_old, &replacement_new, 1);
-                std::fs::write(&full_path, updated).map_err(|e| {
-                    VmError::Runtime(format!("host_invoke workspace.apply_edit: {e}"))
-                })?;
-                Ok(VmValue::Nil)
-            }
-            ("workspace", "delete") => {
-                let path = require_param(&params, "path")?;
-                let full_path = resolve_path(&path);
-                if full_path.exists() {
-                    std::fs::remove_file(full_path).map_err(|e| {
-                        VmError::Runtime(format!("host_invoke workspace.delete: {e}"))
-                    })?;
-                }
-                Ok(VmValue::Nil)
-            }
-            ("workspace", "exists") => {
-                let path = require_param(&params, "path")?;
-                Ok(VmValue::Bool(resolve_path(&path).exists()))
-            }
-            ("workspace", "file_exists") => {
-                let path = require_param(&params, "path")?;
-                Ok(VmValue::Bool(resolve_path(&path).exists()))
-            }
-            ("workspace", "list") => {
-                let path = params
-                    .get("path")
-                    .map(|v| v.display())
-                    .unwrap_or_else(|| ".".to_string());
-                let entries = std::fs::read_dir(resolve_path(&path))
-                    .map_err(|e| VmError::Runtime(format!("host_invoke workspace.list: {e}")))?;
-                let mut values = Vec::new();
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    let file_type = entry.file_type().ok();
-                    let mut item = BTreeMap::new();
-                    item.insert(
-                        "name".to_string(),
-                        VmValue::String(Rc::from(entry.file_name().to_string_lossy().to_string())),
-                    );
-                    item.insert(
-                        "path".to_string(),
-                        VmValue::String(Rc::from(path.to_string_lossy().to_string())),
-                    );
-                    item.insert(
-                        "is_dir".to_string(),
-                        VmValue::Bool(file_type.as_ref().is_some_and(|ft| ft.is_dir())),
-                    );
-                    values.push(VmValue::Dict(Rc::new(item)));
-                }
-                values.sort_by_key(|v| {
-                    v.as_dict()
-                        .and_then(|d| d.get("name"))
-                        .map(|v| v.display())
-                        .unwrap_or_default()
-                });
-                Ok(VmValue::List(Rc::new(values)))
-            }
-            ("workspace", "project_root") => Ok(current_project_root()
-                .map(|root| VmValue::String(Rc::from(root.to_string_lossy().to_string())))
-                .unwrap_or(VmValue::Nil)),
-            ("workspace", "roots") => {
-                let roots = current_project_root()
-                    .map(|root| {
-                        vec![VmValue::String(Rc::from(
-                            root.to_string_lossy().to_string(),
-                        ))]
-                    })
-                    .unwrap_or_default();
-                Ok(VmValue::List(Rc::new(roots)))
-            }
-            ("process", "exec") => {
-                let command = require_param(&params, "command")?;
-                let output = tokio::process::Command::new("/bin/sh")
-                    .arg("-lc")
-                    .arg(&command)
-                    .stdin(Stdio::null())
-                    .output()
-                    .await
-                    .map_err(|e| VmError::Runtime(format!("host_invoke process.exec: {e}")))?;
-                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-                let mut result = BTreeMap::new();
-                result.insert(
-                    "stdout".to_string(),
-                    VmValue::String(Rc::from(stdout.clone())),
-                );
-                result.insert(
-                    "stderr".to_string(),
-                    VmValue::String(Rc::from(stderr.clone())),
-                );
-                result.insert(
-                    "combined".to_string(),
-                    VmValue::String(Rc::from(format!("{stdout}{stderr}"))),
-                );
-                let status = output.status.code().unwrap_or(-1);
-                result.insert("status".to_string(), VmValue::Int(status as i64));
-                result.insert(
-                    "success".to_string(),
-                    VmValue::Bool(output.status.success()),
-                );
-                Ok(VmValue::Dict(Rc::new(result)))
-            }
-            ("template", "render") => {
-                let path = require_param(&params, "path")?;
-                let bindings = params.get("bindings").and_then(|v| v.as_dict());
-                Ok(VmValue::String(Rc::from(render_template(&path, bindings)?)))
-            }
-            ("interaction", "ask") => {
-                let question = require_param(&params, "question")?;
-                use std::io::BufRead;
-                print!("{question}");
-                let _ = std::io::Write::flush(&mut std::io::stdout());
-                let mut input = String::new();
-                if std::io::stdin().lock().read_line(&mut input).is_ok() {
-                    Ok(VmValue::String(Rc::from(input.trim_end())))
-                } else {
-                    Ok(VmValue::Nil)
-                }
-            }
-            _ => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                "host_invoke: unsupported operation {capability}.{operation}"
-            ))))),
-        }
+        let Some((capability, operation)) = name.split_once('.') else {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                "host_call: unsupported operation name '{name}'"
+            )))));
+        };
+        dispatch_host_operation(capability, operation, &params).await
     });
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        capability_manifest_with_mocks, dedent_multiline_patch_text, mock_host_invoke,
-        push_host_mock, reset_host_state, HostMock,
+        capability_manifest_with_mocks, mock_host_call, push_host_mock, reset_host_state, HostMock,
     };
     use std::collections::BTreeMap;
     use std::rc::Rc;
@@ -653,21 +447,17 @@ mod tests {
     #[test]
     fn manifest_includes_operation_metadata() {
         let manifest = capability_manifest_with_mocks();
-        let workspace = manifest
+        let process = manifest
             .as_dict()
-            .and_then(|d| d.get("workspace"))
+            .and_then(|d| d.get("process"))
             .and_then(|v| v.as_dict())
-            .expect("workspace capability");
-        assert!(workspace.get("description").is_some());
-        let operations = workspace
+            .expect("process capability");
+        assert!(process.get("description").is_some());
+        let operations = process
             .get("operations")
             .and_then(|v| v.as_dict())
             .expect("operations dict");
-        assert!(operations.get("read_text").is_some());
-        assert!(operations.get("file_exists").is_some());
-        assert!(operations.get("list").is_some());
-        assert!(operations.get("project_root").is_some());
-        assert!(operations.get("roots").is_some());
+        assert!(operations.get("exec").is_some());
     }
 
     #[test]
@@ -695,7 +485,7 @@ mod tests {
     }
 
     #[test]
-    fn mock_host_invoke_matches_partial_params_and_overrides_order() {
+    fn mock_host_call_matches_partial_params_and_overrides_order() {
         reset_host_state();
         let mut exact_params = BTreeMap::new();
         exact_params.insert("namespace".to_string(), VmValue::String(Rc::from("facts")));
@@ -717,7 +507,7 @@ mod tests {
         let mut call_params = BTreeMap::new();
         call_params.insert("dir".to_string(), VmValue::String(Rc::from("pkg")));
         call_params.insert("namespace".to_string(), VmValue::String(Rc::from("facts")));
-        let exact = mock_host_invoke("project", "metadata_get", &call_params)
+        let exact = mock_host_call("project", "metadata_get", &call_params)
             .expect("expected exact mock")
             .expect("exact mock should succeed");
         assert_eq!(exact.display(), "facts");
@@ -726,7 +516,7 @@ mod tests {
             "namespace".to_string(),
             VmValue::String(Rc::from("classification")),
         );
-        let fallback = mock_host_invoke("project", "metadata_get", &call_params)
+        let fallback = mock_host_call("project", "metadata_get", &call_params)
             .expect("expected fallback mock")
             .expect("fallback mock should succeed");
         assert_eq!(fallback.display(), "fallback");
@@ -734,7 +524,7 @@ mod tests {
     }
 
     #[test]
-    fn mock_host_invoke_can_throw_errors() {
+    fn mock_host_call_can_throw_errors() {
         reset_host_state();
         push_host_mock(HostMock {
             capability: "project".to_string(),
@@ -745,26 +535,11 @@ mod tests {
         });
         let params = BTreeMap::new();
         let result =
-            mock_host_invoke("project", "metadata_get", &params).expect("expected mock result");
+            mock_host_call("project", "metadata_get", &params).expect("expected mock result");
         match result {
             Err(VmError::Thrown(VmValue::String(message))) => assert_eq!(message.as_ref(), "boom"),
             other => panic!("unexpected result: {other:?}"),
         }
         reset_host_state();
-    }
-
-    #[test]
-    fn dedent_multiline_patch_text_removes_common_indent() {
-        let text = "    @pytest.fixture\n    def event_loop():\n        yield loop\n";
-        let dedented = dedent_multiline_patch_text(text).expect("dedented");
-        assert_eq!(
-            dedented,
-            "@pytest.fixture\ndef event_loop():\n    yield loop"
-        );
-    }
-
-    #[test]
-    fn dedent_multiline_patch_text_keeps_already_aligned_text() {
-        assert!(dedent_multiline_patch_text("def event_loop():\n    yield loop").is_none());
     }
 }

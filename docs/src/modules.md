@@ -189,30 +189,41 @@ Structured prompt/context assembly helpers:
 | `context_render(ctx, options?)` | Render a context into prompt text |
 | `prompt_compose(task, ctx, options?)` | Compose `{prompt, system, rendered_context}` |
 
+### std/runtime
+
+Generic host/runtime helpers that are useful across many hosts:
+
+| Function | Description |
+|---|---|
+| `runtime_task()` | Return the current runtime task string |
+| `runtime_pipeline_input()` | Return structured pipeline input from the host |
+| `runtime_dry_run()` | Return whether the current run is dry-run only |
+| `runtime_approved_plan()` | Return the host-approved plan text when available |
+| `process_exec(command)` | Execute a process through the typed host contract |
+| `process_exec_with_timeout(command, timeout_ms)` | Execute a process with an explicit timeout |
+| `interaction_ask(question)` | Ask the host/user a question through the typed interaction contract |
+| `interaction_ask_with_kind(question, kind)` | Ask the host/user a question with an explicit interaction kind |
+| `record_run_metadata(run, workflow_name)` | Persist normalized workflow run metadata through the runtime contract |
+
 ### std/project
 
-Project metadata and scanner helpers built on `metadata_*` and `scan_directory(...)`:
+Project metadata and scanner helpers built on `metadata_*`, `project_root()`, and `scan_directory(...)`:
 
 | Function | Description |
 |---|---|
 | `metadata_namespace(dir, namespace)` | Read resolved metadata for a namespace, defaulting to `{}` |
 | `metadata_local_namespace(dir, namespace)` | Read only the namespace data stored directly on a directory |
 | `project_inventory(namespace?)` | Return `{entries, status}` for metadata-backed project state |
+| `project_root_package()` | Infer the repository's root package/module name from common manifests |
 | `project_scan(path, options?)` | Scan files/directories with the runtime scanner options |
 | `project_scan_paths(path, options?)` | Return only the scanned paths |
 | `project_stale(namespace?)` | Return the stale summary from `metadata_status(...)` |
 | `project_stale_dirs(namespace?)` | Return the tier1+tier2 stale directory list |
 | `project_requires_refresh(namespace?)` | Return `true` when stale or missing hashes require refresh |
-| `workspace_roots()` | Return the host workspace roots, falling back to the current project root |
-| `workspace_read_text(path)` | Read text through the typed workspace host contract |
-| `workspace_write_text(path, content)` | Write text through the typed workspace host contract |
-| `workspace_apply_edit(path, old, new)` | Apply a substring patch through the typed workspace host contract |
-| `workspace_delete(path)` | Delete a workspace path through the typed workspace host contract |
-| `workspace_list(path?)` | List entries through the typed workspace host contract |
-| `workspace_exists(path)` | Check path existence through `workspace.exists` |
-| `workspace_file_exists(path)` | Check file existence through `workspace.file_exists`, falling back to `workspace.exists` |
-| `process_exec(command, timeout_ms?)` | Execute a process through the typed host contract |
-| `interaction_ask(question, kind?)` | Ask the host/user a question through the typed interaction contract |
+
+Host-specific editor, git, diagnostics, learning, and filesystem/edit helpers
+should live in host-side `.harn` libraries built on capability-aware
+`host_call(...)`, not in Harn's shared stdlib.
 
 ### std/agents
 

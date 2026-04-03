@@ -530,27 +530,26 @@ assert_eq(resp.status, 200)
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `host_call(name, args)` | name: string, args: any | any | Generic host escape hatch for legacy integrations |
+| `host_call(name, args)` | name: string, args: any | any | Call a host capability operation using `capability.operation` naming |
 | `host_capabilities()` | — | dict | Typed host capability manifest |
 | `host_has(capability, op?)` | capability: string, op: string | bool | Check whether a typed host capability/operation exists |
-| `host_invoke(capability, op, params?)` | capability: string, op: string, params: dict | any | Invoke a typed host operation such as workspace or process |
 | `host_mock(capability, op, response_or_config, params?)` | capability: string, op: string, response_or_config: any or dict, params: dict | nil | Register a runtime mock for a typed host operation |
 | `host_mock_clear()` | — | nil | Clear registered typed host mocks and recorded mock invocations |
 | `host_mock_calls()` | — | list | Return recorded typed host mock invocations |
 
 `host_capabilities()` returns the capability manifest surfaced by the active
-host bridge. The local runtime exposes the standard `workspace`, `process`,
-`template`, and `interaction` capabilities, and ACP/editor hosts may add
-additional capabilities or operations.
+host bridge. The local runtime exposes generic `process`, `template`, and
+`interaction` capabilities. Product hosts can add capabilities such as
+`workspace`, `project`, `runtime`, `editor`, `git`, or `diagnostics`.
 
-Common workspace ops surfaced by hosts include `read_text`, `write_text`,
-`apply_edit`, `delete`, `exists`, `file_exists`, `list`, `project_root`, and
-optionally `roots` for multi-root workspaces.
+Prefer `host_call("capability.operation", args)` in shared wrappers and
+host-owned `.harn` modules so capability names stay consistent across the
+runtime, host manifest, and preflight validation.
 
 `host_mock(...)` is intended for tests and local conformance runs. The third
 argument may be either a direct result value or a config dict containing
 `result`, `params`, and/or `error`. Mock matching is last-write-wins and only
-requires the declared `params` subset to match the actual `host_invoke(...)`
+requires the declared `params` subset to match the actual host call
 call. Matched calls are recorded in `host_mock_calls()` as
 `{capability, operation, params}` dictionaries.
 
@@ -565,12 +564,12 @@ import {
 } from "std/testing"
 
 clear_host_mocks()
-mock_host_result("workspace", "read_text", "hello", {path: "note.txt"})
-assert_eq(host_invoke("workspace", "read_text", {path: "note.txt"}), "hello")
-assert_host_called("workspace", "read_text", {path: "note.txt"}, nil)
+mock_host_result("project", "metadata_get", "hello", {dir: ".", namespace: "facts"})
+assert_eq(host_call("project.metadata_get", {dir: ".", namespace: "facts"}), "hello")
+assert_host_called("project", "metadata_get", {dir: ".", namespace: "facts"}, nil)
 
 mock_host_error("project", "scan", "scan failed", nil)
-let result = try { host_invoke("project", "scan", {}) }
+let result = try { host_call("project.scan", {}) }
 assert(is_err(result))
 ```
 
@@ -626,7 +625,7 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 |---|---|---|---|
 | `llm_call(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Single LLM request. Returns `{text, model, input_tokens, output_tokens}` |
 | `llm_completion(prefix, suffix?, system?, options?)` | prefix: string, suffix: string, system: string, options: dict | dict | Text completion / fill-in-the-middle request. Returns `{text, model, input_tokens, output_tokens}` |
-| `agent_loop(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Multi-turn agent loop with `##DONE##` sentinel. Returns `{status, text, iterations, duration_ms, tools_used}` |
+| `agent_loop(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Multi-turn agent loop with `##DONE##` sentinel and optional per-turn context filtering. Returns `{status, text, iterations, duration_ms, tools_used}` |
 | `llm_info()` | — | dict | Current LLM config: `{provider, model, api_key_set}` |
 | `llm_usage()` | — | dict | Cumulative usage: `{input_tokens, output_tokens, total_duration_ms, call_count}` |
 | `llm_resolve_model(alias)` | alias: string | dict | Resolve model alias to `{id, provider}` via providers.toml |

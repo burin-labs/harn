@@ -37,6 +37,8 @@ pub(crate) enum Command {
     Mcp(McpArgs),
     /// Watch a .harn file and re-run it on changes.
     Watch(WatchArgs),
+    /// Launch the local Harn observability portal.
+    Portal(PortalArgs),
     /// Inspect persisted workflow run records.
     Runs(RunsArgs),
     /// Replay a persisted workflow run record.
@@ -227,6 +229,22 @@ pub(crate) struct WatchArgs {
 }
 
 #[derive(Debug, Args)]
+pub(crate) struct PortalArgs {
+    /// Directory containing persisted run records.
+    #[arg(long, default_value = ".harn-runs")]
+    pub dir: String,
+    /// Host interface to bind.
+    #[arg(long, default_value = "127.0.0.1")]
+    pub host: String,
+    /// Port to serve the portal on.
+    #[arg(long, default_value_t = 4621)]
+    pub port: u16,
+    /// Open the portal in a browser after starting.
+    #[arg(long, default_value_t = true, action = ArgAction::Set)]
+    pub open: bool,
+}
+
+#[derive(Debug, Args)]
 pub(crate) struct RunsArgs {
     #[command(subcommand)]
     pub command: RunsCommand,
@@ -360,5 +378,21 @@ mod tests {
         let RunsCommand::Inspect(inspect) = args.command;
         assert_eq!(inspect.path, "run.json");
         assert_eq!(inspect.compare.as_deref(), Some("baseline.json"));
+    }
+
+    #[test]
+    fn test_parses_portal_flags() {
+        let cli = Cli::parse_from([
+            "harn", "portal", "--dir", "runs", "--host", "0.0.0.0", "--port", "4900", "--open",
+            "false",
+        ]);
+
+        let Command::Portal(args) = cli.command.unwrap() else {
+            panic!("expected portal command");
+        };
+        assert_eq!(args.dir, "runs");
+        assert_eq!(args.host, "0.0.0.0");
+        assert_eq!(args.port, 4900);
+        assert!(!args.open);
     }
 }

@@ -2,6 +2,24 @@
 
 All notable changes to Harn are documented in this file.
 
+## Unreleased
+
+### Changed
+
+- **Host capability invocation is now unified on `host_call("capability.operation", ...)`** —
+  the live `host_invoke(...)` runtime/ACP path was removed, parser/checker/LSP
+  validation now targets the dotted capability contract directly, and shared
+  host wrappers/documentation were updated to match.
+- **Shared Harn layers are cleaner and less IDE-shaped** — generic runtime and
+  session/process helpers now live in `std/runtime`, while host-owned
+  filesystem, edit, and IDE/coding-specific wrappers are expected to live in
+  product-local `.harn` libraries such as Burin's pipeline libs instead of in
+  Harn's shared stdlib.
+- **Agent transcript compaction now preserves durable summaries** — prompt
+  compaction still shrinks the visible context passed back to the model, but
+  the recorded transcript keeps a compaction summary so orchestration and
+  conformance surfaces can still explain what happened after the fact.
+
 ## v0.5.32
 
 ### Changed

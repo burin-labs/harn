@@ -21,10 +21,10 @@ pipeline test(task) {
     {result: {value: "facts"}, params: {namespace: "facts"}},
   )
   mock_host_error("project", "metadata_set", "write denied", {dir: "pkg"})
-  let note = host_invoke("workspace", "read_text", {path: "note.txt"})
-  let facts = host_invoke("project", "metadata_get", {dir: "pkg", namespace: "facts"})
+  let note = host_call("workspace.read_text", {path: "note.txt"})
+  let facts = host_call("project.metadata_get", {dir: "pkg", namespace: "facts"})
   let denied = try {
-    host_invoke("project", "metadata_set", {dir: "pkg", namespace: "facts", value: {}})
+    host_call("project.metadata_set", {dir: "pkg", namespace: "facts", value: {}})
   }
   assert_eq(note, "hello")
   assert_eq(facts?.value, "facts")

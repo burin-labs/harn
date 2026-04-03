@@ -285,7 +285,7 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
     ),
     ("host_capabilities", "host_capabilities() -> dict"),
     ("host_has", "host_has(capability, op?) -> bool"),
-    ("host_invoke", "host_invoke(capability, op, params?) -> any"),
+    ("host_call", "host_call(name, args) -> value"),
     (
         "workflow_policy_report",
         "workflow_policy_report(graph, ceiling?) -> dict",
@@ -669,7 +669,7 @@ pub(crate) fn builtin_doc(name: &str) -> Option<String> {
         "schema_omit" => "**schema_omit(schema, keys)** → dict — Remove selected top-level properties from a schema",
         "host_capabilities" => "**host_capabilities()** → dict — Typed host capability manifest",
         "host_has" => "**host_has(capability, op?)** → bool — Check host capability support",
-        "host_invoke" => "**host_invoke(capability, op, params?)** → any — Invoke a typed host operation",
+        "host_call" => "**host_call(name, args)** → any — Invoke a host capability operation using capability.operation naming",
         "host_mock" => "**host_mock(capability, op, response_or_config, params?)** → nil — Register a typed host mock for tests. The third argument may be a direct result value or a config dict containing `result`, `params`, and/or `error`.",
         "host_mock_clear" => "**host_mock_clear()** → nil — Clear typed host mocks and recorded mock invocations",
         "host_mock_calls" => "**host_mock_calls()** → list — Return recorded typed host mock invocations",

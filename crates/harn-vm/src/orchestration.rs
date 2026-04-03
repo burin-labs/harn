@@ -451,9 +451,9 @@ pub(crate) async fn auto_compact_messages(
     messages: &mut Vec<serde_json::Value>,
     config: &AutoCompactConfig,
     llm_opts: Option<&crate::llm::api::LlmCallOptions>,
-) -> Result<bool, VmError> {
+) -> Result<Option<String>, VmError> {
     if messages.len() <= config.keep_last {
-        return Ok(false);
+        return Ok(None);
     }
     let split_at = messages.len().saturating_sub(config.keep_last);
     let old_messages: Vec<_> = messages.drain(..split_at).collect();
@@ -493,7 +493,7 @@ pub(crate) async fn auto_compact_messages(
             "content": summary,
         }),
     );
-    Ok(true)
+    Ok(Some(summary))
 }
 
 // ── Adaptive context assembly ─────────────────────────────────────────
@@ -1409,8 +1409,21 @@ pub struct RunRecord {
     pub transcript: Option<serde_json::Value>,
     pub usage: Option<LlmUsageRecord>,
     pub replay_fixture: Option<ReplayFixture>,
+    pub trace_spans: Vec<RunTraceSpanRecord>,
     pub metadata: BTreeMap<String, serde_json::Value>,
     pub persisted_path: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RunTraceSpanRecord {
+    pub span_id: u64,
+    pub parent_id: Option<u64>,
+    pub kind: String,
+    pub name: String,
+    pub start_ms: u64,
+    pub duration_ms: u64,
+    pub metadata: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -2552,22 +2565,26 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
                 return reject_policy(format!("builtin '{name}' exceeds process.exec ceiling"));
             }
         }
-        "host_invoke" => {
-            let capability = args.first().map(|v| v.display()).unwrap_or_default();
-            let op = args.get(1).map(|v| v.display()).unwrap_or_default();
-            if !policy_allows_capability(&policy, &capability, &op) {
+        "host_call" => {
+            let name = args.first().map(|v| v.display()).unwrap_or_default();
+            let Some((capability, op)) = name.split_once('.') else {
                 return reject_policy(format!(
-                    "host_invoke {capability}.{op} exceeds capability ceiling"
+                    "host_call '{name}' must use capability.operation naming"
+                ));
+            };
+            if !policy_allows_capability(&policy, capability, op) {
+                return reject_policy(format!(
+                    "host_call {capability}.{op} exceeds capability ceiling"
                 ));
             }
-            let requested_side_effect = match (capability.as_str(), op.as_str()) {
+            let requested_side_effect = match (capability, op) {
                 ("workspace", "write_text" | "apply_edit" | "delete") => "workspace_write",
                 ("process", "exec") => "process_exec",
                 _ => "read_only",
             };
             if !policy_allows_side_effect(&policy, requested_side_effect) {
                 return reject_policy(format!(
-                    "host_invoke {capability}.{op} exceeds side-effect ceiling"
+                    "host_call {capability}.{op} exceeds side-effect ceiling"
                 ));
             }
         }
@@ -2893,6 +2910,7 @@ pub async fn execute_stage_node(
                     tool_backoff_ms: 1000,
                     tool_format: tool_format.clone(),
                     auto_compact: None,
+                    context_callback: None,
                     policy: None,
                     daemon: false,
                     llm_retries: 2,
@@ -3319,6 +3337,7 @@ mod tests {
             transcript: None,
             usage: None,
             replay_fixture: None,
+            trace_spans: vec![],
             metadata: BTreeMap::new(),
             persisted_path: None,
         };
@@ -3493,6 +3512,36 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[test]
+    fn normalize_run_record_preserves_trace_spans() {
+        let value = crate::stdlib::json_to_vm_value(&serde_json::json!({
+            "_type": "run_record",
+            "id": "run_trace",
+            "workflow_id": "wf",
+            "status": "completed",
+            "started_at": "1",
+            "trace_spans": [
+                {
+                    "span_id": 1,
+                    "parent_id": null,
+                    "kind": "pipeline",
+                    "name": "workflow",
+                    "start_ms": 0,
+                    "duration_ms": 42,
+                    "metadata": {"model": "demo"}
+                }
+            ]
+        }));
+
+        let run = normalize_run_record(&value).unwrap();
+        assert_eq!(run.trace_spans.len(), 1);
+        assert_eq!(run.trace_spans[0].kind, "pipeline");
+        assert_eq!(
+            run.trace_spans[0].metadata["model"],
+            serde_json::json!("demo")
+        );
+    }
+
     // ── Tool hook tests ──────────────────────────────────────────────
 
     #[test]
@@ -3622,7 +3671,8 @@ mod tests {
             },
             None,
         ));
-        assert!(compacted.unwrap());
+        let summary = compacted.unwrap();
+        assert!(summary.is_some());
         assert!(messages.len() <= 7); // 6 kept + 1 summary
         assert!(messages[0]["content"]
             .as_str()
@@ -3648,7 +3698,7 @@ mod tests {
             },
             None,
         ));
-        assert!(!compacted.unwrap());
+        assert!(compacted.unwrap().is_none());
         assert_eq!(messages.len(), 4);
     }
 

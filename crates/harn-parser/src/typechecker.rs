@@ -368,7 +368,7 @@ fn is_builtin(name: &str) -> bool {
             | "transcript_summarize"
             | "host_capabilities"
             | "host_has"
-            | "host_invoke"
+            | "host_call"
             | "host_mock"
             | "host_mock_clear"
             | "host_mock_calls"

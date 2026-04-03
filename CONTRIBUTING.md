@@ -7,9 +7,15 @@ Thanks for your interest in contributing to Harn! This guide covers the basics.
 ```bash
 git clone https://github.com/burin-labs/harn.git
 cd harn
-git config core.hooksPath .githooks
-cargo build
+./scripts/dev_setup.sh
 ```
+
+This script:
+
+- configures `.githooks` as the repo hook path
+- installs repo-local markdown tooling plus Node dependencies for
+  `tree-sitter-harn/` and `editors/vscode/` when `npm` is available
+- runs `cargo check --workspace`
 
 ## Running checks
 
@@ -17,6 +23,14 @@ Before submitting a PR, run the full check suite:
 
 ```bash
 make all
+```
+
+Useful shortcuts:
+
+```bash
+make check     # alias for make all
+make portal    # launch the local Harn observability portal
+make setup     # rerun repo bootstrap
 ```
 
 This runs:
@@ -30,7 +44,8 @@ This runs:
 - `harn test conformance` -- Conformance test suite
 
 Pre-commit hooks (`.githooks/pre-commit`) run fmt + clippy + markdown lint
-automatically.
+automatically. Pre-push hooks (`.githooks/pre-push`) run workspace tests,
+Harn formatting checks, and markdown lint before code leaves your machine.
 
 ## Project structure
 

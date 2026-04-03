@@ -1,0 +1,12 @@
+#!/bin/sh
+set -e
+
+echo "=== Pre-push: running fast release-quality checks ==="
+cargo test --workspace
+cargo run --quiet --bin harn -- fmt --check conformance/tests/
+
+if command -v npx >/dev/null 2>&1; then
+  npx markdownlint-cli2 "**/*.md"
+fi
+
+echo "=== Pre-push checks passed. ==="

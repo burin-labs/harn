@@ -1108,11 +1108,29 @@ fn scan_node_preflight(
             );
         }
         Node::FunctionCall { name, args } if name == "host_invoke" => {
-            // Validate known capability/operation pairs
-            if let (Some(Node::StringLiteral(cap)), Some(Node::StringLiteral(op))) =
-                (args.first().map(|a| &a.node), args.get(1).map(|a| &a.node))
-            {
-                if !is_known_host_operation(host_capabilities, cap, op) {
+            diagnostics.push(PreflightDiagnostic {
+                path: file_path.display().to_string(),
+                source: source.to_string(),
+                span: node.span,
+                message: "preflight: host_invoke(...) was removed; use host_call(\"capability.operation\", args)".to_string(),
+                help: Some(
+                    "replace host_invoke(\"project\", \"scan\", {}) with host_call(\"project.scan\", {})"
+                        .to_string(),
+                ),
+            });
+            scan_children(
+                args,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
+        }
+        Node::FunctionCall { name, args } if name == "host_call" => {
+            if let Some((cap, op, params_arg)) = parse_host_call_args(args) {
+                if !is_known_host_operation(host_capabilities, &cap, &op) {
                     diagnostics.push(PreflightDiagnostic {
                         path: file_path.display().to_string(),
                         source: source.to_string(),
@@ -1126,15 +1144,14 @@ fn scan_node_preflight(
                         ),
                     });
                 }
-                // Template render target check
                 if cap == "template" && op == "render" {
-                    if let Some(template_path) = host_render_path_arg(args.get(2)) {
+                    if let Some(template_path) = host_render_path_arg(params_arg) {
                         let resolved = resolve_preflight_target(file_path, &template_path, config);
                         if !resolved.iter().any(|path| path.exists()) {
                             diagnostics.push(PreflightDiagnostic {
                                 path: file_path.display().to_string(),
                                 source: source.to_string(),
-                                span: args[2].span,
+                                span: params_arg.map(|arg| arg.span).unwrap_or(node.span),
                                 message: format!(
                                     "preflight: host template render target '{}' does not exist at {}",
                                     template_path,
@@ -1148,6 +1165,17 @@ fn scan_node_preflight(
                         }
                     }
                 }
+            } else if let Some(arg) = args.first() {
+                diagnostics.push(PreflightDiagnostic {
+                    path: file_path.display().to_string(),
+                    source: source.to_string(),
+                    span: arg.span,
+                    message: "preflight: host_call(...) requires a literal \"capability.operation\" name for static validation".to_string(),
+                    help: Some(
+                        "use a string literal like host_call(\"project.scan\", {}) so preflight can validate the capability contract"
+                            .to_string(),
+                    ),
+                });
             }
             scan_children(
                 args,
@@ -1951,11 +1979,27 @@ fn default_host_capabilities() -> HashMap<String, HashSet<String>> {
             HashSet::from([
                 "agent_instructions".to_string(),
                 "code_patterns".to_string(),
+                "compute_content_hash".to_string(),
                 "ide_context".to_string(),
                 "lessons".to_string(),
                 "mcp_config".to_string(),
+                "metadata_get".to_string(),
+                "metadata_refresh_hashes".to_string(),
+                "metadata_save".to_string(),
+                "metadata_set".to_string(),
+                "metadata_stale".to_string(),
                 "scan".to_string(),
+                "scope_test_command".to_string(),
                 "test_commands".to_string(),
+            ]),
+        ),
+        (
+            "session".to_string(),
+            HashSet::from([
+                "active_roots".to_string(),
+                "changed_paths".to_string(),
+                "preread_get".to_string(),
+                "preread_read_many".to_string(),
             ]),
         ),
         (
@@ -2085,6 +2129,14 @@ fn host_render_path_arg(arg: Option<&SNode>) -> Option<String> {
             }
             _ => None,
         })
+}
+
+fn parse_host_call_args(args: &[SNode]) -> Option<(String, String, Option<&SNode>)> {
+    let Node::StringLiteral(name) = &args.first()?.node else {
+        return None;
+    };
+    let (capability, operation) = name.split_once('.')?;
+    Some((capability.to_string(), operation.to_string(), args.get(1)))
 }
 
 fn literal_string(node: &SNode) -> Option<String> {
@@ -2302,7 +2354,7 @@ pipeline main() {
         let file = dir.join("main.harn");
         let source = r#"
 pipeline main() {
-  host_invoke("unknown_cap", "do_stuff", {})
+  host_call("unknown_cap.do_stuff", {})
 }
 "#;
         let program = parse_program(source);
@@ -2325,8 +2377,8 @@ pipeline main() {
         let file = dir.join("main.harn");
         let source = r#"
 pipeline main() {
-  host_invoke("workspace", "read_text", {path: "x.txt"})
-  host_invoke("process", "exec", {command: "ls"})
+  host_call("project.metadata_get", {dir: ".", namespace: "facts"})
+  host_call("process.exec", {command: "ls"})
 }
 "#;
         let program = parse_program(source);
@@ -2349,8 +2401,8 @@ pipeline main() {
         let file = dir.join("main.harn");
         let source = r#"
 pipeline main() {
-  host_invoke("project", "scan", {})
-  host_invoke("runtime", "set_result", {})
+  host_call("project.scan", {})
+  host_call("runtime.set_result", {})
 }
 "#;
         let program = parse_program(source);
@@ -2377,14 +2429,14 @@ pipeline main() {
     }
 
     #[test]
-    fn preflight_accepts_workspace_project_root_and_file_exists_ops() {
-        let dir = unique_temp_dir("harn-check-host-workspace");
+    fn preflight_accepts_runtime_task_and_session_ops() {
+        let dir = unique_temp_dir("harn-check-host-runtime");
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("main.harn");
         let source = r#"
 pipeline main() {
-  host_invoke("workspace", "project_root", {})
-  host_invoke("workspace", "file_exists", {path: "x.txt"})
+  host_call("runtime.task", {})
+  host_call("session.changed_paths", {})
 }
 "#;
         let program = parse_program(source);
@@ -2408,7 +2460,7 @@ pipeline main() {
         let source = r#"
 pipeline main() {
   host_mock("project", "metadata_get", {result: {value: "facts"}})
-  host_invoke("project", "metadata_get", {dir: "pkg"})
+  host_call("project.metadata_get", {dir: "pkg"})
 }
 "#;
         let program = parse_program(source);

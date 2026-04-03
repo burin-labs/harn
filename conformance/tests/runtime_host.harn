@@ -1,0 +1,15 @@
+import "std/runtime"
+
+pipeline default() {
+  host_mock("runtime", "task", "demo-task")
+  host_mock("runtime", "pipeline_input", {message: "hello"})
+  host_mock("runtime", "dry_run", true)
+  host_mock("runtime", "approved_plan", "ship it")
+  println(runtime_task())
+  println(runtime_pipeline_input()?.message)
+  println(runtime_dry_run())
+  println(runtime_approved_plan())
+  let result = process_exec("printf ok")
+  println(result?.success)
+  println(result?.combined)
+}

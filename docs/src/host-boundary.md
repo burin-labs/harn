@@ -12,13 +12,12 @@ The boundary should stay narrow:
 
 What belongs in Harn `std/*` modules or the VM:
 
-- Generic host wrappers like `project_host_scan()`, `git_diff()`,
-  `workspace_read_text()`, or `process_exec()`
-- Reusable project-state normalization and packaging
+- Generic runtime wrappers like `runtime_task()`, `process_exec()`, or
+  `interaction_ask()`
+- Reusable metadata/scanner helpers and product-agnostic project-state normalization
 - Transcript schemas, assets, compaction, and replay semantics
 - Context/artifact assembly rules that are product-agnostic
 - Structured contract enforcement and eval/replay helpers
-- Multi-root workspace contracts and fallbacks such as `workspace_roots()`
 - Test-time typed host mocks such as `host_mock(...)` when the behavior is a
   runtime fixture for host-backed flows rather than a product-specific bridge
 - Mutation-session identity and audit provenance for write-capable workflows
@@ -27,8 +26,10 @@ What belongs in Harn `std/*` modules or the VM:
 What should stay in host-side `.harn` scripts:
 
 - Product-specific prompts and instruction tone
-- IDE-specific flows such as edit application, approval UX, or bespoke tool
-  choreography
+- IDE-specific flows such as edit application, approval UX, repo enrichment,
+  or bespoke tool choreography
+- Host-owned filesystem and edit wrappers built on capability-aware `host_call(...)`
+- Host-owned editor, diagnostics, git, learning, and project-context wrappers
 - Concrete undo/redo stacks and editor-native mutation application
 - Proprietary ranking, routing, or heuristics tied to one host product
 - Features that depend on host-only commercial, account, or app lifecycle rules

@@ -222,8 +222,8 @@ Add to `claude_desktop_config.json`:
 
 ## ACP (Agent Client Protocol)
 
-ACP lets editors, IDEs, and CLIs use Harn as a
-coding agent backend. Communication is JSON-RPC 2.0 over stdin/stdout.
+ACP lets host applications and local clients use Harn as a
+runtime backend. Communication is JSON-RPC 2.0 over stdin/stdout.
 
 Bridge-level tool gates and daemon idle/resume notifications are documented in
 [Bridge Protocol](./bridge-protocol.md).

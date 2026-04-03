@@ -68,5 +68,5 @@ pipeline test(task) {
     compact_callback: { archived -> {summary: "loop compact " + to_string(len(archived))} },
   },
   )
-  println(transcript_messages(loop_compacted?.transcript)[0].content.contains("loop compact"))
+  println(transcript_summary(loop_compacted?.transcript).contains("loop compact"))
 }

@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Harn Portal</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="sidebar-header">
+          <div class="eyebrow">Harn</div>
+          <h1>Portal</h1>
+          <p>Local observability for persisted runs, spans, transcripts, and child workflows.</p>
+        </div>
+        <div id="stats" class="stats-grid"></div>
+        <label class="search">
+          <span>Filter runs</span>
+          <input id="search" type="search" placeholder="workflow, model, status..." />
+        </label>
+        <div id="run-list" class="run-list"></div>
+      </aside>
+      <main class="main">
+        <section id="empty" class="empty-state">
+          <h2>No run selected</h2>
+          <p>Pick a run from the left to inspect its stages, spans, transcript story, and child runs.</p>
+        </section>
+        <section id="detail" class="detail hidden">
+          <header class="hero">
+            <div>
+              <div class="eyebrow">Run</div>
+              <h2 id="run-title"></h2>
+              <p id="run-subtitle" class="muted"></p>
+              <p id="run-path" class="mono muted"></p>
+            </div>
+            <div id="hero-meta" class="hero-meta"></div>
+          </header>
+
+          <section id="insights" class="card-grid"></section>
+
+          <div class="split split-tight">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <h3>Lineage and execution</h3>
+                  <p>Where this run sits in a larger tree, and which local execution context it used.</p>
+                </div>
+              </div>
+              <div id="lineage" class="table-like"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <h3>Workflow flow</h3>
+                  <p>The path this run took through transitions and checkpoints.</p>
+                </div>
+              </div>
+              <div id="flow" class="table-like"></div>
+            </section>
+          </div>
+
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <h3>Run comparison</h3>
+                <p>Compare this run against the most recent earlier run of the same workflow.</p>
+              </div>
+            </div>
+            <div id="compare" class="compare-panel"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <h3>Trace timeline</h3>
+                <p>A horizontal view of where time went across workflow stages and nested runtime spans.</p>
+              </div>
+            </div>
+            <div id="flamegraph" class="flamegraph"></div>
+          </section>
+
+          <div class="split">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <h3>Stage summary</h3>
+                  <p>Big-picture workflow progress, retries, and verification output.</p>
+                </div>
+              </div>
+              <div id="stages" class="table-like"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <h3>Runtime activity</h3>
+                  <p>Span-derived activity feed ordered by when things happened.</p>
+                </div>
+              </div>
+              <div id="activity" class="activity-list"></div>
+            </section>
+          </div>
+
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <h3>Produced artifacts</h3>
+                <p>The durable outputs this run saved for later stages, child runs, or inspection.</p>
+              </div>
+            </div>
+            <div id="artifacts" class="table-like"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <h3>Model turns</h3>
+                <p>Saved request/response turns from <span class="mono">llm_transcript.jsonl</span> when a transcript sidecar exists.</p>
+              </div>
+            </div>
+            <div id="turns" class="turn-list"></div>
+          </section>
+
+          <div class="split">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <h3>Transcript story</h3>
+                  <p>Human-visible transcript sections from the run and its stages.</p>
+                </div>
+              </div>
+              <div id="story" class="story-list"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <h3>Child runs</h3>
+                  <p>Delegated work launched under this run.</p>
+                </div>
+              </div>
+              <div id="children" class="child-list"></div>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="/app.js"></script>
+  </body>
+  </html>

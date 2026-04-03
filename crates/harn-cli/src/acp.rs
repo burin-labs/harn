@@ -27,70 +27,6 @@ struct Session {
     host_bridge: Option<Rc<harn_vm::bridge::HostBridge>>,
 }
 
-fn common_leading_whitespace_prefix<'a>(left: &'a str, right: &str) -> &'a str {
-    let mut matched_bytes = 0usize;
-    for ((left_idx, left_ch), right_ch) in left.char_indices().zip(right.chars()) {
-        if !left_ch.is_whitespace() || !right_ch.is_whitespace() || left_ch != right_ch {
-            break;
-        }
-        matched_bytes = left_idx + left_ch.len_utf8();
-    }
-    &left[..matched_bytes]
-}
-
-fn dedent_multiline_patch_text(text: &str) -> Option<String> {
-    if !text.contains('\n') {
-        return None;
-    }
-
-    let mut lines = text.lines().collect::<Vec<_>>();
-    let non_empty = lines
-        .iter()
-        .copied()
-        .filter(|line| !line.trim().is_empty())
-        .collect::<Vec<_>>();
-    let first = non_empty.first()?;
-    let mut common = first
-        .chars()
-        .take_while(|ch| ch.is_whitespace())
-        .collect::<String>();
-    if common.is_empty() {
-        return None;
-    }
-
-    for line in non_empty.iter().skip(1) {
-        let leading = line
-            .chars()
-            .take_while(|ch| ch.is_whitespace())
-            .collect::<String>();
-        common = common_leading_whitespace_prefix(&common, &leading).to_string();
-        if common.is_empty() {
-            return None;
-        }
-    }
-
-    for line in &mut lines {
-        if line.trim().is_empty() {
-            continue;
-        }
-        if let Some(stripped) = line.strip_prefix(&common) {
-            *line = stripped;
-        }
-    }
-
-    Some(lines.join("\n"))
-}
-
-fn dedented_edit_retry(old_string: &str, new_string: &str) -> Option<(String, String)> {
-    let dedented_old = dedent_multiline_patch_text(old_string)?;
-    if dedented_old == old_string {
-        return None;
-    }
-    let dedented_new =
-        dedent_multiline_patch_text(new_string).unwrap_or_else(|| new_string.to_string());
-    Some((dedented_old, dedented_new))
-}
-
 // ---------------------------------------------------------------------------
 // AcpServer
 // ---------------------------------------------------------------------------
@@ -705,43 +641,6 @@ impl AcpBridge {
             }
         }
     }
-
-    async fn call_client_apply_edit(
-        &self,
-        path: &str,
-        old_string: &str,
-        new_string: &str,
-    ) -> Result<serde_json::Value, harn_vm::VmError> {
-        let request = |old_string: &str, new_string: &str| {
-            serde_json::json!({
-                "sessionId": self.session_id,
-                "path": path,
-                "old_string": old_string,
-                "new_string": new_string,
-            })
-        };
-
-        match self
-            .call_client("fs/apply_edit", request(old_string, new_string))
-            .await
-        {
-            Ok(result) => Ok(result),
-            Err(first_error) => {
-                let Some((dedented_old, dedented_new)) =
-                    dedented_edit_retry(old_string, new_string)
-                else {
-                    return Err(first_error);
-                };
-                match self
-                    .call_client("fs/apply_edit", request(&dedented_old, &dedented_new))
-                    .await
-                {
-                    Ok(result) => Ok(result),
-                    Err(_) => Err(first_error),
-                }
-            }
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -865,12 +764,24 @@ async fn load_host_mcp_clients(
     host_bridge: Rc<harn_vm::bridge::HostBridge>,
 ) -> BTreeMap<String, harn_vm::VmValue> {
     let mut mcp_dict = BTreeMap::new();
+    let capabilities = host_bridge
+        .call("host/capabilities", serde_json::json!({}))
+        .await
+        .ok()
+        .and_then(|value| value.as_object().cloned());
+    let has_project_mcp_config = capabilities
+        .as_ref()
+        .and_then(|root| root.get("project"))
+        .and_then(|entry| entry.as_array())
+        .is_some_and(|ops| ops.iter().any(|value| value.as_str() == Some("mcp_config")));
+    if !has_project_mcp_config {
+        return mcp_dict;
+    }
     let response = match host_bridge
         .call(
-            "host/invoke",
+            "host/call",
             serde_json::json!({
-                "capability": "project",
-                "op": "mcp_config",
+                "name": "project.mcp_config",
                 "args": {}
             }),
         )
@@ -944,11 +855,6 @@ async fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Rc<AcpBridge>) {
         })
         .unwrap_or_else(|_| harn_vm::VmValue::Dict(Rc::new(std::collections::BTreeMap::new())));
 
-    // Override sync file builtins so async versions take precedence.
-    for name in ["read_file", "write_file"] {
-        vm.unregister_builtin(name);
-    }
-
     // --- Output builtins: route through session/update ---
 
     let b = bridge.clone();
@@ -970,92 +876,6 @@ async fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Rc<AcpBridge>) {
         let msg = args.first().map(|a| a.display()).unwrap_or_default();
         b.send_update(&format!("{msg}\n"));
         Ok(harn_vm::VmValue::Nil)
-    });
-
-    // --- File I/O: delegate to editor via ACP fs/ methods ---
-
-    let b = bridge.clone();
-    vm.register_async_builtin("read_file", move |args| {
-        let bridge = b.clone();
-        async move {
-            let path = args.first().map(|a| a.display()).unwrap_or_default();
-            let result = bridge
-                .call_client(
-                    "fs/read_text_file",
-                    serde_json::json!({
-                        "sessionId": bridge.session_id,
-                        "path": path,
-                    }),
-                )
-                .await?;
-            if let Some(content) = result.get("content").and_then(|v| v.as_str()) {
-                Ok(harn_vm::VmValue::String(Rc::from(content)))
-            } else {
-                Ok(harn_vm::bridge::json_result_to_vm_value(&result))
-            }
-        }
-    });
-
-    let b = bridge.clone();
-    vm.register_async_builtin("write_file", move |args| {
-        let bridge = b.clone();
-        async move {
-            let path = args.first().map(|a| a.display()).unwrap_or_default();
-            let content = args.get(1).map(|a| a.display()).unwrap_or_default();
-            bridge
-                .call_client(
-                    "fs/write_text_file",
-                    serde_json::json!({
-                        "sessionId": bridge.session_id,
-                        "path": path,
-                        "content": content,
-                    }),
-                )
-                .await?;
-            Ok(harn_vm::VmValue::Nil)
-        }
-    });
-
-    // --- Additional file I/O builtins (previously bridge-only) ---
-
-    let b = bridge.clone();
-    vm.register_async_builtin("apply_edit", move |args| {
-        let bridge = b.clone();
-        async move {
-            let file = args.first().map(|a| a.display()).unwrap_or_default();
-            let old_str = args.get(1).map(|a| a.display()).unwrap_or_default();
-            let new_str = args.get(2).map(|a| a.display()).unwrap_or_default();
-            bridge
-                .call_client_apply_edit(&file, &old_str, &new_str)
-                .await?;
-            Ok(harn_vm::VmValue::Nil)
-        }
-    });
-
-    vm.unregister_builtin("delete_file");
-
-    let b = bridge.clone();
-    vm.register_async_builtin("delete_file", move |args| {
-        let bridge = b.clone();
-        async move {
-            let path = args.first().map(|a| a.display()).unwrap_or_default();
-            bridge
-                .call_client(
-                    "fs/delete_file",
-                    serde_json::json!({
-                        "sessionId": bridge.session_id,
-                        "path": path,
-                    }),
-                )
-                .await?;
-            Ok(harn_vm::VmValue::Nil)
-        }
-    });
-
-    // file_exists is sync — delegates to local filesystem (same as bridge mode)
-    vm.register_builtin("file_exists", |args, _out| {
-        let path = args.first().map(|a| a.display()).unwrap_or_default();
-        Ok(harn_vm::VmValue::Bool(std::path::Path::new(&path).exists()))
     });
 
     // --- Host callback — generic escape hatch ---
@@ -1117,200 +937,6 @@ async fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Rc<AcpBridge>) {
             false
         };
         Ok(harn_vm::VmValue::Bool(valid))
-    });
-
-    let b = bridge.clone();
-    vm.register_async_builtin("host_invoke", move |args| {
-        let bridge = b.clone();
-        async move {
-            let capability = args.first().map(|a| a.display()).unwrap_or_default();
-            let operation = args.get(1).map(|a| a.display()).unwrap_or_default();
-            let params = args.get(2).cloned().unwrap_or(harn_vm::VmValue::Nil);
-            let params_json = harn_vm::llm::vm_value_to_json(&params);
-
-            match (capability.as_str(), operation.as_str()) {
-                ("workspace", "read_text") => {
-                    let path = params_json
-                        .get("path")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or_default();
-                    let result = bridge
-                        .call_client(
-                            "fs/read_text_file",
-                            serde_json::json!({
-                                "sessionId": bridge.session_id,
-                                "path": path,
-                            }),
-                        )
-                        .await?;
-                    if let Some(content) = result.get("content").and_then(|v| v.as_str()) {
-                        Ok(harn_vm::VmValue::String(Rc::from(content)))
-                    } else {
-                        Ok(harn_vm::bridge::json_result_to_vm_value(&result))
-                    }
-                }
-                ("workspace", "write_text") => {
-                    let path = params_json
-                        .get("path")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or_default();
-                    let content = params_json
-                        .get("content")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or_default();
-                    let overwrite = params_json
-                        .get("overwrite")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false);
-                    let result = bridge
-                        .call_client(
-                            "fs/write_text_file",
-                            serde_json::json!({
-                                "sessionId": bridge.session_id,
-                                "path": path,
-                                "content": content,
-                                "overwrite": overwrite,
-                            }),
-                        )
-                        .await?;
-                    Ok(harn_vm::bridge::json_result_to_vm_value(&result))
-                }
-                ("workspace", "apply_edit") => {
-                    let path = params_json
-                        .get("path")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or_default();
-                    let old_string = params_json
-                        .get("old_string")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or_default();
-                    let new_string = params_json
-                        .get("new_string")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or_default();
-                    let result = bridge
-                        .call_client_apply_edit(path, old_string, new_string)
-                        .await?;
-                    Ok(harn_vm::bridge::json_result_to_vm_value(&result))
-                }
-                ("workspace", "delete") => {
-                    let path = params_json
-                        .get("path")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or_default();
-                    bridge
-                        .call_client(
-                            "fs/delete_file",
-                            serde_json::json!({
-                                "sessionId": bridge.session_id,
-                                "path": path,
-                            }),
-                        )
-                        .await?;
-                    Ok(harn_vm::VmValue::Nil)
-                }
-                ("workspace", "exists") => {
-                    let path = params_json
-                        .get("path")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or_default();
-                    let result = bridge
-                        .call_client(
-                            "fs/read_text_file",
-                            serde_json::json!({
-                                "sessionId": bridge.session_id,
-                                "path": path,
-                            }),
-                        )
-                        .await;
-                    Ok(harn_vm::VmValue::Bool(result.is_ok()))
-                }
-                ("workspace", "list") => {
-                    let path = params_json
-                        .get("path")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or(".");
-                    let result = bridge
-                        .call_client(
-                            "host/call",
-                            serde_json::json!({
-                                "sessionId": bridge.session_id,
-                                "name": "list_directory",
-                                "args": {"path": path},
-                            }),
-                        )
-                        .await?;
-                    Ok(harn_vm::bridge::json_result_to_vm_value(&result))
-                }
-                ("process", "exec") => {
-                    acp_terminal_exec(
-                        &bridge,
-                        &[harn_vm::VmValue::String(Rc::from(
-                            params_json
-                                .get("command")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or_default(),
-                        ))],
-                    )
-                    .await
-                }
-                ("template", "render") => {
-                    let template = params_json
-                        .get("path")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or_default();
-                    let bindings = params_json
-                        .get("bindings")
-                        .cloned()
-                        .unwrap_or(serde_json::Value::Null);
-                    let result = bridge
-                        .call_client(
-                            "host/call",
-                            serde_json::json!({
-                                "sessionId": bridge.session_id,
-                                "name": "render",
-                                "args": {"template": template, "bindings": bindings},
-                            }),
-                        )
-                        .await?;
-                    Ok(harn_vm::bridge::json_result_to_vm_value(&result))
-                }
-                ("interaction", "ask") => {
-                    let question = params_json
-                        .get("question")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or_default();
-                    let result = bridge
-                        .call_client(
-                            "host/call",
-                            serde_json::json!({
-                                "sessionId": bridge.session_id,
-                                "name": "ask_user",
-                                "args": {"question": question},
-                            }),
-                        )
-                        .await?;
-                    Ok(harn_vm::bridge::json_result_to_vm_value(&result))
-                }
-                _ => {
-                    let result = bridge
-                        .call_client(
-                            "host/call",
-                            serde_json::json!({
-                                "sessionId": bridge.session_id,
-                                "name": "host_invoke",
-                                "args": {
-                                    "capability": capability,
-                                    "operation": operation,
-                                    "params": params_json,
-                                },
-                            }),
-                        )
-                        .await?;
-                    Ok(harn_vm::bridge::json_result_to_vm_value(&result))
-                }
-            }
-        }
     });
 
     // --- Render — template rendering delegated to host ---
@@ -1723,9 +1349,7 @@ pub async fn run_acp_server(pipeline: Option<&str>) {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        dedent_multiline_patch_text, dedented_edit_retry, normalize_host_capability_manifest,
-    };
+    use super::normalize_host_capability_manifest;
     use harn_vm::VmValue;
     use std::collections::BTreeMap;
     use std::rc::Rc;
@@ -1757,25 +1381,5 @@ mod tests {
         assert!(ops
             .iter()
             .any(|value| value.display() == "scope_test_command"));
-    }
-
-    #[test]
-    fn dedent_multiline_patch_text_removes_common_indent() {
-        let text = "        @pytest.fixture\n        def event_loop():\n            yield loop";
-        let dedented = dedent_multiline_patch_text(text).expect("dedented");
-        assert_eq!(
-            dedented,
-            "@pytest.fixture\ndef event_loop():\n    yield loop"
-        );
-    }
-
-    #[test]
-    fn dedented_edit_retry_returns_both_old_and_new_variants() {
-        let old_string = "        old line\n            nested";
-        let new_string = "        new line\n            nested";
-        let (dedented_old, dedented_new) =
-            dedented_edit_retry(old_string, new_string).expect("retry payload");
-        assert_eq!(dedented_old, "old line\n    nested");
-        assert_eq!(dedented_new, "new line\n    nested");
     }
 }

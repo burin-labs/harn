@@ -14,7 +14,7 @@
     "node-gyp-build": "^4.8.0"
   },
   "devDependencies": {
-    "tree-sitter-cli": "^0.26.7"
+    "tree-sitter-cli": "^0.26.8"
   },
   "scripts": {
     "build": "./scripts/tree-sitter-cli.sh generate && ./scripts/tree-sitter-cli.sh build",

@@ -38,6 +38,7 @@ pub fn workflow_options(config) {
     tool_retries: config?.tool_retries,
     tool_backoff_ms: config?.tool_backoff_ms,
     tool_format: config?.tool_format,
+    context_callback: config?.context_callback ?? config?.context_filter,
     transcript: config?.transcript
   })
 }
@@ -82,7 +83,7 @@ pub fn verify_command(config) {
   if config?.command == nil || config?.command == "" {
     return nil
   }
-  let output = host_invoke("process", "exec", {command: config?.command})
+  let output = host_call("process.exec", {command: config?.command})
   var ok = output?.success == true
   if config?.expect_status != nil {
     ok = output?.status == config?.expect_status
@@ -283,6 +284,7 @@ pub fn workflow_result_run(task, workflow_name, result, artifacts, options) {
       status: options?.status ?? base_run?.status ?? "completed",
       transcript: transcript,
       artifacts: run_artifacts,
+      trace_spans: trace_spans(),
       metadata: metadata,
     },
   )
@@ -347,6 +349,7 @@ pub fn workflow_result_persist(task, workflow_name, result, artifacts, options) 
       status: options?.status ?? base_run?.status ?? "completed",
       transcript: transcript,
       artifacts: run_artifacts,
+      trace_spans: trace_spans(),
       metadata: metadata,
     },
   )

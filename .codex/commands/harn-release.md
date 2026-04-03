@@ -10,7 +10,9 @@ Default assumptions:
   scopes it differently.
 - Before any release mechanics, do a repo-consistency sweep and update release-
   facing docs as needed, including `README.md`, `CLAUDE.md`, `docs/src/`,
-  `spec/HARN_SPEC.md`, and `CHANGELOG.md`.
+  `spec/HARN_SPEC.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, and developer setup
+  surfaces such as `scripts/dev_setup.sh`, `Makefile`, `.githooks/`, and
+  `docs/src/portal.md`.
 - Commit the actual release content first, including untracked files that
   belong in the release.
 - Then prefer the deterministic ship script:
@@ -32,7 +34,8 @@ Rules:
 - If syntax, parser, lexer, or tree-sitter changed, update
   `spec/HARN_SPEC.md` before the final gate.
 - If command behavior, release workflow, or operator guidance changed, update
-  `README.md`, `CLAUDE.md`, and mdBook pages that describe the changed surface.
+  `README.md`, `CLAUDE.md`, `CONTRIBUTING.md`, and mdBook pages that describe
+  the changed surface.
 - Treat `CHANGELOG.md` as the source of truth for GitHub release notes.
 - Summarize the shipped version, the release-content commit, the bump commit,
   publish status, and the exact notes body or compare link.

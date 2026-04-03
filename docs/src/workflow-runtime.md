@@ -287,6 +287,7 @@ Workflow execution produces a persisted run record containing:
 CLI support:
 
 ```bash
+harn portal
 harn runs inspect .harn-runs/<run>.json
 harn runs inspect .harn-runs/<run>.json --compare baseline.json
 harn replay .harn-runs/<run>.json
@@ -297,6 +298,10 @@ harn eval evals/regression.json
 
 The replay/eval surface is intentionally tied to saved typed run records so
 host applications do not need to build their own provenance layer.
+
+For a local visual view over the same persisted data, `harn portal` reads the
+run directory directly and renders stages, trace spans, transcript sections,
+and delegated child runs without introducing a second storage format.
 
 For host/runtime consumers that want the same logic inside Harn code, the VM
 also exposes:

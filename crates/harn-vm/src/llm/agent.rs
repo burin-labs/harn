@@ -1,5 +1,7 @@
 use std::rc::Rc;
 
+use serde::Deserialize;
+
 use crate::value::{ErrorCategory, VmClosure, VmError, VmValue};
 use crate::vm::Vm;
 
@@ -63,6 +65,9 @@ pub struct AgentLoopConfig {
     /// Auto-compaction config. When set, the agent loop automatically compacts
     /// the transcript when estimated tokens exceed the threshold.
     pub auto_compact: Option<crate::orchestration::AutoCompactConfig>,
+    /// Optional per-turn callback that can rewrite the prompt-visible messages
+    /// and/or effective system prompt without mutating the recorded transcript.
+    pub context_callback: Option<VmValue>,
     /// Capability policy scoped to this agent loop.
     pub policy: Option<crate::orchestration::CapabilityPolicy>,
     /// Daemon mode: agent stays alive waiting for user messages instead of
@@ -158,6 +163,7 @@ fn dump_llm_request(iteration: usize, call_id: &str, opts: &super::api::LlmCallO
         "type": "request",
         "iteration": iteration,
         "call_id": call_id,
+        "span_id": crate::tracing::current_span_id(),
         "timestamp": chrono_now(),
         "model": opts.model,
         "provider": opts.provider,
@@ -190,6 +196,7 @@ fn dump_llm_response(iteration: usize, call_id: &str, result: &super::api::LlmRe
         "type": "response",
         "iteration": iteration,
         "call_id": call_id,
+        "span_id": crate::tracing::current_span_id(),
         "timestamp": chrono_now(),
         "model": result.model,
         "text": result.text,
@@ -207,6 +214,15 @@ fn dump_llm_response(iteration: usize, call_id: &str, result: &super::api::LlmRe
         {
             let _ = writeln!(f, "{line}");
         }
+    }
+}
+
+fn annotate_current_span(metadata: &[(&str, serde_json::Value)]) {
+    let Some(span_id) = crate::tracing::current_span_id() else {
+        return;
+    };
+    for (key, value) in metadata {
+        crate::tracing::span_set_metadata(span_id, key, value.clone());
     }
 }
 
@@ -237,7 +253,7 @@ fn declared_paths(tool_name: &str, tool_args: &serde_json::Value) -> Vec<String>
 
 async fn inject_queued_user_messages(
     bridge: Option<&Rc<crate::bridge::HostBridge>>,
-    opts: &mut super::api::LlmCallOptions,
+    messages: &mut Vec<serde_json::Value>,
     checkpoint: crate::bridge::DeliveryCheckpoint,
 ) -> Result<Vec<crate::bridge::QueuedUserMessage>, VmError> {
     let Some(bridge) = bridge else {
@@ -245,12 +261,218 @@ async fn inject_queued_user_messages(
     };
     let queued = bridge.take_queued_user_messages_for(checkpoint).await;
     for message in &queued {
-        opts.messages.push(serde_json::json!({
+        messages.push(serde_json::json!({
             "role": "user",
             "content": message.content.clone(),
         }));
     }
     Ok(queued)
+}
+
+fn append_message_to_contexts(
+    visible_messages: &mut Vec<serde_json::Value>,
+    recorded_messages: &mut Vec<serde_json::Value>,
+    message: serde_json::Value,
+) {
+    visible_messages.push(message.clone());
+    recorded_messages.push(message);
+}
+
+fn append_host_messages_to_recorded(
+    recorded_messages: &mut Vec<serde_json::Value>,
+    queued_messages: &[crate::bridge::QueuedUserMessage],
+) {
+    for message in queued_messages {
+        recorded_messages.push(serde_json::json!({
+            "role": "user",
+            "content": message.content.clone(),
+        }));
+    }
+}
+
+fn build_agent_system_prompt(
+    base_system: Option<&str>,
+    tool_prompt: Option<&str>,
+    persistent_prompt: Option<&str>,
+) -> Option<String> {
+    let mut parts = Vec::new();
+    if let Some(base) = base_system {
+        let trimmed = base.trim();
+        if !trimmed.is_empty() {
+            parts.push(trimmed.to_string());
+        }
+    }
+    if let Some(tool_prompt) = tool_prompt {
+        let trimmed = tool_prompt.trim();
+        if !trimmed.is_empty() {
+            parts.push(trimmed.to_string());
+        }
+    }
+    if let Some(persistent_prompt) = persistent_prompt {
+        let trimmed = persistent_prompt.trim();
+        if !trimmed.is_empty() {
+            parts.push(trimmed.to_string());
+        }
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("\n\n"))
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct AgentContextCallbackResponse {
+    #[serde(default)]
+    messages: Option<Vec<serde_json::Value>>,
+    #[serde(default)]
+    system: Option<String>,
+}
+
+fn message_content_text(message: &serde_json::Value) -> Option<String> {
+    let content = message.get("content")?;
+    if let Some(text) = content.as_str() {
+        return Some(text.to_string());
+    }
+    let items = content.as_array()?;
+    let mut parts: Vec<String> = Vec::new();
+    for item in items {
+        let item_type = item
+            .get("type")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        match item_type {
+            "text" => {
+                if let Some(text) = item.get("text").and_then(|value| value.as_str()) {
+                    if !text.is_empty() {
+                        parts.push(text.to_string());
+                    }
+                }
+            }
+            "tool_result" => {
+                if let Some(text) = item.get("content").and_then(|value| value.as_str()) {
+                    if !text.is_empty() {
+                        parts.push(text.to_string());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("\n\n"))
+    }
+}
+
+fn latest_message_text(messages: &[serde_json::Value], role: &str) -> Option<String> {
+    messages
+        .iter()
+        .rev()
+        .find(|message| message.get("role").and_then(|value| value.as_str()) == Some(role))
+        .and_then(message_content_text)
+}
+
+fn latest_tool_result_text(messages: &[serde_json::Value]) -> Option<String> {
+    for message in messages.iter().rev() {
+        let role = message
+            .get("role")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        if role == "tool" {
+            if let Some(text) = message_content_text(message) {
+                if !text.is_empty() {
+                    return Some(text);
+                }
+            }
+            continue;
+        }
+        if role != "user" {
+            continue;
+        }
+        let Some(items) = message.get("content").and_then(|value| value.as_array()) else {
+            continue;
+        };
+        for item in items {
+            if item.get("type").and_then(|value| value.as_str()) != Some("tool_result") {
+                continue;
+            }
+            if let Some(text) = item.get("content").and_then(|value| value.as_str()) {
+                if !text.is_empty() {
+                    return Some(text.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+fn recent_message_tail(messages: &[serde_json::Value], count: usize) -> Vec<serde_json::Value> {
+    let len = messages.len();
+    let start = len.saturating_sub(count);
+    messages[start..].to_vec()
+}
+
+async fn apply_agent_context_callback(
+    callback: &VmValue,
+    iteration: usize,
+    system: Option<&str>,
+    visible_messages: &[serde_json::Value],
+    recorded_messages: &[serde_json::Value],
+) -> Result<(Vec<serde_json::Value>, Option<String>), VmError> {
+    let Some(VmValue::Closure(closure)) = Some(callback.clone()) else {
+        return Err(VmError::Runtime(
+            "context_callback must be a closure".to_string(),
+        ));
+    };
+    let payload = serde_json::json!({
+        "iteration": iteration,
+        "system": system,
+        "messages": visible_messages,
+        "visible_messages": visible_messages,
+        "recorded_messages": recorded_messages,
+        "recent_visible_messages": recent_message_tail(visible_messages, 8),
+        "recent_recorded_messages": recent_message_tail(recorded_messages, 12),
+        "latest_visible_user_message": latest_message_text(visible_messages, "user"),
+        "latest_visible_assistant_message": latest_message_text(visible_messages, "assistant"),
+        "latest_recorded_user_message": latest_message_text(recorded_messages, "user"),
+        "latest_recorded_assistant_message": latest_message_text(recorded_messages, "assistant"),
+        "latest_tool_result": latest_tool_result_text(visible_messages),
+        "latest_recorded_tool_result": latest_tool_result_text(recorded_messages),
+    });
+    let mut vm = crate::vm::take_async_builtin_child_vm().ok_or_else(|| {
+        VmError::Runtime("context_callback requires an async builtin VM context".to_string())
+    })?;
+    let payload_vm = crate::stdlib::json_to_vm_value(&payload);
+    let result = vm.call_closure_pub(&closure, &[payload_vm], &[]).await;
+    crate::vm::restore_async_builtin_child_vm(vm);
+    let value = result?;
+    match value {
+        VmValue::Nil => Ok((visible_messages.to_vec(), system.map(|s| s.to_string()))),
+        VmValue::List(list) => Ok((
+            list.iter().map(crate::llm::helpers::vm_value_to_json).collect(),
+            system.map(|s| s.to_string()),
+        )),
+        VmValue::Dict(_) => {
+            let parsed: AgentContextCallbackResponse =
+                serde_json::from_value(crate::llm::helpers::vm_value_to_json(&value)).map_err(
+                    |error| {
+                        VmError::Runtime(format!(
+                            "context_callback returned an invalid response: {error}"
+                        ))
+                    },
+                )?;
+            Ok((
+                parsed.messages.unwrap_or_else(|| visible_messages.to_vec()),
+                parsed.system.or_else(|| system.map(|s| s.to_string())),
+            ))
+        }
+        other => Err(VmError::Runtime(format!(
+            "context_callback must return nil, a messages list, or a dict with optional messages/system fields; got {}",
+            other.display()
+        ))),
+    }
 }
 
 pub(crate) fn agent_loop_result_from_llm(
@@ -355,6 +577,7 @@ pub async fn run_agent_loop_internal(
     let tool_retries = config.tool_retries;
     let tool_backoff_ms = config.tool_backoff_ms;
     let tool_format = config.tool_format;
+    let context_callback = config.context_callback.clone();
 
     let auto_compact = config.auto_compact.clone();
     let daemon = config.daemon;
@@ -373,31 +596,36 @@ pub async fn run_agent_loop_internal(
     let rendered_schemas =
         crate::llm::tools::collect_tool_schemas(tools_val, native_tools_for_prompt.as_deref());
     let has_tools = !rendered_schemas.is_empty();
+    let base_system = opts.system.clone();
 
     if has_tools && tool_format != "native" {
         opts.native_tools = None;
     }
-    if has_tools {
-        let system_prompt = opts.system.get_or_insert_with(String::new);
-        system_prompt.push_str(&build_tool_calling_contract_prompt(
+    let tool_contract_prompt = if has_tools {
+        Some(build_tool_calling_contract_prompt(
             tools_val,
             native_tools_for_prompt.as_deref(),
             &tool_format,
             tool_format == "text",
-        ));
-    }
+        ))
+    } else {
+        None
+    };
 
-    if persistent {
-        let system_prompt = opts.system.get_or_insert_with(String::new);
-        system_prompt.push_str(&format!(
+    let persistent_system_prompt = if persistent {
+        Some(format!(
             "\n\nIMPORTANT: You MUST keep working until the task is complete. \
              Do NOT stop to explain or summarize — take action with tools. \
              When the requested work is complete and your verification has succeeded, \
              stop immediately and output {done_sentinel} on its own line. \
              Do not make additional tool calls after a passing verification result unless \
              you still have concrete evidence that the task is incomplete or failing."
-        ));
-    }
+        ))
+    } else {
+        None
+    };
+    let mut visible_messages = opts.messages.clone();
+    let mut recorded_messages = opts.messages.clone();
 
     let mut total_text = String::new();
     let mut consecutive_text_only = 0usize;
@@ -406,6 +634,7 @@ pub async fn run_agent_loop_internal(
     let mut deferred_user_messages: Vec<String> = Vec::new();
     let mut total_iterations = 0usize;
     let mut final_status = "done";
+    let mut transcript_summary = opts.transcript_summary.clone();
     let loop_start = std::time::Instant::now();
     let mut transcript_events = Vec::new();
     let mut idle_backoff_ms = 100u64;
@@ -414,10 +643,11 @@ pub async fn run_agent_loop_internal(
         total_iterations = iteration + 1;
         let immediate_messages = inject_queued_user_messages(
             bridge.as_ref(),
-            opts,
+            &mut visible_messages,
             crate::bridge::DeliveryCheckpoint::InterruptImmediate,
         )
         .await?;
+        append_host_messages_to_recorded(&mut recorded_messages, &immediate_messages);
         for message in &immediate_messages {
             transcript_events.push(transcript_event(
                 "host_input",
@@ -431,6 +661,25 @@ pub async fn run_agent_loop_internal(
             consecutive_text_only = 0;
             idle_backoff_ms = 100;
         }
+        let default_system = build_agent_system_prompt(
+            base_system.as_deref(),
+            tool_contract_prompt.as_deref(),
+            persistent_system_prompt.as_deref(),
+        );
+        let (call_messages, call_system) = if let Some(callback) = context_callback.as_ref() {
+            apply_agent_context_callback(
+                callback,
+                iteration,
+                default_system.as_deref(),
+                &visible_messages,
+                &recorded_messages,
+            )
+            .await?
+        } else {
+            (visible_messages.clone(), default_system)
+        };
+        opts.messages = call_messages;
+        opts.system = call_system;
         let start = std::time::Instant::now();
         let result = if let Some(bridge) = bridge.as_ref() {
             let mut llm_attempt = 0usize;
@@ -442,6 +691,13 @@ pub async fn run_agent_loop_internal(
                     .filter_map(|m| m.get("content").and_then(|c| c.as_str()))
                     .map(|s| s.len())
                     .sum();
+                annotate_current_span(&[
+                    ("call_id", serde_json::json!(llm_call_id.clone())),
+                    ("iteration", serde_json::json!(iteration)),
+                    ("model", serde_json::json!(opts.model.clone())),
+                    ("provider", serde_json::json!(opts.provider.clone())),
+                    ("prompt_chars", serde_json::json!(prompt_chars)),
+                ]);
                 bridge.send_call_start(
                     &llm_call_id,
                     "llm",
@@ -459,6 +715,11 @@ pub async fn run_agent_loop_internal(
                 let llm_duration = start.elapsed().as_millis() as u64;
                 match llm_result {
                     Ok(result) => {
+                        annotate_current_span(&[
+                            ("status", serde_json::json!("ok")),
+                            ("input_tokens", serde_json::json!(result.input_tokens)),
+                            ("output_tokens", serde_json::json!(result.output_tokens)),
+                        ]);
                         dump_llm_response(iteration, &llm_call_id, &result);
                         bridge.send_call_end(
                             &llm_call_id,
@@ -484,6 +745,12 @@ pub async fn run_agent_loop_internal(
                         } else {
                             "error"
                         };
+                        annotate_current_span(&[
+                            ("status", serde_json::json!(status)),
+                            ("error", serde_json::json!(error.to_string())),
+                            ("retryable", serde_json::json!(retryable)),
+                            ("attempt", serde_json::json!(llm_attempt)),
+                        ]);
                         bridge.send_call_end(
                             &llm_call_id,
                             "llm",
@@ -595,16 +862,20 @@ pub async fn run_agent_loop_internal(
             consecutive_text_only = 0;
             idle_backoff_ms = 100;
             if tool_format == "native" {
-                opts.messages.push(build_assistant_tool_message(
-                    &text,
-                    &tool_calls,
-                    &opts.provider,
-                ));
+                append_message_to_contexts(
+                    &mut visible_messages,
+                    &mut recorded_messages,
+                    build_assistant_tool_message(&text, &tool_calls, &opts.provider),
+                );
             } else {
-                opts.messages.push(serde_json::json!({
-                    "role": "assistant",
-                    "content": text,
-                }));
+                append_message_to_contexts(
+                    &mut visible_messages,
+                    &mut recorded_messages,
+                    serde_json::json!({
+                        "role": "assistant",
+                        "content": text,
+                    }),
+                );
             }
 
             let mut observations = String::new();
@@ -652,11 +923,11 @@ pub async fn run_agent_loop_internal(
                         })),
                     ));
                     if tool_format == "native" {
-                        opts.messages.push(build_tool_result_message(
-                            tool_id,
-                            &result_text,
-                            &opts.provider,
-                        ));
+                        append_message_to_contexts(
+                            &mut visible_messages,
+                            &mut recorded_messages,
+                            build_tool_result_message(tool_id, &result_text, &opts.provider),
+                        );
                     } else {
                         observations.push_str(&format!(
                             "<tool_result name=\"{tool_name}\">\n{result_text}\n</tool_result>\n\n"
@@ -678,11 +949,11 @@ pub async fn run_agent_loop_internal(
                             Some(serde_json::json!({"tool_name": tool_name, "tool_use_id": tool_id, "rejected": true})),
                         ));
                         if tool_format == "native" {
-                            opts.messages.push(build_tool_result_message(
-                                tool_id,
-                                &result_text,
-                                &opts.provider,
-                            ));
+                            append_message_to_contexts(
+                                &mut visible_messages,
+                                &mut recorded_messages,
+                                build_tool_result_message(tool_id, &result_text, &opts.provider),
+                            );
                         } else {
                             observations.push_str(&format!(
                                 "<tool_result name=\"{tool_name}\">\n{result_text}\n</tool_result>\n\n"
@@ -737,11 +1008,15 @@ pub async fn run_agent_loop_internal(
                                     Some(serde_json::json!({"tool_name": tool_name, "tool_use_id": tool_id, "rejected": true})),
                                 ));
                                 if tool_format == "native" {
-                                    opts.messages.push(build_tool_result_message(
-                                        tool_id,
-                                        &result_text,
-                                        &opts.provider,
-                                    ));
+                                    append_message_to_contexts(
+                                        &mut visible_messages,
+                                        &mut recorded_messages,
+                                        build_tool_result_message(
+                                            tool_id,
+                                            &result_text,
+                                            &opts.provider,
+                                        ),
+                                    );
                                 } else {
                                     observations.push_str(&format!(
                                         "<tool_result name=\"{tool_name}\">\n{result_text}\n</tool_result>\n\n"
@@ -770,6 +1045,62 @@ pub async fn run_agent_loop_internal(
                     ),
                 ));
                 tools_used_this_iter.push(tool_name.to_string());
+                let mutation_classification = classify_tool_mutation(tool_name);
+                let declared_paths_current = declared_paths(tool_name, &tool_args);
+                let tool_started_at = std::time::Instant::now();
+                let tool_call_id = if tool_id.is_empty() {
+                    format!("tool-iter-{iteration}-{}", tools_used_this_iter.len())
+                } else {
+                    format!("tool-{tool_id}")
+                };
+                let tool_span_id = crate::tracing::span_start(
+                    crate::tracing::SpanKind::ToolCall,
+                    tool_name.to_string(),
+                );
+                crate::tracing::span_set_metadata(
+                    tool_span_id,
+                    "tool_name",
+                    serde_json::json!(tool_name),
+                );
+                crate::tracing::span_set_metadata(
+                    tool_span_id,
+                    "tool_use_id",
+                    serde_json::json!(tool_id),
+                );
+                crate::tracing::span_set_metadata(
+                    tool_span_id,
+                    "call_id",
+                    serde_json::json!(tool_call_id.clone()),
+                );
+                crate::tracing::span_set_metadata(
+                    tool_span_id,
+                    "iteration",
+                    serde_json::json!(iteration),
+                );
+                crate::tracing::span_set_metadata(
+                    tool_span_id,
+                    "classification",
+                    serde_json::json!(mutation_classification.clone()),
+                );
+                crate::tracing::span_set_metadata(
+                    tool_span_id,
+                    "declared_paths",
+                    serde_json::json!(declared_paths_current.clone()),
+                );
+                if let Some(bridge) = bridge.as_ref() {
+                    bridge.send_call_start(
+                        &tool_call_id,
+                        "tool",
+                        tool_name,
+                        serde_json::json!({
+                            "tool_name": tool_name,
+                            "tool_use_id": tool_id,
+                            "iteration": iteration,
+                            "classification": mutation_classification,
+                            "declared_paths": declared_paths_current,
+                        }),
+                    );
+                }
 
                 let call_result = {
                     let mut attempt = 0usize;
@@ -871,6 +1202,16 @@ pub async fn run_agent_loop_internal(
                 } else {
                     result_text
                 };
+                crate::tracing::span_set_metadata(
+                    tool_span_id,
+                    "status",
+                    serde_json::json!(if is_rejected { "rejected" } else { "ok" }),
+                );
+                crate::tracing::span_set_metadata(
+                    tool_span_id,
+                    "result_chars",
+                    serde_json::json!(result_text.len()),
+                );
 
                 // PostToolUse hooks (in-process)
                 let result_text =
@@ -907,6 +1248,25 @@ pub async fn run_agent_loop_internal(
                 } else {
                     result_text
                 };
+                if let Some(bridge) = bridge.as_ref() {
+                    bridge.send_call_end(
+                        &tool_call_id,
+                        "tool",
+                        tool_name,
+                        tool_started_at.elapsed().as_millis() as u64,
+                        if is_rejected { "rejected" } else { "ok" },
+                        serde_json::json!({
+                            "tool_name": tool_name,
+                            "tool_use_id": tool_id,
+                            "iteration": iteration,
+                            "classification": classify_tool_mutation(tool_name),
+                            "declared_paths": declared_paths(tool_name, &tool_args),
+                            "result_chars": result_text.len(),
+                            "rejected": is_rejected,
+                        }),
+                    );
+                }
+                crate::tracing::span_end(tool_span_id);
 
                 transcript_events.push(transcript_event(
                     "tool_execution",
@@ -921,11 +1281,11 @@ pub async fn run_agent_loop_internal(
                 ));
 
                 if tool_format == "native" {
-                    opts.messages.push(build_tool_result_message(
-                        tool_id,
-                        &result_text,
-                        &opts.provider,
-                    ));
+                    append_message_to_contexts(
+                        &mut visible_messages,
+                        &mut recorded_messages,
+                        build_tool_result_message(tool_id, &result_text, &opts.provider),
+                    );
                 } else {
                     observations.push_str(&format!(
                         "<tool_result name=\"{tool_name}\">\n{result_text}\n</tool_result>\n\n"
@@ -935,23 +1295,32 @@ pub async fn run_agent_loop_internal(
 
             all_tools_used.extend(tools_used_this_iter);
             if tool_format != "native" && !observations.is_empty() {
-                opts.messages.push(serde_json::json!({
-                    "role": "user",
-                    "content": observations.trim_end(),
-                }));
+                append_message_to_contexts(
+                    &mut visible_messages,
+                    &mut recorded_messages,
+                    serde_json::json!({
+                        "role": "user",
+                        "content": observations.trim_end(),
+                    }),
+                );
             }
             if !rejection_followups.is_empty() {
-                opts.messages.push(serde_json::json!({
-                    "role": "user",
-                    "content": rejection_followups.join("\n\n"),
-                }));
+                append_message_to_contexts(
+                    &mut visible_messages,
+                    &mut recorded_messages,
+                    serde_json::json!({
+                        "role": "user",
+                        "content": rejection_followups.join("\n\n"),
+                    }),
+                );
             }
             let finish_step_messages = inject_queued_user_messages(
                 bridge.as_ref(),
-                opts,
+                &mut visible_messages,
                 crate::bridge::DeliveryCheckpoint::AfterCurrentOperation,
             )
             .await?;
+            append_host_messages_to_recorded(&mut recorded_messages, &finish_step_messages);
             for message in &finish_step_messages {
                 transcript_events.push(transcript_event(
                     "host_input",
@@ -967,15 +1336,28 @@ pub async fn run_agent_loop_internal(
 
             // Auto-compaction check after tool processing
             if let Some(ref ac) = auto_compact {
-                let est = crate::orchestration::estimate_message_tokens(&opts.messages);
+                let est = crate::orchestration::estimate_message_tokens(&visible_messages);
                 if est > ac.token_threshold {
-                    let compact_opts = opts.clone();
-                    crate::orchestration::auto_compact_messages(
-                        &mut opts.messages,
+                    let mut compact_opts = opts.clone();
+                    compact_opts.messages = visible_messages.clone();
+                    if let Some(summary) = crate::orchestration::auto_compact_messages(
+                        &mut visible_messages,
                         ac,
                         Some(&compact_opts),
                     )
-                    .await?;
+                    .await?
+                    {
+                        let merged = match transcript_summary.take() {
+                            Some(existing)
+                                if !existing.trim().is_empty()
+                                    && existing.trim() != summary.trim() =>
+                            {
+                                format!("{existing}\n\n{summary}")
+                            }
+                            Some(_) | None => summary,
+                        };
+                        transcript_summary = Some(merged);
+                    }
                 }
             }
 
@@ -985,10 +1367,14 @@ pub async fn run_agent_loop_internal(
             continue;
         }
 
-        opts.messages.push(serde_json::json!({
-            "role": "assistant",
-            "content": text,
-        }));
+        append_message_to_contexts(
+            &mut visible_messages,
+            &mut recorded_messages,
+            serde_json::json!({
+                "role": "assistant",
+                "content": text,
+            }),
+        );
 
         // Sentinel check for text-only responses (no tool calls)
         if sentinel_hit {
@@ -999,10 +1385,14 @@ pub async fn run_agent_loop_internal(
         // back so it can fix its syntax instead of being silently nudged.
         if !tool_parse_errors.is_empty() {
             let error_msg = tool_parse_errors.join("\n\n");
-            opts.messages.push(serde_json::json!({
-                "role": "user",
-                "content": error_msg,
-            }));
+            append_message_to_contexts(
+                &mut visible_messages,
+                &mut recorded_messages,
+                serde_json::json!({
+                    "role": "user",
+                    "content": error_msg,
+                }),
+            );
             tool_parse_errors.clear();
             consecutive_text_only = 0;
             continue;
@@ -1033,10 +1423,11 @@ pub async fn run_agent_loop_internal(
                 let resumed = bridge.take_resume_signal();
                 let idle_messages = inject_queued_user_messages(
                     Some(bridge),
-                    opts,
+                    &mut visible_messages,
                     crate::bridge::DeliveryCheckpoint::InterruptImmediate,
                 )
                 .await?;
+                append_host_messages_to_recorded(&mut recorded_messages, &idle_messages);
                 if resumed || !idle_messages.is_empty() {
                     for message in &idle_messages {
                         transcript_events.push(transcript_event(
@@ -1063,10 +1454,11 @@ pub async fn run_agent_loop_internal(
 
         let finish_step_messages = inject_queued_user_messages(
             bridge.as_ref(),
-            opts,
+            &mut visible_messages,
             crate::bridge::DeliveryCheckpoint::AfterCurrentOperation,
         )
         .await?;
+        append_host_messages_to_recorded(&mut recorded_messages, &finish_step_messages);
         for message in &finish_step_messages {
             transcript_events.push(transcript_event(
                 "host_input",
@@ -1109,16 +1501,20 @@ pub async fn run_agent_loop_internal(
                 "FINAL WARNING: call a tool now or the task will fail.".to_string()
             }
         });
-        opts.messages.push(serde_json::json!({
-            "role": "user",
-            "content": nudge,
-        }));
+        append_message_to_contexts(
+            &mut visible_messages,
+            &mut recorded_messages,
+            serde_json::json!({
+                "role": "user",
+                "content": nudge,
+            }),
+        );
     }
 
     deferred_user_messages.extend(
         inject_queued_user_messages(
             bridge.as_ref(),
-            opts,
+            &mut visible_messages,
             crate::bridge::DeliveryCheckpoint::EndOfInteraction,
         )
         .await?
@@ -1138,9 +1534,9 @@ pub async fn run_agent_loop_internal(
         "deferred_user_messages": deferred_user_messages,
         "transcript": super::helpers::vm_value_to_json(&transcript_to_vm_with_events(
             opts.transcript_id.clone(),
-            opts.transcript_summary.clone(),
+            transcript_summary,
             opts.transcript_metadata.clone(),
-            &opts.messages,
+            &recorded_messages,
             transcript_events,
             Vec::new(),
             Some(if final_status == "done" { "active" } else { "paused" }),
@@ -1171,6 +1567,13 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                 opt_str(&options, "tool_format").unwrap_or_else(|| "text".to_string());
             let done_sentinel = opt_str(&options, "done_sentinel");
             let break_unless_phase = opt_str(&options, "break_unless_phase");
+            let context_callback = options
+                .as_ref()
+                .and_then(|o| {
+                    o.get("context_callback")
+                        .or_else(|| o.get("context_filter"))
+                })
+                .cloned();
             let daemon = opt_bool(&options, "daemon");
             let auto_compact = if opt_bool(&options, "auto_compact") {
                 let mut ac = crate::orchestration::AutoCompactConfig::default();
@@ -1219,6 +1622,7 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                     tool_backoff_ms,
                     tool_format,
                     auto_compact,
+                    context_callback,
                     policy,
                     daemon,
                     llm_retries: opt_int(&options, "llm_retries").unwrap_or(2) as usize,
@@ -1268,6 +1672,12 @@ pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Host
                 .filter_map(|m| m.get("content").and_then(|c| c.as_str()))
                 .map(|s| s.len())
                 .sum();
+            annotate_current_span(&[
+                ("call_id", serde_json::json!(call_id.clone())),
+                ("model", serde_json::json!(opts.model.clone())),
+                ("provider", serde_json::json!(opts.provider.clone())),
+                ("prompt_chars", serde_json::json!(prompt_chars)),
+            ]);
             bridge.send_call_start(
                 &call_id,
                 "llm",
@@ -1282,6 +1692,10 @@ pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Host
             let result = match llm_result {
                 Ok(r) => r,
                 Err(e) => {
+                    annotate_current_span(&[
+                        ("status", serde_json::json!("error")),
+                        ("error", serde_json::json!(e.to_string())),
+                    ]);
                     bridge.send_call_end(
                         &call_id,
                         "llm",
@@ -1300,6 +1714,11 @@ pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Host
                 output_tokens: result.output_tokens,
                 duration_ms,
             });
+            annotate_current_span(&[
+                ("status", serde_json::json!("ok")),
+                ("input_tokens", serde_json::json!(result.input_tokens)),
+                ("output_tokens", serde_json::json!(result.output_tokens)),
+            ]);
 
             bridge.send_call_end(
                 &call_id,

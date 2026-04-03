@@ -27,6 +27,7 @@ From source:
 ```bash
 git clone https://github.com/burin-labs/harn.git
 cd harn
+./scripts/dev_setup.sh
 cargo install --path crates/harn-cli
 ```
 
@@ -37,6 +38,7 @@ harn init my-project
 cd my-project
 harn run main.harn
 harn test tests/
+harn portal
 ```
 
 Remote MCP OAuth:
@@ -116,9 +118,10 @@ registry instead of duplicating the same ceilings in separate node config.
   `worker_result` artifacts.
 - Runtime schema helpers for structured LLM I/O: `schema_check(...)`,
   `schema_parse(...)`, JSON Schema export, and schema composition helpers.
-- Design-by-contract and project orchestration helpers: `require ...`,
-  metadata/scanner runtime builtins, and `import "std/project"` for
-  freshness-aware project state assembly inside Harn itself.
+- Design-by-contract and project/runtime helpers: `require ...`,
+  metadata/scanner runtime builtins, `import "std/project"` for
+  freshness-aware metadata and scan state, and `import "std/runtime"` for
+  generic runtime/process/interaction helpers inside Harn itself.
 - Isolated execution substrate via directory-scoped command builtins
   (`exec_at`, `shell_at`) plus the `std/worktree` module for git worktree
   creation, status, diff, shell execution, and cleanup. Worker execution
@@ -131,7 +134,7 @@ registry instead of duplicating the same ceilings in separate node config.
   `render(...)` resolves relative to the module source tree (including inside
   imported modules) instead of the ambient process cwd. Literal delegated
   execution roots, `exec_at(...)` / `shell_at(...)` directories, and unknown
-  `host_invoke(...)` capability/operation pairs are also checked before launch.
+  `host_call("capability.operation", ...)` contracts are also checked before launch.
 - Runtime-local typed host mocking for tests via `host_mock(...)`,
   `host_mock_clear()`, and `host_mock_calls()`, so `.harn` conformance and VM
   tests can exercise host-backed flows without requiring a live bridge host.
@@ -221,6 +224,20 @@ bump flow, and publish ritual through:
 ```
 
 `scripts/publish.sh` remains the crates.io publisher used by the gate.
+
+## Local Development
+
+For a local contributor setup:
+
+```bash
+./scripts/dev_setup.sh
+make all
+make portal
+```
+
+`dev_setup.sh` installs repo-local Node tooling, sets up git hooks, and runs a
+workspace `cargo check`. `make portal` launches the built-in observability UI
+for persisted runs under `.harn-runs/`.
 
 ## Why This Matters
 
@@ -344,6 +361,7 @@ harn acp agent.harn
 Inspect persisted run records:
 
 ```bash
+harn portal
 harn runs inspect .harn-runs/<run>.json
 harn replay .harn-runs/<run>.json
 harn eval .harn-runs/<run>.json

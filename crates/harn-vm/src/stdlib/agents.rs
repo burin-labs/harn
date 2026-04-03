@@ -28,7 +28,8 @@ use crate::orchestration::{
     select_artifacts, validate_workflow, workflow_tool_policy_from_tools, ArtifactRecord,
     CapabilityPolicy, ContextPolicy, LlmUsageRecord, MutationSessionRecord, ReplayFixture,
     RunCheckpointRecord, RunChildRecord, RunExecutionRecord, RunRecord, RunStageAttemptRecord,
-    RunStageRecord, RunTransitionRecord, TranscriptPolicy, WorkflowEdge, WorkflowGraph,
+    RunStageRecord, RunTraceSpanRecord, RunTransitionRecord, TranscriptPolicy, WorkflowEdge,
+    WorkflowGraph,
 };
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -107,6 +108,8 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
             "tools",
             "max_iterations",
             "tool_format",
+            "context_callback",
+            "context_filter",
             "tool_retries",
             "tool_backoff_ms",
         ] {
@@ -1204,8 +1207,9 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
         } else {
             None
         };
-        crate::orchestration::auto_compact_messages(&mut messages, &config, llm_opts.as_ref())
-            .await?;
+        let _ =
+            crate::orchestration::auto_compact_messages(&mut messages, &config, llm_opts.as_ref())
+                .await?;
         Ok(VmValue::List(Rc::new(
             messages
                 .iter()
@@ -1769,6 +1773,7 @@ fn checkpoint_run(
 ) -> Result<(), VmError> {
     run.pending_nodes = ready_nodes.iter().cloned().collect();
     run.completed_nodes = completed_nodes.iter().cloned().collect();
+    run.trace_spans = snapshot_trace_spans();
     run.checkpoints.push(RunCheckpointRecord {
         id: uuid::Uuid::now_v7().to_string(),
         ready_nodes: run.pending_nodes.clone(),
@@ -1780,6 +1785,21 @@ fn checkpoint_run(
     let persisted_path = save_run_record(run, Some(persist_path))?;
     run.persisted_path = Some(persisted_path);
     Ok(())
+}
+
+fn snapshot_trace_spans() -> Vec<RunTraceSpanRecord> {
+    crate::tracing::peek_spans()
+        .into_iter()
+        .map(|span| RunTraceSpanRecord {
+            span_id: span.span_id,
+            parent_id: span.parent_id,
+            kind: span.kind.as_str().to_string(),
+            name: span.name,
+            start_ms: span.start_ms,
+            duration_ms: span.duration_ms,
+            metadata: span.metadata,
+        })
+        .collect()
 }
 
 fn parse_execution_record(value: Option<&VmValue>) -> Result<Option<RunExecutionRecord>, VmError> {
@@ -2298,6 +2318,15 @@ async fn execute_workflow(
     options: BTreeMap<String, VmValue>,
 ) -> Result<VmValue, VmError> {
     crate::llm::enable_tracing();
+    crate::tracing::set_tracing_enabled(true);
+    let workflow_span_id = crate::tracing::span_start(
+        crate::tracing::SpanKind::Pipeline,
+        graph
+            .name
+            .clone()
+            .unwrap_or_else(|| graph.id.clone())
+            .to_string(),
+    );
     let run_usage_before = llm_usage_snapshot();
     let report = validate_workflow(&graph, Some(&builtin_ceiling()));
     if !report.valid {
@@ -2364,6 +2393,7 @@ async fn execute_workflow(
         transcript: None,
         usage: None,
         replay_fixture: None,
+        trace_spans: Vec::new(),
         metadata: BTreeMap::new(),
         persisted_path: None,
     });
@@ -2721,6 +2751,8 @@ async fn execute_workflow(
     run.finished_at = Some(uuid::Uuid::now_v7().to_string());
     run.usage = Some(llm_usage_delta(&run_usage_before, &llm_usage_snapshot()));
     run.replay_fixture = Some(replay_fixture_from_run(&run));
+    crate::tracing::span_end(workflow_span_id);
+    run.trace_spans = snapshot_trace_spans();
     checkpoint_run(
         &mut run,
         &ready_nodes,
@@ -2742,6 +2774,7 @@ async fn execute_workflow(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tracing::{set_tracing_enabled, span_end, span_start, SpanKind};
 
     #[test]
     fn classify_stage_outcome_fails_when_agent_loop_is_stuck() {
@@ -2802,5 +2835,22 @@ mod tests {
         assert_eq!(tree["children"][0]["run"]["id"], "child");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn snapshot_trace_spans_returns_completed_trace_tree() {
+        set_tracing_enabled(true);
+        let parent = span_start(SpanKind::Pipeline, "workflow".to_string());
+        let child = span_start(SpanKind::ToolCall, "read".to_string());
+        span_end(child);
+        span_end(parent);
+
+        let spans = snapshot_trace_spans();
+        assert_eq!(spans.len(), 2);
+        assert_eq!(spans[0].kind, "tool_call");
+        assert_eq!(spans[0].parent_id, Some(parent));
+        assert_eq!(spans[1].kind, "pipeline");
+
+        set_tracing_enabled(false);
     }
 }

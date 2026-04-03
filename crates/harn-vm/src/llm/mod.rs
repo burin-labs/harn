@@ -139,6 +139,18 @@ pub fn register_llm_builtins(vm: &mut Vm) {
     // =========================================================================
     vm.register_async_builtin("llm_call", |args| async move {
         let opts = extract_llm_options(&args)?;
+        if let Some(span_id) = crate::tracing::current_span_id() {
+            crate::tracing::span_set_metadata(
+                span_id,
+                "model",
+                serde_json::json!(opts.model.clone()),
+            );
+            crate::tracing::span_set_metadata(
+                span_id,
+                "provider",
+                serde_json::json!(opts.provider.clone()),
+            );
+        }
 
         let start = std::time::Instant::now();
         let result = vm_call_llm_full(&opts).await?;
@@ -187,6 +199,19 @@ pub fn register_llm_builtins(vm: &mut Vm) {
             output_tokens: result.output_tokens,
             duration_ms: start.elapsed().as_millis() as u64,
         });
+        if let Some(span_id) = crate::tracing::current_span_id() {
+            crate::tracing::span_set_metadata(span_id, "status", serde_json::json!("ok"));
+            crate::tracing::span_set_metadata(
+                span_id,
+                "input_tokens",
+                serde_json::json!(result.input_tokens),
+            );
+            crate::tracing::span_set_metadata(
+                span_id,
+                "output_tokens",
+                serde_json::json!(result.output_tokens),
+            );
+        }
 
         // If response_format is "json", parse the response and optionally
         // validate it against a configured output contract.
@@ -222,6 +247,18 @@ pub fn register_llm_builtins(vm: &mut Vm) {
             args.get(2).cloned().unwrap_or(VmValue::Nil),
             args.get(3).cloned().unwrap_or(VmValue::Nil),
         ])?;
+        if let Some(span_id) = crate::tracing::current_span_id() {
+            crate::tracing::span_set_metadata(
+                span_id,
+                "model",
+                serde_json::json!(opts.model.clone()),
+            );
+            crate::tracing::span_set_metadata(
+                span_id,
+                "provider",
+                serde_json::json!(opts.provider.clone()),
+            );
+        }
 
         let start = std::time::Instant::now();
         let result = vm_call_completion_full(&opts, &prefix, suffix.as_deref()).await?;
@@ -231,6 +268,19 @@ pub fn register_llm_builtins(vm: &mut Vm) {
             output_tokens: result.output_tokens,
             duration_ms: start.elapsed().as_millis() as u64,
         });
+        if let Some(span_id) = crate::tracing::current_span_id() {
+            crate::tracing::span_set_metadata(span_id, "status", serde_json::json!("ok"));
+            crate::tracing::span_set_metadata(
+                span_id,
+                "input_tokens",
+                serde_json::json!(result.input_tokens),
+            );
+            crate::tracing::span_set_metadata(
+                span_id,
+                "output_tokens",
+                serde_json::json!(result.output_tokens),
+            );
+        }
         Ok(vm_build_llm_result(&result, None, None))
     });
 
@@ -247,6 +297,13 @@ pub fn register_llm_builtins(vm: &mut Vm) {
         let tool_backoff_ms = opt_int(&options, "tool_backoff_ms").unwrap_or(1000) as u64;
         let tool_format = opt_str(&options, "tool_format").unwrap_or_else(|| "text".to_string());
         let daemon = opt_bool(&options, "daemon");
+        let context_callback = options
+            .as_ref()
+            .and_then(|o| {
+                o.get("context_callback")
+                    .or_else(|| o.get("context_filter"))
+            })
+            .cloned();
         let auto_compact = if opt_bool(&options, "auto_compact") {
             let mut ac = crate::orchestration::AutoCompactConfig::default();
             if let Some(v) = opt_int(&options, "compact_threshold") {
@@ -295,6 +352,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                 tool_backoff_ms,
                 tool_format,
                 auto_compact,
+                context_callback,
                 policy,
                 daemon,
                 llm_retries: opt_int(&options, "llm_retries").unwrap_or(2) as usize,

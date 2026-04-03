@@ -194,6 +194,9 @@ async fn main() {
                 commands::run::build_denied_builtins(args.deny.as_deref(), args.allow.as_deref());
             commands::run::run_watch(&args.file, denied).await;
         }
+        Command::Portal(args) => {
+            commands::portal::run_portal(&args.dir, &args.host, args.port, args.open).await
+        }
         Command::Runs(args) => match args.command {
             RunsCommand::Inspect(inspect) => {
                 inspect_run_record(&inspect.path, inspect.compare.as_deref())
@@ -215,11 +218,11 @@ async fn main() {
 fn print_version() {
     println!(
         r#"
-  ╱▔▔╲
+ ╱▔▔╲
  ╱    ╲    harn v{}
  │ ◆  │    the agent harness language
  │    │
- ╰──╯╱    by burin
+ ╰──╯╱
    ╱╱
 "#,
         env!("CARGO_PKG_VERSION")

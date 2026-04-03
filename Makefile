@@ -1,10 +1,18 @@
-.PHONY: check fmt fmt-harn lint lint-md lint-harn test conformance all release-gate
+.PHONY: setup install-hooks check fmt fmt-harn lint lint-md lint-harn test conformance all release-gate portal
 
 # Full quality check: format first, then lint/test in parallel.
 # Usage: make all -j       (parallel checks after formatting)
 #        make all           (sequential, also works)
 all: fmt
 	$(MAKE) lint lint-md lint-harn fmt-harn test conformance
+
+check: all
+
+setup:
+	./scripts/dev_setup.sh
+
+install-hooks:
+	git config core.hooksPath .githooks
 
 # Format all code
 fmt:
@@ -59,3 +67,6 @@ fmt-check:
 
 release-gate:
 	./scripts/release_gate.sh audit
+
+portal:
+	cargo run --bin harn -- portal

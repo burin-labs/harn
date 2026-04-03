@@ -1,125 +1,6 @@
-import { section } from "std/context"
-
 /// metadata_namespace.
 pub fn metadata_namespace(dir, namespace) {
   return metadata_resolve(dir, namespace) ?? {}
-}
-
-/// host_task.
-pub fn host_task() -> string {
-  return host_invoke("runtime", "task", {}) ?? ""
-}
-
-/// host_pipeline_input.
-pub fn host_pipeline_input() {
-  return host_invoke("runtime", "pipeline_input", {})
-}
-
-/// runtime_dry_run.
-pub fn runtime_dry_run() -> bool {
-  return host_invoke("runtime", "dry_run", {}) ?? false
-}
-
-/// host_project_root.
-pub fn host_project_root() -> string {
-  return host_invoke("workspace", "project_root", {}) ?? ""
-}
-
-/// workspace_roots.
-pub fn workspace_roots() {
-  if host_has("workspace", "roots") {
-    return host_invoke("workspace", "roots", {}) ?? []
-  }
-  let root = host_project_root()
-  return root ? [root] : []
-}
-
-/// workspace_read_text.
-pub fn workspace_read_text(path: string) {
-  return host_invoke("workspace", "read_text", {path: path})
-}
-
-/// workspace_write_text.
-pub fn workspace_write_text(path: string, content) {
-  return host_invoke("workspace", "write_text", {path: path, content: content})
-}
-
-/// workspace_apply_edit.
-pub fn workspace_apply_edit(path: string, old_string: string, new_string: string) {
-  return host_invoke(
-    "workspace",
-    "apply_edit",
-    {path: path, old_string: old_string, new_string: new_string},
-  )
-}
-
-/// workspace_delete.
-pub fn workspace_delete(path: string) {
-  return host_invoke("workspace", "delete", {path: path})
-}
-
-/// workspace_list.
-pub fn workspace_list(path) {
-  return host_invoke("workspace", "list", {path: path ?? "."}) ?? []
-}
-
-/// workspace_exists.
-pub fn workspace_exists(path: string) -> bool {
-  return host_invoke("workspace", "exists", {path: path}) ?? false
-}
-
-/// workspace_file_exists.
-pub fn workspace_file_exists(path: string) -> bool {
-  if host_has("workspace", "file_exists") {
-    return host_invoke("workspace", "file_exists", {path: path}) ?? false
-  }
-  return workspace_exists(path)
-}
-
-/// approved_plan.
-pub fn approved_plan() -> string {
-  return host_invoke("runtime", "approved_plan", {}) ?? ""
-}
-
-/// process_exec.
-pub fn process_exec(command: string, timeout_ms = nil) {
-  let params = {command: command}
-  if timeout_ms != nil {
-    return host_invoke("process", "exec", params + {timeout: timeout_ms})
-  }
-  return host_invoke("process", "exec", params)
-}
-
-/// interaction_ask.
-pub fn interaction_ask(question: string, kind = nil) -> string {
-  let params = {question: question}
-  if kind != nil {
-    return host_invoke("interaction", "ask", params + {type: kind}) ?? ""
-  }
-  return host_invoke("interaction", "ask", params) ?? ""
-}
-
-/// record_run_metadata.
-pub fn record_run_metadata(run, workflow_name) {
-  if run?.path {
-    host_invoke(
-      "runtime",
-      "record_run",
-      {
-      workflow: workflow_name,
-      path: run?.path,
-      status: run?.status ?? "",
-      fixture_type: run?.run?.replay_fixture?._type,
-      usage: run?.usage,
-      persisted_path: run?.persisted_path,
-      summary: transcript_summary(run?.transcript),
-      transcript_state: run?.transcript?.state ?? "",
-      message_count: len(transcript_messages(run?.transcript)),
-      event_count: len(transcript_events(run?.transcript)),
-      asset_count: len(transcript_assets(run?.transcript)),
-    },
-    )
-  }
 }
 
 /// metadata_local_namespace.
@@ -141,62 +22,6 @@ pub fn project_inventory(namespace) {
   }
 }
 
-/// project_host_scan.
-pub fn project_host_scan() {
-  return host_invoke("project", "scan", {})
-}
-
-/// project_host_test_commands.
-pub fn project_host_test_commands() {
-  return host_invoke("project", "test_commands", {})
-}
-
-/// project_host_code_patterns.
-pub fn project_host_code_patterns() {
-  return host_invoke("project", "code_patterns", {})
-}
-
-/// project_host_agent_instructions.
-pub fn project_host_agent_instructions() {
-  return host_invoke("project", "agent_instructions", {})
-}
-
-/// project_host_lessons.
-pub fn project_host_lessons() {
-  return host_invoke("project", "lessons", {})
-}
-
-/// project_host_ide_context.
-pub fn project_host_ide_context() {
-  return host_invoke("project", "ide_context", {})
-}
-
-/// project_host_mcp_config.
-pub fn project_host_mcp_config() {
-  return host_invoke("project", "mcp_config", {})
-}
-
-/// project_host_state.
-pub fn project_host_state() {
-  return {
-    project_root: host_project_root(),
-    workspace_roots: workspace_roots(),
-    root_package: project_root_package(),
-    scan: project_host_scan(),
-    test_commands: project_host_test_commands(),
-    code_patterns: project_host_code_patterns(),
-    agent_instructions: project_host_agent_instructions(),
-    lessons: project_host_lessons(),
-    ide_context: project_host_ide_context(),
-    mcp_config: project_host_mcp_config(),
-    runtime: {
-      task: host_task(),
-      dry_run: runtime_dry_run(),
-      approved_plan: approved_plan(),
-    },
-  }
-}
-
 /// project_root_package.
 pub fn project_root_package() -> string {
   var root_package = ""
@@ -211,7 +36,7 @@ pub fn project_root_package() -> string {
     }
   }
   if !root_package {
-    let project_root = host_project_root()
+    let project_root = project_root() ?? ""
     let pyproject = read_file(project_root + "/pyproject.toml")
     if pyproject {
       for line in pyproject.split("\n") {
@@ -232,7 +57,7 @@ pub fn project_root_package() -> string {
     }
   }
   if !root_package {
-    let project_root = host_project_root()
+    let project_root = project_root() ?? ""
     let package_json = read_file(project_root + "/package.json")
     if package_json {
       for line in package_json.split("\n") {
@@ -248,7 +73,7 @@ pub fn project_root_package() -> string {
     }
   }
   if !root_package {
-    let project_root = host_project_root()
+    let project_root = project_root() ?? ""
     let go_mod = read_file(project_root + "/go.mod")
     if go_mod {
       for line in go_mod.split("\n") {
@@ -265,7 +90,7 @@ pub fn project_root_package() -> string {
     }
   }
   if !root_package {
-    let project_root = host_project_root()
+    let project_root = project_root() ?? ""
     let cargo_toml = read_file(project_root + "/Cargo.toml")
     if cargo_toml {
       for line in cargo_toml.split("\n") {
@@ -328,220 +153,4 @@ pub fn project_requires_refresh(namespace) {
     return true
   }
   return false
-}
-
-/// active_editor_file.
-pub fn active_editor_file() {
-  return host_invoke("editor", "get_active_file", {})
-}
-
-/// editor_selection.
-pub fn editor_selection() {
-  return host_invoke("editor", "get_selection", {})
-}
-
-/// visible_editor_files.
-pub fn visible_editor_files() {
-  return host_invoke("editor", "get_visible_files", {}) ?? []
-}
-
-/// diagnostics_errors.
-pub fn diagnostics_errors(paths) {
-  return host_invoke("diagnostics", "get_errors", {paths: paths}) ?? []
-}
-
-/// diagnostics_causal_traces.
-pub fn diagnostics_causal_traces(paths) {
-  return host_invoke("diagnostics", "get_causal_traces", {paths: paths}) ?? []
-}
-
-/// git_branch.
-pub fn git_branch() -> string {
-  return host_invoke("git", "get_branch", {}) ?? ""
-}
-
-/// git_diff.
-pub fn git_diff() {
-  return host_invoke("git", "get_diff", {})
-}
-
-/// learning_report_correction.
-pub fn learning_report_correction(file, original, corrected) -> bool {
-  return host_invoke("learning", "report_correction", {file: file, original: original, corrected: corrected}) ?? false
-}
-
-/// learning_learned_rules.
-pub fn learning_learned_rules() -> string {
-  return host_invoke("learning", "get_learned_rules", {}) ?? ""
-}
-
-/// project_host_artifacts.
-pub fn project_host_artifacts(paths) {
-  var artifacts = []
-
-  let active = active_editor_file()
-  if active?.content {
-    artifacts = artifacts + [
-      artifact_workspace_file(
-      active?.path,
-      active?.content,
-      {
-      title: "Active file",
-      source: "editor",
-      freshness: "live",
-      relevance: 0.92,
-      metadata: {language: active?.language, cursor: active?.cursor},
-    },
-    ),
-    ]
-  }
-
-  let selection = editor_selection()
-  if selection?.text {
-    artifacts = artifacts + [
-      artifact_editor_selection(
-      selection?.file,
-      selection?.text,
-      {
-      title: "Selection",
-      source: "editor",
-      freshness: "live",
-      relevance: 0.88,
-      metadata: {range: selection?.range},
-    },
-    ),
-    ]
-  }
-
-  let open_files = visible_editor_files()
-  if len(open_files) > 0 {
-    var open_files_text = ""
-    var snapshot_paths = []
-    for item in open_files {
-      let suffix = item?.isActive ? " (active)" : ""
-      open_files_text = open_files_text + "- " + item?.path + suffix + "\n"
-      snapshot_paths = snapshot_paths + [item?.path]
-    }
-    artifacts = artifacts + [
-      artifact_workspace_snapshot(
-      snapshot_paths,
-      open_files_text.trim(),
-      {title: "Visible files", source: "editor", freshness: "live", relevance: 0.55},
-    ),
-    ]
-  }
-
-  let diagnostics = diagnostics_errors(paths)
-  if len(diagnostics) > 0 {
-    var diagnostic_text = ""
-    for item in diagnostics {
-      diagnostic_text = diagnostic_text + item?.file + ":" + string(item?.line) + " [" + item?.severity + "] " + item?.message + "\n"
-    }
-    artifacts = artifacts + [
-      artifact_verification_result(
-      "Diagnostics",
-      diagnostic_text.trim(),
-      {source: "diagnostics", freshness: "live", relevance: 0.9},
-    ),
-    ]
-  }
-
-  let causal_traces = diagnostics_causal_traces(paths)
-  if len(causal_traces) > 0 {
-    var trace_text = ""
-    for item in causal_traces {
-      trace_text = trace_text + "File: " + item?.file + "\nLine: " + string(item?.line) + "\nError: " + item?.error + "\n" + item?.chain + "\n\n"
-    }
-    artifacts = artifacts + [
-      artifact_verification_result(
-      "Causal traces",
-      trace_text.trim(),
-      {source: "diagnostics", freshness: "live", relevance: 0.94},
-    ),
-    ]
-  }
-
-  let branch = git_branch()
-  if branch {
-    artifacts = artifacts + [
-      artifact(
-      {
-      kind: "summary",
-      title: "Git branch",
-      text: branch,
-      source: "git",
-      freshness: "recent",
-      relevance: 0.45,
-    },
-    ),
-    ]
-  }
-
-  let diff = git_diff()
-  if diff?.diff {
-    artifacts = artifacts + [
-      artifact_git_diff(
-      diff?.diff,
-      {
-      title: "Current diff",
-      source: "git",
-      freshness: "recent",
-      relevance: 0.72,
-      metadata: {branch: diff?.branch, base_branch: diff?.baseBranch, commits_ahead: diff?.commitsAhead},
-    },
-    ),
-    ]
-  }
-
-  return artifacts
-}
-
-/// project_host_sections.
-pub fn project_host_sections(project_state) {
-  let state = project_state ?? project_host_state()
-  var sections = []
-  let root_package = state?.root_package
-  if root_package {
-    sections = sections + [
-      section(
-      "package",
-      "- The project's root package is `" + root_package + "`. Use this in imports.",
-      {priority: 95},
-    ),
-    ]
-  }
-  let scan = state?.scan
-  if scan?.repo_map {
-    var map_content = scan?.overview + "\n"
-    if scan?.lang_summary {
-      map_content = map_content + "Languages: " + scan?.lang_summary + "\n\n"
-    }
-    map_content = map_content + "--- Repo map (key symbols by importance) ---\n" + scan?.repo_map + "\n--- End repo map ---"
-    sections = sections + [section("repo_map", map_content, {priority: 80})]
-  }
-  let cmds = state?.test_commands
-  if cmds {
-    var cmd_text = "Available test/build commands:"
-    for key in cmds {
-      cmd_text = cmd_text + "\n  " + key + "  — " + cmds[key]
-    }
-    sections = sections + [section("commands", cmd_text, {priority: 70})]
-  }
-  let patterns = state?.code_patterns
-  if patterns?.count ?? 0 > 0 {
-    var pat_text = "Detected project patterns:"
-    for pattern in patterns {
-      pat_text = pat_text + "\n  - " + pattern
-    }
-    sections = sections + [section("patterns", pat_text, {priority: 60})]
-  }
-  let agent_instructions = state?.agent_instructions
-  if agent_instructions {
-    sections = sections + [section("agent_instructions", agent_instructions, {priority: 85})]
-  }
-  let lessons = state?.lessons
-  if lessons {
-    sections = sections + [section("lessons", "IMPORTANT — Known gotchas from prior sessions:\n" + lessons, {priority: 88})]
-  }
-  return sections
 }

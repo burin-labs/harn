@@ -224,6 +224,14 @@ pub fn span_end(span_id: u64) {
     COLLECTOR.with(|c| c.borrow_mut().end(span_id));
 }
 
+/// Get the currently active span id, if tracing is enabled and a span is open.
+pub fn current_span_id() -> Option<u64> {
+    if !is_tracing_enabled() {
+        return None;
+    }
+    COLLECTOR.with(|c| c.borrow().current_span_id())
+}
+
 /// Take all completed spans.
 pub fn take_spans() -> Vec<Span> {
     COLLECTOR.with(|c| c.borrow_mut().take_spans())

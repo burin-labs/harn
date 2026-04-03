@@ -183,6 +183,8 @@ Same as `llm_call`, plus additional options:
 | `nudge` | string | see below | Custom message to send when nudging the agent |
 | `tool_retries` | int | `0` | Number of retry attempts for failed tool calls |
 | `tool_backoff_ms` | int | `1000` | Base backoff delay in ms for tool retries (doubles each attempt) |
+| `context_callback` | closure | nil | Per-turn hook that can rewrite prompt-visible `messages` and/or the effective `system` prompt before the next LLM call |
+| `context_filter` | closure | nil | Alias for `context_callback` |
 
 Default nudge message:
 
@@ -195,6 +197,64 @@ When `persistent: true`, the system prompt is automatically extended with:
 > IMPORTANT: You MUST keep working until the task is complete.
 > Do NOT stop to explain or summarize — take action. Output ##DONE##
 > only when the task is fully complete and verified.
+
+### Context callback
+
+`context_callback` lets you keep the full recorded transcript for replay and
+debugging while showing the model a smaller or rewritten prompt-visible
+history on each turn.
+
+The callback receives one argument:
+
+```harn
+{
+  iteration: int,
+  system: string?,
+  messages: list,
+  visible_messages: list,
+  recorded_messages: list,
+  recent_visible_messages: list,
+  recent_recorded_messages: list,
+  latest_visible_user_message: string?,
+  latest_visible_assistant_message: string?,
+  latest_recorded_user_message: string?,
+  latest_recorded_assistant_message: string?,
+  latest_tool_result: string?,
+  latest_recorded_tool_result: string?
+}
+```
+
+It may return:
+
+- `nil` to leave the current prompt-visible context unchanged
+- a `list` of messages to use as the next prompt-visible message list
+- a `dict` with optional `messages` and `system` fields
+
+Example: hide older assistant messages so the model mostly sees user intent,
+tool results, and the latest assistant turn.
+
+```harn
+fn hide_old_assistant_turns(ctx) {
+  var kept = []
+  var latest_assistant = nil
+  for msg in ctx.visible_messages {
+    if msg?.role == "assistant" {
+      latest_assistant = msg
+    } else {
+      kept = kept + [msg]
+    }
+  }
+  if latest_assistant != nil {
+    kept = kept + [latest_assistant]
+  }
+  return {messages: kept}
+}
+
+let result = agent_loop(task, "You are a coding assistant.", {
+  persistent: true,
+  context_callback: hide_old_assistant_turns
+})
+```
 
 ### Example with retry
 
