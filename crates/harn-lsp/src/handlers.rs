@@ -629,11 +629,19 @@ impl tower_lsp::LanguageServer for HarnLsp {
                         value: d,
                     })
                 }),
-                parameters: Some(params_list),
-                active_parameter: Some(comma_count),
+                parameters: Some(params_list.clone()),
+                active_parameter: Some(if params_list.is_empty() {
+                    0
+                } else {
+                    comma_count.min(params_list.len() as u32 - 1)
+                }),
             }],
             active_signature: Some(0),
-            active_parameter: Some(comma_count),
+            active_parameter: Some(if params_list.is_empty() {
+                0
+            } else {
+                comma_count.min(params_list.len() as u32 - 1)
+            }),
         }))
     }
 

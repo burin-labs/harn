@@ -39,7 +39,8 @@ and call a model:
 let answer = llm_call("Summarize this code", "You are a code reviewer.")
 ```
 
-Harn supports Anthropic, OpenAI, Ollama, and OpenRouter. Switching
+Harn ships with built-in configs for Anthropic, OpenAI, OpenRouter,
+HuggingFace, Ollama, and local OpenAI-compatible servers. Switching
 providers is a one-field change in the options dict.
 
 ### Pipeline composition

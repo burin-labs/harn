@@ -53,6 +53,14 @@ pub(crate) fn vm_resolve_provider(options: &Option<BTreeMap<String, VmValue>>) -
     if let Ok(p) = std::env::var("HARN_LLM_PROVIDER") {
         return p;
     }
+    // First-class local OpenAI-compatible server support.
+    if std::env::var("LOCAL_LLM_BASE_URL").is_ok()
+        && (options.as_ref().and_then(|o| o.get("model")).is_some()
+            || std::env::var("HARN_LLM_MODEL").is_ok()
+            || std::env::var("LOCAL_LLM_MODEL").is_ok())
+    {
+        return "local".to_string();
+    }
     // Try to infer from model
     if let Some(m) = options
         .as_ref()
@@ -86,7 +94,14 @@ pub(crate) fn vm_resolve_model(
         .as_ref()
         .and_then(|o| o.get("model"))
         .map(|v| v.display())
-        .or_else(|| std::env::var("HARN_LLM_MODEL").ok());
+        .or_else(|| std::env::var("HARN_LLM_MODEL").ok())
+        .or_else(|| {
+            if provider == "local" {
+                std::env::var("LOCAL_LLM_MODEL").ok()
+            } else {
+                None
+            }
+        });
 
     if let Some(raw) = raw {
         let (resolved, _) = llm_config::resolve_model(&raw);
@@ -103,6 +118,9 @@ pub(crate) fn vm_resolve_model(
     }
     // Default model per provider
     match provider {
+        "local" => std::env::var("LOCAL_LLM_MODEL")
+            .or_else(|_| std::env::var("HARN_LLM_MODEL"))
+            .unwrap_or_else(|_| "gpt-4o".to_string()),
         "openai" => "gpt-4o".to_string(),
         "ollama" => "llama3.2".to_string(),
         "openrouter" => "anthropic/claude-sonnet-4-20250514".to_string(),
@@ -957,7 +975,7 @@ fn validate_options(opts: &super::api::LlmCallOptions) {
                 warn("presence_penalty");
             }
         }
-        "openai" | "openrouter" | "huggingface" => {
+        "openai" | "openrouter" | "huggingface" | "local" => {
             if opts.top_k.is_some() {
                 warn("top_k");
             }
@@ -1008,5 +1026,48 @@ pub fn vm_value_to_json(val: &VmValue) -> serde_json::Value {
         }
         VmValue::Dict(d) => vm_value_dict_to_json(d),
         _ => serde_json::json!(val.display()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn local_provider_is_selected_when_local_base_url_and_model_are_set() {
+        let prev_base = std::env::var("LOCAL_LLM_BASE_URL").ok();
+        let prev_model = std::env::var("LOCAL_LLM_MODEL").ok();
+        let prev_harn_provider = std::env::var("HARN_LLM_PROVIDER").ok();
+        let prev_harn_model = std::env::var("HARN_LLM_MODEL").ok();
+
+        unsafe {
+            std::env::set_var("LOCAL_LLM_BASE_URL", "http://127.0.0.1:8000");
+            std::env::set_var("LOCAL_LLM_MODEL", "qwen2.5-coder-32b");
+            std::env::remove_var("HARN_LLM_PROVIDER");
+            std::env::remove_var("HARN_LLM_MODEL");
+        }
+
+        assert_eq!(vm_resolve_provider(&None), "local");
+        assert_eq!(vm_resolve_model(&None, "local"), "qwen2.5-coder-32b");
+        assert!(vm_resolve_api_key("local").is_ok());
+
+        unsafe {
+            match prev_base {
+                Some(value) => std::env::set_var("LOCAL_LLM_BASE_URL", value),
+                None => std::env::remove_var("LOCAL_LLM_BASE_URL"),
+            }
+            match prev_model {
+                Some(value) => std::env::set_var("LOCAL_LLM_MODEL", value),
+                None => std::env::remove_var("LOCAL_LLM_MODEL"),
+            }
+            match prev_harn_provider {
+                Some(value) => std::env::set_var("HARN_LLM_PROVIDER", value),
+                None => std::env::remove_var("HARN_LLM_PROVIDER"),
+            }
+            match prev_harn_model {
+                Some(value) => std::env::set_var("HARN_LLM_MODEL", value),
+                None => std::env::remove_var("HARN_LLM_MODEL"),
+            }
+        }
     }
 }

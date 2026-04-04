@@ -19,9 +19,11 @@ pipeline test(task) {
   assert_eq(p4, "ollama")
   // Test providers list
   let providers = llm_providers()
-  assert(len(providers) >= 5)
+  assert(len(providers) >= 6)
   // Test config access
   let anthropic_config = llm_config("anthropic")
   assert_eq(anthropic_config?.auth_style, "header")
+  let local_config = llm_config("local")
+  assert_eq(local_config?.auth_style, "none")
   log("All llm_config tests passed")
 }

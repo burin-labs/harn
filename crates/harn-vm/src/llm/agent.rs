@@ -1362,6 +1362,13 @@ pub async fn run_agent_loop_internal(
             }
 
             if sentinel_hit {
+                if !tool_parse_errors.is_empty() {
+                    eprintln!(
+                        "[harn] {} tool-call parse error(s) suppressed by sentinel: {}",
+                        tool_parse_errors.len(),
+                        tool_parse_errors.join("; ")
+                    );
+                }
                 break;
             }
             continue;

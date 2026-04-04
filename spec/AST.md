@@ -1,19 +1,19 @@
 # Harn AST node catalog
 
-All AST nodes are cases of the `HarnNode` enum,
-defined in `Sources/BurinCore/Harn/HarnNode.swift`.
-The enum is `indirect` (nodes can contain other nodes) and `Equatable`.
+All AST nodes are variants of the `Node` enum, defined in
+`crates/harn-parser/src/ast.rs`. Each node is wrapped in `Spanned<Node>`
+(aliased as `SNode`) which pairs it with a source `Span` for diagnostics.
 
 ## Declarations
 
-### `pipeline`
+### `Pipeline`
 
-```javascript
-pipeline(name: String, params: [String], body: [HarnNode], extends: String?)
+```rust
+Pipeline { name: String, params: Vec<String>, body: Vec<SNode>, extends: Option<String>, is_pub: bool }
 ```
 
 A named pipeline declaration. `params` are the formal parameter names.
-`body` is the list of statements. `extends` is the optional parent pipeline name.
+`body` is the list of statements. `extends` names the optional parent pipeline.
 
 ```harn
 pipeline default(task, project) {
@@ -21,34 +21,35 @@ pipeline default(task, project) {
 }
 ```
 
-### `letBinding`
+### `LetBinding`
 
-```javascript
-letBinding(name: String, value: HarnNode)
+```rust
+LetBinding { pattern: BindingPattern, type_ann: Option<TypeExpr>, value: Box<SNode> }
 ```
 
-An immutable variable binding.
+An immutable variable binding. `pattern` supports identifier or destructuring.
 
 ```harn
-let result = compute()
+let result: string = compute()
+let {x, y} = point
 ```
 
-### `varBinding`
+### `VarBinding`
 
-```javascript
-varBinding(name: String, value: HarnNode)
+```rust
+VarBinding { pattern: BindingPattern, type_ann: Option<TypeExpr>, value: Box<SNode> }
 ```
 
 A mutable variable binding.
 
 ```harn
-var count = 0
+var count: int = 0
 ```
 
-### `overrideDecl`
+### `OverrideDecl`
 
-```javascript
-overrideDecl(name: String, params: [String], body: [HarnNode])
+```rust
+OverrideDecl { name: String, params: Vec<String>, body: Vec<SNode> }
 ```
 
 An override declaration inside a child pipeline that extends a parent.
@@ -61,10 +62,29 @@ pipeline child(task) extends parent {
 }
 ```
 
-### `importDecl`
+### `FnDecl`
 
-```javascript
-importDecl(path: String)
+```rust
+FnDecl { name: String, type_params: Vec<TypeParam>, params: Vec<TypedParam>, return_type: Option<TypeExpr>, where_clauses: Vec<WhereClause>, body: Vec<SNode>, is_pub: bool }
+```
+
+Named function declaration with optional generics, typed parameters, return
+type annotation, and where-clause constraints.
+
+```harn
+fn add(a: int, b: int) -> int {
+  return a + b
+}
+
+fn process<T>(item: T) where T: Displayable {
+  println(item.display())
+}
+```
+
+### `ImportDecl`
+
+```rust
+ImportDecl { path: String }
 ```
 
 Imports another `.harn` file by path.
@@ -73,35 +93,73 @@ Imports another `.harn` file by path.
 import "shared/common.harn"
 ```
 
-### `implBlock`
+### `SelectiveImport`
 
-```javascript
-implBlock(type_name: String, methods: [HarnNode])
+```rust
+SelectiveImport { names: Vec<String>, path: String }
 ```
 
-An impl block that attaches methods to a struct type. Each entry in
-`methods` is a `fnDecl` whose first parameter is `self`.
+Imports specific names from a module.
 
 ```harn
-impl Point {
-  fn distance(self, other) {
-    let dx = self.x - other.x
-    let dy = self.y - other.y
-    return sqrt(dx * dx + dy * dy)
-  }
+import { helper, util } from "shared/lib.harn"
+```
+
+### `TypeDecl`
+
+```rust
+TypeDecl { name: String, type_expr: TypeExpr }
+```
+
+A type alias declaration.
+
+```harn
+type UserId = string
+type Pair = {first: int, second: int}
+```
+
+### `EnumDecl`
+
+```rust
+EnumDecl { name: String, variants: Vec<EnumVariant>, is_pub: bool }
+```
+
+An enum declaration. Each `EnumVariant` has a `name` and optional typed `fields`.
+
+```harn
+enum Color {
+  Red
+  Green
+  Blue
+  Custom(r: int, g: int, b: int)
 }
 ```
 
-### `interfaceDecl`
+### `StructDecl`
 
-```javascript
-interfaceDecl(name: String, methods: [InterfaceMethod])
+```rust
+StructDecl { name: String, fields: Vec<StructField>, is_pub: bool }
 ```
 
-An interface declaration listing required method signatures. Each
-`InterfaceMethod` has a name, parameter list (first must be `self`),
-and optional return type. Structs satisfy an interface implicitly if
-their `impl` block contains all required methods.
+A struct declaration. Each `StructField` has a `name`, optional `type_expr`,
+and an `optional` flag.
+
+```harn
+struct Point {
+  x: int
+  y: int
+  label: string?
+}
+```
+
+### `InterfaceDecl`
+
+```rust
+InterfaceDecl { name: String, type_params: Vec<TypeParam>, methods: Vec<InterfaceMethod> }
+```
+
+An interface declaration listing required method signatures. Structs satisfy
+an interface implicitly if their `impl` block provides all required methods.
 
 ```harn
 interface Displayable {
@@ -109,16 +167,33 @@ interface Displayable {
 }
 ```
 
-## Control flow
+### `ImplBlock`
 
-### `ifElse`
-
-```javascript
-ifElse(condition: HarnNode, then: [HarnNode], elseBlock: [HarnNode]?)
+```rust
+ImplBlock { type_name: String, methods: Vec<SNode> }
 ```
 
-Conditional execution. `elseBlock` is `nil` when there is no `else` branch.
-An `else if` chain produces a nested `ifElse` inside the `elseBlock` array.
+Attaches methods to a struct type. Each entry in `methods` is a `FnDecl`
+whose first parameter is `self`.
+
+```harn
+impl Point {
+  fn distance(self, other: Point) -> float {
+    sqrt((self.x - other.x) ** 2 + (self.y - other.y) ** 2)
+  }
+}
+```
+
+## Control flow
+
+### `IfElse`
+
+```rust
+IfElse { condition: Box<SNode>, then_body: Vec<SNode>, else_body: Option<Vec<SNode>> }
+```
+
+Conditional execution. An `else if` chain produces a nested `IfElse` inside
+the `else_body`.
 
 ```harn
 if x > 0 {
@@ -128,13 +203,13 @@ if x > 0 {
 }
 ```
 
-### `forIn`
+### `ForIn`
 
-```javascript
-forIn(variable: String, iterable: HarnNode, body: [HarnNode])
+```rust
+ForIn { pattern: BindingPattern, iterable: Box<SNode>, body: Vec<SNode> }
 ```
 
-Iteration over a list or dict.
+Iteration over a list, dict, string, or range.
 
 ```harn
 for item in [1, 2, 3] {
@@ -142,26 +217,26 @@ for item in [1, 2, 3] {
 }
 ```
 
-### `matchExpr`
+### `MatchExpr`
 
-```javascript
-matchExpr(value: HarnNode, arms: [(pattern: HarnNode, body: [HarnNode])])
+```rust
+MatchExpr { value: Box<SNode>, arms: Vec<MatchArm> }
 ```
 
-Pattern matching. Each arm has a pattern expression and a body.
-The first arm whose pattern equals the match value executes.
+Pattern matching. Each `MatchArm` has a `pattern`, optional `guard`, and `body`.
 
 ```harn
 match status {
-  "ok" -> { handle_ok() }
-  "error" -> { handle_error() }
+  "ok" -> handle_ok()
+  "error" -> handle_error()
+  _ -> handle_other()
 }
 ```
 
-### `whileLoop`
+### `WhileLoop`
 
-```javascript
-whileLoop(condition: HarnNode, body: [HarnNode])
+```rust
+WhileLoop { condition: Box<SNode>, body: Vec<SNode> }
 ```
 
 Repeats the body while the condition is truthy.
@@ -172,10 +247,10 @@ while i < 10 {
 }
 ```
 
-### `retry`
+### `Retry`
 
-```javascript
-retry(count: HarnNode, body: [HarnNode])
+```rust
+Retry { count: Box<SNode>, body: Vec<SNode> }
 ```
 
 Executes the body up to `count` times, retrying on error.
@@ -186,73 +261,107 @@ retry 3 {
 }
 ```
 
-### `returnStmt`
+### `GuardStmt`
 
-```javascript
-returnStmt(HarnNode?)
+```rust
+GuardStmt { condition: Box<SNode>, else_body: Vec<SNode> }
 ```
 
-Returns from the current pipeline or function. The value is optional.
+Guard clause: if the condition is falsy, execute the else body (which
+must diverge via `return`, `throw`, or `break`).
 
 ```harn
-return result
+guard len(items) > 0 else {
+  return nil
+}
 ```
 
-### `tryCatch`
+### `RequireStmt`
 
-```javascript
-tryCatch(body: [HarnNode], errorVar: String?, catchBody: [HarnNode])
+```rust
+RequireStmt { condition: Box<SNode>, message: Option<Box<SNode>> }
 ```
 
-Error handling. `errorVar` is the optional name bound to the caught error in the catch block.
+Assertion that throws if the condition is falsy.
+
+```harn
+require x > 0, "x must be positive"
+```
+
+### `ReturnStmt`
+
+```rust
+ReturnStmt { value: Option<Box<SNode>> }
+```
+
+Returns from the current pipeline or function.
+
+### `BreakStmt` / `ContinueStmt`
+
+Terminal nodes for loop control flow.
+
+### `ThrowStmt`
+
+```rust
+ThrowStmt { value: Box<SNode> }
+```
+
+Throws a value as an error.
+
+```harn
+throw {code: 404, msg: "not found"}
+```
+
+### `TryCatch`
+
+```rust
+TryCatch { body: Vec<SNode>, error_var: Option<String>, error_type: Option<TypeExpr>, catch_body: Vec<SNode>, finally_body: Option<Vec<SNode>> }
+```
+
+Error handling with optional typed catch and finally blocks.
 
 ```harn
 try {
   risky_operation()
-} catch (e) {
+} catch (e: NetworkError) {
   log(e)
+} finally {
+  cleanup()
 }
 ```
 
-### `tryExpr`
+### `TryExpr`
 
-```javascript
-tryExpr(body: [HarnNode])
+```rust
+TryExpr { body: Vec<SNode> }
 ```
 
-A try-expression (no `catch` block). Evaluates the body and wraps the
-result in a `Result`: `Result.Ok(value)` on success, `Result.Err(error)`
-on thrown error.
+A try-expression (no catch). Wraps the result as `Result.Ok(value)` or
+`Result.Err(error)`.
 
 ```harn
 let result = try { json_parse(raw_input) }
 ```
 
-### `fnDecl`
+### `TryOperator`
 
-```javascript
-fnDecl(name: String, params: [String], body: [HarnNode],
-       generic_params: [String]?, where_clauses: [(String, String)]?)
+```rust
+TryOperator { operand: Box<SNode> }
 ```
 
-Named function declaration. Creates a closure value and binds it in the
-current scope. Optionally includes generic type parameters and `where`
-clauses for interface constraints.
+Postfix `?` operator. Unwraps `Result.Ok(v)` to `v`, propagates
+`Result.Err(e)` from the enclosing function.
 
 ```harn
-fn add(a, b) {
-  return a + b
-}
-
-fn process<T>(item: T) where T: Displayable {
-  println(item.display())
-}
+let value = might_fail()?
 ```
 
-### `spawnExpr`
+## Concurrency
 
-```javascript
-spawnExpr(body: [HarnNode])
+### `SpawnExpr`
+
+```rust
+SpawnExpr { body: Vec<SNode> }
 ```
 
 Spawns an asynchronous task and returns a task handle.
@@ -263,15 +372,14 @@ let handle = spawn {
 }
 ```
 
-## Concurrency
+### `Parallel`
 
-### `parallel`
-
-```javascript
-parallel(count: HarnNode, variable: String?, body: [HarnNode])
+```rust
+Parallel { count: Box<SNode>, variable: Option<String>, body: Vec<SNode> }
 ```
 
-Executes `body` concurrently `count` times. The optional `variable` is bound to the iteration index (0-based).
+Executes `body` concurrently `count` times. The optional `variable` is
+bound to the iteration index (0-based).
 
 ```harn
 parallel(3) { i ->
@@ -279,10 +387,10 @@ parallel(3) { i ->
 }
 ```
 
-### `parallelMap`
+### `ParallelMap`
 
-```javascript
-parallelMap(list: HarnNode, variable: String, body: [HarnNode])
+```rust
+ParallelMap { list: Box<SNode>, variable: String, body: Vec<SNode> }
 ```
 
 Maps over a list concurrently. Each element is bound to `variable`.
@@ -293,30 +401,88 @@ parallel_map(items) { item ->
 }
 ```
 
-## Expressions
+### `ParallelSettle`
 
-### `functionCall`
-
-```javascript
-functionCall(name: String, args: [HarnNode])
+```rust
+ParallelSettle { list: Box<SNode>, variable: String, body: Vec<SNode> }
 ```
 
-Calls a function or builtin by name. Arguments may include spread
-expressions (`...expr`), which are represented as `spreadArg(HarnNode)`
-nodes in the `args` list. At runtime, the `CallSpread` opcode flattens
-spread arguments into the argument list before invoking the function.
+Like `ParallelMap`, but collects all results (including errors) instead of
+failing fast.
+
+```harn
+parallel_settle(urls) { url ->
+  fetch(url)
+}
+```
+
+### `SelectExpr`
+
+```rust
+SelectExpr { cases: Vec<SelectCase>, timeout: Option<(Box<SNode>, Vec<SNode>)>, default_body: Option<Vec<SNode>> }
+```
+
+Waits on multiple channels. Each `SelectCase` has a `variable`, `channel`,
+and `body`. Optional timeout and default branches.
+
+```harn
+select {
+  msg <- inbox -> handle(msg)
+  sig <- signals -> shutdown(sig)
+  timeout 5s -> log("timed out")
+}
+```
+
+### `DeadlineBlock`
+
+```rust
+DeadlineBlock { duration: Box<SNode>, body: Vec<SNode> }
+```
+
+Wraps a block with a deadline. If the body doesn't complete within the
+duration, an error is thrown.
+
+```harn
+deadline 30s {
+  slow_operation()
+}
+```
+
+### `MutexBlock`
+
+```rust
+MutexBlock { body: Vec<SNode> }
+```
+
+Mutual exclusion block for concurrent access.
+
+### `YieldExpr`
+
+```rust
+YieldExpr { value: Option<Box<SNode>> }
+```
+
+Yields control to the host, optionally with a value.
+
+## Expressions
+
+### `FunctionCall`
+
+```rust
+FunctionCall { name: String, args: Vec<SNode> }
+```
+
+Calls a function or builtin by name. Arguments may include `Spread` nodes.
 
 ```harn
 read_file("config.json")
-
-let args = [1, 2, 3]
 add(...args)
 ```
 
-### `methodCall`
+### `MethodCall`
 
-```javascript
-methodCall(object: HarnNode, method: String, args: [HarnNode])
+```rust
+MethodCall { object: Box<SNode>, method: String, args: Vec<SNode> }
 ```
 
 Calls a method on an object.
@@ -325,22 +491,46 @@ Calls a method on an object.
 list.map({ x -> x * 2 })
 ```
 
-### `propertyAccess`
+### `OptionalMethodCall`
 
-```javascript
-propertyAccess(object: HarnNode, property: String)
+```rust
+OptionalMethodCall { object: Box<SNode>, method: String, args: Vec<SNode> }
 ```
 
-Accesses a property on an object (dict field, list `.count`, etc.).
+Optional chaining method call. Returns nil if the object is nil.
+
+```harn
+result?.to_string()
+```
+
+### `PropertyAccess`
+
+```rust
+PropertyAccess { object: Box<SNode>, property: String }
+```
+
+Accesses a property on an object (dict field, struct field, `.count`, etc.).
 
 ```harn
 result.name
 ```
 
-### `subscriptAccess`
+### `OptionalPropertyAccess`
 
-```javascript
-subscriptAccess(object: HarnNode, index: HarnNode)
+```rust
+OptionalPropertyAccess { object: Box<SNode>, property: String }
+```
+
+Optional chaining property access. Returns nil if the object is nil.
+
+```harn
+user?.email
+```
+
+### `SubscriptAccess`
+
+```rust
+SubscriptAccess { object: Box<SNode>, index: Box<SNode> }
 ```
 
 Accesses an element by index (list) or key (dict).
@@ -350,38 +540,41 @@ items[0]
 config["key"]
 ```
 
-### `binaryOp`
+### `SliceAccess`
 
-```javascript
-binaryOp(op: String, left: HarnNode, right: HarnNode)
+```rust
+SliceAccess { object: Box<SNode>, start: Option<Box<SNode>>, end: Option<Box<SNode>> }
 ```
 
-A binary operation. `op` is the operator string:
-`+`, `-`, `*`, `/`, `==`, `!=`, `<`, `>`, `<=`, `>=`, `&&`, `||`, `??`, `|>`.
+Slice access with optional start and end bounds.
 
 ```harn
-1 + 2
-x == y
-a |> transform
+items[1:3]
+text[:5]
 ```
 
-### `unaryOp`
+### `BinaryOp`
 
-```javascript
-unaryOp(op: String, operand: HarnNode)
+```rust
+BinaryOp { op: String, left: Box<SNode>, right: Box<SNode> }
 ```
 
-A unary prefix operation. `op` is `!` (logical not) or `-` (negation).
+Binary operation. Operators:
+`+`, `-`, `*`, `/`, `%`, `**`, `==`, `!=`, `<`, `>`, `<=`, `>=`,
+`&&`, `||`, `??`, `|>`, `in`, `not_in`.
 
-```harn
-!done
--5
+### `UnaryOp`
+
+```rust
+UnaryOp { op: String, operand: Box<SNode> }
 ```
 
-### `ternary`
+Unary prefix operation: `!` (logical not) or `-` (negation).
 
-```javascript
-ternary(condition: HarnNode, trueExpr: HarnNode, falseExpr: HarnNode)
+### `Ternary`
+
+```rust
+Ternary { condition: Box<SNode>, true_expr: Box<SNode>, false_expr: Box<SNode> }
 ```
 
 Conditional expression.
@@ -390,140 +583,92 @@ Conditional expression.
 x > 0 ? "positive" : "non-positive"
 ```
 
-### `assignment`
+### `Assignment`
 
-```javascript
-assignment(target: HarnNode, value: HarnNode)
+```rust
+Assignment { target: Box<SNode>, value: Box<SNode>, op: Option<String> }
 ```
 
-Assigns a new value to an existing mutable variable. `target` is always an `identifier` node.
+Assigns a value to a mutable variable. `op` is `None` for plain `=`,
+or `Some("+")` for `+=`, etc.
+
+### `RangeExpr`
+
+```rust
+RangeExpr { start: Box<SNode>, end: Box<SNode>, inclusive: bool }
+```
+
+Range expression. `inclusive: false` uses `upto`, `inclusive: true` uses `thru`.
 
 ```harn
-count = count + 1
+0 upto 10   // exclusive
+0 thru 9    // inclusive
 ```
 
-### `throwStmt`
+### `AskExpr`
 
-```javascript
-throwStmt(HarnNode)
+```rust
+AskExpr { fields: Vec<DictEntry> }
 ```
 
-Throws a value as an error.
+Ask expression for LLM interaction.
 
 ```harn
-throw "something went wrong"
-throw {code: 404, msg: "not found"}
+ask { system: "You are a helper", user: "Explain this code" }
 ```
 
-### `tryOperator`
+### `EnumConstruct`
 
-```javascript
-tryOperator(operand: HarnNode)
+```rust
+EnumConstruct { enum_name: String, variant: String, args: Vec<SNode> }
 ```
 
-Postfix `?` operator for `Result` unwrapping. If the operand evaluates
-to `Result.Ok(v)`, the expression produces `v`. If it evaluates to
-`Result.Err(e)`, the error is propagated (returned) from the enclosing
-function.
+Constructs an enum variant.
 
 ```harn
-let value = might_fail()?
-let parsed = parse(input)?
+Color.Custom(255, 0, 0)
+```
+
+### `StructConstruct`
+
+```rust
+StructConstruct { struct_name: String, fields: Vec<DictEntry> }
+```
+
+Constructs a struct instance with named fields.
+
+```harn
+Point { x: 10, y: 20 }
 ```
 
 ## Literals
 
-### `interpolatedString`
+### `InterpolatedString`
 
-```javascript
-interpolatedString([StringSegment])
+```rust
+InterpolatedString(Vec<StringSegment>)
 ```
 
-A string with embedded expressions. Each `StringSegment` is either `.literal(String)` or `.expression(String)`.
+A string with embedded expressions. Each `StringSegment` is
+`Literal(String)` or `Expression(String, line, col)`.
 
 ```harn
 "hello ${name}, result: ${x + 1}"
 ```
 
-### `stringLiteral`
+### `StringLiteral(String)` / `IntLiteral(i64)` / `FloatLiteral(f64)` / `BoolLiteral(bool)` / `NilLiteral`
 
-```javascript
-stringLiteral(String)
-```
+Constant value terminals.
 
-A plain string constant.
+### `DurationLiteral(u64)`
 
-```harn
-"hello world"
-```
+Duration in milliseconds: `500ms`, `5s`, `30m`, `2h`.
 
-### `intLiteral`
-
-```javascript
-intLiteral(Int)
-```
-
-An integer constant.
-
-```harn
-42
-```
-
-### `floatLiteral`
-
-```javascript
-floatLiteral(Double)
-```
-
-A floating-point constant.
-
-```harn
-3.14
-```
-
-### `boolLiteral`
-
-```javascript
-boolLiteral(Bool)
-```
-
-A boolean constant.
-
-```harn
-true
-false
-```
-
-### `nilLiteral`
-
-```javascript
-nilLiteral
-```
-
-The nil value.
-
-```harn
-nil
-```
-
-### `identifier`
-
-```javascript
-identifier(String)
-```
+### `Identifier(String)`
 
 A variable or function name reference.
 
-```harn
-count
-my_variable
-```
-
-### `listLiteral`
-
-```javascript
-listLiteral([HarnNode])
-```
+### `ListLiteral(Vec<SNode>)`
 
 A list literal with zero or more element expressions.
 
@@ -531,39 +676,54 @@ A list literal with zero or more element expressions.
 [1, "two", true]
 ```
 
-### `dictLiteral`
+### `DictLiteral(Vec<DictEntry>)`
 
-```javascript
-dictLiteral([(key: HarnNode, value: HarnNode)])
-```
-
-A dictionary literal with key-value pairs. Bare-identifier keys are
-converted to `stringLiteral` nodes during parsing. Computed keys use bracket syntax.
+A dictionary literal. Each `DictEntry` has a `key` and `value` node.
+Bare-identifier keys become `StringLiteral` during parsing. Computed keys
+use bracket syntax: `{[expr]: value}`.
 
 ```harn
 {name: "test", count: 42}
-{[dynamic_key]: value}
 ```
+
+### `Spread(Box<SNode>)`
+
+Spread expression `...expr` inside list/dict literals or function calls.
 
 ## Blocks
 
-### `block`
+### `Block(Vec<SNode>)`
 
-```javascript
-block([HarnNode])
+A sequence of statements in a child scope.
+
+### `Closure`
+
+```rust
+Closure { params: Vec<TypedParam>, body: Vec<SNode>, fn_syntax: bool }
 ```
 
-A sequence of statements evaluated in a child scope. Not directly produced by the parser but used internally.
-
-### `closure`
-
-```javascript
-closure(params: [String], body: [HarnNode])
-```
-
-A closure literal with parameter names and a body.
+A closure literal. `fn_syntax: true` when written as `fn(params) { body }`.
+Parameters may include type annotations.
 
 ```harn
 { x -> x * 2 }
-{ a, b -> a + b }
+fn(a: int, b: int) -> int { a + b }
 ```
+
+## Supporting types
+
+| Type | Fields | Used in |
+|------|--------|---------|
+| `SNode` | `Spanned<Node>` — node + source span | everywhere |
+| `BindingPattern` | `Identifier(String)`, `Dict(Vec<...>)`, `List(Vec<...>)` | let/var/for |
+| `TypeExpr` | `Named`, `List`, `Optional`, `Union`, `Shape`, `FnType`, `Generic` | type annotations |
+| `TypeParam` | `name: String`, `constraint: Option<String>` | generics |
+| `TypedParam` | `name`, `type_expr`, `default_value`, `is_rest` | fn params |
+| `WhereClause` | `type_name: String`, `bound: String` | generic constraints |
+| `MatchArm` | `pattern: SNode`, `guard: Option<SNode>`, `body: Vec<SNode>` | match |
+| `SelectCase` | `variable`, `channel`, `body` | select |
+| `DictEntry` | `key: SNode`, `value: SNode` | dict/struct |
+| `EnumVariant` | `name: String`, `fields: Vec<TypedParam>` | enum decl |
+| `StructField` | `name`, `type_expr`, `optional` | struct decl |
+| `InterfaceMethod` | `name`, `type_params`, `params`, `return_type` | interface decl |
+| `StringSegment` | `Literal(String)`, `Expression(String, usize, usize)` | interpolation |

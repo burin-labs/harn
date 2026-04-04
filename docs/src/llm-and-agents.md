@@ -4,16 +4,26 @@ Harn has built-in support for calling language models and running persistent age
 
 ## Providers
 
-Harn supports four LLM providers. Set the appropriate environment variable to authenticate:
+Harn ships with built-in configs for Anthropic, OpenAI, OpenRouter, Ollama,
+HuggingFace, and a local OpenAI-compatible server. Set the appropriate
+environment variable to authenticate or point Harn at a local endpoint:
 
 | Provider | Environment variable | Default model |
 |---|---|---|
 | Anthropic (default) | `ANTHROPIC_API_KEY` | `claude-sonnet-4-20250514` |
 | OpenAI | `OPENAI_API_KEY` | `gpt-4o` |
 | OpenRouter | `OPENROUTER_API_KEY` | `anthropic/claude-sonnet-4-20250514` |
+| HuggingFace | `HF_TOKEN` or `HUGGINGFACE_API_KEY` | explicit `model` |
 | Ollama | `OLLAMA_HOST` (optional) | `llama3.2` |
+| Local server | `LOCAL_LLM_BASE_URL` | `LOCAL_LLM_MODEL` or explicit `model` |
 
-Ollama runs locally and doesn't require an API key. The default host is `http://localhost:11434`.
+Ollama runs locally and doesn't require an API key. The default host is
+`http://localhost:11434`.
+
+For a generic OpenAI-compatible local server, set `LOCAL_LLM_BASE_URL` to
+something like `http://192.168.86.250:8000` and either pass
+`{provider: "local", model: "qwen2.5-coder-32b"}` or set
+`LOCAL_LLM_MODEL=qwen2.5-coder-32b`.
 
 ## llm_call
 
@@ -83,7 +93,7 @@ println(result.text)
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `provider` | string | `"anthropic"` | `"anthropic"`, `"openai"`, `"ollama"`, or `"openrouter"` |
+| `provider` | string | `"anthropic"` | Any configured provider. Built-in names include `"anthropic"`, `"openai"`, `"openrouter"`, `"huggingface"`, `"ollama"`, and `"local"` |
 | `model` | string | varies by provider | Model identifier |
 | `max_tokens` | int | `4096` | Maximum tokens in the response |
 | `temperature` | float | provider default | Sampling temperature (0.0-2.0) |
@@ -512,9 +522,23 @@ println("Remaining: $${llm_budget_remaining()}")
 - Auth: `Authorization: Bearer <key>`
 - Same message format as OpenAI
 
+### HuggingFace
+
+- Endpoint: `https://router.huggingface.co/v1/chat/completions`
+- Auth: `Authorization: Bearer <key>`
+- Use `HF_TOKEN` or `HUGGINGFACE_API_KEY`
+- Same message format as OpenAI
+
 ### Ollama
 
 - Endpoint: `<OLLAMA_HOST>/v1/chat/completions`
 - Default host: `http://localhost:11434`
+- No authentication required
+- Same message format as OpenAI
+
+### Local OpenAI-compatible server
+
+- Endpoint: `<LOCAL_LLM_BASE_URL>/v1/chat/completions`
+- Default host: `http://localhost:8000`
 - No authentication required
 - Same message format as OpenAI

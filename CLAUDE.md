@@ -21,6 +21,13 @@ That means the runtime now includes:
 - ACP/bridge host integration with queued human-message delivery policies
 - capability-ceiling enforcement for nested orchestration
 
+## Setup
+
+```bash
+make setup          # run scripts/dev_setup.sh for first-time setup
+make install-hooks  # configure git to use .githooks/
+```
+
 ## Core Commands
 
 ```bash
@@ -51,6 +58,9 @@ cargo run --bin harn -- acp
 cargo run --bin harn -- runs inspect .harn-runs/<run>.json
 cargo run --bin harn -- replay .harn-runs/<run>.json
 cargo run --bin harn -- eval .harn-runs/<run>.json
+
+# Portal (embedded web UI)
+cargo run --bin harn -- portal
 ```
 
 ## Quality Gates

@@ -1,0 +1,85 @@
+```call
+scaffold(path="internal/manifest/parser_extra_test.go", source_path="internal/manifest/parser.go")
+```
+
+```call
+edit(action="insert_function", path="internal/manifest/parser_extra_test.go", position="end", name="TestParse_EmptyManifest", signature="func TestParse_EmptyManifest(t *testing.T)", body="<<'EOF'\n\tinput := \"\"\n\tassertParseError(t, input)\nEOF")
+```
+
+```call
+edit(action="insert_function", path="internal/manifest/parser_extra_test.go", position="end", name="TestParse_InvalidYAML", signature="func TestParse_InvalidYAML(t *testing.T)", body="<<'EOF'\n\tinput := `{ invalid yaml ]`\n\tassertParseError(t, input)\nEOF")
+```
+
+```call
+edit(action="insert_function", path="internal/manifest/parser_extra_test.go", position="end", name="TestParse_MissingVersion", signature="func TestParse_MissingVersion(t *testing.T)", body="<<'EOF'\n\tinput := `services:\\n  web:\\n    image: nginx:latest\\n`\n\tassertParseOK(t, input) // Version is optional\nEOF")
+```
+
+```call
+edit(action="insert_function", path="internal/manifest/parser_extra_test.go", position="end", name="TestParse_DuplicateServices", signature="func TestParse_DuplicateServices(t *testing.T)", body="<<'EOF'\n\tinput := `\\nversion: \\\"1\\\"\\nservices:\\n  web:\\n    image: nginx:latest\\n  web:\\n    image: apache:latest\\n`\n\tm := assertParseOK(t, input)\n\t// YAML parsing will override duplicate keys, so we should have 1 service\n\tassertServiceCount(t, m, 1)\n\t// The last definition wins in YAML\n\tassertStringEqual(t, \"service image\", m.Services[\"web\"].Image, \"apache:latest\")\nEOF")
+```
+
+```call
+edit(action="insert_function", path="internal/manifest/parser_extra_test.go", position="end", name="TestParse_PortValidation", signature="func TestParse_PortValidation(t *testing.T)", body="<<'EOF'\n\ttests := []struct {\n\t\tname  string\n\t\tinput string\n\t}{\n\t\t{\n\t\t\tname: \"invalid port format\",\n\t\t\tinput: `\\nversion: \\\"1\\\"\\nservices:\\n  web:\\n    image: nginx:latest\\n    ports:\\n      - \\\"not-a-port\\\"\\n`,\n\t\t},\n\t\t{\n\t\t\tname: \"invalid port range\",\n\t\t\tinput: `\\nversion: \\\"1\\\"\\nservices:\\n  web:\\n    image: nginx:latest\\n    ports:\\n      - \\\"999999:80\\\"\\n`,\n\t\t},\n\t\t{\n\t\t\tname: \"negative port\",\n\t\t\tinput: `\\nversion: \\\"1\\\"\\nservices:\\n  web:\\n    image: nginx:latest\\n    ports:\\n      - \\\"-80:80\\\"\\n`,\n\t\t},\n\t}\n\n\tfor _, tt := range tests {\n\t\tt.Run(tt.name, func(t *testing.T) {\n\t\t\t// These should parse successfully as we don't validate port formats in the parser\n\t\t\tassertParseOK(t, tt.input)\n\t\t})\n\t}\nEOF")
+```
+
+```call
+edit(action="add_import", path="internal/manifest/parser_extra_test.go", import_statement="import \"strings\"")
+```
+
+```call
+edit(action="add_import", path="internal/manifest/parser_extra_test.go", import_statement="import \"testing\"")
+```
+
+```call
+edit(action="replace_body", path="internal/manifest/parser_extra_test.go", function_name="TestParse_EmptyManifest", new_body="<<'EOF'\n\tinput := \"\"\n\tassertParseError(t, input)\nEOF")
+```
+
+```call
+edit(action="replace_body", path="internal/manifest/parser_extra_test.go", function_name="TestParse_InvalidYAML", new_body="<<'EOF'\n\tinput := `{ invalid yaml ]`\n\tassertParseError(t, input)\nEOF")
+```
+
+```call
+edit(action="replace_body", path="internal/manifest/parser_extra_test.go", function_name="TestParse_MissingVersion", new_body="<<'EOF'\n\tinput := `services:\\n  web:\\n    image: nginx:latest\\n`\n\tassertParseOK(t, input) // Version is optional\nEOF")
+```
+
+```call
+edit(action="replace_body", path="internal/manifest/parser_extra_test.go", function_name="TestParse_DuplicateServices", new_body="<<'EOF'\n\tinput := `\\nversion: \\\"1\\\"\\nservices:\\n  web:\\n    image: nginx:latest\\n  web:\\n    image: apache:latest\\n`\n\tm := assertParseOK(t, input)\n\t// YAML parsing will override duplicate keys, so we should have 1 service\n\tassertServiceCount(t, m, 1)\n\t// The last definition wins in YAML\n\tassertStringEqual(t, \"service image\", m.Services[\"web\"].Image, \"apache:latest\")\nEOF")
+```
+
+```call
+edit(action="replace_body", path="internal/manifest/parser_extra_test.go", function_name="TestParse_PortValidation", new_body="<<'EOF'\n\ttests := []struct {\n\t\tname  string\n\t\tinput string\n\t}{\n\t\t{\n\t\t\tname: \"invalid port format\",\n\t\t\tinput: `\\nversion: \\\"1\\\"\\nservices:\\n  web:\\n    image: nginx:latest\\n    ports:\\n      - \\\"not-a-port\\\"\\n`,\n\t\t},\n\t\t{\n\t\t\tname: \"invalid port range\",\n\t\t\tinput: `\\nversion: \\\"1\\\"\\nservices:\\n  web:\\n    image: nginx:latest\\n    ports:\\n      - \\\"999999:80\\\"\\n`,\n\t\t},\n\t\t{\n\t\t\tname: \"negative port\",\n\t\t\tinput: `\\nversion: \\\"1\\\"\\nservices:\\n  web:\\n    image: nginx:latest\\n    ports:\\n      - \\\"-80:80\\\"\\n`,\n\t\t},\n\t}\n\n\tfor _, tt := range tests {\n\t\tt.Run(tt.name, func(t *testing.T) {\n\t\t\t// These should parse successfully as we don't validate port formats in the parser\n\t\t\tassertParseOK(t, tt.input)\n\t\t})\n\t}\nEOF")
+```
+
+```call
+edit(action="add_import", path="internal/manifest/parser_extra_test.go", import_statement="import \"time\"")
+```
+
+__EXECUTE_COMPLETE__
+## LOOP_STATE
+phase: execute
+next_phase: validate
+done: true
+confidence: 1.00
+summary: Created parser_extra_test.go with tests for edge cases including empty manifest, invalid YAML, missing required fields, duplicate service names, and port validation
+unknowns: []
+facts:
+- Created internal/manifest/parser_extra_test.go
+- Added TestParse_EmptyManifest test
+- Added TestParse_InvalidYAML test
+- Added TestParse_MissingVersion test
+- Added TestParse_DuplicateServices test
+- Added TestParse_PortValidation test
+- Added required imports (strings, testing, time)
+operations:
+- scaffold(path="internal/manifest/parser_extra_test.go", source_path="internal/manifest/parser.go")
+- insert_function(name="TestParse_EmptyManifest")
+- insert_function(name="TestParse_InvalidYAML")
+- insert_function(name="TestParse_MissingVersion")
+- insert_function(name="TestParse_DuplicateServices")
+- insert_function(name="TestParse_PortValidation")
+- add_import(import_statement="import \"strings\"")
+- add_import(import_statement="import \"testing\"")
+- add_import(import_statement="import \"time\"")
+validation:
+- go test ./internal/manifest/
+## END_LOOP_STATE

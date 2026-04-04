@@ -5461,9 +5461,6 @@
       "select_block"
     ],
     [
-      "parallel_expression"
-    ],
-    [
       "parallel_map_expression"
     ],
     [

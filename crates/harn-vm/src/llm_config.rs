@@ -472,6 +472,25 @@ fn default_config() -> ProvidersConfig {
         },
     );
 
+    // Local OpenAI-compatible server
+    config.providers.insert(
+        "local".to_string(),
+        ProviderDef {
+            base_url: "http://localhost:8000".to_string(),
+            base_url_env: Some("LOCAL_LLM_BASE_URL".to_string()),
+            auth_style: "none".to_string(),
+            chat_endpoint: "/v1/chat/completions".to_string(),
+            completion_endpoint: Some("/v1/completions".to_string()),
+            healthcheck: Some(HealthcheckDef {
+                method: "GET".to_string(),
+                path: Some("/v1/models".to_string()),
+                url: None,
+                body: None,
+            }),
+            ..Default::default()
+        },
+    );
+
     // Default inference rules
     config.inference_rules = vec![
         InferenceRule {
@@ -653,8 +672,9 @@ mod tests {
     #[test]
     fn test_provider_names() {
         let names = provider_names();
-        assert!(names.len() >= 5);
+        assert!(names.len() >= 6);
         assert!(names.contains(&"anthropic".to_string()));
+        assert!(names.contains(&"local".to_string()));
         assert!(names.contains(&"openai".to_string()));
         assert!(names.contains(&"ollama".to_string()));
     }

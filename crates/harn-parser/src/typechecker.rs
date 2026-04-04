@@ -1060,8 +1060,233 @@ impl TypeChecker {
                 }
             }
 
-            // Terminals — nothing to check
-            _ => {}
+            // --- Compound nodes: recurse into children ---
+            Node::Ternary {
+                condition,
+                true_expr,
+                false_expr,
+            } => {
+                self.check_node(condition, scope);
+                self.check_node(true_expr, scope);
+                self.check_node(false_expr, scope);
+            }
+
+            Node::ThrowStmt { value } => {
+                self.check_node(value, scope);
+            }
+
+            Node::GuardStmt {
+                condition,
+                else_body,
+            } => {
+                self.check_node(condition, scope);
+                let mut else_scope = scope.child();
+                self.check_block(else_body, &mut else_scope);
+            }
+
+            Node::SpawnExpr { body } => {
+                let mut spawn_scope = scope.child();
+                self.check_block(body, &mut spawn_scope);
+            }
+
+            Node::Parallel {
+                count,
+                variable,
+                body,
+            } => {
+                self.check_node(count, scope);
+                let mut par_scope = scope.child();
+                if let Some(var) = variable {
+                    par_scope.define_var(var, Some(TypeExpr::Named("int".into())));
+                }
+                self.check_block(body, &mut par_scope);
+            }
+
+            Node::ParallelMap {
+                list,
+                variable,
+                body,
+            }
+            | Node::ParallelSettle {
+                list,
+                variable,
+                body,
+            } => {
+                self.check_node(list, scope);
+                let mut par_scope = scope.child();
+                let elem_type = match self.infer_type(list, scope) {
+                    Some(TypeExpr::List(inner)) => Some(*inner),
+                    _ => None,
+                };
+                par_scope.define_var(variable, elem_type);
+                self.check_block(body, &mut par_scope);
+            }
+
+            Node::SelectExpr {
+                cases,
+                timeout,
+                default_body,
+            } => {
+                for case in cases {
+                    self.check_node(&case.channel, scope);
+                    let mut case_scope = scope.child();
+                    case_scope.define_var(&case.variable, None);
+                    self.check_block(&case.body, &mut case_scope);
+                }
+                if let Some((dur, body)) = timeout {
+                    self.check_node(dur, scope);
+                    let mut timeout_scope = scope.child();
+                    self.check_block(body, &mut timeout_scope);
+                }
+                if let Some(body) = default_body {
+                    let mut default_scope = scope.child();
+                    self.check_block(body, &mut default_scope);
+                }
+            }
+
+            Node::DeadlineBlock { duration, body } => {
+                self.check_node(duration, scope);
+                let mut block_scope = scope.child();
+                self.check_block(body, &mut block_scope);
+            }
+
+            Node::MutexBlock { body } => {
+                let mut block_scope = scope.child();
+                self.check_block(body, &mut block_scope);
+            }
+
+            Node::Retry { count, body } => {
+                self.check_node(count, scope);
+                let mut retry_scope = scope.child();
+                self.check_block(body, &mut retry_scope);
+            }
+
+            Node::Closure { params, body, .. } => {
+                let mut closure_scope = scope.child();
+                for p in params {
+                    closure_scope.define_var(&p.name, p.type_expr.clone());
+                }
+                self.check_block(body, &mut closure_scope);
+            }
+
+            Node::ListLiteral(elements) => {
+                for elem in elements {
+                    self.check_node(elem, scope);
+                }
+            }
+
+            Node::DictLiteral(entries) | Node::AskExpr { fields: entries } => {
+                for entry in entries {
+                    self.check_node(&entry.key, scope);
+                    self.check_node(&entry.value, scope);
+                }
+            }
+
+            Node::RangeExpr { start, end, .. } => {
+                self.check_node(start, scope);
+                self.check_node(end, scope);
+            }
+
+            Node::Spread(inner) => {
+                self.check_node(inner, scope);
+            }
+
+            Node::Block(stmts) => {
+                let mut block_scope = scope.child();
+                self.check_block(stmts, &mut block_scope);
+            }
+
+            Node::YieldExpr { value } => {
+                if let Some(v) = value {
+                    self.check_node(v, scope);
+                }
+            }
+
+            // --- Struct construction: validate fields against declaration ---
+            Node::StructConstruct {
+                struct_name,
+                fields,
+            } => {
+                for entry in fields {
+                    self.check_node(&entry.key, scope);
+                    self.check_node(&entry.value, scope);
+                }
+                if let Some(declared_fields) = scope.get_struct(struct_name).cloned() {
+                    // Warn on unknown fields
+                    for entry in fields {
+                        if let Node::StringLiteral(key) | Node::Identifier(key) = &entry.key.node {
+                            if !declared_fields.iter().any(|(name, _)| name == key) {
+                                self.warning_at(
+                                    format!("Unknown field '{}' in struct '{}'", key, struct_name),
+                                    entry.key.span,
+                                );
+                            }
+                        }
+                    }
+                    // Warn on missing required fields
+                    let provided: Vec<String> = fields
+                        .iter()
+                        .filter_map(|e| match &e.key.node {
+                            Node::StringLiteral(k) | Node::Identifier(k) => Some(k.clone()),
+                            _ => None,
+                        })
+                        .collect();
+                    for (name, _) in &declared_fields {
+                        if !provided.contains(name) {
+                            self.warning_at(
+                                format!(
+                                    "Missing field '{}' in struct '{}' construction",
+                                    name, struct_name
+                                ),
+                                span,
+                            );
+                        }
+                    }
+                }
+            }
+
+            // --- Enum construction: validate variant exists ---
+            Node::EnumConstruct {
+                enum_name,
+                variant,
+                args,
+            } => {
+                for arg in args {
+                    self.check_node(arg, scope);
+                }
+                if let Some(variants) = scope.get_enum(enum_name) {
+                    if !variants.contains(variant) {
+                        self.warning_at(
+                            format!("Unknown variant '{}' in enum '{}'", variant, enum_name),
+                            span,
+                        );
+                    }
+                }
+            }
+
+            // --- InterpolatedString: segments are lexer-level, no SNode children ---
+            Node::InterpolatedString(_) => {}
+
+            // --- Terminals: no children to check ---
+            Node::StringLiteral(_)
+            | Node::IntLiteral(_)
+            | Node::FloatLiteral(_)
+            | Node::BoolLiteral(_)
+            | Node::NilLiteral
+            | Node::Identifier(_)
+            | Node::DurationLiteral(_)
+            | Node::BreakStmt
+            | Node::ContinueStmt
+            | Node::ReturnStmt { value: None }
+            | Node::ImportDecl { .. }
+            | Node::SelectiveImport { .. } => {}
+
+            // Declarations already handled above; catch remaining variants
+            // that have no meaningful type-check behavior.
+            Node::Pipeline { body, .. } | Node::OverrideDecl { body, .. } => {
+                let mut decl_scope = scope.child();
+                self.check_block(body, &mut decl_scope);
+            }
         }
     }
 

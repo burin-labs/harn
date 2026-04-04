@@ -1893,11 +1893,16 @@ The following environment variables configure runtime behavior:
 
 | Variable | Description |
 |---|---|
-| `HARN_LLM_PROVIDER` | Override the default LLM provider. Accepted values: `anthropic` (default), `openai`, `openrouter`, `ollama`, `mock`. |
+| `HARN_LLM_PROVIDER` | Override the default LLM provider. Any configured provider is accepted. Built-in names include `anthropic` (default), `openai`, `openrouter`, `huggingface`, `ollama`, `local`, and `mock`. |
 | `HARN_LLM_TIMEOUT` | LLM request timeout in seconds. Default `120`. |
 | `ANTHROPIC_API_KEY` | API key for the Anthropic provider. |
 | `OPENAI_API_KEY` | API key for the OpenAI provider. |
 | `OPENROUTER_API_KEY` | API key for the OpenRouter provider. |
+| `HF_TOKEN` | API key for the HuggingFace provider. |
+| `HUGGINGFACE_API_KEY` | Alternate API key name for the HuggingFace provider. |
+| `OLLAMA_HOST` | Override the Ollama host. Default `http://localhost:11434`. |
+| `LOCAL_LLM_BASE_URL` | Base URL for a local OpenAI-compatible server. Default `http://localhost:8000`. |
+| `LOCAL_LLM_MODEL` | Default model ID for the local OpenAI-compatible provider. |
 
 ## Known limitations and future work
 

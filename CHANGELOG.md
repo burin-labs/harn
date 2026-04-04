@@ -2,6 +2,59 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.34
+
+### Fixed
+
+- **UTF-8 safe string slicing in transcript compaction** — `microcompact_tool_output()`
+  and `truncate_compaction_summary()` now use `floor_char_boundary` /
+  `ceil_char_boundary` instead of raw byte offsets, preventing panics on
+  multi-byte characters (emoji, CJK, accented text) at slice boundaries.
+- **Portal server exits gracefully on bind errors** — invalid addresses and
+  listener failures now print a diagnostic to stderr and exit cleanly instead
+  of panicking.
+- **LSP signature help clamps activeParameter** — the active parameter index
+  is now clamped to the parameter list length, preventing out-of-bounds values
+  when the cursor has more commas than the function has parameters.
+- **Tree-sitter duplicate conflict removed** — `parallel_expression` appeared
+  twice in the grammar conflicts array; the duplicate is removed.
+- **Text-mode tool-call parser no longer misinterprets `<<` inside quoted
+  strings as heredoc openers** — `find_call_block_end` now tracks double-quoted
+  string boundaries, so model responses containing heredoc-like syntax in string
+  arguments (e.g. `body="<<'EOF'\n...\nEOF"`) parse all call blocks correctly.
+- **Sentinel exits now preserve tool-call parse diagnostics** — when an agent
+  response hits the phase-loop sentinel, suppressed tool-call parse errors are
+  logged to stderr instead of disappearing silently.
+
+### Changed
+
+- **Type checker now visits all compound AST nodes** — the catch-all `_ => {}`
+  in `check_node()` has been replaced with explicit arms for 25+ node types
+  including `Ternary`, `ThrowStmt`, `GuardStmt`, `SpawnExpr`, `Parallel`,
+  `ParallelMap`, `ParallelSettle`, `SelectExpr`, `DeadlineBlock`, `MutexBlock`,
+  `Retry`, `Closure`, `ListLiteral`, `DictLiteral`, `RangeExpr`, `Block`,
+  `YieldExpr`, `Spread`, `AskExpr`, `Pipeline`, and `OverrideDecl`. This
+  ensures the full AST tree is traversed for type analysis and diagnostics.
+- **Struct construction field validation** — the type checker now warns on
+  unknown fields and missing fields when constructing struct instances.
+- **Enum construction variant validation** — the type checker now warns when
+  constructing a variant that does not exist in the enum declaration.
+
+### Added
+
+- **Built-in local OpenAI-compatible provider** — Harn now ships a `local`
+  provider with `LOCAL_LLM_BASE_URL` / `LOCAL_LLM_MODEL` support, no auth by
+  default, and matching docs/spec coverage for self-hosted local model setups.
+- **Unicode conformance test** — new `unicode_strings` test exercises string
+  operations (len, contains, split, replace, interpolation) with emoji, CJK,
+  and accented characters.
+- **Editor integration docs** — new `docs/src/editor-integration.md` covering
+  LSP capabilities, DAP debugging, tree-sitter grammar, and VS Code setup.
+- **Testing guide** — new `docs/src/testing.md` covering the conformance runner,
+  `std/testing` host mock helpers, LLM mocking, and assertion builtins.
+- **AST spec regenerated** — `spec/AST.md` now reflects the Rust `Node` enum
+  with all current variants, replacing the stale Swift-era documentation.
+
 ## v0.5.33
 
 ### Changed

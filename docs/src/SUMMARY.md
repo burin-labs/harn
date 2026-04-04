@@ -23,4 +23,6 @@
 
 - [CLI Reference](./cli-reference.md)
 - [Builtin Functions](./builtins.md)
+- [Editor Integration](./editor-integration.md)
+- [Testing](./testing.md)
 - [Cookbook](./cookbook.md)

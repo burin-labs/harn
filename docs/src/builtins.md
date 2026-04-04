@@ -663,7 +663,7 @@ are configured via a TOML file. The VM searches for config in this order:
 
 1. `HARN_PROVIDERS_CONFIG` env var (explicit path)
 2. `~/.config/harn/providers.toml`
-3. Built-in defaults (Anthropic, OpenAI, OpenRouter, HuggingFace, Ollama)
+3. Built-in defaults (Anthropic, OpenAI, OpenRouter, HuggingFace, Ollama, Local)
 
 See `harn init` to generate a default config file, or create one manually:
 
@@ -674,6 +674,13 @@ auth_style = "header"
 auth_header = "x-api-key"
 auth_env = "ANTHROPIC_API_KEY"
 chat_endpoint = "/messages"
+
+[providers.local]
+base_url = "http://localhost:8000"
+base_url_env = "LOCAL_LLM_BASE_URL"
+auth_style = "none"
+chat_endpoint = "/v1/chat/completions"
+completion_endpoint = "/v1/completions"
 
 [aliases]
 sonnet = { id = "claude-sonnet-4-20250514", provider = "anthropic" }

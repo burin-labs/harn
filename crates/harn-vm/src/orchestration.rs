@@ -301,16 +301,20 @@ pub fn microcompact_tool_output(output: &str, max_chars: usize) -> String {
         let budget = max_chars.saturating_sub(diagnostics.len() + 64);
         let keep = budget / 2;
         if keep >= 80 && output.len() > keep * 2 {
-            let head = &output[..keep];
-            let tail = &output[output.len() - keep..];
+            let head_end = output.floor_char_boundary(keep);
+            let tail_start = output.ceil_char_boundary(output.len() - keep);
+            let head = &output[..head_end];
+            let tail = &output[tail_start..];
             return format!(
                 "{head}\n\n[diagnostic lines preserved]\n{diagnostics}\n\n[... output compacted ...]\n\n{tail}"
             );
         }
     }
     let keep = max_chars / 2;
-    let head = &output[..keep];
-    let tail = &output[output.len() - keep..];
+    let head_end = output.floor_char_boundary(keep);
+    let tail_start = output.ceil_char_boundary(output.len() - keep);
+    let head = &output[..head_end];
+    let tail = &output[tail_start..];
     let snipped = output.len() - max_chars;
     format!("{head}\n\n[... {snipped} characters snipped ...]\n\n{tail}")
 }
@@ -347,7 +351,7 @@ fn truncate_compaction_summary(
                 return None;
             }
             let truncated = if content.len() > 500 {
-                format!("{}...", &content[..500])
+                format!("{}...", &content[..content.floor_char_boundary(500)])
             } else {
                 content.to_string()
             };
@@ -3805,5 +3809,24 @@ mod tests {
             &serde_json::json!({"path": "/etc/passwd"}),
         );
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn microcompact_handles_multibyte_utf8() {
+        // Emoji are 4 bytes each — slicing at arbitrary byte offsets would panic
+        let emoji_output = "🔥".repeat(500); // 2000 bytes, 500 chars
+        let result = microcompact_tool_output(&emoji_output, 400);
+        // Should not panic and should contain the snip marker
+        assert!(result.contains("snipped"));
+
+        // Mixed ASCII + multi-byte
+        let mixed = format!("{}{}{}", "a".repeat(300), "é".repeat(500), "b".repeat(300));
+        let result2 = microcompact_tool_output(&mixed, 400);
+        assert!(result2.contains("snipped"));
+
+        // CJK characters (3 bytes each)
+        let cjk = "中文".repeat(500);
+        let result3 = microcompact_tool_output(&cjk, 400);
+        assert!(result3.contains("snipped"));
     }
 }

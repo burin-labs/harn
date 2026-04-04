@@ -655,8 +655,19 @@ fn parse_text_tool_calls(text: &str) -> Vec<serde_json::Value> {
 fn find_call_block_end(s: &str) -> Option<usize> {
     let bytes = s.as_bytes();
     let mut i = 0;
+    let mut in_double_quote = false;
     while i < bytes.len() {
-        // Check for heredoc opener: <<'TAG' or <<TAG
+        // Track double-quoted strings so we don't misinterpret << inside them
+        if bytes[i] == b'"' && (i == 0 || bytes[i - 1] != b'\\') {
+            in_double_quote = !in_double_quote;
+            i += 1;
+            continue;
+        }
+        if in_double_quote {
+            i += 1;
+            continue;
+        }
+        // Check for heredoc opener: <<'TAG' or <<TAG (only outside quoted strings)
         if i + 1 < bytes.len() && bytes[i] == b'<' && bytes[i + 1] == b'<' {
             let mut j = i + 2;
             let quoted = j < bytes.len() && bytes[j] == b'\'';
@@ -743,13 +754,14 @@ pub(crate) fn parse_text_tool_calls_with_tools(
             }
             search_from = content_end + "```".len();
         } else {
-            // Found ```call but no closing ``` — unclosed block
+            // Found ```call but no closing ``` — unclosed block.
+            // Don't break: skip past this marker and continue scanning for valid blocks.
             let preview: String = text[content_start..].chars().take(80).collect();
             errors.push(format!(
                 "TOOL CALL PARSE ERROR: Found ```call block but no closing ```. Content starts with: `{preview}...`\n\
                  Make sure every ```call block has a matching closing ```."
             ));
-            break;
+            search_from = after_marker;
         }
     }
 
@@ -916,7 +928,7 @@ fn split_call_args(s: &str) -> Vec<String> {
                 if body.ends_with('\n') {
                     body.pop();
                 }
-                j + pos + closing.len()
+                j + rest[..pos + closing.len()].chars().count()
             } else if rest.trim_end() == closing_eoi
                 || rest.ends_with(&format!("\n{}", closing_eoi))
             {
@@ -925,15 +937,15 @@ fn split_call_args(s: &str) -> Vec<String> {
                 if let Some(pos) = rest.rfind(&tag_at_end) {
                     let body_part = &rest[..pos];
                     body.push_str(body_part);
-                    j + pos + tag_at_end.len()
+                    j + rest[..pos + tag_at_end.len()].chars().count()
                 } else {
                     body.push_str(&rest);
-                    j + rest.len()
+                    j + rest.chars().count()
                 }
             } else {
                 // no closing tag found; treat rest as body
                 body.push_str(&rest);
-                j + rest.len()
+                j + rest.chars().count()
             };
             // Encode as heredoc marker
             current.push('\x00');
@@ -1137,8 +1149,8 @@ fn vm_build_json_schema(params: Option<&BTreeMap<String, VmValue>>) -> serde_jso
 #[cfg(test)]
 mod tests {
     use super::{
-        build_tool_calling_contract_prompt, normalize_tool_args, parse_text_tool_calls,
-        parse_text_tool_calls_with_tools, split_call_args,
+        build_tool_calling_contract_prompt, find_call_block_end, normalize_tool_args,
+        parse_text_tool_calls, parse_text_tool_calls_with_tools, split_call_args,
     };
     use crate::value::VmValue;
     use serde_json::json;
@@ -1365,5 +1377,87 @@ mod tests {
             content.contains("```python"),
             "should preserve triple backticks in content"
         );
+    }
+
+    #[test]
+    fn parse_text_tool_calls_handles_unicode_inside_heredoc_bodies() {
+        let calls = parse_text_tool_calls(
+            "```call\nedit(action=\"patch\", path=\"notes.txt\", old_string=<<'OLD'\nalpha — beta\nOLD\n, new_string=<<'NEW'\ngamma — delta\nNEW\n)\n```",
+        );
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0]["name"], json!("edit"));
+        assert_eq!(calls[0]["arguments"]["old_string"], json!("alpha — beta"));
+        assert_eq!(calls[0]["arguments"]["new_string"], json!("gamma — delta"));
+    }
+
+    /// Regression: find_call_block_end must not treat << inside double-quoted
+    /// string arguments as a heredoc opener.
+    #[test]
+    fn find_call_block_end_ignores_heredoc_in_quotes() {
+        let block = r#"edit(action="insert", body="<<'EOF'\nsome code\nEOF")
+```"#;
+        let end = find_call_block_end(block);
+        assert!(
+            end.is_some(),
+            "find_call_block_end should find closing ``` even when << appears inside quotes"
+        );
+    }
+
+    /// Regression: real eval transcript where model emitted 14 ```call blocks
+    /// with heredoc-like syntax inside quoted string arguments.
+    #[test]
+    fn parse_text_tool_calls_real_transcript_14_blocks() {
+        let text = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../test_fixtures/execute_response_raw.txt"
+        ));
+        let result = parse_text_tool_calls_with_tools(text, None);
+        assert_eq!(
+            result.calls.len(),
+            14,
+            "expected 14 parsed calls, got {} calls and {} errors: {:?}",
+            result.calls.len(),
+            result.errors.len(),
+            result.errors
+        );
+        assert!(
+            result.errors.is_empty(),
+            "expected no parse errors, got: {:?}",
+            result.errors
+        );
+        // First call should be scaffold
+        assert_eq!(result.calls[0]["name"], json!("scaffold"));
+        // Last call should be edit (add_import "time")
+        assert_eq!(result.calls[13]["name"], json!("edit"));
+        assert_eq!(
+            result.calls[13]["arguments"]["import_statement"],
+            json!("import \"time\"")
+        );
+    }
+
+    /// Regression: an unclosed ```call block must not kill parsing of subsequent valid blocks.
+    #[test]
+    fn parse_text_tool_calls_continues_past_unclosed_block() {
+        let text = concat!(
+            "```call\n",
+            "broken(arg=\"no closing\n",
+            "Some random text\n",
+            "```call\n",
+            "valid_tool(x=\"hello\")\n",
+            "```\n",
+        );
+        let result = parse_text_tool_calls_with_tools(text, None);
+        assert_eq!(
+            result.calls.len(),
+            1,
+            "should parse the valid block after the unclosed one"
+        );
+        assert_eq!(result.calls[0]["name"], json!("valid_tool"));
+        assert_eq!(
+            result.errors.len(),
+            1,
+            "should report exactly one error for the unclosed block"
+        );
+        assert!(result.errors[0].contains("no closing"));
     }
 }

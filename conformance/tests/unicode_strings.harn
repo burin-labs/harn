@@ -1,0 +1,26 @@
+// Unicode string operations: slicing, contains, split, replace, interpolation
+pipeline default(task) {
+  let emoji = "Hello 🌍🔥 World"
+  // len counts characters, not bytes
+  log(len(emoji))
+  // contains with multi-byte
+  log(emoji.contains("🌍"))
+  log(emoji.contains("🎉"))
+  // replace multi-byte
+  log(emoji.replace("🔥", "💧"))
+  // split around multi-byte
+  log("a🔥b🔥c".split("🔥"))
+  // starts_with / ends_with
+  log("café".starts_with("caf"))
+  log("café".ends_with("fé"))
+  // interpolation with multi-byte
+  let name = "André"
+  log("Hello ${name}!")
+  // CJK characters
+  let cjk = "中文测试"
+  log(len(cjk))
+  log(cjk.contains("文"))
+  // Accented characters
+  let accented = "naïve résumé"
+  log(accented.replace("é", "e"))
+}

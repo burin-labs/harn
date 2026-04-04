@@ -79,8 +79,9 @@ let response = llm_call(
 println(response)
 ```
 
-No imports, no SDK initialization, no response parsing. Harn supports
-Anthropic, OpenAI, Ollama, and OpenRouter out of the box.
+No imports, no SDK initialization, no response parsing. Harn ships with
+built-in configs for Anthropic, OpenAI, OpenRouter, Ollama, HuggingFace,
+and local OpenAI-compatible servers.
 
 ## The REPL
 

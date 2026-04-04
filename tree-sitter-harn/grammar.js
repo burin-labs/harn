@@ -19,7 +19,6 @@ module.exports = grammar({
     [$.block],
     [$.closure],
     [$.select_block],
-    [$.parallel_expression],
     [$.parallel_map_expression],
     [$.parallel_settle_expression],
     [$.struct_declaration],

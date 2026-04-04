@@ -236,9 +236,13 @@ struct CompareQuery {
 
 pub(crate) async fn run_portal(dir: &str, host: &str, port: u16, open_browser: bool) {
     let run_dir = PathBuf::from(dir);
-    let addr: SocketAddr = format!("{host}:{port}")
-        .parse()
-        .unwrap_or_else(|_| panic!("invalid portal bind address: {host}:{port}"));
+    let addr: SocketAddr = match format!("{host}:{port}").parse() {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("error: invalid portal bind address {host}:{port}: {e}");
+            std::process::exit(1);
+        }
+    };
 
     let state = Arc::new(PortalState {
         run_dir: run_dir.clone(),
@@ -253,12 +257,17 @@ pub(crate) async fn run_portal(dir: &str, host: &str, port: u16, open_browser: b
         let _ = webbrowser::open(&url);
     }
 
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
-        .unwrap_or_else(|error| panic!("failed to bind portal listener: {error}"));
-    axum::serve(listener, app)
-        .await
-        .unwrap_or_else(|error| panic!("portal server failed: {error}"));
+    let listener = match tokio::net::TcpListener::bind(addr).await {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("error: failed to bind portal listener on {addr}: {e}");
+            std::process::exit(1);
+        }
+    };
+    if let Err(e) = axum::serve(listener, app).await {
+        eprintln!("error: portal server failed: {e}");
+        std::process::exit(1);
+    }
 }
 
 fn build_router(state: Arc<PortalState>) -> Router {
