@@ -52,7 +52,7 @@ way to structure multi-stage agent workflows:
 ```harn
 pipeline analyze(task) {
   let context = read_file("README.md")
-  let plan = llm_call(task + "\n\nContext:\n" + context, "Break this into steps.")
+  let plan = llm_call("${task}\n\nContext:\n${context}", "Break this into steps.")
   let steps = json_parse(plan)
 
   let results = parallel_map(steps) { step ->
@@ -71,7 +71,7 @@ pipeline), making Harn work well for scripts and quick experiments.
 Harn has built-in support for the
 [Model Context Protocol](https://modelcontextprotocol.io). Connect to any
 MCP server, or expose your Harn pipeline as one. ACP integration lets
-editors use Harn as a coding agent backend.
+editors use Harn as an agent backend.
 
 That includes remote HTTP MCP servers with standalone OAuth handled by the
 CLI, so cloud MCP integrations can be treated as normal runtime dependencies
@@ -177,7 +177,7 @@ pipeline default(task) {
   let results = parallel_map(urls) { url ->
     retry 3 {
       let page = http_get(url)
-      llm_call("Summarize:\n" + page, "Be concise.")
+      llm_call("Summarize:\n${page}", "Be concise.")
     }
   }
 
@@ -193,6 +193,6 @@ all that remains.
 
 ## Getting started
 
-See the [Getting Started](getting-started.md) guide to install Harn and
+See the [Getting started](getting-started.md) guide to install Harn and
 run your first program, or jump to the [cookbook](cookbook.md) for
 practical patterns.

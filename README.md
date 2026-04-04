@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/burin-labs/harn/actions/workflows/ci.yml/badge.svg)](https://github.com/burin-labs/harn/actions/workflows/ci.yml)
 
-Harn is a programming language and runtime for orchestrating coding agents.
+Harn is a programming language and runtime for orchestrating AI agents.
 It is designed to be the orchestration boundary between product code and
 provider/runtime code: products declare workflows, policies, capabilities,
 and UI hooks, while Harn owns transcripts, context assembly, retries,

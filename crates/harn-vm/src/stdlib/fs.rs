@@ -1,16 +1,41 @@
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::rc::Rc;
+use std::{cell::RefCell, thread_local};
 
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
+thread_local! {
+    static FILE_TEXT_CACHE: RefCell<BTreeMap<PathBuf, Rc<str>>> = const { RefCell::new(BTreeMap::new()) };
+}
+
+pub(crate) fn reset_fs_state() {
+    FILE_TEXT_CACHE.with(|cache| cache.borrow_mut().clear());
+}
+
+fn resolve_fs_path(path: &str) -> PathBuf {
+    crate::stdlib::process::resolve_source_relative_path(path)
+}
+
 pub(crate) fn register_fs_builtins(vm: &mut Vm) {
     vm.register_builtin("read_file", |args, _out| {
         let path = args.first().map(|a| a.display()).unwrap_or_default();
-        match std::fs::read_to_string(&path) {
-            Ok(content) => Ok(VmValue::String(Rc::from(content))),
+        let resolved = resolve_fs_path(&path);
+        if let Some(cached) = FILE_TEXT_CACHE.with(|cache| cache.borrow().get(&resolved).cloned()) {
+            return Ok(VmValue::String(cached));
+        }
+        match std::fs::read_to_string(&resolved) {
+            Ok(content) => {
+                let shared: Rc<str> = Rc::from(content);
+                FILE_TEXT_CACHE.with(|cache| {
+                    cache.borrow_mut().insert(resolved.clone(), shared.clone());
+                });
+                Ok(VmValue::String(shared))
+            }
             Err(e) => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                "Failed to read file {path}: {e}"
+                "Failed to read file {}: {e}",
+                resolved.display()
             ))))),
         }
     });
@@ -19,36 +44,47 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
         if args.len() >= 2 {
             let path = args[0].display();
             let content = args[1].display();
-            std::fs::write(&path, &content).map_err(|e| {
+            let resolved = resolve_fs_path(&path);
+            std::fs::write(&resolved, &content).map_err(|e| {
                 VmError::Thrown(VmValue::String(Rc::from(format!(
-                    "Failed to write file {path}: {e}"
+                    "Failed to write file {}: {e}",
+                    resolved.display()
                 ))))
             })?;
+            FILE_TEXT_CACHE.with(|cache| {
+                cache.borrow_mut().insert(resolved, Rc::from(content));
+            });
         }
         Ok(VmValue::Nil)
     });
 
     vm.register_builtin("file_exists", |args, _out| {
         let path = args.first().map(|a| a.display()).unwrap_or_default();
-        Ok(VmValue::Bool(std::path::Path::new(&path).exists()))
+        let resolved = resolve_fs_path(&path);
+        Ok(VmValue::Bool(resolved.exists()))
     });
 
     vm.register_builtin("delete_file", |args, _out| {
         let path = args.first().map(|a| a.display()).unwrap_or_default();
-        let p = std::path::Path::new(&path);
-        if p.is_dir() {
-            std::fs::remove_dir_all(&path).map_err(|e| {
+        let resolved = resolve_fs_path(&path);
+        if resolved.is_dir() {
+            std::fs::remove_dir_all(&resolved).map_err(|e| {
                 VmError::Thrown(VmValue::String(Rc::from(format!(
-                    "Failed to delete directory {path}: {e}"
+                    "Failed to delete directory {}: {e}",
+                    resolved.display()
                 ))))
             })?;
         } else {
-            std::fs::remove_file(&path).map_err(|e| {
+            std::fs::remove_file(&resolved).map_err(|e| {
                 VmError::Thrown(VmValue::String(Rc::from(format!(
-                    "Failed to delete file {path}: {e}"
+                    "Failed to delete file {}: {e}",
+                    resolved.display()
                 ))))
             })?;
         }
+        FILE_TEXT_CACHE.with(|cache| {
+            cache.borrow_mut().remove(&resolved);
+        });
         Ok(VmValue::Nil)
     });
 
@@ -57,20 +93,26 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
         if args.len() >= 2 {
             let path = args[0].display();
             let content = args[1].display();
+            let resolved = resolve_fs_path(&path);
             let mut file = std::fs::OpenOptions::new()
                 .append(true)
                 .create(true)
-                .open(&path)
+                .open(&resolved)
                 .map_err(|e| {
                     VmError::Thrown(VmValue::String(Rc::from(format!(
-                        "Failed to open file {path}: {e}"
+                        "Failed to open file {}: {e}",
+                        resolved.display()
                     ))))
                 })?;
             file.write_all(content.as_bytes()).map_err(|e| {
                 VmError::Thrown(VmValue::String(Rc::from(format!(
-                    "Failed to append to file {path}: {e}"
+                    "Failed to append to file {}: {e}",
+                    resolved.display()
                 ))))
             })?;
+            FILE_TEXT_CACHE.with(|cache| {
+                cache.borrow_mut().remove(&resolved);
+            });
         }
         Ok(VmValue::Nil)
     });
@@ -80,9 +122,11 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
             .first()
             .map(|a| a.display())
             .unwrap_or_else(|| ".".to_string());
-        let entries = std::fs::read_dir(&path).map_err(|e| {
+        let resolved = resolve_fs_path(&path);
+        let entries = std::fs::read_dir(&resolved).map_err(|e| {
             VmError::Thrown(VmValue::String(Rc::from(format!(
-                "Failed to list directory {path}: {e}"
+                "Failed to list directory {}: {e}",
+                resolved.display()
             ))))
         })?;
         let mut result = Vec::new();
@@ -98,9 +142,11 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
 
     vm.register_builtin("mkdir", |args, _out| {
         let path = args.first().map(|a| a.display()).unwrap_or_default();
-        std::fs::create_dir_all(&path).map_err(|e| {
+        let resolved = resolve_fs_path(&path);
+        std::fs::create_dir_all(&resolved).map_err(|e| {
             VmError::Thrown(VmValue::String(Rc::from(format!(
-                "Failed to create directory {path}: {e}"
+                "Failed to create directory {}: {e}",
+                resolved.display()
             ))))
         })?;
         Ok(VmValue::Nil)
@@ -120,11 +166,18 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
         if args.len() >= 2 {
             let src = args[0].display();
             let dst = args[1].display();
-            std::fs::copy(&src, &dst).map_err(|e| {
+            let resolved_src = resolve_fs_path(&src);
+            let resolved_dst = resolve_fs_path(&dst);
+            std::fs::copy(&resolved_src, &resolved_dst).map_err(|e| {
                 VmError::Thrown(VmValue::String(Rc::from(format!(
-                    "Failed to copy {src} to {dst}: {e}"
+                    "Failed to copy {} to {}: {e}",
+                    resolved_src.display(),
+                    resolved_dst.display()
                 ))))
             })?;
+            FILE_TEXT_CACHE.with(|cache| {
+                cache.borrow_mut().remove(&resolved_dst);
+            });
         }
         Ok(VmValue::Nil)
     });
@@ -137,9 +190,11 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
 
     vm.register_builtin("stat", |args, _out| {
         let path = args.first().map(|a| a.display()).unwrap_or_default();
-        let metadata = std::fs::metadata(&path).map_err(|e| {
+        let resolved = resolve_fs_path(&path);
+        let metadata = std::fs::metadata(&resolved).map_err(|e| {
             VmError::Thrown(VmValue::String(Rc::from(format!(
-                "Failed to stat {path}: {e}"
+                "Failed to stat {}: {e}",
+                resolved.display()
             ))))
         })?;
         let mut info = BTreeMap::new();

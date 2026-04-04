@@ -1,4 +1,4 @@
-# CLI Reference
+# CLI reference
 
 All commands available in the `harn` CLI.
 

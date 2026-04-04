@@ -1,6 +1,6 @@
-# Harn Cookbook
+# Cookbook
 
-Practical patterns for building AI agents and pipelines in Harn. Each
+Practical patterns for building agents and pipelines in Harn. Each
 recipe is self-contained with a short explanation and working code.
 
 ## 1. Basic LLM call
@@ -50,7 +50,7 @@ pipeline default(task) {
     parameters: {query: {type: "string", description: "Query to search"}},
     returns: {type: "string"},
     handler: { query ->
-      let result = shell("grep -r '" + query + "' src/ || true")
+      let result = shell("grep -r '${query}' src/ || true")
       return result.stdout
     }
   })
@@ -95,7 +95,7 @@ pipeline default(task) {
   let reviews = parallel_map(files) { file ->
     let content = read_file(file)
     llm_call(
-      "Review this code for bugs and suggest fixes:\n\n" + content,
+      "Review this code for bugs and suggest fixes:\n\n${content}",
       "You are a senior code reviewer. Be specific."
     )
   }
@@ -224,12 +224,12 @@ fn gather_context(task) {
 
 **lib/review.harn** -- a reusable review pipeline:
 
-```harn
+```harn,ignore
 import "lib/context"
 
 pipeline review(task) {
   let ctx = gather_context(task)
-  let prompt = "Review this project.\n\nREADME:\n" + ctx.readme + "\n\nTask: " + ctx.task
+  let prompt = "Review this project.\n\nREADME:\n${ctx.readme}\n\nTask: ${ctx.task}"
   let result = llm_call(prompt, "You are a code reviewer.")
   println(result)
 }
@@ -237,11 +237,11 @@ pipeline review(task) {
 
 **main.harn** -- extend and customize:
 
-```harn
+```harn,ignore
 import "lib/review"
 
 pipeline default(task) extends review {
-  override fn setup() {
+  override setup() {
     println("Starting custom review pipeline")
   }
 }
@@ -280,13 +280,17 @@ pipeline default(task) {
     )
     println("Summary: ${result.summary}")
     println("Score: ${result.score}")
-  } catch (e: AgentError) {
-    match e.variant {
-      "LlmFailure" -> { println("LLM failed after retries: ${e.fields[0]}") }
-      "ParseFailure" -> { println("Could not parse LLM output: ${e.fields[0]}") }
-    }
   } catch (e) {
-    println("Unexpected error: ${e}")
+    // Harn supports a single catch per try; branch on the error type here.
+    if type_of(e) == "enum" {
+      match e.variant {
+        "LlmFailure" -> { println("LLM failed after retries: ${e.fields[0]}") }
+        "ParseFailure" -> { println("Could not parse LLM output: ${e.fields[0]}") }
+        "Timeout" -> { println("Timed out after ${e.fields[0]}s") }
+      }
+    } else {
+      println("Unexpected error: ${e}")
+    }
   }
 }
 ```
@@ -319,12 +323,12 @@ pipeline default(task) {
       if item == "DONE" {
         running = false
       } else {
-        let result = "processed: " + item
+        let result = "processed: ${item}"
         send(results_ch, result)
         processed = processed + 1
       }
     }
-    send(results_ch, "COMPLETE:" + to_string(processed))
+    send(results_ch, "COMPLETE:${processed}")
   }
 
   await(producer)
@@ -375,9 +379,9 @@ pipeline default(task) {
   }
 
   // Format context for the LLM
-  var prompt = "Task: " + task + "\n\n"
+  var prompt = "Task: ${task}\n\n"
   for entry in context.files {
-    prompt = prompt + "=== " + entry.key + " ===\n" + entry.value + "\n\n"
+    prompt += "=== ${entry.key} ===\n${entry.value}\n\n"
   }
 
   let result = llm_call(prompt, "You are a helpful assistant. Use the provided files as context.")
@@ -405,12 +409,12 @@ Respond with ONLY a JSON array of objects, each with "step" (string) and
 
       // Validate structure
       guard type_of(parsed) == "list" else {
-        throw "Expected a JSON array, got: " + type_of(parsed)
+        throw "Expected a JSON array, got: ${type_of(parsed)}"
       }
 
       for item in parsed {
         guard item.has("step") && item.has("priority") else {
-          throw "Missing required fields in: " + json_stringify(item)
+          throw "Missing required fields in: ${json_stringify(item)}"
         }
       }
 
@@ -478,7 +482,7 @@ Add type annotations to function parameters for automatic runtime
 validation. When a caller passes a value of the wrong type, the VM
 throws a `TypeError` before the function body executes.
 
-```harn
+```harn,ignore
 pipeline default(task) {
   fn summarize(text: string, max_words: int) -> string {
     let words = text.split(" ")
@@ -486,12 +490,13 @@ pipeline default(task) {
       return text
     }
     let truncated = words.slice(0, max_words)
-    return join(truncated, " ") + "..."
+    return "${join(truncated, " ")}..."
   }
 
   println(summarize("The quick brown fox jumps over the lazy dog", 5))
 
-  // Catch type errors gracefully
+  // Catch type errors gracefully. `harn check` rejects this call statically
+  // before the catch can run — the example is shown for illustration only.
   try {
     summarize(42, "not a number")
   } catch (e) {
@@ -567,7 +572,7 @@ pipeline default(task) {
 
     let result = retry 3 {
       llm_call(
-        "Plan how to: " + item,
+        "Plan how to: ${item}",
         "You are a senior engineer. Output a numbered list of steps."
       )
     }

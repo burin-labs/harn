@@ -1,20 +1,32 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use axum::extract::{Query, State};
+use axum::extract::{Json as ExtractJson, Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
-use serde::Serialize;
+use include_dir::{include_dir, Dir};
+use serde::{Deserialize, Serialize};
+use tokio::process::Command;
+use tokio::sync::Mutex;
+
+use harn_lexer::KEYWORDS;
+use harn_vm::llm_config;
+use harn_vm::stdlib::stdlib_builtin_names;
+
+static PORTAL_DIST: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/portal-dist");
 
 #[derive(Clone)]
 struct PortalState {
     run_dir: PathBuf,
+    workspace_root: PathBuf,
+    launch_program: PathBuf,
+    launch_jobs: Arc<Mutex<HashMap<String, PortalLaunchJob>>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -32,6 +44,8 @@ struct PortalRunSummary {
     id: String,
     workflow_name: String,
     status: String,
+    last_stage_node_id: Option<String>,
+    failure_summary: Option<String>,
     started_at: String,
     finished_at: Option<String>,
     duration_ms: Option<u64>,
@@ -55,14 +69,39 @@ struct PortalInsight {
 struct PortalStage {
     id: String,
     node_id: String,
+    kind: String,
     status: String,
     outcome: String,
+    branch: Option<String>,
     started_at: String,
     finished_at: Option<String>,
     duration_ms: Option<u64>,
     artifact_count: usize,
     attempt_count: usize,
     verification_summary: Option<String>,
+    debug: PortalStageDebug,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct PortalStageDebug {
+    call_count: i64,
+    input_tokens: i64,
+    output_tokens: i64,
+    consumed_artifact_ids: Vec<String>,
+    produced_artifact_ids: Vec<String>,
+    selected_artifact_ids: Vec<String>,
+    worker_id: Option<String>,
+    error: Option<String>,
+    model_policy: Option<String>,
+    transcript_policy: Option<String>,
+    context_policy: Option<String>,
+    retry_policy: Option<String>,
+    capability_policy: Option<String>,
+    input_contract: Option<String>,
+    output_contract: Option<String>,
+    prompt: Option<String>,
+    system_prompt: Option<String>,
+    rendered_context: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -130,6 +169,39 @@ struct PortalExecutionSummary {
 }
 
 #[derive(Debug, Clone, Serialize)]
+struct PortalPolicySummary {
+    tools: Vec<String>,
+    capabilities: Vec<String>,
+    workspace_roots: Vec<String>,
+    side_effect_level: Option<String>,
+    recursion_limit: Option<usize>,
+    tool_arg_constraints: Vec<String>,
+    validation_valid: Option<bool>,
+    validation_errors: Vec<String>,
+    validation_warnings: Vec<String>,
+    reachable_nodes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct PortalReplayAssertion {
+    node_id: String,
+    expected_status: String,
+    expected_outcome: String,
+    expected_branch: Option<String>,
+    required_artifact_kinds: Vec<String>,
+    visible_text_contains: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct PortalReplaySummary {
+    fixture_id: String,
+    source_run_id: String,
+    created_at: String,
+    expected_status: String,
+    stage_assertions: Vec<PortalReplayAssertion>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 struct PortalTranscriptMessage {
     role: String,
     content: String,
@@ -184,6 +256,8 @@ struct PortalRunDetail {
     workflow_id: String,
     parent_run_id: Option<String>,
     root_run_id: Option<String>,
+    policy_summary: PortalPolicySummary,
+    replay_summary: Option<PortalReplaySummary>,
     execution: Option<harn_vm::orchestration::RunExecutionRecord>,
     insights: Vec<PortalInsight>,
     stages: Vec<PortalStage>,
@@ -196,6 +270,55 @@ struct PortalRunDetail {
     transcript_steps: Vec<PortalTranscriptStep>,
     story: Vec<PortalStorySection>,
     child_runs: Vec<PortalChildRun>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct PortalLaunchTarget {
+    path: String,
+    group: String,
+}
+
+#[derive(Debug, Clone)]
+struct MaterializedLaunchTarget {
+    mode: String,
+    target_label: String,
+    launch_file: PathBuf,
+    workspace_dir: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct PortalLaunchJob {
+    id: String,
+    mode: String,
+    target_label: String,
+    status: String,
+    started_at: String,
+    finished_at: Option<String>,
+    exit_code: Option<i32>,
+    logs: String,
+    discovered_run_paths: Vec<String>,
+    workspace_dir: Option<String>,
+    transcript_path: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct PortalLaunchTargetList {
+    targets: Vec<PortalLaunchTarget>,
+}
+
+#[derive(Debug, Serialize)]
+struct PortalLaunchJobList {
+    jobs: Vec<PortalLaunchJob>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PortalLaunchRequest {
+    file_path: Option<String>,
+    source: Option<String>,
+    task: Option<String>,
+    provider: Option<String>,
+    model: Option<String>,
+    env: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Serialize, serde::Deserialize)]
@@ -215,12 +338,59 @@ struct PortalRunDiff {
 #[derive(Debug, Serialize)]
 struct PortalListResponse {
     stats: PortalStats,
+    filtered_count: usize,
+    pagination: PortalPagination,
     runs: Vec<PortalRunSummary>,
+}
+
+#[derive(Debug, Serialize)]
+struct PortalPagination {
+    page: usize,
+    page_size: usize,
+    total_pages: usize,
+    total_runs: usize,
+    has_previous: bool,
+    has_next: bool,
 }
 
 #[derive(Debug, Serialize)]
 struct ErrorResponse {
     error: String,
+}
+
+#[derive(Debug, Serialize)]
+struct PortalMeta {
+    workspace_root: String,
+    run_dir: String,
+}
+
+#[derive(Debug, Serialize)]
+struct PortalHighlightKeywords {
+    keyword: Vec<String>,
+    literal: Vec<String>,
+    built_in: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct PortalLlmProviderOption {
+    name: String,
+    base_url: String,
+    base_url_env: Option<String>,
+    auth_style: String,
+    auth_envs: Vec<String>,
+    auth_configured: bool,
+    viable: bool,
+    local: bool,
+    models: Vec<String>,
+    aliases: Vec<String>,
+    default_model: String,
+}
+
+#[derive(Debug, Serialize)]
+struct PortalLlmOptions {
+    preferred_provider: Option<String>,
+    preferred_model: Option<String>,
+    providers: Vec<PortalLlmProviderOption>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -234,8 +404,20 @@ struct CompareQuery {
     right: String,
 }
 
+#[derive(Debug, serde::Deserialize)]
+struct ListRunsQuery {
+    q: Option<String>,
+    workflow: Option<String>,
+    status: Option<String>,
+    sort: Option<String>,
+    page: Option<usize>,
+    page_size: Option<usize>,
+}
+
 pub(crate) async fn run_portal(dir: &str, host: &str, port: u16, open_browser: bool) {
     let run_dir = PathBuf::from(dir);
+    let workspace_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let launch_program = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("harn"));
     let addr: SocketAddr = match format!("{host}:{port}").parse() {
         Ok(a) => a,
         Err(e) => {
@@ -246,6 +428,9 @@ pub(crate) async fn run_portal(dir: &str, host: &str, port: u16, open_browser: b
 
     let state = Arc::new(PortalState {
         run_dir: run_dir.clone(),
+        workspace_root,
+        launch_program,
+        launch_jobs: Arc::new(Mutex::new(HashMap::new())),
     });
     let app = build_router(state);
     let url = format!("http://{addr}");
@@ -273,48 +458,102 @@ pub(crate) async fn run_portal(dir: &str, host: &str, port: u16, open_browser: b
 fn build_router(state: Arc<PortalState>) -> Router {
     Router::new()
         .route("/", get(index))
-        .route("/styles.css", get(styles))
-        .route("/app.js", get(app_js))
+        .route("/assets/{*path}", get(asset))
+        .route("/api/meta", get(portal_meta_handler))
+        .route("/api/highlight/keywords", get(highlight_keywords_handler))
+        .route("/api/llm/options", get(llm_options_handler))
         .route("/api/runs", get(list_runs_handler))
         .route("/api/run", get(run_detail_handler))
         .route("/api/compare", get(compare_runs_handler))
+        .route("/api/launch/targets", get(list_launch_targets_handler))
+        .route("/api/launch/jobs", get(list_launch_jobs_handler))
+        .route("/api/launch", post(launch_run_handler))
+        .route("/{*path}", get(index))
         .with_state(state)
 }
 
-async fn index() -> Html<&'static str> {
-    Html(include_str!("../../portal/index.html"))
+async fn index() -> Response {
+    match PORTAL_DIST.get_file("index.html") {
+        Some(file) => Html(String::from_utf8_lossy(file.contents()).into_owned()).into_response(),
+        None => internal_error("portal frontend is not built; run npm install && npm run build in crates/harn-cli/portal")
+            .into_response(),
+    }
 }
 
-async fn styles() -> impl IntoResponse {
-    asset_response(
-        include_str!("../../portal/styles.css"),
-        "text/css; charset=utf-8",
-    )
-}
-
-async fn app_js() -> impl IntoResponse {
-    asset_response(
-        include_str!("../../portal/app.js"),
-        "application/javascript; charset=utf-8",
-    )
+async fn asset(axum::extract::Path(path): axum::extract::Path<String>) -> Response {
+    let asset_path = format!("assets/{path}");
+    match PORTAL_DIST.get_file(&asset_path) {
+        Some(file) => asset_response(file.contents(), content_type_for_path(&asset_path)),
+        None => not_found_error(format!("asset not found: {path}")).into_response(),
+    }
 }
 
 async fn list_runs_handler(
     State(state): State<Arc<PortalState>>,
+    Query(query): Query<ListRunsQuery>,
 ) -> Result<Json<PortalListResponse>, (StatusCode, Json<ErrorResponse>)> {
     let runs = scan_runs(&state.run_dir).map_err(internal_error)?;
     let stats = summarize_runs(&runs);
-    Ok(Json(PortalListResponse { stats, runs }))
+    let page_size = query.page_size.unwrap_or(25).clamp(1, 200);
+    let page = query.page.unwrap_or(1).max(1);
+    let filtered = filter_and_sort_runs(runs, &query);
+    let filtered_count = filtered.len();
+    let total_pages = usize::max(1, filtered_count.div_ceil(page_size));
+    let clamped_page = page.min(total_pages);
+    let start = (clamped_page - 1) * page_size;
+    let end = usize::min(start + page_size, filtered_count);
+    let page_runs = filtered
+        .into_iter()
+        .skip(start)
+        .take(end.saturating_sub(start))
+        .collect::<Vec<_>>();
+    Ok(Json(PortalListResponse {
+        stats,
+        filtered_count,
+        pagination: PortalPagination {
+            page: clamped_page,
+            page_size,
+            total_pages,
+            total_runs: filtered_count,
+            has_previous: clamped_page > 1,
+            has_next: clamped_page < total_pages,
+        },
+        runs: page_runs,
+    }))
+}
+
+async fn portal_meta_handler(
+    State(state): State<Arc<PortalState>>,
+) -> Result<Json<PortalMeta>, (StatusCode, Json<ErrorResponse>)> {
+    Ok(Json(PortalMeta {
+        workspace_root: state.workspace_root.display().to_string(),
+        run_dir: state.run_dir.display().to_string(),
+    }))
+}
+
+async fn highlight_keywords_handler(
+) -> Result<Json<PortalHighlightKeywords>, (StatusCode, Json<ErrorResponse>)> {
+    Ok(Json(build_highlight_keywords()))
+}
+
+async fn llm_options_handler() -> Result<Json<PortalLlmOptions>, (StatusCode, Json<ErrorResponse>)>
+{
+    let options = build_llm_options().await;
+    Ok(Json(options))
 }
 
 async fn run_detail_handler(
     State(state): State<Arc<PortalState>>,
     Query(query): Query<RunQuery>,
 ) -> Result<Json<PortalRunDetail>, (StatusCode, Json<ErrorResponse>)> {
-    let path = safe_join(&state.run_dir, &query.path)
-        .ok_or_else(|| internal_error("requested run path escapes the configured run directory"))?;
-    let run = harn_vm::orchestration::load_run_record(&path)
-        .map_err(|error| internal_error(format!("failed to load run record: {error}")))?;
+    let path = resolve_run_path(&state.run_dir, &query.path)?;
+    let run = harn_vm::orchestration::load_run_record(&path).map_err(|error| {
+        if path.exists() {
+            internal_error(format!("failed to load run record: {error}"))
+        } else {
+            not_found_error(format!("run record not found: {}", query.path))
+        }
+    })?;
     Ok(Json(build_run_detail(&state.run_dir, &query.path, &run)))
 }
 
@@ -322,14 +561,22 @@ async fn compare_runs_handler(
     State(state): State<Arc<PortalState>>,
     Query(query): Query<CompareQuery>,
 ) -> Result<Json<PortalRunDiff>, (StatusCode, Json<ErrorResponse>)> {
-    let left_path = safe_join(&state.run_dir, &query.left)
-        .ok_or_else(|| internal_error("left run path escapes the configured run directory"))?;
-    let right_path = safe_join(&state.run_dir, &query.right)
-        .ok_or_else(|| internal_error("right run path escapes the configured run directory"))?;
-    let left = harn_vm::orchestration::load_run_record(&left_path)
-        .map_err(|error| internal_error(format!("failed to load left run: {error}")))?;
-    let right = harn_vm::orchestration::load_run_record(&right_path)
-        .map_err(|error| internal_error(format!("failed to load right run: {error}")))?;
+    let left_path = resolve_run_path(&state.run_dir, &query.left)?;
+    let right_path = resolve_run_path(&state.run_dir, &query.right)?;
+    let left = harn_vm::orchestration::load_run_record(&left_path).map_err(|error| {
+        if left_path.exists() {
+            internal_error(format!("failed to load left run: {error}"))
+        } else {
+            not_found_error(format!("left run not found: {}", query.left))
+        }
+    })?;
+    let right = harn_vm::orchestration::load_run_record(&right_path).map_err(|error| {
+        if right_path.exists() {
+            internal_error(format!("failed to load right run: {error}"))
+        } else {
+            not_found_error(format!("right run not found: {}", query.right))
+        }
+    })?;
     let diff = harn_vm::orchestration::diff_run_records(&left, &right);
     Ok(Json(PortalRunDiff {
         left_path: query.left,
@@ -345,13 +592,150 @@ async fn compare_runs_handler(
     }))
 }
 
-fn asset_response(body: &'static str, content_type: &'static str) -> Response {
+async fn list_launch_targets_handler(
+    State(state): State<Arc<PortalState>>,
+) -> Result<Json<PortalLaunchTargetList>, (StatusCode, Json<ErrorResponse>)> {
+    let targets = scan_launch_targets(&state.workspace_root).map_err(internal_error)?;
+    Ok(Json(PortalLaunchTargetList { targets }))
+}
+
+async fn list_launch_jobs_handler(
+    State(state): State<Arc<PortalState>>,
+) -> Result<Json<PortalLaunchJobList>, (StatusCode, Json<ErrorResponse>)> {
+    let jobs = state
+        .launch_jobs
+        .lock()
+        .await
+        .values()
+        .cloned()
+        .collect::<Vec<_>>();
+    Ok(Json(PortalLaunchJobList { jobs }))
+}
+
+async fn launch_run_handler(
+    State(state): State<Arc<PortalState>>,
+    ExtractJson(request): ExtractJson<PortalLaunchRequest>,
+) -> Result<Json<PortalLaunchJob>, (StatusCode, Json<ErrorResponse>)> {
+    let job = create_launch_job(&state, request).await?;
+    Ok(Json(job))
+}
+
+async fn create_launch_job(
+    state: &Arc<PortalState>,
+    request: PortalLaunchRequest,
+) -> Result<PortalLaunchJob, (StatusCode, Json<ErrorResponse>)> {
+    validate_launch_request(&request)?;
+
+    let job_id = portal_timestamp_id("job");
+    let started_at = portal_timestamp_id("started");
+    let before_paths = known_run_paths(&state.run_dir).map_err(internal_error)?;
+    let launch_env = validated_env_overrides(request.env.as_ref())?;
+    let materialized =
+        materialize_launch_target(&state.run_dir, &state.workspace_root, &job_id, request)
+            .map_err(internal_error)?;
+    let transcript_path = materialized.workspace_dir.as_ref().map(|dir| {
+        dir.join("run-llm")
+            .join("llm_transcript.jsonl")
+            .display()
+            .to_string()
+    });
+
+    let job = PortalLaunchJob {
+        id: job_id.clone(),
+        mode: materialized.mode.clone(),
+        target_label: materialized.target_label.clone(),
+        status: "running".to_string(),
+        started_at,
+        finished_at: None,
+        exit_code: None,
+        logs: String::new(),
+        discovered_run_paths: Vec::new(),
+        workspace_dir: materialized
+            .workspace_dir
+            .as_ref()
+            .map(|path| path.display().to_string()),
+        transcript_path,
+    };
+    state
+        .launch_jobs
+        .lock()
+        .await
+        .insert(job_id.clone(), job.clone());
+
+    let jobs = state.launch_jobs.clone();
+    let launch_program = state.launch_program.clone();
+    let run_dir = state.run_dir.clone();
+    let workspace_root = state.workspace_root.clone();
+    tokio::spawn(async move {
+        let output = Command::new(&launch_program)
+            .arg("run")
+            .arg(&materialized.launch_file)
+            .current_dir(&workspace_root)
+            .envs(build_launch_env(
+                materialized.workspace_dir.as_deref(),
+                &launch_env,
+            ))
+            .output()
+            .await;
+
+        let mut jobs = jobs.lock().await;
+        if let Some(job) = jobs.get_mut(&job_id) {
+            match output {
+                Ok(output) => {
+                    let mut logs = String::new();
+                    logs.push_str(&String::from_utf8_lossy(&output.stdout));
+                    if !output.stderr.is_empty() {
+                        if !logs.is_empty() {
+                            logs.push('\n');
+                        }
+                        logs.push_str(&String::from_utf8_lossy(&output.stderr));
+                    }
+                    job.logs = logs;
+                    job.exit_code = output.status.code();
+                    job.status = if output.status.success() {
+                        "completed".to_string()
+                    } else {
+                        "failed".to_string()
+                    };
+                    job.finished_at = Some(portal_timestamp_id("finished"));
+                    job.discovered_run_paths =
+                        discovered_run_paths(&run_dir, &before_paths).unwrap_or_default();
+                }
+                Err(error) => {
+                    job.status = "failed".to_string();
+                    job.finished_at = Some(portal_timestamp_id("finished"));
+                    job.logs = format!("failed to start harn run: {error}");
+                }
+            }
+        }
+    });
+
+    Ok(job)
+}
+
+fn asset_response(body: &'static [u8], content_type: &'static str) -> Response {
     let mut headers = HeaderMap::new();
     headers.insert(
         header::CONTENT_TYPE,
         content_type.parse().expect("content type"),
     );
     (headers, body).into_response()
+}
+
+fn content_type_for_path(path: &str) -> &'static str {
+    if path.ends_with(".css") {
+        "text/css; charset=utf-8"
+    } else if path.ends_with(".js") {
+        "application/javascript; charset=utf-8"
+    } else if path.ends_with(".html") {
+        "text/html; charset=utf-8"
+    } else if path.ends_with(".svg") {
+        "image/svg+xml"
+    } else if path.ends_with(".json") {
+        "application/json; charset=utf-8"
+    } else {
+        "application/octet-stream"
+    }
 }
 
 fn internal_error(message: impl ToString) -> (StatusCode, Json<ErrorResponse>) {
@@ -363,6 +747,522 @@ fn internal_error(message: impl ToString) -> (StatusCode, Json<ErrorResponse>) {
     )
 }
 
+fn build_highlight_keywords() -> PortalHighlightKeywords {
+    let literals = ["true", "false", "nil"];
+    let literal_set = literals.into_iter().collect::<HashSet<_>>();
+    let keyword = KEYWORDS
+        .iter()
+        .filter(|item| !literal_set.contains(**item))
+        .map(|item| (*item).to_string())
+        .collect::<Vec<_>>();
+    let keyword_set = KEYWORDS.iter().copied().collect::<HashSet<_>>();
+    let mut built_in = stdlib_builtin_names()
+        .into_iter()
+        .filter(|name| !name.starts_with("__"))
+        .filter(|name| !keyword_set.contains(name.as_str()))
+        .collect::<Vec<_>>();
+    built_in.sort();
+    built_in.dedup();
+    PortalHighlightKeywords {
+        keyword,
+        literal: literals.into_iter().map(str::to_string).collect(),
+        built_in,
+    }
+}
+
+async fn build_llm_options() -> PortalLlmOptions {
+    let config = llm_config::load_config();
+    let preferred_provider = std::env::var("HARN_LLM_PROVIDER")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            if std::env::var("LOCAL_LLM_BASE_URL").is_ok() {
+                Some("local".to_string())
+            } else {
+                None
+            }
+        });
+    let preferred_model = std::env::var("HARN_LLM_MODEL")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            std::env::var("LOCAL_LLM_MODEL")
+                .ok()
+                .filter(|value| !value.is_empty())
+        });
+
+    let mut providers = Vec::new();
+    for name in llm_config::provider_names() {
+        let Some(def) = llm_config::provider_config(&name) else {
+            continue;
+        };
+        let base_url = llm_config::resolve_base_url(def);
+        let auth_envs = auth_env_names(&def.auth_env);
+        let auth_configured = auth_envs.iter().any(|env_name| {
+            std::env::var(env_name)
+                .ok()
+                .is_some_and(|value| !value.is_empty())
+        });
+        let viable = def.auth_style == "none" || auth_configured;
+        let local = is_local_provider(&base_url);
+        let aliases = config
+            .aliases
+            .iter()
+            .filter(|(_, alias)| alias.provider == name)
+            .map(|(alias_name, _)| alias_name.clone())
+            .collect::<Vec<_>>();
+        let mut models = if local {
+            discover_provider_models(&name, &base_url, def)
+                .await
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        if let Some(default_model) = default_model_for_provider(&name) {
+            if !models.contains(&default_model) {
+                models.insert(0, default_model.clone());
+            }
+        }
+        for alias_name in &aliases {
+            if let Some((resolved, _)) = llm_config::resolve_tier_model(alias_name, Some(&name)) {
+                if !models.contains(&resolved) {
+                    models.push(resolved);
+                }
+            }
+        }
+        models.sort();
+        models.dedup();
+        providers.push(PortalLlmProviderOption {
+            name: name.clone(),
+            base_url,
+            base_url_env: def.base_url_env.clone(),
+            auth_style: def.auth_style.clone(),
+            auth_envs,
+            auth_configured,
+            viable,
+            local,
+            models,
+            aliases,
+            default_model: default_model_for_provider(&name).unwrap_or_default(),
+        });
+    }
+
+    providers.sort_by(|left, right| {
+        right
+            .viable
+            .cmp(&left.viable)
+            .then_with(|| right.local.cmp(&left.local))
+            .then_with(|| left.name.cmp(&right.name))
+    });
+
+    PortalLlmOptions {
+        preferred_provider,
+        preferred_model,
+        providers,
+    }
+}
+
+fn auth_env_names(auth_env: &llm_config::AuthEnv) -> Vec<String> {
+    match auth_env {
+        llm_config::AuthEnv::None => Vec::new(),
+        llm_config::AuthEnv::Single(name) => vec![name.clone()],
+        llm_config::AuthEnv::Multiple(names) => names.clone(),
+    }
+}
+
+fn is_local_provider(base_url: &str) -> bool {
+    base_url.contains("127.0.0.1") || base_url.contains("localhost")
+}
+
+fn default_model_for_provider(provider: &str) -> Option<String> {
+    match provider {
+        "local" => std::env::var("LOCAL_LLM_MODEL")
+            .ok()
+            .filter(|value| !value.is_empty())
+            .or_else(|| {
+                std::env::var("HARN_LLM_MODEL")
+                    .ok()
+                    .filter(|value| !value.is_empty())
+            })
+            .or_else(|| Some("gpt-4o".to_string())),
+        "openai" => Some("gpt-4o".to_string()),
+        "ollama" => Some("llama3.2".to_string()),
+        "openrouter" => Some("Qwen/Qwen3.5-9B".to_string()),
+        "anthropic" => Some("claude-sonnet-4-20250514".to_string()),
+        _ => None,
+    }
+}
+
+async fn discover_provider_models(
+    provider: &str,
+    base_url: &str,
+    def: &llm_config::ProviderDef,
+) -> Result<Vec<String>, String> {
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(2))
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+        .map_err(|error| format!("failed to build model discovery client: {error}"))?;
+
+    let response = if provider == "ollama" || def.chat_endpoint.contains("/api/chat") {
+        client
+            .get(format!("{base_url}/api/tags"))
+            .send()
+            .await
+            .map_err(|error| format!("failed to reach {provider}: {error}"))?
+    } else {
+        client
+            .get(format!("{base_url}/v1/models"))
+            .send()
+            .await
+            .map_err(|error| format!("failed to reach {provider}: {error}"))?
+    };
+    if !response.status().is_success() {
+        return Ok(Vec::new());
+    }
+    let payload = response
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|error| format!("failed to parse model list: {error}"))?;
+    let mut models = Vec::new();
+    if provider == "ollama" || def.chat_endpoint.contains("/api/chat") {
+        if let Some(entries) = payload.get("models").and_then(|value| value.as_array()) {
+            for entry in entries {
+                if let Some(name) = entry.get("name").and_then(|value| value.as_str()) {
+                    models.push(name.to_string());
+                }
+            }
+        }
+    } else if let Some(entries) = payload.get("data").and_then(|value| value.as_array()) {
+        for entry in entries {
+            if let Some(id) = entry.get("id").and_then(|value| value.as_str()) {
+                models.push(id.to_string());
+            }
+        }
+    }
+    models.sort();
+    models.dedup();
+    Ok(models)
+}
+
+fn bad_request_error(message: impl ToString) -> (StatusCode, Json<ErrorResponse>) {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(ErrorResponse {
+            error: message.to_string(),
+        }),
+    )
+}
+
+fn not_found_error(message: impl ToString) -> (StatusCode, Json<ErrorResponse>) {
+    (
+        StatusCode::NOT_FOUND,
+        Json(ErrorResponse {
+            error: message.to_string(),
+        }),
+    )
+}
+
+fn validate_launch_request(
+    request: &PortalLaunchRequest,
+) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
+    let has_file = request
+        .file_path
+        .as_ref()
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false);
+    let has_source = request
+        .source
+        .as_ref()
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false);
+    let has_playground = request
+        .task
+        .as_ref()
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false);
+    let count = [has_file, has_source, has_playground]
+        .into_iter()
+        .filter(|value| *value)
+        .count();
+    if count != 1 {
+        return Err(bad_request_error(
+            "launch requires exactly one of file_path, source, or task",
+        ));
+    }
+    Ok(())
+}
+
+fn validated_env_overrides(
+    env: Option<&BTreeMap<String, String>>,
+) -> Result<BTreeMap<String, String>, (StatusCode, Json<ErrorResponse>)> {
+    let mut validated = BTreeMap::new();
+    if let Some(env) = env {
+        for (key, value) in env {
+            if key.is_empty()
+                || !key
+                    .chars()
+                    .all(|ch| ch.is_ascii_uppercase() || ch.is_ascii_digit() || ch == '_')
+            {
+                return Err(bad_request_error(format!(
+                    "invalid env key '{key}'; use uppercase shell-style names only"
+                )));
+            }
+            if value.len() > 16_384 {
+                return Err(bad_request_error(format!(
+                    "env value for '{key}' is too large"
+                )));
+            }
+            validated.insert(key.clone(), value.clone());
+        }
+    }
+    Ok(validated)
+}
+
+fn build_launch_env(
+    workspace_dir: Option<&Path>,
+    overrides: &BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    let mut env = overrides.clone();
+    if let Some(workspace_dir) = workspace_dir {
+        env.insert(
+            "HARN_LLM_TRANSCRIPT_DIR".to_string(),
+            workspace_dir.join("run-llm").display().to_string(),
+        );
+    }
+    env
+}
+
+fn materialize_launch_target(
+    run_dir: &Path,
+    workspace_root: &Path,
+    job_id: &str,
+    request: PortalLaunchRequest,
+) -> Result<MaterializedLaunchTarget, String> {
+    if let Some(file_path) = request.file_path.filter(|value| !value.trim().is_empty()) {
+        let path = resolve_workspace_file(workspace_root, &file_path)?;
+        return Ok(MaterializedLaunchTarget {
+            mode: "file".to_string(),
+            target_label: file_path,
+            launch_file: path,
+            workspace_dir: None,
+        });
+    }
+
+    if let Some(source) = request.source.filter(|value| !value.trim().is_empty()) {
+        let workspace_dir = launch_workspace_dir(run_dir, job_id)?;
+        let launch_file = workspace_dir.join("workflow.harn");
+        fs::write(&launch_file, source)
+            .map_err(|error| format!("failed to write temp source file: {error}"))?;
+        write_launch_metadata(
+            &workspace_dir,
+            &serde_json::json!({
+                "mode": "source",
+                "source_path": launch_file.display().to_string(),
+            }),
+        )?;
+        return Ok(MaterializedLaunchTarget {
+            mode: "source".to_string(),
+            target_label: launch_file.display().to_string(),
+            launch_file,
+            workspace_dir: Some(workspace_dir),
+        });
+    }
+
+    let task = request
+        .task
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "playground task is required".to_string())?;
+    let workspace_dir = launch_workspace_dir(run_dir, job_id)?;
+    let source = build_playground_source(
+        &workspace_dir,
+        &task,
+        request.provider.as_deref(),
+        request.model.as_deref(),
+    );
+    let launch_file = workspace_dir.join("workflow.harn");
+    fs::write(&launch_file, source)
+        .map_err(|error| format!("failed to write playground source file: {error}"))?;
+    fs::write(workspace_dir.join("task.txt"), &task)
+        .map_err(|error| format!("failed to write playground task file: {error}"))?;
+    write_launch_metadata(
+        &workspace_dir,
+        &serde_json::json!({
+            "mode": "playground",
+            "task": task,
+            "provider": request.provider.as_deref(),
+            "model": request.model.as_deref(),
+            "workflow_path": launch_file.display().to_string(),
+            "run_path": workspace_dir.join("run.json").display().to_string(),
+            "transcript_path": workspace_dir.join("run-llm").join("llm_transcript.jsonl").display().to_string(),
+        }),
+    )?;
+    Ok(MaterializedLaunchTarget {
+        mode: "playground".to_string(),
+        target_label: format!("playground: {task}"),
+        launch_file,
+        workspace_dir: Some(workspace_dir),
+    })
+}
+
+fn launch_workspace_dir(run_dir: &Path, job_id: &str) -> Result<PathBuf, String> {
+    let dir = run_dir.join("playground").join(job_id);
+    fs::create_dir_all(&dir).map_err(|error| {
+        format!(
+            "failed to create launch workspace {}: {error}",
+            dir.display()
+        )
+    })?;
+    Ok(dir)
+}
+
+fn write_launch_metadata(workspace_dir: &Path, payload: &serde_json::Value) -> Result<(), String> {
+    let content = serde_json::to_string_pretty(payload)
+        .map_err(|error| format!("failed to encode launch metadata: {error}"))?;
+    fs::write(workspace_dir.join("launch.json"), content)
+        .map_err(|error| format!("failed to write launch metadata: {error}"))
+}
+
+fn resolve_workspace_file(workspace_root: &Path, relative_path: &str) -> Result<PathBuf, String> {
+    let path = Path::new(relative_path);
+    if path.is_absolute() {
+        return Err("file_path must be relative to the current workspace".to_string());
+    }
+    if path.components().any(|component| {
+        matches!(
+            component,
+            std::path::Component::ParentDir
+                | std::path::Component::RootDir
+                | std::path::Component::Prefix(_)
+        )
+    }) {
+        return Err("file_path must stay inside the current workspace".to_string());
+    }
+    let resolved = workspace_root.join(path);
+    if !resolved.exists() {
+        return Err(format!("file not found: {relative_path}"));
+    }
+    Ok(resolved)
+}
+
+fn build_playground_source(
+    workspace_dir: &Path,
+    task: &str,
+    provider: Option<&str>,
+    model: Option<&str>,
+) -> String {
+    let persist_path = workspace_dir.join("run.json");
+    let provider_line = provider
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| format!("provider: {:?},", value))
+        .unwrap_or_default();
+    let model_line = model
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| format!("model: {:?},", value))
+        .unwrap_or_default();
+
+    format!(
+        r#"pipeline main() {{
+  let flow = workflow_graph(
+    {{
+    name: "portal_playground",
+    entry: "act",
+    nodes: {{
+    act: {{
+    kind: "stage",
+    mode: "llm",
+    model_policy: {{{provider_line}{model_line}}},
+    output_contract: {{output_kinds: ["summary"]}},
+  }},
+  }},
+    edges: [],
+  }},
+  )
+  let seed = artifact({{kind: "summary", text: "Playground seed context", relevance: 0.5}})
+  let workspace_note = artifact({{
+    kind: "workspace_file",
+    title: "task.txt",
+    text: {task:?},
+    relevance: 0.9,
+  }})
+  let result = workflow_execute(
+    {task:?},
+    flow,
+    [seed, workspace_note],
+    {{max_steps: 4, persist_path: {:?}}},
+  )
+  println(result?.status)
+  println(result?.run?.persisted_path)
+}}"#,
+        persist_path.display().to_string()
+    )
+}
+
+fn known_run_paths(run_dir: &Path) -> Result<HashSet<String>, String> {
+    Ok(scan_runs(run_dir)?
+        .into_iter()
+        .map(|run| run.path)
+        .collect::<HashSet<_>>())
+}
+
+fn discovered_run_paths(
+    run_dir: &Path,
+    before_paths: &HashSet<String>,
+) -> Result<Vec<String>, String> {
+    let mut paths = scan_runs(run_dir)?
+        .into_iter()
+        .map(|run| run.path)
+        .filter(|path| !before_paths.contains(path))
+        .collect::<Vec<_>>();
+    paths.sort();
+    Ok(paths)
+}
+
+fn scan_launch_targets(workspace_root: &Path) -> Result<Vec<PortalLaunchTarget>, String> {
+    let groups = [
+        ("examples", workspace_root.join("examples")),
+        ("conformance", workspace_root.join("conformance/tests")),
+    ];
+    let mut targets = Vec::new();
+    for (group, root) in groups {
+        collect_launch_targets(workspace_root, &root, group, &mut targets)?;
+    }
+    targets.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(targets)
+}
+
+fn collect_launch_targets(
+    workspace_root: &Path,
+    current: &Path,
+    group: &str,
+    out: &mut Vec<PortalLaunchTarget>,
+) -> Result<(), String> {
+    if !current.exists() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(current)
+        .map_err(|error| format!("failed to read {}: {error}", current.display()))?
+    {
+        let entry =
+            entry.map_err(|error| format!("failed to iterate {}: {error}", current.display()))?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_launch_targets(workspace_root, &path, group, out)?;
+        } else if path.extension().is_some_and(|ext| ext == "harn") {
+            let relative = path
+                .strip_prefix(workspace_root)
+                .map_err(|error| format!("failed to relativize {}: {error}", path.display()))?
+                .display()
+                .to_string();
+            out.push(PortalLaunchTarget {
+                path: relative,
+                group: group.to_string(),
+            });
+        }
+    }
+    Ok(())
+}
+
 fn scan_runs(run_dir: &Path) -> Result<Vec<PortalRunSummary>, String> {
     let mut files = Vec::new();
     collect_run_files(run_dir, run_dir, &mut files)?;
@@ -370,6 +1270,9 @@ fn scan_runs(run_dir: &Path) -> Result<Vec<PortalRunSummary>, String> {
     let mut runs = Vec::new();
     for (path, modified_at_ms) in files {
         if let Ok(run) = harn_vm::orchestration::load_run_record(&path) {
+            if run.type_name != "run_record" || run.id.is_empty() || run.workflow_id.is_empty() {
+                continue;
+            }
             let relative = path
                 .strip_prefix(run_dir)
                 .ok()
@@ -386,6 +1289,80 @@ fn scan_runs(run_dir: &Path) -> Result<Vec<PortalRunSummary>, String> {
             .then_with(|| b.updated_at_ms.cmp(&a.updated_at_ms))
     });
     Ok(runs)
+}
+
+fn filter_and_sort_runs(
+    runs: Vec<PortalRunSummary>,
+    query: &ListRunsQuery,
+) -> Vec<PortalRunSummary> {
+    let search = query
+        .q
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_ascii_lowercase());
+    let workflow = query
+        .workflow
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let status = query.status.as_deref().unwrap_or("all");
+    let sort = query.sort.as_deref().unwrap_or("newest");
+
+    let mut filtered = runs
+        .into_iter()
+        .filter(|run| match workflow.as_deref() {
+            Some(name) => run.workflow_name == name,
+            None => true,
+        })
+        .filter(|run| matches_run_status(run, status))
+        .filter(|run| match search.as_deref() {
+            Some(needle) => matches_run_search(run, needle),
+            None => true,
+        })
+        .collect::<Vec<_>>();
+
+    filtered.sort_by(|left, right| match sort {
+        "duration" => right
+            .duration_ms
+            .unwrap_or_default()
+            .cmp(&left.duration_ms.unwrap_or_default())
+            .then_with(|| right.started_at.cmp(&left.started_at)),
+        "oldest" => left
+            .started_at
+            .cmp(&right.started_at)
+            .then_with(|| left.updated_at_ms.cmp(&right.updated_at_ms)),
+        _ => right
+            .started_at
+            .cmp(&left.started_at)
+            .then_with(|| right.updated_at_ms.cmp(&left.updated_at_ms)),
+    });
+    filtered
+}
+
+fn matches_run_status(run: &PortalRunSummary, status: &str) -> bool {
+    match status {
+        "failed" => is_failed_status(&run.status),
+        "completed" => is_completed_status(&run.status),
+        "active" => !is_failed_status(&run.status) && !is_completed_status(&run.status),
+        _ => true,
+    }
+}
+
+fn matches_run_search(run: &PortalRunSummary, needle: &str) -> bool {
+    let models = run.models.join(" ");
+    format!(
+        "{} {} {} {} {} {}",
+        run.workflow_name,
+        run.status,
+        run.path,
+        run.last_stage_node_id.as_deref().unwrap_or_default(),
+        run.failure_summary.as_deref().unwrap_or_default(),
+        models
+    )
+    .to_ascii_lowercase()
+    .contains(needle)
 }
 
 fn collect_run_files(
@@ -419,19 +1396,55 @@ fn collect_run_files(
     Ok(())
 }
 
-fn safe_join(root: &Path, relative: &str) -> Option<PathBuf> {
-    let joined = root.join(relative);
-    let canonical_root = root.canonicalize().ok()?;
-    let canonical_joined = joined.canonicalize().ok()?;
-    if canonical_joined.starts_with(&canonical_root) {
-        Some(canonical_joined)
-    } else {
-        None
+fn resolve_run_path(
+    root: &Path,
+    relative: &str,
+) -> Result<PathBuf, (StatusCode, Json<ErrorResponse>)> {
+    if relative.trim().is_empty() {
+        return Err(bad_request_error("run path is required"));
     }
+    let relative_path = Path::new(relative);
+    if relative_path.is_absolute() {
+        return Err(bad_request_error(
+            "run path must be relative to the configured run directory",
+        ));
+    }
+    if relative_path.components().any(|component| {
+        matches!(
+            component,
+            std::path::Component::ParentDir
+                | std::path::Component::RootDir
+                | std::path::Component::Prefix(_)
+        )
+    }) {
+        return Err(bad_request_error(
+            "run path must stay inside the configured run directory",
+        ));
+    }
+    let joined = root.join(relative_path);
+    if joined.exists() {
+        let canonical_root = root
+            .canonicalize()
+            .map_err(|error| internal_error(format!("failed to resolve run directory: {error}")))?;
+        let canonical_joined = joined
+            .canonicalize()
+            .map_err(|error| internal_error(format!("failed to resolve run path: {error}")))?;
+        if !canonical_joined.starts_with(&canonical_root) {
+            return Err(bad_request_error(
+                "run path must stay inside the configured run directory",
+            ));
+        }
+    }
+    Ok(joined)
 }
 
 fn system_time_ms(time: SystemTime) -> Option<u128> {
     time.duration_since(UNIX_EPOCH).ok().map(|d| d.as_millis())
+}
+
+fn portal_timestamp_id(prefix: &str) -> String {
+    let millis = system_time_ms(SystemTime::now()).unwrap_or_default();
+    format!("{prefix}-{millis}")
 }
 
 fn build_run_summary(
@@ -440,6 +1453,7 @@ fn build_run_summary(
     run: &harn_vm::orchestration::RunRecord,
 ) -> PortalRunSummary {
     let usage = run.usage.clone().unwrap_or_default();
+    let (last_stage_node_id, failure_summary) = latest_stage_summary(run);
     PortalRunSummary {
         path: path.to_string(),
         id: run.id.clone(),
@@ -448,6 +1462,8 @@ fn build_run_summary(
             .clone()
             .unwrap_or_else(|| run.workflow_id.clone()),
         status: run.status.clone(),
+        last_stage_node_id,
+        failure_summary,
         started_at: run.started_at.clone(),
         finished_at: run.finished_at.clone(),
         duration_ms: run_duration_ms(run),
@@ -459,6 +1475,32 @@ fn build_run_summary(
         models: usage.models,
         updated_at_ms,
     }
+}
+
+fn latest_stage_summary(
+    run: &harn_vm::orchestration::RunRecord,
+) -> (Option<String>, Option<String>) {
+    let last_stage = run.stages.last();
+    let last_stage_node_id = last_stage.map(|stage| stage.node_id.clone());
+    let failure_summary = run
+        .stages
+        .iter()
+        .rev()
+        .find(|stage| is_failed_status(&stage.status) || is_failed_status(&stage.outcome))
+        .map(|stage| {
+            let error = stage.metadata.get("error").map(compact_json).or_else(|| {
+                stage
+                    .attempts
+                    .iter()
+                    .rev()
+                    .find_map(|attempt| attempt.error.clone())
+            });
+            match error {
+                Some(error) if !error.is_empty() => format!("{} failed: {}", stage.node_id, error),
+                _ => format!("{} failed with {}", stage.node_id, stage.outcome),
+            }
+        });
+    (last_stage_node_id, failure_summary)
 }
 
 fn summarize_runs(runs: &[PortalRunSummary]) -> PortalStats {
@@ -531,6 +1573,8 @@ fn build_run_detail(
         workflow_id: run.workflow_id.clone(),
         parent_run_id: run.parent_run_id.clone(),
         root_run_id: run.root_run_id.clone(),
+        policy_summary: build_policy_summary(run),
+        replay_summary: build_replay_summary(run.replay_fixture.as_ref()),
         execution: run.execution.clone(),
         insights,
         stages,
@@ -640,14 +1684,17 @@ fn build_stages(run: &harn_vm::orchestration::RunRecord) -> Vec<PortalStage> {
         .map(|stage| PortalStage {
             id: stage.id.clone(),
             node_id: stage.node_id.clone(),
+            kind: stage.kind.clone(),
             status: stage.status.clone(),
             outcome: stage.outcome.clone(),
+            branch: stage.branch.clone(),
             started_at: stage.started_at.clone(),
             finished_at: stage.finished_at.clone(),
             duration_ms: stage_duration_ms(stage),
             artifact_count: stage.artifacts.len(),
             attempt_count: stage.attempts.len(),
             verification_summary: stage.verification.as_ref().map(compact_json),
+            debug: build_stage_debug(stage),
         })
         .collect()
 }
@@ -806,6 +1853,111 @@ fn build_execution_summary(
         branch: execution.branch.clone(),
         adapter: execution.adapter.clone(),
     })
+}
+
+fn build_policy_summary(run: &harn_vm::orchestration::RunRecord) -> PortalPolicySummary {
+    let validation = run.metadata.get("validation").cloned().and_then(|value| {
+        serde_json::from_value::<harn_vm::orchestration::WorkflowValidationReport>(value).ok()
+    });
+    let capabilities = run
+        .policy
+        .capabilities
+        .iter()
+        .flat_map(|(capability, ops)| {
+            if ops.is_empty() {
+                vec![capability.clone()]
+            } else {
+                ops.iter()
+                    .map(|op| format!("{capability}.{op}"))
+                    .collect::<Vec<_>>()
+            }
+        })
+        .collect::<Vec<_>>();
+    let tool_arg_constraints = run
+        .policy
+        .tool_arg_constraints
+        .iter()
+        .map(|constraint| {
+            if constraint.arg_patterns.is_empty() {
+                constraint.tool.clone()
+            } else {
+                format!(
+                    "{} → {}",
+                    constraint.tool,
+                    constraint.arg_patterns.join(", ")
+                )
+            }
+        })
+        .collect::<Vec<_>>();
+
+    PortalPolicySummary {
+        tools: run.policy.tools.clone(),
+        capabilities,
+        workspace_roots: run.policy.workspace_roots.clone(),
+        side_effect_level: run.policy.side_effect_level.clone(),
+        recursion_limit: run.policy.recursion_limit,
+        tool_arg_constraints,
+        validation_valid: validation.as_ref().map(|report| report.valid),
+        validation_errors: validation
+            .as_ref()
+            .map(|report| report.errors.clone())
+            .unwrap_or_default(),
+        validation_warnings: validation
+            .as_ref()
+            .map(|report| report.warnings.clone())
+            .unwrap_or_default(),
+        reachable_nodes: validation
+            .as_ref()
+            .map(|report| report.reachable_nodes.clone())
+            .unwrap_or_default(),
+    }
+}
+
+fn build_replay_summary(
+    replay: Option<&harn_vm::orchestration::ReplayFixture>,
+) -> Option<PortalReplaySummary> {
+    replay.map(|fixture| PortalReplaySummary {
+        fixture_id: fixture.id.clone(),
+        source_run_id: fixture.source_run_id.clone(),
+        created_at: fixture.created_at.clone(),
+        expected_status: fixture.expected_status.clone(),
+        stage_assertions: fixture
+            .stage_assertions
+            .iter()
+            .map(|stage| PortalReplayAssertion {
+                node_id: stage.node_id.clone(),
+                expected_status: stage.expected_status.clone(),
+                expected_outcome: stage.expected_outcome.clone(),
+                expected_branch: stage.expected_branch.clone(),
+                required_artifact_kinds: stage.required_artifact_kinds.clone(),
+                visible_text_contains: stage.visible_text_contains.clone(),
+            })
+            .collect(),
+    })
+}
+
+fn build_stage_debug(stage: &harn_vm::orchestration::RunStageRecord) -> PortalStageDebug {
+    let usage = stage.usage.clone().unwrap_or_default();
+    PortalStageDebug {
+        call_count: usage.call_count,
+        input_tokens: usage.input_tokens,
+        output_tokens: usage.output_tokens,
+        consumed_artifact_ids: stage.consumed_artifact_ids.clone(),
+        produced_artifact_ids: stage.produced_artifact_ids.clone(),
+        selected_artifact_ids: string_array_value(&stage.metadata, "selected_artifact_ids"),
+        worker_id: metadata_string(&stage.metadata, "worker_id"),
+        error: metadata_pretty_json(&stage.metadata, "error"),
+        model_policy: metadata_pretty_json(&stage.metadata, "model_policy"),
+        transcript_policy: metadata_pretty_json(&stage.metadata, "transcript_policy"),
+        context_policy: metadata_pretty_json(&stage.metadata, "context_policy"),
+        retry_policy: metadata_pretty_json(&stage.metadata, "retry_policy"),
+        capability_policy: metadata_pretty_json(&stage.metadata, "effective_capability_policy"),
+        input_contract: metadata_pretty_json(&stage.metadata, "input_contract"),
+        output_contract: metadata_pretty_json(&stage.metadata, "output_contract"),
+        prompt: metadata_pretty_json(&stage.metadata, "prompt"),
+        system_prompt: metadata_pretty_json(&stage.metadata, "system_prompt"),
+        rendered_context: metadata_pretty_json(&stage.metadata, "rendered_context"),
+    }
 }
 
 fn discover_transcript_steps(
@@ -1219,6 +2371,40 @@ fn compact_json(value: &serde_json::Value) -> String {
     }
 }
 
+fn pretty_json(value: &serde_json::Value) -> String {
+    if let Some(text) = value.as_str() {
+        return text.to_string();
+    }
+    serde_json::to_string_pretty(value).unwrap_or_else(|_| compact_json(value))
+}
+
+fn metadata_pretty_json(
+    metadata: &BTreeMap<String, serde_json::Value>,
+    key: &str,
+) -> Option<String> {
+    metadata.get(key).map(pretty_json)
+}
+
+fn metadata_string(metadata: &BTreeMap<String, serde_json::Value>, key: &str) -> Option<String> {
+    metadata
+        .get(key)
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+}
+
+fn string_array_value(metadata: &BTreeMap<String, serde_json::Value>, key: &str) -> Vec<String> {
+    metadata
+        .get(key)
+        .and_then(|value| value.as_array())
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|value| value.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn span_kind_totals(spans: &[PortalSpan]) -> Vec<(String, u64)> {
     let mut totals = HashMap::<String, u64>::new();
     for span in spans {
@@ -1274,10 +2460,35 @@ mod tests {
     use axum::http::Request;
     use tower::util::ServiceExt;
 
+    fn test_portal_state(run_dir: &Path) -> Arc<PortalState> {
+        Arc::new(PortalState {
+            run_dir: run_dir.to_path_buf(),
+            workspace_root: run_dir.to_path_buf(),
+            launch_program: PathBuf::from("harn"),
+            launch_jobs: Arc::new(Mutex::new(HashMap::new())),
+        })
+    }
+
+    #[test]
+    fn resolve_run_path_rejects_parent_segments() {
+        let temp = tempfile::tempdir().unwrap();
+        let error = resolve_run_path(temp.path(), "../outside.json").unwrap_err();
+        assert_eq!(error.0, StatusCode::BAD_REQUEST);
+    }
+
     #[test]
     fn scan_runs_ignores_non_run_json() {
         let temp = tempfile::tempdir().unwrap();
         fs::write(temp.path().join("ignore.json"), "{not valid json").unwrap();
+        fs::write(
+            temp.path().join("launch.json"),
+            serde_json::json!({
+                "mode": "playground",
+                "task": "hello"
+            })
+            .to_string(),
+        )
+        .unwrap();
         fs::write(
             temp.path().join("run.json"),
             serde_json::json!({
@@ -1308,6 +2519,128 @@ mod tests {
         assert_eq!(runs[0].workflow_name, "demo");
     }
 
+    #[test]
+    fn build_run_summary_includes_failure_context() {
+        let run = harn_vm::orchestration::RunRecord {
+            id: "run-1".to_string(),
+            workflow_id: "wf".to_string(),
+            workflow_name: Some("demo".to_string()),
+            status: "failed".to_string(),
+            started_at: "2026-04-03T01:00:00Z".to_string(),
+            stages: vec![harn_vm::orchestration::RunStageRecord {
+                id: "stage-1".to_string(),
+                node_id: "verify".to_string(),
+                status: "failed".to_string(),
+                outcome: "error".to_string(),
+                started_at: "2026-04-03T01:00:00Z".to_string(),
+                attempts: vec![harn_vm::orchestration::RunStageAttemptRecord {
+                    error: Some("assertion failed".to_string()),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let summary = build_run_summary("run.json", 0, &run);
+        assert_eq!(summary.last_stage_node_id.as_deref(), Some("verify"));
+        assert_eq!(
+            summary.failure_summary.as_deref(),
+            Some("verify failed: assertion failed")
+        );
+    }
+
+    #[test]
+    fn scan_launch_targets_finds_harn_files() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("examples")).unwrap();
+        fs::create_dir_all(temp.path().join("conformance/tests")).unwrap();
+        fs::write(temp.path().join("examples/demo.harn"), "pipeline main() {}").unwrap();
+        fs::write(
+            temp.path().join("conformance/tests/check.harn"),
+            "pipeline main() {}",
+        )
+        .unwrap();
+
+        let targets = scan_launch_targets(temp.path()).unwrap();
+        assert_eq!(targets.len(), 2);
+        assert!(targets
+            .iter()
+            .any(|target| target.path == "examples/demo.harn"));
+        assert!(targets
+            .iter()
+            .any(|target| target.path == "conformance/tests/check.harn"));
+    }
+
+    #[test]
+    fn validate_launch_request_requires_exactly_one_mode() {
+        let missing = PortalLaunchRequest {
+            file_path: None,
+            source: None,
+            task: None,
+            provider: None,
+            model: None,
+            env: None,
+        };
+        assert!(validate_launch_request(&missing).is_err());
+
+        let conflicting = PortalLaunchRequest {
+            file_path: Some("examples/demo.harn".to_string()),
+            source: Some("pipeline main() {}".to_string()),
+            task: None,
+            provider: None,
+            model: None,
+            env: None,
+        };
+        assert!(validate_launch_request(&conflicting).is_err());
+    }
+
+    #[test]
+    fn validated_env_overrides_rejects_non_shell_style_names() {
+        let env = BTreeMap::from([
+            ("OPENAI_API_KEY".to_string(), "secret".to_string()),
+            ("bad-key".to_string(), "oops".to_string()),
+        ]);
+        assert!(validated_env_overrides(Some(&env)).is_err());
+    }
+
+    #[test]
+    fn build_launch_env_sets_transcript_dir_inside_workspace() {
+        let temp = tempfile::tempdir().unwrap();
+        let env = build_launch_env(Some(temp.path()), &BTreeMap::new());
+        assert_eq!(
+            env.get("HARN_LLM_TRANSCRIPT_DIR").map(String::as_str),
+            Some(temp.path().join("run-llm").to_str().unwrap())
+        );
+    }
+
+    #[test]
+    fn materialize_playground_target_creates_workspace_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let target = materialize_launch_target(
+            temp.path(),
+            temp.path(),
+            "job-1",
+            PortalLaunchRequest {
+                file_path: None,
+                source: None,
+                task: Some("hello world".to_string()),
+                provider: Some("mock".to_string()),
+                model: Some("mock".to_string()),
+                env: None,
+            },
+        )
+        .unwrap();
+
+        let workspace_dir = target.workspace_dir.expect("workspace dir");
+        assert!(workspace_dir.join("workflow.harn").exists());
+        assert!(workspace_dir.join("task.txt").exists());
+        assert!(workspace_dir.join("launch.json").exists());
+        let source = fs::read_to_string(workspace_dir.join("workflow.harn")).unwrap();
+        assert!(source.contains("workspace_file"));
+        assert!(source.contains("persist_path"));
+    }
+
     #[tokio::test]
     async fn api_runs_returns_json() {
         let temp = tempfile::tempdir().unwrap();
@@ -1336,9 +2669,7 @@ mod tests {
         )
         .unwrap();
 
-        let app = build_router(Arc::new(PortalState {
-            run_dir: temp.path().to_path_buf(),
-        }));
+        let app = build_router(test_portal_state(temp.path()));
         let response = app
             .oneshot(
                 Request::builder()
@@ -1350,6 +2681,170 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn filter_and_sort_runs_applies_search_status_and_ordering() {
+        let runs = vec![
+            PortalRunSummary {
+                path: "alpha.json".to_string(),
+                id: "run-alpha".to_string(),
+                workflow_name: "alpha".to_string(),
+                status: "completed".to_string(),
+                last_stage_node_id: Some("finalize".to_string()),
+                failure_summary: None,
+                started_at: "2026-04-04T10:00:00Z".to_string(),
+                finished_at: None,
+                duration_ms: Some(100),
+                stage_count: 1,
+                child_run_count: 0,
+                call_count: 1,
+                input_tokens: 10,
+                output_tokens: 5,
+                models: vec!["gpt-4o".to_string()],
+                updated_at_ms: 1,
+            },
+            PortalRunSummary {
+                path: "beta.json".to_string(),
+                id: "run-beta".to_string(),
+                workflow_name: "beta".to_string(),
+                status: "failed".to_string(),
+                last_stage_node_id: Some("verify".to_string()),
+                failure_summary: Some("assertion failed".to_string()),
+                started_at: "2026-04-04T11:00:00Z".to_string(),
+                finished_at: None,
+                duration_ms: Some(200),
+                stage_count: 2,
+                child_run_count: 0,
+                call_count: 2,
+                input_tokens: 20,
+                output_tokens: 10,
+                models: vec!["qwen".to_string()],
+                updated_at_ms: 2,
+            },
+        ];
+
+        let query = ListRunsQuery {
+            q: Some("assertion".to_string()),
+            workflow: None,
+            status: Some("failed".to_string()),
+            sort: Some("duration".to_string()),
+            page: Some(1),
+            page_size: Some(25),
+        };
+
+        let filtered = filter_and_sort_runs(runs, &query);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].path, "beta.json");
+    }
+
+    #[tokio::test]
+    async fn api_meta_returns_workspace_and_run_dir() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = build_router(test_portal_state(temp.path()));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/meta")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn api_highlight_keywords_returns_payload() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = build_router(test_portal_state(temp.path()));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/highlight/keywords")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn api_llm_options_returns_payload() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = build_router(test_portal_state(temp.path()));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/llm/options")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn portal_index_and_assets_are_served() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = build_router(test_portal_state(temp.path()));
+
+        let index_response = app
+            .clone()
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(index_response.status(), StatusCode::OK);
+
+        let asset_response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/assets/portal/app.js")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(asset_response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn api_run_rejects_escaping_paths() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = build_router(test_portal_state(temp.path()));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/run?path=../outside.json")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn api_run_returns_not_found_for_missing_runs() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = build_router(test_portal_state(temp.path()));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/run?path=missing.json")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
@@ -1420,9 +2915,7 @@ mod tests {
         )
         .unwrap();
 
-        let app = build_router(Arc::new(PortalState {
-            run_dir: temp.path().to_path_buf(),
-        }));
+        let app = build_router(test_portal_state(temp.path()));
         let response = app
             .oneshot(
                 Request::builder()
@@ -1447,6 +2940,40 @@ mod tests {
         assert_eq!(diff.checkpoint_count_delta, 1);
     }
 
+    #[tokio::test]
+    async fn api_compare_rejects_escaping_paths() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = build_router(test_portal_state(temp.path()));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/compare?left=../left.json&right=right.json")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn api_compare_returns_not_found_for_missing_runs() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = build_router(test_portal_state(temp.path()));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/compare?left=left.json&right=right.json")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
     #[test]
     fn discover_transcript_steps_reads_sibling_sidecar() {
         let temp = tempfile::tempdir().unwrap();
@@ -1468,5 +2995,71 @@ mod tests {
         assert_eq!(steps[0].tool_calls, vec!["read".to_string()]);
         assert_eq!(steps[0].added_messages, 1);
         assert_eq!(steps[0].response_text.as_deref(), Some("Done"));
+    }
+
+    #[test]
+    fn build_policy_summary_reads_validation_metadata() {
+        let run = harn_vm::orchestration::RunRecord {
+            policy: harn_vm::orchestration::CapabilityPolicy {
+                tools: vec!["read".to_string(), "exec".to_string()],
+                capabilities: BTreeMap::from([(
+                    "workspace".to_string(),
+                    vec!["read_text".to_string(), "list".to_string()],
+                )]),
+                workspace_roots: vec!["/tmp/project".to_string()],
+                side_effect_level: Some("workspace_write".to_string()),
+                recursion_limit: Some(4),
+                tool_arg_constraints: vec![harn_vm::orchestration::ToolArgConstraint {
+                    tool: "read".to_string(),
+                    arg_patterns: vec!["src/*".to_string()],
+                }],
+                tool_metadata: BTreeMap::new(),
+            },
+            metadata: BTreeMap::from([(
+                "validation".to_string(),
+                serde_json::json!({
+                    "valid": false,
+                    "errors": ["missing edge"],
+                    "warnings": ["unused node"],
+                    "reachable_nodes": ["plan"],
+                }),
+            )]),
+            ..Default::default()
+        };
+
+        let summary = build_policy_summary(&run);
+
+        assert_eq!(summary.tools, vec!["read".to_string(), "exec".to_string()]);
+        assert!(summary
+            .capabilities
+            .contains(&"workspace.read_text".to_string()));
+        assert_eq!(summary.validation_valid, Some(false));
+        assert_eq!(summary.validation_errors, vec!["missing edge".to_string()]);
+        assert_eq!(summary.validation_warnings, vec!["unused node".to_string()]);
+        assert_eq!(summary.reachable_nodes, vec!["plan".to_string()]);
+    }
+
+    #[test]
+    fn build_replay_summary_reads_fixture_metadata() {
+        let fixture = harn_vm::orchestration::ReplayFixture {
+            id: "fixture-1".to_string(),
+            source_run_id: "run-1".to_string(),
+            created_at: "2026-04-04T00:00:00Z".to_string(),
+            expected_status: "completed".to_string(),
+            stage_assertions: vec![harn_vm::orchestration::ReplayStageAssertion {
+                node_id: "plan".to_string(),
+                expected_status: "completed".to_string(),
+                expected_outcome: "success".to_string(),
+                expected_branch: Some("true".to_string()),
+                required_artifact_kinds: vec!["notes".to_string()],
+                visible_text_contains: Some("done".to_string()),
+            }],
+            ..Default::default()
+        };
+
+        let summary = build_replay_summary(Some(&fixture)).unwrap();
+        assert_eq!(summary.fixture_id, "fixture-1");
+        assert_eq!(summary.stage_assertions.len(), 1);
+        assert_eq!(summary.stage_assertions[0].node_id, "plan");
     }
 }

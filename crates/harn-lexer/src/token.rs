@@ -72,6 +72,61 @@ impl fmt::Display for Span {
     }
 }
 
+/// Canonical list of Harn language keywords.
+///
+/// This is the single source of truth for keyword tokens. The lexer's
+/// identifier-to-keyword match in `lexer.rs` must stay in sync; the unit test
+/// `test_keywords_const_covers_lexer` verifies parity between the two.
+///
+/// Tooling that needs the keyword set (syntax highlighters, the LSP, etc.)
+/// should read `KEYWORDS` rather than hard-coding a duplicate list.
+pub const KEYWORDS: &[&str] = &[
+    "ask",
+    "break",
+    "catch",
+    "continue",
+    "deadline",
+    "else",
+    "enum",
+    "extends",
+    "false",
+    "finally",
+    "fn",
+    "for",
+    "from",
+    "guard",
+    "if",
+    "impl",
+    "import",
+    "in",
+    "interface",
+    "let",
+    "match",
+    "mutex",
+    "nil",
+    "override",
+    "parallel",
+    "parallel_map",
+    "parallel_settle",
+    "pipeline",
+    "pub",
+    "require",
+    "retry",
+    "return",
+    "select",
+    "spawn",
+    "struct",
+    "throw",
+    "thru",
+    "true",
+    "try",
+    "type",
+    "upto",
+    "var",
+    "while",
+    "yield",
+];
+
 /// Token kinds produced by the lexer.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {

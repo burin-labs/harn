@@ -1,10 +1,10 @@
-.PHONY: setup install-hooks check fmt fmt-harn lint lint-md lint-harn test conformance all release-gate portal
+.PHONY: setup install-hooks check fmt fmt-harn lint lint-md lint-harn test conformance all release-gate portal portal-demo gen-highlight check-highlight check-docs-snippets
 
 # Full quality check: format first, then lint/test in parallel.
 # Usage: make all -j       (parallel checks after formatting)
 #        make all           (sequential, also works)
 all: fmt
-	$(MAKE) lint lint-md lint-harn fmt-harn test conformance
+	$(MAKE) lint lint-md lint-harn fmt-harn test conformance check-highlight check-docs-snippets
 
 check: all
 
@@ -70,3 +70,24 @@ release-gate:
 
 portal:
 	cargo run --bin harn -- portal
+
+portal-demo:
+	./scripts/portal_demo.sh
+
+# Regenerate docs/theme/harn-keywords.js from the live lexer + stdlib.
+# Run this whenever keywords or globally-available builtins change.
+gen-highlight:
+	cargo run --quiet -p harn-cli -- dump-highlight-keywords
+
+# CI guard: fail if docs/theme/harn-keywords.js is stale relative to
+# the lexer/stdlib. `make gen-highlight` fixes it.
+check-highlight:
+	@echo "=== Checking docs/theme/harn-keywords.js is up to date ==="
+	@cargo run --quiet -p harn-cli -- dump-highlight-keywords --check
+	@echo "    Harn keyword file OK."
+
+# CI guard: every ```harn block in docs/src/*.md must parse under
+# `harn check`. Blocks tagged ```harn,ignore are skipped.
+check-docs-snippets:
+	@echo "=== Checking docs snippets parse under harn check ==="
+	@./scripts/check_docs_snippets.sh

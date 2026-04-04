@@ -696,6 +696,22 @@ mod tests {
     }
 
     #[test]
+    fn test_keywords_const_covers_lexer() {
+        // Every string in KEYWORDS must lex as a non-identifier token.
+        // If this fails, either KEYWORDS has a stale entry or the lexer
+        // match in `identifier_or_keyword` is missing an arm.
+        for kw in KEYWORDS {
+            let mut lexer = Lexer::new(kw);
+            let tokens = lexer.tokenize().expect("lex keyword");
+            let first = &tokens[0].kind;
+            assert!(
+                !matches!(first, TokenKind::Identifier(_)),
+                "keyword `{kw}` lexes as Identifier — KEYWORDS const and lexer match are out of sync"
+            );
+        }
+    }
+
+    #[test]
     fn test_parallel_map_keyword() {
         let mut lexer = Lexer::new("parallel_map parallel");
         let tokens = lexer.tokenize().unwrap();

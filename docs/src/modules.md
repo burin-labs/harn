@@ -4,13 +4,13 @@ Harn supports splitting code across files using `import` and top-level `fn` decl
 
 ## Importing files
 
-```harn
+```harn,ignore
 import "lib/helpers.harn"
 ```
 
 The extension is optional — these are equivalent:
 
-```harn
+```harn,ignore
 import "lib/helpers.harn"
 import "lib/helpers"
 ```
@@ -41,7 +41,7 @@ When imported, these functions become available in the importing file's scope.
 
 ## Using imported functions
 
-```harn
+```harn,ignore
 import "lib/math"
 
 pipeline default(task) {
@@ -61,13 +61,27 @@ pipeline analyze(task) {
 }
 ```
 
-```harn
+```harn,ignore
 import "lib/analysis"
 
 pipeline default(task) {
   // the "analyze" pipeline is now registered and available
 }
 ```
+
+## What needs an import
+
+Most Harn builtins — `println`, `log`, `read_file`, `write_file`, `llm_call`,
+`agent_loop`, `http_get`, `parallel_map`, `workflow_*`, `transcript_*`,
+`mcp_*`, and the rest of the runtime surface — are registered globally and
+require **no import statement**. You can call them directly from top-level
+code or inside any pipeline.
+
+`import "std/..."` is only needed for the Harn-written helper modules
+described below (`std/text`, `std/json`, `std/math`, `std/collections`,
+`std/path`, `std/context`, `std/agents`, `std/runtime`, `std/project`,
+`std/worktree`, `std/checkpoint`). These add layered utilities on top of
+the core builtins; the core builtins themselves are always available.
 
 ## Standard library modules
 
@@ -303,7 +317,7 @@ Use selective imports to disambiguate: import { helper } from "..."
 To resolve collisions, use selective imports to import only the names
 you need from each module:
 
-```harn
+```harn,ignore
 import { parse_output } from "lib/a"
 import { format_result } from "lib/b"
 ```
@@ -320,7 +334,7 @@ pipeline base(task) {
 }
 
 pipeline custom(task) extends base {
-  override fn setup() {
+  override setup() {
     println("Custom setup")
   }
 }
@@ -343,7 +357,7 @@ my-project/
     helpers.harn      # general-purpose utilities
 ```
 
-```harn
+```harn,ignore
 // main.harn
 import "lib/context"
 import "lib/agent"

@@ -1,10 +1,10 @@
-# MCP and ACP Integration
+# MCP and ACP integration
 
 Harn has built-in support for the Model Context Protocol (MCP), Agent
 Client Protocol (ACP), and Agent-to-Agent (A2A) protocol. This guide
 covers how to use each from both client and server perspectives.
 
-## MCP Client (Connecting to MCP Servers)
+## MCP client (connecting to MCP servers)
 
 Connect to any MCP-compatible tool server, list its capabilities, and
 call tools from within a Harn program. Harn supports both stdio MCP
@@ -133,7 +133,7 @@ println(entries)
 mcp_disconnect(client)
 ```
 
-## MCP Server (Exposing Harn as an MCP Server)
+## MCP server (exposing Harn as an MCP server)
 
 Harn pipelines can expose tools, resources, resource templates, and
 prompts as an MCP server. This lets Claude Desktop, Cursor, or any MCP
@@ -150,12 +150,12 @@ pipeline main(task) {
 
   tools = tool_define(tools, "greet", "Greet someone", {
     parameters: {name: "string"},
-    handler: { args -> "Hello, " + args.name + "!" }
+    handler: { args -> "Hello, ${args.name}!" }
   })
 
   tools = tool_define(tools, "search", "Search files", {
     parameters: {query: "string"},
-    handler: { args -> "results for " + args.query },
+    handler: { args -> "results for ${args.query}" },
     annotations: {
       title: "File Search",
       readOnlyHint: true,
@@ -182,7 +182,7 @@ pipeline main(task) {
   mcp_resource_template({
     uri_template: "config://{key}",
     name: "Config Values",
-    handler: { args -> "value for " + args.key }
+    handler: { args -> "value for ${args.key}" }
   })
 
   // Prompt
@@ -190,7 +190,7 @@ pipeline main(task) {
     name: "review",
     description: "Code review prompt",
     arguments: [{name: "code", required: true}],
-    handler: { args -> "Please review:\n" + args.code }
+    handler: { args -> "Please review:\n${args.code}" }
   })
 }
 ```
@@ -226,7 +226,7 @@ ACP lets host applications and local clients use Harn as a
 runtime backend. Communication is JSON-RPC 2.0 over stdin/stdout.
 
 Bridge-level tool gates and daemon idle/resume notifications are documented in
-[Bridge Protocol](./bridge-protocol.md).
+[Bridge protocol](./bridge-protocol.md).
 
 ### Running the ACP server
 

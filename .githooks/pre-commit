@@ -19,4 +19,12 @@ else
   echo "=== Pre-commit: skipping markdown lint (npx not found) ==="
 fi
 
+if command -v npm >/dev/null 2>&1; then
+  echo "=== Pre-commit: linting portal frontend ==="
+  npm run portal:lint
+  echo "    Portal lint OK."
+else
+  echo "=== Pre-commit: skipping portal lint (npm not found) ==="
+fi
+
 echo "=== All pre-commit checks passed. ==="

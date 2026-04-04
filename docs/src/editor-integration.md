@@ -19,7 +19,7 @@ cd editors/vscode && npm install && npm run build
 Then use **Extensions: Install from VSIX** or symlink into
 `~/.vscode/extensions/`.
 
-## Language Server (LSP)
+## Language server (LSP)
 
 Start the LSP server with:
 
@@ -53,7 +53,7 @@ your editor's LSP client at the `harn-lsp` binary with no arguments. The
 server uses `TextDocumentSyncKind::FULL` (re-parses the full document on
 each change).
 
-## Debug Adapter (DAP)
+## Debug adapter (DAP)
 
 Start the debugger with:
 

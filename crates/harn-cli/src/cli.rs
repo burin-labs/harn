@@ -53,6 +53,13 @@ pub(crate) enum Command {
     Add(AddArgs),
     /// Print the decorated version banner.
     Version,
+    /// Regenerate docs/theme/harn-keywords.js from the live lexer + stdlib sets.
+    ///
+    /// Dev-only. Hidden from `--help` — invoke via
+    /// `cargo run -p harn-cli -- dump-highlight-keywords` or the
+    /// `make gen-highlight` target.
+    #[command(hide = true, name = "dump-highlight-keywords")]
+    DumpHighlightKeywords(DumpHighlightKeywordsArgs),
 }
 
 #[derive(Debug, Args)]
@@ -237,7 +244,7 @@ pub(crate) struct PortalArgs {
     #[arg(long, default_value = "127.0.0.1")]
     pub host: String,
     /// Port to serve the portal on.
-    #[arg(long, default_value_t = 4621)]
+    #[arg(long, default_value_t = 4721)]
     pub port: u16,
     /// Open the portal in a browser after starting.
     #[arg(long, default_value_t = true, action = ArgAction::Set)]
@@ -278,6 +285,18 @@ pub(crate) struct EvalArgs {
     /// Optional baseline run record for diffing.
     #[arg(long)]
     pub compare: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct DumpHighlightKeywordsArgs {
+    /// Path to the generated keyword file (relative to the repo root).
+    #[arg(long, default_value = "docs/theme/harn-keywords.js")]
+    pub output: String,
+    /// Verify the on-disk file matches what would be generated; exit non-zero
+    /// if stale. Used by CI to prevent drift between the highlighter and the
+    /// lexer/stdlib.
+    #[arg(long)]
+    pub check: bool,
 }
 
 #[derive(Debug, Args)]

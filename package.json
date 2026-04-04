@@ -4,12 +4,21 @@
   "version": "0.0.0",
   "description": "Local development tooling for the Harn repository",
   "scripts": {
-    "lint:md": "markdownlint-cli2 \"**/*.md\""
+    "lint:md": "markdownlint-cli2 \"**/*.md\"",
+    "portal": "cargo run --bin harn -- portal",
+    "portal:server": "cargo run --bin harn -- portal --open false --port 4721",
+    "portal:ui": "npm --prefix crates/harn-cli/portal run dev",
+    "portal:dev": "concurrently -k -n server,ui -c blue,magenta \"npm:portal:server\" \"npm:portal:ui\"",
+    "portal:build": "npm --prefix crates/harn-cli/portal run build",
+    "portal:lint": "npm --prefix crates/harn-cli/portal run lint",
+    "portal:test": "npm --prefix crates/harn-cli/portal test",
+    "portal:demo": "./scripts/portal_demo.sh"
   },
   "overrides": {
     "smol-toml": "1.6.1"
   },
   "devDependencies": {
+    "concurrently": "^9.2.1",
     "markdownlint-cli2": "^0.22.0"
   }
 }

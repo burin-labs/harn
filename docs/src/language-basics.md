@@ -106,7 +106,7 @@ Parameter type annotations for primitive types (`int`, `float`, `string`,
 `bool`, `list`, `dict`, `set`, `nil`, `closure`) are enforced at runtime.
 Calling a function with the wrong type produces a `TypeError`:
 
-```harn
+```harn,ignore
 fn add(a: int, b: int) -> int {
   return a + b
 }
@@ -126,7 +126,7 @@ let user: {name: string, age: int} = {name: "Alice", age: 30}
 let config: {host: string, port?: int} = {host: "localhost"}
 
 fn greet(u: {name: string}) -> string {
-  return "hi " + u["name"]
+  return "hi ${u["name"]}"
 }
 greet({name: "Bob", age: 25})
 ```
@@ -744,7 +744,7 @@ Now you can write a function that accepts any `Displayable`:
 
 ```harn
 fn introduce(animal: Displayable) {
-  println("Meet: " + animal.display())
+  println("Meet: ${animal.display()}")
 }
 
 let d = Dog({name: "Rex", breed: "Labrador"})
@@ -777,7 +777,7 @@ You can also use interfaces as constraints on generic type parameters:
 
 ```harn
 fn log_item<T>(item: T) where T: Displayable {
-  println("[LOG] " + item.display())
+  println("[LOG] ${item.display()}")
 }
 ```
 
@@ -894,7 +894,7 @@ println("Hello, ${name}!")
 /// HarnDoc comment for a public API
 /// Use contiguous `///` lines directly above `pub fn`
 pub fn greet(name: string) -> string {
-  return "Hello, " + name
+  return "Hello, ${name}"
 }
 
 pub pipeline deploy(task) {

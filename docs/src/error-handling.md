@@ -140,7 +140,7 @@ When a function parameter has a structural type annotation (a shape like
 the argument is missing a required field or a field has the wrong type,
 a clear error is produced:
 
-```harn
+```harn,ignore
 fn process(user: {name: string, age: int}) {
   println("${user.name} is ${user.age}")
 }

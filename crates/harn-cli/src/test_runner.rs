@@ -20,11 +20,20 @@ pub struct TestSummary {
     pub duration_ms: u64,
 }
 
+fn canonicalize_existing_path(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn test_execution_cwd() -> PathBuf {
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+}
+
 /// Run all test_* pipelines in a single source file using the VM.
 pub async fn run_test_file(
     path: &Path,
     filter: Option<&str>,
     timeout_ms: u64,
+    execution_cwd: Option<&Path>,
 ) -> Result<Vec<TestResult>, String> {
     let source = std::fs::read_to_string(path)
         .map_err(|e| format!("Failed to read {}: {e}", path.display()))?;
@@ -79,6 +88,18 @@ pub async fn run_test_file(
         let local = tokio::task::LocalSet::new();
         let path_str = path.display().to_string();
         let timeout = std::time::Duration::from_millis(timeout_ms);
+        let previous_cwd = if let Some(cwd) = execution_cwd {
+            let previous = std::env::current_dir().ok();
+            std::env::set_current_dir(cwd).map_err(|error| {
+                format!(
+                    "Failed to set current directory to {}: {error}",
+                    cwd.display()
+                )
+            })?;
+            previous
+        } else {
+            None
+        };
         let result = tokio::time::timeout(
             timeout,
             local.run_until(async {
@@ -87,11 +108,29 @@ pub async fn run_test_file(
                 let source_parent = path.parent().unwrap_or(std::path::Path::new("."));
                 let project_root = harn_vm::stdlib::process::find_project_root(source_parent);
                 let store_base = project_root.as_deref().unwrap_or(source_parent);
+                let execution_cwd = test_execution_cwd();
+                let source_dir = source_parent.to_string_lossy().to_string();
                 harn_vm::register_store_builtins(&mut vm, store_base);
                 harn_vm::register_metadata_builtins(&mut vm, store_base);
                 let pipeline_name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("test");
                 harn_vm::register_checkpoint_builtins(&mut vm, store_base, pipeline_name);
                 vm.set_source_info(&path_str, &source);
+                harn_vm::stdlib::process::set_thread_execution_context(Some(
+                    harn_vm::orchestration::RunExecutionRecord {
+                        cwd: Some(execution_cwd.to_string_lossy().to_string()),
+                        source_dir: Some(source_dir),
+                        env: std::collections::BTreeMap::new(),
+                        adapter: None,
+                        repo_path: None,
+                        worktree_path: None,
+                        branch: None,
+                        base_ref: None,
+                        cleanup: None,
+                    },
+                ));
+                if let Some(ref root) = project_root {
+                    vm.set_project_root(root);
+                }
                 if let Some(parent) = path.parent() {
                     if !parent.as_os_str().is_empty() {
                         vm.set_source_dir(parent);
@@ -107,6 +146,9 @@ pub async fn run_test_file(
             }),
         )
         .await;
+        if let Some(previous) = previous_cwd {
+            let _ = std::env::set_current_dir(previous);
+        }
 
         let duration = start.elapsed().as_millis() as u64;
 
@@ -160,10 +202,11 @@ pub async fn run_tests(
     let start = Instant::now();
     let mut all_results = Vec::new();
 
-    let files = if path.is_dir() {
-        discover_test_files(path)
+    let canonical_target = canonicalize_existing_path(path);
+    let files = if canonical_target.is_dir() {
+        discover_test_files(&canonical_target)
     } else {
-        vec![path.to_path_buf()]
+        vec![canonical_target]
     };
 
     if parallel {
@@ -175,7 +218,7 @@ pub async fn run_tests(
                 for file in files {
                     let filter = filter.map(|s| s.to_string());
                     handles.push(tokio::task::spawn_local(async move {
-                        run_test_file(&file, filter.as_deref(), timeout_ms).await
+                        run_test_file(&file, filter.as_deref(), timeout_ms, None).await
                     }));
                 }
                 let mut results = Vec::new();
@@ -204,7 +247,10 @@ pub async fn run_tests(
         all_results = results;
     } else {
         for file in &files {
-            match run_test_file(file, filter, timeout_ms).await {
+            let execution_cwd = file
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty());
+            match run_test_file(file, filter, timeout_ms, execution_cwd).await {
                 Ok(results) => all_results.extend(results),
                 Err(e) => {
                     all_results.push(TestResult {
@@ -248,7 +294,7 @@ fn discover_test_files(dir: &Path) -> Vec<PathBuf> {
             } else if path.extension().is_some_and(|e| e == "harn") {
                 if let Ok(content) = std::fs::read_to_string(&path) {
                     if content.contains("test_") {
-                        files.push(path);
+                        files.push(canonicalize_existing_path(&path));
                     }
                 }
             }
@@ -256,4 +302,96 @@ fn discover_test_files(dir: &Path) -> Vec<PathBuf> {
     }
     files.sort();
     files
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{discover_test_files, run_tests};
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct TempTestDir {
+        path: PathBuf,
+    }
+
+    impl TempTestDir {
+        fn new() -> Self {
+            let unique = format!(
+                "harn-test-runner-{}-{}",
+                std::process::id(),
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            );
+            let path = std::env::temp_dir().join(unique);
+            fs::create_dir_all(&path).unwrap();
+            Self { path }
+        }
+
+        fn write(&self, relative: &str, contents: &str) {
+            let path = self.path.join(relative);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).unwrap();
+            }
+            fs::write(path, contents).unwrap();
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TempTestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    #[test]
+    fn discover_test_files_returns_canonical_absolute_paths() {
+        let temp = TempTestDir::new();
+        temp.write("suite/test_alpha.harn", "pipeline test_alpha(task) {}");
+        temp.write("suite/nested/test_beta.harn", "pipeline test_beta(task) {}");
+        temp.write("suite/ignore.harn", "pipeline build(task) {}");
+
+        // Pass an absolute path rather than mutating process-wide cwd — the
+        // other test_runner test asserts cwd preservation, and mutating it
+        // from two tests concurrently causes cross-test flakiness.
+        let files = discover_test_files(&temp.path().join("suite"));
+
+        assert_eq!(files.len(), 2);
+        assert!(files.iter().all(|path| path.is_absolute()));
+        assert!(files
+            .iter()
+            .any(|path| path.ends_with("suite/test_alpha.harn")));
+        assert!(files
+            .iter()
+            .any(|path| path.ends_with("suite/nested/test_beta.harn")));
+    }
+
+    #[tokio::test]
+    async fn run_tests_uses_file_parent_as_execution_cwd_and_restores_shell_cwd() {
+        let temp = TempTestDir::new();
+        temp.write(
+            "suite/test_cwd.harn",
+            r#"
+pipeline test_current_dir(task) {
+  assert_eq(cwd(), source_dir())
+}
+"#,
+        );
+
+        let original_cwd = std::env::current_dir().unwrap();
+        let summary = run_tests(&temp.path().join("suite"), None, 1_000, false).await;
+        let restored_cwd = std::env::current_dir().unwrap();
+
+        assert_eq!(summary.failed, 0);
+        assert_eq!(summary.passed, 1);
+        assert_eq!(
+            fs::canonicalize(restored_cwd).unwrap(),
+            fs::canonicalize(original_cwd).unwrap()
+        );
+    }
 }

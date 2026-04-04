@@ -1,4 +1,4 @@
-# Host Boundary
+# Host boundary
 
 Harn is the orchestration layer. Hosts supply facts and platform effects.
 

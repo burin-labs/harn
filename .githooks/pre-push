@@ -9,4 +9,8 @@ if command -v npx >/dev/null 2>&1; then
   npx markdownlint-cli2 "**/*.md"
 fi
 
+if command -v npm >/dev/null 2>&1; then
+  npm run portal:lint
+fi
+
 echo "=== Pre-push checks passed. ==="

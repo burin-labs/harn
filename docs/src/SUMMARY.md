@@ -2,27 +2,36 @@
 
 [Introduction](./introduction.md)
 
-# Guide
+# Getting started
 
-- [Getting Started](./getting-started.md)
+- [Getting started](./getting-started.md)
 - [Why Harn?](./why-harn.md)
-- [Language Basics](./language-basics.md)
-- [Language Specification](./language-spec.md)
-- [Error Handling](./error-handling.md)
-- [Modules and Imports](./modules.md)
+
+# The language
+
+- [Language basics](./language-basics.md)
+- [Error handling](./error-handling.md)
+- [Modules and imports](./modules.md)
 - [Concurrency](./concurrency.md)
-- [LLM Calls and Agent Loops](./llm-and-agents.md)
-- [Transcript Architecture](./transcript-architecture.md)
-- [Host Boundary](./host-boundary.md)
-- [Workflow Runtime](./workflow-runtime.md)
-- [Harn Portal](./portal.md)
-- [MCP and ACP Integration](./mcp-and-acp.md)
-- [Bridge Protocol](./bridge-protocol.md)
+- [Language specification](./language-spec.md)
+
+# Agents and workflows
+
+- [LLM calls and agent loops](./llm-and-agents.md)
+- [Transcript architecture](./transcript-architecture.md)
+- [Workflow runtime](./workflow-runtime.md)
+- [Cookbook](./cookbook.md)
+
+# Hosts and integration
+
+- [Host boundary](./host-boundary.md)
+- [Bridge protocol](./bridge-protocol.md)
+- [MCP and ACP integration](./mcp-and-acp.md)
+- [Harn portal](./portal.md)
 
 # Reference
 
-- [CLI Reference](./cli-reference.md)
-- [Builtin Functions](./builtins.md)
-- [Editor Integration](./editor-integration.md)
+- [CLI reference](./cli-reference.md)
+- [Builtin functions](./builtins.md)
+- [Editor integration](./editor-integration.md)
 - [Testing](./testing.md)
-- [Cookbook](./cookbook.md)

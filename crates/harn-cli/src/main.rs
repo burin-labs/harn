@@ -212,6 +212,9 @@ async fn main() {
             args.tag.as_deref(),
             args.path.as_deref(),
         ),
+        Command::DumpHighlightKeywords(args) => {
+            commands::dump_highlight_keywords::run(&args.output, args.check);
+        }
     }
 }
 

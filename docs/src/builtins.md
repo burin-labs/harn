@@ -26,7 +26,7 @@ at runtime. If a dict or struct argument is missing a required field or has
 the wrong field type, a descriptive error is thrown before the function
 body executes.
 
-```harn
+```harn,ignore
 fn greet(u: {name: string, age: int}) {
   println("${u.name} is ${u.age}")
 }
@@ -723,7 +723,7 @@ Example:
 ```harn
 circuit_breaker("api", 3, 10000)
 
-for i in 0..5 {
+for i in 0 upto 5 {
   if circuit_check("api") == "open" {
     println("circuit open, skipping call")
   } else {
@@ -930,7 +930,7 @@ harn mcp redirect-uri
 harn mcp login notion
 ```
 
-### MCP Server Mode
+### MCP server mode
 
 Harn pipelines can expose tools, resources, resource templates, and prompts
 as an MCP server using `harn mcp-serve`. The CLI serves them over stdio
@@ -953,7 +953,7 @@ Tool annotations (MCP spec `annotations` field) can be passed in the
 tools = tool_define(tools, "search", "Search files", {
   parameters: { query: {type: "string"} },
   returns: {type: "string"},
-  handler: { args -> "results for " + args.query },
+  handler: { args -> "results for ${args.query}" },
   annotations: {
     title: "File Search",
     readOnlyHint: true,
@@ -992,7 +992,7 @@ pipeline main(task) {
   tools = tool_define(tools, "greet", "Greet someone", {
     parameters: { name: {type: "string"} },
     returns: {type: "string"},
-    handler: { args -> "Hello, " + args.name + "!" }
+    handler: { args -> "Hello, ${args.name}!" }
   })
   mcp_tools(tools)
 
@@ -1005,14 +1005,14 @@ pipeline main(task) {
   mcp_resource_template({
     uri_template: "config://{key}",
     name: "Config Values",
-    handler: { args -> "value for " + args.key }
+    handler: { args -> "value for ${args.key}" }
   })
 
   mcp_prompt({
     name: "review",
     description: "Code review prompt",
     arguments: [{ name: "code", required: true }],
-    handler: { args -> "Please review:\n" + args.code }
+    handler: { args -> "Please review:\n${args.code}" }
   })
 }
 ```

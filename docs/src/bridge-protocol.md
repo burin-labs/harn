@@ -1,4 +1,4 @@
-# Bridge Protocol
+# Bridge protocol
 
 Harn's stdio bridge uses JSON-RPC 2.0 notifications and requests for host/runtime
 coordination that sits below ACP session semantics.

@@ -301,17 +301,9 @@ for chunk in stream {
 max_tokens). The channel closes automatically when the response is
 complete.
 
-## Transcript management
-
-Harn includes transcript primitives for carrying context across calls,
-forks, repairs, and resumptions:
-
-```harn
-let first = llm_call("Plan the work", nil, {provider: "mock"})
-
 ## Delegated workers
 
-For long-running or parallel orchestration, Harn now exposes a worker/task
+For long-running or parallel orchestration, Harn exposes a worker/task
 lifecycle directly in the runtime.
 
 ```harn
@@ -368,7 +360,14 @@ let worker = spawn_agent({
 })
 ```
 
+## Transcript management
+
+Harn includes transcript primitives for carrying context across calls,
+forks, repairs, and resumptions:
+
 ```harn
+let first = llm_call("Plan the work", nil, {provider: "mock"})
+
 let second = llm_call("Continue", nil, {
   provider: "mock",
   transcript: first.transcript
@@ -429,7 +428,10 @@ This is the intended host integration boundary:
 ## Workflow runtime
 
 For multi-stage orchestration, prefer the workflow runtime over product-side
-fn coding_tools() {
+loop wiring. Define a helper that assembles the tools your agents will use:
+
+```harn
+fn review_tools() {
   var tools = tool_registry()
   tools = tool_define(tools, "read", "Read a file", {
     parameters: {path: {type: "string"}},
@@ -449,15 +451,12 @@ fn coding_tools() {
   return tools
 }
 
-loop wiring:
-
-```harn
 let graph = workflow_graph({
   name: "review_and_repair",
   entry: "act",
   nodes: {
-    act: {kind: "stage", mode: "agent", tools: coding_tools()},
-    verify: {kind: "verify", mode: "agent", tools: tool_select(coding_tools(), ["run"])}
+    act: {kind: "stage", mode: "agent", tools: review_tools()},
+    verify: {kind: "verify", mode: "agent", tools: tool_select(review_tools(), ["run"])}
   },
   edges: [{from: "act", to: "verify"}]
 })

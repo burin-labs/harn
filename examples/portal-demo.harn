@@ -1,0 +1,100 @@
+pipeline main() {
+  let root = ".harn-runs"
+  let dir = path_join(root, "portal-demo")
+  mkdir(root)
+  mkdir(dir)
+
+  let graph_flow = workflow_graph(
+    {
+    name: "portal_demo",
+    entry: "gate",
+    nodes: {
+    gate: {
+    kind: "condition",
+    context_policy: {include_kinds: ["plan"]},
+    metadata: {contains_text: "go"},
+  },
+    fan: {kind: "fork"},
+    map_docs: {
+    kind: "map",
+    context_policy: {include_kinds: ["workspace_file"]},
+    map_policy: {item_artifact_kind: "workspace_file", output_kind: "summary"},
+  },
+    join_results: {kind: "join", join_policy: {strategy: "all", require_all_inputs: true}},
+    reduce_report: {
+    kind: "reduce",
+    context_policy: {include_kinds: ["summary"]},
+    input_contract: {input_kinds: ["summary"]},
+    output_contract: {output_kinds: ["plan"]},
+    capability_policy: {capabilities: {workspace: ["read_text"]}, side_effect_level: "read_only"},
+  },
+  },
+    edges: [
+    {from: "gate", to: "fan", branch: "true"},
+    {from: "gate", to: "reduce_report", branch: "false"},
+    {from: "fan", to: "map_docs"},
+    {from: "fan", to: "join_results"},
+    {from: "map_docs", to: "join_results"},
+    {from: "join_results", to: "reduce_report"},
+  ],
+  },
+  )
+  let graph_artifacts = [
+    artifact({kind: "plan", text: "go build the report", relevance: 0.9}),
+    artifact({kind: "workspace_file", title: "alpha.md", text: "alpha content", relevance: 0.8}),
+    artifact({kind: "workspace_file", title: "beta.md", text: "beta content", relevance: 0.7}),
+  ]
+  let success = workflow_execute(
+    "Assemble the report",
+    graph_flow,
+    graph_artifacts,
+    {max_steps: 8, persist_path: path_join(dir, "portal-success.json")},
+  )
+
+  let replayed = workflow_execute(
+    "Assemble the report",
+    graph_flow,
+    graph_artifacts,
+    {
+    max_steps: 8,
+    replay_run: success?.run,
+    replay_mode: "deterministic",
+    persist_path: path_join(dir, "portal-replay.json"),
+  },
+  )
+
+  let failing_flow = workflow_graph(
+    {
+    name: "portal_demo",
+    entry: "act",
+    nodes: {
+    act: {
+    kind: "stage",
+    mode: "llm",
+    model_policy: {provider: "mock"},
+    transcript_policy: {mode: "fork", compact: true, keep_last: 2},
+    retry_policy: {max_attempts: 2},
+    context_policy: {include_kinds: ["summary"]},
+  },
+    verify: {
+    kind: "verify",
+    mode: "llm",
+    model_policy: {provider: "mock"},
+    verify: {assert_text: "Definitely not present in the mock response"},
+  },
+  },
+    edges: [{from: "act", to: "verify"}],
+  },
+  )
+  let failed = workflow_execute(
+    "Write a note that will fail verification",
+    failing_flow,
+    [artifact({kind: "summary", text: "seed note", relevance: 0.6})],
+    {max_steps: 4, persist_path: path_join(dir, "portal-failed.json")},
+  )
+
+  println(success?.status)
+  println(replayed?.status)
+  println(failed?.status)
+  println(success?.run?.replay_fixture?._type)
+}

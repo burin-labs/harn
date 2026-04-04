@@ -36,8 +36,9 @@ pub fn resolve_source_relative_path(path: &str) -> PathBuf {
     if candidate.is_absolute() {
         return candidate;
     }
-    let base = VM_SOURCE_DIR
-        .with(|sd| sd.borrow().clone())
+    let base = current_execution_context()
+        .and_then(|context| context.cwd.map(PathBuf::from))
+        .or_else(|| VM_SOURCE_DIR.with(|sd| sd.borrow().clone()))
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| PathBuf::from("."));
     base.join(candidate)
@@ -364,6 +365,32 @@ mod tests {
         assert_eq!(resolved, dir.join("templates/prompt.txt"));
         reset_process_state();
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resolve_source_relative_path_prefers_execution_cwd_over_source_dir() {
+        let cwd = std::env::temp_dir().join(format!("harn-process-cwd-{}", uuid::Uuid::now_v7()));
+        let source_dir =
+            std::env::temp_dir().join(format!("harn-process-source-{}", uuid::Uuid::now_v7()));
+        std::fs::create_dir_all(&cwd).unwrap();
+        std::fs::create_dir_all(&source_dir).unwrap();
+        set_thread_source_dir(&source_dir);
+        set_thread_execution_context(Some(crate::orchestration::RunExecutionRecord {
+            cwd: Some(cwd.to_string_lossy().to_string()),
+            source_dir: Some(source_dir.to_string_lossy().to_string()),
+            env: BTreeMap::new(),
+            adapter: None,
+            repo_path: None,
+            worktree_path: None,
+            branch: None,
+            base_ref: None,
+            cleanup: None,
+        }));
+        let resolved = resolve_source_relative_path("templates/prompt.txt");
+        assert_eq!(resolved, cwd.join("templates/prompt.txt"));
+        reset_process_state();
+        let _ = std::fs::remove_dir_all(&cwd);
+        let _ = std::fs::remove_dir_all(&source_dir);
     }
 
     #[test]

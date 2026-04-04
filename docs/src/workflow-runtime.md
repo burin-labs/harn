@@ -1,4 +1,4 @@
-# Workflow Runtime
+# Workflow runtime
 
 Harn's workflow runtime is the layer above raw `llm_call()` and
 `agent_loop()`. It gives host applications a typed, inspectable, replayable
@@ -25,7 +25,12 @@ the worker lifecycle, attach worker metadata to their stage records, and tag
 their produced artifacts with delegated provenance so parent workflows can
 inspect and reduce child results explicitly.
 
-fn coding_tools() {
+Start with a helper that registers the tools the workflow will expose to
+each node. Each tool carries its own capability policy so validation can
+enforce them automatically:
+
+```harn
+fn review_tools() {
   var tools = tool_registry()
   tools = tool_define(tools, "read", "Read a file", {
     parameters: {path: {type: "string"}},
@@ -62,16 +67,13 @@ fn coding_tools() {
   return tools
 }
 
-Validation is explicit:
-
-```harn
 let graph = workflow_graph({
   name: "repair_loop",
   entry: "act",
   nodes: {
-    act: {kind: "stage", mode: "agent", tools: coding_tools()},
-    verify: {kind: "verify", mode: "agent", tools: tool_select(coding_tools(), ["run"])},
-    repair: {kind: "stage", mode: "agent", tools: tool_select(coding_tools(), ["edit", "run"])}
+    act: {kind: "stage", mode: "agent", tools: review_tools()},
+    verify: {kind: "verify", mode: "agent", tools: tool_select(review_tools(), ["run"])},
+    repair: {kind: "stage", mode: "agent", tools: tool_select(review_tools(), ["edit", "run"])}
   },
   edges: [
     {from: "act", to: "verify"},
@@ -157,7 +159,7 @@ println(run.run.stages)
 
 `verify` nodes can also run deterministic checks without an LLM loop:
 
-```harn
+```harn,ignore
 verify: {
   kind: "verify",
   verify: {

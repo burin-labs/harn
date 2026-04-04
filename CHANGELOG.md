@@ -2,6 +2,46 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.35
+
+### Added
+
+- **Embedded React portal frontend** — `harn portal` now serves a Vite-built
+  React UI from assets embedded directly into `harn-cli`, so the shipped CLI
+  no longer depends on a separate runtime-built `app.js` / `styles.css` pair.
+- **Portal launch workspace and playground flows** — the portal can now launch
+  existing `.harn` files, run inline scripts, and turn a task plus
+  provider/model selection into a persisted playground run that records launch
+  metadata and transcript sidecars under the watched run directory.
+- **Keyword/highlight generation and docs-snippet verification** — the lexer
+  now exposes a canonical `KEYWORDS` list, `dump-highlight-keywords` can
+  regenerate `docs/theme/harn-keywords.js`, and `make all` now fails if docs
+  ` ```harn ` snippets stop parsing under `harn check`.
+- **Portal demo workflow** — `make portal-demo` / `scripts/portal_demo.sh`
+  generate a purpose-built demo dataset so the portal can be exercised against
+  successful, replay, and failed verification runs without handcrafting sample
+  records.
+
+### Changed
+
+- **Portal observability is substantially deeper** — the run list now supports
+  filtering, sorting, and pagination; run detail now exposes persisted policy
+  summaries, replay metadata, richer stage debug metadata, and more explicit
+  failure summaries for faster post-run inspection.
+- **Portal frontend development is first-class in repo tooling** — root npm
+  scripts, hook checks, and docs now cover portal build/lint/test/dev flows,
+  and `harn portal` defaults are documented against the new `4721` / `4723`
+  local workflow.
+- **Process-relative execution now respects the actual execution cwd** —
+  runtime path resolution and the Harn test runner now preserve canonical file
+  paths, execute tests from each file’s parent directory when needed, and
+  restore the shell cwd afterward so relative file/process behavior matches the
+  launched workspace more reliably.
+- **Docs/spec/setup surfaces were tightened around the current product shape**
+  — README and language/spec docs now consistently describe Harn as an AI-agent
+  orchestration runtime, portal/launch behavior is documented coherently, and
+  spec examples were updated or marked to avoid snippet-audit drift.
+
 ## v0.5.34
 
 ### Fixed

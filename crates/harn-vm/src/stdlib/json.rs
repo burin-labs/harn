@@ -1,8 +1,17 @@
 use std::collections::BTreeMap;
 use std::rc::Rc;
+use std::{cell::RefCell, thread_local};
 
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
+
+thread_local! {
+    static JSON_PARSE_CACHE: RefCell<BTreeMap<String, VmValue>> = const { RefCell::new(BTreeMap::new()) };
+}
+
+pub(crate) fn reset_json_state() {
+    JSON_PARSE_CACHE.with(|cache| cache.borrow_mut().clear());
+}
 
 pub(crate) fn register_json_builtins(vm: &mut Vm) {
     vm.register_builtin("json_stringify", |args, _out| {
@@ -12,8 +21,17 @@ pub(crate) fn register_json_builtins(vm: &mut Vm) {
 
     vm.register_builtin("json_parse", |args, _out| {
         let text = args.first().map(|a| a.display()).unwrap_or_default();
+        if let Some(cached) = JSON_PARSE_CACHE.with(|cache| cache.borrow().get(&text).cloned()) {
+            return Ok(cached);
+        }
         match serde_json::from_str::<serde_json::Value>(&text) {
-            Ok(jv) => Ok(json_to_vm_value(&jv)),
+            Ok(jv) => {
+                let parsed = json_to_vm_value(&jv);
+                JSON_PARSE_CACHE.with(|cache| {
+                    cache.borrow_mut().insert(text, parsed.clone());
+                });
+                Ok(parsed)
+            }
             Err(e) => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
                 "JSON parse error: {e}"
             ))))),

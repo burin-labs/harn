@@ -4,7 +4,7 @@
 
 Version: 1.0 (derived from implementation, 2026-04-01)
 
-Harn is a pipeline-oriented programming language for orchestrating AI coding agents.
+Harn is a pipeline-oriented programming language for orchestrating AI agents.
 It is implemented as a Rust workspace with a lexer, parser, type checker,
 tree-walking VM, tree-sitter grammar, and CLI/runtime tooling. Programs consist of named pipelines
 containing imperative statements, expressions, and calls to registered builtins
@@ -992,10 +992,10 @@ The error variable `(e)` is optional: `catch { ... }` is valid without it.
 The `finally` block is optional and runs regardless of whether the try body
 succeeds, throws, or the catch body re-throws. Supported forms:
 
-```harn
-try { ... } catch (e) { ... } finally { ... }
+```harn,ignore
+try { ... } catch e { ... } finally { ... }
 try { ... } finally { ... }
-try { ... } catch (e) { ... }
+try { ... } catch e { ... }
 ```
 
 `return`, `break`, and `continue` inside a try body with a finally block will
@@ -1459,7 +1459,7 @@ Width subtyping: a dict with extra fields satisfies a shape that requires fewer 
 
 ```harn
 fn greet(u: {name: string}) -> string {
-  return "hi " + u["name"]
+  return "hi ${u["name"]}"
 }
 greet({name: "Bob", age: 25})  // OK — extra field allowed
 ```
@@ -1509,7 +1509,7 @@ the then-branch by removing `nil` from the union:
 fn greet(name: string | nil) -> string {
   if name != nil {
     // name is narrowed to `string` here
-    return "hello " + name
+    return "hello ${name}"
   }
   return "hello stranger"
 }
@@ -1541,7 +1541,7 @@ parameter has a structural type annotation (e.g., `{name: string, age: int}`),
 the VM checks that the argument is a dict (or struct instance) with all
 required fields and that each field has the expected type.
 
-```harn
+```harn,ignore
 fn process(user: {name: string, age: int}) {
   println("${user.name} is ${user.age}")
 }

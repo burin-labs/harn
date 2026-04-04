@@ -1,4 +1,4 @@
-# Transcript Architecture
+# Transcript architecture
 
 Harn transcripts are now versioned runtime values with three distinct layers:
 

@@ -1,4 +1,4 @@
-# Getting Started
+# Getting started
 
 This page gets you from zero to running your first Harn program.
 
@@ -123,6 +123,6 @@ harn mcp login https://mcp.notion.com/mcp --scope "read write"
 ## Next steps
 
 - **[Why Harn?](./why-harn.md)** -- What problems Harn solves
-- **[Language Basics](./language-basics.md)** -- Syntax, types, control flow
-- **[LLM Calls and Agent Loops](./llm-and-agents.md)** -- Calling models and building agents
+- **[Language basics](./language-basics.md)** -- Syntax, types, control flow
+- **[LLM calls and agent loops](./llm-and-agents.md)** -- Calling models and building agents
 - **[Cookbook](./cookbook.md)** -- Practical recipes and patterns

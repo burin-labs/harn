@@ -35,3 +35,4 @@ clap = { version = "4", features = ["derive"] }
 tower = { version = "0.5", features = ["util"] }
 time = { version = "0.3", features = ["formatting", "parsing"] }
 tempfile = "3"
+include_dir = "0.7"
