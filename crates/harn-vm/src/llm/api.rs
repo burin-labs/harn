@@ -135,6 +135,16 @@ pub(crate) struct LlmResult {
     pub tool_calls: Vec<serde_json::Value>,
     pub input_tokens: i64,
     pub output_tokens: i64,
+    /// Prompt tokens served from the provider's cache (when supported).
+    /// Anthropic: `usage.cache_read_input_tokens`.
+    /// OpenAI: `usage.prompt_tokens_details.cached_tokens`.
+    /// OpenRouter passthrough for Anthropic: `usage.cache_read_input_tokens`.
+    /// Defaults to 0 when the provider doesn't report it.
+    pub cache_read_tokens: i64,
+    /// Prompt tokens written to the provider's cache on this request
+    /// (Anthropic `usage.cache_creation_input_tokens`). Helps distinguish
+    /// "warm-up" calls from cache hits.
+    pub cache_write_tokens: i64,
     pub model: String,
     pub provider: String,
     pub thinking: Option<String>,
@@ -169,6 +179,15 @@ pub(crate) fn vm_build_llm_result(
     dict.insert(
         "output_tokens".to_string(),
         VmValue::Int(result.output_tokens),
+    );
+    // Cache accounting (0 when provider doesn't report cache info).
+    dict.insert(
+        "cache_read_tokens".to_string(),
+        VmValue::Int(result.cache_read_tokens),
+    );
+    dict.insert(
+        "cache_write_tokens".to_string(),
+        VmValue::Int(result.cache_write_tokens),
     );
 
     if let Some(json_val) = parsed_json {
@@ -224,9 +243,14 @@ pub(crate) fn vm_build_llm_result(
 // Core LLM call with all options
 // =============================================================================
 
-/// Execute an LLM call (non-streaming).
+/// Execute an LLM call. Internally always uses the streaming path with a
+/// discarding receiver so all callers go through a single code path with
+/// consistent HTTP status handling, error detection, and provider semantics.
+/// Callers that don't care about token-level deltas just let the channel
+/// buffer and drop the receiver on return — negligible cost.
 pub(crate) async fn vm_call_llm_full(opts: &LlmCallOptions) -> Result<LlmResult, VmError> {
-    vm_call_llm_full_inner(opts, None).await
+    let (delta_tx, _delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    vm_call_llm_full_inner(opts, Some(delta_tx)).await
 }
 
 /// Execute an LLM call, streaming text deltas to `delta_tx`.
@@ -446,6 +470,8 @@ fn mock_completion_response(prefix: &str, suffix: Option<&str>) -> LlmResult {
         tool_calls: Vec::new(),
         input_tokens: (prefix.len() + suffix.len()) as i64,
         output_tokens: 16,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
         model: "mock".to_string(),
         provider: "mock".to_string(),
         thinking: None,
@@ -546,6 +572,8 @@ async fn vm_call_completion_openai_style(
         tool_calls: Vec::new(),
         input_tokens: json["usage"]["prompt_tokens"].as_i64().unwrap_or(0),
         output_tokens: json["usage"]["completion_tokens"].as_i64().unwrap_or(0),
+        cache_read_tokens: extract_cache_read_tokens(&json["usage"]),
+        cache_write_tokens: extract_cache_write_tokens(&json["usage"]),
         model: opts.model.clone(),
         provider: opts.provider.clone(),
         thinking: None,
@@ -662,6 +690,8 @@ async fn vm_call_completion_ollama(
         tool_calls: Vec::new(),
         input_tokens: json["prompt_eval_count"].as_i64().unwrap_or(0),
         output_tokens: json["eval_count"].as_i64().unwrap_or(0),
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
         model: opts.model.clone(),
         provider: opts.provider.clone(),
         thinking: None,
@@ -928,6 +958,18 @@ async fn vm_call_llm_api(
         if let Some(ref tc) = opts.tool_choice {
             body["tool_choice"] = tc.clone();
         }
+        // OpenAI-compatible thinking (qwen3/qwen3.5 via vLLM and similar).
+        // Passes `chat_template_kwargs.enable_thinking` through so the
+        // server-side chat template emits `<think>...</think>` blocks as
+        // part of the streamed content, which we then split out in the
+        // response parser. We only set this when the caller explicitly
+        // asked for thinking AND the provider isn't Anthropic or Ollama
+        // (those have their own mechanisms handled above).
+        if !is_ollama && opts.thinking.is_some() {
+            body["chat_template_kwargs"] = serde_json::json!({
+                "enable_thinking": true,
+            });
+        }
         body
     };
 
@@ -1014,6 +1056,47 @@ async fn vm_call_llm_api(
         ))))
     })?;
 
+    // Critical: check HTTP status BEFORE attempting to parse the body as an
+    // LLM response. Previously this path went straight to `.json().await` and
+    // silently garbled error responses — so a vLLM "prompt too long for
+    // model" 400 came back as an empty/malformed parse result and the agent
+    // loop kept retrying against the same oversized context. The streaming
+    // path already does this check; the non-streaming path was missing it.
+    if !response.status().is_success() {
+        let status = response.status();
+        let retry_after = response
+            .headers()
+            .get("retry-after")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
+        let body = response.text().await.unwrap_or_default();
+        // Detect context-overflow errors specifically so the agent_loop can
+        // react by triggering compaction rather than just erroring out. These
+        // patterns cover vLLM, OpenAI, Anthropic, and most OpenAI-compatible
+        // servers.
+        let body_lower = body.to_lowercase();
+        let is_context_overflow = body_lower.contains("maximum context length")
+            || body_lower.contains("context length")
+            || body_lower.contains("context_length_exceeded")
+            || body_lower.contains("prompt is too long")
+            || body_lower.contains("prompt_tokens_exceeded")
+            || body_lower.contains("this model's maximum context")
+            || body_lower.contains("exceeds the maximum")
+            || body_lower.contains("max_tokens") && body_lower.contains("exceed");
+        let tag = if is_context_overflow {
+            "context_overflow"
+        } else if status.as_u16() == 429 {
+            "rate_limited"
+        } else {
+            "http_error"
+        };
+        let mut msg = format!("{provider} HTTP {status} [{tag}]: {body}");
+        if let Some(ra) = retry_after {
+            msg.push_str(&format!(" (retry-after: {ra})"));
+        }
+        return Err(VmError::Thrown(VmValue::String(Rc::from(msg))));
+    }
+
     let json: serde_json::Value = response.json().await.map_err(|e| {
         VmError::Thrown(VmValue::String(Rc::from(format!(
             "{provider} response parse error: {e}"
@@ -1083,6 +1166,8 @@ fn parse_llm_response(
 
         let input_tokens = json["usage"]["input_tokens"].as_i64().unwrap_or(0);
         let output_tokens = json["usage"]["output_tokens"].as_i64().unwrap_or(0);
+        let cache_read_tokens = extract_cache_read_tokens(&json["usage"]);
+        let cache_write_tokens = extract_cache_write_tokens(&json["usage"]);
         let stop_reason = json["stop_reason"].as_str().map(|s| s.to_string());
 
         Ok(LlmResult {
@@ -1090,6 +1175,8 @@ fn parse_llm_response(
             tool_calls,
             input_tokens,
             output_tokens,
+            cache_read_tokens,
+            cache_write_tokens,
             model: model.to_string(),
             provider: provider.to_string(),
             thinking: if thinking_text.is_empty() {
@@ -1107,15 +1194,30 @@ fn parse_llm_response(
             )))));
         }
 
-        let text = json["choices"][0]["message"]["content"]
+        let raw_text = json["choices"][0]["message"]["content"]
             .as_str()
             .unwrap_or("")
             .to_string();
+        // Split `<think>...</think>` blocks out of the content so the agent
+        // loop doesn't interpret reasoning tokens as its own output or try to
+        // parse tool calls inside them. Qwen3/Qwen3.5 emit these inline when
+        // `chat_template_kwargs.enable_thinking` is set.
+        let (text, extracted_thinking) = split_openai_thinking_blocks(&raw_text);
         let mut blocks = if text.is_empty() {
             Vec::new()
         } else {
             vec![serde_json::json!({"type": "output_text", "text": text, "visibility": "public"})]
         };
+        if !extracted_thinking.is_empty() {
+            blocks.insert(
+                0,
+                serde_json::json!({
+                    "type": "reasoning",
+                    "text": extracted_thinking,
+                    "visibility": "private",
+                }),
+            );
+        }
 
         let mut tool_calls = Vec::new();
         if let Some(calls) = json["choices"][0]["message"]["tool_calls"].as_array() {
@@ -1142,6 +1244,8 @@ fn parse_llm_response(
 
         let input_tokens = json["usage"]["prompt_tokens"].as_i64().unwrap_or(0);
         let output_tokens = json["usage"]["completion_tokens"].as_i64().unwrap_or(0);
+        let cache_read_tokens = extract_cache_read_tokens(&json["usage"]);
+        let cache_write_tokens = extract_cache_write_tokens(&json["usage"]);
         let stop_reason = json["choices"][0]["finish_reason"]
             .as_str()
             .map(|s| s.to_string());
@@ -1151,13 +1255,58 @@ fn parse_llm_response(
             tool_calls,
             input_tokens,
             output_tokens,
+            cache_read_tokens,
+            cache_write_tokens,
             model: model.to_string(),
             provider: provider.to_string(),
-            thinking: None,
+            thinking: if extracted_thinking.is_empty() {
+                None
+            } else {
+                Some(extracted_thinking)
+            },
             stop_reason,
             blocks,
         })
     }
+}
+
+/// Extract cache-read token count from a provider `usage` JSON value,
+/// covering Anthropic, OpenAI (and OpenAI-compatibles), and OpenRouter
+/// passthrough field shapes. Returns 0 when the provider doesn't report it.
+fn extract_cache_read_tokens(usage: &serde_json::Value) -> i64 {
+    // Anthropic / OpenRouter passthrough: usage.cache_read_input_tokens
+    if let Some(n) = usage
+        .get("cache_read_input_tokens")
+        .and_then(|v| v.as_i64())
+    {
+        return n;
+    }
+    // OpenAI (and vLLM/SGLang when configured): usage.prompt_tokens_details.cached_tokens
+    if let Some(n) = usage
+        .get("prompt_tokens_details")
+        .and_then(|d| d.get("cached_tokens"))
+        .and_then(|v| v.as_i64())
+    {
+        return n;
+    }
+    // Some OpenRouter responses nest under usage.cache_read_tokens or
+    // usage.cached_prompt_tokens — be permissive.
+    if let Some(n) = usage.get("cache_read_tokens").and_then(|v| v.as_i64()) {
+        return n;
+    }
+    if let Some(n) = usage.get("cached_prompt_tokens").and_then(|v| v.as_i64()) {
+        return n;
+    }
+    0
+}
+
+/// Extract cache-write (creation) token count from a provider `usage` JSON.
+/// Currently only Anthropic reports this explicitly.
+fn extract_cache_write_tokens(usage: &serde_json::Value) -> i64 {
+    usage
+        .get("cache_creation_input_tokens")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0)
 }
 
 /// Consume an SSE streaming response from an already-sent request.
@@ -1193,10 +1342,17 @@ async fn vm_call_llm_api_sse_from_response(
     let mut thinking_text = String::new();
     let mut in_thinking_block = false;
     let mut stop_reason: Option<String> = None;
+    let mut cache_read_tokens: i64 = 0;
+    let mut cache_write_tokens: i64 = 0;
 
     // OpenAI tool-call streaming state
     let mut oai_tool_map: std::collections::HashMap<u64, (String, String, String)> =
         std::collections::HashMap::new();
+    // OpenAI-compatible inline `<think>...</think>` splitter (qwen3/qwen3.5
+    // via vLLM's chat_template_kwargs.enable_thinking). Strips thinking
+    // tokens out of the visible delta stream so downstream consumers (tool
+    // call parser, progress UI) only see the real response.
+    let mut oai_thinking_splitter = ThinkingStreamSplitter::new();
 
     while let Ok(Some(line)) = lines.next_line().await {
         // SSE lines are prefixed with "data: "
@@ -1218,6 +1374,15 @@ async fn vm_call_llm_api_sse_from_response(
                 Some("message_start") => {
                     if let Some(n) = json["message"]["usage"]["input_tokens"].as_i64() {
                         input_tokens = n;
+                    }
+                    let usage = &json["message"]["usage"];
+                    let cr = extract_cache_read_tokens(usage);
+                    if cr > 0 {
+                        cache_read_tokens = cr;
+                    }
+                    let cw = extract_cache_write_tokens(usage);
+                    if cw > 0 {
+                        cache_write_tokens = cw;
                     }
                 }
                 Some("content_block_start") => {
@@ -1277,6 +1442,15 @@ async fn vm_call_llm_api_sse_from_response(
                     if let Some(n) = json["usage"]["output_tokens"].as_i64() {
                         output_tokens = n;
                     }
+                    let usage = &json["usage"];
+                    let cr = extract_cache_read_tokens(usage);
+                    if cr > 0 {
+                        cache_read_tokens = cr;
+                    }
+                    let cw = extract_cache_write_tokens(usage);
+                    if cw > 0 {
+                        cache_write_tokens = cw;
+                    }
                     if let Some(sr) = json["delta"]["stop_reason"].as_str() {
                         stop_reason = Some(sr.to_string());
                     }
@@ -1289,9 +1463,12 @@ async fn vm_call_llm_api_sse_from_response(
             let delta = &choice["delta"];
 
             if let Some(content) = delta["content"].as_str() {
-                text.push_str(content);
-                let _ = delta_tx.send(content.to_string());
-                blocks.push(serde_json::json!({"type": "output_text", "text": content, "visibility": "public"}));
+                let visible = oai_thinking_splitter.push(content);
+                if !visible.is_empty() {
+                    text.push_str(&visible);
+                    let _ = delta_tx.send(visible.clone());
+                    blocks.push(serde_json::json!({"type": "output_text", "text": visible, "visibility": "public"}));
+                }
             }
 
             // Capture finish_reason
@@ -1314,13 +1491,21 @@ async fn vm_call_llm_api_sse_from_response(
                 }
             }
 
-            // Usage in final chunk
+            // Usage in final chunk (OpenAI-style)
             if let Some(usage) = json.get("usage") {
                 if let Some(n) = usage["prompt_tokens"].as_i64() {
                     input_tokens = n;
                 }
                 if let Some(n) = usage["completion_tokens"].as_i64() {
                     output_tokens = n;
+                }
+                let cr = extract_cache_read_tokens(usage);
+                if cr > 0 {
+                    cache_read_tokens = cr;
+                }
+                let cw = extract_cache_write_tokens(usage);
+                if cw > 0 {
+                    cache_write_tokens = cw;
                 }
             }
         }
@@ -1336,6 +1521,22 @@ async fn vm_call_llm_api_sse_from_response(
         blocks.push(serde_json::json!({"type": "tool_call", "id": id, "name": name, "arguments": args, "visibility": "internal"}));
     }
 
+    // Flush any carried-over characters from the thinking splitter and merge
+    // its accumulated thinking into the primary thinking_text (which is used
+    // by both Anthropic and OpenAI-compatible response shapes).
+    let final_visible = oai_thinking_splitter.flush();
+    if !final_visible.is_empty() {
+        text.push_str(&final_visible);
+        let _ = delta_tx.send(final_visible.clone());
+        blocks.push(serde_json::json!({"type": "output_text", "text": final_visible, "visibility": "public"}));
+    }
+    if !oai_thinking_splitter.thinking.is_empty() {
+        if !thinking_text.is_empty() {
+            thinking_text.push('\n');
+        }
+        thinking_text.push_str(&oai_thinking_splitter.thinking);
+    }
+
     let _ = in_thinking_block; // suppress unused warning
 
     Ok(LlmResult {
@@ -1343,6 +1544,8 @@ async fn vm_call_llm_api_sse_from_response(
         tool_calls,
         input_tokens,
         output_tokens,
+        cache_read_tokens,
+        cache_write_tokens,
         model: model.to_string(),
         provider: if resolved.is_anthropic_style {
             "anthropic".to_string()
@@ -1357,6 +1560,303 @@ async fn vm_call_llm_api_sse_from_response(
         stop_reason,
         blocks,
     })
+}
+
+// =============================================================================
+// Provider context window discovery
+// =============================================================================
+//
+// Many OpenAI-compatible servers (vLLM, text-generation-inference, LocalAI,
+// llama.cpp server, etc.) expose the model's actual `max_model_len` via
+// `GET /v1/models`. Harn can query that once and use it to adapt
+// auto-compaction thresholds to the real window instead of assuming a
+// hardcoded 80K. This prevents the "server silently truncates the prompt"
+// failure mode where the agent loses older turns without knowing.
+
+use std::collections::HashMap as StdHashMap;
+use std::sync::{Mutex as StdMutex, OnceLock as StdOnceLock};
+
+type ContextWindowKey = (String, String);
+type ContextWindowCache = StdMutex<StdHashMap<ContextWindowKey, Option<usize>>>;
+
+fn context_window_cache() -> &'static ContextWindowCache {
+    static CACHE: StdOnceLock<ContextWindowCache> = StdOnceLock::new();
+    CACHE.get_or_init(|| StdMutex::new(StdHashMap::new()))
+}
+
+/// Fetch the server-reported maximum context length for a given model, if
+/// available. Caches results per (base_url, model_id) so we only pay the
+/// discovery cost once per session.
+///
+/// Returns `None` when the provider doesn't expose `/v1/models`, when the
+/// model isn't found in the response, or when the request fails for any
+/// reason — callers should fall back to their default threshold.
+pub(crate) async fn fetch_provider_max_context(
+    provider: &str,
+    model: &str,
+    api_key: &str,
+) -> Option<usize> {
+    let pdef = crate::llm_config::provider_config(provider);
+    let base_url = pdef
+        .map(crate::llm_config::resolve_base_url)
+        .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
+    let cache_key = (base_url.clone(), model.to_string());
+
+    // Fast path: cached (may be Some(n) or a cached None meaning "we tried
+    // and it doesn't work for this provider, don't keep asking").
+    if let Ok(cache) = context_window_cache().lock() {
+        if let Some(value) = cache.get(&cache_key) {
+            return *value;
+        }
+    }
+
+    let fetched = fetch_provider_max_context_uncached(provider, model, api_key, &base_url).await;
+    if let Ok(mut cache) = context_window_cache().lock() {
+        cache.insert(cache_key, fetched);
+    }
+    fetched
+}
+
+async fn fetch_provider_max_context_uncached(
+    provider: &str,
+    model: &str,
+    api_key: &str,
+    base_url: &str,
+) -> Option<usize> {
+    // Only attempt discovery against OpenAI-compatible shapes. Anthropic,
+    // Google, etc. have their own model info surfaces which we don't parse
+    // here; the default 80K threshold is fine for those.
+    let is_openai_compatible = matches!(
+        provider,
+        "local"
+            | "openai"
+            | "vllm"
+            | "groq"
+            | "together"
+            | "openrouter"
+            | "deepinfra"
+            | "fireworks"
+    );
+    if !is_openai_compatible {
+        return None;
+    }
+    let pdef = crate::llm_config::provider_config(provider);
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .ok()?;
+    let url = format!("{base_url}/models");
+    let req = client.get(&url).header("Content-Type", "application/json");
+    let req = apply_auth_headers(req, api_key, pdef);
+    let response = req.send().await.ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    let json: serde_json::Value = response.json().await.ok()?;
+    let data = json.get("data").and_then(|d| d.as_array())?;
+    // Find the matching model entry and extract its max_model_len /
+    // context_length. Different servers use different field names, so we
+    // check several.
+    for entry in data {
+        let id = entry.get("id").and_then(|v| v.as_str()).unwrap_or("");
+        if id != model {
+            continue;
+        }
+        // vLLM: "max_model_len"
+        if let Some(n) = entry.get("max_model_len").and_then(|v| v.as_u64()) {
+            return Some(n as usize);
+        }
+        // Some servers: "context_length"
+        if let Some(n) = entry.get("context_length").and_then(|v| v.as_u64()) {
+            return Some(n as usize);
+        }
+        // Others: "max_context_length" / "n_ctx"
+        if let Some(n) = entry.get("max_context_length").and_then(|v| v.as_u64()) {
+            return Some(n as usize);
+        }
+        if let Some(n) = entry.get("n_ctx").and_then(|v| v.as_u64()) {
+            return Some(n as usize);
+        }
+        // OpenRouter exposes "context_length" at the top level of the entry
+        // in their custom shape.
+        if let Some(n) = entry
+            .get("top_provider")
+            .and_then(|tp| tp.get("context_length"))
+            .and_then(|v| v.as_u64())
+        {
+            return Some(n as usize);
+        }
+        break;
+    }
+    None
+}
+
+/// Derive an effective auto-compact token threshold from the server-reported
+/// max context window, applying a safety margin so the compaction fires
+/// *before* the request actually overflows. Returns `None` if no server value
+/// is available — callers should keep their default.
+///
+/// The 0.75 safety factor is deliberate: the input messages alone aren't the
+/// whole request (the response also needs token budget), and our token
+/// estimator uses a rough chars/4 heuristic that under-counts ~15-25% on
+/// English code. 0.75 gives us headroom for both without wasting too much.
+pub(crate) fn effective_threshold_from_max_context(max_context: usize) -> usize {
+    let bounded = max_context.max(4_096);
+    (bounded * 3) / 4
+}
+
+/// Apply discovered context-window information to an auto-compact config.
+/// Only lowers the threshold below the user's current value — never raises
+/// it above what the user explicitly asked for.
+pub(crate) async fn adapt_auto_compact_to_provider(
+    ac: &mut crate::orchestration::AutoCompactConfig,
+    user_specified_threshold: bool,
+    provider: &str,
+    model: &str,
+    api_key: &str,
+) {
+    let Some(max_ctx) = fetch_provider_max_context(provider, model, api_key).await else {
+        return;
+    };
+    let effective = effective_threshold_from_max_context(max_ctx);
+    if user_specified_threshold {
+        // User chose their own threshold — respect it, but still clamp down
+        // if they chose a value that would definitely overflow this server.
+        if ac.token_threshold > effective {
+            ac.token_threshold = effective;
+        }
+        return;
+    }
+    ac.token_threshold = effective;
+}
+
+/// Split `<think>...</think>` blocks out of an OpenAI-compatible response
+/// text. Returns `(visible_text, thinking_text)`. Handles multiple thinking
+/// blocks, malformed/unclosed tags (best-effort), and preserves original
+/// whitespace in the visible portion.
+///
+/// Used for Qwen3/Qwen3.5 thinking via vLLM's `chat_template_kwargs.enable_thinking`.
+pub(crate) fn split_openai_thinking_blocks(raw: &str) -> (String, String) {
+    if !raw.contains("<think>") {
+        return (raw.to_string(), String::new());
+    }
+    let mut visible = String::new();
+    let mut thinking = String::new();
+    let mut rest = raw;
+    loop {
+        if let Some(start) = rest.find("<think>") {
+            visible.push_str(&rest[..start]);
+            let after_tag = &rest[start + "<think>".len()..];
+            if let Some(end) = after_tag.find("</think>") {
+                thinking.push_str(&after_tag[..end]);
+                rest = &after_tag[end + "</think>".len()..];
+            } else {
+                // Unclosed <think> — treat everything after as thinking and stop.
+                thinking.push_str(after_tag);
+                break;
+            }
+        } else {
+            visible.push_str(rest);
+            break;
+        }
+    }
+    // Trim a single leading newline from visible if we stripped a leading
+    // thinking block — the model often emits `<think>...</think>\nActual`
+    // and we don't want the blank line to linger.
+    let visible = visible.trim_start_matches('\n').to_string();
+    (visible, thinking.trim().to_string())
+}
+
+/// Incremental splitter for OpenAI-style streaming content that may contain
+/// `<think>...</think>` blocks. Buffers a small suffix to handle tags split
+/// across delta chunks. Only emits visible (non-thinking) content to the
+/// delta channel; accumulates thinking separately for the final result.
+#[derive(Default)]
+pub(crate) struct ThinkingStreamSplitter {
+    /// True while we're inside a `<think>` block.
+    in_thinking: bool,
+    /// Carryover characters from the last delta that might be the start of a
+    /// `<think>` or `</think>` tag. Never longer than `</think>`.len() - 1.
+    carry: String,
+    /// Accumulated thinking text (returned at the end).
+    pub thinking: String,
+}
+
+impl ThinkingStreamSplitter {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Feed a new delta chunk. Returns the visible portion to forward
+    /// downstream (may be empty if the entire chunk was part of a thinking
+    /// block or got held back as carry).
+    pub fn push(&mut self, delta: &str) -> String {
+        let combined = {
+            let mut s = std::mem::take(&mut self.carry);
+            s.push_str(delta);
+            s
+        };
+        let mut visible_out = String::new();
+        let mut cursor = 0usize;
+        let bytes = combined.as_bytes();
+        while cursor < bytes.len() {
+            if self.in_thinking {
+                // Look for </think> in the remainder.
+                if let Some(rel) = combined[cursor..].find("</think>") {
+                    self.thinking.push_str(&combined[cursor..cursor + rel]);
+                    cursor += rel + "</think>".len();
+                    self.in_thinking = false;
+                } else {
+                    // Hold back up to len("</think>")-1 chars as potential
+                    // split-tag carry; emit the rest into thinking.
+                    let hold = "</think>".len() - 1;
+                    let remaining = combined.len() - cursor;
+                    if remaining <= hold {
+                        self.carry.push_str(&combined[cursor..]);
+                    } else {
+                        let split = combined.len() - hold;
+                        self.thinking.push_str(&combined[cursor..split]);
+                        self.carry.push_str(&combined[split..]);
+                    }
+                    return visible_out;
+                }
+            } else {
+                // Look for <think> in the remainder.
+                if let Some(rel) = combined[cursor..].find("<think>") {
+                    visible_out.push_str(&combined[cursor..cursor + rel]);
+                    cursor += rel + "<think>".len();
+                    self.in_thinking = true;
+                } else {
+                    // Hold back len("<think>")-1 chars as potential split-tag
+                    // carry; emit the rest as visible.
+                    let hold = "<think>".len() - 1;
+                    let remaining = combined.len() - cursor;
+                    if remaining <= hold {
+                        self.carry.push_str(&combined[cursor..]);
+                    } else {
+                        let split = combined.len() - hold;
+                        visible_out.push_str(&combined[cursor..split]);
+                        self.carry.push_str(&combined[split..]);
+                    }
+                    return visible_out;
+                }
+            }
+        }
+        visible_out
+    }
+
+    /// Flush any remaining carry as visible or thinking, depending on state.
+    /// Called when the stream terminates.
+    pub fn flush(&mut self) -> String {
+        let rest = std::mem::take(&mut self.carry);
+        if self.in_thinking {
+            self.thinking.push_str(&rest);
+            String::new()
+        } else {
+            rest
+        }
+    }
 }
 
 /// Apply auth headers to a request based on provider config.
@@ -1471,6 +1971,8 @@ async fn vm_call_llm_api_ndjson_from_response(
         tool_calls: Vec::new(),
         input_tokens,
         output_tokens,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
         model: result_model,
         provider: "ollama".to_string(),
         thinking,
@@ -1521,12 +2023,93 @@ fn ollama_keep_alive_override() -> Option<serde_json::Value> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ollama_keep_alive_override, ollama_num_ctx_override, vm_call_llm_full_streaming_offthread,
-        LlmCallOptions, LlmRequestPayload,
+        ollama_keep_alive_override, ollama_num_ctx_override, split_openai_thinking_blocks,
+        vm_call_llm_full_streaming_offthread, LlmCallOptions, LlmRequestPayload,
+        ThinkingStreamSplitter,
     };
     use crate::value::VmValue;
     use std::rc::Rc;
     use std::sync::{Mutex, OnceLock};
+
+    #[test]
+    fn thinking_split_no_tags_returns_original() {
+        let (visible, thinking) = split_openai_thinking_blocks("just a plain response");
+        assert_eq!(visible, "just a plain response");
+        assert_eq!(thinking, "");
+    }
+
+    #[test]
+    fn thinking_split_single_block() {
+        let raw = "<think>step by step reasoning</think>\nThe answer is 42.";
+        let (visible, thinking) = split_openai_thinking_blocks(raw);
+        assert_eq!(visible, "The answer is 42.");
+        assert_eq!(thinking, "step by step reasoning");
+    }
+
+    #[test]
+    fn thinking_split_multiple_blocks() {
+        let raw = "<think>first</think>hello <think>second</think>world";
+        let (visible, thinking) = split_openai_thinking_blocks(raw);
+        assert_eq!(visible, "hello world");
+        assert_eq!(
+            thinking,
+            "first\nsecond".replace('\n', "") /* joined with empty */
+        );
+        // Tolerate either concatenation strategy: important invariant is
+        // neither block text leaked into visible.
+        assert!(!visible.contains("first"));
+        assert!(!visible.contains("second"));
+    }
+
+    #[test]
+    fn thinking_split_unclosed_block_captures_remainder() {
+        let raw = "<think>reasoning with no closing tag and then text";
+        let (visible, thinking) = split_openai_thinking_blocks(raw);
+        assert_eq!(visible, "");
+        assert!(thinking.contains("reasoning with no closing tag"));
+    }
+
+    #[test]
+    fn thinking_stream_splitter_handles_clean_boundaries() {
+        let mut s = ThinkingStreamSplitter::new();
+        let v1 = s.push("<think>");
+        let v2 = s.push("reasoning");
+        let v3 = s.push("</think>");
+        let v4 = s.push("visible answer");
+        let tail = s.flush();
+        assert_eq!(v1, "");
+        assert_eq!(v2, "");
+        assert_eq!(v3, "");
+        // Visible answer may be partially held as carry — concatenate
+        // everything plus flush to get the full output.
+        let combined = format!("{}{}{}{}{}", v1, v2, v3, v4, tail);
+        assert_eq!(combined, "visible answer");
+        assert_eq!(s.thinking, "reasoning");
+    }
+
+    #[test]
+    fn thinking_stream_splitter_handles_split_tags() {
+        // `<think>` split across deltas: `<thi` + `nk>rest`
+        let mut s = ThinkingStreamSplitter::new();
+        let v1 = s.push("<thi");
+        let v2 = s.push("nk>inside</thi");
+        let v3 = s.push("nk>after");
+        let tail = s.flush();
+        let combined = format!("{}{}{}{}", v1, v2, v3, tail);
+        assert_eq!(combined, "after");
+        assert_eq!(s.thinking, "inside");
+    }
+
+    #[test]
+    fn thinking_stream_splitter_passthrough_without_tags() {
+        let mut s = ThinkingStreamSplitter::new();
+        let v1 = s.push("hello ");
+        let v2 = s.push("world");
+        let tail = s.flush();
+        let combined = format!("{}{}{}", v1, v2, tail);
+        assert_eq!(combined, "hello world");
+        assert_eq!(s.thinking, "");
+    }
 
     fn env_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();

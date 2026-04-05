@@ -392,25 +392,29 @@ fn test_nested_list_in_dict_wrapping() {
 
 #[test]
 fn test_nil_coalescing_with_logical_ops() {
-    // ?? binds less tightly than ||, so `a ?? b || c` is `a ?? (b || c)`.
-    // No parens needed — natural precedence is correct.
+    // `??` binds tighter than `||`, `&&`, comparisons, and additive ops
+    // (placed between multiplicative and additive in the parser). So
+    // `a ?? b || c` parses naturally as `(a ?? b) || c` and needs no parens.
+    // This matches the intuition `xs?.count ?? 0 > 0` → `(xs?.count ?? 0) > 0`.
     let source = r#"pipeline default(task) {
   let x = a ?? b || c
 }"#;
     let result = format_source(source).unwrap();
     assert!(
         result.contains("a ?? b || c"),
-        "Expected no parens (natural precedence), got:\n{result}"
+        "Expected no parens — natural precedence is (a ?? b) || c, got:\n{result}"
     );
     assert_roundtrip(source);
-    // But (a ?? b) || c requires parens because ?? is lower-prec on left of ||
+    // The opposite shape `a ?? (b || c)` MUST keep its parens, because the
+    // default grouping is `(a ?? b) || c` — stripping the parens would lose
+    // the `b || c` sub-expression.
     let source2 = r#"pipeline default(task) {
-  let x = (a ?? b) || c
+  let x = a ?? (b || c)
 }"#;
     let result2 = format_source(source2).unwrap();
     assert!(
-        result2.contains("(a ?? b) || c"),
-        "Expected parens preserved for (?? inside ||), got:\n{result2}"
+        result2.contains("a ?? (b || c)"),
+        "Expected parens preserved for (?? over || rhs), got:\n{result2}"
     );
     assert_roundtrip(source2);
 }

@@ -273,10 +273,22 @@ pub fn microcompact_tool_output(output: &str, max_chars: usize) -> String {
                 }
                 found_colon && i + 1 < bytes.len() && bytes[i + 1].is_ascii_digit()
             };
-            // keyword-based diagnostics
-            let has_keyword = trimmed.contains("error")
-                || trimmed.contains("FAIL")
-                || trimmed.contains("panic")
+            // Generic keyword classification. Split into "strong" keywords
+            // whose presence alone signals a diagnostic line (regardless of
+            // whether the line also has a file:line reference), and "weak"
+            // keywords which only count as diagnostic when paired with a
+            // file:line (to avoid false positives on narrative prose that
+            // happens to contain the word "error" or "expected").
+            //
+            // These are deliberately generic — not tied to any specific
+            // language's test runner output format. Language-specific
+            // patterns (Go's "--- FAIL:", pytest's "FAILED tests/", Rust's
+            // "thread 'X' panicked at") should be supplied by the pipeline
+            // via the `extra_diagnostic_patterns` auto_compact option,
+            // which is where language/runner awareness belongs.
+            let has_strong_keyword =
+                trimmed.contains("FAIL") || trimmed.contains("panic") || trimmed.contains("Panic");
+            let has_weak_keyword = trimmed.contains("error")
                 || trimmed.contains("undefined")
                 || trimmed.contains("expected")
                 || trimmed.contains("got")
@@ -290,9 +302,10 @@ pub fn microcompact_tool_output(output: &str, max_chars: usize) -> String {
                 || lower.contains("mismatch");
             let positional = lower.contains(" error ")
                 || lower.starts_with("error:")
-                || lower.starts_with("fail")
+                || lower.starts_with("warning:")
+                || lower.starts_with("note:")
                 || lower.contains("panic:");
-            (has_file_line && has_keyword) || positional
+            has_strong_keyword || (has_file_line && has_weak_keyword) || positional
         })
         .take(32)
         .collect::<Vec<_>>();
@@ -342,6 +355,15 @@ fn truncate_compaction_summary(
     old_messages: &[serde_json::Value],
     archived_count: usize,
 ) -> String {
+    truncate_compaction_summary_with_context(old_messages, archived_count, false)
+}
+
+fn truncate_compaction_summary_with_context(
+    old_messages: &[serde_json::Value],
+    archived_count: usize,
+    is_llm_fallback: bool,
+) -> String {
+    let per_msg_limit = 500_usize;
     let summary_parts: Vec<String> = old_messages
         .iter()
         .filter_map(|m| {
@@ -350,8 +372,12 @@ fn truncate_compaction_summary(
             if content.is_empty() {
                 return None;
             }
-            let truncated = if content.len() > 500 {
-                format!("{}...", &content[..content.floor_char_boundary(500)])
+            let truncated = if content.len() > per_msg_limit {
+                format!(
+                    "{}... [truncated from {} chars]",
+                    &content[..content.floor_char_boundary(per_msg_limit)],
+                    content.len()
+                )
             } else {
                 content.to_string()
             };
@@ -359,8 +385,15 @@ fn truncate_compaction_summary(
         })
         .take(15)
         .collect();
+    let header = if is_llm_fallback {
+        format!(
+            "[auto-compact fallback: LLM summarizer returned empty; {archived_count} older messages abbreviated to ~{per_msg_limit} chars each]"
+        )
+    } else {
+        format!("[auto-compacted {archived_count} older messages via truncate strategy]")
+    };
     format!(
-        "[auto-compacted {archived_count} older messages]\n{}{}",
+        "{header}\n{}{}",
         summary_parts.join("\n"),
         if archived_count > 15 {
             format!("\n... and {} more", archived_count - 15)
@@ -408,7 +441,11 @@ async fn llm_compaction_summary(
     let result = vm_call_llm_full(&compact_opts).await?;
     let summary = result.text.trim();
     if summary.is_empty() {
-        Ok(truncate_compaction_summary(old_messages, archived_count))
+        Ok(truncate_compaction_summary_with_context(
+            old_messages,
+            archived_count,
+            true,
+        ))
     } else {
         Ok(format!(
             "[auto-compacted {archived_count} older messages]\n{summary}"
@@ -426,7 +463,7 @@ async fn custom_compaction_summary(
             "compact_callback must be a closure when compact_strategy is 'custom'".to_string(),
         ));
     };
-    let mut vm = crate::vm::take_async_builtin_child_vm().ok_or_else(|| {
+    let mut vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
         VmError::Runtime(
             "custom transcript compaction requires an async builtin VM context".to_string(),
         )
@@ -438,7 +475,6 @@ async fn custom_compaction_summary(
             .collect(),
     ));
     let result = vm.call_closure_pub(&closure, &[messages_vm], &[]).await;
-    crate::vm::restore_async_builtin_child_vm(vm);
     let summary = compact_summary_text_from_value(&result?)?;
     if summary.trim().is_empty() {
         Ok(truncate_compaction_summary(old_messages, archived_count))
@@ -3655,6 +3691,41 @@ mod tests {
         let small = "hello world";
         let result = microcompact_tool_output(small, 10_000);
         assert_eq!(result, small);
+    }
+
+    #[test]
+    fn microcompact_preserves_strong_keyword_lines_without_file_line() {
+        // Regression: diagnostic extraction used to require both a
+        // file:line reference AND a keyword. Strong keywords like "FAIL"
+        // and "panic" should preserve the line on their own, because they
+        // carry signal even when they appear on narrative lines (Go's
+        // "--- FAIL: TestName", Rust's "thread '...' panicked at ...",
+        // pytest's "FAILED tests/..."). The exact patterns are language-
+        // specific and don't belong in the VM — but the generic rule
+        // "strong keywords count even without file:line" does.
+        let mut output = String::new();
+        for i in 0..100 {
+            output.push_str(&format!("verbose progress line {i}\n"));
+        }
+        output.push_str("--- FAIL: TestEmpty (0.00s)\n");
+        output.push_str("thread 'tests::test_foo' panicked at src/lib.rs:42:5\n");
+        output.push_str("FAILED tests/test_parser.py::test_empty\n");
+        for i in 0..100 {
+            output.push_str(&format!("more output after failures {i}\n"));
+        }
+        let result = microcompact_tool_output(&output, 2_000);
+        assert!(
+            result.contains("--- FAIL: TestEmpty"),
+            "strong 'FAIL' keyword should preserve the line:\n{result}"
+        );
+        assert!(
+            result.contains("panicked at"),
+            "strong 'panic' keyword should preserve the line:\n{result}"
+        );
+        assert!(
+            result.contains("FAILED tests/test_parser.py"),
+            "strong 'FAIL' keyword should preserve pytest-style lines too:\n{result}"
+        );
     }
 
     #[test]

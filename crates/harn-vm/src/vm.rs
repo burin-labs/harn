@@ -147,7 +147,7 @@ pub struct Vm {
     /// Cancellation token for cooperative graceful shutdown (set by parent).
     pub(crate) cancel_token: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     /// Captured stack trace from the most recent error (fn_name, line, col).
-    pub(crate) error_stack_trace: Vec<(String, usize, usize)>,
+    pub(crate) error_stack_trace: Vec<(String, usize, usize, Option<String>)>,
     /// Yield channel sender for generator execution. When set, `Op::Yield`
     /// sends values through this channel instead of being a no-op.
     pub(crate) yield_sender: Option<tokio::sync::mpsc::Sender<VmValue>>,
@@ -683,15 +683,15 @@ impl Vm {
         }
     }
 
-    /// Capture the current call stack as (fn_name, line, col) tuples.
-    fn capture_stack_trace(&self) -> Vec<(String, usize, usize)> {
+    /// Capture the current call stack as (fn_name, line, col, source_file) tuples.
+    fn capture_stack_trace(&self) -> Vec<(String, usize, usize, Option<String>)> {
         self.frames
             .iter()
             .map(|f| {
                 let idx = if f.ip > 0 { f.ip - 1 } else { 0 };
                 let line = f.chunk.lines.get(idx).copied().unwrap_or(0) as usize;
                 let col = f.chunk.columns.get(idx).copied().unwrap_or(0) as usize;
-                (f.fn_name.clone(), line, col)
+                (f.fn_name.clone(), line, col, f.chunk.source_file.clone())
             })
             .collect()
     }
@@ -704,7 +704,7 @@ impl Vm {
         let line = self
             .error_stack_trace
             .last()
-            .map(|(_, l, _)| *l)
+            .map(|(_, l, _, _)| *l)
             .unwrap_or_else(|| self.current_line());
         if line == 0 {
             return error;
@@ -1014,13 +1014,45 @@ impl Vm {
     }
 }
 
-pub fn take_async_builtin_child_vm() -> Option<Vm> {
-    CURRENT_ASYNC_BUILTIN_CHILD_VM.with(|slot| slot.borrow_mut().pop())
+/// Clone the VM at the top of the async-builtin child VM stack, returning a
+/// fresh `Vm` instance that callers own and can use without coordinating
+/// with other concurrent users of the stack. This replaces the legacy
+/// `take/restore` pattern: that pattern serialized access because only one
+/// consumer could hold the single stack entry at a time, which prevented
+/// any form of concurrent tool-handler execution within a single
+/// agent_loop iteration. Cloning is cheap — the VM struct shares its
+/// heavy state (env, builtins, bridge, module_cache) via `Arc`/`Rc` — so
+/// multiple concurrent handlers can each have their own execution context.
+///
+/// Returns `None` if no parent VM is currently pushed on the stack.
+pub fn clone_async_builtin_child_vm() -> Option<Vm> {
+    CURRENT_ASYNC_BUILTIN_CHILD_VM.with(|slot| slot.borrow().last().map(|vm| vm.child_vm()))
 }
 
-pub fn restore_async_builtin_child_vm(vm: Vm) {
+/// Legacy API preserved for backward compatibility with any out-of-tree
+/// callers. New code should use `clone_async_builtin_child_vm()` instead
+/// — `take` serializes concurrent callers because only one can hold the
+/// popped value at a time. Internally this now delegates to a clone so
+/// even legacy callers don't deadlock each other, but the name is kept
+/// until external callers migrate.
+#[deprecated(
+    note = "use clone_async_builtin_child_vm() — take/restore serialized concurrent callers"
+)]
+pub fn take_async_builtin_child_vm() -> Option<Vm> {
+    clone_async_builtin_child_vm()
+}
+
+/// Legacy API — now a no-op because `take_async_builtin_child_vm` returns
+/// a clone rather than popping the stack, so there is nothing to restore.
+/// Kept for backward compatibility.
+#[deprecated(note = "clone_async_builtin_child_vm does not need a matching restore call")]
+pub fn restore_async_builtin_child_vm(_vm: Vm) {
+    // No-op: the new clone-based API doesn't require restoration since
+    // the caller owns a fresh clone and the stack is never mutated.
     CURRENT_ASYNC_BUILTIN_CHILD_VM.with(|slot| {
-        slot.borrow_mut().push(vm);
+        // Intentionally ignore — kept as a syntactic no-op block so the
+        // function signature remains stable.
+        let _ = slot;
     });
 }
 

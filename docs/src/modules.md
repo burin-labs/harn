@@ -104,6 +104,10 @@ Text processing utilities for LLM output and code analysis:
 
 | Function | Description |
 |---|---|
+| `int_to_string(value)` | Convert an integer-compatible value to a decimal string |
+| `float_to_string(value)` | Convert a float-compatible value to a string |
+| `parse_int_or(value, fallback)` | Parse an integer, returning `fallback` on failure |
+| `parse_float_or(value, fallback)` | Parse a float, returning `fallback` on failure |
 | `extract_paths(text)` | Extract file paths from text, filtering comments and validating extensions |
 | `parse_cells(response)` | Parse fenced code blocks from LLM output. Returns `[{type, lang, code}]` |
 | `filter_test_cells(cells, target_file?)` | Filter cells to keep code blocks and write_file calls |

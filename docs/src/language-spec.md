@@ -265,7 +265,8 @@ Imports starting with `std/` load embedded stdlib modules:
 
 - `import "std/text"` — text processing (extract_paths, parse_cells,
   filter_test_cells, truncate_head_tail, detect_compile_error, has_got_want,
-  format_test_errors)
+  format_test_errors, int_to_string, float_to_string, parse_int_or,
+  parse_float_or)
 - `import "std/collections"` — collection utilities (filter_nil, store_stale,
   store_refresh)
 
@@ -372,14 +373,14 @@ followed by `=`.
 expression         ::= pipe_expr
 pipe_expr          ::= range_expr ('|>' range_expr)*
 range_expr         ::= ternary_expr [('thru' | 'upto') ternary_expr]
-ternary_expr       ::= nil_coal_expr ['?' nil_coal_expr ':' nil_coal_expr]
-nil_coal_expr      ::= logical_or ('??' logical_or)*
+ternary_expr       ::= logical_or ['?' logical_or ':' logical_or]
 logical_or         ::= logical_and ('||' logical_and)*
 logical_and        ::= equality ('&&' equality)*
 equality           ::= comparison (('==' | '!=') comparison)*
 comparison         ::= additive
                        (('<' | '>' | '<=' | '>=' | 'in' | 'not in') additive)*
-additive           ::= multiplicative (('+' | '-') multiplicative)*
+additive           ::= nil_coal_expr (('+' | '-') nil_coal_expr)*
+nil_coal_expr      ::= multiplicative ('??' multiplicative)*
 multiplicative     ::= unary (('*' | '/' | '%') unary)*
 unary              ::= ('!' | '-') unary | postfix
 postfix            ::= primary (member_access
@@ -453,12 +454,12 @@ From lowest to highest binding:
 |---|---|---|---|
 | 1 | `\|>` | Left | Pipe |
 | 2 | `? :` | Right | Ternary conditional |
-| 3 | `??` | Left | Nil coalescing |
-| 4 | `\|\|` | Left | Logical OR |
-| 5 | `&&` | Left | Logical AND |
-| 6 | `==` `!=` | Left | Equality |
-| 7 | `<` `>` `<=` `>=` `in` `not in` | Left | Comparison / membership |
-| 8 | `+` `-` | Left | Additive |
+| 3 | `\|\|` | Left | Logical OR |
+| 4 | `&&` | Left | Logical AND |
+| 5 | `==` `!=` | Left | Equality |
+| 6 | `<` `>` `<=` `>=` `in` `not in` | Left | Comparison / membership |
+| 7 | `+` `-` | Left | Additive |
+| 8 | `??` | Left | Nil coalescing |
 | 9 | `*` `/` | Left | Multiplicative |
 | 10 | `!` `-` (unary) | Right (prefix) | Unary |
 | 11 | `.` `?.` `[]` `[:]` `()` `?` | Left | Postfix |
@@ -744,6 +745,9 @@ Short-circuit evaluation:
 ### Nil coalescing (`??`)
 
 Short-circuit: if left is not `nil`, returns left without evaluating right.
+`??` binds tighter than additive/comparison/logical operators but looser than
+multiplicative operators, so `xs?.count ?? 0 > 0` parses as
+`(xs?.count ?? 0) > 0`.
 
 ### Pipe (`|>`)
 

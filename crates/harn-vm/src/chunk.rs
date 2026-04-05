@@ -232,6 +232,11 @@ pub struct Chunk {
     /// Source column numbers for each instruction (for error reporting).
     /// Parallel to `lines`; 0 means no column info available.
     pub columns: Vec<u32>,
+    /// Source file that this chunk was compiled from, when known. Set for
+    /// chunks compiled from imported modules so runtime errors can report
+    /// the correct file path for each frame instead of always pointing at
+    /// the entry-point pipeline.
+    pub source_file: Option<String>,
     /// Current column to use when emitting instructions (set by compiler).
     current_col: u32,
     /// Compiled function bodies (for closures).
@@ -257,6 +262,7 @@ impl Chunk {
             constants: Vec::new(),
             lines: Vec::new(),
             columns: Vec::new(),
+            source_file: None,
             current_col: 0,
             functions: Vec::new(),
         }

@@ -249,7 +249,7 @@ pub(crate) fn register_string_builtins(vm: &mut Vm) {
 
     vm.register_builtin("render", |args, _out| {
         let path = args.first().map(|a| a.display()).unwrap_or_default();
-        let resolved = crate::stdlib::process::resolve_source_relative_path(&path);
+        let resolved = crate::stdlib::process::resolve_source_asset_path(&path);
         let template = std::fs::read_to_string(&resolved).map_err(|e| {
             VmError::Thrown(VmValue::String(Rc::from(format!(
                 "Failed to read template {}: {e}",

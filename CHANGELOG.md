@@ -2,6 +2,50 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.36
+
+### Fixed
+
+- **`render(...)` source-relative resolution works again across direct and
+  imported calls** — template reads once again resolve from the active module
+  source tree instead of drifting to the repo cwd during ordinary runs, which
+  fixes the conformance regressions around `fixtures/greeting.prompt` and
+  imported helper modules.
+- **Imported functions now keep the same runtime setup as in-file
+  declarations** — imported top-level `fn` bodies once again carry
+  default-argument setup, runtime type checks, generator detection, and
+  source-file attribution consistently, so imported helpers behave like local
+  ones and report cleaner stack traces.
+- **OpenAI-compatible HTTP failures now fail loudly instead of being
+  misparsed as empty model output** — non-streaming LLM calls now check HTTP
+  status before JSON parsing, classify context-overflow/rate-limit failures,
+  and surface provider errors directly so agent loops can react correctly
+  instead of retrying blindly against malformed responses.
+
+### Added
+
+- **`std/text` conversion helpers** — `int_to_string`, `float_to_string`,
+  `parse_int_or`, and `parse_float_or` are now available from the embedded
+  text stdlib so Harn-authored libraries can share explicit conversion
+  helpers without reimplementing them in every package.
+- **Provider cache token accounting in `llm_call(...)` results** — LLM
+  results now expose `cache_read_tokens` and `cache_write_tokens` when
+  providers report prompt-cache usage, making warm-up calls and cache hits
+  inspectable from Harn itself.
+
+### Changed
+
+- **Nil-coalescing precedence now matches the shipped parser/formatter
+  behavior everywhere** — the parser, formatter, formal spec, and language
+  docs now agree that `??` binds tighter than additive/comparison/logical
+  operators but looser than `* / %`, so expressions like
+  `xs?.count ?? 0 > 0` parse as `(xs?.count ?? 0) > 0`.
+- **Agent execution is more resilient under heavier tool/LLM workloads** —
+  read-only tool batches can prefetch in parallel, transcript dumps now
+  record cache-token and response-time metadata, and the default
+  `llm_call(...)` output ceiling is raised to `16384` tokens to avoid
+  premature truncation in longer repair turns.
+
 ## v0.5.35
 
 ### Added

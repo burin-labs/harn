@@ -939,29 +939,6 @@ async fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Rc<AcpBridge>) {
         Ok(harn_vm::VmValue::Bool(valid))
     });
 
-    // --- Render — template rendering delegated to host ---
-
-    let b = bridge.clone();
-    vm.register_async_builtin("render", move |args| {
-        let bridge = b.clone();
-        async move {
-            let template = args.first().map(|a| a.display()).unwrap_or_default();
-            let bindings = args.get(1).cloned().unwrap_or(harn_vm::VmValue::Nil);
-            let bindings_json = harn_vm::llm::vm_value_to_json(&bindings);
-            let result = bridge
-                .call_client(
-                    "host/call",
-                    serde_json::json!({
-                        "sessionId": bridge.session_id,
-                        "name": "render",
-                        "args": {"template": template, "bindings": bindings_json},
-                    }),
-                )
-                .await?;
-            Ok(harn_vm::bridge::json_result_to_vm_value(&result))
-        }
-    });
-
     // --- ask_user — delegate to host (IDE shows modal, CLI reads stdin) ---
 
     let b = bridge.clone();

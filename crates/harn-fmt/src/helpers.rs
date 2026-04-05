@@ -5,17 +5,23 @@ use harn_parser::{BindingPattern, Node, SNode, TypeExpr, TypeParam, TypedParam, 
 use crate::Formatter;
 
 /// Return a numeric precedence for binary operators (higher = tighter binding).
+///
+/// `??` sits between additive and multiplicative — tighter than
+/// `+ - < > == != && || ?:` but looser than `* / %`. This matches the parser's
+/// placement (harn-parser: parse_additive → parse_nil_coalescing →
+/// parse_multiplicative) and the intuition `xs?.count ?? 0 > 0` →
+/// `(xs?.count ?? 0) > 0`.
 pub(crate) fn op_precedence(op: &str) -> u8 {
     match op {
         "|>" => 1,
-        "??" => 2,
         "||" => 3,
         "&&" => 4,
         "==" | "!=" => 5,
         "<" | ">" | "<=" | ">=" | "in" | "not_in" | "is" => 6,
         "+" | "-" => 7,
-        "*" | "/" | "%" => 8,
-        _ => 9,
+        "??" => 8,
+        "*" | "/" | "%" => 9,
+        _ => 10,
     }
 }
 

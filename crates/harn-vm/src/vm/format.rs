@@ -2,11 +2,8 @@ use super::*;
 
 impl super::Vm {
     pub fn format_runtime_error(&self, error: &VmError) -> String {
-        let source = match &self.source_text {
-            Some(s) => s.as_str(),
-            None => return format!("error: {error}"),
-        };
-        let filename = self.source_file.as_deref().unwrap_or("<unknown>");
+        let entry_file = self.source_file.as_deref().unwrap_or("<unknown>");
+        let entry_source = self.source_text.as_deref();
 
         let error_msg = format!("{error}");
         let mut out = String::new();
@@ -14,27 +11,43 @@ impl super::Vm {
         // Error header
         out.push_str(&format!("error: {error_msg}\n"));
 
-        // Prefer captured stack trace (taken before unwinding), else use live frames
-        let frames: Vec<(&str, usize, usize)> = if !self.error_stack_trace.is_empty() {
-            self.error_stack_trace
-                .iter()
-                .map(|(name, line, col)| (name.as_str(), *line, *col))
-                .collect()
-        } else {
-            self.frames
-                .iter()
-                .map(|f| {
-                    let idx = if f.ip > 0 { f.ip - 1 } else { 0 };
-                    let line = f.chunk.lines.get(idx).copied().unwrap_or(0) as usize;
-                    let col = f.chunk.columns.get(idx).copied().unwrap_or(0) as usize;
-                    (f.fn_name.as_str(), line, col)
-                })
-                .collect()
-        };
+        // Prefer captured stack trace (taken before unwinding), else use live frames.
+        // Each frame now carries its own source file so errors attribute the correct
+        // path for imported-module frames instead of the entry-point pipeline.
+        let frames: Vec<(String, usize, usize, Option<String>)> =
+            if !self.error_stack_trace.is_empty() {
+                self.error_stack_trace
+                    .iter()
+                    .map(|(name, line, col, src)| (name.clone(), *line, *col, src.clone()))
+                    .collect()
+            } else {
+                self.frames
+                    .iter()
+                    .map(|f| {
+                        let idx = if f.ip > 0 { f.ip - 1 } else { 0 };
+                        let line = f.chunk.lines.get(idx).copied().unwrap_or(0) as usize;
+                        let col = f.chunk.columns.get(idx).copied().unwrap_or(0) as usize;
+                        (f.fn_name.clone(), line, col, f.chunk.source_file.clone())
+                    })
+                    .collect()
+            };
 
-        if let Some((_name, line, col)) = frames.last() {
+        if let Some((_name, line, col, frame_file)) = frames.last() {
             let line = *line;
             let col = *col;
+            let filename = frame_file.as_deref().unwrap_or(entry_file);
+            // Prefer reading the frame's own source file from disk so the
+            // caret line is meaningful. Fall back to the entry-point source
+            // text if reading fails (e.g. stdlib modules).
+            let owned_source: Option<String> = frame_file
+                .as_deref()
+                .and_then(|p| std::fs::read_to_string(p).ok());
+            let source_for_line: Option<&str> =
+                owned_source.as_deref().or(if frame_file.is_none() {
+                    entry_source
+                } else {
+                    None
+                });
             if line > 0 {
                 let display_col = if col > 0 { col } else { 1 };
                 let gutter_width = line.to_string().len();
@@ -43,26 +56,23 @@ impl super::Vm {
                     " ",
                     width = gutter_width + 1,
                 ));
-                // Show source line with caret
-                if let Some(source_line) = source.lines().nth(line.saturating_sub(1)) {
+                if let Some(source_line) =
+                    source_for_line.and_then(|s| s.lines().nth(line.saturating_sub(1)))
+                {
                     out.push_str(&format!("{:>width$} |\n", " ", width = gutter_width + 1));
                     out.push_str(&format!(
                         "{:>width$} | {source_line}\n",
                         line,
                         width = gutter_width + 1,
                     ));
-                    // Render caret line
                     let caret_col = if col > 0 { col } else { 1 };
                     let trimmed = source_line.trim();
                     let leading = source_line
                         .len()
                         .saturating_sub(source_line.trim_start().len());
-                    // Calculate how many carets to show
                     let caret_len = if col > 0 {
-                        // Try to find a reasonable token length at this column
                         Self::token_len_at(source_line, col)
                     } else {
-                        // No column info: underline the trimmed content
                         trimmed.len().max(1)
                     };
                     let padding = if col > 0 {
@@ -80,11 +90,12 @@ impl super::Vm {
             }
         }
 
-        // Show call stack (bottom-up, skipping top frame which is already shown)
+        // Show call stack (bottom-up, skipping top frame which is already shown).
         if frames.len() > 1 {
-            for (name, line, _col) in frames.iter().rev().skip(1) {
+            for (name, line, _col, frame_file) in frames.iter().rev().skip(1) {
                 let display_name = if name.is_empty() { "pipeline" } else { name };
                 if *line > 0 {
+                    let filename = frame_file.as_deref().unwrap_or(entry_file);
                     out.push_str(&format!(
                         "  = note: called from {display_name} at {filename}:{line}\n"
                     ));

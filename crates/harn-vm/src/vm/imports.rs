@@ -204,8 +204,9 @@ impl Vm {
                 };
 
                 let mut compiler = crate::Compiler::new();
+                let module_source_file = file_path.map(|p| p.display().to_string());
                 let func_chunk = compiler
-                    .compile_fn_body(params, body)
+                    .compile_fn_body(params, body, module_source_file)
                     .map_err(|e| VmError::Runtime(format!("Import compile error: {e}")))?;
                 let closure = Rc::new(VmClosure {
                     func: func_chunk,

@@ -81,6 +81,8 @@ println(result.text)
 | `provider` | string | Canonical provider identifier |
 | `input_tokens` | int | Input/prompt token count |
 | `output_tokens` | int | Output/completion token count |
+| `cache_read_tokens` | int | Prompt tokens served from provider-side cache when supported |
+| `cache_write_tokens` | int | Prompt tokens written into provider-side cache when supported |
 | `data` | any | Parsed JSON (when `response_format: "json"`) |
 | `tool_calls` | list | Tool calls (when model uses tools) |
 | `thinking` | string | Reasoning trace (when `thinking` is enabled) |
@@ -95,7 +97,7 @@ println(result.text)
 |---|---|---|---|
 | `provider` | string | `"anthropic"` | Any configured provider. Built-in names include `"anthropic"`, `"openai"`, `"openrouter"`, `"huggingface"`, `"ollama"`, and `"local"` |
 | `model` | string | varies by provider | Model identifier |
-| `max_tokens` | int | `4096` | Maximum tokens in the response |
+| `max_tokens` | int | `16384` | Maximum tokens in the response |
 | `temperature` | float | provider default | Sampling temperature (0.0-2.0) |
 | `top_p` | float | nil | Nucleus sampling |
 | `top_k` | int | nil | Top-K sampling (Anthropic/Ollama only) |

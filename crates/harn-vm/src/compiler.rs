@@ -2527,21 +2527,38 @@ impl Compiler {
 
 impl Compiler {
     /// Compile a function body into a CompiledFunction (for import support).
+    ///
+    /// This path is used when a module is imported and its top-level `fn`
+    /// declarations are loaded into the importer's environment. It MUST emit
+    /// the same function preamble as the in-file `Node::FnDecl` path, or
+    /// imported functions will behave differently from locally-defined ones —
+    /// in particular, default parameter values would never be set and typed
+    /// parameters would not be runtime-checked.
+    ///
+    /// `source_file`, when provided, tags the resulting chunk so runtime
+    /// errors can attribute frames to the imported file rather than the
+    /// entry-point pipeline.
     pub fn compile_fn_body(
         &mut self,
         params: &[TypedParam],
         body: &[SNode],
+        source_file: Option<String>,
     ) -> Result<CompiledFunction, CompileError> {
         let mut fn_compiler = Compiler::new();
+        fn_compiler.enum_names = self.enum_names.clone();
+        fn_compiler.emit_default_preamble(params)?;
+        fn_compiler.emit_type_checks(params);
+        let is_gen = body_contains_yield(body);
         fn_compiler.compile_block(body)?;
         fn_compiler.chunk.emit(Op::Nil, 0);
         fn_compiler.chunk.emit(Op::Return, 0);
+        fn_compiler.chunk.source_file = source_file;
         Ok(CompiledFunction {
             name: String::new(),
             params: TypedParam::names(params),
             default_start: TypedParam::default_start(params),
             chunk: fn_compiler.chunk,
-            is_generator: false,
+            is_generator: is_gen,
         })
     }
 

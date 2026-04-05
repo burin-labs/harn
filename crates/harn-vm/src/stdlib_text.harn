@@ -1,5 +1,34 @@
 // std/text — Text processing utilities for LLM output and code analysis.
 
+// Convert an integer-compatible value into a decimal string with explicit
+// stdlib import ergonomics for Harn-authored libraries.
+/// int_to_string.
+pub fn int_to_string(value) {
+  let parsed = to_int(value)
+  require parsed != nil, "int_to_string expects an integer-compatible value"
+  return to_string(parsed)
+}
+
+// Convert a float-compatible value into a string.
+/// float_to_string.
+pub fn float_to_string(value) {
+  let parsed = to_float(value)
+  require parsed != nil, "float_to_string expects a float-compatible value"
+  return to_string(parsed)
+}
+
+// Parse an integer-like value, returning fallback when conversion fails.
+/// parse_int_or.
+pub fn parse_int_or(value, fallback) {
+  return to_int(value) ?? fallback
+}
+
+// Parse a float-like value, returning fallback when conversion fails.
+/// parse_float_or.
+pub fn parse_float_or(value, fallback) {
+  return to_float(value) ?? fallback
+}
+
 // Extract file paths from text.
 // Splits on newlines, skips comment lines, extracts path-like words,
 // validates extensions, and deduplicates.

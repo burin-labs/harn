@@ -1288,15 +1288,15 @@ impl Parser {
     }
 
     fn parse_ternary(&mut self) -> Result<SNode, ParserError> {
-        let condition = self.parse_nil_coalescing()?;
+        let condition = self.parse_logical_or()?;
         if !self.check(&TokenKind::Question) {
             return Ok(condition);
         }
         let start = condition.span;
         self.advance(); // skip ?
-        let true_val = self.parse_nil_coalescing()?;
+        let true_val = self.parse_logical_or()?;
         self.consume(&TokenKind::Colon, ":")?;
-        let false_val = self.parse_nil_coalescing()?;
+        let false_val = self.parse_logical_or()?;
         Ok(spanned(
             Node::Ternary {
                 condition: Box::new(condition),
@@ -1307,12 +1307,19 @@ impl Parser {
         ))
     }
 
+    // Nil-coalescing `??` binds tighter than arithmetic and comparison
+    // operators but looser than `* / %`. This matches the intuition users
+    // reach for when writing `xs?.count ?? 0 > 0` or `xs[xs?.count ?? 0 - 1]`
+    // — both parse as `(xs?.count ?? 0) <op> rhs`. The previous placement
+    // above `parse_logical_or` caused `?? 0 > 0` to parse as `?? (0 > 0)`
+    // which silently broke correctness in ~118 sites across Burin's pipeline
+    // library. See project_pipeline_batch_apr04_v4.md for impact analysis.
     fn parse_nil_coalescing(&mut self) -> Result<SNode, ParserError> {
-        let mut left = self.parse_logical_or()?;
+        let mut left = self.parse_multiplicative()?;
         while self.check(&TokenKind::NilCoal) {
             let start = left.span;
             self.advance();
-            let right = self.parse_logical_or()?;
+            let right = self.parse_multiplicative()?;
             left = spanned(
                 Node::BinaryOp {
                     op: "??".into(),
@@ -1450,7 +1457,7 @@ impl Parser {
     }
 
     fn parse_additive(&mut self) -> Result<SNode, ParserError> {
-        let mut left = self.parse_multiplicative()?;
+        let mut left = self.parse_nil_coalescing()?;
         while self.check_skip_newlines(&TokenKind::Plus) || self.check(&TokenKind::Minus) {
             let start = left.span;
             let op = if self.check(&TokenKind::Plus) {
@@ -1459,7 +1466,7 @@ impl Parser {
                 "-"
             };
             self.advance();
-            let right = self.parse_multiplicative()?;
+            let right = self.parse_nil_coalescing()?;
             left = spanned(
                 Node::BinaryOp {
                     op: op.into(),

@@ -1,6 +1,14 @@
 import "std/text"
 
 pipeline default() {
+  // conversion helpers
+  println(int_to_string(42))
+  println(int_to_string(-7))
+  println(float_to_string(3.5))
+  println(parse_int_or("12", 0))
+  println(parse_int_or("oops", 9))
+  println(parse_float_or("2.25", 0.0))
+  println(parse_float_or("oops", 1.5))
   // extract_paths
   let paths = extract_paths("Error in /src/main.rs at line 5\nAlso see ./lib/test.go\n// /ignored/comment.txt")
   println(len(paths))

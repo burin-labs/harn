@@ -168,7 +168,7 @@ fn render_template(
     path: &str,
     bindings: Option<&BTreeMap<String, VmValue>>,
 ) -> Result<String, VmError> {
-    let resolved = crate::stdlib::process::resolve_source_relative_path(path);
+    let resolved = crate::stdlib::process::resolve_source_asset_path(path);
     let template = std::fs::read_to_string(&resolved).map_err(|e| {
         VmError::Thrown(VmValue::String(Rc::from(format!(
             "host_call template.render: failed to read template {}: {e}",
