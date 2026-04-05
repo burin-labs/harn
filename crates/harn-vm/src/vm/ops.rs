@@ -50,13 +50,24 @@ impl super::Vm {
                 self.stack.push(val);
             } else if let Some(val) = self.globals.get(&name) {
                 self.stack.push(val.clone());
+            } else if self.builtins.contains_key(&name) || self.async_builtins.contains_key(&name) {
+                // Allow referencing a builtin by bare name so it can be passed
+                // as a callback (e.g. `dict.rekey(snake_to_camel)`).
+                self.stack
+                    .push(VmValue::BuiltinRef(Rc::from(name.as_str())));
             } else {
                 let mut all_vars = self.env.all_variables();
                 for (k, v) in &self.globals {
                     all_vars.entry(k.clone()).or_insert_with(|| v.clone());
                 }
+                // Include registered builtin names in the suggestion pool so
+                // typos on builtin references (e.g. `snake_too_camel`) get
+                // resolved to `snake_to_camel`.
+                let mut candidates: Vec<String> = all_vars.keys().cloned().collect();
+                candidates.extend(self.builtins.keys().cloned());
+                candidates.extend(self.async_builtins.keys().cloned());
                 if let Some(suggestion) =
-                    crate::value::closest_match(&name, all_vars.keys().map(|s| s.as_str()))
+                    crate::value::closest_match(&name, candidates.iter().map(|s| s.as_str()))
                 {
                     return Err(VmError::Runtime(format!(
                         "Undefined variable: {name} (did you mean `{suggestion}`?)"

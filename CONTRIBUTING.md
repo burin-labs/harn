@@ -25,6 +25,43 @@ Before submitting a PR, run the full check suite:
 make all
 ```
 
+### Warm vs cold expectations
+
+On a modern workstation with a populated target/ cache you should see:
+
+- `cargo check --workspace`: ~0.1–5 s warm, ~30–90 s cold
+- `cargo test --workspace --lib`: ~0.1–0.5 s warm (after the initial build)
+- `cargo clippy --workspace --all-targets -- -D warnings`: ~1–20 s warm
+- `cargo run --bin harn -- test conformance`: ~7–15 s
+- Full `make all`: ~60–120 s warm, ~3–5 min cold
+
+What triggers a cold rebuild:
+
+- Editing `Cargo.toml` at the workspace or crate root (profile flips,
+  dependency changes, feature flag changes)
+- Toolchain bump (`rustup update` that installs a new stable)
+- `cargo clean`
+- Running `cargo fmt` on `Cargo.toml` files (rare, but it does re-stamp)
+
+On macOS, Spotlight may index freshly-linked test binaries on first run,
+adding ~30–60 s of stat traffic unrelated to cargo.
+
+### Optional: nextest
+
+For bounded test timeouts (nothing can wedge the suite indefinitely) and
+better parallelism, install `cargo-nextest`:
+
+```bash
+cargo install cargo-nextest --locked
+make test-fast
+```
+
+`make test-fast` invokes `cargo nextest run --workspace` when nextest is
+available and falls back to `cargo test --workspace` otherwise. The
+workspace `.config/nextest.toml` applies a 15 s slow-test threshold by
+default and a 60 s hard termination cap — tests that legitimately need
+more time (the LLM transport tests) have targeted overrides.
+
 Useful shortcuts:
 
 ```bash

@@ -134,6 +134,20 @@ pub(crate) fn vm_resolve_api_key(provider: &str) -> Result<String, VmError> {
         return Ok(String::new());
     }
 
+    // Build a short "why this provider?" explanation to append to error
+    // messages so the user knows where the selection came from (env vars,
+    // llm.toml, or the default fallback) and how to switch to the mock
+    // provider for offline experimentation.
+    let selection_hint = {
+        let config_path = llm_config::loaded_config_path()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "<built-in defaults>".to_string());
+        format!(
+            " (provider '{provider}' selected via LLM_PROVIDER / llm.toml @ {config_path}; \
+             set HARN_LLM_PROVIDER=mock or LLM_PROVIDER=mock for offline use)"
+        )
+    };
+
     if let Some(pdef) = llm_config::provider_config(provider) {
         if pdef.auth_style == "none" {
             return Ok(String::new());
@@ -142,7 +156,7 @@ pub(crate) fn vm_resolve_api_key(provider: &str) -> Result<String, VmError> {
             llm_config::AuthEnv::Single(env) => {
                 return std::env::var(env).map_err(|_| {
                     VmError::Thrown(VmValue::String(Rc::from(format!(
-                        "Missing API key: set {env} environment variable"
+                        "Missing API key: set {env} environment variable{selection_hint}"
                     ))))
                 });
             }
@@ -155,7 +169,7 @@ pub(crate) fn vm_resolve_api_key(provider: &str) -> Result<String, VmError> {
                     }
                 }
                 return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                    "Missing API key: set one of {} environment variables",
+                    "Missing API key: set one of {} environment variables{selection_hint}",
                     envs.join(", ")
                 )))));
             }
@@ -164,9 +178,9 @@ pub(crate) fn vm_resolve_api_key(provider: &str) -> Result<String, VmError> {
     }
     // Fallback for unknown providers
     std::env::var("ANTHROPIC_API_KEY").map_err(|_| {
-        VmError::Thrown(VmValue::String(Rc::from(
-            "Missing API key: set ANTHROPIC_API_KEY environment variable",
-        )))
+        VmError::Thrown(VmValue::String(Rc::from(format!(
+            "Missing API key: set ANTHROPIC_API_KEY environment variable{selection_hint}"
+        ))))
     })
 }
 

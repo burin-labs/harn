@@ -239,6 +239,21 @@ pub(crate) async fn run_repl() {
         DefaultPromptSegment::Empty,
     );
 
+    // Accumulated REPL history. Each accepted line is appended here and the
+    // whole block is re-executed on every new input so that bindings like
+    // `let x = 5` remain visible to later expressions (simple replay model —
+    // side effects from prior lines will run again).
+    let mut accumulated: Vec<String> = Vec::new();
+    // Top-level `fn`/`struct`/`enum`/`type` declarations must live outside the
+    // pipeline body, so track them separately and splice them into the
+    // synthetic program at emit time.
+    let mut top_level: Vec<String> = Vec::new();
+    let mut prior_output_len: usize = 0;
+    // Counter for captured bare-expression results; bare expressions are
+    // auto-wrapped as `let _N = <expr>; println(<expr-value>)` so the result
+    // is both displayed and saved under `_1`, `_2`, etc. for later reference.
+    let mut result_counter: usize = 0;
+
     loop {
         // Run reedline in spawn_blocking since it blocks on terminal input
         let input = tokio::task::spawn_blocking({
@@ -259,11 +274,103 @@ pub(crate) async fn run_repl() {
                     continue;
                 }
 
-                let source = format!("pipeline repl(task) {{\n{line}\n}}");
+                let first_word = line.split_whitespace().next();
+                let is_top_level = matches!(
+                    first_word,
+                    Some("fn" | "struct" | "enum" | "type" | "pub" | "import"),
+                );
+                // Classify as a "statement" keyword if the first token is one
+                // that introduces a statement rather than an expression. Bare
+                // expressions get auto-wrapped so their value is displayed.
+                let is_statement_kw = matches!(
+                    first_word,
+                    Some(
+                        "let"
+                            | "var"
+                            | "if"
+                            | "for"
+                            | "while"
+                            | "return"
+                            | "break"
+                            | "continue"
+                            | "match"
+                            | "try"
+                            | "throw"
+                            | "log"
+                            | "print"
+                            | "println"
+                            | "assert"
+                            | "assert_eq"
+                            | "assert_ne"
+                            | "spawn"
+                            | "guard"
+                            | "deadline"
+                            | "retry"
+                            | "parallel"
+                            | "parallel_map"
+                            | "mutex"
+                    ),
+                );
+                let is_assignment = !is_top_level
+                    && !is_statement_kw
+                    && line.contains('=')
+                    && !line.contains("==")
+                    && !line.contains("!=")
+                    && !line.contains("<=")
+                    && !line.contains(">=");
+                let is_bare_expression = !is_top_level && !is_statement_kw && !is_assignment;
+
+                let emitted_line = if is_bare_expression {
+                    result_counter += 1;
+                    format!(
+                        "let _{n} = {expr}\nprintln(to_string(_{n}))",
+                        n = result_counter,
+                        expr = line
+                    )
+                } else {
+                    line.clone()
+                };
+
+                let body_lines = if is_top_level {
+                    accumulated.clone()
+                } else {
+                    let mut body = accumulated.clone();
+                    body.push(emitted_line.clone());
+                    body
+                };
+                let top_level_block = if is_top_level {
+                    let mut tl = top_level.clone();
+                    tl.push(line.clone());
+                    tl.join("\n")
+                } else {
+                    top_level.join("\n")
+                };
+
+                let body_block = body_lines.join("\n");
+                let source = if top_level_block.is_empty() {
+                    format!("pipeline repl(task) {{\n{body_block}\n}}")
+                } else {
+                    format!("{top_level_block}\npipeline repl(task) {{\n{body_block}\n}}")
+                };
+
                 match execute(&source, None).await {
                     Ok(output) => {
-                        if !output.is_empty() {
-                            io::stdout().write_all(output.as_bytes()).ok();
+                        // Only show output produced by the newly-evaluated
+                        // fragment — replayed side effects from prior lines
+                        // are suppressed by skipping the prior prefix.
+                        let new_portion = if output.len() > prior_output_len {
+                            &output[prior_output_len..]
+                        } else {
+                            ""
+                        };
+                        if !new_portion.is_empty() {
+                            io::stdout().write_all(new_portion.as_bytes()).ok();
+                        }
+                        prior_output_len = output.len();
+                        if is_top_level {
+                            top_level.push(line);
+                        } else {
+                            accumulated.push(emitted_line);
                         }
                     }
                     Err(e) => eprintln!("Error: {e}"),

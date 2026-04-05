@@ -189,15 +189,52 @@ fn builtin_return_type(name: &str) -> InferredType {
         | "temp_dir"
         | "date_format"
         | "format"
-        | "compute_content_hash" => Some(TypeExpr::Named("string".into())),
-        "to_int" | "timer_end" | "elapsed" | "sign" => Some(TypeExpr::Named("int".into())),
+        | "compute_content_hash"
+        | "addr_of"
+        | "sha224"
+        | "sha384"
+        | "sha512"
+        | "sha512_256"
+        | "path_parent"
+        | "path_basename"
+        | "path_stem"
+        | "path_extension"
+        | "path_with_extension"
+        | "path_with_stem"
+        | "path_normalize"
+        | "path_to_posix"
+        | "path_to_native"
+        | "trim"
+        | "lowercase"
+        | "uppercase"
+        | "replace"
+        | "substring"
+        | "join"
+        | "dirname"
+        | "basename"
+        | "extname"
+        | "snake_to_camel"
+        | "snake_to_pascal"
+        | "camel_to_snake"
+        | "pascal_to_snake"
+        | "kebab_to_camel"
+        | "camel_to_kebab"
+        | "snake_to_kebab"
+        | "kebab_to_snake"
+        | "pascal_to_camel"
+        | "camel_to_pascal"
+        | "title_case"
+        | "uppercase_first"
+        | "lowercase_first" => Some(TypeExpr::Named("string".into())),
+        "to_int" | "timer_end" | "elapsed" | "sign" | "hash_value" => {
+            Some(TypeExpr::Named("int".into()))
+        }
         "to_float" | "timestamp" | "date_parse" | "sin" | "cos" | "tan" | "asin" | "acos"
         | "atan" | "atan2" | "log2" | "log10" | "ln" | "exp" | "pi" | "e" => {
             Some(TypeExpr::Named("float".into()))
         }
-        "file_exists" | "json_validate" | "is_nan" | "is_infinite" | "set_contains" => {
-            Some(TypeExpr::Named("bool".into()))
-        }
+        "file_exists" | "json_validate" | "is_nan" | "is_infinite" | "set_contains" | "is_same"
+        | "path_is_absolute" | "path_is_relative" => Some(TypeExpr::Named("bool".into())),
         "schema_to_json_schema"
         | "schema_extend"
         | "schema_partial"
@@ -212,7 +249,8 @@ fn builtin_return_type(name: &str) -> InferredType {
         | "artifact_select"
         | "transcript_messages"
         | "transcript_assets"
-        | "transcript_events" => Some(TypeExpr::Named("list".into())),
+        | "transcript_events"
+        | "path_segments" => Some(TypeExpr::Named("list".into())),
         "stat"
         | "exec"
         | "exec_at"
@@ -280,7 +318,8 @@ fn builtin_return_type(name: &str) -> InferredType {
         | "resume_agent"
         | "transcript_compact"
         | "transcript_summarize"
-        | "host_capabilities" => Some(TypeExpr::Named("dict".into())),
+        | "host_capabilities"
+        | "path_parts" => Some(TypeExpr::Named("dict".into())),
         "metadata_entries" | "host_mock_calls" => Some(TypeExpr::Named("list".into())),
         "transcript_render_visible"
         | "transcript_render_full"
@@ -438,6 +477,19 @@ fn is_builtin(name: &str) -> bool {
             | "trim"
             | "lowercase"
             | "uppercase"
+            | "snake_to_camel"
+            | "snake_to_pascal"
+            | "camel_to_snake"
+            | "pascal_to_snake"
+            | "kebab_to_camel"
+            | "camel_to_kebab"
+            | "snake_to_kebab"
+            | "kebab_to_snake"
+            | "pascal_to_camel"
+            | "camel_to_pascal"
+            | "title_case"
+            | "uppercase_first"
+            | "lowercase_first"
             | "split"
             | "starts_with"
             | "ends_with"
@@ -449,6 +501,20 @@ fn is_builtin(name: &str) -> bool {
             | "dirname"
             | "basename"
             | "extname"
+            | "path_parts"
+            | "path_parent"
+            | "path_basename"
+            | "path_stem"
+            | "path_extension"
+            | "path_with_extension"
+            | "path_with_stem"
+            | "path_is_absolute"
+            | "path_is_relative"
+            | "path_normalize"
+            | "path_relative_to"
+            | "path_to_posix"
+            | "path_to_native"
+            | "path_segments"
             | "sin"
             | "cos"
             | "tan"
@@ -473,6 +539,13 @@ fn is_builtin(name: &str) -> bool {
             | "set_intersect"
             | "set_difference"
             | "to_list"
+            | "is_same"
+            | "addr_of"
+            | "hash_value"
+            | "sha224"
+            | "sha384"
+            | "sha512"
+            | "sha512_256"
     )
 }
 
@@ -1868,7 +1941,8 @@ impl TypeChecker {
             | Node::OptionalMethodCall { object, method, .. } => {
                 let obj_type = self.infer_type(object, scope);
                 let is_dict = matches!(&obj_type, Some(TypeExpr::Named(n)) if n == "dict")
-                    || matches!(&obj_type, Some(TypeExpr::DictType(..)));
+                    || matches!(&obj_type, Some(TypeExpr::DictType(..)))
+                    || matches!(&obj_type, Some(TypeExpr::Shape(_)));
                 match method.as_str() {
                     // Shared: bool-returning methods
                     "contains" | "starts_with" | "ends_with" | "empty" | "has" | "any" | "all" => {
@@ -1895,7 +1969,19 @@ impl TypeChecker {
                     "reduce" | "find" | "first" | "last" => None,
                     // Dict methods
                     "keys" | "values" | "entries" => Some(TypeExpr::Named("list".into())),
-                    "merge" | "map_values" => Some(TypeExpr::Named("dict".into())),
+                    "merge" | "map_values" | "rekey" | "map_keys" => {
+                        // Rekey/map_keys transform keys; resulting dict still keys-by-string.
+                        // Preserve the value-type parameter when known so downstream code can
+                        // still rely on dict<string, V> typing after a key-rename.
+                        if let Some(TypeExpr::DictType(_, v)) = &obj_type {
+                            Some(TypeExpr::DictType(
+                                Box::new(TypeExpr::Named("string".into())),
+                                v.clone(),
+                            ))
+                        } else {
+                            Some(TypeExpr::Named("dict".into()))
+                        }
+                    }
                     // Conversions
                     "to_string" => Some(TypeExpr::Named("string".into())),
                     "to_int" => Some(TypeExpr::Named("int".into())),

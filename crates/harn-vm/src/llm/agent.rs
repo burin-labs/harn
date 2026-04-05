@@ -376,6 +376,19 @@ fn append_message_to_contexts(
     recorded_messages.push(message);
 }
 
+/// Replacement text for an assistant turn whose ```call blocks all failed to
+/// parse. Feeding the raw malformed text back into the next request causes the
+/// model to mutate its own broken syntax (observed self-poison loop in
+/// local-gemma4 eval 2026-04-05). We keep the parse-error diagnostic as the
+/// user-role reply, but elide the broken assistant content from history.
+fn compact_malformed_assistant_turn(error_count: usize) -> String {
+    let plural = if error_count == 1 { "" } else { "s" };
+    format!(
+        "<assistant turn elided: produced {error_count} malformed tool call{plural} \
+         (see parse error below). Emit a corrected call in the next turn.>"
+    )
+}
+
 fn append_host_messages_to_recorded(
     recorded_messages: &mut Vec<serde_json::Value>,
     queued_messages: &[crate::bridge::QueuedUserMessage],
@@ -726,6 +739,12 @@ pub async fn run_agent_loop_internal(
 
     let mut total_text = String::new();
     let mut consecutive_text_only = 0usize;
+    // Count turns in a row where the model emitted malformed tool calls.
+    // When the model also emits the DONE sentinel in such a turn, we give it
+    // exactly one recovery attempt before honoring DONE, so a model that
+    // genuinely cannot produce valid syntax does not loop until timeout.
+    let mut consecutive_parse_error_turns = 0usize;
+    const MAX_PARSE_ERROR_RECOVERY_TURNS: usize = 1;
     let mut all_tools_used: Vec<String> = Vec::new();
     let mut rejected_tools: Vec<String> = Vec::new();
     let mut deferred_user_messages: Vec<String> = Vec::new();
@@ -1483,31 +1502,85 @@ pub async fn run_agent_loop_internal(
                 }
             }
 
+            if !tool_parse_errors.is_empty() {
+                consecutive_parse_error_turns += 1;
+            } else {
+                consecutive_parse_error_turns = 0;
+            }
             if sentinel_hit {
-                if !tool_parse_errors.is_empty() {
+                // Parse errors take precedence over DONE for exactly one
+                // recovery attempt. This lets a model that mistyped `:` vs `=`
+                // fix itself, but prevents an open-ended loop when the model
+                // cannot produce valid syntax at all.
+                if !tool_parse_errors.is_empty()
+                    && consecutive_parse_error_turns <= MAX_PARSE_ERROR_RECOVERY_TURNS
+                {
                     eprintln!(
-                        "[harn] {} tool-call parse error(s) suppressed by sentinel: {}",
-                        tool_parse_errors.len(),
-                        tool_parse_errors.join("; ")
+                        "[harn] DONE sentinel ignored for one recovery attempt ({} parse error(s) this turn)",
+                        tool_parse_errors.len()
                     );
+                } else {
+                    if !tool_parse_errors.is_empty() {
+                        eprintln!(
+                            "[harn] DONE sentinel honored despite {} parse error(s) — recovery budget ({}) exhausted",
+                            tool_parse_errors.len(),
+                            MAX_PARSE_ERROR_RECOVERY_TURNS
+                        );
+                    }
+                    break;
                 }
-                break;
             }
             continue;
         }
 
+        // If the model attempted tool calls but parsing failed, replace the
+        // raw malformed assistant text with a compact placeholder before
+        // replaying history. Otherwise the next iteration sees its own
+        // broken syntax and mutates it further (observed self-poison loop).
+        let assistant_content_for_history = if !tool_parse_errors.is_empty() {
+            compact_malformed_assistant_turn(tool_parse_errors.len())
+        } else {
+            text.clone()
+        };
         append_message_to_contexts(
             &mut visible_messages,
             &mut recorded_messages,
             serde_json::json!({
                 "role": "assistant",
-                "content": text,
+                "content": assistant_content_for_history,
             }),
         );
 
-        // Sentinel check for text-only responses (no tool calls)
+        // Track parse-error streaks for the bounded-recovery policy used by
+        // the sentinel check below.
+        if !tool_parse_errors.is_empty() {
+            consecutive_parse_error_turns += 1;
+        } else {
+            consecutive_parse_error_turns = 0;
+        }
+        // Sentinel check for text-only responses (no tool calls). Parse errors
+        // earn exactly one recovery attempt before DONE is honored — a model
+        // that cannot emit valid syntax after one diagnostic is not going to
+        // recover, and looping until timeout is strictly worse than exiting
+        // with whatever partial state already exists.
         if sentinel_hit {
-            break;
+            if !tool_parse_errors.is_empty()
+                && consecutive_parse_error_turns <= MAX_PARSE_ERROR_RECOVERY_TURNS
+            {
+                eprintln!(
+                    "[harn] DONE sentinel ignored for one recovery attempt ({} parse error(s) this turn)",
+                    tool_parse_errors.len()
+                );
+            } else {
+                if !tool_parse_errors.is_empty() {
+                    eprintln!(
+                        "[harn] DONE sentinel honored despite {} parse error(s) — recovery budget ({}) exhausted",
+                        tool_parse_errors.len(),
+                        MAX_PARSE_ERROR_RECOVERY_TURNS
+                    );
+                }
+                break;
+            }
         }
 
         // If the model attempted tool calls but parsing failed, send diagnostics
@@ -1918,12 +1991,26 @@ pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Host
 
 #[cfg(test)]
 mod tests {
-    use super::loop_state_requests_phase_change;
+    use super::{compact_malformed_assistant_turn, loop_state_requests_phase_change};
 
     #[test]
     fn detects_phase_change_from_latest_loop_state_footer() {
         let text = "First\n\n## LOOP_STATE\nphase: assess\nnext_phase: ground\n## END_LOOP_STATE\n\nSecond\n\n## LOOP_STATE\nphase: ground\nnext_phase: execute\n## END_LOOP_STATE";
         assert!(loop_state_requests_phase_change(text, "ground"));
         assert!(!loop_state_requests_phase_change(text, "execute"));
+    }
+
+    #[test]
+    fn compact_malformed_assistant_turn_elides_raw_text() {
+        let msg = compact_malformed_assistant_turn(1);
+        assert!(msg.contains("1 malformed tool call"));
+        assert!(msg.contains("elided"));
+        // The message must not echo any of the broken tool-call syntax that
+        // triggered the elision; it is a fixed template.
+        assert!(!msg.contains("```call"));
+        assert!(!msg.contains("<<'EOF'"));
+
+        let msg_plural = compact_malformed_assistant_turn(3);
+        assert!(msg_plural.contains("3 malformed tool calls"));
     }
 }

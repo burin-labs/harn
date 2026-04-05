@@ -2168,6 +2168,40 @@ mod tests {
         );
     }
 
+    /// Accept a single connection with a bounded deadline so a buggy client
+    /// can't wedge the test runner. Used by all localhost stubs in this
+    /// module. Historical note: blocking `listener.accept()` has taken down
+    /// the test suite at least twice.
+    fn accept_with_deadline(listener: &std::net::TcpListener, label: &str) -> std::net::TcpStream {
+        listener
+            .set_nonblocking(true)
+            .expect("set listener nonblocking");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        loop {
+            match listener.accept() {
+                Ok((stream, _)) => {
+                    stream
+                        .set_nonblocking(false)
+                        .expect("restore blocking mode");
+                    stream
+                        .set_read_timeout(Some(std::time::Duration::from_secs(3)))
+                        .ok();
+                    stream
+                        .set_write_timeout(Some(std::time::Duration::from_secs(3)))
+                        .ok();
+                    return stream;
+                }
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    if std::time::Instant::now() >= deadline {
+                        panic!("{label}: no client within 3s");
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+                Err(e) => panic!("{label}: accept failed: {e}"),
+            }
+        }
+    }
+
     fn spawn_ollama_stub() -> (std::net::SocketAddr, std::thread::JoinHandle<()>) {
         use std::io::{Read, Write};
         use std::net::TcpListener;
@@ -2175,7 +2209,7 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind ollama stub");
         let addr = listener.local_addr().expect("stub addr");
         let handle = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().expect("accept request");
+            let mut stream = accept_with_deadline(&listener, "ollama stub");
             let mut buf = vec![0u8; 8192];
             let n = stream.read(&mut buf).expect("read request");
             let request = String::from_utf8_lossy(&buf[..n]);
@@ -2207,7 +2241,7 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind ollama stub");
         let addr = listener.local_addr().expect("stub addr");
         let handle = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().expect("accept request");
+            let mut stream = accept_with_deadline(&listener, "ollama stub (capture)");
             let mut buf = vec![0u8; 16384];
             let n = stream.read(&mut buf).expect("read request");
             let request = String::from_utf8_lossy(&buf[..n]).to_string();

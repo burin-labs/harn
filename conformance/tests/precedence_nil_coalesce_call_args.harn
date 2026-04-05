@@ -1,0 +1,15 @@
+fn show_three(a, b, c) {
+  log("a=" + a)
+  log("b=" + b)
+  log("c=" + c)
+}
+
+fn tag_for(path) {
+  return "tag:" + path
+}
+
+pipeline test(task) {
+  let base = "base"
+  let path = nil
+  show_three(base, path ?? "", tag_for(path ?? ""))
+}

@@ -942,6 +942,37 @@ impl Vm {
         })
     }
 
+    /// Invoke a value as a callable. Supports `VmValue::Closure` and
+    /// `VmValue::BuiltinRef`, so builtin names passed by reference (e.g.
+    /// `dict.rekey(snake_to_camel)`) dispatch through the same code path as
+    /// user-defined closures.
+    #[allow(clippy::manual_async_fn)]
+    fn call_callable_value<'a>(
+        &'a mut self,
+        callable: &'a VmValue,
+        args: &'a [VmValue],
+        functions: &'a [CompiledFunction],
+    ) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + 'a>> {
+        Box::pin(async move {
+            match callable {
+                VmValue::Closure(closure) => self.call_closure(closure, args, functions).await,
+                VmValue::BuiltinRef(name) => {
+                    let name_owned = name.to_string();
+                    self.call_named_builtin(&name_owned, args.to_vec()).await
+                }
+                other => Err(VmError::TypeError(format!(
+                    "expected callable, got {}",
+                    other.type_name()
+                ))),
+            }
+        })
+    }
+
+    /// Returns true if `v` is callable via `call_callable_value`.
+    fn is_callable_value(v: &VmValue) -> bool {
+        matches!(v, VmValue::Closure(_) | VmValue::BuiltinRef(_))
+    }
+
     /// Public wrapper for `call_closure`, used by the MCP server to invoke
     /// tool handler closures from outside the VM execution loop.
     pub async fn call_closure_pub(

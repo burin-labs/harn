@@ -1,4 +1,4 @@
-.PHONY: setup install-hooks check fmt fmt-harn lint lint-md lint-harn test conformance all release-gate portal portal-demo gen-highlight check-highlight check-docs-snippets
+.PHONY: setup install-hooks check fmt fmt-harn lint lint-md lint-harn test test-fast conformance all release-gate portal portal-demo gen-highlight check-highlight check-docs-snippets
 
 # Full quality check: format first, then lint/test in parallel.
 # Usage: make all -j       (parallel checks after formatting)
@@ -25,6 +25,17 @@ lint:
 # Run Rust unit tests
 test:
 	cargo test --workspace
+
+# Run Rust unit tests via cargo-nextest when available for parallelism and
+# bounded timeouts (see .config/nextest.toml). Falls back to `cargo test`
+# if nextest is not installed.
+test-fast:
+	@if command -v cargo-nextest >/dev/null 2>&1; then \
+		cargo nextest run --workspace; \
+	else \
+		echo "cargo-nextest not installed; install with 'cargo install cargo-nextest --locked' for bounded timeouts"; \
+		cargo test --workspace; \
+	fi
 
 # Run Harn conformance test suite
 conformance:

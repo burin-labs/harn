@@ -134,4 +134,25 @@ pub(crate) fn register_type_builtins(vm: &mut Vm) {
             _ => Ok(VmValue::Int(0)),
         }
     });
+
+    // Reference / identity comparison. Default `==` is structural; `is_same`
+    // returns true when two values share the same underlying allocation
+    // (Rc::ptr_eq on heap values) or are identical primitives. For
+    // primitive scalars (Int/Float/Bool/Nil/String) this is equivalent to
+    // structural equality.
+    vm.register_builtin("is_same", |args, _out| {
+        let a = args.first().unwrap_or(&VmValue::Nil);
+        let b = args.get(1).unwrap_or(&VmValue::Nil);
+        Ok(VmValue::Bool(crate::value::values_identical(a, b)))
+    });
+
+    // Identity key — returns a stable string that differs iff two values
+    // live at different heap allocations. Useful for hashing by identity
+    // rather than by structure. Primitives get their own display() text.
+    vm.register_builtin("addr_of", |args, _out| {
+        let v = args.first().unwrap_or(&VmValue::Nil);
+        Ok(VmValue::String(Rc::from(crate::value::value_identity_key(
+            v,
+        ))))
+    });
 }

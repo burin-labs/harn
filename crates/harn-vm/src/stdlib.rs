@@ -12,6 +12,7 @@ mod io;
 mod json;
 mod logging;
 mod math;
+mod path;
 pub mod process;
 mod regex;
 mod sets;
@@ -45,6 +46,7 @@ pub fn register_core_stdlib(vm: &mut Vm) {
     datetime::register_datetime_builtins(vm);
     regex::register_regex_builtins(vm);
     crypto::register_crypto_builtins(vm);
+    path::register_path_helper_builtins(vm);
     sets::register_set_builtins(vm);
     shapes::register_shape_builtins(vm);
     testing::register_testing_builtins(vm);

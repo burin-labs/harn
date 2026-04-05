@@ -1,0 +1,26 @@
+pipeline test(task) {
+  // snake ↔ camel
+  log(snake_to_camel("test_file_patterns"))
+  log(snake_to_camel("a"))
+  log("empty:" + snake_to_camel(""))
+  log(camel_to_snake("testFilePatterns"))
+  log(camel_to_snake("HTTPServer"))
+  log(camel_to_snake("already_snake"))
+  log("empty:" + camel_to_snake(""))
+  // snake ↔ pascal
+  log(snake_to_pascal("test_file_patterns"))
+  log(pascal_to_snake("TestFilePatterns"))
+  log(pascal_to_snake("HTTPServer"))
+  // kebab variants
+  log(kebab_to_camel("test-file-patterns"))
+  log(camel_to_kebab("testFilePatterns"))
+  log(snake_to_kebab("test_file_patterns"))
+  log(kebab_to_snake("test-file-patterns"))
+  // case-first helpers
+  log(uppercase_first("hello"))
+  log(lowercase_first("Hello"))
+  log(title_case("hello world from harn"))
+  // round-trip
+  log(camel_to_snake(snake_to_camel("abc_def_ghi")))
+  log(snake_to_camel(camel_to_snake("fooBarBaz")))
+}

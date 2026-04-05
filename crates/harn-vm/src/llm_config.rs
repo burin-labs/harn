@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
 static CONFIG: OnceLock<ProvidersConfig> = OnceLock::new();
+static CONFIG_PATH: OnceLock<String> = OnceLock::new();
 
 // =============================================================================
 // Config structs
@@ -166,6 +167,7 @@ pub fn load_config() -> &'static ProvidersConfig {
                             config.aliases.len(),
                             path
                         );
+                        let _ = CONFIG_PATH.set(path);
                         return config;
                     }
                     Err(e) => eprintln!("[llm_config] TOML parse error in {}: {}", path, e),
@@ -178,6 +180,7 @@ pub fn load_config() -> &'static ProvidersConfig {
             let path = format!("{home}/.config/harn/providers.toml");
             if let Ok(content) = std::fs::read_to_string(&path) {
                 if let Ok(config) = toml::from_str::<ProvidersConfig>(&content) {
+                    let _ = CONFIG_PATH.set(path);
                     return config;
                 }
             }
@@ -185,6 +188,14 @@ pub fn load_config() -> &'static ProvidersConfig {
         // Fallback: built-in defaults
         default_config()
     })
+}
+
+/// Returns the filesystem path of the currently-loaded providers config, if
+/// any. Returns `None` when built-in defaults are active.
+pub fn loaded_config_path() -> Option<std::path::PathBuf> {
+    // Trigger lazy init so CONFIG_PATH gets populated if a file was loaded.
+    let _ = load_config();
+    CONFIG_PATH.get().map(std::path::PathBuf::from)
 }
 
 /// Resolve a model alias to (model_id, provider_name).

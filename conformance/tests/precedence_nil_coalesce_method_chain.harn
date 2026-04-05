@@ -1,0 +1,26 @@
+fn entries() {
+  return [
+    {language: "Rust"},
+    {id: "ts", language: "TypeScript"},
+    {language: "Python"},
+    {id: "go", language: "Go"},
+  ]
+}
+
+fn find_match(name) {
+  let normalized = name.lower()
+  for entry in entries() {
+    if (entry?.id ?? entry?.language ?? "").lower() == normalized {
+      return entry?.language
+    }
+  }
+  return "not found"
+}
+
+pipeline test(task) {
+  log(find_match("ts"))
+  log(find_match("python"))
+  log(find_match("go"))
+  log(find_match("rust"))
+  log(find_match("missing"))
+}

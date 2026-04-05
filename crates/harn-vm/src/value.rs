@@ -62,6 +62,10 @@ pub enum VmValue {
     List(Rc<Vec<VmValue>>),
     Dict(Rc<BTreeMap<String, VmValue>>),
     Closure(Rc<VmClosure>),
+    /// Reference to a registered builtin function, used when a builtin name is
+    /// referenced as a value (e.g. `snake_dict.rekey(snake_to_camel)`). The
+    /// contained string is the builtin's registered name.
+    BuiltinRef(Rc<str>),
     Duration(u64),
     EnumVariant {
         enum_name: String,
@@ -450,6 +454,7 @@ impl VmValue {
             VmValue::List(l) => !l.is_empty(),
             VmValue::Dict(d) => !d.is_empty(),
             VmValue::Closure(_) => true,
+            VmValue::BuiltinRef(_) => true,
             VmValue::Duration(ms) => *ms > 0,
             VmValue::EnumVariant { .. } => true,
             VmValue::StructInstance { .. } => true,
@@ -472,6 +477,7 @@ impl VmValue {
             VmValue::List(_) => "list",
             VmValue::Dict(_) => "dict",
             VmValue::Closure(_) => "closure",
+            VmValue::BuiltinRef(_) => "builtin",
             VmValue::Duration(_) => "duration",
             VmValue::EnumVariant { .. } => "enum",
             VmValue::StructInstance { .. } => "struct",
@@ -509,6 +515,7 @@ impl VmValue {
                 format!("{{{}}}", inner.join(", "))
             }
             VmValue::Closure(c) => format!("<fn({})>", c.func.params.join(", ")),
+            VmValue::BuiltinRef(name) => format!("<builtin {name}>"),
             VmValue::Duration(ms) => {
                 if *ms >= 3_600_000 && ms % 3_600_000 == 0 {
                     format!("{}h", ms / 3_600_000)
@@ -580,6 +587,72 @@ impl VmValue {
 
 /// Sync builtin function for the VM.
 pub type VmBuiltinFn = Rc<dyn Fn(&[VmValue], &mut String) -> Result<VmValue, VmError>>;
+
+/// Reference / identity equality. For heap-allocated refcounted values
+/// (List/Dict/Set/Closure) returns true only when both operands share the
+/// same underlying `Rc` allocation. For primitive scalars, falls back to
+/// structural equality (since primitives have no distinct identity).
+pub fn values_identical(a: &VmValue, b: &VmValue) -> bool {
+    match (a, b) {
+        (VmValue::List(x), VmValue::List(y)) => Rc::ptr_eq(x, y),
+        (VmValue::Dict(x), VmValue::Dict(y)) => Rc::ptr_eq(x, y),
+        (VmValue::Set(x), VmValue::Set(y)) => Rc::ptr_eq(x, y),
+        (VmValue::Closure(x), VmValue::Closure(y)) => Rc::ptr_eq(x, y),
+        (VmValue::String(x), VmValue::String(y)) => Rc::ptr_eq(x, y) || x == y,
+        (VmValue::BuiltinRef(x), VmValue::BuiltinRef(y)) => x == y,
+        // Primitives: identity collapses to structural equality.
+        _ => values_equal(a, b),
+    }
+}
+
+/// Stable identity key for a value. Different allocations produce different
+/// keys; two values with the same heap identity produce the same key. For
+/// primitives the key is derived from the displayed value plus type name so
+/// logically-equal primitives always compare equal.
+pub fn value_identity_key(v: &VmValue) -> String {
+    match v {
+        VmValue::List(x) => format!("list@{:p}", Rc::as_ptr(x)),
+        VmValue::Dict(x) => format!("dict@{:p}", Rc::as_ptr(x)),
+        VmValue::Set(x) => format!("set@{:p}", Rc::as_ptr(x)),
+        VmValue::Closure(x) => format!("closure@{:p}", Rc::as_ptr(x)),
+        VmValue::String(x) => format!("string@{:p}", x.as_ptr()),
+        VmValue::BuiltinRef(name) => format!("builtin@{name}"),
+        other => format!("{}@{}", other.type_name(), other.display()),
+    }
+}
+
+/// Canonical string form used as the keying material for `hash_value`.
+/// Different types never collide (the type name is prepended) and collection
+/// order is preserved so structurally-equal values always produce the same
+/// key. Not intended for cross-process stability; depends on the in-process
+/// iteration order for collections (Dict uses BTreeMap so keys are sorted).
+pub fn value_structural_hash_key(v: &VmValue) -> String {
+    match v {
+        VmValue::Nil => "nil:".into(),
+        VmValue::Bool(b) => format!("bool:{b}"),
+        VmValue::Int(n) => format!("int:{n}"),
+        VmValue::Float(n) => format!("float:{}", n.to_bits()),
+        VmValue::String(s) => format!("string:{}", s),
+        VmValue::Duration(ms) => format!("duration:{ms}"),
+        VmValue::List(items) => {
+            let inner: Vec<String> = items.iter().map(value_structural_hash_key).collect();
+            format!("list:[{}]", inner.join(","))
+        }
+        VmValue::Dict(map) => {
+            let inner: Vec<String> = map
+                .iter()
+                .map(|(k, v)| format!("{k}={}", value_structural_hash_key(v)))
+                .collect();
+            format!("dict:{{{}}}", inner.join(","))
+        }
+        VmValue::Set(items) => {
+            let mut inner: Vec<String> = items.iter().map(value_structural_hash_key).collect();
+            inner.sort();
+            format!("set:{{{}}}", inner.join(","))
+        }
+        other => format!("{}:{}", other.type_name(), other.display()),
+    }
+}
 
 pub fn values_equal(a: &VmValue, b: &VmValue) -> bool {
     match (a, b) {

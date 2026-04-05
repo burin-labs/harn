@@ -4,6 +4,106 @@ use std::rc::Rc;
 use crate::value::{values_equal, VmError, VmValue};
 use crate::vm::Vm;
 
+// --- Case conversion helpers ---
+
+fn split_snake(s: &str) -> Vec<String> {
+    s.split('_')
+        .filter(|p| !p.is_empty())
+        .map(|p| p.to_string())
+        .collect()
+}
+
+fn split_kebab(s: &str) -> Vec<String> {
+    s.split('-')
+        .filter(|p| !p.is_empty())
+        .map(|p| p.to_string())
+        .collect()
+}
+
+/// Splits a camelCase or PascalCase string into lowercase words.
+/// `"HTTPServer"` → `["http", "server"]`.
+/// `"testFilePatterns"` → `["test", "file", "patterns"]`.
+fn split_camel(s: &str) -> Vec<String> {
+    let chars: Vec<char> = s.chars().collect();
+    if chars.is_empty() {
+        return Vec::new();
+    }
+    let mut words = Vec::new();
+    let mut cur = String::new();
+    for i in 0..chars.len() {
+        let c = chars[i];
+        if i > 0 && c.is_uppercase() {
+            let prev = chars[i - 1];
+            let next = chars.get(i + 1).copied();
+            let prev_lower_or_digit = prev.is_lowercase() || prev.is_ascii_digit();
+            let acronym_end = prev.is_uppercase() && next.is_some_and(|n| n.is_lowercase());
+            if (prev_lower_or_digit || acronym_end) && !cur.is_empty() {
+                words.push(cur.clone());
+                cur.clear();
+            }
+        }
+        for lc in c.to_lowercase() {
+            cur.push(lc);
+        }
+    }
+    if !cur.is_empty() {
+        words.push(cur);
+    }
+    words
+}
+
+fn uppercase_first_str(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
+    }
+}
+
+fn lowercase_first_str(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(c) => c.to_lowercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
+    }
+}
+
+fn words_to_camel(words: &[String]) -> String {
+    let mut out = String::new();
+    for (i, w) in words.iter().enumerate() {
+        let lower = w.to_lowercase();
+        if i == 0 {
+            out.push_str(&lower);
+        } else {
+            out.push_str(&uppercase_first_str(&lower));
+        }
+    }
+    out
+}
+
+fn words_to_pascal(words: &[String]) -> String {
+    words
+        .iter()
+        .map(|w| uppercase_first_str(&w.to_lowercase()))
+        .collect()
+}
+
+fn words_to_snake(words: &[String]) -> String {
+    words
+        .iter()
+        .map(|w| w.to_lowercase())
+        .collect::<Vec<_>>()
+        .join("_")
+}
+
+fn words_to_kebab(words: &[String]) -> String {
+    words
+        .iter()
+        .map(|w| w.to_lowercase())
+        .collect::<Vec<_>>()
+        .join("-")
+}
+
 fn template_truthy(value: &VmValue) -> bool {
     match value {
         VmValue::Nil => false,
@@ -211,6 +311,86 @@ pub(crate) fn register_string_builtins(vm: &mut Vm) {
                 Ok(VmValue::String(Rc::from(result)))
             }
         }
+    });
+
+    // --- Case conversion ---
+
+    vm.register_builtin("snake_to_camel", |args, _out| {
+        let s = args.first().map(|a| a.display()).unwrap_or_default();
+        Ok(VmValue::String(Rc::from(words_to_camel(&split_snake(&s)))))
+    });
+
+    vm.register_builtin("snake_to_pascal", |args, _out| {
+        let s = args.first().map(|a| a.display()).unwrap_or_default();
+        Ok(VmValue::String(Rc::from(words_to_pascal(&split_snake(&s)))))
+    });
+
+    vm.register_builtin("camel_to_snake", |args, _out| {
+        let s = args.first().map(|a| a.display()).unwrap_or_default();
+        Ok(VmValue::String(Rc::from(words_to_snake(&split_camel(&s)))))
+    });
+
+    vm.register_builtin("pascal_to_snake", |args, _out| {
+        let s = args.first().map(|a| a.display()).unwrap_or_default();
+        Ok(VmValue::String(Rc::from(words_to_snake(&split_camel(&s)))))
+    });
+
+    vm.register_builtin("kebab_to_camel", |args, _out| {
+        let s = args.first().map(|a| a.display()).unwrap_or_default();
+        Ok(VmValue::String(Rc::from(words_to_camel(&split_kebab(&s)))))
+    });
+
+    vm.register_builtin("camel_to_kebab", |args, _out| {
+        let s = args.first().map(|a| a.display()).unwrap_or_default();
+        Ok(VmValue::String(Rc::from(words_to_kebab(&split_camel(&s)))))
+    });
+
+    vm.register_builtin("snake_to_kebab", |args, _out| {
+        let s = args.first().map(|a| a.display()).unwrap_or_default();
+        Ok(VmValue::String(Rc::from(words_to_kebab(&split_snake(&s)))))
+    });
+
+    vm.register_builtin("kebab_to_snake", |args, _out| {
+        let s = args.first().map(|a| a.display()).unwrap_or_default();
+        Ok(VmValue::String(Rc::from(words_to_snake(&split_kebab(&s)))))
+    });
+
+    vm.register_builtin("pascal_to_camel", |args, _out| {
+        let s = args.first().map(|a| a.display()).unwrap_or_default();
+        Ok(VmValue::String(Rc::from(lowercase_first_str(&s))))
+    });
+
+    vm.register_builtin("camel_to_pascal", |args, _out| {
+        let s = args.first().map(|a| a.display()).unwrap_or_default();
+        Ok(VmValue::String(Rc::from(uppercase_first_str(&s))))
+    });
+
+    vm.register_builtin("title_case", |args, _out| {
+        let s = args.first().map(|a| a.display()).unwrap_or_default();
+        let mut out = String::with_capacity(s.len());
+        let mut at_word_start = true;
+        for c in s.chars() {
+            if c.is_whitespace() {
+                at_word_start = true;
+                out.push(c);
+            } else if at_word_start {
+                out.extend(c.to_uppercase());
+                at_word_start = false;
+            } else {
+                out.extend(c.to_lowercase());
+            }
+        }
+        Ok(VmValue::String(Rc::from(out)))
+    });
+
+    vm.register_builtin("uppercase_first", |args, _out| {
+        let s = args.first().map(|a| a.display()).unwrap_or_default();
+        Ok(VmValue::String(Rc::from(uppercase_first_str(&s))))
+    });
+
+    vm.register_builtin("lowercase_first", |args, _out| {
+        let s = args.first().map(|a| a.display()).unwrap_or_default();
+        Ok(VmValue::String(Rc::from(lowercase_first_str(&s))))
     });
 
     // --- Path builtins ---

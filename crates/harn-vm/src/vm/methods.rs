@@ -138,11 +138,12 @@ impl super::Vm {
                     "count" => Ok(VmValue::Int(items.len() as i64)),
                     "empty" => Ok(VmValue::Bool(items.is_empty())),
                     "map" => {
-                        if let Some(VmValue::Closure(closure)) = args.first() {
+                        if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v))
+                        {
                             let mut results = Vec::new();
                             for item in items.iter() {
                                 results.push(
-                                    self.call_closure(closure, &[item.clone()], functions)
+                                    self.call_callable_value(callable, &[item.clone()], functions)
                                         .await?,
                                 );
                             }
@@ -152,11 +153,12 @@ impl super::Vm {
                         }
                     }
                     "filter" => {
-                        if let Some(VmValue::Closure(closure)) = args.first() {
+                        if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v))
+                        {
                             let mut results = Vec::new();
                             for item in items.iter() {
                                 let result = self
-                                    .call_closure(closure, &[item.clone()], functions)
+                                    .call_callable_value(callable, &[item.clone()], functions)
                                     .await?;
                                 if result.is_truthy() {
                                     results.push(item.clone());
@@ -168,24 +170,24 @@ impl super::Vm {
                         }
                     }
                     "reduce" => {
-                        if args.len() >= 2 {
-                            if let VmValue::Closure(closure) = &args[1] {
-                                let mut acc = args[0].clone();
-                                for item in items.iter() {
-                                    acc = self
-                                        .call_closure(closure, &[acc, item.clone()], functions)
-                                        .await?;
-                                }
-                                return Ok(acc);
+                        if args.len() >= 2 && Self::is_callable_value(&args[1]) {
+                            let callable = &args[1].clone();
+                            let mut acc = args[0].clone();
+                            for item in items.iter() {
+                                acc = self
+                                    .call_callable_value(callable, &[acc, item.clone()], functions)
+                                    .await?;
                             }
+                            return Ok(acc);
                         }
                         Ok(VmValue::Nil)
                     }
                     "find" => {
-                        if let Some(VmValue::Closure(closure)) = args.first() {
+                        if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v))
+                        {
                             for item in items.iter() {
                                 let result = self
-                                    .call_closure(closure, &[item.clone()], functions)
+                                    .call_callable_value(callable, &[item.clone()], functions)
                                     .await?;
                                 if result.is_truthy() {
                                     return Ok(item.clone());
@@ -195,10 +197,11 @@ impl super::Vm {
                         Ok(VmValue::Nil)
                     }
                     "any" => {
-                        if let Some(VmValue::Closure(closure)) = args.first() {
+                        if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v))
+                        {
                             for item in items.iter() {
                                 let result = self
-                                    .call_closure(closure, &[item.clone()], functions)
+                                    .call_callable_value(callable, &[item.clone()], functions)
                                     .await?;
                                 if result.is_truthy() {
                                     return Ok(VmValue::Bool(true));
@@ -210,10 +213,11 @@ impl super::Vm {
                         }
                     }
                     "all" | "every" | "all?" => {
-                        if let Some(VmValue::Closure(closure)) = args.first() {
+                        if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v))
+                        {
                             for item in items.iter() {
                                 let result = self
-                                    .call_closure(closure, &[item.clone()], functions)
+                                    .call_callable_value(callable, &[item.clone()], functions)
                                     .await?;
                                 if !result.is_truthy() {
                                     return Ok(VmValue::Bool(false));
@@ -225,11 +229,12 @@ impl super::Vm {
                         }
                     }
                     "flat_map" => {
-                        if let Some(VmValue::Closure(closure)) = args.first() {
+                        if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v))
+                        {
                             let mut results = Vec::new();
                             for item in items.iter() {
                                 let result = self
-                                    .call_closure(closure, &[item.clone()], functions)
+                                    .call_callable_value(callable, &[item.clone()], functions)
                                     .await?;
                                 if let VmValue::List(inner) = result {
                                     results.extend(inner.iter().cloned());
@@ -248,11 +253,12 @@ impl super::Vm {
                         Ok(VmValue::List(Rc::new(sorted)))
                     }
                     "sort_by" => {
-                        if let Some(VmValue::Closure(closure)) = args.first() {
+                        if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v))
+                        {
                             let mut keyed: Vec<(VmValue, VmValue)> = Vec::new();
                             for item in items.iter() {
                                 let key = self
-                                    .call_closure(closure, &[item.clone()], functions)
+                                    .call_callable_value(callable, &[item.clone()], functions)
                                     .await?;
                                 keyed.push((item.clone(), key));
                             }
@@ -432,10 +438,11 @@ impl super::Vm {
                     }
                     // --- Ruby-inspired additions ---
                     "none" | "none?" => {
-                        if let Some(VmValue::Closure(closure)) = args.first() {
+                        if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v))
+                        {
                             for item in items.iter() {
                                 let result = self
-                                    .call_closure(closure, &[item.clone()], functions)
+                                    .call_callable_value(callable, &[item.clone()], functions)
                                     .await?;
                                 if result.is_truthy() {
                                     return Ok(VmValue::Bool(false));
@@ -448,10 +455,11 @@ impl super::Vm {
                         }
                     }
                     "find_index" => {
-                        if let Some(VmValue::Closure(closure)) = args.first() {
+                        if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v))
+                        {
                             for (i, item) in items.iter().enumerate() {
                                 let result = self
-                                    .call_closure(closure, &[item.clone()], functions)
+                                    .call_callable_value(callable, &[item.clone()], functions)
                                     .await?;
                                 if result.is_truthy() {
                                     return Ok(VmValue::Int(i as i64));
@@ -483,12 +491,13 @@ impl super::Vm {
                         }
                     }
                     "partition" => {
-                        if let Some(VmValue::Closure(closure)) = args.first() {
+                        if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v))
+                        {
                             let mut truthy = Vec::new();
                             let mut falsy = Vec::new();
                             for item in items.iter() {
                                 let result = self
-                                    .call_closure(closure, &[item.clone()], functions)
+                                    .call_callable_value(callable, &[item.clone()], functions)
                                     .await?;
                                 if result.is_truthy() {
                                     truthy.push(item.clone());
@@ -505,11 +514,12 @@ impl super::Vm {
                         }
                     }
                     "group_by" => {
-                        if let Some(VmValue::Closure(closure)) = args.first() {
+                        if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v))
+                        {
                             let mut groups: BTreeMap<String, Vec<VmValue>> = BTreeMap::new();
                             for item in items.iter() {
                                 let key = self
-                                    .call_closure(closure, &[item.clone()], functions)
+                                    .call_callable_value(callable, &[item.clone()], functions)
                                     .await?;
                                 let key_str = key.display();
                                 groups.entry(key_str).or_default().push(item.clone());
@@ -536,14 +546,15 @@ impl super::Vm {
                         if items.is_empty() {
                             return Ok(VmValue::Nil);
                         }
-                        if let Some(VmValue::Closure(closure)) = args.first() {
+                        if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v))
+                        {
                             let mut best = items[0].clone();
                             let mut best_key = self
-                                .call_closure(closure, &[best.clone()], functions)
+                                .call_callable_value(callable, &[best.clone()], functions)
                                 .await?;
                             for item in &items[1..] {
                                 let key = self
-                                    .call_closure(closure, &[item.clone()], functions)
+                                    .call_callable_value(callable, &[item.clone()], functions)
                                     .await?;
                                 if compare_values(&key, &best_key) < 0 {
                                     best = item.clone();
@@ -559,14 +570,15 @@ impl super::Vm {
                         if items.is_empty() {
                             return Ok(VmValue::Nil);
                         }
-                        if let Some(VmValue::Closure(closure)) = args.first() {
+                        if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v))
+                        {
                             let mut best = items[0].clone();
                             let mut best_key = self
-                                .call_closure(closure, &[best.clone()], functions)
+                                .call_callable_value(callable, &[best.clone()], functions)
                                 .await?;
                             for item in &items[1..] {
                                 let key = self
-                                    .call_closure(closure, &[item.clone()], functions)
+                                    .call_callable_value(callable, &[item.clone()], functions)
                                     .await?;
                                 if compare_values(&key, &best_key) > 0 {
                                     best = item.clone();
@@ -640,11 +652,13 @@ impl super::Vm {
                         }
                     }
                     "map_values" => {
-                        if let Some(VmValue::Closure(closure)) = args.first() {
+                        if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v))
+                        {
                             let mut result = BTreeMap::new();
                             for (k, v) in map.iter() {
-                                let mapped =
-                                    self.call_closure(closure, &[v.clone()], functions).await?;
+                                let mapped = self
+                                    .call_callable_value(callable, &[v.clone()], functions)
+                                    .await?;
                                 result.insert(k.clone(), mapped);
                             }
                             Ok(VmValue::Dict(Rc::new(result)))
@@ -652,12 +666,35 @@ impl super::Vm {
                             Ok(VmValue::Nil)
                         }
                     }
-                    "filter" => {
-                        if let Some(VmValue::Closure(closure)) = args.first() {
+                    "rekey" | "map_keys" => {
+                        if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v))
+                        {
                             let mut result = BTreeMap::new();
                             for (k, v) in map.iter() {
-                                let keep =
-                                    self.call_closure(closure, &[v.clone()], functions).await?;
+                                let new_key = self
+                                    .call_callable_value(
+                                        callable,
+                                        &[VmValue::String(Rc::from(k.as_str()))],
+                                        functions,
+                                    )
+                                    .await?;
+                                let new_key_str = new_key.display();
+                                // Last write wins on key collision
+                                result.insert(new_key_str, v.clone());
+                            }
+                            Ok(VmValue::Dict(Rc::new(result)))
+                        } else {
+                            Ok(VmValue::Nil)
+                        }
+                    }
+                    "filter" => {
+                        if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v))
+                        {
+                            let mut result = BTreeMap::new();
+                            for (k, v) in map.iter() {
+                                let keep = self
+                                    .call_callable_value(callable, &[v.clone()], functions)
+                                    .await?;
                                 if keep.is_truthy() {
                                     result.insert(k.clone(), v.clone());
                                 }
@@ -793,11 +830,12 @@ impl super::Vm {
                     }
                     "to_list" => Ok(VmValue::List(Rc::new(items.to_vec()))),
                     "map" => {
-                        if let Some(VmValue::Closure(closure)) = args.first() {
+                        if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v))
+                        {
                             let mut result = Vec::new();
                             for item in items.iter() {
                                 let mapped = self
-                                    .call_closure(closure, &[item.clone()], functions)
+                                    .call_callable_value(callable, &[item.clone()], functions)
                                     .await?;
                                 if !result.iter().any(|x| values_equal(x, &mapped)) {
                                     result.push(mapped);
@@ -809,11 +847,12 @@ impl super::Vm {
                         }
                     }
                     "filter" => {
-                        if let Some(VmValue::Closure(closure)) = args.first() {
+                        if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v))
+                        {
                             let mut result = Vec::new();
                             for item in items.iter() {
                                 let keep = self
-                                    .call_closure(closure, &[item.clone()], functions)
+                                    .call_callable_value(callable, &[item.clone()], functions)
                                     .await?;
                                 if keep.is_truthy() {
                                     result.push(item.clone());
@@ -825,10 +864,11 @@ impl super::Vm {
                         }
                     }
                     "any" => {
-                        if let Some(VmValue::Closure(closure)) = args.first() {
+                        if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v))
+                        {
                             for item in items.iter() {
                                 let result = self
-                                    .call_closure(closure, &[item.clone()], functions)
+                                    .call_callable_value(callable, &[item.clone()], functions)
                                     .await?;
                                 if result.is_truthy() {
                                     return Ok(VmValue::Bool(true));
@@ -840,10 +880,11 @@ impl super::Vm {
                         }
                     }
                     "all" | "every" => {
-                        if let Some(VmValue::Closure(closure)) = args.first() {
+                        if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v))
+                        {
                             for item in items.iter() {
                                 let result = self
-                                    .call_closure(closure, &[item.clone()], functions)
+                                    .call_callable_value(callable, &[item.clone()], functions)
                                     .await?;
                                 if !result.is_truthy() {
                                     return Ok(VmValue::Bool(false));

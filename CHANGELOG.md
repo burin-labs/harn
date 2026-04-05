@@ -2,6 +2,118 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.38
+
+### Added
+
+- **String case conversion builtins** — `snake_to_camel`, `snake_to_pascal`,
+  `camel_to_snake`, `pascal_to_snake`, `kebab_to_camel`, `camel_to_kebab`,
+  `snake_to_kebab`, `kebab_to_snake`, `pascal_to_camel`, `camel_to_pascal`,
+  `title_case`, `uppercase_first`, `lowercase_first`. `camel_to_snake`
+  uses the common acronym convention so `"HTTPServer"` → `"http_server"`.
+  Replaces ~56 lines of per-project snake↔camel aliasing in downstream
+  consumers with a single stdlib call.
+- **`dict.rekey(fn)` / `dict.map_keys(fn)` method** — returns a new dict
+  with each key replaced by `fn(old_key)`; last write wins on collision.
+  Composes with the new case converters: `snake_dict.rekey(snake_to_camel)`
+  rewrites every key in one call.
+- **Named fn/builtin references as callbacks** — a bare identifier that
+  names a registered builtin (or user fn) is now a first-class value, so
+  you can write `snake_dict.rekey(snake_to_camel)` without wrapping the
+  callback in a lambda. Implemented via a new `VmValue::BuiltinRef` variant
+  that dispatches through `call_callable_value` at each method-dispatch
+  site. Accepted at all dict/list/set/generator method callbacks
+  (`map`, `filter`, `reduce`, `find`, `any`, `all`, `sort_by`, `group_by`,
+  `max_by`, `map_values`, `rekey`/`map_keys`, etc.). Unknown identifiers
+  still error with accurate source carets, and the runtime suggestion
+  pool now includes builtin names so typos (e.g. `snake_too_camel`) get
+  "did you mean `snake_to_camel`?" hints.
+- **`std/path` structural helpers** — new pure-string path manipulation
+  builtins in `stdlib/path.rs`: `path_parts`, `path_parent`, `path_basename`,
+  `path_stem`, `path_extension`, `path_with_extension`, `path_with_stem`,
+  `path_is_absolute`, `path_is_relative`, `path_normalize`, `path_relative_to`,
+  `path_to_posix`, `path_to_native`, `path_segments`. All operate on forward
+  slashes, collapse `..`, handle Windows drive letters, and never touch
+  the filesystem. Rust-side unit tests cover `..` collapse, dot-file stem
+  handling (`.gitignore`), and `relative_to` walk-up.
+- **Identity / reference equality** — `is_same(a, b)` returns true when
+  two heap-allocated values (List/Dict/Set/Closure) share the same
+  underlying `Rc` allocation, and falls back to structural equality for
+  primitives. `addr_of(v)` returns a stable identity key
+  (`list@0x...`, `dict@0x...`, etc.) for bucketing by identity.
+- **`hash_value(v)` builtin** — FNV-1a 64-bit hash over a canonical
+  display form so structurally-equal values always produce the same hash.
+  Non-cryptographic; use `sha256`/`sha512` for integrity.
+- **Additional hash algorithms** — `sha224`, `sha384`, `sha512`,
+  `sha512_256` alongside the existing `sha256` and `md5`.
+- **REPL persistent variable memory** — `let x = 5` followed by `x + 1`
+  now works. Successful lines are replayed as prior history on every new
+  input; output is diffed so only the newly-executed fragment prints.
+  Top-level `fn`/`struct`/`enum`/`type`/`import`/`pub` declarations are
+  tracked separately and spliced outside the synthetic pipeline body.
+- **REPL implicit println + result history** — bare expressions (`e`,
+  `5 + 2`, `find_match("ts")`) are auto-wrapped so their value is both
+  displayed and captured under a numbered binding (`_1`, `_2`, ...) for
+  later reference in the session.
+- **New conformance coverage** — `nested_call_args`,
+  `precedence_nil_coalesce_call_args`, `precedence_nil_coalesce_method_chain`,
+  `stdlib_case_conversion`, `stdlib_dict_rekey`, `stdlib_identity_hash`,
+  `stdlib_path_helpers` (297 → 303 passing).
+
+### Changed
+
+- **Graceful LLM provider error context** — `Missing API key` errors now
+  include the currently-loaded `llm.toml` path (or `<built-in defaults>`)
+  and the env var names for switching to the mock provider for offline
+  experimentation, instead of just naming the missing env var.
+- **Shape-typed dicts type-check as dicts for method dispatch** — calling
+  `.filter(...)`, `.map_values(...)`, or the new `.rekey(...)` on a
+  shape-annotated dict now returns `dict` instead of `list` in the
+  inferred type.
+- **Case converters & path helpers wired through the typechecker** — all
+  new builtin names appear in `is_builtin` and carry explicit return types
+  (`string`/`bool`/`dict`/`list`) so downstream type inference works for
+  expressions like `let camel: string = snake_to_camel(x)` without
+  annotations.
+
+### Fixed
+
+- **Precedence regression pins** — two conformance tests faithfully
+  reproduce the two Burin-reported repros for `??` in nested call args
+  and chained `??` + `==` with optional chaining. Both pass on current
+  main; the minimal self-contained cases no longer trigger the described
+  misbehaviour. Tests retained as regression guards so future drift is
+  caught immediately.
+
+### Performance / infra
+
+- **cargo-nextest config** — new `.config/nextest.toml` with a 15 s
+  slow-test threshold and 60 s hard termination cap (30 s / 60 s
+  respectively under `--profile ci`). LLM transport tests have targeted
+  overrides since they do real localhost TCP.
+- **`make test-fast` target** — runs `cargo nextest run --workspace`
+  when nextest is installed; falls back to `cargo test --workspace`
+  otherwise. `CONTRIBUTING.md` documents warm-vs-cold timing expectations,
+  cold-rebuild triggers, and the optional nextest install.
+- **Bounded localhost test stubs** — retrofitted the two old blocking
+  ollama stubs in `llm/api.rs` to share a new `accept_with_deadline`
+  helper with a 3 s cap and read/write timeouts, matching the pattern
+  from `spawn_openai_error_stub`. Stubs can no longer wedge the suite
+  indefinitely.
+
+### Deferred to a follow-up
+
+- **Modularity refactor** — splitting the 21 files over 1000 lines into
+  submodules (`orchestration.rs`, `commands/portal.rs`, `typechecker.rs`,
+  `stdlib/agents.rs`, `compiler.rs`, etc.) is deliberately left out of
+  this patch because a parallel session is editing `llm/agent.rs` and
+  `llm/tools.rs` concurrently and the mechanical file moves would fight
+  the merges. Scope stays roughly as described in the next-session prompt.
+- **DRY builtin registry** — `is_builtin` and `builtin_return_type` in
+  the typechecker still carry overlapping lists; a single source of
+  truth (ideally derived from the stdlib registration) is tracked as a
+  follow-up.
+
 ## v0.5.37
 
 ### Fixed

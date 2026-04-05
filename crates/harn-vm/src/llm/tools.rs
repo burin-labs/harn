@@ -649,10 +649,20 @@ fn parse_text_tool_calls(text: &str) -> Vec<serde_json::Value> {
     parse_text_tool_calls_with_tools(text, None).calls
 }
 
+/// Why find_call_block_end failed to locate a closing fence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum BlockEndReason {
+    /// Block reached EOF while still inside a heredoc body.
+    UnterminatedHeredoc { tag: String },
+    /// Block reached EOF with no closing ``` fence.
+    NoClosingFence,
+}
+
 /// Find the end of a ```call block starting from `s`, skipping over heredoc bodies
 /// so that triple backticks inside heredoc content don't close the block early.
-/// Returns the byte offset within `s` where the closing ``` begins, or None.
-fn find_call_block_end(s: &str) -> Option<usize> {
+/// Returns the byte offset within `s` where the closing ``` begins, or a structured
+/// reason for why no closing fence was found.
+fn find_call_block_end(s: &str) -> Result<usize, BlockEndReason> {
     let bytes = s.as_bytes();
     let mut i = 0;
     let mut in_double_quote = false;
@@ -681,7 +691,7 @@ fn find_call_block_end(s: &str) -> Option<usize> {
                 }
                 j += 1;
             }
-            let tag = &s[tag_start..j];
+            let tag = s[tag_start..j].to_string();
             if quoted && j < bytes.len() && bytes[j] == b'\'' {
                 j += 1;
             }
@@ -697,16 +707,93 @@ fn find_call_block_end(s: &str) -> Option<usize> {
             let rest = &s[j..];
             if let Some(pos) = rest.find(&closing) {
                 i = j + pos + closing.len();
-            } else {
-                // No closing tag: skip to end
+            } else if rest.trim_end() == tag.as_str() || rest.ends_with(&format!("\n{}", tag)) {
+                // Closing tag at very end of input with no trailing newline.
                 i = bytes.len();
+            } else {
+                // Unterminated heredoc body — the response was likely truncated.
+                return Err(BlockEndReason::UnterminatedHeredoc { tag });
             }
             continue;
         }
         // Check for closing ```
         if i + 2 < bytes.len() && bytes[i] == b'`' && bytes[i + 1] == b'`' && bytes[i + 2] == b'`' {
-            return Some(i);
+            return Ok(i);
         }
+        i += 1;
+    }
+    Err(BlockEndReason::NoClosingFence)
+}
+
+/// Detect the common mistake of using `:` instead of `=` before a heredoc:
+/// `new_body: <<'EOF'` rather than `new_body=<<'EOF'`. Returns the offending
+/// key name if found, else None.
+///
+/// Heuristic: the pattern `<arg-boundary> <ident> \s* : \s* <<` where
+/// arg-boundary is `(`, `,`, or a newline. Colons inside quoted strings, and
+/// colons that are not preceded by an identifier at an argument boundary, are
+/// ignored. This avoids false positives on JSON/dict content inside heredoc
+/// bodies.
+fn detect_colon_before_heredoc(call_text: &str) -> Option<String> {
+    let bytes = call_text.as_bytes();
+    let mut i = 0;
+    let mut in_quote = false;
+    let mut quote_ch: u8 = b'"';
+    // Track whether we have just crossed an argument boundary and are now
+    // looking for an identifier. Start true because the very beginning of
+    // args_str is also an argument boundary (right after the opening paren).
+    let mut at_arg_boundary = true;
+    while i + 1 < bytes.len() {
+        let b = bytes[i];
+        if !in_quote && (b == b'"' || b == b'\'') {
+            in_quote = true;
+            quote_ch = b;
+            at_arg_boundary = false;
+            i += 1;
+            continue;
+        }
+        if in_quote {
+            if b == quote_ch && (i == 0 || bytes[i - 1] != b'\\') {
+                in_quote = false;
+            }
+            i += 1;
+            continue;
+        }
+        if b == b'(' || b == b',' || b == b'\n' {
+            at_arg_boundary = true;
+            i += 1;
+            continue;
+        }
+        if b == b' ' || b == b'\t' || b == b'\r' {
+            i += 1;
+            continue;
+        }
+        if at_arg_boundary && (b.is_ascii_alphabetic() || b == b'_') {
+            // Walk an identifier
+            let id_start = i;
+            while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                i += 1;
+            }
+            let id_end = i;
+            // Skip whitespace
+            while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'\t') {
+                i += 1;
+            }
+            // Check for `:` followed by whitespace and `<<`
+            if i < bytes.len() && bytes[i] == b':' {
+                let mut j = i + 1;
+                while j < bytes.len() && (bytes[j] == b' ' || bytes[j] == b'\t') {
+                    j += 1;
+                }
+                if j + 1 < bytes.len() && bytes[j] == b'<' && bytes[j + 1] == b'<' {
+                    let key = std::str::from_utf8(&bytes[id_start..id_end]).ok()?;
+                    return Some(key.to_string());
+                }
+            }
+            at_arg_boundary = false;
+            continue;
+        }
+        at_arg_boundary = false;
         i += 1;
     }
     None
@@ -734,34 +821,63 @@ pub(crate) fn parse_text_tool_calls_with_tools(
         } else {
             after_marker
         };
-        if let Some(end_offset) = find_call_block_end(&text[content_start..]) {
-            let content_end = content_start + end_offset;
-            let call_text = text[content_start..content_end].trim();
-            if let Some((name, arguments)) = parse_function_call_syntax(call_text, tools_val) {
-                calls.push(serde_json::json!({
-                    "id": format!("tc_{}", calls.len()),
-                    "name": name,
-                    "arguments": arguments,
-                }));
-            } else {
-                // Call block found but couldn't parse the function syntax
-                let preview: String = call_text.chars().take(120).collect();
-                errors.push(format!(
-                    "TOOL CALL PARSE ERROR: Could not parse tool call from: `{preview}...`\n\
-                     Check: missing closing `)`, unmatched quotes, or malformed arguments.\n\
-                     For multiline string values, use heredoc syntax: param=<<'EOF'\\n...\\nEOF"
-                ));
+        match find_call_block_end(&text[content_start..]) {
+            Ok(end_offset) => {
+                let content_end = content_start + end_offset;
+                let call_text = text[content_start..content_end].trim();
+                if let Some((name, arguments)) = parse_function_call_syntax(call_text, tools_val) {
+                    calls.push(serde_json::json!({
+                        "id": format!("tc_{}", calls.len()),
+                        "name": name,
+                        "arguments": arguments,
+                    }));
+                } else if let Some(key) = detect_colon_before_heredoc(call_text) {
+                    errors.push(format!(
+                        "TOOL CALL PARSE ERROR: argument `{key}` used `:` as the separator \
+                         before a heredoc. Tool call arguments use `=`, not `:`. \
+                         Write `{key}=<<'EOF'` (no space, `=` not `:`) on its own line, \
+                         then the body, then `EOF` on its own line."
+                    ));
+                } else {
+                    let preview: String = call_text.chars().take(120).collect();
+                    errors.push(format!(
+                        "TOOL CALL PARSE ERROR: Could not parse tool call from: `{preview}...`\n\
+                         Check: missing closing `)`, unmatched quotes, or malformed arguments.\n\
+                         For multiline string values, use heredoc syntax: param=<<'EOF'\\n...\\nEOF"
+                    ));
+                }
+                search_from = content_end + "```".len();
             }
-            search_from = content_end + "```".len();
-        } else {
-            // Found ```call but no closing ``` — unclosed block.
-            // Don't break: skip past this marker and continue scanning for valid blocks.
-            let preview: String = text[content_start..].chars().take(80).collect();
-            errors.push(format!(
-                "TOOL CALL PARSE ERROR: Found ```call block but no closing ```. Content starts with: `{preview}...`\n\
-                 Make sure every ```call block has a matching closing ```."
-            ));
-            search_from = after_marker;
+            Err(BlockEndReason::UnterminatedHeredoc { tag }) => {
+                // Prefer the colon-misuse diagnostic if we can spot it in the
+                // partial block — it is more actionable than "truncated".
+                let partial = &text[content_start..];
+                if let Some(key) = detect_colon_before_heredoc(partial) {
+                    errors.push(format!(
+                        "TOOL CALL PARSE ERROR: argument `{key}` used `:` as the separator \
+                         before a heredoc. Tool call arguments use `=`, not `:`. \
+                         Write `{key}=<<'{tag}'` (no space, `=` not `:`) on its own line, \
+                         then the body, then `{tag}` on its own line."
+                    ));
+                } else {
+                    errors.push(format!(
+                        "TOOL CALL PARSE ERROR: heredoc body for tag `{tag}` was never closed \
+                         — the response was likely truncated mid-call. \
+                         Re-emit the call with a shorter body, or split the edit into \
+                         smaller pieces so the whole call fits in one response."
+                    ));
+                }
+                // Skip past this marker so we still scan for subsequent valid blocks.
+                search_from = after_marker;
+            }
+            Err(BlockEndReason::NoClosingFence) => {
+                let preview: String = text[content_start..].chars().take(80).collect();
+                errors.push(format!(
+                    "TOOL CALL PARSE ERROR: Found ```call block but no closing ```. Content starts with: `{preview}...`\n\
+                     Make sure every ```call block has a matching closing ```."
+                ));
+                search_from = after_marker;
+            }
         }
     }
 
@@ -795,6 +911,12 @@ fn parse_function_call_syntax(
     let mut positional_index = 0usize;
     for part in split_call_args(args_str) {
         let part = part.trim();
+        // If a part contains a heredoc sentinel but no `=`, the model used
+        // the wrong separator (e.g. `new_body: <<'EOF'`). Bail out so the
+        // caller can produce a precise `key: <<` diagnostic.
+        if part.contains("\x00H") && !part.contains('=') {
+            return None;
+        }
         if let Some(eq_pos) = part.find('=') {
             let key = part[..eq_pos].trim().to_string();
             let val_str = part[eq_pos + 1..].trim();
@@ -1149,8 +1271,9 @@ fn vm_build_json_schema(params: Option<&BTreeMap<String, VmValue>>) -> serde_jso
 #[cfg(test)]
 mod tests {
     use super::{
-        build_tool_calling_contract_prompt, find_call_block_end, normalize_tool_args,
-        parse_text_tool_calls, parse_text_tool_calls_with_tools, split_call_args,
+        build_tool_calling_contract_prompt, detect_colon_before_heredoc, find_call_block_end,
+        normalize_tool_args, parse_text_tool_calls, parse_text_tool_calls_with_tools,
+        split_call_args, BlockEndReason,
     };
     use crate::value::VmValue;
     use serde_json::json;
@@ -1398,9 +1521,84 @@ mod tests {
 ```"#;
         let end = find_call_block_end(block);
         assert!(
-            end.is_some(),
+            end.is_ok(),
             "find_call_block_end should find closing ``` even when << appears inside quotes"
         );
+    }
+
+    /// Truncated heredoc body should yield a specific UnterminatedHeredoc reason,
+    /// not a generic "no closing fence" error.
+    #[test]
+    fn find_call_block_end_reports_unterminated_heredoc() {
+        let block = "edit(body=<<'EOF'\nline 1\nline 2\n";
+        let result = find_call_block_end(block);
+        match result {
+            Err(BlockEndReason::UnterminatedHeredoc { tag }) => {
+                assert_eq!(tag, "EOF");
+            }
+            other => panic!("expected UnterminatedHeredoc, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_text_tool_calls_reports_truncated_heredoc() {
+        // Mimics the local-gemma4 failure: heredoc body never closes.
+        let text = "```call\nedit(body=<<'EOF'\nsome code\n";
+        let result = parse_text_tool_calls_with_tools(text, None);
+        assert_eq!(result.calls.len(), 0);
+        assert_eq!(result.errors.len(), 1);
+        let err = &result.errors[0];
+        assert!(
+            err.contains("heredoc body for tag `EOF` was never closed"),
+            "expected truncated-heredoc diagnostic, got: {err}"
+        );
+        assert!(err.contains("truncated"));
+    }
+
+    /// The `key: <<'TAG'` misuse (colon instead of `=`) should produce a
+    /// specific diagnostic that names the offending key.
+    #[test]
+    fn parse_text_tool_calls_reports_colon_before_heredoc() {
+        let text = "```call\nreplace_body(\n  path=\"a.go\",\n  function_name=\"Foo\",\n  new_body: <<'EOF'\nbody\nEOF\n)\n```";
+        let result = parse_text_tool_calls_with_tools(text, None);
+        assert_eq!(
+            result.calls.len(),
+            0,
+            "malformed call should not be accepted: {:?}",
+            result.calls
+        );
+        assert_eq!(result.errors.len(), 1);
+        let err = &result.errors[0];
+        assert!(
+            err.contains("`new_body`"),
+            "diagnostic should name the offending key, got: {err}"
+        );
+        assert!(
+            err.contains("`:`") && err.contains("`=`"),
+            "diagnostic should mention : vs =, got: {err}"
+        );
+    }
+
+    /// When BOTH the colon-misuse and a truncation are present (exactly the
+    /// failing local-gemma4 scenario), prefer the colon diagnostic since it is
+    /// more actionable.
+    #[test]
+    fn parse_text_tool_calls_prefers_colon_diagnostic_over_truncation() {
+        let text = "```call\nreplace_body(\n  path=\"a.go\",\n  new_body: <<'EOF'\nbody that never terminates";
+        let result = parse_text_tool_calls_with_tools(text, None);
+        assert_eq!(result.errors.len(), 1);
+        let err = &result.errors[0];
+        assert!(
+            err.contains("`new_body`") && err.contains("`:`"),
+            "expected colon diagnostic to win, got: {err}"
+        );
+    }
+
+    #[test]
+    fn detect_colon_before_heredoc_ignores_colons_inside_strings() {
+        // Colon in a quoted dict value must not trigger the heuristic.
+        let text = "replace_body(path=\"a.go\", new_body=<<'EOF'\n{\"k\": <<inline>>}\nEOF\n)";
+        assert!(detect_colon_before_heredoc(text).is_none());
     }
 
     /// Regression: real eval transcript where model emitted 14 ```call blocks

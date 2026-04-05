@@ -1,0 +1,21 @@
+pipeline test(task) {
+  let snake_dict = {first_name: "Ada", last_name: "Lovelace", birth_year: 1815}
+  // Named builtin passed by reference (no lambda wrapper needed)
+  let camel_dict = snake_dict.rekey(snake_to_camel)
+  log(camel_dict["firstName"])
+  log(camel_dict["lastName"])
+  log(camel_dict["birthYear"])
+  // Original unchanged
+  log(snake_dict["first_name"])
+  // map_keys alias
+  let upper_dict = snake_dict.map_keys({ k -> uppercase(k) })
+  log(upper_dict["FIRST_NAME"])
+  // map_values continues to work
+  let doubled = {a: 1, b: 2}.map_values({ v -> v * 2 })
+  log(doubled["a"])
+  log(doubled["b"])
+  // Key collision: last write wins (sorted key order deterministic)
+  let collided = {aa: 1, bb: 2}.rekey({ k -> "same" })
+  log(collided["same"])
+  log(len(keys(collided)))
+}
