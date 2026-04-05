@@ -2,6 +2,53 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.37
+
+### Fixed
+
+- **`scan_directory(...)` now agrees with `mkdir`/`write_file` about where
+  Harn-relative paths live** — `resolve_scan_root` consulted only the
+  execution-context cwd and the process cwd, while the v0.5.36 fs resolvers
+  started preferring the active module source dir. The drift silently
+  returned an empty list whenever a script `mkdir`'d into its source tree
+  and then scanned it, which broke `conformance/tests/metadata_runtime.harn`
+  on CI. Both resolvers now share the same priority: execution-context cwd
+  → module source dir → process cwd → registration-time base.
+- **ACP fatal prompt-load failures now terminate the Harn process cleanly**
+  — compile errors, pipeline read failures, and fatal `execute_chunk`
+  errors inside an ACP prompt now route through a single
+  `exit_after_fatal_prompt_error` helper that emits a `session/update` with
+  the formatted error, a JSON-RPC error response for the pending prompt,
+  flushes stdio, and exits with code `2`. Hosts (e.g. Burin) that relied on
+  the old "send error update and keep running" shape no longer block
+  waiting on a still-alive process after a fatal prompt failure.
+- **`cargo clippy --workspace --all-targets` passes on a clean tree again**
+  — `items_after_test_module` was tripping inside `llm/agent.rs` because
+  `register_llm_call_with_bridge` sat after the `#[cfg(test)] mod tests`
+  block. The test module now lives at the bottom of the file where clippy
+  expects it, and `make lint` plus the pre-commit hook were tightened to
+  run clippy with `--all-targets` so the same drift can't land unnoticed
+  again.
+- **Streaming LLM transport now classifies HTTP errors the same way as the
+  non-streaming path** — `vm_call_llm_api` used to return a plain
+  `HTTP {status}: {body}` for streaming failures and only tagged
+  `[context_overflow]` / `[rate_limited]` / `[http_error]` on the
+  non-streaming fallback path. Both branches now share a single
+  `classify_http_error` helper, so agent loops get the same tagged
+  diagnostics regardless of which transport the provider used. Regression
+  tests pin the classification for both streaming (`local` provider stub)
+  and direct classifier calls.
+
+### Changed
+
+- **Quieter LLM runtime logs** — unconditional `[llm-debug]` stderr prints
+  on every `llm_call` (present in v0.5.36) are gone. Retry/`text_fallback`
+  warnings still print because they carry actionable signal.
+- **Faster inner-loop builds** — the workspace `[profile.dev]` now uses
+  `debug = "line-tables-only"`, shrinking debuginfo and link time without
+  losing line-level backtraces. A strict win for incremental dev/test
+  cycles on macOS.
+
 ## v0.5.36
 
 ### Fixed

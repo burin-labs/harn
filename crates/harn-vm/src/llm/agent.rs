@@ -1781,18 +1781,6 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
     });
 }
 
-#[cfg(test)]
-mod tests {
-    use super::loop_state_requests_phase_change;
-
-    #[test]
-    fn detects_phase_change_from_latest_loop_state_footer() {
-        let text = "First\n\n## LOOP_STATE\nphase: assess\nnext_phase: ground\n## END_LOOP_STATE\n\nSecond\n\n## LOOP_STATE\nphase: ground\nnext_phase: execute\n## END_LOOP_STATE";
-        assert!(loop_state_requests_phase_change(text, "ground"));
-        assert!(!loop_state_requests_phase_change(text, "execute"));
-    }
-}
-
 /// Register a bridge-aware `llm_call` that emits call_start/call_end notifications.
 /// This overrides the native llm_call with one that reports to the host for observability.
 pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::HostBridge>) {
@@ -1804,12 +1792,7 @@ pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Host
     vm.register_async_builtin("llm_call", move |args| {
         let bridge = b.clone();
         async move {
-            eprintln!("[llm-debug] llm_call entered, extracting options");
             let opts = extract_llm_options(&args)?;
-            eprintln!(
-                "[llm-debug] Options extracted: provider={} model={}",
-                opts.provider, opts.model
-            );
 
             let call_id = next_call_id();
             let prompt_chars: usize = opts
@@ -1931,4 +1914,16 @@ pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Host
             Ok(vm_build_llm_result(&result, None, Some(transcript)))
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::loop_state_requests_phase_change;
+
+    #[test]
+    fn detects_phase_change_from_latest_loop_state_footer() {
+        let text = "First\n\n## LOOP_STATE\nphase: assess\nnext_phase: ground\n## END_LOOP_STATE\n\nSecond\n\n## LOOP_STATE\nphase: ground\nnext_phase: execute\n## END_LOOP_STATE";
+        assert!(loop_state_requests_phase_change(text, "ground"));
+        assert!(!loop_state_requests_phase_change(text, "execute"));
+    }
 }

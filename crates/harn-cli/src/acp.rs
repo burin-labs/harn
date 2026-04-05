@@ -237,6 +237,10 @@ impl AcpServer {
             }
         };
 
+        let fatal_prompt_error = |message: String| -> ! {
+            exit_after_fatal_prompt_error(&self.stdout_lock, &session_id, id, &message)
+        };
+
         // Determine source to execute: either the configured pipeline file or
         // the prompt text treated as inline harn source.
         let (source, source_path) = if let Some(ref pipeline_path) = self.pipeline {
@@ -247,14 +251,10 @@ impl AcpServer {
             };
             match std::fs::read_to_string(&full_path) {
                 Ok(src) => (src, Some(full_path)),
-                Err(e) => {
-                    self.send_error(
-                        id,
-                        -32000,
-                        &format!("Failed to read pipeline {}: {e}", full_path.display()),
-                    );
-                    return;
-                }
+                Err(e) => fatal_prompt_error(format!(
+                    "Failed to read pipeline {}: {e}",
+                    full_path.display()
+                )),
             }
         } else {
             // Treat the prompt text as inline harn source code.
@@ -266,10 +266,7 @@ impl AcpServer {
         // Compile the source.
         let chunk = match compile_source(&source, source_path.as_deref()) {
             Ok(c) => c,
-            Err(e) => {
-                self.send_error(id, -32000, &format!("Compilation error: {e}"));
-                return;
-            }
+            Err(e) => fatal_prompt_error(format!("Compilation error: {e}")),
         };
 
         // Build shared state for bridge-style builtins.
@@ -336,13 +333,7 @@ impl AcpServer {
                         serde_json::json!({"stopReason": "cancelled"}),
                     );
                 } else {
-                    // Send error as update, then complete with error reason.
-                    send_update_raw(&send_lock, &sid, &format!("Error: {e}\n"));
-                    send_json_response(
-                        &send_lock,
-                        &id_owned,
-                        serde_json::json!({"stopReason": "error"}),
-                    );
+                    exit_after_fatal_prompt_error(&send_lock, &sid, &id_owned, &e);
                 }
             }
         }
@@ -1221,6 +1212,48 @@ fn send_json_response(
         let _ = stdout.write_all(b"\n");
         let _ = stdout.flush();
     }
+}
+
+/// Write a JSON-RPC error response directly through a stdout lock.
+fn send_json_error(
+    stdout_lock: &Arc<std::sync::Mutex<()>>,
+    id: &serde_json::Value,
+    code: i64,
+    message: &str,
+) {
+    let response = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "error": {
+            "code": code,
+            "message": message,
+        },
+    });
+    if let Ok(line) = serde_json::to_string(&response) {
+        let _guard = stdout_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let mut stdout = std::io::stdout().lock();
+        let _ = stdout.write_all(line.as_bytes());
+        let _ = stdout.write_all(b"\n");
+        let _ = stdout.flush();
+    }
+}
+
+fn flush_stdio() {
+    let _ = std::io::stdout().flush();
+    let _ = std::io::stderr().flush();
+}
+
+fn exit_after_fatal_prompt_error(
+    stdout_lock: &Arc<std::sync::Mutex<()>>,
+    session_id: &str,
+    id: &serde_json::Value,
+    message: &str,
+) -> ! {
+    send_update_raw(stdout_lock, session_id, &format!("Error: {message}\n"));
+    send_json_error(stdout_lock, id, -32000, message);
+    eprintln!("{message}");
+    flush_stdio();
+    std::process::exit(2);
 }
 
 // ---------------------------------------------------------------------------

@@ -334,17 +334,7 @@ async fn vm_call_llm_full_inner_request(
         )))));
     }
 
-    eprintln!(
-        "[llm-debug] Starting API call provider={} model={}",
-        request.provider, request.model
-    );
     let result = vm_call_llm_api(request, delta_tx).await;
-    eprintln!(
-        "[llm-debug] API call finished provider={} model={} ok={}",
-        request.provider,
-        request.model,
-        result.is_ok()
-    );
 
     // On failure, check for provider fallback chain without carrying the VM
     // error across the off-thread await boundary.
@@ -816,6 +806,42 @@ fn normalize_openai_style_messages(
         .collect()
 }
 
+/// Build a tagged, provider-prefixed error message from a non-2xx HTTP
+/// response so downstream agent loops can react (e.g. trigger compaction on
+/// `context_overflow`, back off on `rate_limited`, surface everything else as
+/// `http_error`). Shared by both streaming and non-streaming transports so
+/// the classification never drifts between them.
+pub(crate) fn classify_http_error(
+    provider: &str,
+    status: reqwest::StatusCode,
+    retry_after: Option<&str>,
+    body: &str,
+) -> String {
+    // Patterns cover vLLM, OpenAI, Anthropic, and most OpenAI-compatible
+    // servers. Lowercased once for cheap matching.
+    let body_lower = body.to_lowercase();
+    let is_context_overflow = body_lower.contains("maximum context length")
+        || body_lower.contains("context length")
+        || body_lower.contains("context_length_exceeded")
+        || body_lower.contains("prompt is too long")
+        || body_lower.contains("prompt_tokens_exceeded")
+        || body_lower.contains("this model's maximum context")
+        || body_lower.contains("exceeds the maximum")
+        || (body_lower.contains("max_tokens") && body_lower.contains("exceed"));
+    let tag = if is_context_overflow {
+        "context_overflow"
+    } else if status.as_u16() == 429 {
+        "rate_limited"
+    } else {
+        "http_error"
+    };
+    let mut msg = format!("{provider} HTTP {status} [{tag}]: {body}");
+    if let Some(ra) = retry_after {
+        msg.push_str(&format!(" (retry-after: {ra})"));
+    }
+    msg
+}
+
 async fn vm_call_llm_api(
     opts: &LlmRequestPayload,
     delta_tx: Option<DeltaSender>,
@@ -1033,10 +1059,7 @@ async fn vm_call_llm_api(
                 .and_then(|v| v.to_str().ok())
                 .map(|s| s.to_string());
             let body = response.text().await.unwrap_or_default();
-            let mut msg = format!("{provider} HTTP {status}: {body}");
-            if let Some(ra) = retry_after {
-                msg.push_str(&format!(" (retry-after: {ra})"));
-            }
+            let msg = classify_http_error(provider, status, retry_after.as_deref(), &body);
             return Err(VmError::Thrown(VmValue::String(Rc::from(msg))));
         }
         let ct = response
@@ -1060,8 +1083,7 @@ async fn vm_call_llm_api(
     // LLM response. Previously this path went straight to `.json().await` and
     // silently garbled error responses — so a vLLM "prompt too long for
     // model" 400 came back as an empty/malformed parse result and the agent
-    // loop kept retrying against the same oversized context. The streaming
-    // path already does this check; the non-streaming path was missing it.
+    // loop kept retrying against the same oversized context.
     if !response.status().is_success() {
         let status = response.status();
         let retry_after = response
@@ -1070,30 +1092,7 @@ async fn vm_call_llm_api(
             .and_then(|v| v.to_str().ok())
             .map(|s| s.to_string());
         let body = response.text().await.unwrap_or_default();
-        // Detect context-overflow errors specifically so the agent_loop can
-        // react by triggering compaction rather than just erroring out. These
-        // patterns cover vLLM, OpenAI, Anthropic, and most OpenAI-compatible
-        // servers.
-        let body_lower = body.to_lowercase();
-        let is_context_overflow = body_lower.contains("maximum context length")
-            || body_lower.contains("context length")
-            || body_lower.contains("context_length_exceeded")
-            || body_lower.contains("prompt is too long")
-            || body_lower.contains("prompt_tokens_exceeded")
-            || body_lower.contains("this model's maximum context")
-            || body_lower.contains("exceeds the maximum")
-            || body_lower.contains("max_tokens") && body_lower.contains("exceed");
-        let tag = if is_context_overflow {
-            "context_overflow"
-        } else if status.as_u16() == 429 {
-            "rate_limited"
-        } else {
-            "http_error"
-        };
-        let mut msg = format!("{provider} HTTP {status} [{tag}]: {body}");
-        if let Some(ra) = retry_after {
-            msg.push_str(&format!(" (retry-after: {ra})"));
-        }
+        let msg = classify_http_error(provider, status, retry_after.as_deref(), &body);
         return Err(VmError::Thrown(VmValue::String(Rc::from(msg))));
     }
 
@@ -2023,9 +2022,9 @@ fn ollama_keep_alive_override() -> Option<serde_json::Value> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ollama_keep_alive_override, ollama_num_ctx_override, split_openai_thinking_blocks,
-        vm_call_llm_full_streaming_offthread, LlmCallOptions, LlmRequestPayload,
-        ThinkingStreamSplitter,
+        classify_http_error, ollama_keep_alive_override, ollama_num_ctx_override,
+        split_openai_thinking_blocks, vm_call_llm_full_streaming_offthread, LlmCallOptions,
+        LlmRequestPayload, ThinkingStreamSplitter,
     };
     use crate::value::VmValue;
     use std::rc::Rc;
@@ -2375,5 +2374,206 @@ mod tests {
             assert_eq!(json["keep_alive"].as_i64(), Some(-1));
             assert_eq!(json["options"]["num_ctx"].as_u64(), Some(131072));
         });
+    }
+
+    // ---- HTTP error classification (v0.5.36 regression coverage) ----
+
+    #[test]
+    fn classify_tags_vllm_prompt_too_long_as_context_overflow() {
+        let msg = classify_http_error(
+            "local",
+            reqwest::StatusCode::BAD_REQUEST,
+            None,
+            r#"{"object":"error","message":"This model's maximum context length is 8192 tokens. However, your prompt is too long (10234 tokens)."}"#,
+        );
+        assert!(msg.contains("[context_overflow]"), "msg was: {msg}");
+        assert!(msg.starts_with("local HTTP 400 Bad Request"));
+        assert!(!msg.contains("(retry-after"));
+    }
+
+    #[test]
+    fn classify_tags_openai_context_length_exceeded_as_context_overflow() {
+        let msg = classify_http_error(
+            "openai",
+            reqwest::StatusCode::BAD_REQUEST,
+            None,
+            r#"{"error":{"code":"context_length_exceeded","message":"maximum context length"}}"#,
+        );
+        assert!(msg.contains("[context_overflow]"), "msg was: {msg}");
+    }
+
+    #[test]
+    fn classify_tags_429_with_retry_after_as_rate_limited() {
+        let msg = classify_http_error(
+            "anthropic",
+            reqwest::StatusCode::TOO_MANY_REQUESTS,
+            Some("12"),
+            r#"{"error":{"type":"rate_limit_error","message":"quota exceeded"}}"#,
+        );
+        assert!(msg.contains("[rate_limited]"), "msg was: {msg}");
+        assert!(msg.ends_with("(retry-after: 12)"), "msg was: {msg}");
+    }
+
+    #[test]
+    fn classify_tags_opaque_500_as_http_error() {
+        let msg = classify_http_error(
+            "local",
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            None,
+            "upstream exploded",
+        );
+        assert!(msg.contains("[http_error]"), "msg was: {msg}");
+        assert!(msg.contains("upstream exploded"));
+    }
+
+    #[test]
+    fn classify_429_with_context_body_still_prefers_context_overflow() {
+        // A provider that returns 429 for context-overflow (seen with some
+        // OpenAI-compat servers) should classify by body, not by status,
+        // because the caller's reaction differs (compact vs. back off).
+        let msg = classify_http_error(
+            "local",
+            reqwest::StatusCode::TOO_MANY_REQUESTS,
+            Some("1"),
+            "prompt is too long",
+        );
+        assert!(msg.contains("[context_overflow]"), "msg was: {msg}");
+    }
+
+    /// Bind a stub listener + spawn a responder that serves a single canned
+    /// HTTP error response, then returns its join handle. The listener uses
+    /// a bounded accept so a misrouted client can never hang the test
+    /// process — any failure to connect within 3s causes the thread to
+    /// exit, unblocking `join()`.
+    fn spawn_openai_error_stub(
+        status_line: &'static str,
+        extra_headers: &'static str,
+        body: &'static str,
+    ) -> (std::net::SocketAddr, std::thread::JoinHandle<()>) {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind openai stub");
+        let addr = listener.local_addr().expect("stub addr");
+        listener
+            .set_nonblocking(true)
+            .expect("set listener nonblocking");
+        let handle = std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+            let (mut stream, _) = loop {
+                match listener.accept() {
+                    Ok(pair) => break pair,
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        if std::time::Instant::now() >= deadline {
+                            return;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                    Err(_) => return,
+                }
+            };
+            stream
+                .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+                .ok();
+            stream
+                .set_write_timeout(Some(std::time::Duration::from_secs(2)))
+                .ok();
+            let mut buf = vec![0u8; 16384];
+            let _ = stream.read(&mut buf);
+            let response = format!(
+                "{status_line}\r\ncontent-type: application/json\r\ncontent-length: {}\r\n{extra_headers}connection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = stream.write_all(response.as_bytes());
+        });
+        (addr, handle)
+    }
+
+    /// Single-entrypoint helper that serializes env-var mutation and the
+    /// LLM call behind `env_lock`, so parallel streaming error tests can't
+    /// clobber each other's `LOCAL_LLM_BASE_URL` and leak an unconnected
+    /// stub whose `join()` would hang the test binary.
+    fn run_streaming_error_case(
+        status_line: &'static str,
+        extra_headers: &'static str,
+        body: &'static str,
+    ) -> String {
+        let _guard = env_lock().lock().expect("env lock");
+        let (addr, server) = spawn_openai_error_stub(status_line, extra_headers, body);
+        let prev = std::env::var("LOCAL_LLM_BASE_URL").ok();
+        unsafe {
+            std::env::set_var("LOCAL_LLM_BASE_URL", format!("http://{addr}"));
+        }
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .worker_threads(2)
+            .build()
+            .expect("runtime");
+        let err = runtime.block_on(async {
+            let local = tokio::task::LocalSet::new();
+            local
+                .run_until(async {
+                    let mut opts = base_opts("local");
+                    // Drop tools/schemas so the request body stays minimal.
+                    opts.tools = None;
+                    opts.native_tools = None;
+                    opts.tool_choice = None;
+                    opts.response_format = None;
+                    opts.json_schema = None;
+                    opts.output_schema = None;
+                    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+                    let call = tokio::time::timeout(
+                        std::time::Duration::from_secs(5),
+                        vm_call_llm_full_streaming_offthread(&opts, tx),
+                    )
+                    .await;
+                    match call {
+                        Ok(Ok(_)) => panic!("expected streaming call to fail"),
+                        Ok(Err(err)) => err.to_string(),
+                        Err(_) => panic!("streaming call timed out"),
+                    }
+                })
+                .await
+        });
+        match prev {
+            Some(v) => unsafe { std::env::set_var("LOCAL_LLM_BASE_URL", v) },
+            None => unsafe { std::env::remove_var("LOCAL_LLM_BASE_URL") },
+        }
+        // Bounded join: the stub's internal deadline guarantees this returns.
+        let _ = server.join();
+        err
+    }
+
+    #[test]
+    fn streaming_path_classifies_context_overflow() {
+        let err = run_streaming_error_case(
+            "HTTP/1.1 400 Bad Request",
+            "",
+            r#"{"error":{"message":"This model's maximum context length is 8192 tokens. However, your prompt is too long."}}"#,
+        );
+        assert!(err.contains("[context_overflow]"), "err was: {err}");
+        assert!(err.contains("local HTTP 400"), "err was: {err}");
+    }
+
+    #[test]
+    fn streaming_path_classifies_rate_limit_with_retry_after() {
+        let err = run_streaming_error_case(
+            "HTTP/1.1 429 Too Many Requests",
+            "retry-after: 7\r\n",
+            r#"{"error":{"type":"rate_limit_error","message":"slow down"}}"#,
+        );
+        assert!(err.contains("[rate_limited]"), "err was: {err}");
+        assert!(err.contains("(retry-after: 7)"), "err was: {err}");
+    }
+
+    #[test]
+    fn streaming_path_classifies_opaque_500_as_http_error() {
+        let err = run_streaming_error_case(
+            "HTTP/1.1 500 Internal Server Error",
+            "",
+            r#"{"error":"upstream exploded"}"#,
+        );
+        assert!(err.contains("[http_error]"), "err was: {err}");
+        assert!(err.contains("upstream exploded"), "err was: {err}");
     }
 }

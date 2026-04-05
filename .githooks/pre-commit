@@ -8,7 +8,7 @@ git diff --name-only | xargs -r git add
 echo "    Formatting OK."
 
 echo "=== Pre-commit: running clippy ==="
-cargo clippy --workspace -- -D warnings
+cargo clippy --workspace --all-targets -- -D warnings
 echo "    Clippy OK."
 
 if command -v npx >/dev/null 2>&1; then

@@ -414,10 +414,22 @@ fn resolve_scan_root(base_dir: &Path, rel_dir: &str) -> PathBuf {
     if candidate.is_absolute() {
         return candidate;
     }
+    // Mirror `stdlib::process::resolve_source_relative_path` so
+    // `scan_directory` agrees with `mkdir`/`write_file`/`read_file` about where
+    // Harn-relative paths live. Without this, v0.5.36's switch to prefer
+    // VM_SOURCE_DIR in the fs resolvers left `scan_directory` reading a
+    // different root (the process cwd), which broke conformance tests that
+    // mkdir'd into the source tree and then scanned it.
+    //
+    // Priority: explicit execution-context cwd → VM source dir → process
+    // cwd → the base dir captured at builtin registration.
     if let Some(cwd) =
         crate::stdlib::process::current_execution_context().and_then(|context| context.cwd)
     {
         return PathBuf::from(cwd).join(candidate);
+    }
+    if let Some(source_dir) = crate::stdlib::process::VM_SOURCE_DIR.with(|sd| sd.borrow().clone()) {
+        return source_dir.join(candidate);
     }
     if let Ok(cwd) = std::env::current_dir() {
         return cwd.join(candidate);

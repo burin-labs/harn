@@ -20,7 +20,7 @@ fmt:
 
 # Run clippy lints (deny warnings in CI)
 lint:
-	cargo clippy --workspace -- -D warnings
+	cargo clippy --workspace --all-targets -- -D warnings
 
 # Run Rust unit tests
 test:

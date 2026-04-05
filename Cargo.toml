@@ -22,3 +22,8 @@ homepage = "https://github.com/burin-labs/harn"
 description = "A pipeline-oriented programming language for orchestrating AI coding agents"
 keywords = ["ai", "agents", "pipeline", "llm", "language"]
 categories = ["compilers", "command-line-utilities"]
+
+# Smaller debuginfo => faster linking on macOS without losing line-level
+# backtraces. A strict win for inner-loop dev/test builds.
+[profile.dev]
+debug = "line-tables-only"
