@@ -2493,7 +2493,14 @@ mod tests {
             .set_nonblocking(true)
             .expect("set listener nonblocking");
         let handle = std::thread::spawn(move || {
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+            // Accept window intentionally generous (was 3s and proved flaky
+            // under parallel-test load on CI / cold macOS workers — the
+            // listener would exit before reqwest established the connection
+            // so the client saw a refused connect and the assertion fired
+            // against a transport error instead of the HTTP 500 payload).
+            // 15s matches the `.config/nextest.toml` slow-test threshold
+            // and still falls well inside the 60s hard termination cap.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
             let (mut stream, _) = loop {
                 match listener.accept() {
                     Ok(pair) => break pair,
@@ -2501,16 +2508,21 @@ mod tests {
                         if std::time::Instant::now() >= deadline {
                             return;
                         }
-                        std::thread::sleep(std::time::Duration::from_millis(10));
+                        std::thread::sleep(std::time::Duration::from_millis(5));
                     }
                     Err(_) => return,
                 }
             };
+            // Once we have a client, use a bounded read/write so a stuck
+            // client can't wedge the suite either.
             stream
-                .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+                .set_nonblocking(false)
+                .expect("restore blocking mode on accepted stream");
+            stream
+                .set_read_timeout(Some(std::time::Duration::from_secs(5)))
                 .ok();
             stream
-                .set_write_timeout(Some(std::time::Duration::from_secs(2)))
+                .set_write_timeout(Some(std::time::Duration::from_secs(5)))
                 .ok();
             let mut buf = vec![0u8; 16384];
             let _ = stream.read(&mut buf);
@@ -2519,6 +2531,7 @@ mod tests {
                 body.len()
             );
             let _ = stream.write_all(response.as_bytes());
+            let _ = stream.flush();
         });
         (addr, handle)
     }
@@ -2557,7 +2570,10 @@ mod tests {
                     opts.output_schema = None;
                     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
                     let call = tokio::time::timeout(
-                        std::time::Duration::from_secs(5),
+                        // Must stay strictly less than the stub's 15s accept
+                        // window so we always fail with the actual HTTP 500
+                        // classification instead of a generic timeout.
+                        std::time::Duration::from_secs(12),
                         vm_call_llm_full_streaming_offthread(&opts, tx),
                     )
                     .await;

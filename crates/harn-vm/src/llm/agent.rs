@@ -984,12 +984,33 @@ pub async fn run_agent_loop_internal(
                     build_assistant_tool_message(&text, &tool_calls, &opts.provider),
                 );
             } else {
+                // When some calls parsed but others didn't, replace the raw
+                // assistant text with a compact summary so the next iteration
+                // cannot see (and mutate) the malformed call blocks. Tool
+                // results for the successful calls are appended below, so the
+                // model still has their outcomes.
+                let assistant_content_for_history = if tool_parse_errors.is_empty() {
+                    text.clone()
+                } else {
+                    format!(
+                        "<assistant turn partially elided: {} tool call(s) executed successfully \
+                         ({}), {} malformed tool call(s) rejected. \
+                         See tool results and parse errors that follow.>",
+                        tool_calls.len(),
+                        tool_calls
+                            .iter()
+                            .filter_map(|c| c.get("name").and_then(|n| n.as_str()))
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        tool_parse_errors.len(),
+                    )
+                };
                 append_message_to_contexts(
                     &mut visible_messages,
                     &mut recorded_messages,
                     serde_json::json!({
                         "role": "assistant",
-                        "content": text,
+                        "content": assistant_content_for_history,
                     }),
                 );
             }
@@ -1504,6 +1525,19 @@ pub async fn run_agent_loop_internal(
 
             if !tool_parse_errors.is_empty() {
                 consecutive_parse_error_turns += 1;
+                // Feed the parse-error diagnostics back so the model can
+                // correct its syntax in the next turn (mirrors the text-only
+                // branch). Without this, the mixed case would silently drop
+                // rejected calls.
+                let error_msg = tool_parse_errors.join("\n\n");
+                append_message_to_contexts(
+                    &mut visible_messages,
+                    &mut recorded_messages,
+                    serde_json::json!({
+                        "role": "user",
+                        "content": error_msg,
+                    }),
+                );
             } else {
                 consecutive_parse_error_turns = 0;
             }
