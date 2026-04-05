@@ -1,0 +1,13 @@
+pipeline test(task) {
+  fn first_match() {
+    for pattern in ["a", "b"] {
+      return pattern
+    }
+    return ""
+  }
+  var seen = []
+  for path in ["outer"] {
+    seen = seen + [path + ":" + first_match()]
+  }
+  log(join(seen, ","))
+}

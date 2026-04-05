@@ -6,6 +6,11 @@ All notable changes to Harn are documented in this file.
 
 ### Added
 
+- **Tool parser and schema-renderer regression coverage** — added
+  `crates/harn-vm/src/llm/tools_tests.rs` for the fenceless TypeScript-style
+  tool-call parser and JSON-Schema-to-TypeScript contract renderer, plus new
+  conformance tests for dotted closure calls, frame-scoped iterator returns,
+  and workflow tool-handler preservation.
 - **String case conversion builtins** — `snake_to_camel`, `snake_to_pascal`,
   `camel_to_snake`, `pascal_to_snake`, `kebab_to_camel`, `camel_to_kebab`,
   `snake_to_kebab`, `kebab_to_snake`, `pascal_to_camel`, `camel_to_pascal`,
@@ -62,6 +67,26 @@ All notable changes to Harn are documented in this file.
 
 ### Changed
 
+- **Tool-call contract prompts and visible text** — tool-enabled LLM prompts now
+  render recursive JSON Schema / OpenAPI shapes into reusable TypeScript-style
+  aliases (`$ref`, `oneOf` / `anyOf`, `allOf`, arrays, enums, nested objects),
+  and `llm_call(...).visible_text` now removes parsed tool invocations from the
+  assistant-visible text while leaving raw `text` and normalized `tool_calls`
+  intact.
+- **Parser builtin registry alignment** — the parser-side builtin signature
+  table now covers far more of the runtime stdlib surface, corrects a number of
+  stale static return-type hints, and is guarded by a bidirectional
+  parser-vs-runtime alignment test so future builtin additions cannot silently
+  drift out of static analysis.
+- **ACP boot / trace observability** — bridge mode now emits `ACP_BOOT` timing
+  logs for compile, VM setup, and execute phases, and streams `trace_end`
+  duration events live instead of waiting for pipeline completion to flush the
+  VM output buffer.
+- **Ollama reasoning transport** — Ollama requests now always enable the
+  provider reasoning channel for thinking-capable models, fall back to
+  `message.thinking` when `message.content` is empty, and surface a hard error
+  when the server reports generated tokens but returns neither content nor
+  reasoning text.
 - **Graceful LLM provider error context** — `Missing API key` errors now
   include the currently-loaded `llm.toml` path (or `<built-in defaults>`)
   and the env var names for switching to the mock provider for offline
@@ -78,6 +103,17 @@ All notable changes to Harn are documented in this file.
 
 ### Fixed
 
+- **Imported module state and sibling function values** — closures imported from
+  modules now share top-level `var` / `let` state across calls and can read
+  sibling functions both for direct invocation and when passing a function as a
+  first-class value.
+- **Closure/runtime call edge cases** — local recursive closures late-bind only
+  callable names from the caller, dotted dict property calls can invoke stored
+  callable values, and `return` inside a nested iterator no longer leaks the
+  iterator frame into the caller.
+- **Workflow tool handler preservation** — `workflow_graph(...)` and
+  `workflow_commit(...)` now retain original tool-handler closures instead of
+  dropping them during workflow normalization.
 - **Precedence regression pins** — two conformance tests faithfully
   reproduce the two Burin-reported repros for `??` in nested call args
   and chained `??` + `==` with optional chaining. Both pass on current

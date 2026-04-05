@@ -22,6 +22,21 @@ mod stream;
 mod tools;
 mod trace;
 
+/// Shared process-wide lock for tests that mutate LLM-related environment
+/// variables (LOCAL_LLM_BASE_URL, LOCAL_LLM_MODEL, HARN_LLM_*). Any test that
+/// sets or removes one of these MUST hold this lock for its whole duration,
+/// including through any async LLM call, so concurrent tests from sibling
+/// modules cannot clobber each other's env and leak stale values into a
+/// streaming request. Previously each submodule had its own `env_lock()` and
+/// races between `llm::helpers::tests` and `llm::api::tests` flaked the
+/// streaming classification tests under parallel cargo execution.
+#[cfg(test)]
+pub(crate) fn env_lock() -> &'static std::sync::Mutex<()> {
+    use std::sync::{Mutex, OnceLock};
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -227,10 +242,20 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                 },
                 None => parsed,
             };
-            return Ok(vm_build_llm_result(&result, validated, Some(transcript)));
+            return Ok(vm_build_llm_result(
+                &result,
+                validated,
+                Some(transcript),
+                opts.tools.as_ref(),
+            ));
         }
 
-        Ok(vm_build_llm_result(&result, None, Some(transcript)))
+        Ok(vm_build_llm_result(
+            &result,
+            None,
+            Some(transcript),
+            opts.tools.as_ref(),
+        ))
     });
 
     vm.register_async_builtin("llm_completion", |args| async move {
@@ -281,7 +306,8 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                 serde_json::json!(result.output_tokens),
             );
         }
-        Ok(vm_build_llm_result(&result, None, None))
+        // llm_completion has no tool registry: visible_text will equal text.
+        Ok(vm_build_llm_result(&result, None, None, None))
     });
 
     // =========================================================================

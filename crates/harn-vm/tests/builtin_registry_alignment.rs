@@ -75,9 +75,7 @@ fn every_runtime_builtin_has_a_parser_signature() {
 
     let missing: Vec<&String> = runtime
         .iter()
-        .filter(|name| {
-            !harn_parser::is_known_builtin(name) && !exceptions.contains(name.as_str())
-        })
+        .filter(|name| !harn_parser::is_known_builtin(name) && !exceptions.contains(name.as_str()))
         .collect();
 
     assert!(

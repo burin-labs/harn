@@ -1,0 +1,38 @@
+pipeline main() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "scaffold",
+    "Scaffold file",
+    {handler: { _args -> "scaffold-ok" }, parameters: {}},
+  )
+  tools = tool_define(tools, "edit", "Edit file", {handler: { _args -> "replace-body-ok" }, parameters: {}})
+  let flow = workflow_graph(
+    {
+    name: "preserve_handlers",
+    entry: "act",
+    nodes: {act: {kind: "stage", mode: "agent", model_policy: {provider: "mock"}, tools: tools}},
+    edges: [],
+  },
+  )
+  let scaffold = tool_find(flow.nodes.act.tools, "scaffold")
+  let edit = tool_find(flow.nodes.act.tools, "edit")
+  let scaffold_handler = scaffold.handler
+  let edit_handler = edit.handler
+  assert(scaffold_handler({}) == "scaffold-ok", "workflow_graph should preserve scaffold handler")
+  assert(edit_handler({}) == "replace-body-ok", "workflow_graph should preserve edit handler")
+  let committed = workflow_commit(flow, "preserve tool handlers")
+  let committed_scaffold = tool_find(committed.nodes.act.tools, "scaffold")
+  let committed_edit = tool_find(committed.nodes.act.tools, "edit")
+  let committed_scaffold_handler = committed_scaffold.handler
+  let committed_edit_handler = committed_edit.handler
+  assert(
+    committed_scaffold_handler({}) == "scaffold-ok",
+    "workflow_commit should preserve scaffold handler",
+  )
+  assert(
+    committed_edit_handler({}) == "replace-body-ok",
+    "workflow_commit should preserve edit handler",
+  )
+  log("workflow tool handlers preserved")
+}

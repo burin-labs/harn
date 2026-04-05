@@ -1055,6 +1055,10 @@ mod tests {
 
     #[test]
     fn local_provider_is_selected_when_local_base_url_and_model_are_set() {
+        // Share the crate-wide LLM env lock so this test cannot race with
+        // sibling modules (e.g. llm::api streaming classification tests) that
+        // also mutate LOCAL_LLM_BASE_URL.
+        let _guard = crate::llm::env_lock().lock().expect("env lock");
         let prev_base = std::env::var("LOCAL_LLM_BASE_URL").ok();
         let prev_model = std::env::var("LOCAL_LLM_MODEL").ok();
         let prev_harn_provider = std::env::var("HARN_LLM_PROVIDER").ok();

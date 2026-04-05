@@ -7,6 +7,48 @@ use crate::vm::Vm;
 
 use super::logging::{vm_build_log_line, VmTraceContext, VM_MIN_LOG_LEVEL, VM_TRACE_STACK};
 
+/// Finish a span started by `trace_start`: computes the elapsed duration,
+/// pops the span from the thread-local trace stack if it is on top, and
+/// returns `(name, trace_id, span_id, duration_ms)` suitable for both the
+/// default `out`-buffered `trace_end` and the bridge-streaming override
+/// registered by the ACP runner.
+pub fn finish_span_from_args(args: &[VmValue]) -> Result<(String, String, String, i64), VmError> {
+    let span = match args.first() {
+        Some(VmValue::Dict(d)) => d,
+        _ => {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "trace_end: argument must be a span dict from trace_start",
+            ))));
+        }
+    };
+    let end_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+    let start_ms = span
+        .get("start_ms")
+        .and_then(|v| v.as_int())
+        .unwrap_or(end_ms);
+    let duration_ms = end_ms - start_ms;
+    let name = span.get("name").map(|v| v.display()).unwrap_or_default();
+    let trace_id = span
+        .get("trace_id")
+        .map(|v| v.display())
+        .unwrap_or_default();
+    let span_id = span.get("span_id").map(|v| v.display()).unwrap_or_default();
+
+    VM_TRACE_STACK.with(|stack| {
+        let mut s = stack.borrow_mut();
+        if let Some(top) = s.last() {
+            if top.span_id == span_id {
+                s.pop();
+            }
+        }
+    });
+
+    Ok((name, trace_id, span_id, duration_ms))
+}
+
 pub(crate) fn register_tracing_builtins(vm: &mut Vm) {
     vm.register_builtin("trace_start", |args, _out| {
         use rand::Rng;
@@ -46,42 +88,7 @@ pub(crate) fn register_tracing_builtins(vm: &mut Vm) {
     });
 
     vm.register_builtin("trace_end", |args, out| {
-        let span = match args.first() {
-            Some(VmValue::Dict(d)) => d,
-            _ => {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(
-                    "trace_end: argument must be a span dict from trace_start",
-                ))));
-            }
-        };
-
-        let end_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as i64;
-
-        let start_ms = span
-            .get("start_ms")
-            .and_then(|v| v.as_int())
-            .unwrap_or(end_ms);
-        let duration_ms = end_ms - start_ms;
-        let name = span.get("name").map(|v| v.display()).unwrap_or_default();
-        let trace_id = span
-            .get("trace_id")
-            .map(|v| v.display())
-            .unwrap_or_default();
-        let span_id = span.get("span_id").map(|v| v.display()).unwrap_or_default();
-
-        VM_TRACE_STACK.with(|stack| {
-            let mut s = stack.borrow_mut();
-            // Only pop if the top of the stack matches this span
-            if let Some(top) = s.last() {
-                if top.span_id == span_id {
-                    s.pop();
-                }
-            }
-        });
-
+        let (name, trace_id, span_id, duration_ms) = finish_span_from_args(args)?;
         let level_num = 1_u8;
         if level_num >= VM_MIN_LOG_LEVEL.load(Ordering::Relaxed) {
             let mut fields = BTreeMap::new();
@@ -92,7 +99,6 @@ pub(crate) fn register_tracing_builtins(vm: &mut Vm) {
             let line = vm_build_log_line("info", "span_end", Some(&fields));
             out.push_str(&line);
         }
-
         Ok(VmValue::Nil)
     });
 

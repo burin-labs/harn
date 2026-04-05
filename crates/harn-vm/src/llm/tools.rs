@@ -371,31 +371,529 @@ pub(crate) fn handle_tool_locally(name: &str, args: &serde_json::Value) -> Optio
     }
 }
 
+// ── Recursive type expression ───────────────────────────────────────────────
+//
+// TypeExpr is a structural representation of a JSON Schema / OAS 3.1 type that
+// we know how to render as a TypeScript-ish type string. Anything the extractor
+// cannot map cleanly becomes `Unknown`, which renders as `unknown` — we never
+// fabricate a type the model could read but the runtime would not honour.
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub(crate) enum TypeExpr {
+    /// Primitive type name as used in TypeScript: string, number, boolean, null, any, unknown, void.
+    Primitive(String),
+    /// A literal value (JSON Schema `const`, or an enum member after fan-out).
+    Literal(serde_json::Value),
+    /// Array with an element type.
+    Array(Box<TypeExpr>),
+    /// `oneOf` / `anyOf` / multi-value `enum` → A | B | C.
+    Union(Vec<TypeExpr>),
+    /// `allOf` composition → A & B & C.
+    Intersection(Vec<TypeExpr>),
+    /// Nested object schema with named fields.
+    Object(Vec<ObjectField>),
+    /// Named reference to a reusable type declared in the ComponentRegistry.
+    /// Resolved from `$ref` targets like `#/components/schemas/Foo` or from
+    /// Harn-side `types/Foo` references.
+    Ref(String),
+    /// Fallback for shapes we cannot map cleanly.
+    Unknown,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub(crate) struct ObjectField {
+    pub(crate) name: String,
+    pub(crate) ty: TypeExpr,
+    pub(crate) required: bool,
+    pub(crate) description: Option<String>,
+    pub(crate) default: Option<serde_json::Value>,
+}
+
+/// Registry of reusable named types discovered during schema extraction.
+/// Each tool-contract prompt build produces one registry; the renderer emits
+/// `type X = ...;` aliases at the top, and tool signatures can reference them
+/// by name to keep individual signatures short.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ComponentRegistry {
+    /// Registered types by their resolved short name. Names are derived from
+    /// the last path segment of the `$ref` (e.g. `#/components/schemas/Foo` → `Foo`).
+    types: BTreeMap<String, TypeExpr>,
+    /// Insertion order, so `type` aliases render in a deterministic stable order.
+    order: Vec<String>,
+    /// Set of names currently being resolved. Used to break cycles: if we
+    /// encounter the same ref while it's still being resolved, we emit a
+    /// `Ref(name)` placeholder and leave the alias definition to the outer
+    /// call. Without this, a recursive schema would infinite-loop.
+    in_progress: BTreeSet<String>,
+}
+
+impl ComponentRegistry {
+    fn register(&mut self, name: String, ty: TypeExpr) {
+        if !self.types.contains_key(&name) {
+            self.order.push(name.clone());
+        }
+        self.types.insert(name, ty);
+    }
+
+    fn contains(&self, name: &str) -> bool {
+        self.types.contains_key(name)
+    }
+
+    /// Render all registered types as `type Name = Expr;` lines in insertion
+    /// order. Returns an empty string when the registry is empty.
+    pub(crate) fn render_aliases(&self) -> String {
+        if self.order.is_empty() {
+            return String::new();
+        }
+        let mut out = String::new();
+        for name in &self.order {
+            if let Some(ty) = self.types.get(name) {
+                out.push_str(&format!("type {} = {};\n", name, ty.render()));
+            }
+        }
+        out
+    }
+}
+
+/// Extract the short name from a JSON Pointer `$ref`. Supports common shapes:
+/// `#/components/schemas/Foo`, `#/definitions/Foo`, and Harn-native
+/// `types/Foo` / `#/types/Foo`. Returns None if we cannot find a name-like tail.
+fn ref_name_from_pointer(pointer: &str) -> Option<String> {
+    let stripped = pointer.trim_start_matches('#').trim_start_matches('/');
+    let last = stripped.rsplit('/').next()?;
+    if last.is_empty() {
+        None
+    } else {
+        Some(last.to_string())
+    }
+}
+
+/// Resolve a JSON Pointer `$ref` against a root schema document. Supports
+/// fragments like `#/components/schemas/Foo` by walking each path segment.
+fn resolve_json_ref<'a>(
+    root: &'a serde_json::Value,
+    pointer: &str,
+) -> Option<&'a serde_json::Value> {
+    let stripped = pointer.trim_start_matches('#').trim_start_matches('/');
+    if stripped.is_empty() {
+        return Some(root);
+    }
+    let mut current = root;
+    for segment in stripped.split('/') {
+        let decoded = segment.replace("~1", "/").replace("~0", "~");
+        current = match current {
+            serde_json::Value::Object(obj) => obj.get(&decoded)?,
+            serde_json::Value::Array(arr) => {
+                let idx: usize = decoded.parse().ok()?;
+                arr.get(idx)?
+            }
+            _ => return None,
+        };
+    }
+    Some(current)
+}
+
+impl TypeExpr {
+    /// Render this type expression as a TypeScript-ish string.
+    pub(crate) fn render(&self) -> String {
+        match self {
+            TypeExpr::Primitive(name) => normalize_primitive_name(name).to_string(),
+            TypeExpr::Literal(value) => render_literal(value),
+            TypeExpr::Array(inner) => {
+                // Wrap unions / intersections so `(A | B)[]` parses correctly.
+                match inner.as_ref() {
+                    TypeExpr::Union(_) | TypeExpr::Intersection(_) => {
+                        format!("({})[]", inner.render())
+                    }
+                    _ => format!("{}[]", inner.render()),
+                }
+            }
+            TypeExpr::Union(members) => members
+                .iter()
+                .map(|m| m.render())
+                .collect::<Vec<_>>()
+                .join(" | "),
+            TypeExpr::Intersection(members) => members
+                .iter()
+                .map(|m| {
+                    let rendered = m.render();
+                    // Parenthesise unions inside intersections for unambiguity.
+                    if matches!(m, TypeExpr::Union(_)) {
+                        format!("({rendered})")
+                    } else {
+                        rendered
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" & "),
+            TypeExpr::Object(fields) => {
+                if fields.is_empty() {
+                    "{}".to_string()
+                } else {
+                    let rendered = fields
+                        .iter()
+                        .map(|f| {
+                            let marker = if f.required { "" } else { "?" };
+                            format!("{}{}: {}", f.name, marker, f.ty.render())
+                        })
+                        .collect::<Vec<_>>()
+                        .join("; ");
+                    format!("{{ {rendered} }}")
+                }
+            }
+            TypeExpr::Ref(name) => name.clone(),
+            TypeExpr::Unknown => "unknown".to_string(),
+        }
+    }
+}
+
+fn normalize_primitive_name(raw: &str) -> &str {
+    // Accept both JSON-Schema and TypeScript spellings; collapse to the TS
+    // spelling. `integer`/`int` are both really numbers in JSON transport.
+    match raw {
+        "str" | "string" => "string",
+        "int" | "integer" | "long" | "number" | "float" | "double" => "number",
+        "bool" | "boolean" => "boolean",
+        "nil" | "null" | "none" => "null",
+        "dict" | "map" => "object",
+        "list" | "array" => "unknown[]", // naked list with no items → unknown[]
+        "any" => "any",
+        "void" => "void",
+        other => other,
+    }
+}
+
+fn render_literal(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(s) => {
+            // TypeScript string literals use double quotes; escape backslash and quote.
+            let escaped = s.replace('\\', "\\\\").replace('"', "\\\"");
+            format!("\"{escaped}\"")
+        }
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        serde_json::Value::Null => "null".to_string(),
+        // Non-scalar literals are unusual for JSON Schema `const`. Fall back
+        // to serialised JSON so the model sees the exact shape.
+        other => other.to_string(),
+    }
+}
+
+/// Convert a JSON Schema fragment into a TypeExpr, recursing through
+/// oneOf/anyOf/allOf, items, properties, const/enum, and $ref. The `root`
+/// document is required to resolve ref pointers; the `registry` accumulates
+/// named types so they can be rendered as top-of-prompt `type X = ...` aliases.
+fn json_schema_to_type_expr(
+    schema: &serde_json::Value,
+    root: &serde_json::Value,
+    registry: &mut ComponentRegistry,
+) -> TypeExpr {
+    let obj = match schema.as_object() {
+        Some(obj) => obj,
+        None => {
+            // A bare string in the schema slot means "type name" — be forgiving.
+            if let Some(s) = schema.as_str() {
+                return TypeExpr::Primitive(s.to_string());
+            }
+            return TypeExpr::Unknown;
+        }
+    };
+
+    // $ref — resolve against root, register the resolved type under its short
+    // name, and return a Ref so the rendered prompt can share the alias.
+    if let Some(serde_json::Value::String(pointer)) = obj.get("$ref") {
+        if let Some(name) = ref_name_from_pointer(pointer) {
+            if !registry.contains(&name) && !registry.in_progress.contains(&name) {
+                if let Some(resolved) = resolve_json_ref(root, pointer) {
+                    registry.in_progress.insert(name.clone());
+                    let expanded = json_schema_to_type_expr(resolved, root, registry);
+                    registry.in_progress.remove(&name);
+                    registry.register(name.clone(), expanded);
+                }
+            }
+            return TypeExpr::Ref(name);
+        }
+        return TypeExpr::Unknown;
+    }
+
+    // const — single-literal type.
+    if let Some(c) = obj.get("const") {
+        return TypeExpr::Literal(c.clone());
+    }
+
+    // enum — union of literals.
+    if let Some(serde_json::Value::Array(values)) = obj.get("enum") {
+        let members: Vec<TypeExpr> = values
+            .iter()
+            .map(|v| TypeExpr::Literal(v.clone()))
+            .collect();
+        return match members.len() {
+            0 => TypeExpr::Unknown,
+            1 => members.into_iter().next().unwrap(),
+            _ => TypeExpr::Union(members),
+        };
+    }
+
+    // oneOf / anyOf — union. Render both the same way for our purposes
+    // (model doesn't care about structural-disambiguation semantics here).
+    for key in ["oneOf", "anyOf"] {
+        if let Some(serde_json::Value::Array(variants)) = obj.get(key) {
+            let members: Vec<TypeExpr> = variants
+                .iter()
+                .map(|v| json_schema_to_type_expr(v, root, registry))
+                .filter(|t| !matches!(t, TypeExpr::Unknown))
+                .collect();
+            return match members.len() {
+                0 => TypeExpr::Unknown,
+                1 => members.into_iter().next().unwrap(),
+                _ => merge_nullable(TypeExpr::Union(members)),
+            };
+        }
+    }
+
+    // allOf — intersection of all component schemas.
+    if let Some(serde_json::Value::Array(variants)) = obj.get("allOf") {
+        let members: Vec<TypeExpr> = variants
+            .iter()
+            .map(|v| json_schema_to_type_expr(v, root, registry))
+            .filter(|t| !matches!(t, TypeExpr::Unknown))
+            .collect();
+        return match members.len() {
+            0 => TypeExpr::Unknown,
+            1 => members.into_iter().next().unwrap(),
+            _ => TypeExpr::Intersection(members),
+        };
+    }
+
+    // type — may be a string (`"string"`) or an array of strings (`["string", "null"]`).
+    let nullable = obj
+        .get("nullable")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let core_type = match obj.get("type") {
+        Some(serde_json::Value::Array(type_list)) => {
+            let primitives: Vec<TypeExpr> = type_list
+                .iter()
+                .filter_map(|v| v.as_str().map(|s| TypeExpr::Primitive(s.to_string())))
+                .collect();
+            match primitives.len() {
+                0 => TypeExpr::Unknown,
+                1 => primitives.into_iter().next().unwrap(),
+                _ => TypeExpr::Union(primitives),
+            }
+        }
+        Some(serde_json::Value::String(t)) => match t.as_str() {
+            "array" => {
+                let item_schema = obj.get("items").cloned().unwrap_or(serde_json::json!({}));
+                let item_type = json_schema_to_type_expr(&item_schema, root, registry);
+                TypeExpr::Array(Box::new(item_type))
+            }
+            "object" => {
+                if let Some(props) = obj.get("properties").and_then(|v| v.as_object()) {
+                    let required_set: BTreeSet<String> = obj
+                        .get("required")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|v| v.as_str().map(str::to_string))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let mut fields: Vec<ObjectField> = props
+                        .iter()
+                        .map(|(name, sub_schema)| ObjectField {
+                            name: name.clone(),
+                            ty: json_schema_to_type_expr(sub_schema, root, registry),
+                            required: required_set.contains(name),
+                            description: sub_schema
+                                .get("description")
+                                .and_then(|v| v.as_str())
+                                .map(str::to_string),
+                            default: sub_schema.get("default").cloned(),
+                        })
+                        .collect();
+                    // Required first, then optional, stable within each group.
+                    fields.sort_by_key(|f| !f.required);
+                    TypeExpr::Object(fields)
+                } else {
+                    TypeExpr::Primitive("object".to_string())
+                }
+            }
+            other => TypeExpr::Primitive(other.to_string()),
+        },
+        _ => TypeExpr::Unknown,
+    };
+
+    if nullable {
+        merge_nullable(TypeExpr::Union(vec![
+            core_type,
+            TypeExpr::Primitive("null".to_string()),
+        ]))
+    } else {
+        core_type
+    }
+}
+
+/// If a union already contains a primitive `null`, keep it as-is; otherwise
+/// return the type unchanged. This exists so we don't end up with `T | null | null`.
+fn merge_nullable(ty: TypeExpr) -> TypeExpr {
+    if let TypeExpr::Union(ref members) = ty {
+        let null_count = members
+            .iter()
+            .filter(|m| matches!(m, TypeExpr::Primitive(name) if name == "null"))
+            .count();
+        if null_count <= 1 {
+            return ty;
+        }
+        // Dedupe trailing nulls.
+        let mut seen_null = false;
+        let deduped: Vec<TypeExpr> = members
+            .iter()
+            .filter(|m| match m {
+                TypeExpr::Primitive(name) if name == "null" => {
+                    if seen_null {
+                        false
+                    } else {
+                        seen_null = true;
+                        true
+                    }
+                }
+                _ => true,
+            })
+            .cloned()
+            .collect();
+        return TypeExpr::Union(deduped);
+    }
+    ty
+}
+
 /// Extract parameter info from a Harn VmValue dict (tool_registry entry).
-fn extract_params_from_vm_dict(td: &BTreeMap<String, VmValue>) -> Vec<(String, String, String)> {
+/// Harn tool definitions default to `required: true`; a param is optional only
+/// when its dict explicitly contains `required: false`. The per-param dict
+/// carries a JSON-Schema-ish subset (type / enum / const / items / properties
+/// / oneOf / anyOf / allOf / default / examples / $ref) which we recursively
+/// lift into TypeExpr. The `root_json` is the whole tool-registry converted
+/// to JSON so `$ref` pointers can resolve against it.
+fn extract_params_from_vm_dict(
+    td: &BTreeMap<String, VmValue>,
+    root_json: &serde_json::Value,
+    registry: &mut ComponentRegistry,
+) -> Vec<ToolParamSchema> {
     let mut params = Vec::new();
     if let Some(VmValue::Dict(pd)) = td.get("parameters") {
         for (pname, pval) in pd.iter() {
-            if let VmValue::Dict(pdef) = pval {
-                let ptype = pdef
-                    .get("type")
-                    .map(|v| v.display())
-                    .unwrap_or_else(|| "str".to_string());
-                let pdesc = pdef
+            let (ty, desc, required, default, examples) = if let VmValue::Dict(pdef) = pval {
+                let desc = pdef
                     .get("description")
                     .map(|v| v.display())
                     .unwrap_or_default();
-                params.push((pname.clone(), ptype, pdesc));
+                let required = match pdef.get("required") {
+                    Some(VmValue::Bool(b)) => *b,
+                    _ => true,
+                };
+                let json = vm_dict_to_json(pdef);
+                let ty = json_schema_to_type_expr(&json, root_json, registry);
+                let default = json.get("default").cloned();
+                let examples = extract_examples_vm(pdef);
+                (ty, desc, required, default, examples)
             } else {
-                // Simple string description
-                params.push((pname.clone(), "str".to_string(), pval.display()));
-            }
+                // Simple string description — treat as required string.
+                (
+                    TypeExpr::Primitive("string".to_string()),
+                    pval.display(),
+                    true,
+                    None,
+                    Vec::new(),
+                )
+            };
+            params.push(ToolParamSchema {
+                name: pname.clone(),
+                ty,
+                description: desc,
+                required,
+                default,
+                examples,
+            });
         }
     }
+    // Required params first so the rendered TS signature — and any downstream
+    // consumers that iterate `params` in order — sees the critical fields up
+    // front. Stable-alphabetical within each group (BTreeMap iteration is
+    // already alphabetical).
+    params.sort_by_key(|p| !p.required);
     params
 }
 
-type ToolParamSchema = (String, String, String);
+/// Convert a VmValue dict fragment into a serde_json::Value using the crate's
+/// canonical VmValue → JSON conversion (re-exported via `super::vm_value_to_json`
+/// at the top of this file). We wrap the dict contents in `VmValue::Dict` so
+/// the single shared conversion path handles every field uniformly.
+fn vm_dict_to_json(dict: &BTreeMap<String, VmValue>) -> serde_json::Value {
+    vm_value_to_json(&VmValue::Dict(Rc::new(dict.clone())))
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub(crate) struct ToolParamSchema {
+    pub(crate) name: String,
+    pub(crate) ty: TypeExpr,
+    pub(crate) description: String,
+    pub(crate) required: bool,
+    pub(crate) default: Option<serde_json::Value>,
+    /// JSON Schema `examples` (plural) or `example` (singular, legacy). Shown
+    /// inline after the description so models see concrete valid values
+    /// alongside the type constraint.
+    pub(crate) examples: Vec<serde_json::Value>,
+}
+
+impl ToolParamSchema {
+    fn rendered_default_suffix(&self) -> String {
+        match &self.default {
+            Some(v) => format!(" = {}", render_literal(v)),
+            None => String::new(),
+        }
+    }
+
+    fn rendered_examples_suffix(&self) -> String {
+        if self.examples.is_empty() {
+            return String::new();
+        }
+        let rendered = self
+            .examples
+            .iter()
+            .map(render_literal)
+            .collect::<Vec<_>>()
+            .join(", ");
+        if self.examples.len() == 1 {
+            format!(" Example: {rendered}.")
+        } else {
+            format!(" Examples: {rendered}.")
+        }
+    }
+}
+
+/// Pull examples from a JSON-schema-ish fragment, accepting both plural
+/// `examples: [...]` (OAS 3.1 preferred) and the legacy singular `example: v`.
+fn extract_examples(obj: &serde_json::Map<String, serde_json::Value>) -> Vec<serde_json::Value> {
+    if let Some(serde_json::Value::Array(arr)) = obj.get("examples") {
+        return arr.clone();
+    }
+    if let Some(single) = obj.get("example") {
+        return vec![single.clone()];
+    }
+    Vec::new()
+}
+
+/// Pull examples from a VmValue dict, same dual-key convention.
+fn extract_examples_vm(pdef: &BTreeMap<String, VmValue>) -> Vec<serde_json::Value> {
+    if let Some(VmValue::List(items)) = pdef.get("examples") {
+        return items.iter().map(vm_value_to_json).collect();
+    }
+    if let Some(single) = pdef.get("example") {
+        return vec![vm_value_to_json(single)];
+    }
+    Vec::new()
+}
 
 #[derive(Clone, Debug, serde::Serialize)]
 pub(crate) struct ToolSchema {
@@ -404,7 +902,18 @@ pub(crate) struct ToolSchema {
     params: Vec<ToolParamSchema>,
 }
 
-fn collect_vm_tool_schemas(tools_val: Option<&VmValue>) -> Vec<ToolSchema> {
+fn collect_vm_tool_schemas(
+    tools_val: Option<&VmValue>,
+    registry: &mut ComponentRegistry,
+) -> Vec<ToolSchema> {
+    // Build a JSON mirror of the root tool-registry so `$ref` pointers inside
+    // individual param schemas can resolve against sibling `types` / `definitions`
+    // / `components.schemas` declarations.
+    let root_json = match tools_val {
+        Some(value) => vm_value_to_json(value),
+        None => serde_json::Value::Null,
+    };
+
     let entries: Vec<&VmValue> = match tools_val {
         Some(VmValue::List(list)) => list.iter().collect(),
         Some(VmValue::Dict(d)) => {
@@ -426,7 +935,7 @@ fn collect_vm_tool_schemas(tools_val: Option<&VmValue>) -> Vec<ToolSchema> {
                     .get("description")
                     .map(|v| v.display())
                     .unwrap_or_default();
-                let params = extract_params_from_vm_dict(td);
+                let params = extract_params_from_vm_dict(td, &root_json, registry);
                 Some(ToolSchema {
                     name,
                     description,
@@ -437,20 +946,6 @@ fn collect_vm_tool_schemas(tools_val: Option<&VmValue>) -> Vec<ToolSchema> {
         })
         .collect()
 }
-
-fn schema_type_from_json(value: &serde_json::Value) -> String {
-    value
-        .as_str()
-        .map(ToString::to_string)
-        .or_else(|| {
-            value
-                .get("type")
-                .and_then(|inner| inner.as_str())
-                .map(ToString::to_string)
-        })
-        .unwrap_or_else(|| "string".to_string())
-}
-
 fn schema_description_from_json(value: &serde_json::Value) -> String {
     value
         .as_str()
@@ -464,7 +959,20 @@ fn schema_description_from_json(value: &serde_json::Value) -> String {
         .unwrap_or_default()
 }
 
-fn extract_params_from_native_schema(input_schema: &serde_json::Value) -> Vec<ToolParamSchema> {
+fn extract_params_from_native_schema(
+    input_schema: &serde_json::Value,
+    root: &serde_json::Value,
+    registry: &mut ComponentRegistry,
+) -> Vec<ToolParamSchema> {
+    let required_set: BTreeSet<String> = input_schema
+        .get("required")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
     input_schema
         .get("properties")
         .and_then(|value| value.as_object())
@@ -472,20 +980,33 @@ fn extract_params_from_native_schema(input_schema: &serde_json::Value) -> Vec<To
             let mut params = properties
                 .iter()
                 .map(|(name, value)| {
-                    (
-                        name.clone(),
-                        schema_type_from_json(value),
-                        schema_description_from_json(value),
-                    )
+                    let examples = value.as_object().map(extract_examples).unwrap_or_default();
+                    ToolParamSchema {
+                        name: name.clone(),
+                        ty: json_schema_to_type_expr(value, root, registry),
+                        description: schema_description_from_json(value),
+                        required: required_set.contains(name),
+                        default: value.get("default").cloned(),
+                        examples,
+                    }
                 })
                 .collect::<Vec<_>>();
-            params.sort_by(|a, b| a.0.cmp(&b.0));
+            // Stable sort: required first (matching vm dict extractor), then
+            // alphabetical within each group so the signature is deterministic.
+            params.sort_by(|a, b| {
+                (!a.required)
+                    .cmp(&!b.required)
+                    .then_with(|| a.name.cmp(&b.name))
+            });
             params
         })
         .unwrap_or_default()
 }
 
-fn collect_native_tool_schemas(native_tools: Option<&[serde_json::Value]>) -> Vec<ToolSchema> {
+fn collect_native_tool_schemas(
+    native_tools: Option<&[serde_json::Value]>,
+    registry: &mut ComponentRegistry,
+) -> Vec<ToolSchema> {
     native_tools
         .unwrap_or(&[])
         .iter()
@@ -506,58 +1027,68 @@ fn collect_native_tool_schemas(native_tools: Option<&[serde_json::Value]>) -> Ve
                 .or_else(|| tool.get("input_schema"))
                 .cloned()
                 .unwrap_or_else(|| serde_json::json!({"type": "object"}));
+            // For native schemas the root is the tool wrapper itself (or the
+            // function object), so `$ref` can resolve against sibling
+            // `components.schemas` entries if the provider included them.
+            let root = tool.clone();
             Some(ToolSchema {
                 name: name.to_string(),
                 description,
-                params: extract_params_from_native_schema(&input_schema),
+                params: extract_params_from_native_schema(&input_schema, &root, registry),
             })
         })
         .collect()
 }
 
-pub(crate) fn collect_tool_schemas(
+/// Collect the full tool schema set AND the reusable type registry populated
+/// by any `$ref` encounters during extraction. Callers that only need the
+/// list of schemas can ignore the registry.
+pub(crate) fn collect_tool_schemas_with_registry(
     tools_val: Option<&VmValue>,
     native_tools: Option<&[serde_json::Value]>,
-) -> Vec<ToolSchema> {
-    let mut merged = collect_vm_tool_schemas(tools_val);
+) -> (Vec<ToolSchema>, ComponentRegistry) {
+    let mut registry = ComponentRegistry::default();
+    let mut merged = collect_vm_tool_schemas(tools_val, &mut registry);
     let mut seen = merged
         .iter()
         .map(|schema| schema.name.clone())
         .collect::<BTreeSet<_>>();
 
-    for schema in collect_native_tool_schemas(native_tools) {
+    for schema in collect_native_tool_schemas(native_tools, &mut registry) {
         if seen.insert(schema.name.clone()) {
             merged.push(schema);
         }
     }
 
     merged.sort_by(|a, b| a.name.cmp(&b.name));
-    merged
+    (merged, registry)
 }
 
-fn positional_param_name(tool_name: &str, position: usize, tools_val: Option<&VmValue>) -> String {
-    let param_names = collect_tool_schemas(tools_val, None)
-        .into_iter()
-        .find(|schema| schema.name == tool_name)
-        .map(|schema| {
-            schema
-                .params
-                .into_iter()
-                .map(|(name, _, _)| name)
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-
-    if position == 0 && param_names.len() == 1 {
-        return param_names[0].clone();
-    }
-
-    format!("arg{}", position + 1)
+pub(crate) fn collect_tool_schemas(
+    tools_val: Option<&VmValue>,
+    native_tools: Option<&[serde_json::Value]>,
+) -> Vec<ToolSchema> {
+    collect_tool_schemas_with_registry(tools_val, native_tools).0
 }
-
 /// Build a runtime-owned tool-calling contract prompt.
 /// The runtime injects this block so prompt templates do not need to carry
 /// stale tool syntax examples that can drift from actual parser behavior.
+///
+/// Layout:
+///   ## Tool Calling Contract
+///   Active mode: text (authoritative — ignore older prompt text).
+///
+///   ## Shared types           (only if any $ref aliases were registered)
+///   type Foo = ...;
+///
+///   ## Available tools
+///   declare function edit(args: { ... }): string;
+///   /** @param path (required) - Relative path. Example: "a.go". */
+///   /** @param action (required) - Which edit. */
+///   ...
+///
+///   ## How to call tools      (only in text mode when include_format = true)
+///   Call a tool as a plain TypeScript function call at the start of a line ...
 pub(crate) fn build_tool_calling_contract_prompt(
     tools_val: Option<&VmValue>,
     native_tools: Option<&[serde_json::Value]>,
@@ -568,597 +1099,803 @@ pub(crate) fn build_tool_calling_contract_prompt(
     prompt.push_str(&format!(
         "Active mode: `{mode}`. Follow this runtime-owned contract even if older prompt text suggests another tool syntax.\n\n"
     ));
+
+    let (schemas, registry) = collect_tool_schemas_with_registry(tools_val, native_tools);
+
+    let aliases = registry.render_aliases();
+    if !aliases.is_empty() {
+        prompt.push_str("## Shared types\n\n");
+        prompt.push_str(&aliases);
+        prompt.push('\n');
+    }
+
     prompt.push_str("## Available tools\n\n");
 
-    let schemas = collect_tool_schemas(tools_val, native_tools);
-
-    // Present tools as Python-like function signatures
     for schema in &schemas {
-        let sig = schema
-            .params
-            .iter()
-            .map(|(pname, ptype, _)| format!("{pname}: {ptype}"))
-            .collect::<Vec<_>>()
-            .join(", ");
+        // Required params come first, then optional. Each tool is presented
+        // as a single-arg TypeScript function declaration so the model sees
+        // optionality, enums, nested objects, and array item types directly
+        // in the type.
+        let args_type = build_tool_args_type(&schema.params);
         prompt.push_str(&format!(
-            "### {}({sig})\n{}\n",
-            schema.name, schema.description
+            "declare function {}(args: {}): string;\n",
+            schema.name,
+            args_type.render()
         ));
-        for (pname, _, pdesc) in &schema.params {
-            if !pdesc.is_empty() {
-                prompt.push_str(&format!("- `{pname}`: {pdesc}\n"));
+        if !schema.description.trim().is_empty() {
+            // Description goes in a JSDoc comment above the per-param @param
+            // lines so everything the model needs for a tool reads top-to-bottom.
+            prompt.push_str("/**\n");
+            for line in schema.description.lines() {
+                prompt.push_str(&format!(" * {line}\n"));
             }
+            for p in schema.params.iter() {
+                let tag = if p.required { "required" } else { "optional" };
+                let default_suffix = p.rendered_default_suffix();
+                let examples_suffix = p.rendered_examples_suffix();
+                if p.description.is_empty()
+                    && default_suffix.is_empty()
+                    && examples_suffix.is_empty()
+                {
+                    continue;
+                }
+                prompt.push_str(&format!(
+                    " * @param {} ({tag}){}{} {}{}\n",
+                    p.name,
+                    if default_suffix.is_empty() { "" } else { " " },
+                    default_suffix,
+                    if p.description.is_empty() {
+                        "".to_string()
+                    } else {
+                        format!("— {}", p.description.trim())
+                    },
+                    examples_suffix,
+                ));
+            }
+            prompt.push_str(" */\n");
+        } else if schema.params.iter().any(|p| !p.description.is_empty()) {
+            prompt.push_str("/**\n");
+            for p in schema.params.iter() {
+                if p.description.is_empty() {
+                    continue;
+                }
+                let tag = if p.required { "required" } else { "optional" };
+                let examples_suffix = p.rendered_examples_suffix();
+                prompt.push_str(&format!(
+                    " * @param {} ({tag}) — {}{}\n",
+                    p.name,
+                    p.description.trim(),
+                    examples_suffix,
+                ));
+            }
+            prompt.push_str(" */\n");
         }
         prompt.push('\n');
     }
 
     if mode == "native" {
-        prompt.push_str(
-            "Use the provider's native tool-calling channel for tool invocations. Do not emit ```call blocks in this mode.\n",
-        );
+        prompt.push_str("Use the provider's native tool-calling channel for tool invocations.\n");
     } else if include_format {
-        prompt.push_str(
-            "\n## How to call tools in text mode\n\
-             Emit each tool call in its own fenced code block with the `call` language tag:\n\
-             ````\n\
-             ```call\n\
-             tool_name(param=\"value\", param2=\"value2\")\n\
-             ```\n\
-             ````\n\
-             For multiline string values (like file content or code), use heredoc syntax:\n\
-             ````\n\
-             ```call\n\
-             tool_name(param=\"value\", long_param=<<'EOF'\n\
-             line 1\n\
-             line 2\n\
-             EOF\n\
-             )\n\
-             ```\n\
-             ````\n\
-             The heredoc tag (EOF, BODY, etc.) can be any word. Content between the opening and closing tag is passed raw with no escaping needed.\n\
-             You can use multiple heredocs in one call:\n\
-             ````\n\
-             ```call\n\
-             edit(action=\"patch\", path=\"foo.py\", old_string=<<'OLD'\n\
-             old code\n\
-             OLD\n\
-             new_string=<<'NEW'\n\
-             new code\n\
-             NEW\n\
-             )\n\
-             ```\n\
-             ````\n\
-             You can make multiple tool calls in one response by emitting multiple ` ```call ` blocks.\n\
-             After each call, you will see the result in a <tool_result> tag.\n\
-             Only the `### name(...)` headings above are tools. Parameter names listed under those headings are arguments, not standalone tools.\n\
-             Use named arguments unless the tool signature above has exactly one parameter; positional calls beyond that are ambiguous and may be rejected.\n\
-             If a parameter expects a string command or path, pass that value as a normal string unless the tool schema explicitly requests a list or object.\n",
-        );
+        prompt.push_str(TS_CALL_CONTRACT_HELP);
     }
 
     prompt
 }
 
-/// Parse tool calls from LLM text response.
-/// Uses ```call blocks with Python-like function syntax:
-///   ```call
-///   tool_name(param="value", param2="value2")
-///   ```
-#[cfg(test)]
-fn parse_text_tool_calls(text: &str) -> Vec<serde_json::Value> {
-    parse_text_tool_calls_with_tools(text, None).calls
-}
-
-/// Why find_call_block_end failed to locate a closing fence.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum BlockEndReason {
-    /// Block reached EOF while still inside a heredoc body.
-    UnterminatedHeredoc { tag: String },
-    /// Block reached EOF with no closing ``` fence.
-    NoClosingFence,
-}
-
-/// Find the end of a ```call block starting from `s`, skipping over heredoc bodies
-/// so that triple backticks inside heredoc content don't close the block early.
-/// Returns the byte offset within `s` where the closing ``` begins, or a structured
-/// reason for why no closing fence was found.
-fn find_call_block_end(s: &str) -> Result<usize, BlockEndReason> {
-    let bytes = s.as_bytes();
-    let mut i = 0;
-    let mut in_double_quote = false;
-    while i < bytes.len() {
-        // Track double-quoted strings so we don't misinterpret << inside them
-        if bytes[i] == b'"' && (i == 0 || bytes[i - 1] != b'\\') {
-            in_double_quote = !in_double_quote;
-            i += 1;
-            continue;
-        }
-        if in_double_quote {
-            i += 1;
-            continue;
-        }
-        // Check for heredoc opener: <<'TAG' or <<TAG (only outside quoted strings)
-        if i + 1 < bytes.len() && bytes[i] == b'<' && bytes[i + 1] == b'<' {
-            let mut j = i + 2;
-            let quoted = j < bytes.len() && bytes[j] == b'\'';
-            if quoted {
-                j += 1;
-            }
-            let tag_start = j;
-            while j < bytes.len() && bytes[j] != b'\n' {
-                if quoted && bytes[j] == b'\'' {
-                    break;
-                }
-                j += 1;
-            }
-            let tag = s[tag_start..j].to_string();
-            if quoted && j < bytes.len() && bytes[j] == b'\'' {
-                j += 1;
-            }
-            // Skip to end of the <<'TAG' line
-            while j < bytes.len() && bytes[j] != b'\n' {
-                j += 1;
-            }
-            if j < bytes.len() && bytes[j] == b'\n' {
-                j += 1;
-            }
-            // Skip body until closing tag alone on a line
-            let closing = format!("{}\n", tag);
-            let rest = &s[j..];
-            if let Some(pos) = rest.find(&closing) {
-                i = j + pos + closing.len();
-            } else if rest.trim_end() == tag.as_str() || rest.ends_with(&format!("\n{}", tag)) {
-                // Closing tag at very end of input with no trailing newline.
-                i = bytes.len();
+/// Build the single-arg TypeScript object type that a tool takes. Each
+/// top-level parameter becomes a field in the object (optional via `?`, with
+/// a JSDoc @example rendered by the containing comment block), with required
+/// fields listed first for consistency with the per-param comment order.
+fn build_tool_args_type(params: &[ToolParamSchema]) -> TypeExpr {
+    let fields: Vec<ObjectField> = params
+        .iter()
+        .map(|p| ObjectField {
+            name: p.name.clone(),
+            ty: p.ty.clone(),
+            required: p.required,
+            description: if p.description.is_empty() {
+                None
             } else {
-                // Unterminated heredoc body — the response was likely truncated.
-                return Err(BlockEndReason::UnterminatedHeredoc { tag });
-            }
-            continue;
-        }
-        // Check for closing ```
-        if i + 2 < bytes.len() && bytes[i] == b'`' && bytes[i + 1] == b'`' && bytes[i + 2] == b'`' {
-            return Ok(i);
-        }
-        i += 1;
-    }
-    Err(BlockEndReason::NoClosingFence)
+                Some(p.description.clone())
+            },
+            default: p.default.clone(),
+        })
+        .collect();
+    TypeExpr::Object(fields)
 }
 
-/// Detect the common mistake of using `:` instead of `=` before a heredoc:
-/// `new_body: <<'EOF'` rather than `new_body=<<'EOF'`. Returns the offending
-/// key name if found, else None.
+/// Help text for the fenceless TS call syntax. Declared as a constant so tests
+/// can assert on its content without duplicating the string.
 ///
-/// Heuristic: the pattern `<arg-boundary> <ident> \s* : \s* <<` where
-/// arg-boundary is `(`, `,`, or a newline. Colons inside quoted strings, and
-/// colons that are not preceded by an identifier at an argument boundary, are
-/// ignored. This avoids false positives on JSON/dict content inside heredoc
-/// bodies.
-fn detect_colon_before_heredoc(call_text: &str) -> Option<String> {
-    let bytes = call_text.as_bytes();
-    let mut i = 0;
-    let mut in_quote = false;
-    let mut quote_ch: u8 = b'"';
-    // Track whether we have just crossed an argument boundary and are now
-    // looking for an identifier. Start true because the very beginning of
-    // args_str is also an argument boundary (right after the opening paren).
-    let mut at_arg_boundary = true;
-    while i + 1 < bytes.len() {
-        let b = bytes[i];
-        if !in_quote && (b == b'"' || b == b'\'') {
-            in_quote = true;
-            quote_ch = b;
-            at_arg_boundary = false;
-            i += 1;
-            continue;
-        }
-        if in_quote {
-            if b == quote_ch && (i == 0 || bytes[i - 1] != b'\\') {
-                in_quote = false;
-            }
-            i += 1;
-            continue;
-        }
-        if b == b'(' || b == b',' || b == b'\n' {
-            at_arg_boundary = true;
-            i += 1;
-            continue;
-        }
-        if b == b' ' || b == b'\t' || b == b'\r' {
-            i += 1;
-            continue;
-        }
-        if at_arg_boundary && (b.is_ascii_alphabetic() || b == b'_') {
-            // Walk an identifier
-            let id_start = i;
-            while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
-                i += 1;
-            }
-            let id_end = i;
-            // Skip whitespace
-            while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'\t') {
-                i += 1;
-            }
-            // Check for `:` followed by whitespace and `<<`
-            if i < bytes.len() && bytes[i] == b':' {
-                let mut j = i + 1;
-                while j < bytes.len() && (bytes[j] == b' ' || bytes[j] == b'\t') {
-                    j += 1;
-                }
-                if j + 1 < bytes.len() && bytes[j] == b'<' && bytes[j + 1] == b'<' {
-                    let key = std::str::from_utf8(&bytes[id_start..id_end]).ok()?;
-                    return Some(key.to_string());
-                }
-            }
-            at_arg_boundary = false;
-            continue;
-        }
-        at_arg_boundary = false;
-        i += 1;
-    }
-    None
-}
+/// The text is written to minimise backtick-counting demands on weaker models:
+/// prose references to single-character syntax use quoted descriptions
+/// ('backtick', 'double quote') and the ONE code example is embedded in the
+/// paragraph without any wrapping fence. Wrapping the example in a Markdown
+/// fenced code block caused confusion because models had to balance several
+/// levels of backticks at once.
+pub(crate) const TS_CALL_CONTRACT_HELP: &str = "
+## How to call tools
 
-/// Result of parsing text tool calls: successfully parsed calls + diagnostics for failures.
+You invoke a tool by writing a plain TypeScript function call on its own line in your response. The call takes exactly one argument: an object literal whose fields match the tool's signature above. You can write prose before and after tool calls freely — anything that is not a top-of-line function-call expression naming a known tool is narration and the harness ignores it.
+
+Here is an example of calling the edit tool, with a single multiline string argument expressed as a template literal (opened and closed by single backtick characters):
+
+edit({
+    action: \"create\",
+    path: \"internal/manifest/parser_extra_test.go\",
+    content: `package manifest
+
+import \"testing\"
+
+func TestParseExtra(t *testing.T) {
+\t// body
+}
+`
+})
+
+Rules for the call expression:
+
+- The full form is name({ key: value, key: value }). Trailing commas are optional.
+- String values can be written with double quotes (\"...\") for single-line text, or with a template literal (opened and closed by a single backtick character) for multiline text. Template literal content is passed through raw — you do NOT need to escape newlines, double quotes, or backslashes. If you genuinely need a literal backtick character inside a template literal, escape it with a leading backslash.
+- Optional fields may be omitted entirely; required fields must be present (their type has no trailing ? in the signature).
+- Enum / literal fields accept only the literal values shown in the union type. Other strings are rejected.
+- Arrays use [a, b, c]. Nested objects use { key: value }.
+- Tool-name mentions inside a Markdown fenced code block or inside backtick-delimited inline code are treated as documentation, not invocations. Only calls outside every code-display region count.
+- After each call, you will see a <tool_result name=\"...\">...</tool_result> entry with the outcome before your next turn.
+- You can emit multiple tool calls in one response by placing each as its own top-of-line expression.
+";
+
+/// Result of parsing a prose-interleaved TS tool-call stream.
+///
+/// The scanner walks the model's text once and splits it into three
+/// streams for the caller:
+///   - `calls`: the parsed structured tool calls.
+///   - `errors`: diagnostics for malformed call attempts.
+///   - `prose`: the original text with every successfully-parsed call
+///     expression removed, whitespace around the hole collapsed. This is
+///     what should be shown as "the agent's answer" and replayed back into
+///     conversation history — tool calls are structured data, not narration.
 pub(crate) struct TextToolParseResult {
     pub calls: Vec<serde_json::Value>,
     pub errors: Vec<String>,
+    pub prose: String,
 }
 
+/// Parse every fenceless TS tool call found in a model's text response.
+///
+/// The model writes prose and tool calls intermixed. A tool call is a
+/// TypeScript function expression `name({...})` whose `name` matches a
+/// registered tool AND whose call-site `(` immediately follows the name at
+/// the start of a line (leading whitespace allowed). Tool names inside
+/// Markdown fenced code blocks (```` ``` ````) or inline code spans (`` ` ``)
+/// are treated as narration and skipped.
+///
+/// The returned `prose` field is the input text with every successfully
+/// parsed call expression excised — useful for building a clean "what the
+/// model said" string separate from the structured tool-call list.
 pub(crate) fn parse_text_tool_calls_with_tools(
     text: &str,
     tools_val: Option<&VmValue>,
 ) -> TextToolParseResult {
+    if let Some(unwrapped) = unwrap_exact_code_wrapper(text) {
+        let result = parse_text_tool_calls_with_tools(unwrapped, tools_val);
+        if !result.calls.is_empty() || !result.errors.is_empty() {
+            return result;
+        }
+    }
+    let known: BTreeSet<String> = collect_tool_schemas(tools_val, None)
+        .into_iter()
+        .map(|s| s.name)
+        .collect();
     let mut calls = Vec::new();
     let mut errors = Vec::new();
-    let mut search_from = 0;
+    // Byte ranges [start, end) to excise from the original text to produce
+    // the `prose` field. We collect them during the scan and apply them at
+    // the end in a single pass so the scanner's index arithmetic stays
+    // simple.
+    let mut call_ranges: Vec<(usize, usize)> = Vec::new();
 
-    while let Some(start_offset) = text[search_from..].find("```call") {
-        let after_marker = search_from + start_offset + "```call".len();
-        // Skip newline after ```call
-        let content_start = if text.as_bytes().get(after_marker) == Some(&b'\n') {
-            after_marker + 1
-        } else {
-            after_marker
-        };
-        match find_call_block_end(&text[content_start..]) {
-            Ok(end_offset) => {
-                let content_end = content_start + end_offset;
-                let call_text = text[content_start..content_end].trim();
-                if let Some((name, arguments)) = parse_function_call_syntax(call_text, tools_val) {
-                    calls.push(serde_json::json!({
-                        "id": format!("tc_{}", calls.len()),
-                        "name": name,
-                        "arguments": arguments,
-                    }));
-                } else if let Some(key) = detect_colon_before_heredoc(call_text) {
-                    errors.push(format!(
-                        "TOOL CALL PARSE ERROR: argument `{key}` used `:` as the separator \
-                         before a heredoc. Tool call arguments use `=`, not `:`. \
-                         Write `{key}=<<'EOF'` (no space, `=` not `:`) on its own line, \
-                         then the body, then `EOF` on its own line."
-                    ));
-                } else {
-                    let preview: String = call_text.chars().take(120).collect();
-                    errors.push(format!(
-                        "TOOL CALL PARSE ERROR: Could not parse tool call from: `{preview}...`\n\
-                         Check: missing closing `)`, unmatched quotes, or malformed arguments.\n\
-                         For multiline string values, use heredoc syntax: param=<<'EOF'\\n...\\nEOF"
-                    ));
-                }
-                search_from = content_end + "```".len();
+    let bytes = text.as_bytes();
+    let mut i = 0usize;
+    let mut at_line_start = true;
+    // Nesting of Markdown fenced code blocks we are currently inside. Any
+    // line starting with ```<info> opens a fence; a matching ``` closes it.
+    // We do NOT attempt to nest by length (4-backtick fences inside
+    // 3-backtick fences); the common case is flat one-level fences.
+    let mut in_fence = false;
+    let mut in_inline_code = false;
+
+    while i < bytes.len() {
+        // Line-start fence toggle: `^\s*````. Absorb the whole fence line so
+        // the rest of the scanner does not walk inside it.
+        if at_line_start && !in_inline_code {
+            // Skip leading whitespace on this line (for fence/call detection).
+            let mut j = i;
+            while j < bytes.len() && (bytes[j] == b' ' || bytes[j] == b'\t') {
+                j += 1;
             }
-            Err(BlockEndReason::UnterminatedHeredoc { tag }) => {
-                // Prefer the colon-misuse diagnostic if we can spot it in the
-                // partial block — it is more actionable than "truncated".
-                let partial = &text[content_start..];
-                if let Some(key) = detect_colon_before_heredoc(partial) {
-                    errors.push(format!(
-                        "TOOL CALL PARSE ERROR: argument `{key}` used `:` as the separator \
-                         before a heredoc. Tool call arguments use `=`, not `:`. \
-                         Write `{key}=<<'{tag}'` (no space, `=` not `:`) on its own line, \
-                         then the body, then `{tag}` on its own line."
-                    ));
-                } else {
-                    errors.push(format!(
-                        "TOOL CALL PARSE ERROR: heredoc body for tag `{tag}` was never closed \
-                         — the response was likely truncated mid-call. \
-                         Re-emit the call with a shorter body, or split the edit into \
-                         smaller pieces so the whole call fits in one response."
-                    ));
-                }
-                // Skip past this marker so we still scan for subsequent valid blocks.
-                search_from = after_marker;
-            }
-            Err(BlockEndReason::NoClosingFence) => {
-                let preview: String = text[content_start..].chars().take(80).collect();
-                errors.push(format!(
-                    "TOOL CALL PARSE ERROR: Found ```call block but no closing ```. Content starts with: `{preview}...`\n\
-                     Make sure every ```call block has a matching closing ```."
-                ));
-                search_from = after_marker;
-            }
-        }
-    }
-
-    TextToolParseResult { calls, errors }
-}
-
-/// Parse function-call syntax: `name(key="value", key2="value2")`
-/// Also handles positional args for single-parameter tools declared in the
-/// active tool schema.
-fn parse_function_call_syntax(
-    text: &str,
-    tools_val: Option<&VmValue>,
-) -> Option<(String, serde_json::Value)> {
-    // Strip whitespace, then trailing literal "\n" that models sometimes emit before closing ```
-    let text = text.trim();
-    let text = text.strip_suffix("\\n").unwrap_or(text);
-    let text = text.trim();
-    let paren_start = text.find('(')?;
-    let name = text[..paren_start].trim().to_string();
-    if name.is_empty() {
-        return None;
-    }
-
-    let args_str = text[paren_start + 1..].strip_suffix(')');
-    let args_str = args_str?.trim();
-    if args_str.is_empty() {
-        return Some((name, serde_json::json!({})));
-    }
-
-    let mut args = serde_json::Map::new();
-    let mut positional_index = 0usize;
-    for part in split_call_args(args_str) {
-        let part = part.trim();
-        // If a part contains a heredoc sentinel but no `=`, the model used
-        // the wrong separator (e.g. `new_body: <<'EOF'`). Bail out so the
-        // caller can produce a precise `key: <<` diagnostic.
-        if part.contains("\x00H") && !part.contains('=') {
-            return None;
-        }
-        if let Some(eq_pos) = part.find('=') {
-            let key = part[..eq_pos].trim().to_string();
-            let val_str = part[eq_pos + 1..].trim();
-            let val =
-                if val_str.starts_with("\x00H") && val_str.ends_with("\x00H") && val_str.len() >= 4
-                {
-                    // Heredoc content: completely raw, no unescaping
-                    serde_json::json!(&val_str[2..val_str.len() - 2])
-                } else if val_str.starts_with('[') && val_str.ends_with(']') {
-                    serde_json::from_str(val_str).unwrap_or_else(|_| serde_json::json!(val_str))
-                } else if val_str.starts_with('{') && val_str.ends_with('}') {
-                    serde_json::from_str(val_str).unwrap_or_else(|_| serde_json::json!(val_str))
-                } else if val_str.starts_with("\"\"\"")
-                    && val_str.ends_with("\"\"\"")
-                    && val_str.len() >= 6
-                {
-                    // Triple-quoted string: mostly raw, but process \" -> " and \\ -> \
-                    // so models can include literal """ inside the block by writing \"\"\".
-                    // Must be checked BEFORE single-quote to avoid stripping only 1 char.
-                    let raw = &val_str[3..val_str.len() - 3];
-                    let unescaped = raw.replace("\\\"", "\"").replace("\\\\", "\\");
-                    serde_json::json!(unescaped)
-                } else if (val_str.starts_with('"') && val_str.ends_with('"'))
-                    || (val_str.starts_with('\'') && val_str.ends_with('\''))
-                {
-                    let inner = &val_str[1..val_str.len() - 1];
-                    let unescaped = inner
-                        .replace("\\n", "\n")
-                        .replace("\\t", "\t")
-                        .replace("\\\"", "\"")
-                        .replace("\\'", "'")
-                        .replace("\\\\", "\\");
-                    serde_json::json!(unescaped)
-                } else if val_str == "true" {
-                    serde_json::json!(true)
-                } else if val_str == "false" {
-                    serde_json::json!(false)
-                } else if val_str == "null" {
-                    serde_json::Value::Null
-                } else if let Ok(n) = val_str.parse::<i64>() {
-                    serde_json::json!(n)
-                } else if let Ok(n) = val_str.parse::<f64>() {
-                    serde_json::json!(n)
-                } else {
-                    serde_json::json!(val_str)
-                };
-            args.insert(key, val);
-        } else if !part.is_empty() {
-            // Positional arguments are only schema-driven for single-parameter tools.
-            let key = positional_param_name(&name, positional_index, tools_val);
-            let val = if part.starts_with('[') && part.ends_with(']') {
-                serde_json::from_str(part).unwrap_or_else(|_| serde_json::json!(part))
-            } else if part.starts_with('{') && part.ends_with('}') {
-                serde_json::from_str(part).unwrap_or_else(|_| serde_json::json!(part))
-            } else if part.starts_with("\"\"\"") && part.ends_with("\"\"\"") && part.len() >= 6 {
-                let raw = &part[3..part.len() - 3];
-                serde_json::json!(raw.replace("\\\"", "\"").replace("\\\\", "\\"))
-            } else if (part.starts_with('"') && part.ends_with('"'))
-                || (part.starts_with('\'') && part.ends_with('\''))
+            if bytes.get(j) == Some(&b'`')
+                && bytes.get(j + 1) == Some(&b'`')
+                && bytes.get(j + 2) == Some(&b'`')
             {
-                let inner = &part[1..part.len() - 1];
-                serde_json::json!(inner
-                    .replace("\\n", "\n")
-                    .replace("\\t", "\t")
-                    .replace("\\\"", "\"")
-                    .replace("\\'", "'")
-                    .replace("\\\\", "\\"))
-            } else {
-                serde_json::json!(part)
-            };
-            args.insert(key, val);
-            positional_index += 1;
-        }
-    }
-
-    Some((name, serde_json::Value::Object(args)))
-}
-
-/// Split comma-separated arguments, respecting quoted strings.
-fn split_call_args(s: &str) -> Vec<String> {
-    let mut parts = Vec::new();
-    let mut current = String::new();
-    let mut in_quote = false;
-    let mut quote_char = '"';
-    let mut in_triple = false;
-    let mut bracket_depth = 0usize;
-    let mut brace_depth = 0usize;
-    let chars: Vec<char> = s.chars().collect();
-    let mut i = 0;
-
-    while i < chars.len() {
-        let ch = chars[i];
-        // Heredoc detection: <<'TAG' or <<TAG outside any quote/triple mode
-        if !in_quote && !in_triple && i + 1 < chars.len() && chars[i] == '<' && chars[i + 1] == '<'
-        {
-            // Parse the tag — skip past <<
-            let mut j = i + 2;
-            // Strip optional surrounding quotes on the tag
-            let quoted_tag = j < chars.len() && chars[j] == '\'';
-            if quoted_tag {
-                j += 1;
-            }
-            let tag_start = j;
-            while j < chars.len() && chars[j] != '\n' {
-                if quoted_tag && chars[j] == '\'' {
-                    break;
+                in_fence = !in_fence;
+                // Consume to end of line.
+                while i < bytes.len() && bytes[i] != b'\n' {
+                    i += 1;
                 }
-                j += 1;
-            }
-            let tag: String = chars[tag_start..j].iter().collect();
-            if quoted_tag && j < chars.len() && chars[j] == '\'' {
-                j += 1; // skip closing quote
-            }
-            // Skip to end of the <<'TAG' line (past the newline)
-            while j < chars.len() && chars[j] != '\n' {
-                j += 1;
-            }
-            if j < chars.len() && chars[j] == '\n' {
-                j += 1;
-            }
-            // Now collect body lines until the closing tag appears alone on a line
-            let mut body = String::new();
-            let rest: String = chars[j..].iter().collect();
-            let closing = format!("{}\n", tag);
-            let closing_eoi = tag.as_str(); // closing at end with no trailing newline
-            let end_offset = if let Some(pos) = rest.find(&closing) {
-                // found tag followed by newline
-                let body_part = &rest[..pos];
-                body.push_str(body_part);
-                // strip trailing newline from body (heredoc convention)
-                if body.ends_with('\n') {
-                    body.pop();
+                if i < bytes.len() {
+                    i += 1;
                 }
-                j + rest[..pos + closing.len()].chars().count()
-            } else if rest.trim_end() == closing_eoi
-                || rest.ends_with(&format!("\n{}", closing_eoi))
-            {
-                // closing tag at very end of input with no trailing newline
-                let tag_at_end = format!("\n{}", closing_eoi);
-                if let Some(pos) = rest.rfind(&tag_at_end) {
-                    let body_part = &rest[..pos];
-                    body.push_str(body_part);
-                    j + rest[..pos + tag_at_end.len()].chars().count()
-                } else {
-                    body.push_str(&rest);
-                    j + rest.chars().count()
-                }
-            } else {
-                // no closing tag found; treat rest as body
-                body.push_str(&rest);
-                j + rest.chars().count()
-            };
-            // Encode as heredoc marker
-            current.push('\x00');
-            current.push('H');
-            current.push_str(&body);
-            current.push('\x00');
-            current.push('H');
-            // A heredoc is always a complete value — push the part now so the
-            // next key=value (with no preceding comma) starts fresh.
-            if !current.trim().is_empty() {
-                parts.push(current.trim().to_string());
-                current = String::new();
-            }
-            // Skip an optional comma + whitespace after the closing tag line
-            let rest_chars: Vec<char> = chars[end_offset..].to_vec();
-            let mut skip = 0;
-            while skip < rest_chars.len()
-                && (rest_chars[skip] == ' '
-                    || rest_chars[skip] == '\t'
-                    || rest_chars[skip] == '\n'
-                    || rest_chars[skip] == '\r')
-            {
-                skip += 1;
-            }
-            if skip < rest_chars.len() && rest_chars[skip] == ',' {
-                skip += 1;
-                while skip < rest_chars.len()
-                    && (rest_chars[skip] == ' '
-                        || rest_chars[skip] == '\t'
-                        || rest_chars[skip] == '\n'
-                        || rest_chars[skip] == '\r')
-                {
-                    skip += 1;
-                }
-            }
-            i = end_offset + skip;
-            continue;
-        }
-        if !in_quote
-            && i + 2 < chars.len()
-            && chars[i] == '"'
-            && chars[i + 1] == '"'
-            && chars[i + 2] == '"'
-        {
-            if in_triple {
-                current.push_str("\"\"\"");
-                i += 3;
-                in_triple = false;
+                at_line_start = true;
                 continue;
             }
-            current.push_str("\"\"\"");
-            i += 3;
-            in_triple = true;
-            continue;
+            if !in_fence {
+                // Candidate tool call at line start: <ident>( directly.
+                if let Some(name_len) = ident_length(&bytes[j..]) {
+                    if bytes.get(j + name_len) == Some(&b'(')
+                        && known
+                            .contains(std::str::from_utf8(&bytes[j..j + name_len]).unwrap_or(""))
+                    {
+                        let name = std::str::from_utf8(&bytes[j..j + name_len])
+                            .unwrap()
+                            .to_string();
+                        match parse_ts_call_from(&text[j..], name.clone()) {
+                            Ok((arguments, consumed)) => {
+                                calls.push(serde_json::json!({
+                                    "id": format!("tc_{}", calls.len()),
+                                    "name": name,
+                                    "arguments": arguments,
+                                }));
+                                // Record the call's byte range so we can
+                                // strip it from `prose` below.
+                                call_ranges.push((j, j + consumed));
+                                i = j + consumed;
+                                at_line_start = bytes.get(i.saturating_sub(1)) == Some(&b'\n');
+                                continue;
+                            }
+                            Err(msg) => {
+                                errors.push(msg);
+                                // Advance past the offending `(` so we can
+                                // keep scanning and (hopefully) find the
+                                // next well-formed call.
+                                i = j + name_len + 1;
+                                at_line_start = false;
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
         }
-        if in_triple {
-            current.push(ch);
+
+        // Inside a fenced code block → treat everything as narration/display.
+        if in_fence {
+            at_line_start = bytes[i] == b'\n';
             i += 1;
             continue;
         }
-        if !in_quote && (ch == '"' || ch == '\'') {
-            in_quote = true;
-            quote_char = ch;
-            current.push(ch);
-        } else if in_quote && ch == quote_char && (i == 0 || chars[i - 1] != '\\') {
-            in_quote = false;
-            current.push(ch);
-        } else if !in_quote && ch == '[' {
-            bracket_depth += 1;
-            current.push(ch);
-        } else if !in_quote && ch == ']' {
-            bracket_depth = bracket_depth.saturating_sub(1);
-            current.push(ch);
-        } else if !in_quote && ch == '{' {
-            brace_depth += 1;
-            current.push(ch);
-        } else if !in_quote && ch == '}' {
-            brace_depth = brace_depth.saturating_sub(1);
-            current.push(ch);
-        } else if !in_quote && bracket_depth == 0 && brace_depth == 0 && ch == ',' {
-            parts.push(current.trim().to_string());
-            current = String::new();
-        } else {
-            current.push(ch);
+
+        // Inline code spans: `code`. Tool names inside backtick-wrapped
+        // prose are references, not invocations.
+        if bytes[i] == b'`' {
+            in_inline_code = !in_inline_code;
+            at_line_start = false;
+            i += 1;
+            continue;
+        }
+
+        if bytes[i] == b'\n' {
+            at_line_start = true;
+        } else if !bytes[i].is_ascii_whitespace() {
+            at_line_start = false;
         }
         i += 1;
     }
-    if !current.trim().is_empty() {
-        parts.push(current.trim().to_string());
+
+    // Build `prose` by copying every byte range NOT inside a parsed-call
+    // window. Collapse runs of blank lines that form purely because a call
+    // was removed so the final prose reads naturally.
+    let prose = if call_ranges.is_empty() {
+        text.to_string()
+    } else {
+        let mut buf = String::with_capacity(text.len());
+        let mut cursor = 0usize;
+        for (start, end) in &call_ranges {
+            if *start > cursor {
+                buf.push_str(&text[cursor..*start]);
+            }
+            cursor = *end;
+        }
+        if cursor < text.len() {
+            buf.push_str(&text[cursor..]);
+        }
+        collapse_blank_lines(&buf).trim().to_string()
+    };
+
+    TextToolParseResult {
+        calls,
+        errors,
+        prose,
     }
-    parts
+}
+
+fn unwrap_exact_code_wrapper(text: &str) -> Option<&str> {
+    let trimmed = text.trim();
+    if let Some(rest) = trimmed.strip_prefix("```") {
+        let newline = rest.find('\n')?;
+        let after_opener = &rest[newline + 1..];
+        let inner = after_opener.strip_suffix("```")?;
+        return Some(inner.trim());
+    }
+    let inner = trimmed.strip_prefix('`')?.strip_suffix('`')?;
+    if inner.contains('`') {
+        return None;
+    }
+    Some(inner.trim())
+}
+
+/// Collapse runs of ≥3 consecutive newlines down to 2 (one blank line). Used
+/// to tidy the `prose` output after tool-call ranges are excised, so the
+/// removed bytes don't leave an ugly vertical gap between surrounding prose.
+fn collapse_blank_lines(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut newline_run = 0usize;
+    for ch in text.chars() {
+        if ch == '\n' {
+            newline_run += 1;
+            if newline_run <= 2 {
+                out.push(ch);
+            }
+        } else {
+            newline_run = 0;
+            out.push(ch);
+        }
+    }
+    out
+}
+
+/// Length of a JavaScript-ish identifier starting at bytes[0]. Returns None
+/// if the first byte is not a valid identifier start.
+fn ident_length(bytes: &[u8]) -> Option<usize> {
+    if bytes.is_empty() {
+        return None;
+    }
+    let first = bytes[0];
+    if !(first.is_ascii_alphabetic() || first == b'_' || first == b'$') {
+        return None;
+    }
+    let mut i = 1;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b.is_ascii_alphanumeric() || b == b'_' || b == b'$' {
+            i += 1;
+        } else {
+            break;
+        }
+    }
+    Some(i)
+}
+
+/// Parse a full `name(args)` TS call expression starting at the beginning of
+/// `text`. Returns the parsed argument JSON and the number of bytes consumed
+/// (from the start of the name through the closing paren), or an error with
+/// a diagnostic suitable to show the model.
+fn parse_ts_call_from(text: &str, name: String) -> Result<(serde_json::Value, usize), String> {
+    let bytes = text.as_bytes();
+    let paren_open = name.len();
+    if bytes.get(paren_open) != Some(&b'(') {
+        return Err(format!(
+            "TOOL CALL PARSE ERROR: `{name}(` expected immediately after the tool name."
+        ));
+    }
+    let mut p = TsValueParser::new(&text[paren_open + 1..]);
+    p.skip_ws_and_comments();
+    // An empty arg list `name()` is legal and produces an empty object.
+    let args_value = if p.peek() == Some(b')') {
+        serde_json::Value::Object(serde_json::Map::new())
+    } else {
+        p.parse_value().map_err(|e| {
+            format!(
+                "TOOL CALL PARSE ERROR: `{name}(...)` — {e}. \
+                 Tool arguments must be a TypeScript object literal: `{{ key: value, key: value }}`."
+            )
+        })?
+    };
+    p.skip_ws_and_comments();
+    if p.peek() != Some(b')') {
+        return Err(format!(
+            "TOOL CALL PARSE ERROR: `{name}(...)` — missing closing `)`. \
+             Every tool call must be a complete TypeScript expression."
+        ));
+    }
+    let consumed_in_parser = p.position();
+    let total_consumed = paren_open + 1 + consumed_in_parser + 1; // +1 for the ')'
+
+    // Coerce positional / non-object calls: the tool contract is that every
+    // call takes a single object literal argument. If the model wrote a bare
+    // scalar like `lookup("README.md")`, error precisely — we do not silently
+    // promote positional args any more.
+    match args_value {
+        serde_json::Value::Object(map) => Ok((serde_json::Value::Object(map), total_consumed)),
+        other => Err(format!(
+            "TOOL CALL PARSE ERROR: `{name}(...)` — expected an object literal argument, \
+             got `{}`. Wrap the value in braces: `{name}({{ key: value }})`.",
+            other
+        )),
+    }
+}
+
+/// Minimal recursive-descent parser for a TypeScript value expression. Handles
+/// object and array literals, string literals (double-quoted and single-quoted),
+/// template literals (backticks) including escape sequences, numbers (int and
+/// float, negative), booleans, null, undefined, and identifier keys inside
+/// object literals.
+struct TsValueParser<'a> {
+    bytes: &'a [u8],
+    text: &'a str,
+    pos: usize,
+}
+
+impl<'a> TsValueParser<'a> {
+    fn new(text: &'a str) -> Self {
+        TsValueParser {
+            bytes: text.as_bytes(),
+            text,
+            pos: 0,
+        }
+    }
+
+    fn position(&self) -> usize {
+        self.pos
+    }
+
+    fn peek(&self) -> Option<u8> {
+        self.bytes.get(self.pos).copied()
+    }
+
+    fn advance(&mut self) -> Option<u8> {
+        let b = self.peek()?;
+        self.pos += 1;
+        Some(b)
+    }
+
+    fn skip_ws_and_comments(&mut self) {
+        loop {
+            while let Some(b) = self.peek() {
+                if b == b' ' || b == b'\t' || b == b'\n' || b == b'\r' {
+                    self.pos += 1;
+                } else {
+                    break;
+                }
+            }
+            // Line comments
+            if self.peek() == Some(b'/') && self.bytes.get(self.pos + 1) == Some(&b'/') {
+                while let Some(b) = self.peek() {
+                    if b == b'\n' {
+                        self.pos += 1;
+                        break;
+                    }
+                    self.pos += 1;
+                }
+                continue;
+            }
+            // Block comments
+            if self.peek() == Some(b'/') && self.bytes.get(self.pos + 1) == Some(&b'*') {
+                self.pos += 2;
+                while self.pos + 1 < self.bytes.len() {
+                    if self.bytes[self.pos] == b'*' && self.bytes[self.pos + 1] == b'/' {
+                        self.pos += 2;
+                        break;
+                    }
+                    self.pos += 1;
+                }
+                continue;
+            }
+            break;
+        }
+    }
+
+    fn parse_value(&mut self) -> Result<serde_json::Value, String> {
+        self.skip_ws_and_comments();
+        let c = self.peek().ok_or("unexpected end of input")?;
+        match c {
+            b'{' => self.parse_object(),
+            b'[' => self.parse_array(),
+            b'"' | b'\'' => self.parse_string_literal(c),
+            b'`' => self.parse_template_literal(),
+            b't' | b'f' => self.parse_boolean(),
+            b'n' => self.parse_null(),
+            b'u' => self.parse_undefined(),
+            b'-' | b'0'..=b'9' => self.parse_number(),
+            other => Err(format!(
+                "unexpected character `{}` starting a value",
+                other as char
+            )),
+        }
+    }
+
+    fn parse_object(&mut self) -> Result<serde_json::Value, String> {
+        // consume '{'
+        self.advance();
+        let mut map = serde_json::Map::new();
+        loop {
+            self.skip_ws_and_comments();
+            if self.peek() == Some(b'}') {
+                self.advance();
+                return Ok(serde_json::Value::Object(map));
+            }
+            // Key: bare identifier OR string literal.
+            let key = if let Some(b) = self.peek() {
+                if b == b'"' || b == b'\'' {
+                    match self.parse_string_literal(b)? {
+                        serde_json::Value::String(s) => s,
+                        _ => unreachable!(),
+                    }
+                } else {
+                    let len = ident_length(&self.bytes[self.pos..])
+                        .ok_or("expected an object key (identifier or string) inside `{ ... }`")?;
+                    let k = self.text[self.pos..self.pos + len].to_string();
+                    self.pos += len;
+                    k
+                }
+            } else {
+                return Err("unexpected end of input inside object literal".to_string());
+            };
+            self.skip_ws_and_comments();
+            // TS shorthand `{ foo }` is legal but rare for our tool calls; we
+            // disallow it to keep the contract explicit.
+            if self.peek() != Some(b':') {
+                return Err(format!(
+                    "expected `:` after key `{key}` inside object literal"
+                ));
+            }
+            self.advance();
+            self.skip_ws_and_comments();
+            let value = self.parse_value()?;
+            map.insert(key, value);
+            self.skip_ws_and_comments();
+            match self.peek() {
+                Some(b',') => {
+                    self.advance();
+                    continue;
+                }
+                Some(b'}') => {
+                    self.advance();
+                    return Ok(serde_json::Value::Object(map));
+                }
+                Some(other) => {
+                    return Err(format!(
+                        "expected `,` or `}}` after value inside object literal, got `{}`",
+                        other as char
+                    ));
+                }
+                None => {
+                    return Err("unexpected end of input inside object literal".to_string());
+                }
+            }
+        }
+    }
+
+    fn parse_array(&mut self) -> Result<serde_json::Value, String> {
+        self.advance(); // '['
+        let mut items = Vec::new();
+        loop {
+            self.skip_ws_and_comments();
+            if self.peek() == Some(b']') {
+                self.advance();
+                return Ok(serde_json::Value::Array(items));
+            }
+            items.push(self.parse_value()?);
+            self.skip_ws_and_comments();
+            match self.peek() {
+                Some(b',') => {
+                    self.advance();
+                    continue;
+                }
+                Some(b']') => {
+                    self.advance();
+                    return Ok(serde_json::Value::Array(items));
+                }
+                Some(other) => {
+                    return Err(format!(
+                        "expected `,` or `]` inside array literal, got `{}`",
+                        other as char
+                    ));
+                }
+                None => {
+                    return Err("unexpected end of input inside array literal".to_string());
+                }
+            }
+        }
+    }
+
+    fn parse_string_literal(&mut self, quote: u8) -> Result<serde_json::Value, String> {
+        self.advance(); // opening quote
+        let mut out = String::new();
+        loop {
+            match self.advance() {
+                None => return Err("unterminated string literal".to_string()),
+                Some(b) if b == quote => return Ok(serde_json::Value::String(out)),
+                Some(b'\\') => {
+                    let esc = self
+                        .advance()
+                        .ok_or("unterminated escape sequence in string literal")?;
+                    match esc {
+                        b'n' => out.push('\n'),
+                        b't' => out.push('\t'),
+                        b'r' => out.push('\r'),
+                        b'0' => out.push('\0'),
+                        b'\\' => out.push('\\'),
+                        b'\'' => out.push('\''),
+                        b'"' => out.push('"'),
+                        b'`' => out.push('`'),
+                        b'\n' => { /* line continuation — drop */ }
+                        b'u' => {
+                            // \uXXXX or \u{XXXXX}
+                            let (ch, consumed) = parse_unicode_escape(&self.bytes[self.pos..])
+                                .ok_or("invalid \\u escape in string literal")?;
+                            out.push(ch);
+                            self.pos += consumed;
+                        }
+                        b'x' => {
+                            if self.pos + 2 > self.bytes.len() {
+                                return Err("invalid \\x escape in string literal".to_string());
+                            }
+                            let hex = std::str::from_utf8(&self.bytes[self.pos..self.pos + 2])
+                                .map_err(|_| "invalid \\x escape".to_string())?;
+                            let code = u32::from_str_radix(hex, 16)
+                                .map_err(|_| "invalid \\x escape".to_string())?;
+                            if let Some(ch) = char::from_u32(code) {
+                                out.push(ch);
+                                self.pos += 2;
+                            } else {
+                                return Err("invalid \\x code point".to_string());
+                            }
+                        }
+                        other => out.push(other as char),
+                    }
+                }
+                Some(b) => {
+                    // A literal newline inside a double/single quote is a TS
+                    // syntax error. We accept it anyway so weaker models that
+                    // forget the heredoc/template-literal rule still get their
+                    // content through rather than silently dropping the call.
+                    out.push(b as char);
+                }
+            }
+        }
+    }
+
+    fn parse_template_literal(&mut self) -> Result<serde_json::Value, String> {
+        self.advance(); // opening backtick
+        let mut out = String::new();
+        loop {
+            match self.advance() {
+                None => return Err("unterminated template literal".to_string()),
+                Some(b'`') => return Ok(serde_json::Value::String(out)),
+                Some(b'\\') => {
+                    let esc = self
+                        .advance()
+                        .ok_or("unterminated escape in template literal")?;
+                    match esc {
+                        b'n' => out.push('\n'),
+                        b't' => out.push('\t'),
+                        b'r' => out.push('\r'),
+                        b'\\' => out.push('\\'),
+                        b'`' => out.push('`'),
+                        b'$' => out.push('$'),
+                        b'\n' => { /* line continuation — drop */ }
+                        other => {
+                            out.push('\\');
+                            out.push(other as char);
+                        }
+                    }
+                }
+                Some(b'$') if self.peek() == Some(b'{') => {
+                    // Template literal interpolation. Tool arguments never
+                    // evaluate expressions; pass through the literal text.
+                    out.push('$');
+                    out.push('{');
+                    self.advance();
+                    let mut depth = 1usize;
+                    while depth > 0 {
+                        match self.advance() {
+                            None => {
+                                return Err(
+                                    "unterminated ${{...}} interpolation in template literal"
+                                        .to_string(),
+                                );
+                            }
+                            Some(b'{') => {
+                                depth += 1;
+                                out.push('{');
+                            }
+                            Some(b'}') => {
+                                depth -= 1;
+                                out.push('}');
+                            }
+                            Some(b) => out.push(b as char),
+                        }
+                    }
+                }
+                Some(b) => {
+                    out.push(b as char);
+                }
+            }
+        }
+    }
+
+    fn parse_boolean(&mut self) -> Result<serde_json::Value, String> {
+        if self.text[self.pos..].starts_with("true") {
+            self.pos += 4;
+            Ok(serde_json::Value::Bool(true))
+        } else if self.text[self.pos..].starts_with("false") {
+            self.pos += 5;
+            Ok(serde_json::Value::Bool(false))
+        } else {
+            Err("expected `true` or `false`".to_string())
+        }
+    }
+
+    fn parse_null(&mut self) -> Result<serde_json::Value, String> {
+        if self.text[self.pos..].starts_with("null") {
+            self.pos += 4;
+            Ok(serde_json::Value::Null)
+        } else {
+            Err("expected `null`".to_string())
+        }
+    }
+
+    fn parse_undefined(&mut self) -> Result<serde_json::Value, String> {
+        if self.text[self.pos..].starts_with("undefined") {
+            self.pos += 9;
+            Ok(serde_json::Value::Null)
+        } else {
+            Err("expected `undefined`".to_string())
+        }
+    }
+
+    fn parse_number(&mut self) -> Result<serde_json::Value, String> {
+        let start = self.pos;
+        if self.peek() == Some(b'-') {
+            self.advance();
+        }
+        while let Some(b) = self.peek() {
+            if b.is_ascii_digit() || b == b'.' || b == b'e' || b == b'E' || b == b'+' || b == b'-' {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        let slice = &self.text[start..self.pos];
+        if let Ok(n) = slice.parse::<i64>() {
+            return Ok(serde_json::json!(n));
+        }
+        if let Ok(n) = slice.parse::<f64>() {
+            return serde_json::Number::from_f64(n)
+                .map(serde_json::Value::Number)
+                .ok_or_else(|| "non-finite number literal".to_string());
+        }
+        Err(format!("invalid number literal `{slice}`"))
+    }
+}
+
+/// Parse a `\uXXXX` or `\u{XXXXXX}` escape starting at bytes[0]. Returns the
+/// decoded character AND the number of bytes consumed after the `\u`.
+fn parse_unicode_escape(bytes: &[u8]) -> Option<(char, usize)> {
+    if bytes.first() == Some(&b'{') {
+        // \u{XXXXXX}
+        let close = bytes.iter().position(|&b| b == b'}')?;
+        let hex = std::str::from_utf8(&bytes[1..close]).ok()?;
+        let code = u32::from_str_radix(hex, 16).ok()?;
+        Some((char::from_u32(code)?, close + 1))
+    } else if bytes.len() >= 4 {
+        let hex = std::str::from_utf8(&bytes[..4]).ok()?;
+        let code = u32::from_str_radix(hex, 16).ok()?;
+        Some((char::from_u32(code)?, 4))
+    } else {
+        None
+    }
 }
 
 pub(crate) fn vm_tools_to_native(
@@ -1269,393 +2006,5 @@ fn vm_build_json_schema(params: Option<&BTreeMap<String, VmValue>>) -> serde_jso
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{
-        build_tool_calling_contract_prompt, detect_colon_before_heredoc, find_call_block_end,
-        normalize_tool_args, parse_text_tool_calls, parse_text_tool_calls_with_tools,
-        split_call_args, BlockEndReason,
-    };
-    use crate::value::VmValue;
-    use serde_json::json;
-    use std::collections::BTreeMap;
-    use std::rc::Rc;
-
-    #[test]
-    fn split_call_args_keeps_array_values_intact() {
-        let parts = split_call_args(r#"command=["ls","internal/manifest/"], timeout=30"#);
-        assert_eq!(
-            parts,
-            vec![r#"command=["ls","internal/manifest/"]"#, "timeout=30"]
-        );
-    }
-
-    #[test]
-    fn parse_text_tool_calls_supports_json_array_arguments() {
-        let calls = parse_text_tool_calls(
-            "```call\nexecute(command=[\"ls\",\"internal/manifest/\"], timeout=30)\n```",
-        );
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0]["name"], json!("execute"));
-        assert_eq!(
-            calls[0]["arguments"]["command"],
-            json!(["ls", "internal/manifest/"])
-        );
-        assert_eq!(calls[0]["arguments"]["timeout"], json!(30));
-    }
-
-    #[test]
-    fn parse_text_tool_calls_preserves_scalar_json_types() {
-        let calls = parse_text_tool_calls(
-            "```call\nlookup(score=0.5, limit=3, exact=false, note=null)\n```",
-        );
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0]["arguments"]["score"], json!(0.5));
-        assert_eq!(calls[0]["arguments"]["limit"], json!(3));
-        assert_eq!(calls[0]["arguments"]["exact"], json!(false));
-        assert_eq!(calls[0]["arguments"]["note"], serde_json::Value::Null);
-    }
-
-    #[test]
-    fn parse_text_tool_calls_uses_schema_for_single_positional_argument() {
-        let tools = VmValue::List(Rc::new(vec![VmValue::Dict(
-            BTreeMap::from([
-                ("name".into(), VmValue::String(Rc::from("lookup"))),
-                (
-                    "parameters".into(),
-                    VmValue::Dict(Rc::new(BTreeMap::from([(
-                        "target".into(),
-                        VmValue::Dict(Rc::new(BTreeMap::from([(
-                            "type".into(),
-                            VmValue::String(Rc::from("str")),
-                        )]))),
-                    )]))),
-                ),
-            ])
-            .into(),
-        )]));
-
-        let result =
-            parse_text_tool_calls_with_tools("```call\nlookup(\"README.md\")\n```", Some(&tools));
-        assert_eq!(result.calls.len(), 1);
-        assert_eq!(result.calls[0]["arguments"]["target"], json!("README.md"));
-    }
-
-    #[test]
-    fn parse_text_tool_calls_handles_trailing_literal_backslash_n() {
-        // Models sometimes emit a literal \n before closing ```, which caused tool calls
-        // to be silently dropped because strip_suffix(')') failed.
-        let calls = parse_text_tool_calls(
-            "```call\nedit(action=\"patch\", path=\"foo.swift\", old_string=\"a\\nb\", new_string=\"c\\nd\")\\n```",
-        );
-        assert_eq!(
-            calls.len(),
-            1,
-            "tool call should be parsed despite trailing \\n"
-        );
-        assert_eq!(calls[0]["name"], json!("edit"));
-        assert_eq!(calls[0]["arguments"]["action"], json!("patch"));
-        assert_eq!(calls[0]["arguments"]["path"], json!("foo.swift"));
-    }
-
-    #[test]
-    fn normalize_tool_args_joins_run_command_arrays() {
-        let normalized =
-            normalize_tool_args("run", &json!({"command": ["ls", "internal/manifest/"]}));
-        assert_eq!(normalized["command"], json!("ls internal/manifest/"));
-    }
-
-    #[test]
-    fn normalize_tool_args_accepts_run_args_alias() {
-        let normalized = normalize_tool_args(
-            "run",
-            &json!({"args": ["go", "test", "./internal/manifest/"]}),
-        );
-        assert_eq!(normalized["command"], json!("go test ./internal/manifest/"));
-        assert!(normalized.get("args").is_none());
-    }
-
-    #[test]
-    fn normalize_tool_args_recovers_stringified_run_array() {
-        let normalized = normalize_tool_args(
-            "run",
-            &json!({"command": "[\"go\",\"test\",\"./internal/manifest/\"]"}),
-        );
-        assert_eq!(normalized["command"], json!("go test ./internal/manifest/"));
-    }
-
-    #[test]
-    fn normalize_tool_args_recovers_fragmented_run_array() {
-        let normalized = normalize_tool_args(
-            "run",
-            &json!({"command": "\"internal/manifest/\"]", "args": "[\"ls\""}),
-        );
-        assert_eq!(normalized["command"], json!("ls internal/manifest/"));
-    }
-
-    #[test]
-    fn tool_calling_contract_marks_active_text_mode() {
-        let prompt = build_tool_calling_contract_prompt(None, None, "text", true);
-        assert!(prompt.contains("Active mode: `text`"));
-        assert!(prompt.contains("```call"));
-    }
-
-    #[test]
-    fn tool_calling_contract_lists_tools_and_text_mode_guardrails() {
-        let tools = VmValue::List(Rc::new(vec![VmValue::Dict(
-            BTreeMap::from([
-                ("name".into(), VmValue::String(Rc::from("lookup"))),
-                (
-                    "description".into(),
-                    VmValue::String(Rc::from("Fetch one resource")),
-                ),
-                (
-                    "parameters".into(),
-                    VmValue::Dict(Rc::new(BTreeMap::from([(
-                        "target".into(),
-                        VmValue::Dict(Rc::new(BTreeMap::from([
-                            ("type".into(), VmValue::String(Rc::from("str"))),
-                            (
-                                "description".into(),
-                                VmValue::String(Rc::from("Resource identifier")),
-                            ),
-                        ]))),
-                    )]))),
-                ),
-            ])
-            .into(),
-        )]));
-
-        let prompt = build_tool_calling_contract_prompt(Some(&tools), None, "text", true);
-        assert!(prompt.contains("Only the `### name(...)` headings above are tools."));
-        assert!(prompt.contains(
-            "Use named arguments unless the tool signature above has exactly one parameter"
-        ));
-    }
-
-    #[test]
-    fn tool_calling_contract_renders_native_tools_when_vm_registry_is_missing() {
-        let native_tools = vec![serde_json::json!({
-            "type": "function",
-            "function": {
-                "name": "lookup",
-                "description": "Look up a symbol",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string", "description": "Symbol name"},
-                        "folder": {"type": "string", "description": "Optional folder scope"}
-                    },
-                    "required": []
-                }
-            }
-        })];
-
-        let prompt = build_tool_calling_contract_prompt(None, Some(&native_tools), "text", true);
-        assert!(prompt.contains("### lookup("));
-        assert!(prompt.contains("query: string"));
-        assert!(prompt.contains("folder: string"));
-    }
-
-    #[test]
-    fn parse_text_tool_calls_handles_heredoc_syntax() {
-        let calls = parse_text_tool_calls(
-            "```call\nedit(action=\"create\", path=\"test.py\", content=<<'EOF'\n\"\"\"Tests.\"\"\"\n\nimport pytest\nEOF\n)\n```",
-        );
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0]["name"], json!("edit"));
-        assert_eq!(calls[0]["arguments"]["action"], json!("create"));
-        assert_eq!(calls[0]["arguments"]["path"], json!("test.py"));
-        let content = calls[0]["arguments"]["content"].as_str().unwrap();
-        assert!(
-            content.contains("\"\"\"Tests.\"\"\""),
-            "should preserve Python docstrings raw"
-        );
-        assert!(content.contains("import pytest"));
-    }
-
-    #[test]
-    fn parse_text_tool_calls_handles_multiple_heredocs() {
-        let calls = parse_text_tool_calls(
-            "```call\nedit(action=\"patch\", path=\"foo.py\", old_string=<<'OLD'\ndef hello():\n    pass\nOLD\nnew_string=<<'NEW'\ndef hello():\n    print(\"hi\")\nNEW\n)\n```",
-        );
-        assert_eq!(calls.len(), 1);
-        assert_eq!(
-            calls[0]["arguments"]["old_string"],
-            json!("def hello():\n    pass")
-        );
-        assert_eq!(
-            calls[0]["arguments"]["new_string"],
-            json!("def hello():\n    print(\"hi\")")
-        );
-    }
-
-    #[test]
-    fn parse_text_tool_calls_heredoc_preserves_triple_backticks() {
-        let calls = parse_text_tool_calls(
-            "```call\nedit(action=\"create\", path=\"README.md\", content=<<'EOF'\n# Title\n```python\nprint(\"hello\")\n```\nEOF\n)\n```",
-        );
-        assert_eq!(calls.len(), 1);
-        let content = calls[0]["arguments"]["content"].as_str().unwrap();
-        assert!(
-            content.contains("```python"),
-            "should preserve triple backticks in content"
-        );
-    }
-
-    #[test]
-    fn parse_text_tool_calls_handles_unicode_inside_heredoc_bodies() {
-        let calls = parse_text_tool_calls(
-            "```call\nedit(action=\"patch\", path=\"notes.txt\", old_string=<<'OLD'\nalpha — beta\nOLD\n, new_string=<<'NEW'\ngamma — delta\nNEW\n)\n```",
-        );
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0]["name"], json!("edit"));
-        assert_eq!(calls[0]["arguments"]["old_string"], json!("alpha — beta"));
-        assert_eq!(calls[0]["arguments"]["new_string"], json!("gamma — delta"));
-    }
-
-    /// Regression: find_call_block_end must not treat << inside double-quoted
-    /// string arguments as a heredoc opener.
-    #[test]
-    fn find_call_block_end_ignores_heredoc_in_quotes() {
-        let block = r#"edit(action="insert", body="<<'EOF'\nsome code\nEOF")
-```"#;
-        let end = find_call_block_end(block);
-        assert!(
-            end.is_ok(),
-            "find_call_block_end should find closing ``` even when << appears inside quotes"
-        );
-    }
-
-    /// Truncated heredoc body should yield a specific UnterminatedHeredoc reason,
-    /// not a generic "no closing fence" error.
-    #[test]
-    fn find_call_block_end_reports_unterminated_heredoc() {
-        let block = "edit(body=<<'EOF'\nline 1\nline 2\n";
-        let result = find_call_block_end(block);
-        match result {
-            Err(BlockEndReason::UnterminatedHeredoc { tag }) => {
-                assert_eq!(tag, "EOF");
-            }
-            other => panic!("expected UnterminatedHeredoc, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn parse_text_tool_calls_reports_truncated_heredoc() {
-        // Mimics the local-gemma4 failure: heredoc body never closes.
-        let text = "```call\nedit(body=<<'EOF'\nsome code\n";
-        let result = parse_text_tool_calls_with_tools(text, None);
-        assert_eq!(result.calls.len(), 0);
-        assert_eq!(result.errors.len(), 1);
-        let err = &result.errors[0];
-        assert!(
-            err.contains("heredoc body for tag `EOF` was never closed"),
-            "expected truncated-heredoc diagnostic, got: {err}"
-        );
-        assert!(err.contains("truncated"));
-    }
-
-    /// The `key: <<'TAG'` misuse (colon instead of `=`) should produce a
-    /// specific diagnostic that names the offending key.
-    #[test]
-    fn parse_text_tool_calls_reports_colon_before_heredoc() {
-        let text = "```call\nreplace_body(\n  path=\"a.go\",\n  function_name=\"Foo\",\n  new_body: <<'EOF'\nbody\nEOF\n)\n```";
-        let result = parse_text_tool_calls_with_tools(text, None);
-        assert_eq!(
-            result.calls.len(),
-            0,
-            "malformed call should not be accepted: {:?}",
-            result.calls
-        );
-        assert_eq!(result.errors.len(), 1);
-        let err = &result.errors[0];
-        assert!(
-            err.contains("`new_body`"),
-            "diagnostic should name the offending key, got: {err}"
-        );
-        assert!(
-            err.contains("`:`") && err.contains("`=`"),
-            "diagnostic should mention : vs =, got: {err}"
-        );
-    }
-
-    /// When BOTH the colon-misuse and a truncation are present (exactly the
-    /// failing local-gemma4 scenario), prefer the colon diagnostic since it is
-    /// more actionable.
-    #[test]
-    fn parse_text_tool_calls_prefers_colon_diagnostic_over_truncation() {
-        let text = "```call\nreplace_body(\n  path=\"a.go\",\n  new_body: <<'EOF'\nbody that never terminates";
-        let result = parse_text_tool_calls_with_tools(text, None);
-        assert_eq!(result.errors.len(), 1);
-        let err = &result.errors[0];
-        assert!(
-            err.contains("`new_body`") && err.contains("`:`"),
-            "expected colon diagnostic to win, got: {err}"
-        );
-    }
-
-    #[test]
-    fn detect_colon_before_heredoc_ignores_colons_inside_strings() {
-        // Colon in a quoted dict value must not trigger the heuristic.
-        let text = "replace_body(path=\"a.go\", new_body=<<'EOF'\n{\"k\": <<inline>>}\nEOF\n)";
-        assert!(detect_colon_before_heredoc(text).is_none());
-    }
-
-    /// Regression: real eval transcript where model emitted 14 ```call blocks
-    /// with heredoc-like syntax inside quoted string arguments.
-    #[test]
-    fn parse_text_tool_calls_real_transcript_14_blocks() {
-        let text = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../test_fixtures/execute_response_raw.txt"
-        ));
-        let result = parse_text_tool_calls_with_tools(text, None);
-        assert_eq!(
-            result.calls.len(),
-            14,
-            "expected 14 parsed calls, got {} calls and {} errors: {:?}",
-            result.calls.len(),
-            result.errors.len(),
-            result.errors
-        );
-        assert!(
-            result.errors.is_empty(),
-            "expected no parse errors, got: {:?}",
-            result.errors
-        );
-        // First call should be scaffold
-        assert_eq!(result.calls[0]["name"], json!("scaffold"));
-        // Last call should be edit (add_import "time")
-        assert_eq!(result.calls[13]["name"], json!("edit"));
-        assert_eq!(
-            result.calls[13]["arguments"]["import_statement"],
-            json!("import \"time\"")
-        );
-    }
-
-    /// Regression: an unclosed ```call block must not kill parsing of subsequent valid blocks.
-    #[test]
-    fn parse_text_tool_calls_continues_past_unclosed_block() {
-        let text = concat!(
-            "```call\n",
-            "broken(arg=\"no closing\n",
-            "Some random text\n",
-            "```call\n",
-            "valid_tool(x=\"hello\")\n",
-            "```\n",
-        );
-        let result = parse_text_tool_calls_with_tools(text, None);
-        assert_eq!(
-            result.calls.len(),
-            1,
-            "should parse the valid block after the unclosed one"
-        );
-        assert_eq!(result.calls[0]["name"], json!("valid_tool"));
-        assert_eq!(
-            result.errors.len(),
-            1,
-            "should report exactly one error for the unclosed block"
-        );
-        assert!(result.errors[0].contains("no closing"));
-    }
-}
+#[path = "tools_tests.rs"]
+mod tests;

@@ -1024,7 +1024,7 @@ impl ArtifactRecord {
     }
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct WorkflowNode {
     pub id: Option<String>,
@@ -1049,6 +1049,14 @@ pub struct WorkflowNode {
     pub escalation_policy: EscalationPolicy,
     pub verify: Option<serde_json::Value>,
     pub metadata: BTreeMap<String, serde_json::Value>,
+    #[serde(skip)]
+    pub raw_tools: Option<VmValue>,
+}
+
+impl PartialEq for WorkflowNode {
+    fn eq(&self, other: &Self) -> bool {
+        serde_json::to_value(self).ok() == serde_json::to_value(other).ok()
+    }
 }
 
 pub fn workflow_tool_names(value: &serde_json::Value) -> Vec<String> {
@@ -1537,7 +1545,9 @@ fn parse_json_value<T: for<'de> Deserialize<'de>>(value: &VmValue) -> Result<T, 
 }
 
 pub fn parse_workflow_node_value(value: &VmValue, label: &str) -> Result<WorkflowNode, VmError> {
-    parse_json_payload(vm_value_to_json(value), label)
+    let mut node: WorkflowNode = parse_json_payload(vm_value_to_json(value), label)?;
+    node.raw_tools = value.as_dict().and_then(|dict| dict.get("tools")).cloned();
+    Ok(node)
 }
 
 pub fn parse_workflow_node_json(
@@ -1561,7 +1571,7 @@ pub fn normalize_workflow_value(value: &VmValue) -> Result<WorkflowGraph, VmErro
     if graph.nodes.is_empty() {
         for key in ["act", "verify", "repair"] {
             if let Some(node_value) = as_dict.get(key) {
-                let mut node: WorkflowNode = parse_json_value(node_value)?;
+                let mut node = parse_workflow_node_value(node_value, "orchestration")?;
                 let raw_node = node_value.as_dict().cloned().unwrap_or_default();
                 node.id = Some(key.to_string());
                 if node.kind.is_empty() {
@@ -1679,6 +1689,15 @@ pub fn normalize_workflow_value(value: &VmValue) -> Result<WorkflowGraph, VmErro
             .unwrap_or_else(|| "act".to_string());
     }
     for (node_id, node) in &mut graph.nodes {
+        if node.raw_tools.is_none() {
+            node.raw_tools = as_dict
+                .get("nodes")
+                .and_then(|nodes| nodes.as_dict())
+                .and_then(|nodes| nodes.get(node_id))
+                .and_then(|node_value| node_value.as_dict())
+                .and_then(|raw_node| raw_node.get("tools"))
+                .cloned();
+        }
         if node.id.is_none() {
             node.id = Some(node_id.clone());
         }
@@ -2916,11 +2935,15 @@ pub async fn execute_stage_node(
             options.insert("max_tokens".to_string(), VmValue::Int(max_tokens));
         }
         let tool_names = workflow_tool_names(&node.tools);
-        if !matches!(node.tools, serde_json::Value::Null) && !tool_names.is_empty() {
-            options.insert(
-                "tools".to_string(),
-                crate::stdlib::json_to_vm_value(&node.tools),
-            );
+        let tools_value = node.raw_tools.clone().or_else(|| {
+            if matches!(node.tools, serde_json::Value::Null) {
+                None
+            } else {
+                Some(crate::stdlib::json_to_vm_value(&node.tools))
+            }
+        });
+        if tools_value.is_some() && !tool_names.is_empty() {
+            options.insert("tools".to_string(), tools_value.unwrap_or(VmValue::Nil));
         }
         if let Some(transcript) = transcript.clone() {
             options.insert("transcript".to_string(), transcript);

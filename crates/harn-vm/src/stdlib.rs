@@ -20,7 +20,7 @@ mod shapes;
 mod strings;
 mod testing;
 mod tools;
-mod tracing;
+pub mod tracing;
 mod types;
 
 use crate::http::register_http_builtins;

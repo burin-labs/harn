@@ -380,7 +380,7 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
             .cloned()
             .unwrap_or(VmValue::Dict(Rc::new(BTreeMap::new())));
         let graph = normalize_workflow_value(&input)?;
-        to_vm(&graph)
+        workflow_graph_to_vm(&graph)
     });
 
     vm.register_builtin("workflow_validate", |args, _out| {
@@ -444,7 +444,7 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
         graph.id = format!("{}_clone", graph.id);
         graph.version += 1;
         append_audit_entry(&mut graph, "clone", None, None, BTreeMap::new());
-        to_vm(&graph)
+        workflow_graph_to_vm(&graph)
     });
 
     vm.register_builtin("workflow_insert_node", |args, _out| {
@@ -454,9 +454,8 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
         let node_value = args
             .get(1)
             .ok_or_else(|| VmError::Runtime("workflow_insert_node: missing node".to_string()))?;
-        let node_json = crate::llm::vm_value_to_json(node_value);
         let mut node =
-            crate::orchestration::parse_workflow_node_json(node_json, "workflow_insert_node")?;
+            crate::orchestration::parse_workflow_node_value(node_value, "workflow_insert_node")?;
         let node_id = node
             .id
             .clone()
@@ -484,7 +483,7 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
             None,
             BTreeMap::new(),
         );
-        to_vm(&graph)
+        workflow_graph_to_vm(&graph)
     });
 
     vm.register_builtin("workflow_replace_node", |args, _out| {
@@ -494,12 +493,12 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
         let node_id = args.get(1).map(|v| v.display()).ok_or_else(|| {
             VmError::Runtime("workflow_replace_node: missing node id".to_string())
         })?;
-        let node_json =
-            crate::llm::vm_value_to_json(args.get(2).ok_or_else(|| {
+        let mut node = crate::orchestration::parse_workflow_node_value(
+            args.get(2).ok_or_else(|| {
                 VmError::Runtime("workflow_replace_node: missing node".to_string())
-            })?);
-        let mut node =
-            crate::orchestration::parse_workflow_node_json(node_json, "workflow_replace_node")?;
+            })?,
+            "workflow_replace_node",
+        )?;
         node.id = Some(node_id.clone());
         graph.nodes.insert(node_id.clone(), node);
         append_audit_entry(
@@ -509,7 +508,7 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
             None,
             BTreeMap::new(),
         );
-        to_vm(&graph)
+        workflow_graph_to_vm(&graph)
     });
 
     vm.register_builtin("workflow_rewire", |args, _out| {
@@ -536,7 +535,7 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
             label: None,
         });
         append_audit_entry(&mut graph, "rewire", Some(from), None, BTreeMap::new());
-        to_vm(&graph)
+        workflow_graph_to_vm(&graph)
     });
 
     vm.register_builtin("workflow_set_model_policy", |args, _out| {
@@ -593,7 +592,7 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
             )));
         }
         append_audit_entry(&mut graph, "commit", None, reason, BTreeMap::new());
-        to_vm(&graph)
+        workflow_graph_to_vm(&graph)
     });
 
     vm.register_builtin("artifact", |args, _out| {
@@ -1225,6 +1224,42 @@ fn to_vm<T: serde::Serialize>(value: &T) -> Result<VmValue, VmError> {
     Ok(crate::stdlib::json_to_vm_value(&json))
 }
 
+fn workflow_graph_to_vm(graph: &WorkflowGraph) -> Result<VmValue, VmError> {
+    let base = to_vm(graph)?;
+    let VmValue::Dict(base_dict) = base else {
+        return Err(VmError::Runtime(
+            "workflow graph encoding did not produce a dict".to_string(),
+        ));
+    };
+    let mut graph_dict = (*base_dict).clone();
+    let nodes_value = graph_dict
+        .get("nodes")
+        .cloned()
+        .ok_or_else(|| VmError::Runtime("workflow graph is missing nodes".to_string()))?;
+    let VmValue::Dict(nodes_dict) = nodes_value else {
+        return Err(VmError::Runtime(
+            "workflow graph nodes encoding did not produce a dict".to_string(),
+        ));
+    };
+    let mut nodes = (*nodes_dict).clone();
+    for (node_id, node) in &graph.nodes {
+        let Some(raw_tools) = node.raw_tools.clone() else {
+            continue;
+        };
+        let Some(node_value) = nodes.get(node_id).cloned() else {
+            continue;
+        };
+        let VmValue::Dict(node_dict) = node_value else {
+            continue;
+        };
+        let mut node_map = (*node_dict).clone();
+        node_map.insert("tools".to_string(), raw_tools);
+        nodes.insert(node_id.clone(), VmValue::Dict(Rc::new(node_map)));
+    }
+    graph_dict.insert("nodes".to_string(), VmValue::Dict(Rc::new(nodes)));
+    Ok(VmValue::Dict(Rc::new(graph_dict)))
+}
+
 fn normalize_policy(value: &VmValue) -> Result<CapabilityPolicy, VmError> {
     serde_json::from_value(crate::llm::vm_value_to_json(value))
         .map_err(|e| VmError::Runtime(format!("policy parse error: {e}")))
@@ -1453,7 +1488,7 @@ fn set_node_policy(
         None,
         BTreeMap::new(),
     );
-    to_vm(&graph)
+    workflow_graph_to_vm(&graph)
 }
 
 fn apply_runtime_node_overrides(
@@ -1496,6 +1531,10 @@ fn apply_runtime_node_overrides(
     }
     if !node.capability_policy.tools.is_empty() {
         node.tools = filter_workflow_tools(&node.tools, &node.capability_policy.tools);
+        node.raw_tools = node
+            .raw_tools
+            .as_ref()
+            .map(|tools| filter_workflow_tools_vm(tools, &node.capability_policy.tools));
     }
     node
 }
@@ -1541,6 +1580,50 @@ fn filter_workflow_tools(tools: &serde_json::Value, allowed: &[String]) -> serde
             }
         }
         _ => serde_json::Value::Null,
+    }
+}
+
+fn filter_workflow_tools_vm(tools: &VmValue, allowed: &[String]) -> VmValue {
+    match tools {
+        VmValue::Nil => VmValue::Nil,
+        VmValue::List(items) => VmValue::List(Rc::new(
+            items
+                .iter()
+                .filter(|item| {
+                    item.as_dict()
+                        .and_then(|map| map.get("name"))
+                        .map(|name| name.display())
+                        .map(|name| allowed.iter().any(|allowed_name| allowed_name == &name))
+                        .unwrap_or(false)
+                })
+                .cloned()
+                .collect(),
+        )),
+        VmValue::Dict(map)
+            if map.get("_type").map(|value| value.display()).as_deref()
+                == Some("tool_registry") =>
+        {
+            let mut filtered = (**map).clone();
+            let tool_items = map
+                .get("tools")
+                .map(|value| filter_workflow_tools_vm(value, allowed))
+                .unwrap_or_else(|| VmValue::List(Rc::new(Vec::new())));
+            filtered.insert("tools".to_string(), tool_items);
+            VmValue::Dict(Rc::new(filtered))
+        }
+        VmValue::Dict(map) => {
+            let keep = map
+                .get("name")
+                .map(|value| value.display())
+                .map(|name| allowed.iter().any(|allowed_name| allowed_name == &name))
+                .unwrap_or(false);
+            if keep {
+                tools.clone()
+            } else {
+                VmValue::Nil
+            }
+        }
+        _ => VmValue::Nil,
     }
 }
 

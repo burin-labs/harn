@@ -41,6 +41,8 @@ pub(crate) struct CallFrame {
     pub(crate) ip: usize,
     pub(crate) stack_base: usize,
     pub(crate) saved_env: VmEnv,
+    /// Iterator stack depth to restore when this frame unwinds.
+    pub(crate) saved_iterator_depth: usize,
     /// Function name for stack traces (empty for top-level pipeline).
     pub(crate) fn_name: String,
     /// Number of arguments actually passed by the caller (for default arg support).
@@ -50,6 +52,12 @@ pub(crate) struct CallFrame {
     pub(crate) saved_source_dir: Option<std::path::PathBuf>,
     /// Module-local named functions available to symbolic calls within this frame.
     pub(crate) module_functions: Option<ModuleFunctionRegistry>,
+    /// Shared module-level env for top-level `var` / `let` bindings of
+    /// this frame's originating module. Looked up after `self.env` and
+    /// before `self.globals` by `GetVar` / `SetVar`, giving each module
+    /// its own live static state that persists across calls. See the
+    /// `module_state` field on `VmClosure` for the full rationale.
+    pub(crate) module_state: Option<crate::value::ModuleState>,
 }
 
 /// Exception handler for try/catch.
@@ -349,6 +357,7 @@ impl Vm {
             if self.frames.is_empty() {
                 return Ok(Some((val, false)));
             } else {
+                self.iterators.truncate(popped_frame.saved_iterator_depth);
                 self.env = popped_frame.saved_env;
                 self.stack.truncate(popped_frame.stack_base);
                 self.stack.push(val);
@@ -373,6 +382,7 @@ impl Vm {
                     if self.frames.is_empty() {
                         return Ok(Some((val, false)));
                     }
+                    self.iterators.truncate(popped_frame.saved_iterator_depth);
                     self.env = popped_frame.saved_env;
                     self.stack.truncate(popped_frame.stack_base);
                     self.stack.push(val);
@@ -404,10 +414,12 @@ impl Vm {
             ip: 0,
             stack_base: self.stack.len(),
             saved_env: self.env.clone(),
+            saved_iterator_depth: self.iterators.len(),
             fn_name: String::new(),
             argc: 0,
             saved_source_dir: None,
             module_functions: None,
+            module_state: None,
         });
     }
 
@@ -544,6 +556,7 @@ impl Vm {
                     if let Some(ref dir) = frame.saved_source_dir {
                         crate::stdlib::set_thread_source_dir(dir);
                     }
+                    self.iterators.truncate(frame.saved_iterator_depth);
                     self.env = frame.saved_env;
                 }
             }
@@ -577,7 +590,7 @@ impl Vm {
     }
 
     async fn run_chunk(&mut self, chunk: &Chunk) -> Result<VmValue, VmError> {
-        self.run_chunk_entry(chunk, 0, None, None).await
+        self.run_chunk_entry(chunk, 0, None, None, None).await
     }
 
     async fn run_chunk_entry(
@@ -586,16 +599,19 @@ impl Vm {
         argc: usize,
         saved_source_dir: Option<std::path::PathBuf>,
         module_functions: Option<ModuleFunctionRegistry>,
+        module_state: Option<crate::value::ModuleState>,
     ) -> Result<VmValue, VmError> {
         self.frames.push(CallFrame {
             chunk: chunk.clone(),
             ip: 0,
             stack_base: self.stack.len(),
             saved_env: self.env.clone(),
+            saved_iterator_depth: self.iterators.len(),
             fn_name: String::new(),
             argc,
             saved_source_dir,
             module_functions,
+            module_state,
         });
 
         loop {
@@ -631,6 +647,7 @@ impl Vm {
                     return Ok(val);
                 } else {
                     // Returning from a function call
+                    self.iterators.truncate(popped_frame.saved_iterator_depth);
                     self.env = popped_frame.saved_env;
                     self.stack.truncate(popped_frame.stack_base);
                     self.stack.push(val);
@@ -658,6 +675,7 @@ impl Vm {
                         if self.frames.is_empty() {
                             return Ok(val);
                         }
+                        self.iterators.truncate(popped_frame.saved_iterator_depth);
                         self.env = popped_frame.saved_env;
                         self.stack.truncate(popped_frame.stack_base);
                         self.stack.push(val);
@@ -737,12 +755,44 @@ impl Vm {
 
     const MAX_FRAMES: usize = 512;
 
-    /// Merge the caller's env into a closure's captured env for function calls.
-    fn merge_env_into_closure(caller_env: &VmEnv, closure: &VmClosure) -> VmEnv {
+    /// Build the call-time env for a closure invocation.
+    ///
+    /// Harn is **lexically scoped for data**: a closure sees exactly the
+    /// data names it captured at creation time, plus its parameters,
+    /// plus names from its originating module's `module_state`, plus
+    /// the module-function registry. The caller's *data* locals are
+    /// intentionally not visible — that would be dynamic scoping, which
+    /// is neither what Harn's TS-flavored surface suggests to users nor
+    /// something real stdlib code relies on.
+    ///
+    /// **Exception: closure-typed bindings.** Function *names* are
+    /// late-bound, Python-`LOAD_GLOBAL`-style. When a local recursive
+    /// fn is declared in a pipeline body (or inside another function),
+    /// the closure is created BEFORE its own name is defined in the
+    /// enclosing scope, so `closure.env` captures a snapshot that is
+    /// missing the self-reference. To make `fn fact(n) { fact(n-1) }`
+    /// work without a letrec trick, we merge closure-typed entries
+    /// from the caller's scope stack — but only closure-typed ones.
+    /// Data locals are never leaked across call boundaries, so the
+    /// surprising "caller's variable magically visible in callee"
+    /// semantic is ruled out.
+    ///
+    /// Imported module closures have `module_state` set, at which
+    /// point the full lexical environment is already available via
+    /// `closure.env` + `module_state`, and we skip the closure merge
+    /// entirely as a fast path. This is the hot path for context-
+    /// builder workloads (~65% of VM CPU before this optimization).
+    fn closure_call_env(caller_env: &VmEnv, closure: &VmClosure) -> VmEnv {
+        if closure.module_state.is_some() {
+            return closure.env.clone();
+        }
         let mut call_env = closure.env.clone();
+        // Late-bind only closure-typed names from the caller — enough
+        // for local recursive / mutually-recursive fns to self-reference
+        // without leaking caller-local data into the callee.
         for scope in &caller_env.scopes {
             for (name, (val, mutable)) in &scope.vars {
-                if call_env.get(name).is_none() {
+                if matches!(val, VmValue::Closure(_)) && call_env.get(name).is_none() {
                     let _ = call_env.define(name, val.clone(), *mutable);
                 }
             }
@@ -783,7 +833,7 @@ impl Vm {
             None
         };
 
-        let mut call_env = Self::merge_env_into_closure(&saved_env, closure);
+        let mut call_env = Self::closure_call_env(&saved_env, closure);
         call_env.push_scope();
 
         let default_start = closure
@@ -805,10 +855,12 @@ impl Vm {
             ip: 0,
             stack_base: self.stack.len(),
             saved_env,
+            saved_iterator_depth: self.iterators.len(),
             fn_name: closure.func.name.clone(),
             argc: args.len(),
             saved_source_dir,
             module_functions: closure.module_functions.clone(),
+            module_state: closure.module_state.clone(),
         });
 
         Ok(())
@@ -825,9 +877,13 @@ impl Vm {
         let mut child = self.child_vm();
         child.yield_sender = Some(tx);
 
-        // Set up the environment for the generator body
-        let saved_env = child.env.clone();
-        let mut call_env = Self::merge_env_into_closure(&saved_env, closure);
+        // Set up the environment for the generator body. The generator
+        // body runs in its own child VM; closure_call_env walks the
+        // current (parent) env so locally-defined generator closures
+        // can self-reference via the narrow closure-only merge. See
+        // `Vm::closure_call_env`.
+        let parent_env = self.env.clone();
+        let mut call_env = Self::closure_call_env(&parent_env, closure);
         call_env.push_scope();
 
         let default_start = closure
@@ -852,12 +908,19 @@ impl Vm {
             None
         };
         let module_functions = closure.module_functions.clone();
+        let module_state = closure.module_state.clone();
         let argc = args.len();
         // Spawn the generator body as an async task.
         // The task will execute until return, sending yielded values through the channel.
         tokio::task::spawn_local(async move {
             let _ = child
-                .run_chunk_entry(&chunk, argc, saved_source_dir, module_functions)
+                .run_chunk_entry(
+                    &chunk,
+                    argc,
+                    saved_source_dir,
+                    module_functions,
+                    module_state,
+                )
                 .await;
             // When the generator body finishes (return or fall-through),
             // the sender is dropped, signaling completion to the receiver.
@@ -899,7 +962,7 @@ impl Vm {
             let saved_iterators = std::mem::take(&mut self.iterators);
             let saved_deadlines = std::mem::take(&mut self.deadlines);
 
-            let mut call_env = Self::merge_env_into_closure(&saved_env, closure);
+            let mut call_env = Self::closure_call_env(&saved_env, closure);
             call_env.push_scope();
 
             let default_start = closure
@@ -929,6 +992,7 @@ impl Vm {
                     argc,
                     saved_source_dir,
                     closure.module_functions.clone(),
+                    closure.module_state.clone(),
                 )
                 .await;
 
@@ -1197,6 +1261,27 @@ mod tests {
     fn test_for_in() {
         let out = run_output("pipeline t(task) { for item in [1, 2, 3] { log(item) } }");
         assert_eq!(out, "[harn] 1\n[harn] 2\n[harn] 3");
+    }
+
+    #[test]
+    fn test_inner_for_return_does_not_leak_iterator_into_caller() {
+        let out = run_output(
+            r#"pipeline t(task) {
+  fn first_match() {
+    for pattern in ["a", "b"] {
+      return pattern
+    }
+    return ""
+  }
+
+  var seen = []
+  for path in ["outer"] {
+    seen = seen + [path + ":" + first_match()]
+  }
+  log(join(seen, ","))
+}"#,
+        );
+        assert_eq!(out, "[harn] outer:a");
     }
 
     #[test]

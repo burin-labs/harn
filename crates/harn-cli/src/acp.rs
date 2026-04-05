@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 
 use tokio::io::AsyncBufReadExt;
 use tokio::sync::{oneshot, Mutex};
@@ -263,12 +264,6 @@ impl AcpServer {
             (wrapped, None)
         };
 
-        // Compile the source.
-        let chunk = match compile_source(&source, source_path.as_deref()) {
-            Ok(c) => c,
-            Err(e) => fatal_prompt_error(format!("Compilation error: {e}")),
-        };
-
         // Build shared state for bridge-style builtins.
         let stdout_lock = self.stdout_lock.clone();
         let pending = self.pending.clone();
@@ -293,6 +288,24 @@ impl AcpServer {
             bridge.next_id_counter.fetch_add(10_000, Ordering::SeqCst),
         ));
         host_bridge.set_session_id(&bridge.session_id);
+
+        let compile_started = Instant::now();
+        let chunk = match compile_source(&source, source_path.as_deref()) {
+            Ok(c) => c,
+            Err(e) => fatal_prompt_error(format!("Compilation error: {e}")),
+        };
+        let compile_ms = compile_started.elapsed().as_millis() as u64;
+        bridge.send_log(
+            "info",
+            &format!("ACP_BOOT: compile_ms={compile_ms}"),
+            Some(serde_json::json!({
+                "compile_ms": compile_ms,
+                "pipeline": source_path
+                    .as_ref()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|| "<inline>".to_string()),
+            })),
+        );
         if let Some(session) = self.sessions.get_mut(&session_id) {
             session.host_bridge = Some(host_bridge.clone());
         }
@@ -670,6 +683,7 @@ async fn execute_chunk(
     source_path: Option<&std::path::Path>,
     cwd: &std::path::Path,
 ) -> Result<String, String> {
+    let vm_setup_started = Instant::now();
     let mut vm = harn_vm::Vm::new();
     harn_vm::register_vm_stdlib(&mut vm);
     // Use project root (harn.toml) for metadata/store, falling back to cwd.
@@ -732,6 +746,16 @@ async fn execute_chunk(
     // Override llm_call with bridge-aware version for call_start/call_end observability.
     harn_vm::llm::register_llm_call_with_bridge(&mut vm, host_bridge);
 
+    let vm_setup_ms = vm_setup_started.elapsed().as_millis() as u64;
+    bridge.send_log(
+        "info",
+        &format!("ACP_BOOT: vm_setup_ms={vm_setup_ms} pipeline={pipeline_name}"),
+        Some(serde_json::json!({
+            "pipeline": pipeline_name,
+            "vm_setup_ms": vm_setup_ms,
+        })),
+    );
+
     let execution = harn_vm::orchestration::RunExecutionRecord {
         cwd: Some(cwd.to_string_lossy().to_string()),
         source_dir: source_path
@@ -740,6 +764,7 @@ async fn execute_chunk(
         ..Default::default()
     };
     harn_vm::stdlib::process::set_thread_execution_context(Some(execution));
+    let execute_started = Instant::now();
     let result = match vm.execute(&chunk).await {
         Ok(_) => Ok(vm.output().to_string()),
         Err(e) => {
@@ -747,6 +772,15 @@ async fn execute_chunk(
             Err(formatted)
         }
     };
+    let execute_ms = execute_started.elapsed().as_millis() as u64;
+    bridge.send_log(
+        "info",
+        &format!("ACP_BOOT: execute_ms={execute_ms} pipeline={pipeline_name}"),
+        Some(serde_json::json!({
+            "pipeline": pipeline_name,
+            "execute_ms": execute_ms,
+        })),
+    );
     harn_vm::stdlib::process::set_thread_execution_context(None);
     result
 }
@@ -977,6 +1011,33 @@ async fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Rc<AcpBridge>) {
             Ok(harn_vm::VmValue::Nil)
         });
     }
+
+    // --- Live span streaming ---
+    //
+    // The default `trace_end` builtin writes its `span_end` line to the
+    // VM's internal `out` buffer, which only surfaces when the whole
+    // pipeline completes. In bridge mode that's too late — pipelines
+    // that get stuck in a hot loop never reach the flush point, so
+    // timing data is invisible when we need it most. Override the
+    // builtin so `span_end` events stream live via `send_log` just
+    // like `log_info`.
+    let b = bridge.clone();
+    vm.register_builtin("trace_end", move |args, _out| {
+        let (name, trace_id, span_id, duration_ms) =
+            harn_vm::stdlib::tracing::finish_span_from_args(args)?;
+        // Stamp the span name + duration into the human-readable message
+        // itself so formatters that only surface `message` (not the fields
+        // payload) still show useful timing info at the top of log lines.
+        let message = format!("span_end {name} duration_ms={duration_ms}");
+        let fields = serde_json::json!({
+            "trace_id": trace_id,
+            "span_id": span_id,
+            "name": name,
+            "duration_ms": duration_ms,
+        });
+        b.send_log("info", &message, Some(fields));
+        Ok(harn_vm::VmValue::Nil)
+    });
 
     // --- Progress reporting ---
 

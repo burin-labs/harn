@@ -737,14 +737,16 @@ pub async fn run_agent_loop_internal(
     let mut visible_messages = opts.messages.clone();
     let mut recorded_messages = opts.messages.clone();
 
+    // `total_text` is the concatenation of every iteration's assistant text.
+    // It is the raw transcript the reflector/meta-analysis callers want to
+    // see end-to-end. It is NOT suitable as "the agent's answer" because
+    // exploration turns and tool-call expressions from mid-run bleed into
+    // it. Callers wanting "what the user should see" should use the
+    // `visible_text` field instead, which is the LAST iteration's text
+    // alone — see the Ok(json!) block at the end of this function.
     let mut total_text = String::new();
+    let mut last_iteration_text = String::new();
     let mut consecutive_text_only = 0usize;
-    // Count turns in a row where the model emitted malformed tool calls.
-    // When the model also emits the DONE sentinel in such a turn, we give it
-    // exactly one recovery attempt before honoring DONE, so a model that
-    // genuinely cannot produce valid syntax does not loop until timeout.
-    let mut consecutive_parse_error_turns = 0usize;
-    const MAX_PARSE_ERROR_RECOVERY_TURNS: usize = 1;
     let mut all_tools_used: Vec<String> = Vec::new();
     let mut rejected_tools: Vec<String> = Vec::new();
     let mut deferred_user_messages: Vec<String> = Vec::new();
@@ -906,6 +908,10 @@ pub async fn run_agent_loop_internal(
 
         let text = result.text.clone();
         total_text.push_str(&text);
+        // `last_iteration_text` is assigned below AFTER the tool-call parser
+        // runs, so it holds the prose (calls stripped) rather than the raw
+        // text. For the native-tool-call and no-tools branches we fall back
+        // to the raw text a few lines down.
         transcript_events.push(transcript_event(
             "provider_payload",
             "assistant",
@@ -931,10 +937,12 @@ pub async fn run_agent_loop_internal(
             }
         }
 
-        let mut tool_call_source = "none";
         let mut tool_parse_errors: Vec<String> = Vec::new();
+        // `text_prose` is the model's text with any fenceless TS tool-call
+        // expressions excised. When the parser doesn't run (native-format
+        // path or no-tools path), it falls back to the raw text verbatim.
+        let mut text_prose = text.clone();
         let tool_calls = if !result.tool_calls.is_empty() {
-            tool_call_source = "native";
             result.tool_calls.clone()
         } else if has_tools {
             // Prefer provider-native tool calls when available, but keep text-call
@@ -942,28 +950,25 @@ pub async fn run_agent_loop_internal(
             // tool_format="native" without breaking providers or models that still
             // emit ```call blocks.
             let parse_result = parse_text_tool_calls_with_tools(&text, tools_val);
-            if !parse_result.calls.is_empty() {
-                tool_call_source = "text_fallback";
-                if tool_format == "native" {
-                    eprintln!(
-                        "[harn] text_fallback_triggered: model emitted {} text call(s) in native mode",
-                        parse_result.calls.len()
-                    );
-                }
+            if !parse_result.calls.is_empty() && tool_format == "native" {
+                eprintln!(
+                    "[harn] text_fallback_triggered: model emitted {} text call(s) in native mode",
+                    parse_result.calls.len()
+                );
             }
             tool_parse_errors = parse_result.errors;
+            text_prose = parse_result.prose;
             parse_result.calls
         } else {
             Vec::new()
         };
-        if std::env::var("BURIN_TRACE_HARN_TOOL_PARSE").as_deref() == Ok("1") {
-            eprintln!(
-                "[harn-vm] tool_call_source={} count={} text_len={}",
-                tool_call_source,
-                tool_calls.len(),
-                text.len()
-            );
-        }
+        // Surface the prose (not the raw text) to callers that read
+        // `last_iteration_text` / `visible_text`. Tool call expressions are
+        // structured data in `tool_calls`, not something the user should
+        // see as the agent's "answer". This also means conversation history
+        // will carry the prose, so future iterations don't see their own
+        // prior call syntax as narration.
+        last_iteration_text = text_prose.clone();
 
         // Check done_sentinel on EVERY response, not just text-only ones.
         // If present alongside tool calls, we still process the tools (so their
@@ -989,8 +994,14 @@ pub async fn run_agent_loop_internal(
                 // cannot see (and mutate) the malformed call blocks. Tool
                 // results for the successful calls are appended below, so the
                 // model still has their outcomes.
+                // In the clean case we append the model's PROSE (tool-call
+                // expressions stripped). Tool calls are structured data —
+                // replaying them as narration would make the next turn see
+                // them as both invocations AND narration commentary, which
+                // is exactly the "visible_text leaked lookup()/read() into
+                // the refined prompt" bug we saw in the rewriter.
                 let assistant_content_for_history = if tool_parse_errors.is_empty() {
-                    text.clone()
+                    text_prose.clone()
                 } else {
                     format!(
                         "<assistant turn partially elided: {} tool call(s) executed successfully \
@@ -1087,12 +1098,6 @@ pub async fn run_agent_loop_internal(
                 let tool_id = tc["id"].as_str().unwrap_or("");
                 let tool_name = tc["name"].as_str().unwrap_or("");
                 let mut tool_args = normalize_tool_args(tool_name, &tc["arguments"]);
-                if std::env::var("BURIN_TRACE_HARN_TOOL_PARSE").as_deref() == Ok("1") {
-                    eprintln!(
-                        "[harn-vm] parsed_tool_call name={} args={}",
-                        tool_name, tc["arguments"]
-                    );
-                }
 
                 let policy_result = crate::orchestration::enforce_current_policy_for_tool(
                     tool_name,
@@ -1523,12 +1528,11 @@ pub async fn run_agent_loop_internal(
                 }
             }
 
+            // Feed parse-error diagnostics back in the mixed case too, so the
+            // model can correct its syntax in the next turn (mirrors the
+            // text-only branch below). Without this, rejected calls would
+            // silently disappear from the conversation.
             if !tool_parse_errors.is_empty() {
-                consecutive_parse_error_turns += 1;
-                // Feed the parse-error diagnostics back so the model can
-                // correct its syntax in the next turn (mirrors the text-only
-                // branch). Without this, the mixed case would silently drop
-                // rejected calls.
                 let error_msg = tool_parse_errors.join("\n\n");
                 append_message_to_contexts(
                     &mut visible_messages,
@@ -1538,31 +1542,16 @@ pub async fn run_agent_loop_internal(
                         "content": error_msg,
                     }),
                 );
-            } else {
-                consecutive_parse_error_turns = 0;
             }
             if sentinel_hit {
-                // Parse errors take precedence over DONE for exactly one
-                // recovery attempt. This lets a model that mistyped `:` vs `=`
-                // fix itself, but prevents an open-ended loop when the model
-                // cannot produce valid syntax at all.
-                if !tool_parse_errors.is_empty()
-                    && consecutive_parse_error_turns <= MAX_PARSE_ERROR_RECOVERY_TURNS
-                {
+                if !tool_parse_errors.is_empty() {
                     eprintln!(
-                        "[harn] DONE sentinel ignored for one recovery attempt ({} parse error(s) this turn)",
-                        tool_parse_errors.len()
+                        "[harn] {} tool-call parse error(s) suppressed by sentinel: {}",
+                        tool_parse_errors.len(),
+                        tool_parse_errors.join("; ")
                     );
-                } else {
-                    if !tool_parse_errors.is_empty() {
-                        eprintln!(
-                            "[harn] DONE sentinel honored despite {} parse error(s) — recovery budget ({}) exhausted",
-                            tool_parse_errors.len(),
-                            MAX_PARSE_ERROR_RECOVERY_TURNS
-                        );
-                    }
-                    break;
                 }
+                break;
             }
             continue;
         }
@@ -1571,10 +1560,16 @@ pub async fn run_agent_loop_internal(
         // raw malformed assistant text with a compact placeholder before
         // replaying history. Otherwise the next iteration sees its own
         // broken syntax and mutates it further (observed self-poison loop).
+        //
+        // In the clean text-only case we still use `text_prose` (not `text`)
+        // so that IF the model wrote prose AND a non-malformed call that
+        // simply happened to have no downstream effect (e.g. a call whose
+        // tool was later filtered), history carries only the prose — not
+        // the call expression as accidental narration.
         let assistant_content_for_history = if !tool_parse_errors.is_empty() {
             compact_malformed_assistant_turn(tool_parse_errors.len())
         } else {
-            text.clone()
+            text_prose.clone()
         };
         append_message_to_contexts(
             &mut visible_messages,
@@ -1585,36 +1580,9 @@ pub async fn run_agent_loop_internal(
             }),
         );
 
-        // Track parse-error streaks for the bounded-recovery policy used by
-        // the sentinel check below.
-        if !tool_parse_errors.is_empty() {
-            consecutive_parse_error_turns += 1;
-        } else {
-            consecutive_parse_error_turns = 0;
-        }
-        // Sentinel check for text-only responses (no tool calls). Parse errors
-        // earn exactly one recovery attempt before DONE is honored — a model
-        // that cannot emit valid syntax after one diagnostic is not going to
-        // recover, and looping until timeout is strictly worse than exiting
-        // with whatever partial state already exists.
+        // Sentinel check for text-only responses (no tool calls).
         if sentinel_hit {
-            if !tool_parse_errors.is_empty()
-                && consecutive_parse_error_turns <= MAX_PARSE_ERROR_RECOVERY_TURNS
-            {
-                eprintln!(
-                    "[harn] DONE sentinel ignored for one recovery attempt ({} parse error(s) this turn)",
-                    tool_parse_errors.len()
-                );
-            } else {
-                if !tool_parse_errors.is_empty() {
-                    eprintln!(
-                        "[harn] DONE sentinel honored despite {} parse error(s) — recovery budget ({}) exhausted",
-                        tool_parse_errors.len(),
-                        MAX_PARSE_ERROR_RECOVERY_TURNS
-                    );
-                }
-                break;
-            }
+            break;
         }
 
         // If the model attempted tool calls but parsing failed, send diagnostics
@@ -1722,16 +1690,14 @@ pub async fn run_agent_loop_internal(
                     "You must use tools to complete this task. Start with the best available tool."
                         .to_string()
                 } else {
-                    "You must use tools to complete this task. Respond with a real ```call block, not a prose description of the tool you intend to use.\nExample:\n```call\ntool_name(param=\"value\")\n```"
-                        .to_string()
+                    "You must actually call a tool to make progress. Emit a top-of-line TypeScript call expression, NOT prose. For example: `edit({ action: \"create\", path: \"a.go\", content: `package a` })` on its own line.".to_string()
                 }
             } else if consecutive_text_only <= 3 {
                 if tool_format == "native" {
                     "STOP explaining and USE TOOLS NOW. Include a concrete tool call."
                         .to_string()
                 } else {
-                    "STOP explaining and USE TOOLS NOW. A plain-English plan is a failure here. Reply with one or more actual ```call blocks only.\nExample:\n```call\ntool_name(param=\"value\")\n```"
-                        .to_string()
+                    "STOP explaining and call a tool NOW. A plain-English plan is a failure here. Your next response must begin with a TypeScript tool call expression — e.g. `read({ path: \"...\" })` or `edit({ action: \"create\", path: \"...\", content: `...` })` — not narration.".to_string()
                 }
             } else {
                 "FINAL WARNING: call a tool now or the task will fail.".to_string()
@@ -1760,8 +1726,16 @@ pub async fn run_agent_loop_internal(
 
     Ok(serde_json::json!({
         "status": final_status,
+        // `text` is the full accumulated transcript of every assistant turn.
+        // Use this for meta-analysis that genuinely wants end-to-end history
+        // (reflectors, auditors, transcript replay).
         "text": total_text,
-        "visible_text": total_text,
+        // `visible_text` is what an end user should see as the agent's answer:
+        // the LAST iteration's assistant text, unwrapped of any exploration
+        // turns or tool-call expressions from earlier iterations. This is
+        // what rewriters, chat bubbles, subagent consumers, and phase-routing
+        // logic should key off. It is intentionally different from `text`.
+        "visible_text": last_iteration_text,
         "iterations": total_iterations,
         "duration_ms": loop_start.elapsed().as_millis() as i64,
         "tools_used": all_tools_used,
@@ -2015,10 +1989,20 @@ pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Host
                 let parsed = serde_json::from_str::<serde_json::Value>(json_str)
                     .ok()
                     .map(|jv| json_to_vm_value(&jv));
-                return Ok(vm_build_llm_result(&result, parsed, Some(transcript)));
+                return Ok(vm_build_llm_result(
+                    &result,
+                    parsed,
+                    Some(transcript),
+                    opts.tools.as_ref(),
+                ));
             }
 
-            Ok(vm_build_llm_result(&result, None, Some(transcript)))
+            Ok(vm_build_llm_result(
+                &result,
+                None,
+                Some(transcript),
+                opts.tools.as_ref(),
+            ))
         }
     });
 }

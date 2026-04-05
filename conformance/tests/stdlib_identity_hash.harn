@@ -7,24 +7,20 @@ pipeline test(task) {
   log(is_same(a, b))
   log(is_same(a, c))
   log(is_same(a, a))
-
   // Primitives: identity == structural equality
   log(is_same(42, 42))
   log(is_same("hi", "hi"))
   log(is_same(nil, nil))
-
   // addr_of produces stable identity string
   log(addr_of(42))
-  let d = {"k": 1}
+  let d = {k: 1}
   log(is_same(addr_of(d), addr_of(d)))
-
   // hash_value is stable for equal values
   log(hash_value(42) == hash_value(42))
   log(hash_value("foo") == hash_value("foo"))
   log(hash_value([1, 2, 3]) == hash_value([1, 2, 3]))
-  log(hash_value({"a": 1, "b": 2}) == hash_value({"a": 1, "b": 2}))
+  log(hash_value({a: 1, b: 2}) == hash_value({a: 1, b: 2}))
   log(hash_value(42) == hash_value("42"))
-
   // sha variants
   log(sha256("abc"))
   log(sha512("abc"))

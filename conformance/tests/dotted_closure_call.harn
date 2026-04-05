@@ -1,0 +1,4 @@
+pipeline main() {
+  let config = {handler: fn(name) { return "hello " + name }}
+  log(config.handler("world"))
+}

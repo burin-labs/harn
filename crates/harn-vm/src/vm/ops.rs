@@ -48,6 +48,15 @@ impl super::Vm {
             };
             if let Some(val) = self.env.get(&name) {
                 self.stack.push(val);
+            } else if let Some(val) = self
+                .frames
+                .last()
+                .and_then(|f| f.module_state.as_ref())
+                .and_then(|ms| ms.borrow().get(&name))
+            {
+                // Shared module-level var (top-level `var`/`let` in the
+                // closure's originating module). See VmClosure::module_state.
+                self.stack.push(val);
             } else if let Some(val) = self.globals.get(&name) {
                 self.stack.push(val.clone());
             } else if self.builtins.contains_key(&name) || self.async_builtins.contains_key(&name) {
@@ -99,7 +108,29 @@ impl super::Vm {
             frame.ip += 2;
             let name = Self::const_string(&frame.chunk.constants[idx])?;
             let val = self.pop()?;
-            self.env.assign(&name, val)?;
+            // If the name lives in a local scope, assign there. Otherwise
+            // route the write to the closure's shared module_state (for
+            // top-level `var` declared in this module). Only fall through
+            // to `env.assign` (which surfaces UndefinedVariable /
+            // ImmutableAssignment) when neither holds the name.
+            if self.env.get(&name).is_some() {
+                self.env.assign(&name, val)?;
+            } else if let Some(ms) = self
+                .frames
+                .last()
+                .and_then(|f| f.module_state.as_ref())
+                .cloned()
+            {
+                if ms.borrow().get(&name).is_some() {
+                    ms.borrow_mut().assign(&name, val)?;
+                } else {
+                    // Neither env nor module_state has it — preserve the
+                    // original error path for suggestion / diagnostics.
+                    self.env.assign(&name, val)?;
+                }
+            } else {
+                self.env.assign(&name, val)?;
+            }
         } else if op == Op::Add as u8 {
             let b = self.pop()?;
             let a = self.pop()?;
@@ -462,8 +493,10 @@ impl super::Vm {
                     None
                 };
 
-                // Set up the callee's environment
-                let mut call_env = Self::merge_env_into_closure(&parent_env, &closure);
+                // Set up the callee's environment. Pass the parent env
+                // so `closure_call_env` can do the narrow closure-only
+                // merge for locally-defined recursive fns.
+                let mut call_env = Self::closure_call_env(&parent_env, &closure);
                 call_env.push_scope();
                 let default_start = closure
                     .func
@@ -486,10 +519,12 @@ impl super::Vm {
                     ip: 0,
                     stack_base,
                     saved_env: parent_env,
+                    saved_iterator_depth: self.iterators.len(),
                     fn_name: closure.func.name.clone(),
                     argc,
                     saved_source_dir,
                     module_functions: closure.module_functions.clone(),
+                    module_state: closure.module_state.clone(),
                 });
                 // Continue the loop — execution proceeds in the new frame
             } else {
@@ -524,6 +559,13 @@ impl super::Vm {
                     .frames
                     .last()
                     .and_then(|frame| frame.module_functions.clone()),
+                // Inline closures inherit the current frame's module state
+                // so a closure created inside a module function still sees
+                // and mutates the same module-level vars.
+                module_state: self
+                    .frames
+                    .last()
+                    .and_then(|frame| frame.module_state.clone()),
             };
             self.stack.push(VmValue::Closure(Rc::new(closure)));
         } else if op == Op::BuildList as u8 {

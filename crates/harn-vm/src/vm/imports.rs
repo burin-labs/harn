@@ -185,6 +185,60 @@ impl Vm {
                 }
             }
 
+            // Evaluate top-level `var` / `let` bindings of this module
+            // and route them into a shared `module_state`. Bindings are
+            // compiled+executed against a temporary child env so they
+            // do NOT leak into `module_env` (the env captured by each
+            // closure's lexical snapshot). Keeping module-level state
+            // out of the closure's env clone is what makes the
+            // GetVar/SetVar module_state fallback work correctly — if
+            // a name appeared in both places, every call's per-invocation
+            // env clone would shadow module_state, and writes would
+            // land in a per-call copy that's discarded on return.
+            //
+            // After this block:
+            //   - `self.env` still contains only the sub-module imports
+            //     (unchanged)
+            //   - `module_state` contains every top-level var / let
+            //     defined by this module's init chunk
+            let module_state: crate::value::ModuleState = {
+                let mut init_env = self.env.clone();
+                let init_nodes: Vec<harn_parser::SNode> = program
+                    .iter()
+                    .filter(|sn| {
+                        matches!(
+                            &sn.node,
+                            harn_parser::Node::VarBinding { .. }
+                                | harn_parser::Node::LetBinding { .. }
+                        )
+                    })
+                    .cloned()
+                    .collect();
+                if !init_nodes.is_empty() {
+                    let init_compiler = crate::Compiler::new();
+                    let init_chunk = init_compiler
+                        .compile(&init_nodes)
+                        .map_err(|e| VmError::Runtime(format!("Import init compile error: {e}")))?;
+                    // Swap in a fresh working env, run the init chunk
+                    // against it, then pull the mutated env back out.
+                    // Stack/frame state is saved so `run_chunk_entry`'s
+                    // top-level frame-pop doesn't restore self.env.
+                    let saved_env = std::mem::replace(&mut self.env, init_env);
+                    let saved_frames = std::mem::take(&mut self.frames);
+                    let saved_handlers = std::mem::take(&mut self.exception_handlers);
+                    let saved_iterators = std::mem::take(&mut self.iterators);
+                    let saved_deadlines = std::mem::take(&mut self.deadlines);
+                    let init_result = self.run_chunk(&init_chunk).await;
+                    init_env = std::mem::replace(&mut self.env, saved_env);
+                    self.frames = saved_frames;
+                    self.exception_handlers = saved_handlers;
+                    self.iterators = saved_iterators;
+                    self.deadlines = saved_deadlines;
+                    init_result?;
+                }
+                Rc::new(RefCell::new(init_env))
+            };
+
             let module_env = self.env.clone();
             let registry: ModuleFunctionRegistry = Rc::new(RefCell::new(BTreeMap::new()));
             let source_dir = file_path.and_then(|fp| fp.parent().map(|p| p.to_path_buf()));
@@ -213,12 +267,30 @@ impl Vm {
                     env: module_env.clone(),
                     source_dir: source_dir.clone(),
                     module_functions: Some(Rc::clone(&registry)),
+                    module_state: Some(Rc::clone(&module_state)),
                 });
                 registry
                     .borrow_mut()
                     .insert(name.clone(), Rc::clone(&closure));
                 self.env
                     .define(name, VmValue::Closure(Rc::clone(&closure)), false)?;
+                // Also publish each fn into the shared `module_state` so
+                // sibling fns can look each other up by name through the
+                // GetVar → module_state fallback. Without this, using a
+                // sibling fn as a VALUE (e.g. `{handler: other_fn}` or
+                // passing it as a callback) fails with
+                // `Undefined variable`, because every closure captured
+                // `module_env.clone()` BEFORE any fn decl was added to
+                // it — so each closure's static env only sees sub-module
+                // imports, not its own sibling fn decls. Direct calls
+                // `other_fn()` work via the `module_functions` registry
+                // late-binding path, but that path is not used when the
+                // fn is read as a value.
+                module_state.borrow_mut().define(
+                    name,
+                    VmValue::Closure(Rc::clone(&closure)),
+                    false,
+                )?;
                 functions.insert(name.clone(), Rc::clone(&closure));
                 if *is_pub {
                     public_names.insert(name.clone());

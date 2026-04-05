@@ -283,6 +283,10 @@ Runtime behavior:
   and audit-session metadata when applicable.
   Hosts can render these as background task notifications instead of scraping
   stdout.
+- Bridge-mode logs also stream boot timing records (`ACP_BOOT` with
+  `compile_ms`, `vm_setup_ms`, and `execute_ms`) and live `span_end` duration
+  events while a prompt is still running, so hosts do not need to wait for the
+  final stdout flush to surface basic timing telemetry.
 - `finish_step`: inject after the current tool/operation completes
 - `wait_for_completion`: defer until the current agent interaction yields
 

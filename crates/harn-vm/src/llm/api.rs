@@ -156,6 +156,7 @@ pub(crate) fn vm_build_llm_result(
     result: &LlmResult,
     parsed_json: Option<VmValue>,
     transcript: Option<VmValue>,
+    tools_val: Option<&VmValue>,
 ) -> VmValue {
     use crate::stdlib::json_to_vm_value;
 
@@ -221,9 +222,23 @@ pub(crate) fn vm_build_llm_result(
         dict.insert("transcript".to_string(), transcript);
     }
 
+    // `visible_text` is the prose the model wrote — the same text the user
+    // would see in a chat bubble — with any fenceless TS tool-call
+    // expressions stripped out. Tool calls are structured data in the
+    // `tool_calls` field and should never appear as narration. When the
+    // caller did not supply a tool registry OR the model used provider-
+    // native tool calls (so the text contains no call expressions), this
+    // equals `text` verbatim. Agent_loop applies the same semantics on its
+    // final iteration — the two interfaces are intentionally symmetric.
+    let visible_text = if tools_val.is_some() && result.tool_calls.is_empty() {
+        let parse_result = super::tools::parse_text_tool_calls_with_tools(&result.text, tools_val);
+        parse_result.prose
+    } else {
+        result.text.clone()
+    };
     dict.insert(
         "visible_text".to_string(),
-        VmValue::String(Rc::from(result.text.as_str())),
+        VmValue::String(Rc::from(visible_text.as_str())),
     );
     dict.insert(
         "blocks".to_string(),
@@ -1007,12 +1022,22 @@ async fn vm_call_llm_api(
         if let Some(keep_alive) = ollama_keep_alive_override() {
             body["keep_alive"] = keep_alive;
         }
-        if let Some(ref thinking) = opts.thinking {
-            body["think"] = serde_json::json!(matches!(
-                thinking,
-                ThinkingConfig::Enabled | ThinkingConfig::WithBudget(_)
-            ));
-        }
+        // Always ask ollama to surface thinking tokens for thinking-capable
+        // models (gemma3/gemma4, qwen3 with reasoning, etc). Without this,
+        // ollama silently drops tokens generated inside its reasoning
+        // channel and the client sees an empty `message.content` even
+        // though `eval_count` is non-zero. The NDJSON parser folds
+        // `message.thinking` into the visible text when no content is
+        // emitted, so the caller still gets the model's output.
+        //
+        // Explicit caller opt-out via `ThinkingConfig::Disabled`-style is
+        // not currently expressible in ThinkingConfig; if that becomes
+        // necessary, extend the enum and branch here.
+        body["think"] = match opts.thinking {
+            Some(ThinkingConfig::Enabled) | Some(ThinkingConfig::WithBudget(_)) | None => {
+                serde_json::json!(true)
+            }
+        };
     }
 
     // Merge provider-specific overrides
@@ -1922,7 +1947,12 @@ async fn vm_call_llm_api_ndjson_from_response(
             Err(_) => continue,
         };
 
-        // Extract text delta from message.content or message.thinking (Qwen 3 extended thinking)
+        // Extract text delta from message.content or message.thinking.
+        // Ollama emits content and thinking as separate streaming channels
+        // for models with reasoning capability (gemma3/gemma4, qwen3, etc.)
+        // — we always set `think: true` in the request so the thinking
+        // tokens are delivered rather than silently dropped. See the
+        // `is_ollama` branch in `vm_call_llm_api` for that flag.
         let content = json["message"]["content"].as_str().unwrap_or("");
         let thinking = json["message"]["thinking"].as_str().unwrap_or("");
         if !content.is_empty() {
@@ -1963,6 +1993,20 @@ async fn vm_call_llm_api_ndjson_from_response(
     };
     if text.is_empty() && !thinking_text.is_empty() {
         text = thinking_text;
+    }
+
+    // Guard against upstream parser bugs that report generated tokens but
+    // deliver no visible content. Observed with `gemma4:26b` + ollama's
+    // server-side `PARSER gemma4` on tool-heavy system prompts: the server
+    // claims `eval_count` in the tens, but every streaming delta is empty
+    // and the done chunk's `message.content`/`message.thinking` are both
+    // empty strings. Silently returning an empty text turns the agent loop
+    // into a no-op that burns iterations. Surface this as a hard error so
+    // callers can decide whether to retry, switch models, or abort.
+    if text.is_empty() && output_tokens > 0 {
+        return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+            "ollama model {model} reported eval_count={output_tokens} but delivered no content or thinking — likely a server-side parser bug; try a different model"
+        )))));
     }
 
     Ok(LlmResult {
@@ -2028,7 +2072,6 @@ mod tests {
     };
     use crate::value::VmValue;
     use std::rc::Rc;
-    use std::sync::{Mutex, OnceLock};
 
     #[test]
     fn thinking_split_no_tags_returns_original() {
@@ -2110,10 +2153,7 @@ mod tests {
         assert_eq!(s.thinking, "");
     }
 
-    fn env_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-    }
+    use crate::llm::env_lock;
 
     fn base_opts(provider: &str) -> LlmCallOptions {
         LlmCallOptions {

@@ -715,7 +715,15 @@ impl super::Vm {
                         let default = args.get(1).cloned().unwrap_or(VmValue::Nil);
                         Ok(map.get(&key).cloned().unwrap_or(default))
                     }
-                    _ => Ok(VmValue::Nil),
+                    _ => {
+                        if let Some(callable) =
+                            map.get(method).filter(|v| Self::is_callable_value(v))
+                        {
+                            self.call_callable_value(callable, args, functions).await
+                        } else {
+                            Ok(VmValue::Nil)
+                        }
+                    }
                 },
                 VmValue::Set(items) => match method {
                     "count" | "len" => Ok(VmValue::Int(items.len() as i64)),
