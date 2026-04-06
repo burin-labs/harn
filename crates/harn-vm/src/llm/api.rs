@@ -1867,10 +1867,10 @@ pub(crate) async fn adapt_auto_compact_to_provider(
             ac.token_threshold = effective;
         }
     } else {
-        // Default tier-1 threshold: either the configured default (24K)
-        // or 40% of max context, whichever is lower. This ensures tier-1
-        // fires well before the hard limit.
-        let tier1_from_context = (max_ctx * 2) / 5;
+        // Default tier-1 threshold: either the configured default (48K)
+        // or 65% of max context, whichever is lower. This keeps the full
+        // conversation visible until we're genuinely running low on headroom.
+        let tier1_from_context = (max_ctx * 13) / 20; // 65%
         if ac.token_threshold > tier1_from_context {
             ac.token_threshold = tier1_from_context;
         }

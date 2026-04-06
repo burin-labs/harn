@@ -248,9 +248,9 @@ pub struct AutoCompactConfig {
 impl Default for AutoCompactConfig {
     fn default() -> Self {
         Self {
-            token_threshold: 24_000,
-            tool_output_max_chars: 12_000,
-            keep_last: 8,
+            token_threshold: 48_000,
+            tool_output_max_chars: 16_000,
+            keep_last: 12,
             compact_strategy: CompactStrategy::ObservationMask,
             hard_limit_tokens: None,
             hard_limit_strategy: CompactStrategy::Llm,
