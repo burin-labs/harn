@@ -5,14 +5,12 @@ pipeline test(task) {
     Timeout(ms)
     RateLimit(retry_after)
   }
-
   fn fail_notfound() {
     throw ApiError.NotFound("/users/42")
   }
   fn fail_timeout() {
     throw ApiError.Timeout(5000)
   }
-
   // Catch specific enum error
   try {
     fail_notfound()
@@ -20,7 +18,6 @@ pipeline test(task) {
     log("variant: ${e.variant}")
     log("field: ${e.fields[0]}")
   }
-
   // Ensure non-matching error propagates through typed catch
   try {
     try {
@@ -31,7 +28,6 @@ pipeline test(task) {
   } catch (e) {
     log("propagated: ${e}")
   }
-
   // Nested try with different enum variants
   try {
     fail_timeout()

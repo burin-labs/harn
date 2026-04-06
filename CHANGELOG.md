@@ -2,6 +2,26 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.42
+
+### Changed
+
+- **Tool-call prompt contract cleanup** — the runtime-owned tool-calling
+  contract now consistently tells models to use heredoc syntax for multiline
+  code/content and explicitly warns that backtick template literals break when
+  the payload itself contains backticks. This removes contradictory guidance
+  that was nudging models toward malformed calls.
+
+### Fixed
+
+- **Auto-compaction threshold accounting** — `agent_loop` now includes the
+  system prompt/tool-contract size when estimating transcript tokens for
+  auto-compaction, so compaction triggers before the real context window is
+  exceeded instead of undercounting large prompts.
+- **Malformed tool-call recovery guidance** — parse-error recovery now shows a
+  concrete heredoc example instead of suggesting backtick escaping, which
+  better matches the parser and reduces repeated malformed retries.
+
 ## v0.5.41
 
 ### Added

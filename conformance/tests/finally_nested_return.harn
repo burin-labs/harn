@@ -14,7 +14,6 @@ pipeline test(task) {
   }
   let r = outer()
   log("result: ${r}")
-
   // Finally with empty body should not crash
   fn with_empty_finally() {
     try {
