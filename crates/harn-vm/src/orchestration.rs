@@ -1999,24 +1999,7 @@ pub fn normalize_artifact(value: &VmValue) -> Result<ArtifactRecord, VmError> {
 }
 
 pub fn normalize_run_record(value: &VmValue) -> Result<RunRecord, VmError> {
-    let json = vm_value_to_json(value);
-    let payload = json.to_string();
-    let mut deserializer = serde_json::Deserializer::from_str(&payload);
-    let mut tracker = serde_path_to_error::Track::new();
-    let path_deserializer = serde_path_to_error::Deserializer::new(&mut deserializer, &mut tracker);
-    let mut run: RunRecord = RunRecord::deserialize(path_deserializer).map_err(|error| {
-        let snippet = if payload.len() > 600 {
-            format!("{}...", &payload[..600])
-        } else {
-            payload.clone()
-        };
-        VmError::Runtime(format!(
-            "orchestration parse error at {}: {} | payload={}",
-            tracker.path(),
-            error,
-            snippet
-        ))
-    })?;
+    let mut run: RunRecord = parse_json_payload(vm_value_to_json(value), "run_record")?;
     if run.type_name.is_empty() {
         run.type_name = "run_record".to_string();
     }
@@ -2237,12 +2220,10 @@ pub fn evaluate_run_against_fixture(run: &RunRecord, fixture: &ReplayFixture) ->
             fixture.expected_status, run.status
         ));
     }
+    let stages_by_id: BTreeMap<&str, &RunStageRecord> =
+        run.stages.iter().map(|s| (s.node_id.as_str(), s)).collect();
     for assertion in &fixture.stage_assertions {
-        let Some(stage) = run
-            .stages
-            .iter()
-            .find(|stage| stage.node_id == assertion.node_id)
-        else {
+        let Some(stage) = stages_by_id.get(assertion.node_id.as_str()) else {
             failures.push(format!("missing stage {}", assertion.node_id));
             continue;
         };
@@ -2326,20 +2307,30 @@ pub fn evaluate_run_suite(
 pub fn diff_run_records(left: &RunRecord, right: &RunRecord) -> RunDiffReport {
     let mut stage_diffs = Vec::new();
     let mut all_node_ids = BTreeSet::new();
-    all_node_ids.extend(left.stages.iter().map(|stage| stage.node_id.clone()));
-    all_node_ids.extend(right.stages.iter().map(|stage| stage.node_id.clone()));
+    let left_by_id: BTreeMap<&str, &RunStageRecord> = left
+        .stages
+        .iter()
+        .map(|s| (s.node_id.as_str(), s))
+        .collect();
+    let right_by_id: BTreeMap<&str, &RunStageRecord> = right
+        .stages
+        .iter()
+        .map(|s| (s.node_id.as_str(), s))
+        .collect();
+    all_node_ids.extend(left_by_id.keys().copied());
+    all_node_ids.extend(right_by_id.keys().copied());
 
     for node_id in all_node_ids {
-        let left_stage = left.stages.iter().find(|stage| stage.node_id == node_id);
-        let right_stage = right.stages.iter().find(|stage| stage.node_id == node_id);
+        let left_stage = left_by_id.get(node_id).copied();
+        let right_stage = right_by_id.get(node_id).copied();
         match (left_stage, right_stage) {
             (Some(_), None) => stage_diffs.push(RunStageDiffRecord {
-                node_id,
+                node_id: node_id.to_string(),
                 change: "removed".to_string(),
                 details: vec!["stage missing from right run".to_string()],
             }),
             (None, Some(_)) => stage_diffs.push(RunStageDiffRecord {
-                node_id,
+                node_id: node_id.to_string(),
                 change: "added".to_string(),
                 details: vec!["stage missing from left run".to_string()],
             }),
@@ -2380,7 +2371,7 @@ pub fn diff_run_records(left: &RunRecord, right: &RunRecord) -> RunDiffReport {
                 }
                 if !details.is_empty() {
                     stage_diffs.push(RunStageDiffRecord {
-                        node_id,
+                        node_id: node_id.to_string(),
                         change: "changed".to_string(),
                         details,
                     });

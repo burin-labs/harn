@@ -1,0 +1,41 @@
+pipeline test(task) {
+  // Typed catch with multiple enum variants
+  enum ApiError {
+    NotFound(path)
+    Timeout(ms)
+    RateLimit(retry_after)
+  }
+
+  fn fail_notfound() {
+    throw ApiError.NotFound("/users/42")
+  }
+  fn fail_timeout() {
+    throw ApiError.Timeout(5000)
+  }
+
+  // Catch specific enum error
+  try {
+    fail_notfound()
+  } catch (e: ApiError) {
+    log("variant: ${e.variant}")
+    log("field: ${e.fields[0]}")
+  }
+
+  // Ensure non-matching error propagates through typed catch
+  try {
+    try {
+      throw "plain string error"
+    } catch (e: ApiError) {
+      log("should not reach")
+    }
+  } catch (e) {
+    log("propagated: ${e}")
+  }
+
+  // Nested try with different enum variants
+  try {
+    fail_timeout()
+  } catch (e: ApiError) {
+    log("timeout variant: ${e.variant}")
+  }
+}

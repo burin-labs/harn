@@ -1,0 +1,26 @@
+pipeline test(task) {
+  // Test that finally runs even with return in nested try
+  fn outer() {
+    try {
+      try {
+        return "early"
+      } finally {
+        log("inner finally")
+      }
+    } finally {
+      log("outer finally")
+    }
+    log("unreachable")
+  }
+  let r = outer()
+  log("result: ${r}")
+
+  // Finally with empty body should not crash
+  fn with_empty_finally() {
+    try {
+      return 42
+    } finally {
+    }
+  }
+  log(with_empty_finally())
+}

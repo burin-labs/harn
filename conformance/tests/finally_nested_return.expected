@@ -1,0 +1,4 @@
+[harn] inner finally
+[harn] outer finally
+[harn] result: early
+[harn] 42

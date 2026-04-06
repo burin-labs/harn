@@ -313,18 +313,19 @@ pub(crate) fn transcript_asset_list(
     }
 }
 
-pub(crate) fn transcript_summary_text(transcript: &BTreeMap<String, VmValue>) -> Option<String> {
-    transcript.get("summary").and_then(|v| match v {
+fn transcript_string_field(transcript: &BTreeMap<String, VmValue>, key: &str) -> Option<String> {
+    transcript.get(key).and_then(|v| match v {
         VmValue::String(s) if !s.is_empty() => Some(s.to_string()),
         _ => None,
     })
 }
 
+pub(crate) fn transcript_summary_text(transcript: &BTreeMap<String, VmValue>) -> Option<String> {
+    transcript_string_field(transcript, "summary")
+}
+
 pub(crate) fn transcript_id(transcript: &BTreeMap<String, VmValue>) -> Option<String> {
-    transcript.get("id").and_then(|v| match v {
-        VmValue::String(s) if !s.is_empty() => Some(s.to_string()),
-        _ => None,
-    })
+    transcript_string_field(transcript, "id")
 }
 
 pub(crate) fn transcript_metadata(

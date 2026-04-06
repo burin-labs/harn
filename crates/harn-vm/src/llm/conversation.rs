@@ -11,6 +11,23 @@ use super::helpers::{
     vm_value_to_json,
 };
 
+/// Extract and validate a transcript dict from the first argument.
+fn require_transcript<'a>(
+    args: &'a [VmValue],
+    context: &str,
+) -> Result<&'a BTreeMap<String, VmValue>, VmError> {
+    match args.first() {
+        Some(VmValue::Dict(d))
+            if d.get("_type").map(|v| v.display()).as_deref() == Some("transcript") =>
+        {
+            Ok(d)
+        }
+        _ => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+            "{context}: argument must be a transcript"
+        ))))),
+    }
+}
+
 /// Register conversation management builtins.
 pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
     vm.register_builtin("conversation", |_args, _out| {
@@ -39,50 +56,17 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
     });
 
     vm.register_builtin("transcript_messages", |args, _out| {
-        let transcript = match args.first() {
-            Some(VmValue::Dict(d))
-                if d.get("_type").map(|v| v.display()).as_deref() == Some("transcript") =>
-            {
-                d
-            }
-            _ => {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(
-                    "transcript_messages: argument must be a transcript",
-                ))));
-            }
-        };
+        let transcript = require_transcript(args, "transcript_messages")?;
         Ok(VmValue::List(Rc::new(transcript_message_list(transcript)?)))
     });
 
     vm.register_builtin("transcript_assets", |args, _out| {
-        let transcript = match args.first() {
-            Some(VmValue::Dict(d))
-                if d.get("_type").map(|v| v.display()).as_deref() == Some("transcript") =>
-            {
-                d
-            }
-            _ => {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(
-                    "transcript_assets: argument must be a transcript",
-                ))));
-            }
-        };
+        let transcript = require_transcript(args, "transcript_assets")?;
         Ok(VmValue::List(Rc::new(transcript_asset_list(transcript)?)))
     });
 
     vm.register_builtin("transcript_add_asset", |args, _out| {
-        let transcript = match args.first() {
-            Some(VmValue::Dict(d))
-                if d.get("_type").map(|v| v.display()).as_deref() == Some("transcript") =>
-            {
-                d
-            }
-            _ => {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(
-                    "transcript_add_asset: first argument must be a transcript",
-                ))));
-            }
-        };
+        let transcript = require_transcript(args, "transcript_add_asset")?;
         let asset_value = args.get(1).cloned().ok_or_else(|| {
             VmError::Thrown(VmValue::String(Rc::from(
                 "transcript_add_asset: missing asset",
@@ -115,18 +99,7 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
     });
 
     vm.register_builtin("transcript_events", |args, _out| {
-        let transcript = match args.first() {
-            Some(VmValue::Dict(d))
-                if d.get("_type").map(|v| v.display()).as_deref() == Some("transcript") =>
-            {
-                d
-            }
-            _ => {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(
-                    "transcript_events: argument must be a transcript",
-                ))));
-            }
-        };
+        let transcript = require_transcript(args, "transcript_events")?;
         Ok(transcript
             .get("events")
             .cloned()
@@ -134,52 +107,19 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
     });
 
     vm.register_builtin("transcript_summary", |args, _out| {
-        let transcript = match args.first() {
-            Some(VmValue::Dict(d))
-                if d.get("_type").map(|v| v.display()).as_deref() == Some("transcript") =>
-            {
-                d
-            }
-            _ => {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(
-                    "transcript_summary: argument must be a transcript",
-                ))));
-            }
-        };
+        let transcript = require_transcript(args, "transcript_summary")?;
         Ok(transcript.get("summary").cloned().unwrap_or(VmValue::Nil))
     });
 
     vm.register_builtin("transcript_id", |args, _out| {
-        let transcript = match args.first() {
-            Some(VmValue::Dict(d))
-                if d.get("_type").map(|v| v.display()).as_deref() == Some("transcript") =>
-            {
-                d
-            }
-            _ => {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(
-                    "transcript_id: argument must be a transcript",
-                ))));
-            }
-        };
+        let transcript = require_transcript(args, "transcript_id")?;
         Ok(VmValue::String(Rc::from(
             transcript_id(transcript).unwrap_or_default(),
         )))
     });
 
     vm.register_builtin("transcript_render_visible", |args, _out| {
-        let transcript = match args.first() {
-            Some(VmValue::Dict(d))
-                if d.get("_type").map(|v| v.display()).as_deref() == Some("transcript") =>
-            {
-                d
-            }
-            _ => {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(
-                    "transcript_render_visible: argument must be a transcript",
-                ))));
-            }
-        };
+        let transcript = require_transcript(args, "transcript_render_visible")?;
         let rendered = match transcript.get("events") {
             Some(VmValue::List(events)) => events
                 .iter()
@@ -211,18 +151,7 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
     });
 
     vm.register_builtin("transcript_render_full", |args, _out| {
-        let transcript = match args.first() {
-            Some(VmValue::Dict(d))
-                if d.get("_type").map(|v| v.display()).as_deref() == Some("transcript") =>
-            {
-                d
-            }
-            _ => {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(
-                    "transcript_render_full: argument must be a transcript",
-                ))));
-            }
-        };
+        let transcript = require_transcript(args, "transcript_render_full")?;
         let rendered = match transcript.get("events") {
             Some(VmValue::List(events)) => events
                 .iter()
@@ -269,18 +198,7 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
     });
 
     vm.register_builtin("transcript_fork", |args, _out| {
-        let transcript = match args.first() {
-            Some(VmValue::Dict(d))
-                if d.get("_type").map(|v| v.display()).as_deref() == Some("transcript") =>
-            {
-                d
-            }
-            _ => {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(
-                    "transcript_fork: argument must be a transcript",
-                ))));
-            }
-        };
+        let transcript = require_transcript(args, "transcript_fork")?;
         let options = args.get(1).and_then(|v| v.as_dict());
         let retain_messages = options
             .and_then(|d| d.get("retain_messages"))
@@ -340,18 +258,7 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
     });
 
     vm.register_builtin("transcript_archive", |args, _out| {
-        let transcript = match args.first() {
-            Some(VmValue::Dict(d))
-                if d.get("_type").map(|v| v.display()).as_deref() == Some("transcript") =>
-            {
-                d
-            }
-            _ => {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(
-                    "transcript_archive: argument must be a transcript",
-                ))));
-            }
-        };
+        let transcript = require_transcript(args, "transcript_archive")?;
         let messages = transcript_message_list(transcript)?;
         Ok(rebuild_transcript(
             transcript,
@@ -370,18 +277,7 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
     });
 
     vm.register_builtin("transcript_abandon", |args, _out| {
-        let transcript = match args.first() {
-            Some(VmValue::Dict(d))
-                if d.get("_type").map(|v| v.display()).as_deref() == Some("transcript") =>
-            {
-                d
-            }
-            _ => {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(
-                    "transcript_abandon: argument must be a transcript",
-                ))));
-            }
-        };
+        let transcript = require_transcript(args, "transcript_abandon")?;
         Ok(rebuild_transcript(
             transcript,
             transcript_message_list(transcript)?,
@@ -399,18 +295,7 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
     });
 
     vm.register_builtin("transcript_resume", |args, _out| {
-        let transcript = match args.first() {
-            Some(VmValue::Dict(d))
-                if d.get("_type").map(|v| v.display()).as_deref() == Some("transcript") =>
-            {
-                d
-            }
-            _ => {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(
-                    "transcript_resume: argument must be a transcript",
-                ))));
-            }
-        };
+        let transcript = require_transcript(args, "transcript_resume")?;
         Ok(rebuild_transcript(
             transcript,
             transcript_message_list(transcript)?,
@@ -428,15 +313,7 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
     });
 
     vm.register_async_builtin("transcript_summarize", |args| async move {
-        let transcript = match args.first() {
-            Some(VmValue::Dict(d))
-                if d.get("_type").map(|v| v.display()).as_deref() == Some("transcript") => d,
-            _ => {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(
-                    "transcript_summarize: argument must be a transcript",
-                ))));
-            }
-        };
+        let transcript = require_transcript(&args, "transcript_summarize")?;
         let mut opts = extract_llm_options(&[
             VmValue::String(Rc::from("")),
             VmValue::Nil,
@@ -507,18 +384,7 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
     });
 
     vm.register_builtin("transcript_compact", |args, _out| {
-        let transcript = match args.first() {
-            Some(VmValue::Dict(d))
-                if d.get("_type").map(|v| v.display()).as_deref() == Some("transcript") =>
-            {
-                d
-            }
-            _ => {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(
-                    "transcript_compact: argument must be a transcript",
-                ))));
-            }
-        };
+        let transcript = require_transcript(args, "transcript_compact")?;
         let keep_last = args
             .get(1)
             .and_then(|v| v.as_dict())

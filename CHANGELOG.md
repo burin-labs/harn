@@ -2,6 +2,28 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.40
+
+### Fixed
+
+- **DRY: transcript validation in conversation builtins** — extracted
+  `require_transcript()` helper, eliminating ~120 lines of duplicated
+  match-and-error boilerplate across 14 transcript builtins.
+- **DRY: `normalize_run_record` duplication** — now delegates to
+  `parse_json_payload()` instead of inlining the same deserialize-with-path
+  pattern and snippet truncation logic.
+- **DRY: transcript string field helpers** — `transcript_summary_text` and
+  `transcript_id` now share a `transcript_string_field` helper.
+- **Performance: O(n²) stage lookup in `diff_run_records`** — replaced
+  linear `.find()` scans with pre-built `BTreeMap` indices.
+- **Performance: O(n²) stage lookup in `evaluate_run_against_fixture`** —
+  same index-based fix.
+
+### Added
+
+- Conformance tests: `select_only_default`, `typed_catch_variants`,
+  `finally_nested_return` (310 total).
+
 ## v0.5.39
 
 ### Added

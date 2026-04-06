@@ -1,0 +1,17 @@
+pipeline test(task) {
+  // Select with only a default arm and no channel arms
+  select {
+    default {
+      log("immediate")
+    }
+  }
+  // Select-only-default in a loop should not hang
+  let items = [0, 1, 2]
+  for i in items {
+    select {
+      default {
+        log("tick ${i}")
+      }
+    }
+  }
+}
