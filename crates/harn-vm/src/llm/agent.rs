@@ -1891,6 +1891,15 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                 if let Some(strategy) = opt_str(&options, "compact_strategy") {
                     ac.compact_strategy = crate::orchestration::parse_compact_strategy(&strategy)?;
                 }
+                if let Some(v) = opt_int(&options, "hard_limit_tokens") {
+                    ac.hard_limit_tokens = Some(v as usize);
+                }
+                if let Some(strategy) = opt_str(&options, "hard_limit_strategy") {
+                    ac.hard_limit_strategy = crate::orchestration::parse_compact_strategy(&strategy)?;
+                }
+                if let Some(callback) = options.as_ref().and_then(|o| o.get("mask_callback")) {
+                    ac.mask_callback = Some(callback.clone());
+                }
                 if let Some(callback) = options.as_ref().and_then(|o| o.get("compact_callback")) {
                     ac.custom_compactor = Some(callback.clone());
                     if !options
@@ -1900,16 +1909,17 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                         ac.compact_strategy = crate::orchestration::CompactStrategy::Custom;
                     }
                 }
-                // Adapt the compact threshold to the provider's actual max
-                // context window if it can be discovered. This prevents the
-                // "server silently truncates the prompt" failure mode where
-                // the agent loses older turns without knowing, which we hit
-                // with vLLM at 32K against the default 80K threshold.
+                // Adapt both tier-1 and tier-2 thresholds to the provider's
+                // actual context window. Tier-1 stays at the configured
+                // value unless it would overflow; tier-2 (hard_limit) is
+                // automatically set to 75% of max context when not user-specified.
                 {
                     let probe_opts = extract_llm_options(&args)?;
+                    let user_specified_hard_limit = opt_int(&options, "hard_limit_tokens").is_some();
                     crate::llm::api::adapt_auto_compact_to_provider(
                         &mut ac,
                         user_specified_threshold,
+                        user_specified_hard_limit,
                         &probe_opts.provider,
                         &probe_opts.model,
                         &probe_opts.api_key,

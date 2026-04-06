@@ -1651,29 +1651,85 @@ pub(crate) async fn fetch_provider_max_context(
     fetched
 }
 
-async fn fetch_provider_max_context_uncached(
+/// Hardcoded context window sizes for well-known model families where the
+/// provider API doesn't expose this information (Anthropic, OpenAI).
+/// Returns `None` for unknown models — callers fall through to API discovery.
+fn known_model_context_window(model: &str) -> Option<usize> {
+    // Anthropic Claude models (all current Claude 3+ models have 200K)
+    if model.starts_with("claude-") {
+        return Some(200_000);
+    }
+    // OpenAI models
+    if model.starts_with("gpt-4o") || model.starts_with("gpt-4.1") || model.starts_with("chatgpt-") {
+        return Some(128_000);
+    }
+    if model.starts_with("gpt-4-turbo") || model == "gpt-4-0125-preview" || model == "gpt-4-1106-preview" {
+        return Some(128_000);
+    }
+    if model.starts_with("gpt-4") {
+        return Some(8_192);
+    }
+    if model.starts_with("gpt-3.5-turbo") {
+        return Some(16_385);
+    }
+    if model.starts_with("o1") || model.starts_with("o3") || model.starts_with("o4") {
+        return Some(200_000);
+    }
+    // Google Gemini models
+    if model.contains("gemini-2") || model.contains("gemini-1.5") {
+        return Some(1_000_000);
+    }
+    if model.contains("gemini") {
+        return Some(128_000);
+    }
+    None
+}
+
+/// Fetch context window from Ollama's `/api/show` endpoint.
+/// Returns the num_ctx from model parameters, or the default 2048 if not set.
+async fn fetch_ollama_context_window(
+    model: &str,
+    base_url: &str,
+) -> Option<usize> {
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(3))
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .ok()?;
+    let url = format!("{}/api/show", base_url.trim_end_matches('/'));
+    let body = serde_json::json!({"name": model});
+    let response = client.post(&url).json(&body).send().await.ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    let json: serde_json::Value = response.json().await.ok()?;
+    // Ollama returns model_info.context_length or parameters with num_ctx
+    if let Some(n) = json
+        .pointer("/model_info/general.context_length")
+        .or_else(|| json.pointer("/model_info/context_length"))
+        .and_then(|v| v.as_u64())
+    {
+        return Some(n as usize);
+    }
+    // Also check OLLAMA_NUM_CTX env override — user may have configured
+    // a larger context window for this Ollama instance.
+    if let Ok(val) = std::env::var("OLLAMA_NUM_CTX") {
+        if let Ok(n) = val.parse::<usize>() {
+            return Some(n);
+        }
+    }
+    // Ollama's default context is model-dependent but commonly 2048-8192.
+    // We return None to let the caller use its default threshold.
+    None
+}
+
+/// Fetch context window from an OpenAI-compatible `/models` endpoint.
+async fn fetch_openai_compatible_context_window(
     provider: &str,
     model: &str,
     api_key: &str,
     base_url: &str,
 ) -> Option<usize> {
-    // Only attempt discovery against OpenAI-compatible shapes. Anthropic,
-    // Google, etc. have their own model info surfaces which we don't parse
-    // here; the default 80K threshold is fine for those.
-    let is_openai_compatible = matches!(
-        provider,
-        "local"
-            | "openai"
-            | "vllm"
-            | "groq"
-            | "together"
-            | "openrouter"
-            | "deepinfra"
-            | "fireworks"
-    );
-    if !is_openai_compatible {
-        return None;
-    }
     let pdef = crate::llm_config::provider_config(provider);
     let client = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(5))
@@ -1689,9 +1745,6 @@ async fn fetch_provider_max_context_uncached(
     }
     let json: serde_json::Value = response.json().await.ok()?;
     let data = json.get("data").and_then(|d| d.as_array())?;
-    // Find the matching model entry and extract its max_model_len /
-    // context_length. Different servers use different field names, so we
-    // check several.
     for entry in data {
         let id = entry.get("id").and_then(|v| v.as_str()).unwrap_or("");
         if id != model {
@@ -1712,8 +1765,7 @@ async fn fetch_provider_max_context_uncached(
         if let Some(n) = entry.get("n_ctx").and_then(|v| v.as_u64()) {
             return Some(n as usize);
         }
-        // OpenRouter exposes "context_length" at the top level of the entry
-        // in their custom shape.
+        // OpenRouter: top_provider.context_length
         if let Some(n) = entry
             .get("top_provider")
             .and_then(|tp| tp.get("context_length"))
@@ -1723,6 +1775,42 @@ async fn fetch_provider_max_context_uncached(
         }
         break;
     }
+    None
+}
+
+async fn fetch_provider_max_context_uncached(
+    provider: &str,
+    model: &str,
+    api_key: &str,
+    base_url: &str,
+) -> Option<usize> {
+    // 1. Check hardcoded known models first (Anthropic, OpenAI, Gemini).
+    if let Some(n) = known_model_context_window(model) {
+        return Some(n);
+    }
+
+    // 2. Ollama has its own model info endpoint.
+    if provider == "ollama" {
+        return fetch_ollama_context_window(model, base_url).await;
+    }
+
+    // 3. OpenAI-compatible providers: query /models endpoint.
+    let is_openai_compatible = matches!(
+        provider,
+        "local"
+            | "openai"
+            | "vllm"
+            | "groq"
+            | "together"
+            | "openrouter"
+            | "deepinfra"
+            | "fireworks"
+            | "huggingface"
+    );
+    if is_openai_compatible {
+        return fetch_openai_compatible_context_window(provider, model, api_key, base_url).await;
+    }
+
     None
 }
 
@@ -1741,11 +1829,17 @@ pub(crate) fn effective_threshold_from_max_context(max_context: usize) -> usize 
 }
 
 /// Apply discovered context-window information to an auto-compact config.
-/// Only lowers the threshold below the user's current value — never raises
-/// it above what the user explicitly asked for.
+///
+/// Sets up two-tier compaction thresholds based on the model's actual context
+/// window:
+///   - Tier-1 threshold: stays at configured value unless it would overflow.
+///   - Tier-2 hard limit: set to 75% of max context (the real overflow boundary).
+///
+/// Only lowers thresholds — never raises above what the user explicitly set.
 pub(crate) async fn adapt_auto_compact_to_provider(
     ac: &mut crate::orchestration::AutoCompactConfig,
     user_specified_threshold: bool,
+    user_specified_hard_limit: bool,
     provider: &str,
     model: &str,
     api_key: &str,
@@ -1754,15 +1848,32 @@ pub(crate) async fn adapt_auto_compact_to_provider(
         return;
     };
     let effective = effective_threshold_from_max_context(max_ctx);
+
+    // Tier-2 hard limit: derived from actual context window.
+    if !user_specified_hard_limit {
+        ac.hard_limit_tokens = Some(effective);
+    } else if let Some(ref mut hl) = ac.hard_limit_tokens {
+        // Clamp user's hard limit down if it would overflow.
+        if *hl > effective {
+            *hl = effective;
+        }
+    }
+
+    // Tier-1: keep the configured lightweight threshold, but clamp down
+    // if it exceeds the hard limit (which would make tier-1 pointless).
     if user_specified_threshold {
-        // User chose their own threshold — respect it, but still clamp down
-        // if they chose a value that would definitely overflow this server.
         if ac.token_threshold > effective {
             ac.token_threshold = effective;
         }
-        return;
+    } else {
+        // Default tier-1 threshold: either the configured default (24K)
+        // or 40% of max context, whichever is lower. This ensures tier-1
+        // fires well before the hard limit.
+        let tier1_from_context = (max_ctx * 2) / 5;
+        if ac.token_threshold > tier1_from_context {
+            ac.token_threshold = tier1_from_context;
+        }
     }
-    ac.token_threshold = effective;
 }
 
 /// Split `<think>...</think>` blocks out of an OpenAI-compatible response
