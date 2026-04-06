@@ -43,7 +43,7 @@ pipeline test(task) {
   ]
   let llm_compacted = transcript_auto_compact(base_messages, {provider: "mock", keep_last: 1})
   println(len(llm_compacted))
-  println(llm_compacted[0].content.contains("Mock response"))
+  println(llm_compacted[0].content.contains("auto-compacted"))
   let custom_compacted = transcript_auto_compact(
     base_messages,
     {

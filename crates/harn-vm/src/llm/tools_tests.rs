@@ -505,11 +505,22 @@ func main() {
 EOF
 })"#;
     let result = parse_text_tool_calls_with_tools(text, Some(&tools));
-    assert_eq!(result.calls.len(), 1, "should parse one call, errors: {:?}", result.errors);
+    assert_eq!(
+        result.calls.len(),
+        1,
+        "should parse one call, errors: {:?}",
+        result.errors
+    );
     let args = &result.calls[0]["arguments"];
     let content = args["content"].as_str().unwrap();
-    assert!(content.starts_with("package main"), "content should start with package: {content}");
-    assert!(content.contains("fmt.Println"), "content should contain fmt.Println");
+    assert!(
+        content.starts_with("package main"),
+        "content should start with package: {content}"
+    );
+    assert!(
+        content.contains("fmt.Println"),
+        "content should contain fmt.Println"
+    );
 }
 
 #[test]
@@ -537,10 +548,21 @@ services:
 CONTENT
 })"#;
     let result = parse_text_tool_calls_with_tools(text, Some(&tools));
-    assert_eq!(result.calls.len(), 1, "should parse heredoc with backticks, errors: {:?}", result.errors);
+    assert_eq!(
+        result.calls.len(),
+        1,
+        "should parse heredoc with backticks, errors: {:?}",
+        result.errors
+    );
     let content = result.calls[0]["arguments"]["content"].as_str().unwrap();
-    assert!(content.contains("yaml := `"), "should preserve Go raw string backticks: {content}");
-    assert!(content.contains("image: nginx"), "should preserve YAML content");
+    assert!(
+        content.contains("yaml := `"),
+        "should preserve Go raw string backticks: {content}"
+    );
+    assert!(
+        content.contains("image: nginx"),
+        "should preserve YAML content"
+    );
 }
 
 #[test]
@@ -560,8 +582,14 @@ END
     let result = parse_text_tool_calls_with_tools(text, Some(&tools));
     assert_eq!(result.calls.len(), 1, "errors: {:?}", result.errors);
     let content = result.calls[0]["arguments"]["content"].as_str().unwrap();
-    assert!(content.contains(r#""hello \"world\"""#), "should preserve escaped quotes raw");
-    assert!(content.contains(r"C:\\Users\\test"), "should preserve backslashes raw");
+    assert!(
+        content.contains(r#""hello \"world\"""#),
+        "should preserve escaped quotes raw"
+    );
+    assert!(
+        content.contains(r"C:\\Users\\test"),
+        "should preserve backslashes raw"
+    );
 }
 
 #[test]
@@ -584,8 +612,14 @@ NEW
     let result = parse_text_tool_calls_with_tools(text, Some(&tools));
     assert_eq!(result.calls.len(), 1, "errors: {:?}", result.errors);
     let args = &result.calls[0]["arguments"];
-    assert!(args["old_string"].as_str().unwrap().contains("broken"), "old_string should contain broken");
-    assert!(args["new_string"].as_str().unwrap().contains("fixed"), "new_string should contain fixed");
+    assert!(
+        args["old_string"].as_str().unwrap().contains("broken"),
+        "old_string should contain broken"
+    );
+    assert!(
+        args["new_string"].as_str().unwrap().contains("fixed"),
+        "new_string should contain fixed"
+    );
 }
 
 #[test]
@@ -599,7 +633,10 @@ package main
 // no closing EOF tag
 })"#;
     let result = parse_text_tool_calls_with_tools(text, Some(&tools));
-    assert!(result.calls.is_empty(), "unterminated heredoc should produce no calls");
+    assert!(
+        result.calls.is_empty(),
+        "unterminated heredoc should produce no calls"
+    );
     assert!(!result.errors.is_empty(), "should have parse error");
 }
 
@@ -614,7 +651,10 @@ package main
 EOF
 })"#;
     let result = parse_text_tool_calls_with_tools(text, Some(&tools));
-    assert!(result.calls.is_empty() || result.errors.len() > 0, "missing tag should error");
+    assert!(
+        result.calls.is_empty() || result.errors.len() > 0,
+        "missing tag should error"
+    );
 }
 
 #[test]
@@ -622,7 +662,12 @@ fn template_literal_still_works() {
     let tools = sample_tool_registry();
     let text = "edit({\n    action: \"create\",\n    path: \"simple.txt\",\n    content: `hello world`\n})";
     let result = parse_text_tool_calls_with_tools(text, Some(&tools));
-    assert_eq!(result.calls.len(), 1, "template literal should still parse, errors: {:?}", result.errors);
+    assert_eq!(
+        result.calls.len(),
+        1,
+        "template literal should still parse, errors: {:?}",
+        result.errors
+    );
     assert_eq!(result.calls[0]["arguments"]["content"], "hello world");
 }
 
@@ -631,8 +676,16 @@ fn double_quoted_string_still_works() {
     let tools = sample_tool_registry();
     let text = "run({ command: \"go test ./internal/manifest/\" })";
     let result = parse_text_tool_calls_with_tools(text, Some(&tools));
-    assert_eq!(result.calls.len(), 1, "double-quoted string should parse, errors: {:?}", result.errors);
-    assert_eq!(result.calls[0]["arguments"]["command"], "go test ./internal/manifest/");
+    assert_eq!(
+        result.calls.len(),
+        1,
+        "double-quoted string should parse, errors: {:?}",
+        result.errors
+    );
+    assert_eq!(
+        result.calls[0]["arguments"]["command"],
+        "go test ./internal/manifest/"
+    );
 }
 
 #[test]
@@ -650,7 +703,12 @@ EOF
 
 run({ command: "go test ./..." })"#;
     let result = parse_text_tool_calls_with_tools(text, Some(&tools));
-    assert_eq!(result.calls.len(), 2, "should parse both calls, errors: {:?}", result.errors);
+    assert_eq!(
+        result.calls.len(),
+        2,
+        "should parse both calls, errors: {:?}",
+        result.errors
+    );
     assert_eq!(result.calls[0]["name"], "edit");
     assert_eq!(result.calls[1]["name"], "run");
 }
@@ -708,13 +766,27 @@ Now let me run the tests.
 
 run({ command: "go test ./internal/manifest/ -v" })"#;
     let result = parse_text_tool_calls_with_tools(text, Some(&tools));
-    assert_eq!(result.calls.len(), 2, "should parse edit+run with Go backtick code, errors: {:?}", result.errors);
+    assert_eq!(
+        result.calls.len(),
+        2,
+        "should parse edit+run with Go backtick code, errors: {:?}",
+        result.errors
+    );
     assert_eq!(result.calls[0]["name"], "edit");
     assert_eq!(result.calls[1]["name"], "run");
     let content = result.calls[0]["arguments"]["content"].as_str().unwrap();
-    assert!(content.contains("func TestParseManifest"), "content should have the test function");
-    assert!(content.contains("`{\"name\": \"test\"}`"), "content should preserve Go raw string literals with backticks");
-    assert_eq!(result.calls[1]["arguments"]["command"], "go test ./internal/manifest/ -v");
+    assert!(
+        content.contains("func TestParseManifest"),
+        "content should have the test function"
+    );
+    assert!(
+        content.contains("`{\"name\": \"test\"}`"),
+        "content should preserve Go raw string literals with backticks"
+    );
+    assert_eq!(
+        result.calls[1]["arguments"]["command"],
+        "go test ./internal/manifest/ -v"
+    );
 }
 
 #[test]
@@ -748,7 +820,12 @@ EOF
 
 run({ command: "go build ./..." })"#;
     let result = parse_text_tool_calls_with_tools(text, Some(&tools));
-    assert_eq!(result.calls.len(), 4, "should parse 3 edits + 1 run, errors: {:?}", result.errors);
+    assert_eq!(
+        result.calls.len(),
+        4,
+        "should parse 3 edits + 1 run, errors: {:?}",
+        result.errors
+    );
     assert_eq!(result.calls[0]["arguments"]["path"], "a.go");
     assert_eq!(result.calls[1]["arguments"]["path"], "b.go");
     assert_eq!(result.calls[2]["arguments"]["path"], "c.go");
@@ -773,7 +850,16 @@ That should compile. Let me verify.
 run({ command: "go build" })"#;
     let result = parse_text_tool_calls_with_tools(text, Some(&tools));
     assert_eq!(result.calls.len(), 2);
-    assert!(result.prose.contains("Here's my plan."), "prose should contain intro");
-    assert!(result.prose.contains("That should compile."), "prose should contain interstitial text");
-    assert!(!result.prose.contains("<<EOF"), "prose should not contain tool calls");
+    assert!(
+        result.prose.contains("Here's my plan."),
+        "prose should contain intro"
+    );
+    assert!(
+        result.prose.contains("That should compile."),
+        "prose should contain interstitial text"
+    );
+    assert!(
+        !result.prose.contains("<<EOF"),
+        "prose should not contain tool calls"
+    );
 }

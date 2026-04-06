@@ -930,3 +930,249 @@ fn find_balanced_json(text: &str, open: u8, close: u8) -> Option<String> {
     }
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::rc::Rc;
+
+    fn s(v: &str) -> VmValue {
+        VmValue::String(Rc::from(v))
+    }
+
+    fn make_dict(pairs: Vec<(&str, VmValue)>) -> BTreeMap<String, VmValue> {
+        pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect()
+    }
+
+    fn make_vm_dict(pairs: Vec<(&str, VmValue)>) -> VmValue {
+        VmValue::Dict(Rc::new(make_dict(pairs)))
+    }
+
+    fn make_list(items: Vec<VmValue>) -> VmValue {
+        VmValue::List(Rc::new(items))
+    }
+
+    // ---- schema_extend (merge) ----
+
+    #[test]
+    fn merge_schema_dicts_basic() {
+        let base = make_dict(vec![("type", s("object")), ("title", s("Base"))]);
+        let overrides = make_dict(vec![("title", s("Override")), ("extra", s("yes"))]);
+        let merged = merge_schema_dicts(&base, &overrides);
+        assert_eq!(merged.get("type").unwrap().display(), "object");
+        assert_eq!(merged.get("title").unwrap().display(), "Override");
+        assert_eq!(merged.get("extra").unwrap().display(), "yes");
+    }
+
+    #[test]
+    fn merge_schema_dicts_empty_override() {
+        let base = make_dict(vec![("type", s("object"))]);
+        let merged = merge_schema_dicts(&base, &BTreeMap::new());
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged.get("type").unwrap().display(), "object");
+    }
+
+    // ---- schema_partial ----
+
+    #[test]
+    fn schema_partial_removes_required() {
+        let schema = make_dict(vec![
+            ("type", s("object")),
+            ("required", make_list(vec![s("name"), s("age")])),
+            (
+                "properties",
+                make_vm_dict(vec![
+                    ("name", make_vm_dict(vec![("type", s("string"))])),
+                    ("age", make_vm_dict(vec![("type", s("int"))])),
+                ]),
+            ),
+        ]);
+        let partial = schema_partial_dict(&schema);
+        assert!(partial.get("required").is_none());
+        // Properties should still be there
+        assert!(partial.get("properties").is_some());
+    }
+
+    #[test]
+    fn schema_partial_recursive_nested() {
+        let inner = make_vm_dict(vec![
+            ("type", s("object")),
+            ("required", make_list(vec![s("x")])),
+            (
+                "properties",
+                make_vm_dict(vec![("x", make_vm_dict(vec![("type", s("int"))]))]),
+            ),
+        ]);
+        let schema = make_dict(vec![
+            ("type", s("object")),
+            ("required", make_list(vec![s("nested")])),
+            ("properties", make_vm_dict(vec![("nested", inner)])),
+        ]);
+        let partial = schema_partial_dict(&schema);
+        assert!(partial.get("required").is_none());
+        // Nested properties should also lose their "required"
+        if let Some(props) = partial.get("properties").and_then(|v| v.as_dict()) {
+            if let Some(nested) = props.get("nested").and_then(|v| v.as_dict()) {
+                assert!(nested.get("required").is_none());
+            }
+        }
+    }
+
+    // ---- schema_pick ----
+
+    #[test]
+    fn schema_pick_keeps_only_selected_keys() {
+        let schema = make_dict(vec![
+            ("type", s("object")),
+            ("required", make_list(vec![s("name"), s("age"), s("email")])),
+            (
+                "properties",
+                make_vm_dict(vec![
+                    ("name", make_vm_dict(vec![("type", s("string"))])),
+                    ("age", make_vm_dict(vec![("type", s("int"))])),
+                    ("email", make_vm_dict(vec![("type", s("string"))])),
+                ]),
+            ),
+        ]);
+        let picked = schema_pick_dict(&schema, &["name".to_string(), "email".to_string()]);
+        let props = picked.get("properties").unwrap().as_dict().unwrap();
+        assert_eq!(props.len(), 2);
+        assert!(props.contains_key("name"));
+        assert!(props.contains_key("email"));
+        assert!(!props.contains_key("age"));
+        // Required should also be filtered
+        if let Some(VmValue::List(req)) = picked.get("required") {
+            let req_strs: Vec<String> = req.iter().map(|v| v.display()).collect();
+            assert!(req_strs.contains(&"name".to_string()));
+            assert!(!req_strs.contains(&"age".to_string()));
+        }
+    }
+
+    #[test]
+    fn schema_pick_nonexistent_key() {
+        let schema = make_dict(vec![(
+            "properties",
+            make_vm_dict(vec![("name", make_vm_dict(vec![("type", s("string"))]))]),
+        )]);
+        let picked = schema_pick_dict(&schema, &["nonexistent".to_string()]);
+        let props = picked.get("properties").unwrap().as_dict().unwrap();
+        assert!(props.is_empty());
+    }
+
+    // ---- schema_omit ----
+
+    #[test]
+    fn schema_omit_removes_specified_keys() {
+        let schema = make_dict(vec![
+            ("type", s("object")),
+            ("required", make_list(vec![s("name"), s("age"), s("email")])),
+            (
+                "properties",
+                make_vm_dict(vec![
+                    ("name", make_vm_dict(vec![("type", s("string"))])),
+                    ("age", make_vm_dict(vec![("type", s("int"))])),
+                    ("email", make_vm_dict(vec![("type", s("string"))])),
+                ]),
+            ),
+        ]);
+        let kept = schema_omit_dict(&schema, &["age".to_string()]);
+        let props = kept.get("properties").unwrap().as_dict().unwrap();
+        assert_eq!(props.len(), 2);
+        assert!(props.contains_key("name"));
+        assert!(props.contains_key("email"));
+        assert!(!props.contains_key("age"));
+        // Required should also drop "age"
+        if let Some(VmValue::List(req)) = kept.get("required") {
+            let req_strs: Vec<String> = req.iter().map(|v| v.display()).collect();
+            assert!(!req_strs.contains(&"age".to_string()));
+            assert_eq!(req_strs.len(), 2);
+        }
+    }
+
+    #[test]
+    fn schema_omit_all_keys() {
+        let schema = make_dict(vec![(
+            "properties",
+            make_vm_dict(vec![("a", s("x")), ("b", s("y"))]),
+        )]);
+        let kept = schema_omit_dict(&schema, &["a".to_string(), "b".to_string()]);
+        let props = kept.get("properties").unwrap().as_dict().unwrap();
+        assert!(props.is_empty());
+    }
+
+    // ---- extract_json_from_text ----
+
+    #[test]
+    fn extract_from_code_fence() {
+        let text = "Here is the result:\n```json\n{\"key\": \"value\"}\n```\nDone.";
+        assert_eq!(extract_json_from_text(text), "{\"key\": \"value\"}");
+    }
+
+    #[test]
+    fn extract_from_code_fence_no_language() {
+        let text = "```\n[1, 2, 3]\n```";
+        assert_eq!(extract_json_from_text(text), "[1, 2, 3]");
+    }
+
+    #[test]
+    fn extract_balanced_object() {
+        let text = "prefix {\"a\": 1, \"b\": {\"c\": 2}} suffix";
+        assert_eq!(
+            extract_json_from_text(text),
+            "{\"a\": 1, \"b\": {\"c\": 2}}"
+        );
+    }
+
+    #[test]
+    fn extract_balanced_array() {
+        let text = "result: [1, [2, 3], 4] end";
+        assert_eq!(extract_json_from_text(text), "[1, [2, 3], 4]");
+    }
+
+    #[test]
+    fn extract_plain_text_fallback() {
+        let text = "just plain text";
+        assert_eq!(extract_json_from_text(text), "just plain text");
+    }
+
+    #[test]
+    fn extract_respects_string_brackets() {
+        // Brackets inside JSON strings should not affect balance counting
+        let text = r#"{"msg": "hello {world} [test]"}"#;
+        assert_eq!(extract_json_from_text(text), text);
+    }
+
+    #[test]
+    fn extract_handles_escaped_quotes() {
+        let text = r#"{"key": "value with \" quote"}"#;
+        assert_eq!(extract_json_from_text(text), text);
+    }
+
+    // ---- find_balanced_json ----
+
+    #[test]
+    fn balanced_nested_objects() {
+        let text = "x {a: {b: {c: 1}}} y";
+        let result = find_balanced_json(text, b'{', b'}');
+        assert_eq!(result.unwrap(), "{a: {b: {c: 1}}}");
+    }
+
+    #[test]
+    fn balanced_no_open_char() {
+        let result = find_balanced_json("no braces here", b'{', b'}');
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn balanced_unclosed() {
+        let result = find_balanced_json("{unclosed", b'{', b'}');
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn balanced_unicode_escape() {
+        let text = r#"{"emoji": "\u0041\u0042"}"#;
+        let result = find_balanced_json(text, b'{', b'}');
+        assert_eq!(result.unwrap(), text);
+    }
+}

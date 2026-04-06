@@ -1891,8 +1891,11 @@ impl<'a> TsValueParser<'a> {
             // Match the closing tag: the line must start with the tag, and
             // anything after it must be only commas/whitespace/closing parens
             // (to tolerate `OLD,` or `EOF  )` on the same line).
-            if trimmed == tag || trimmed.starts_with(tag)
-                && trimmed[tag.len()..].chars().all(|c| c == ',' || c == ')' || c.is_whitespace())
+            if trimmed == tag
+                || trimmed.starts_with(tag)
+                    && trimmed[tag.len()..]
+                        .chars()
+                        .all(|c| c == ',' || c == ')' || c.is_whitespace())
             {
                 let content = &self.text[content_start..line_start];
                 let content = content.strip_suffix('\n').unwrap_or(content);
@@ -1907,7 +1910,9 @@ impl<'a> TsValueParser<'a> {
                 self.advance();
             } else {
                 // End of input without finding closing tag
-                return Err(format!("unterminated heredoc: expected closing {tag} on its own line"));
+                return Err(format!(
+                    "unterminated heredoc: expected closing {tag} on its own line"
+                ));
             }
         }
     }

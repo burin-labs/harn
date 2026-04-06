@@ -1660,10 +1660,14 @@ fn known_model_context_window(model: &str) -> Option<usize> {
         return Some(200_000);
     }
     // OpenAI models
-    if model.starts_with("gpt-4o") || model.starts_with("gpt-4.1") || model.starts_with("chatgpt-") {
+    if model.starts_with("gpt-4o") || model.starts_with("gpt-4.1") || model.starts_with("chatgpt-")
+    {
         return Some(128_000);
     }
-    if model.starts_with("gpt-4-turbo") || model == "gpt-4-0125-preview" || model == "gpt-4-1106-preview" {
+    if model.starts_with("gpt-4-turbo")
+        || model == "gpt-4-0125-preview"
+        || model == "gpt-4-1106-preview"
+    {
         return Some(128_000);
     }
     if model.starts_with("gpt-4") {
@@ -1687,10 +1691,7 @@ fn known_model_context_window(model: &str) -> Option<usize> {
 
 /// Fetch context window from Ollama's `/api/show` endpoint.
 /// Returns the num_ctx from model parameters, or the default 2048 if not set.
-async fn fetch_ollama_context_window(
-    model: &str,
-    base_url: &str,
-) -> Option<usize> {
+async fn fetch_ollama_context_window(model: &str, base_url: &str) -> Option<usize> {
     let client = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(3))
         .timeout(std::time::Duration::from_secs(5))

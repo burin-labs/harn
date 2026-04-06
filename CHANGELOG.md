@@ -2,6 +2,43 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.41
+
+### Added
+
+- **Comprehensive stdlib unit tests** — added 85 new unit tests across
+  four previously untested modules:
+  - `crypto` (22 tests): base64 round-trip, URL encode/decode edge cases,
+    SHA-256/224/384/512/512-256 known vectors, MD5, hash_value determinism.
+  - `regex` (16 tests): match/replace/captures, named groups, optional
+    groups, Unicode, cache eviction, invalid regex errors.
+  - `concurrency` (15 tests): atomics (get/set/add/CAS), circuit breaker
+    state machine (open/close/reset/half-open), timer lifecycle.
+  - `json` (19 tests): schema_extend/partial/pick/omit, recursive nested
+    partial, json_extract from code fences and balanced structures,
+    find_balanced_json with escapes and unicode.
+- **Agent loop unit tests** (13 tests): `extract_retry_after_ms` edge cases
+  (fractional seconds, case-insensitive, non-numeric, non-string errors),
+  `is_read_only_tool` allowlist coverage.
+- **Diff algorithm unit tests** (14 tests): empty/identical/insert/delete/
+  all-changed/large-similar inputs, Myers primitives, header and path
+  formatting.
+
+### Changed
+
+- **O(nd) Myers diff algorithm** — replaced the O(mn) LCS table in
+  `render_unified_diff` with Myers' shortest-edit-script algorithm.
+  Time complexity is now O(nd) where d = edit distance; space is O(d*n)
+  instead of O(m*n). For similar files (small d), this is dramatically
+  faster and avoids the unbounded memory allocation that could OOM on
+  large artifact diffs.
+
+### Fixed
+
+- **Conformance: `agent_runtime_features`** — updated stale assertion that
+  expected mock LLM output from compaction; auto-compact now uses
+  observation masking and the test matches accordingly.
+
 ## v0.5.40
 
 ### Fixed

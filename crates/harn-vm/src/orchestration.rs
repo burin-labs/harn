@@ -515,9 +515,13 @@ async fn custom_compaction_summary(
 /// be preserved verbatim during observation masking.
 fn content_has_error_signal(content: &str) -> bool {
     let lower = content.to_ascii_lowercase();
-    lower.contains("error") || lower.contains("fail") || lower.contains("panic")
-        || lower.contains("non-zero exit") || lower.contains("exit code")
-        || lower.contains("traceback") || lower.contains("exception")
+    lower.contains("error")
+        || lower.contains("fail")
+        || lower.contains("panic")
+        || lower.contains("non-zero exit")
+        || lower.contains("exit code")
+        || lower.contains("traceback")
+        || lower.contains("exception")
 }
 
 /// Default per-message masking for tool results: keep the first line as a
@@ -562,7 +566,10 @@ fn observation_mask_compaction_with_callback(
     ));
     for (idx, msg) in old_messages.iter().enumerate() {
         let role = msg.get("role").and_then(|v| v.as_str()).unwrap_or("user");
-        let content = msg.get("content").and_then(|v| v.as_str()).unwrap_or_default();
+        let content = msg
+            .get("content")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
         if content.is_empty() {
             continue;
         }
@@ -2311,45 +2318,117 @@ pub fn evaluate_run_suite_manifest(
     })
 }
 
+/// Edit operation in a diff sequence.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum DiffOp {
+    Equal,
+    Delete,
+    Insert,
+}
+
+/// Compute the shortest edit script using Myers' O(nd) algorithm.
+/// Returns a sequence of (DiffOp, line_index_in_before_or_after).
+/// Time: O(nd) where d = edit distance. Space: O(d * n).
+fn myers_diff(a: &[&str], b: &[&str]) -> Vec<(DiffOp, usize)> {
+    let n = a.len() as isize;
+    let m = b.len() as isize;
+    if n == 0 && m == 0 {
+        return Vec::new();
+    }
+    if n == 0 {
+        return (0..m as usize).map(|j| (DiffOp::Insert, j)).collect();
+    }
+    if m == 0 {
+        return (0..n as usize).map(|i| (DiffOp::Delete, i)).collect();
+    }
+
+    let max_d = (n + m) as usize;
+    let offset = max_d as isize;
+    let v_size = 2 * max_d + 1;
+    let mut v = vec![0isize; v_size];
+    // trace[d] stores v snapshot BEFORE step d was applied.
+    let mut trace: Vec<Vec<isize>> = Vec::new();
+
+    'outer: for d in 0..=max_d as isize {
+        trace.push(v.clone());
+        let mut new_v = v.clone();
+        for k in (-d..=d).step_by(2) {
+            let ki = (k + offset) as usize;
+            let mut x = if k == -d || (k != d && v[ki - 1] < v[ki + 1]) {
+                v[ki + 1] // insert (move down)
+            } else {
+                v[ki - 1] + 1 // delete (move right)
+            };
+            let mut y = x - k;
+            while x < n && y < m && a[x as usize] == b[y as usize] {
+                x += 1;
+                y += 1;
+            }
+            new_v[ki] = x;
+            if x >= n && y >= m {
+                let _ = new_v;
+                break 'outer;
+            }
+        }
+        v = new_v;
+    }
+
+    // Backtrack from (n, m) to (0, 0).
+    let mut ops: Vec<(DiffOp, usize)> = Vec::new();
+    let mut x = n;
+    let mut y = m;
+    for d in (1..trace.len() as isize).rev() {
+        let k = x - y;
+        let v_prev = &trace[d as usize];
+        let prev_k = if k == -d
+            || (k != d && v_prev[(k - 1 + offset) as usize] < v_prev[(k + 1 + offset) as usize])
+        {
+            k + 1 // came from insert
+        } else {
+            k - 1 // came from delete
+        };
+        let prev_x = v_prev[(prev_k + offset) as usize];
+        let prev_y = prev_x - prev_k;
+
+        // Diagonal (equal) moves
+        while x > prev_x && y > prev_y {
+            x -= 1;
+            y -= 1;
+            ops.push((DiffOp::Equal, x as usize));
+        }
+        // Edit move
+        if prev_k < k {
+            x -= 1;
+            ops.push((DiffOp::Delete, x as usize));
+        } else {
+            y -= 1;
+            ops.push((DiffOp::Insert, y as usize));
+        }
+    }
+    // Initial diagonal at d=0
+    while x > 0 && y > 0 {
+        x -= 1;
+        y -= 1;
+        ops.push((DiffOp::Equal, x as usize));
+    }
+    ops.reverse();
+    ops
+}
+
 pub fn render_unified_diff(path: Option<&str>, before: &str, after: &str) -> String {
     let before_lines: Vec<&str> = before.lines().collect();
     let after_lines: Vec<&str> = after.lines().collect();
-    let mut table = vec![vec![0usize; after_lines.len() + 1]; before_lines.len() + 1];
-    for i in (0..before_lines.len()).rev() {
-        for j in (0..after_lines.len()).rev() {
-            table[i][j] = if before_lines[i] == after_lines[j] {
-                table[i + 1][j + 1] + 1
-            } else {
-                table[i + 1][j].max(table[i][j + 1])
-            };
-        }
-    }
+    let ops = myers_diff(&before_lines, &after_lines);
 
     let mut diff = String::new();
     let file = path.unwrap_or("artifact");
     diff.push_str(&format!("--- a/{file}\n+++ b/{file}\n"));
-    let mut i = 0;
-    let mut j = 0;
-    while i < before_lines.len() && j < after_lines.len() {
-        if before_lines[i] == after_lines[j] {
-            diff.push_str(&format!(" {}\n", before_lines[i]));
-            i += 1;
-            j += 1;
-        } else if table[i + 1][j] >= table[i][j + 1] {
-            diff.push_str(&format!("-{}\n", before_lines[i]));
-            i += 1;
-        } else {
-            diff.push_str(&format!("+{}\n", after_lines[j]));
-            j += 1;
+    for &(op, idx) in &ops {
+        match op {
+            DiffOp::Equal => diff.push_str(&format!(" {}\n", before_lines[idx])),
+            DiffOp::Delete => diff.push_str(&format!("-{}\n", before_lines[idx])),
+            DiffOp::Insert => diff.push_str(&format!("+{}\n", after_lines[idx])),
         }
-    }
-    while i < before_lines.len() {
-        diff.push_str(&format!("-{}\n", before_lines[i]));
-        i += 1;
-    }
-    while j < after_lines.len() {
-        diff.push_str(&format!("+{}\n", after_lines[j]));
-        j += 1;
     }
     diff
 }
@@ -3737,6 +3816,129 @@ mod tests {
         assert!(diff.contains("-old"));
         assert!(diff.contains("+new"));
         assert!(diff.contains(" same"));
+    }
+
+    #[test]
+    fn render_unified_diff_identical_inputs() {
+        let text = "line1\nline2\nline3";
+        let diff = render_unified_diff(None, text, text);
+        assert!(diff.contains("--- a/artifact"));
+        let body: Vec<&str> = diff.lines().skip(2).collect();
+        assert!(!body.iter().any(|l| l.starts_with('-')));
+        assert!(!body.iter().any(|l| l.starts_with('+')));
+        assert_eq!(body.len(), 3);
+    }
+
+    #[test]
+    fn render_unified_diff_empty_before() {
+        let diff = render_unified_diff(None, "", "new1\nnew2");
+        assert!(diff.contains("+new1"));
+        assert!(diff.contains("+new2"));
+        let body: Vec<&str> = diff.lines().skip(2).collect();
+        assert!(!body.iter().any(|l| l.starts_with('-')));
+    }
+
+    #[test]
+    fn render_unified_diff_empty_after() {
+        let diff = render_unified_diff(None, "old1\nold2", "");
+        assert!(diff.contains("-old1"));
+        assert!(diff.contains("-old2"));
+        let body: Vec<&str> = diff.lines().skip(2).collect();
+        assert!(!body.iter().any(|l| l.starts_with('+')));
+    }
+
+    #[test]
+    fn render_unified_diff_both_empty() {
+        let diff = render_unified_diff(None, "", "");
+        assert!(diff.contains("--- a/artifact"));
+        assert!(diff.contains("+++ b/artifact"));
+        // No content lines
+        let body: String = diff.lines().skip(2).collect();
+        assert!(body.is_empty());
+    }
+
+    #[test]
+    fn render_unified_diff_all_changed() {
+        let diff = render_unified_diff(None, "a\nb", "x\ny");
+        assert!(diff.contains("-a"));
+        assert!(diff.contains("-b"));
+        assert!(diff.contains("+x"));
+        assert!(diff.contains("+y"));
+    }
+
+    #[test]
+    fn render_unified_diff_insertion_in_middle() {
+        let diff = render_unified_diff(None, "a\nc", "a\nb\nc");
+        assert!(diff.contains(" a"));
+        assert!(diff.contains("+b"));
+        assert!(diff.contains(" c"));
+        let body: Vec<&str> = diff.lines().skip(2).collect();
+        assert!(!body.iter().any(|l| l.starts_with('-')));
+    }
+
+    #[test]
+    fn render_unified_diff_deletion_from_middle() {
+        let diff = render_unified_diff(None, "a\nb\nc", "a\nc");
+        assert!(diff.contains(" a"));
+        assert!(diff.contains("-b"));
+        assert!(diff.contains(" c"));
+        let body: Vec<&str> = diff.lines().skip(2).collect();
+        assert!(!body.iter().any(|l| l.starts_with('+')));
+    }
+
+    #[test]
+    fn render_unified_diff_default_path() {
+        let diff = render_unified_diff(None, "a", "b");
+        assert!(diff.contains("--- a/artifact"));
+        assert!(diff.contains("+++ b/artifact"));
+    }
+
+    #[test]
+    fn render_unified_diff_large_similar() {
+        // Test performance: 1000 lines with one change in the middle
+        let mut before = Vec::new();
+        let mut after = Vec::new();
+        for i in 0..1000 {
+            before.push(format!("line {i}"));
+            after.push(format!("line {i}"));
+        }
+        before[500] = "OLD LINE 500".to_string();
+        after[500] = "NEW LINE 500".to_string();
+        let before_str = before.join("\n");
+        let after_str = after.join("\n");
+        let diff = render_unified_diff(None, &before_str, &after_str);
+        assert!(diff.contains("-OLD LINE 500"));
+        assert!(diff.contains("+NEW LINE 500"));
+        // Context lines should be present
+        assert!(diff.contains(" line 499"));
+        assert!(diff.contains(" line 501"));
+    }
+
+    #[test]
+    fn myers_diff_empty_sequences() {
+        let ops = myers_diff(&[], &[]);
+        assert!(ops.is_empty());
+    }
+
+    #[test]
+    fn myers_diff_insert_only() {
+        let ops = myers_diff(&[], &["a", "b"]);
+        assert_eq!(ops.len(), 2);
+        assert!(ops.iter().all(|(op, _)| *op == DiffOp::Insert));
+    }
+
+    #[test]
+    fn myers_diff_delete_only() {
+        let ops = myers_diff(&["a", "b"], &[]);
+        assert_eq!(ops.len(), 2);
+        assert!(ops.iter().all(|(op, _)| *op == DiffOp::Delete));
+    }
+
+    #[test]
+    fn myers_diff_equal() {
+        let ops = myers_diff(&["a", "b", "c"], &["a", "b", "c"]);
+        assert_eq!(ops.len(), 3);
+        assert!(ops.iter().all(|(op, _)| *op == DiffOp::Equal));
     }
 
     #[test]

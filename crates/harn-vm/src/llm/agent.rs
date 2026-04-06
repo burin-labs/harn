@@ -5,16 +5,14 @@ use serde::Deserialize;
 use crate::value::{ErrorCategory, VmClosure, VmError, VmValue};
 use crate::vm::Vm;
 
-use super::api::{
-    vm_call_llm_full_streaming, vm_call_llm_full_streaming_offthread, DeltaSender,
-};
+use super::api::{vm_call_llm_full_streaming, vm_call_llm_full_streaming_offthread, DeltaSender};
 use super::helpers::{
     extract_llm_options, opt_bool, opt_int, opt_str, transcript_event, transcript_to_vm_with_events,
 };
 use super::tools::{
     build_assistant_response_message, build_assistant_tool_message,
-    build_tool_calling_contract_prompt, build_tool_result_message,
-    handle_tool_locally, normalize_tool_args, parse_text_tool_calls_with_tools,
+    build_tool_calling_contract_prompt, build_tool_result_message, handle_tool_locally,
+    normalize_tool_args, parse_text_tool_calls_with_tools,
 };
 use super::trace::{trace_llm_call, LlmTraceEntry};
 
@@ -394,7 +392,6 @@ fn compact_malformed_assistant_turn(error_count: usize) -> String {
          (see parse error below). Emit a corrected call in the next turn.>"
     )
 }
-
 
 fn append_host_messages_to_recorded(
     recorded_messages: &mut Vec<serde_json::Value>,
@@ -1036,8 +1033,7 @@ pub async fn run_agent_loop_internal(
         // If the model emitted the sentinel but verification hasn't passed,
         // inject a corrective so the model knows it must keep going.
         if sentinel_in_text && !verified && persistent {
-            let code_str = last_run_exit_code
-                .map_or("none".to_string(), |c| c.to_string());
+            let code_str = last_run_exit_code.map_or("none".to_string(), |c| c.to_string());
             let corrective = format!(
                 "You emitted the done sentinel but verification has not passed \
                  (last run exit code: {code_str}). The loop will continue. \
@@ -1781,7 +1777,7 @@ pub async fn run_agent_loop_internal(
                     "You must use tools to complete this task. Start with the best available tool."
                         .to_string()
                 } else {
-                    "You must actually call a tool to make progress. Emit a top-of-line TypeScript call expression, NOT prose. For example: `edit({ action: \"create\", path: \"a.go\", content: `package a` })` on its own line.".to_string()
+                    "You must actually call a tool to make progress. Emit a top-of-line call expression, NOT prose. Example:\nedit({\n    action: \"create\",\n    path: \"a.go\",\n    content: <<EOF\npackage a\nEOF\n})".to_string()
                 }
             } else if consecutive_text_only <= 3 {
                 if tool_format == "native" {
@@ -1895,7 +1891,8 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                     ac.hard_limit_tokens = Some(v as usize);
                 }
                 if let Some(strategy) = opt_str(&options, "hard_limit_strategy") {
-                    ac.hard_limit_strategy = crate::orchestration::parse_compact_strategy(&strategy)?;
+                    ac.hard_limit_strategy =
+                        crate::orchestration::parse_compact_strategy(&strategy)?;
                 }
                 if let Some(callback) = options.as_ref().and_then(|o| o.get("mask_callback")) {
                     ac.mask_callback = Some(callback.clone());
@@ -1915,7 +1912,8 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                 // automatically set to 75% of max context when not user-specified.
                 {
                     let probe_opts = extract_llm_options(&args)?;
-                    let user_specified_hard_limit = opt_int(&options, "hard_limit_tokens").is_some();
+                    let user_specified_hard_limit =
+                        opt_int(&options, "hard_limit_tokens").is_some();
                     crate::llm::api::adapt_auto_compact_to_provider(
                         &mut ac,
                         user_specified_threshold,
@@ -2111,7 +2109,12 @@ pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Host
 
 #[cfg(test)]
 mod tests {
-    use super::{compact_malformed_assistant_turn, loop_state_requests_phase_change};
+    use super::{
+        compact_malformed_assistant_turn, extract_retry_after_ms, is_read_only_tool,
+        loop_state_requests_phase_change,
+    };
+    use crate::value::{VmError, VmValue};
+    use std::rc::Rc;
 
     #[test]
     fn detects_phase_change_from_latest_loop_state_footer() {
@@ -2125,12 +2128,91 @@ mod tests {
         let msg = compact_malformed_assistant_turn(1);
         assert!(msg.contains("1 malformed tool call"));
         assert!(msg.contains("elided"));
-        // The message must not echo any of the broken tool-call syntax that
-        // triggered the elision; it is a fixed template.
         assert!(!msg.contains("```call"));
         assert!(!msg.contains("<<'EOF'"));
 
         let msg_plural = compact_malformed_assistant_turn(3);
         assert!(msg_plural.contains("3 malformed tool calls"));
+    }
+
+    // ---- extract_retry_after_ms ----
+
+    #[test]
+    fn retry_after_from_runtime_error() {
+        let err = VmError::Runtime("rate limited, retry-after: 5".to_string());
+        assert_eq!(extract_retry_after_ms(&err), Some(5000));
+    }
+
+    #[test]
+    fn retry_after_from_thrown_string() {
+        let err = VmError::Thrown(VmValue::String(Rc::from(
+            "HTTP 429 Retry-After: 2.5 seconds",
+        )));
+        assert_eq!(extract_retry_after_ms(&err), Some(2500));
+    }
+
+    #[test]
+    fn retry_after_case_insensitive() {
+        let err = VmError::Runtime("RETRY-AFTER: 10".to_string());
+        assert_eq!(extract_retry_after_ms(&err), Some(10000));
+    }
+
+    #[test]
+    fn retry_after_missing() {
+        let err = VmError::Runtime("rate limited".to_string());
+        assert_eq!(extract_retry_after_ms(&err), None);
+    }
+
+    #[test]
+    fn retry_after_non_numeric() {
+        let err = VmError::Runtime("retry-after: tomorrow".to_string());
+        assert_eq!(extract_retry_after_ms(&err), None);
+    }
+
+    #[test]
+    fn retry_after_at_end_of_message() {
+        let err = VmError::Runtime("retry-after: 3".to_string());
+        assert_eq!(extract_retry_after_ms(&err), Some(3000));
+    }
+
+    #[test]
+    fn retry_after_fractional_seconds() {
+        let err = VmError::Runtime("retry-after: 0.5".to_string());
+        assert_eq!(extract_retry_after_ms(&err), Some(500));
+    }
+
+    #[test]
+    fn retry_after_non_string_error() {
+        let err = VmError::Thrown(VmValue::Int(42));
+        assert_eq!(extract_retry_after_ms(&err), None);
+    }
+
+    #[test]
+    fn retry_after_with_extra_whitespace() {
+        let err = VmError::Runtime("retry-after:   7  ".to_string());
+        assert_eq!(extract_retry_after_ms(&err), Some(7000));
+    }
+
+    // ---- is_read_only_tool ----
+
+    #[test]
+    fn read_only_tools_recognized() {
+        assert!(is_read_only_tool("read"));
+        assert!(is_read_only_tool("read_file"));
+        assert!(is_read_only_tool("lookup"));
+        assert!(is_read_only_tool("search"));
+        assert!(is_read_only_tool("outline"));
+        assert!(is_read_only_tool("list_directory"));
+        assert!(is_read_only_tool("web_search"));
+        assert!(is_read_only_tool("web_fetch"));
+    }
+
+    #[test]
+    fn write_tools_not_read_only() {
+        assert!(!is_read_only_tool("write"));
+        assert!(!is_read_only_tool("edit"));
+        assert!(!is_read_only_tool("delete"));
+        assert!(!is_read_only_tool("exec"));
+        assert!(!is_read_only_tool(""));
     }
 }

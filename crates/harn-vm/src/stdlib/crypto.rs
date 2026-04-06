@@ -113,3 +113,210 @@ pub(crate) fn register_crypto_builtins(vm: &mut Vm) {
         )))
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::vm::Vm;
+    use std::rc::Rc;
+
+    fn vm() -> Vm {
+        let mut vm = Vm::new();
+        register_crypto_builtins(&mut vm);
+        vm
+    }
+
+    fn call(vm: &mut Vm, name: &str, args: Vec<VmValue>) -> Result<VmValue, VmError> {
+        let f = vm.builtins.get(name).unwrap().clone();
+        let mut out = String::new();
+        f(&args, &mut out)
+    }
+
+    fn s(v: &str) -> VmValue {
+        VmValue::String(Rc::from(v))
+    }
+
+    // ---- base64 ----
+
+    #[test]
+    fn base64_round_trip_ascii() {
+        let mut vm = vm();
+        let encoded = call(&mut vm, "base64_encode", vec![s("hello world")]).unwrap();
+        assert_eq!(encoded.display(), "aGVsbG8gd29ybGQ=");
+        let decoded = call(&mut vm, "base64_decode", vec![encoded]).unwrap();
+        assert_eq!(decoded.display(), "hello world");
+    }
+
+    #[test]
+    fn base64_empty_string() {
+        let mut vm = vm();
+        let encoded = call(&mut vm, "base64_encode", vec![s("")]).unwrap();
+        assert_eq!(encoded.display(), "");
+        let decoded = call(&mut vm, "base64_decode", vec![encoded]).unwrap();
+        assert_eq!(decoded.display(), "");
+    }
+
+    #[test]
+    fn base64_decode_invalid_input() {
+        let mut vm = vm();
+        let result = call(&mut vm, "base64_decode", vec![s("not-valid-base64!!!")]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn base64_binary_content() {
+        let mut vm = vm();
+        // Encode bytes that include non-UTF8 when decoded
+        let encoded = call(&mut vm, "base64_encode", vec![s("\x00\x01\x02")]).unwrap();
+        let decoded = call(&mut vm, "base64_decode", vec![encoded]).unwrap();
+        assert_eq!(decoded.display(), "\x00\x01\x02");
+    }
+
+    // ---- URL encode/decode ----
+
+    #[test]
+    fn url_encode_preserves_unreserved() {
+        let mut vm = vm();
+        let result = call(&mut vm, "url_encode", vec![s("hello-world_foo.bar~baz")]).unwrap();
+        assert_eq!(result.display(), "hello-world_foo.bar~baz");
+    }
+
+    #[test]
+    fn url_encode_encodes_special_chars() {
+        let mut vm = vm();
+        let result = call(&mut vm, "url_encode", vec![s("a b&c=d")]).unwrap();
+        assert_eq!(result.display(), "a%20b%26c%3Dd");
+    }
+
+    #[test]
+    fn url_encode_handles_utf8() {
+        let mut vm = vm();
+        let result = call(&mut vm, "url_encode", vec![s("café")]).unwrap();
+        // 'é' is 0xC3 0xA9 in UTF-8
+        assert!(result.display().contains("%C3%A9"));
+    }
+
+    #[test]
+    fn url_decode_plus_as_space() {
+        let mut vm = vm();
+        let result = call(&mut vm, "url_decode", vec![s("hello+world")]).unwrap();
+        assert_eq!(result.display(), "hello world");
+    }
+
+    #[test]
+    fn url_decode_percent_encoding() {
+        let mut vm = vm();
+        let result = call(&mut vm, "url_decode", vec![s("a%20b%26c")]).unwrap();
+        assert_eq!(result.display(), "a b&c");
+    }
+
+    #[test]
+    fn url_decode_invalid_percent_passthrough() {
+        let mut vm = vm();
+        let result = call(&mut vm, "url_decode", vec![s("100%ZZ")]).unwrap();
+        // Invalid %ZZ should pass through as-is
+        assert_eq!(result.display(), "100%ZZ");
+    }
+
+    #[test]
+    fn url_round_trip() {
+        let mut vm = vm();
+        let original = "key=hello world&foo=bar/baz";
+        let encoded = call(&mut vm, "url_encode", vec![s(original)]).unwrap();
+        let decoded = call(&mut vm, "url_decode", vec![encoded]).unwrap();
+        // Note: url_encode uses %20, url_decode treats + as space,
+        // so round-trip is exact when encode produces %20.
+        assert_eq!(decoded.display(), original);
+    }
+
+    // ---- SHA hashes ----
+
+    #[test]
+    fn sha256_known_vector() {
+        let mut vm = vm();
+        let result = call(&mut vm, "sha256", vec![s("")]).unwrap();
+        // SHA-256 of empty string
+        assert_eq!(
+            result.display(),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        assert_eq!(result.display().len(), 64);
+    }
+
+    #[test]
+    fn sha224_length() {
+        let mut vm = vm();
+        let result = call(&mut vm, "sha224", vec![s("test")]).unwrap();
+        assert_eq!(result.display().len(), 56); // 224 bits = 56 hex chars
+    }
+
+    #[test]
+    fn sha384_length() {
+        let mut vm = vm();
+        let result = call(&mut vm, "sha384", vec![s("test")]).unwrap();
+        assert_eq!(result.display().len(), 96); // 384 bits = 96 hex chars
+    }
+
+    #[test]
+    fn sha512_length() {
+        let mut vm = vm();
+        let result = call(&mut vm, "sha512", vec![s("test")]).unwrap();
+        assert_eq!(result.display().len(), 128); // 512 bits = 128 hex chars
+    }
+
+    #[test]
+    fn sha512_256_length() {
+        let mut vm = vm();
+        let result = call(&mut vm, "sha512_256", vec![s("test")]).unwrap();
+        assert_eq!(result.display().len(), 64); // 256 bits = 64 hex chars
+    }
+
+    #[test]
+    fn md5_known_vector() {
+        let mut vm = vm();
+        let result = call(&mut vm, "md5", vec![s("")]).unwrap();
+        assert_eq!(result.display(), "d41d8cd98f00b204e9800998ecf8427e");
+    }
+
+    #[test]
+    fn sha256_deterministic() {
+        let mut vm = vm();
+        let a = call(&mut vm, "sha256", vec![s("hello")]).unwrap();
+        let b = call(&mut vm, "sha256", vec![s("hello")]).unwrap();
+        assert_eq!(a.display(), b.display());
+    }
+
+    #[test]
+    fn sha256_different_inputs_differ() {
+        let mut vm = vm();
+        let a = call(&mut vm, "sha256", vec![s("hello")]).unwrap();
+        let b = call(&mut vm, "sha256", vec![s("world")]).unwrap();
+        assert_ne!(a.display(), b.display());
+    }
+
+    // ---- hash_value ----
+
+    #[test]
+    fn hash_value_deterministic() {
+        let mut vm = vm();
+        let a = call(&mut vm, "hash_value", vec![s("test")]).unwrap();
+        let b = call(&mut vm, "hash_value", vec![s("test")]).unwrap();
+        assert_eq!(a.display(), b.display());
+    }
+
+    #[test]
+    fn hash_value_different_inputs() {
+        let mut vm = vm();
+        let a = call(&mut vm, "hash_value", vec![s("foo")]).unwrap();
+        let b = call(&mut vm, "hash_value", vec![s("bar")]).unwrap();
+        assert_ne!(a.display(), b.display());
+    }
+
+    #[test]
+    fn hash_value_nil() {
+        let mut vm = vm();
+        let result = call(&mut vm, "hash_value", vec![VmValue::Nil]).unwrap();
+        // Should not panic, should return some int
+        assert!(matches!(result, VmValue::Int(_)));
+    }
+}

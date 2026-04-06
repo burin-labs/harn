@@ -485,3 +485,212 @@ pub(crate) fn register_concurrency_builtins(vm: &mut Vm) {
         Ok(VmValue::Int(elapsed))
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::vm::Vm;
+    use std::rc::Rc;
+
+    fn vm() -> Vm {
+        let mut vm = Vm::new();
+        register_concurrency_builtins(&mut vm);
+        vm
+    }
+
+    fn call(vm: &mut Vm, name: &str, args: Vec<VmValue>) -> Result<VmValue, VmError> {
+        let f = vm.builtins.get(name).unwrap().clone();
+        let mut out = String::new();
+        f(&args, &mut out)
+    }
+
+    fn s(v: &str) -> VmValue {
+        VmValue::String(Rc::from(v))
+    }
+
+    // ---- atomics ----
+
+    #[test]
+    fn atomic_default_zero() {
+        let mut vm = vm();
+        let atom = call(&mut vm, "atomic", vec![]).unwrap();
+        let val = call(&mut vm, "atomic_get", vec![atom]).unwrap();
+        assert_eq!(val.display(), "0");
+    }
+
+    #[test]
+    fn atomic_initial_value() {
+        let mut vm = vm();
+        let atom = call(&mut vm, "atomic", vec![VmValue::Int(42)]).unwrap();
+        let val = call(&mut vm, "atomic_get", vec![atom]).unwrap();
+        assert_eq!(val.display(), "42");
+    }
+
+    #[test]
+    fn atomic_set_returns_old() {
+        let mut vm = vm();
+        let atom = call(&mut vm, "atomic", vec![VmValue::Int(10)]).unwrap();
+        let old = call(&mut vm, "atomic_set", vec![atom.clone(), VmValue::Int(20)]).unwrap();
+        assert_eq!(old.display(), "10");
+        let cur = call(&mut vm, "atomic_get", vec![atom]).unwrap();
+        assert_eq!(cur.display(), "20");
+    }
+
+    #[test]
+    fn atomic_add() {
+        let mut vm = vm();
+        let atom = call(&mut vm, "atomic", vec![VmValue::Int(5)]).unwrap();
+        let prev = call(&mut vm, "atomic_add", vec![atom.clone(), VmValue::Int(3)]).unwrap();
+        assert_eq!(prev.display(), "5");
+        let cur = call(&mut vm, "atomic_get", vec![atom]).unwrap();
+        assert_eq!(cur.display(), "8");
+    }
+
+    #[test]
+    fn atomic_cas_success() {
+        let mut vm = vm();
+        let atom = call(&mut vm, "atomic", vec![VmValue::Int(10)]).unwrap();
+        let ok = call(
+            &mut vm,
+            "atomic_cas",
+            vec![atom.clone(), VmValue::Int(10), VmValue::Int(20)],
+        )
+        .unwrap();
+        assert_eq!(ok.display(), "true");
+        let cur = call(&mut vm, "atomic_get", vec![atom]).unwrap();
+        assert_eq!(cur.display(), "20");
+    }
+
+    #[test]
+    fn atomic_cas_failure() {
+        let mut vm = vm();
+        let atom = call(&mut vm, "atomic", vec![VmValue::Int(10)]).unwrap();
+        let ok = call(
+            &mut vm,
+            "atomic_cas",
+            vec![atom.clone(), VmValue::Int(99), VmValue::Int(20)],
+        )
+        .unwrap();
+        assert_eq!(ok.display(), "false");
+        let cur = call(&mut vm, "atomic_get", vec![atom]).unwrap();
+        assert_eq!(cur.display(), "10"); // unchanged
+    }
+
+    #[test]
+    fn atomic_bool_init() {
+        let mut vm = vm();
+        let atom = call(&mut vm, "atomic", vec![VmValue::Bool(true)]).unwrap();
+        let val = call(&mut vm, "atomic_get", vec![atom]).unwrap();
+        assert_eq!(val.display(), "1");
+    }
+
+    // ---- circuit breaker ----
+
+    #[test]
+    fn circuit_breaker_starts_closed() {
+        let mut vm = vm();
+        call(
+            &mut vm,
+            "circuit_breaker",
+            vec![s("test_cb"), VmValue::Int(3)],
+        )
+        .unwrap();
+        let state = call(&mut vm, "circuit_check", vec![s("test_cb")]).unwrap();
+        assert_eq!(state.display(), "closed");
+    }
+
+    #[test]
+    fn circuit_opens_at_threshold() {
+        let mut vm = vm();
+        call(
+            &mut vm,
+            "circuit_breaker",
+            vec![s("test_cb2"), VmValue::Int(2)],
+        )
+        .unwrap();
+        // First failure
+        let opened = call(&mut vm, "circuit_record_failure", vec![s("test_cb2")]).unwrap();
+        assert_eq!(opened.display(), "false");
+        let state = call(&mut vm, "circuit_check", vec![s("test_cb2")]).unwrap();
+        assert_eq!(state.display(), "closed");
+
+        // Second failure reaches threshold
+        let opened = call(&mut vm, "circuit_record_failure", vec![s("test_cb2")]).unwrap();
+        assert_eq!(opened.display(), "true");
+        let state = call(&mut vm, "circuit_check", vec![s("test_cb2")]).unwrap();
+        assert_eq!(state.display(), "open");
+    }
+
+    #[test]
+    fn circuit_success_resets() {
+        let mut vm = vm();
+        call(
+            &mut vm,
+            "circuit_breaker",
+            vec![s("test_cb3"), VmValue::Int(2)],
+        )
+        .unwrap();
+        call(&mut vm, "circuit_record_failure", vec![s("test_cb3")]).unwrap();
+        call(&mut vm, "circuit_record_success", vec![s("test_cb3")]).unwrap();
+        // After success, should be closed again
+        let state = call(&mut vm, "circuit_check", vec![s("test_cb3")]).unwrap();
+        assert_eq!(state.display(), "closed");
+        // And counter should be reset — need 2 more failures to open
+        call(&mut vm, "circuit_record_failure", vec![s("test_cb3")]).unwrap();
+        let state = call(&mut vm, "circuit_check", vec![s("test_cb3")]).unwrap();
+        assert_eq!(state.display(), "closed");
+    }
+
+    #[test]
+    fn circuit_reset_clears_state() {
+        let mut vm = vm();
+        call(
+            &mut vm,
+            "circuit_breaker",
+            vec![s("test_cb4"), VmValue::Int(1)],
+        )
+        .unwrap();
+        call(&mut vm, "circuit_record_failure", vec![s("test_cb4")]).unwrap();
+        let state = call(&mut vm, "circuit_check", vec![s("test_cb4")]).unwrap();
+        assert_eq!(state.display(), "open");
+        call(&mut vm, "circuit_reset", vec![s("test_cb4")]).unwrap();
+        let state = call(&mut vm, "circuit_check", vec![s("test_cb4")]).unwrap();
+        assert_eq!(state.display(), "closed");
+    }
+
+    #[test]
+    fn circuit_unknown_name_defaults_closed() {
+        let mut vm = vm();
+        let state = call(&mut vm, "circuit_check", vec![s("nonexistent")]).unwrap();
+        assert_eq!(state.display(), "closed");
+    }
+
+    // ---- timer ----
+
+    #[test]
+    fn timer_start_returns_dict() {
+        let mut vm = vm();
+        let timer = call(&mut vm, "timer_start", vec![s("my_timer")]).unwrap();
+        let dict = timer.as_dict().unwrap();
+        assert_eq!(dict.get("name").unwrap().display(), "my_timer");
+        assert!(dict.get("start_ms").unwrap().as_int().unwrap() > 0);
+    }
+
+    #[test]
+    fn timer_end_returns_elapsed() {
+        let mut vm = vm();
+        let timer = call(&mut vm, "timer_start", vec![s("t")]).unwrap();
+        // timer_end computes elapsed from start_ms
+        let elapsed = call(&mut vm, "timer_end", vec![timer]).unwrap();
+        // Should be very small (< 100ms)
+        assert!(elapsed.as_int().unwrap() >= 0);
+        assert!(elapsed.as_int().unwrap() < 1000);
+    }
+
+    #[test]
+    fn timer_end_non_dict_errors() {
+        let mut vm = vm();
+        let result = call(&mut vm, "timer_end", vec![VmValue::Int(42)]);
+        assert!(result.is_err());
+    }
+}
