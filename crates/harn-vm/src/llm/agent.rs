@@ -977,15 +977,35 @@ pub async fn run_agent_loop_internal(
             let calls = parse_result.calls;
 
             // When the parser found tool-call-looking text but couldn't
-            // parse it, log the error and fall through to the nudge system.
-            // The model will see the nudge on its next turn and retry with
-            // cleaner syntax.  This replaces the previous tool_call_repair
-            // micro-executor which burned 2-20s per invocation on an LLM
-            // call — often called 8-10 times per eval (240s+ wasted).
+            // parse it, inject the specific parse error into the conversation
+            // so the model knows what to fix (e.g. unescaped backtick inside
+            // a template literal).  Without this, the generic nudge message
+            // gives the model no signal about *what* was wrong, causing it to
+            // retry the same broken format 5-7 times.
             if calls.is_empty() && !tool_parse_errors.is_empty() {
+                let error_summary = tool_parse_errors
+                    .iter()
+                    .take(2)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join("; ");
                 eprintln!(
-                    "[harn] {} tool-call parse error(s); falling through to nudge",
-                    tool_parse_errors.len()
+                    "[harn] {} tool-call parse error(s): {}",
+                    tool_parse_errors.len(),
+                    &error_summary[..error_summary.len().min(200)]
+                );
+                let feedback = format!(
+                    "Your tool call could not be parsed: {error_summary}\n\n\
+                     Common fix: if your template literal (backtick string) contains \
+                     a literal backtick character (e.g. Go raw strings), escape it as \\` \
+                     or use double-quoted strings with \\n for newlines instead. \
+                     Alternatively, use edit({{ action: \"create\", path: \"...\", \
+                     content: \"line1\\nline2\\n...\" }}) with double quotes."
+                );
+                append_message_to_contexts(
+                    &mut visible_messages,
+                    &mut recorded_messages,
+                    serde_json::json!({"role": "user", "content": feedback}),
                 );
             }
             calls
