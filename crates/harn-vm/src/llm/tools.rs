@@ -1216,36 +1216,33 @@ fn build_tool_args_type(params: &[ToolParamSchema]) -> TypeExpr {
 pub(crate) const TS_CALL_CONTRACT_HELP: &str = "
 ## How to call tools
 
-You invoke a tool by writing a plain TypeScript function call on its own line in your response. The call takes exactly one argument: an object literal whose fields match the tool's signature above. You can write prose before and after tool calls freely — anything that is not a top-of-line function-call expression naming a known tool is narration and the harness ignores it.
+Write a plain function call on its own line. The argument is a single object literal matching the tool's signature. Prose before/after tool calls is ignored by the harness.
 
-Here is an example of calling the edit tool, with a single multiline string argument expressed as a template literal (opened and closed by single backtick characters):
+For multiline string values (file content, code), use heredoc syntax — no escaping needed:
 
 edit({
     action: \"create\",
-    path: \"internal/manifest/parser_extra_test.go\",
-    content: `package manifest
+    path: \"parser_extra_test.go\",
+    content: <<EOF
+package manifest
 
 import \"testing\"
 
 func TestParseExtra(t *testing.T) {
-\t// body
+\tyaml := `version: \"1.0\"`
+\t// backticks, quotes, backslashes — all fine, no escaping
 }
-`
+EOF
 })
 
-Rules for the call expression:
-
-- The full form is `name({ key: value, key: value })`. Write ONLY the function name followed by `(` — no prefix like `call:`, `tool:`, or `use:`.
-- Trailing commas are optional.
-- String values can be written with double quotes (\"...\") for single-line text, or with a template literal (opened and closed by a single backtick character) for multiline text. Template literal content is passed through raw — you do NOT need to escape newlines, double quotes, or backslashes. If you genuinely need a literal backtick character inside a template literal, escape it with a leading backslash.
-- Optional fields may be omitted entirely; required fields must be present (their type has no trailing ? in the signature).
-- Enum / literal fields accept only the literal values shown in the union type. Other strings are rejected.
-- Arrays use [a, b, c]. Nested objects use { key: value }.
-- Tool-name mentions inside a Markdown fenced code block or inside backtick-delimited inline code are treated as documentation, not invocations. Only calls outside every code-display region count.
-- After each call, you will see a `[result of toolname]....[end of toolname result]` entry with the outcome before your next turn. This is NOT a tool call — do not reproduce it.
-- You can emit multiple tool calls in one response by placing each as its own top-of-line expression. Batch independent calls together.
-
-IMPORTANT: Every response MUST include at least one tool call. Progress comes from tool use, not prose. If you find yourself writing more than a few sentences without a tool call, stop and act instead.
+Rules:
+- Form: `name({ key: value })`. No `call:` or `tool:` prefix.
+- Multiline strings: use `<<TAG` ... `TAG` (heredoc). Content is raw — no escaping. TAG must be alone on its closing line.
+- Single-line strings: use double quotes `\"...\"`.
+- Backtick template literals also work but require escaping literal backticks as `\\``. Prefer heredoc when content may contain backticks.
+- Trailing commas optional. Arrays: `[a, b]`. Nested objects: `{ k: v }`.
+- Tool mentions inside Markdown fenced code blocks are documentation, not invocations.
+- Prefer tool calls over prose. When you have work to do, act with tools rather than explaining.
 ";
 
 /// Result of parsing a prose-interleaved TS tool-call stream.
@@ -1621,6 +1618,7 @@ impl<'a> TsValueParser<'a> {
             b'[' => self.parse_array(),
             b'"' | b'\'' => self.parse_string_literal(c),
             b'`' => self.parse_template_literal(),
+            b'<' if self.bytes.get(self.pos + 1) == Some(&b'<') => self.parse_heredoc(),
             b't' | b'f' => self.parse_boolean(),
             b'n' => self.parse_null(),
             b'u' => self.parse_undefined(),
@@ -1839,6 +1837,77 @@ impl<'a> TsValueParser<'a> {
                 Some(b) => {
                     out.push(b as char);
                 }
+            }
+        }
+    }
+
+    /// Parse a heredoc string: `<<TAG\n...\nTAG`
+    ///
+    /// The tag is any sequence of uppercase letters/digits/underscore (e.g. EOF,
+    /// END, CONTENT). Content between the opening tag line and a line containing
+    /// only the tag is returned raw — no escaping of any kind is needed inside.
+    /// This makes heredocs ideal for multiline code that contains backticks,
+    /// quotes, or backslashes (Go raw strings, shell scripts, YAML, etc.).
+    fn parse_heredoc(&mut self) -> Result<serde_json::Value, String> {
+        // Consume "<<"
+        self.advance();
+        self.advance();
+        // Read tag: uppercase letters, digits, underscore
+        let tag_start = self.pos;
+        while let Some(b) = self.peek() {
+            if b.is_ascii_alphanumeric() || b == b'_' {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        let tag = &self.text[tag_start..self.pos];
+        if tag.is_empty() {
+            return Err("heredoc requires a tag after << (e.g. <<EOF)".to_string());
+        }
+        // Consume the newline after the tag
+        if self.peek() == Some(b'\r') {
+            self.advance();
+        }
+        if self.peek() == Some(b'\n') {
+            self.advance();
+        } else {
+            return Err(format!("expected newline after heredoc tag <<{tag}"));
+        }
+        // Read content until a line consisting of exactly the tag
+        let content_start = self.pos;
+        loop {
+            // Find the start of the current line
+            let line_start = self.pos;
+            // Read to end of line
+            while let Some(b) = self.peek() {
+                if b == b'\n' {
+                    break;
+                }
+                self.advance();
+            }
+            let line = &self.text[line_start..self.pos];
+            let trimmed = line.trim();
+            // Match the closing tag: the line must start with the tag, and
+            // anything after it must be only commas/whitespace/closing parens
+            // (to tolerate `OLD,` or `EOF  )` on the same line).
+            if trimmed == tag || trimmed.starts_with(tag)
+                && trimmed[tag.len()..].chars().all(|c| c == ',' || c == ')' || c.is_whitespace())
+            {
+                let content = &self.text[content_start..line_start];
+                let content = content.strip_suffix('\n').unwrap_or(content);
+                let content = content.strip_suffix('\r').unwrap_or(content);
+                // Rewind position to right after the tag so the outer parser
+                // can see the trailing comma/paren.
+                self.pos = line_start + line.find(tag).unwrap_or(0) + tag.len();
+                return Ok(serde_json::Value::String(content.to_string()));
+            }
+            // Consume the newline
+            if self.peek() == Some(b'\n') {
+                self.advance();
+            } else {
+                // End of input without finding closing tag
+                return Err(format!("unterminated heredoc: expected closing {tag} on its own line"));
             }
         }
     }

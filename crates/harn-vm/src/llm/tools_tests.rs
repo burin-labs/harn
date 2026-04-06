@@ -86,13 +86,28 @@ fn sample_tool_registry() -> VmValue {
         ]),
     );
 
-    let tool = vm_dict(&[
+    let edit_tool = vm_dict(&[
         ("name", vm_str("edit")),
         ("description", vm_str("Precise code edit.")),
         ("parameters", VmValue::Dict(Rc::new(params))),
     ]);
 
-    vm_dict(&[("tools", vm_list(vec![tool]))])
+    // run tool
+    let mut run_params = BTreeMap::new();
+    run_params.insert(
+        "command".to_string(),
+        vm_dict(&[
+            ("type", vm_str("string")),
+            ("description", vm_str("Shell command to execute.")),
+        ]),
+    );
+    let run_tool = vm_dict(&[
+        ("name", vm_str("run")),
+        ("description", vm_str("Run a shell command.")),
+        ("parameters", VmValue::Dict(Rc::new(run_params))),
+    ]);
+
+    vm_dict(&[("tools", vm_list(vec![edit_tool, run_tool]))])
 }
 
 // ─── Fenceless TS parser ───────────────────────────────────────────────────
@@ -469,4 +484,296 @@ fn normalize_tool_args_recovers_fragmented_run_array() {
         &json!({"command": "\"internal/manifest/\"]", "args": "[\"ls\""}),
     );
     assert_eq!(out["command"], json!("ls internal/manifest/"));
+}
+
+// ─── Heredoc parser tests ──────────────────────────────────────────────────
+
+#[test]
+fn heredoc_simple() {
+    let tools = sample_tool_registry();
+    let text = r#"edit({
+    action: "create",
+    path: "main.go",
+    content: <<EOF
+package main
+
+import "fmt"
+
+func main() {
+    fmt.Println("hello")
+}
+EOF
+})"#;
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_eq!(result.calls.len(), 1, "should parse one call, errors: {:?}", result.errors);
+    let args = &result.calls[0]["arguments"];
+    let content = args["content"].as_str().unwrap();
+    assert!(content.starts_with("package main"), "content should start with package: {content}");
+    assert!(content.contains("fmt.Println"), "content should contain fmt.Println");
+}
+
+#[test]
+fn heredoc_with_backticks_inside() {
+    let tools = sample_tool_registry();
+    let text = r#"edit({
+    action: "create",
+    path: "parser_test.go",
+    content: <<CONTENT
+package manifest
+
+import "testing"
+
+func TestYAML(t *testing.T) {
+    yaml := `
+version: "1.0"
+services:
+  web:
+    image: nginx
+`
+    if yaml == "" {
+        t.Fatal("empty")
+    }
+}
+CONTENT
+})"#;
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_eq!(result.calls.len(), 1, "should parse heredoc with backticks, errors: {:?}", result.errors);
+    let content = result.calls[0]["arguments"]["content"].as_str().unwrap();
+    assert!(content.contains("yaml := `"), "should preserve Go raw string backticks: {content}");
+    assert!(content.contains("image: nginx"), "should preserve YAML content");
+}
+
+#[test]
+fn heredoc_with_quotes_and_backslashes() {
+    let tools = sample_tool_registry();
+    let text = r#"edit({
+    action: "create",
+    path: "test.py",
+    content: <<END
+def test_escaping():
+    s = "hello \"world\""
+    path = "C:\\Users\\test"
+    raw = r"no\escaping\here"
+    assert len(s) > 0
+END
+})"#;
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_eq!(result.calls.len(), 1, "errors: {:?}", result.errors);
+    let content = result.calls[0]["arguments"]["content"].as_str().unwrap();
+    assert!(content.contains(r#""hello \"world\"""#), "should preserve escaped quotes raw");
+    assert!(content.contains(r"C:\\Users\\test"), "should preserve backslashes raw");
+}
+
+#[test]
+fn heredoc_mixed_with_regular_args() {
+    let tools = sample_tool_registry();
+    let text = r#"edit({
+    action: "patch",
+    path: "main.go",
+    old_string: <<OLD
+func broken() {
+    return nil
+}
+OLD,
+    new_string: <<NEW
+func fixed() {
+    return &Result{}
+}
+NEW
+})"#;
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_eq!(result.calls.len(), 1, "errors: {:?}", result.errors);
+    let args = &result.calls[0]["arguments"];
+    assert!(args["old_string"].as_str().unwrap().contains("broken"), "old_string should contain broken");
+    assert!(args["new_string"].as_str().unwrap().contains("fixed"), "new_string should contain fixed");
+}
+
+#[test]
+fn heredoc_unterminated_is_error() {
+    let tools = sample_tool_registry();
+    let text = r#"edit({
+    action: "create",
+    path: "main.go",
+    content: <<EOF
+package main
+// no closing EOF tag
+})"#;
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert!(result.calls.is_empty(), "unterminated heredoc should produce no calls");
+    assert!(!result.errors.is_empty(), "should have parse error");
+}
+
+#[test]
+fn heredoc_missing_tag_is_error() {
+    let tools = sample_tool_registry();
+    let text = r#"edit({
+    action: "create",
+    path: "main.go",
+    content: <<
+package main
+EOF
+})"#;
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert!(result.calls.is_empty() || result.errors.len() > 0, "missing tag should error");
+}
+
+#[test]
+fn template_literal_still_works() {
+    let tools = sample_tool_registry();
+    let text = "edit({\n    action: \"create\",\n    path: \"simple.txt\",\n    content: `hello world`\n})";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_eq!(result.calls.len(), 1, "template literal should still parse, errors: {:?}", result.errors);
+    assert_eq!(result.calls[0]["arguments"]["content"], "hello world");
+}
+
+#[test]
+fn double_quoted_string_still_works() {
+    let tools = sample_tool_registry();
+    let text = "run({ command: \"go test ./internal/manifest/\" })";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_eq!(result.calls.len(), 1, "double-quoted string should parse, errors: {:?}", result.errors);
+    assert_eq!(result.calls[0]["arguments"]["command"], "go test ./internal/manifest/");
+}
+
+#[test]
+fn multiple_calls_with_heredoc() {
+    let tools = sample_tool_registry();
+    let text = r#"I'll create the file and then run the tests.
+
+edit({
+    action: "create",
+    path: "test.go",
+    content: <<EOF
+package main
+EOF
+})
+
+run({ command: "go test ./..." })"#;
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_eq!(result.calls.len(), 2, "should parse both calls, errors: {:?}", result.errors);
+    assert_eq!(result.calls[0]["name"], "edit");
+    assert_eq!(result.calls[1]["name"], "run");
+}
+
+#[test]
+fn heredoc_go_code_with_backticks_then_run() {
+    let tools = sample_tool_registry();
+    let text = r#"I'll create the test file with table-driven tests.
+
+edit({
+    action: "create",
+    path: "internal/manifest/parser_test.go",
+    content: <<GOFILE
+package manifest
+
+import (
+	"testing"
+)
+
+func TestParseManifest(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    string
+		wantErr bool
+	}{
+		{
+			name:  "basic",
+			input: `{"name": "test"}`,
+			want:  "test",
+		},
+		{
+			name:    "empty",
+			input:   ``,
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := Parse(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("Parse() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+GOFILE
+})
+
+Now let me run the tests.
+
+run({ command: "go test ./internal/manifest/ -v" })"#;
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_eq!(result.calls.len(), 2, "should parse edit+run with Go backtick code, errors: {:?}", result.errors);
+    assert_eq!(result.calls[0]["name"], "edit");
+    assert_eq!(result.calls[1]["name"], "run");
+    let content = result.calls[0]["arguments"]["content"].as_str().unwrap();
+    assert!(content.contains("func TestParseManifest"), "content should have the test function");
+    assert!(content.contains("`{\"name\": \"test\"}`"), "content should preserve Go raw string literals with backticks");
+    assert_eq!(result.calls[1]["arguments"]["command"], "go test ./internal/manifest/ -v");
+}
+
+#[test]
+fn heredoc_three_edits_then_run() {
+    let tools = sample_tool_registry();
+    let text = r#"I'll create all three files.
+
+edit({
+    action: "create",
+    path: "a.go",
+    content: <<EOF
+package a
+EOF
+})
+
+edit({
+    action: "create",
+    path: "b.go",
+    content: <<EOF
+package b
+EOF
+})
+
+edit({
+    action: "create",
+    path: "c.go",
+    content: <<EOF
+package c
+EOF
+})
+
+run({ command: "go build ./..." })"#;
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_eq!(result.calls.len(), 4, "should parse 3 edits + 1 run, errors: {:?}", result.errors);
+    assert_eq!(result.calls[0]["arguments"]["path"], "a.go");
+    assert_eq!(result.calls[1]["arguments"]["path"], "b.go");
+    assert_eq!(result.calls[2]["arguments"]["path"], "c.go");
+    assert_eq!(result.calls[3]["name"], "run");
+}
+
+#[test]
+fn heredoc_prose_extraction() {
+    let tools = sample_tool_registry();
+    let text = r#"Here's my plan.
+
+edit({
+    action: "create",
+    path: "main.go",
+    content: <<EOF
+package main
+EOF
+})
+
+That should compile. Let me verify.
+
+run({ command: "go build" })"#;
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_eq!(result.calls.len(), 2);
+    assert!(result.prose.contains("Here's my plan."), "prose should contain intro");
+    assert!(result.prose.contains("That should compile."), "prose should contain interstitial text");
+    assert!(!result.prose.contains("<<EOF"), "prose should not contain tool calls");
 }
