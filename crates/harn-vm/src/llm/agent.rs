@@ -6,14 +6,14 @@ use crate::value::{ErrorCategory, VmClosure, VmError, VmValue};
 use crate::vm::Vm;
 
 use super::api::{
-    vm_call_llm_full_streaming, vm_call_llm_full_streaming_offthread, DeltaSender, LlmCallOptions,
+    vm_call_llm_full_streaming, vm_call_llm_full_streaming_offthread, DeltaSender,
 };
 use super::helpers::{
     extract_llm_options, opt_bool, opt_int, opt_str, transcript_event, transcript_to_vm_with_events,
 };
 use super::tools::{
     build_assistant_response_message, build_assistant_tool_message,
-    build_tool_calling_contract_prompt, build_tool_result_message, collect_tool_schemas,
+    build_tool_calling_contract_prompt, build_tool_result_message,
     handle_tool_locally, normalize_tool_args, parse_text_tool_calls_with_tools,
 };
 use super::trace::{trace_llm_call, LlmTraceEntry};
@@ -169,6 +169,10 @@ pub struct AgentLoopConfig {
     pub llm_retries: usize,
     /// Base backoff in milliseconds between LLM retries.
     pub llm_backoff_ms: u64,
+    /// When true, the done sentinel is only honoured if the last `run()` tool
+    /// call returned exit code 0.  If the model emits the sentinel without a
+    /// passing verification, the loop injects a corrective and continues.
+    pub exit_when_verified: bool,
 }
 
 /// Classify whether a VmError from an LLM call is transient and worth retrying.
@@ -391,166 +395,6 @@ fn compact_malformed_assistant_turn(error_count: usize) -> String {
     )
 }
 
-/// Micro-executor: given raw model text that failed to parse as tool calls,
-/// ask the same LLM to extract the intended tool calls as a JSON array.
-/// Returns `Some(calls)` on success, `None` if repair fails or isn't worth it.
-async fn tool_call_repair(
-    parent_opts: &LlmCallOptions,
-    raw_text: &str,
-    tools_val: Option<&VmValue>,
-    bridge: Option<&Rc<crate::bridge::HostBridge>>,
-) -> Result<Option<Vec<serde_json::Value>>, VmError> {
-    // Only attempt repair if the text contains something that looks like a
-    // tool invocation — a known tool name followed by `(` or `{`.
-    let known: std::collections::BTreeSet<String> = collect_tool_schemas(tools_val, None)
-        .into_iter()
-        .map(|s| s.name)
-        .collect();
-    let has_tool_intent = known.iter().any(|name| {
-        raw_text.contains(&format!("{name}(")) || raw_text.contains(&format!("{name}{{"))
-    });
-    if !has_tool_intent {
-        return Ok(None);
-    }
-
-    // Build a compact schema summary: just name + parameter names/types.
-    let schemas = collect_tool_schemas(tools_val, None);
-    let mut schema_lines = Vec::new();
-    for s in &schemas {
-        let params: Vec<String> = s
-            .params
-            .iter()
-            .map(|p| {
-                let req = if p.required { "" } else { "?" };
-                format!("{}{}: {:?}", p.name, req, p.ty)
-            })
-            .collect();
-        schema_lines.push(format!("  {}({{ {} }})", s.name, params.join(", ")));
-    }
-    let schema_summary = schema_lines.join("\n");
-
-    let system = "You are a tool-call extraction assistant. Given raw text from a coding agent \
-                  and a set of tool schemas, extract every intended tool call as a JSON array. \
-                  Output ONLY a JSON array of objects, each with \"name\" (string) and \
-                  \"arguments\" (object matching the schema). No prose, no markdown fences.";
-
-    let user = format!(
-        "Tool schemas:\n{schema_summary}\n\n\
-         Raw agent output:\n{raw_text}\n\n\
-         Extract all intended tool calls as a JSON array."
-    );
-
-    // Truncate if the raw text is very large — we only need enough for the
-    // repair model to see the tool call structure.
-    let user = if user.len() > 8000 {
-        format!(
-            "Tool schemas:\n{schema_summary}\n\n\
-             Raw agent output (truncated):\n{}\n\n\
-             Extract all intended tool calls as a JSON array.",
-            &raw_text[..6000.min(raw_text.len())]
-        )
-    } else {
-        user
-    };
-
-    // Dynamic max_tokens: the repair output is a JSON representation of the
-    // tool calls, which is roughly proportional to the input text length.
-    // Use ~50% of raw text char count as a rough token estimate, with a
-    // floor of 1024 and cap of 8192.
-    let repair_max_tokens = ((raw_text.len() / 2) as i64).clamp(1024, 8192);
-
-    let repair_opts = LlmCallOptions {
-        provider: parent_opts.provider.clone(),
-        model: parent_opts.model.clone(),
-        api_key: parent_opts.api_key.clone(),
-        messages: vec![serde_json::json!({"role": "user", "content": user})],
-        system: Some(system.to_string()),
-        max_tokens: repair_max_tokens,
-        temperature: Some(0.0),
-        response_format: Some("json_object".to_string()),
-        cache: false,
-        timeout: Some(30_000),
-        // Clear everything else
-        transcript_id: None,
-        transcript_summary: None,
-        transcript_metadata: None,
-        top_p: None,
-        top_k: None,
-        stop: None,
-        seed: None,
-        frequency_penalty: None,
-        presence_penalty: None,
-        json_schema: None,
-        output_schema: None,
-        output_validation: None,
-        thinking: None,
-        tools: None,
-        native_tools: None,
-        tool_choice: None,
-        provider_overrides: None,
-    };
-
-    let call_id = next_call_id();
-    if let Some(b) = bridge {
-        b.send_call_start(&call_id, "llm", "tool_repair", serde_json::json!({}));
-    }
-    let delta_tx = bridge
-        .map(|b| spawn_progress_forwarder(b, call_id.clone()))
-        .unwrap_or_else(|| tokio::sync::mpsc::unbounded_channel::<String>().0);
-    let repair_result = vm_call_llm_full_streaming(&repair_opts, delta_tx).await;
-    if let Some(b) = bridge {
-        b.send_call_end(
-            &call_id,
-            "llm",
-            "tool_repair",
-            0,
-            "ok",
-            serde_json::json!({}),
-        );
-    }
-
-    match repair_result {
-        Ok(result) => {
-            let response_text = result.text.trim().to_string();
-            // Strip markdown fences if present
-            let json_text = if response_text.starts_with("```") {
-                response_text
-                    .trim_start_matches("```json")
-                    .trim_start_matches("```")
-                    .trim_end_matches("```")
-                    .trim()
-            } else {
-                &response_text
-            };
-            match serde_json::from_str::<Vec<serde_json::Value>>(json_text) {
-                Ok(arr) => {
-                    let mut calls = Vec::new();
-                    for (i, item) in arr.iter().enumerate() {
-                        if let (Some(name), Some(args)) = (
-                            item.get("name").and_then(|n| n.as_str()),
-                            item.get("arguments"),
-                        ) {
-                            if known.contains(name) {
-                                calls.push(serde_json::json!({
-                                    "id": format!("tc_repair_{i}"),
-                                    "name": name,
-                                    "arguments": args,
-                                }));
-                            }
-                        }
-                    }
-                    if calls.is_empty() {
-                        Ok(None)
-                    } else {
-                        Ok(Some(calls))
-                    }
-                }
-                Err(_) => Ok(None),
-            }
-        }
-        Err(_) => Ok(None),
-    }
-}
 
 fn append_host_messages_to_recorded(
     recorded_messages: &mut Vec<serde_json::Value>,
@@ -854,6 +698,8 @@ pub async fn run_agent_loop_internal(
 
     let auto_compact = config.auto_compact.clone();
     let daemon = config.daemon;
+    let exit_when_verified = config.exit_when_verified;
+    let mut last_run_exit_code: Option<i32> = None;
 
     // Push per-agent policy if configured
     if let Some(ref policy) = config.policy {
@@ -886,14 +732,21 @@ pub async fn run_agent_loop_internal(
     };
 
     let persistent_system_prompt = if persistent {
-        Some(format!(
-            "\n\nIMPORTANT: You MUST keep working until the task is complete. \
-             Do NOT stop to explain or summarize — take action with tools. \
-             When the requested work is complete and your verification has succeeded, \
-             stop immediately and output {done_sentinel} on its own line. \
-             Do not make additional tool calls after a passing verification result unless \
-             you still have concrete evidence that the task is incomplete or failing."
-        ))
+        if exit_when_verified {
+            // When exit_when_verified is set, the harness enforces that the
+            // done sentinel is only honoured after a passing run(). The
+            // system prompt only needs a brief reminder, not a long rule.
+            Some(format!(
+                "\n\nKeep working until the task is complete. Take action with tools — \
+                 do not stop to explain. Output {done_sentinel} when done."
+            ))
+        } else {
+            Some(format!(
+                "\n\nIMPORTANT: You MUST keep working until the task is complete. \
+                 Do NOT stop to explain or summarize — take action with tools. \
+                 When the requested work is complete, output {done_sentinel} on its own line."
+            ))
+        }
     } else {
         None
     };
@@ -1121,23 +974,19 @@ pub async fn run_agent_loop_internal(
             }
             tool_parse_errors = parse_result.errors;
             text_prose = parse_result.prose;
-            let mut calls = parse_result.calls;
+            let calls = parse_result.calls;
 
-            // Micro-executor: when the text parser found errors but extracted
-            // zero valid calls, try a cheap LLM call to normalize the model's
-            // intent into valid structured tool calls. This replaces the
-            // expensive nudge→retry loop with a single small extraction call.
+            // When the parser found tool-call-looking text but couldn't
+            // parse it, log the error and fall through to the nudge system.
+            // The model will see the nudge on its next turn and retry with
+            // cleaner syntax.  This replaces the previous tool_call_repair
+            // micro-executor which burned 2-20s per invocation on an LLM
+            // call — often called 8-10 times per eval (240s+ wasted).
             if calls.is_empty() && !tool_parse_errors.is_empty() {
-                if let Some(repaired) =
-                    tool_call_repair(opts, &text, tools_val, bridge.as_ref()).await?
-                {
-                    eprintln!(
-                        "[harn] tool_repair: recovered {} call(s) from malformed text",
-                        repaired.len()
-                    );
-                    tool_parse_errors.clear();
-                    calls = repaired;
-                }
+                eprintln!(
+                    "[harn] {} tool-call parse error(s); falling through to nudge",
+                    tool_parse_errors.len()
+                );
             }
             calls
         } else {
@@ -1154,11 +1003,35 @@ pub async fn run_agent_loop_internal(
         // Check done_sentinel on EVERY response, not just text-only ones.
         // If present alongside tool calls, we still process the tools (so their
         // results land in the conversation), but mark the loop to exit afterward.
-        let sentinel_hit = persistent
-            && (text.contains(&done_sentinel)
-                || break_unless_phase
-                    .as_deref()
-                    .is_some_and(|phase| loop_state_requests_phase_change(&text, phase)));
+        let sentinel_in_text = text.contains(&done_sentinel);
+        let phase_change = break_unless_phase
+            .as_deref()
+            .is_some_and(|phase| loop_state_requests_phase_change(&text, phase));
+        // When exit_when_verified is set, the sentinel is only honoured if the
+        // last run() tool call returned exit code 0.  This prevents premature
+        // exit when the model claims it's done but verification hasn't passed.
+        let verified = !exit_when_verified || last_run_exit_code == Some(0);
+        let sentinel_hit = persistent && ((sentinel_in_text && verified) || phase_change);
+
+        // If the model emitted the sentinel but verification hasn't passed,
+        // inject a corrective so the model knows it must keep going.
+        if sentinel_in_text && !verified && persistent {
+            let code_str = last_run_exit_code
+                .map_or("none".to_string(), |c| c.to_string());
+            let corrective = format!(
+                "You emitted the done sentinel but verification has not passed \
+                 (last run exit code: {code_str}). The loop will continue. \
+                 Run the verification command and fix any failures before finishing."
+            );
+            visible_messages.push(serde_json::json!({
+                "role": "user",
+                "content": corrective
+            }));
+            recorded_messages.push(serde_json::json!({
+                "role": "user",
+                "content": corrective
+            }));
+        }
 
         if !tool_calls.is_empty() {
             consecutive_text_only = 0;
@@ -1539,6 +1412,23 @@ pub async fn run_agent_loop_internal(
 
                 if is_rejected && !rejected_tools.contains(&tool_name.to_string()) {
                     rejected_tools.push(tool_name.to_string());
+                }
+
+                // Track run() exit codes for verification-gated exit.
+                // The host bridge formats run results with "exit_code=N" or
+                // "Command succeeded"/"Command failed" markers.
+                if exit_when_verified && tool_name == "run" {
+                    if result_text.contains("exit_code=0")
+                        || result_text.contains("Command succeeded")
+                        || result_text.contains("success=true")
+                    {
+                        last_run_exit_code = Some(0);
+                    } else if result_text.contains("Command failed")
+                        || result_text.contains("success=false")
+                        || result_text.contains("exit_code=")
+                    {
+                        last_run_exit_code = Some(1);
+                    }
                 }
 
                 // Microcompaction: snip oversized tool outputs
@@ -2035,6 +1925,7 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                     daemon,
                     llm_retries: opt_int(&options, "llm_retries").unwrap_or(2) as usize,
                     llm_backoff_ms: opt_int(&options, "llm_backoff_ms").unwrap_or(2000) as u64,
+                    exit_when_verified: opt_bool(&options, "exit_when_verified"),
                 },
             )
             .await?;

@@ -2973,6 +2973,7 @@ pub async fn execute_stage_node(
                     daemon: false,
                     llm_retries: 2,
                     llm_backoff_ms: 2000,
+                    exit_when_verified: false,
                 },
             )
             .await?

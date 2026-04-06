@@ -364,6 +364,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
         });
         let done_sentinel = opt_str(&options, "done_sentinel");
         let break_unless_phase = opt_str(&options, "break_unless_phase");
+        let exit_when_verified = opt_bool(&options, "exit_when_verified");
         let mut opts = extract_llm_options(&args)?;
         let result = run_agent_loop_internal(
             &mut opts,
@@ -383,6 +384,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                 daemon,
                 llm_retries: opt_int(&options, "llm_retries").unwrap_or(2) as usize,
                 llm_backoff_ms: opt_int(&options, "llm_backoff_ms").unwrap_or(2000) as u64,
+                exit_when_verified,
             },
         )
         .await?;
