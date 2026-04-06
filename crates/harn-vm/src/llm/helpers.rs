@@ -823,12 +823,10 @@ pub(crate) fn extract_llm_options(args: &[VmValue]) -> Result<super::api::LlmCal
     let api_key = vm_resolve_api_key(&provider)?;
 
     // Default output ceiling. 4096 was tight enough for long repairs or
-    // multi-file edits to silently hit the limit mid-response; 16384 matches
-    // modern model families and does not affect cost when callers don't
-    // approach it (providers bill only on tokens actually produced). Callers
-    // that want a tighter cap (e.g. short classification/routing prompts)
-    // continue to pass max_tokens explicitly in their options dict.
-    let max_tokens = opt_int(&options, "max_tokens").unwrap_or(16_384);
+    // No hardcoded default — let the provider decide the output limit.
+    // Callers that need a tight cap (classification, enrichment, ghost-text)
+    // pass max_tokens explicitly. A value of 0 means "omit from request".
+    let max_tokens = opt_int(&options, "max_tokens").unwrap_or(0);
     let temperature = opt_float(&options, "temperature");
     let top_p = opt_float(&options, "top_p");
     let top_k = opt_int(&options, "top_k");

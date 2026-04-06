@@ -881,6 +881,10 @@ pub struct ModelPolicy {
     pub model_tier: Option<String>,
     pub temperature: Option<f64>,
     pub max_tokens: Option<i64>,
+    /// Maximum agent_loop iterations for this stage. Overrides the default 16.
+    pub max_iterations: Option<usize>,
+    /// Maximum consecutive text-only (no tool call) responses before declaring stuck.
+    pub max_nudges: Option<usize>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -2964,8 +2968,8 @@ pub async fn execute_stage_node(
                 &mut opts,
                 crate::llm::AgentLoopConfig {
                     persistent: true,
-                    max_iterations: 12,
-                    max_nudges: 3,
+                    max_iterations: node.model_policy.max_iterations.unwrap_or(16),
+                    max_nudges: node.model_policy.max_nudges.unwrap_or(3),
                     nudge: None,
                     done_sentinel: node.done_sentinel.clone(),
                     break_unless_phase: None,
@@ -3116,23 +3120,11 @@ pub fn append_audit_entry(
 
 pub fn builtin_ceiling() -> CapabilityPolicy {
     CapabilityPolicy {
-        // Runtime-owned ceiling is capability-based, not product-tool-based.
-        // Integrators define concrete tool surfaces in workflow graphs / registries.
+        // Capabilities left empty — the host capability manifest is the sole
+        // authority on which operations are available.  An explicit allowlist
+        // here would silently block any capability the host adds later.
         tools: Vec::new(),
-        capabilities: BTreeMap::from([
-            (
-                "workspace".to_string(),
-                vec![
-                    "read_text".to_string(),
-                    "write_text".to_string(),
-                    "apply_edit".to_string(),
-                    "delete".to_string(),
-                    "exists".to_string(),
-                    "list".to_string(),
-                ],
-            ),
-            ("process".to_string(), vec!["exec".to_string()]),
-        ]),
+        capabilities: BTreeMap::new(),
         workspace_roots: Vec::new(),
         side_effect_level: Some("network".to_string()),
         recursion_limit: Some(8),

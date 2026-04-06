@@ -897,9 +897,9 @@ fn extract_examples_vm(pdef: &BTreeMap<String, VmValue>) -> Vec<serde_json::Valu
 
 #[derive(Clone, Debug, serde::Serialize)]
 pub(crate) struct ToolSchema {
-    name: String,
-    description: String,
-    params: Vec<ToolParamSchema>,
+    pub(crate) name: String,
+    pub(crate) description: String,
+    pub(crate) params: Vec<ToolParamSchema>,
 }
 
 fn collect_vm_tool_schemas(
@@ -1235,14 +1235,17 @@ func TestParseExtra(t *testing.T) {
 
 Rules for the call expression:
 
-- The full form is name({ key: value, key: value }). Trailing commas are optional.
+- The full form is `name({ key: value, key: value })`. Write ONLY the function name followed by `(` — no prefix like `call:`, `tool:`, or `use:`.
+- Trailing commas are optional.
 - String values can be written with double quotes (\"...\") for single-line text, or with a template literal (opened and closed by a single backtick character) for multiline text. Template literal content is passed through raw — you do NOT need to escape newlines, double quotes, or backslashes. If you genuinely need a literal backtick character inside a template literal, escape it with a leading backslash.
 - Optional fields may be omitted entirely; required fields must be present (their type has no trailing ? in the signature).
 - Enum / literal fields accept only the literal values shown in the union type. Other strings are rejected.
 - Arrays use [a, b, c]. Nested objects use { key: value }.
 - Tool-name mentions inside a Markdown fenced code block or inside backtick-delimited inline code are treated as documentation, not invocations. Only calls outside every code-display region count.
-- After each call, you will see a <tool_result name=\"...\">...</tool_result> entry with the outcome before your next turn.
-- You can emit multiple tool calls in one response by placing each as its own top-of-line expression.
+- After each call, you will see a `[result of toolname]....[end of toolname result]` entry with the outcome before your next turn. This is NOT a tool call — do not reproduce it.
+- You can emit multiple tool calls in one response by placing each as its own top-of-line expression. Batch independent calls together.
+
+IMPORTANT: Every response MUST include at least one tool call. Progress comes from tool use, not prose. If you find yourself writing more than a few sentences without a tool call, stop and act instead.
 ";
 
 /// Result of parsing a prose-interleaved TS tool-call stream.
@@ -1330,16 +1333,30 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                 continue;
             }
             if !in_fence {
+                // Strip common model-generated prefixes before the actual
+                // tool name.  Models sometimes emit `call:edit(...)` or
+                // `tool:read(...)` instead of bare `edit(...)`.
+                let mut k = j;
+                for prefix in ["call:", "tool:", "use:"] {
+                    if text[k..].starts_with(prefix) {
+                        k += prefix.len();
+                        // Also skip optional whitespace after the prefix.
+                        while k < bytes.len() && (bytes[k] == b' ' || bytes[k] == b'\t') {
+                            k += 1;
+                        }
+                        break;
+                    }
+                }
                 // Candidate tool call at line start: <ident>( directly.
-                if let Some(name_len) = ident_length(&bytes[j..]) {
-                    if bytes.get(j + name_len) == Some(&b'(')
+                if let Some(name_len) = ident_length(&bytes[k..]) {
+                    if bytes.get(k + name_len) == Some(&b'(')
                         && known
-                            .contains(std::str::from_utf8(&bytes[j..j + name_len]).unwrap_or(""))
+                            .contains(std::str::from_utf8(&bytes[k..k + name_len]).unwrap_or(""))
                     {
-                        let name = std::str::from_utf8(&bytes[j..j + name_len])
+                        let name = std::str::from_utf8(&bytes[k..k + name_len])
                             .unwrap()
                             .to_string();
-                        match parse_ts_call_from(&text[j..], name.clone()) {
+                        match parse_ts_call_from(&text[k..], name.clone()) {
                             Ok((arguments, consumed)) => {
                                 calls.push(serde_json::json!({
                                     "id": format!("tc_{}", calls.len()),
@@ -1347,9 +1364,10 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                                     "arguments": arguments,
                                 }));
                                 // Record the call's byte range so we can
-                                // strip it from `prose` below.
-                                call_ranges.push((j, j + consumed));
-                                i = j + consumed;
+                                // strip it from `prose` below. Use j (original
+                                // line start) to also excise the prefix.
+                                call_ranges.push((j, k + consumed));
+                                i = k + consumed;
                                 at_line_start = bytes.get(i.saturating_sub(1)) == Some(&b'\n');
                                 continue;
                             }
@@ -1358,7 +1376,7 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                                 // Advance past the offending `(` so we can
                                 // keep scanning and (hopefully) find the
                                 // next well-formed call.
-                                i = j + name_len + 1;
+                                i = k + name_len + 1;
                                 at_line_start = false;
                                 continue;
                             }

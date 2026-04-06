@@ -882,10 +882,16 @@ async fn vm_call_llm_api(
 
     // Build request body based on API style
     let mut body = if resolved.is_anthropic_style {
+        // Anthropic requires max_tokens; default to 8192 if not specified.
+        let anthropic_max = if opts.max_tokens > 0 {
+            opts.max_tokens
+        } else {
+            8192
+        };
         let mut body = serde_json::json!({
             "model": model,
             "messages": opts.messages,
-            "max_tokens": opts.max_tokens,
+            "max_tokens": anthropic_max,
         });
         if let Some(ref sys) = opts.system {
             if opts.cache {
@@ -957,8 +963,12 @@ async fn vm_call_llm_api(
         let mut body = serde_json::json!({
             "model": model,
             "messages": msgs,
-            "max_tokens": opts.max_tokens,
         });
+        // Only include max_tokens when explicitly set — otherwise let the
+        // provider use its own default output limit.
+        if opts.max_tokens > 0 {
+            body["max_tokens"] = serde_json::json!(opts.max_tokens);
+        }
         if let Some(temp) = opts.temperature {
             body["temperature"] = serde_json::json!(temp);
         }
@@ -1839,7 +1849,10 @@ impl ThinkingStreamSplitter {
                     if remaining <= hold {
                         self.carry.push_str(&combined[cursor..]);
                     } else {
-                        let split = combined.len() - hold;
+                        let mut split = combined.len() - hold;
+                        while split > cursor && !combined.is_char_boundary(split) {
+                            split -= 1;
+                        }
                         self.thinking.push_str(&combined[cursor..split]);
                         self.carry.push_str(&combined[split..]);
                     }
@@ -1859,7 +1872,12 @@ impl ThinkingStreamSplitter {
                     if remaining <= hold {
                         self.carry.push_str(&combined[cursor..]);
                     } else {
-                        let split = combined.len() - hold;
+                        let mut split = combined.len() - hold;
+                        // Floor to the nearest char boundary so we never slice
+                        // inside a multi-byte UTF-8 codepoint (e.g. em-dash).
+                        while split > cursor && !combined.is_char_boundary(split) {
+                            split -= 1;
+                        }
                         visible_out.push_str(&combined[cursor..split]);
                         self.carry.push_str(&combined[split..]);
                     }

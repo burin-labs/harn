@@ -2,6 +2,46 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.39
+
+### Added
+
+- **Tool-call repair micro-executor** — when the text-based tool-call parser
+  fails to extract any valid calls from a model response, a lightweight LLM
+  call now attempts to recover the intended tool calls as structured JSON.
+  This replaces the expensive nudge→retry loop with a single cheap extraction
+  call, improving reliability for models that emit slightly malformed
+  invocations.
+- **Configurable `max_iterations` / `max_nudges` in `ModelPolicy`** — workflow
+  stage nodes can now override the default agent-loop iteration cap (16) and
+  consecutive-text-only nudge limit (3) via `model_policy`.
+
+### Changed
+
+- **Tool-call prefix stripping** — the text tool-call parser now strips
+  common model-generated prefixes (`call:`, `tool:`, `use:`) before matching
+  tool names, improving parse success for models that prepend these tokens.
+- **Tool result format** — agent-loop tool results now use
+  `[result of name]...[end of name result]` bracket notation instead of
+  XML-style `<tool_result>` tags, reducing accidental XML nesting issues.
+- **Default `max_tokens` behaviour** — `max_tokens` now defaults to "omit
+  from request" (0) instead of a hardcoded 16384, letting providers use their
+  own output limits. Anthropic-style APIs still fall back to 8192 as required
+  by that API.
+- **Contract prompt improvements** — clearer formatting rules, explicit
+  instruction that every response must include a tool call, and guidance to
+  batch independent calls.
+- **Capability ceiling simplified** — `builtin_ceiling()` now returns empty
+  capabilities/tools, deferring entirely to the host capability manifest
+  instead of maintaining a stale allowlist that could silently block
+  host-added capabilities.
+
+### Fixed
+
+- **UTF-8 char-boundary panic in `ThinkingStreamSplitter`** — the carry/split
+  logic now floors to the nearest char boundary, preventing panics on
+  multi-byte codepoints (e.g. em-dash) in streamed thinking blocks.
+
 ## v0.5.38
 
 ### Added
