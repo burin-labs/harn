@@ -8,7 +8,8 @@
 
 use super::{
     build_tool_calling_contract_prompt, collect_tool_schemas_with_registry, normalize_tool_args,
-    parse_text_tool_calls_with_tools, ComponentRegistry, TS_CALL_CONTRACT_HELP,
+    parse_native_json_tool_calls, parse_text_tool_calls_with_tools, ComponentRegistry,
+    TS_CALL_CONTRACT_HELP,
 };
 use crate::value::VmValue;
 use serde_json::json;
@@ -862,4 +863,115 @@ run({ command: "go build" })"#;
         !result.prose.contains("<<EOF"),
         "prose should not contain tool calls"
     );
+}
+
+// ─── Native JSON fallback parser ──────────────────────────────────────────
+
+fn known_tools_set() -> std::collections::BTreeSet<String> {
+    ["edit", "read", "run", "lookup", "scaffold"]
+        .into_iter()
+        .map(String::from)
+        .collect()
+}
+
+#[test]
+fn native_json_fallback_parses_openai_array_format() {
+    let known = known_tools_set();
+    let text = r#"I'll create the test file now.
+
+[{"id":"call_001","type":"function","function":{"name":"edit","arguments":"{\"action\":\"create\",\"path\":\"test.go\",\"content\":\"package main\"}"}}]"#;
+    let calls = parse_native_json_tool_calls(text, &known);
+    assert_eq!(calls.len(), 1, "should parse one call from array");
+    assert_eq!(calls[0]["name"], json!("edit"));
+    assert_eq!(calls[0]["arguments"]["action"], json!("create"));
+    assert_eq!(calls[0]["arguments"]["path"], json!("test.go"));
+    assert_eq!(calls[0]["arguments"]["content"], json!("package main"));
+}
+
+#[test]
+fn native_json_fallback_parses_multiple_calls() {
+    let known = known_tools_set();
+    let text = r#"[{"id":"call_001","type":"function","function":{"name":"edit","arguments":"{\"action\":\"create\",\"path\":\"a.go\",\"content\":\"pkg a\"}"}},{"id":"call_002","type":"function","function":{"name":"run","arguments":"{\"command\":\"go test\"}"}}]"#;
+    let calls = parse_native_json_tool_calls(text, &known);
+    assert_eq!(calls.len(), 2, "should parse both calls");
+    assert_eq!(calls[0]["name"], json!("edit"));
+    assert_eq!(calls[1]["name"], json!("run"));
+    assert_eq!(calls[1]["arguments"]["command"], json!("go test"));
+}
+
+#[test]
+fn native_json_fallback_ignores_unknown_tools() {
+    let known = known_tools_set();
+    let text = r#"[{"id":"call_001","type":"function","function":{"name":"unknown_tool","arguments":"{}"}}]"#;
+    let calls = parse_native_json_tool_calls(text, &known);
+    assert_eq!(calls.len(), 0, "should not parse unknown tools");
+}
+
+#[test]
+fn native_json_fallback_returns_empty_for_no_json() {
+    let known = known_tools_set();
+    let text = "Just some prose without any tool calls.";
+    let calls = parse_native_json_tool_calls(text, &known);
+    assert!(calls.is_empty(), "should return empty for plain text");
+}
+
+#[test]
+fn native_json_fallback_handles_object_arguments() {
+    let known = known_tools_set();
+    // Some models emit arguments as an object instead of a JSON string
+    let text = r#"[{"id":"call_001","type":"function","function":{"name":"read","arguments":{"path":"main.go"}}}]"#;
+    let calls = parse_native_json_tool_calls(text, &known);
+    assert_eq!(calls.len(), 1, "should parse call with object arguments");
+    assert_eq!(calls[0]["arguments"]["path"], json!("main.go"));
+}
+
+#[test]
+fn native_json_fallback_handles_prose_before_json() {
+    let known = known_tools_set();
+    let text = r#"Let me read the file first to understand the structure.
+
+Now I'll create the test:
+
+[{"id":"call_0v95900000000000000002","function":{"name":"edit","arguments":"{\"action\":\"replace_body\",\"path\":\"test.go\",\"function_name\":\"TestMain\",\"new_body\":\"t.Fatal(\\\"fail\\\")\"}"}}]"#;
+    let calls = parse_native_json_tool_calls(text, &known);
+    assert_eq!(calls.len(), 1, "should find call after prose");
+    assert_eq!(calls[0]["name"], json!("edit"));
+    assert_eq!(calls[0]["arguments"]["action"], json!("replace_body"));
+    assert_eq!(calls[0]["arguments"]["function_name"], json!("TestMain"));
+}
+
+#[test]
+fn text_parser_falls_through_to_native_json_fallback() {
+    // End-to-end: the main parse_text_tool_calls_with_tools should fall
+    // through to the native JSON parser when text parsing finds nothing
+    let tools = sample_tool_registry();
+    let text = r#"I'll create the file.
+
+[{"id":"call_001","type":"function","function":{"name":"edit","arguments":"{\"action\":\"create\",\"path\":\"main.go\",\"content\":\"package main\\nfunc main() {}\"}"}}]"#;
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert!(
+        result.errors.is_empty(),
+        "should not produce errors: {:?}",
+        result.errors
+    );
+    assert_eq!(
+        result.calls.len(),
+        1,
+        "should parse native JSON as fallback"
+    );
+    assert_eq!(result.calls[0]["name"], json!("edit"));
+    assert_eq!(result.calls[0]["arguments"]["action"], json!("create"));
+}
+
+#[test]
+fn text_parser_prefers_text_format_over_native_json() {
+    // If both text-format and native JSON are present, text format wins
+    let tools = sample_tool_registry();
+    let text = r#"edit({ action: "create", path: "a.go", content: "pkg a" })
+
+[{"id":"call_001","type":"function","function":{"name":"run","arguments":"{\"command\":\"go test\"}"}}]"#;
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    // Text parser should find the edit call and NOT fall through to native
+    assert_eq!(result.calls.len(), 1, "text format should take priority");
+    assert_eq!(result.calls[0]["name"], json!("edit"));
 }

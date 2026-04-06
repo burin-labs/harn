@@ -2,6 +2,29 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.43
+
+### Added
+
+- **Prose turn collapsing** — when the agent loop detects sustained prose-only
+  output (no tool calls), it now collapses prior prose messages in
+  `visible_messages` to reclaim context tokens. After 3 silent continuation
+  turns, subsequent nudge cycles collapse accumulated prose into compact
+  markers, preventing unbounded context growth from chatty model behavior.
+
+### Fixed
+
+- **Native JSON fallback parser** — the text tool parser now checks for
+  OpenAI-style `[{"id":"call_...","function":{...}}]` JSON when no text-format
+  calls are found, catching models that emit function-calling JSON despite
+  text-format instructions.
+- **Ollama empty-content retry** — transient ollama errors where the server
+  reports `eval_count` tokens but delivers no content (EOF/parser bugs) are now
+  classified as retryable instead of fatal, preventing single-point-of-failure
+  crashes in eval runs.
+- **LLM retry budget** — default retries increased from 2 to 3 for better
+  resilience with local models.
+
 ## v0.5.42
 
 ### Changed

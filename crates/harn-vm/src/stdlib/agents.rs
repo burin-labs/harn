@@ -2361,6 +2361,9 @@ async fn execute_stage_attempts(
                 });
                 last_error = Some(error_message.clone());
                 if attempt == max_attempts {
+                    let last_verification = attempts
+                        .last()
+                        .and_then(|a| a.verification.clone());
                     return Ok(ExecutedStage {
                         status: "failed".to_string(),
                         outcome: "failed".to_string(),
@@ -2368,7 +2371,7 @@ async fn execute_stage_attempts(
                         result: serde_json::json!({"status": "failed", "text": ""}),
                         artifacts: Vec::new(),
                         transcript: transcript.clone(),
-                        verification: None,
+                        verification: last_verification,
                         usage,
                         error: Some(error_message),
                         attempts,
@@ -2379,6 +2382,12 @@ async fn execute_stage_attempts(
         }
     }
 
+    // Carry the last attempt's verification into the stage result so
+    // classify_stage_outcome sees the actual verification data instead
+    // of defaulting to ok=true when verification is None.
+    let last_verification = attempts
+        .last()
+        .and_then(|a| a.verification.clone());
     Ok(ExecutedStage {
         status: "failed".to_string(),
         outcome: "failed".to_string(),
@@ -2386,7 +2395,7 @@ async fn execute_stage_attempts(
         result: serde_json::json!({"status": "failed", "text": ""}),
         artifacts: Vec::new(),
         transcript,
-        verification: None,
+        verification: last_verification,
         usage: LlmUsageRecord::default(),
         error: last_error,
         attempts,

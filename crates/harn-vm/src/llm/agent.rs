@@ -200,6 +200,9 @@ fn is_retryable_llm_error(err: &VmError) -> bool {
         || msg.contains("connection")
         || msg.contains("timed out")
         || msg.contains("timeout")
+        // Ollama transient issues
+        || msg.contains("delivered no content")
+        || msg.contains("eof")
 }
 
 /// Extract retry-after delay from error message if present (e.g. "retry-after: 5").
@@ -391,6 +394,29 @@ fn compact_malformed_assistant_turn(error_count: usize) -> String {
         "<assistant turn elided: produced {error_count} malformed tool call{plural} \
          (see parse error below). Emit a corrected call in the next turn.>"
     )
+}
+
+/// Collapse `n` trailing messages in `visible_messages` into a single compact
+/// marker.  Called when the model is in a prose-only loop to reclaim context
+/// tokens.  The recorded transcript is left untouched for debugging.
+///
+/// The function walks backwards from the end and removes the first `n`
+/// assistant or user messages it finds, then inserts one compact marker.
+fn collapse_trailing_prose_turns(visible_messages: &mut Vec<serde_json::Value>, n: usize) {
+    if n == 0 || visible_messages.len() < n {
+        return;
+    }
+    // Remove the last `n` messages (prose turns and/or nudges).
+    let start = visible_messages.len() - n;
+    visible_messages.drain(start..);
+    // Insert a compact marker so the model knows turns were elided.
+    visible_messages.push(serde_json::json!({
+        "role": "assistant",
+        "content": format!(
+            "<{n} prior prose-only turn(s) collapsed to save context. \
+             Use a tool call to make progress.>"
+        ),
+    }));
 }
 
 fn append_host_messages_to_recorded(
@@ -1783,23 +1809,49 @@ pub async fn run_agent_loop_internal(
             break;
         }
 
+        // Silent continuation for short prose: when the model emits a
+        // short text-only response (< 150 tokens, typically "thinking"
+        // statements like "Let me check..."), don't inject a nudge. Just
+        // loop back — the model sees its own text as the last assistant
+        // message and naturally continues to act. This avoids polluting
+        // context with nudge messages and the "nudge → rephrase → nudge"
+        // loop seen with chatty models.
+        //
+        // Guards:
+        //  - Only in tool-using mode (has_tools) — pure Q&A should stop
+        //  - Only for the first few text-only turns
+        //  - Skip if the model output the done_sentinel (it's finishing)
+        let output_tokens = result.output_tokens as usize;
+        if has_tools
+            && consecutive_text_only <= 3
+            && output_tokens < 150
+            && !sentinel_hit
+        {
+            // Silent continuation — no nudge, just loop back
+            continue;
+        }
+
+        // Collapse prior prose-only turns in visible_messages to save context.
+        // After the silent-continuation phase (turns 1-3), each additional
+        // prose turn wastes ~100+ tokens of "Let me think..." narration.
+        // We keep the last prose message (the model needs continuity) but
+        // replace older prose+nudge pairs with a compact marker.
+        if consecutive_text_only == 4 {
+            // First nudge after silent continuation: collapse the 3 silent
+            // prose turns into a single marker so the model doesn't see
+            // its own repeated thinking as useful context.
+            collapse_trailing_prose_turns(&mut visible_messages, 3);
+        } else if consecutive_text_only > 4 {
+            // For subsequent nudges: collapse the previous prose+nudge pair
+            // (2 messages) to avoid unbounded growth.
+            collapse_trailing_prose_turns(&mut visible_messages, 2);
+        }
+
         let nudge = custom_nudge.clone().unwrap_or_else(|| {
-            if consecutive_text_only == 1 {
-                if tool_format == "native" {
-                    "You must use tools to complete this task. Start with the best available tool."
-                        .to_string()
-                } else {
-                    "You must actually call a tool to make progress. Emit a top-of-line call expression, NOT prose. Example:\nedit({\n    action: \"create\",\n    path: \"a.go\",\n    content: <<EOF\npackage a\nEOF\n})".to_string()
-                }
-            } else if consecutive_text_only <= 3 {
-                if tool_format == "native" {
-                    "STOP explaining and USE TOOLS NOW. Include a concrete tool call."
-                        .to_string()
-                } else {
-                    "STOP explaining and call a tool NOW. A plain-English plan is a failure here. Your next response must begin with a tool call — e.g. `read({ path: \"...\" })` or:\nedit({\n    action: \"create\",\n    path: \"...\",\n    content: <<EOF\n...\nEOF\n})".to_string()
-                }
+            if consecutive_text_only <= 5 {
+                "Continue — when you're ready, include a tool call.".to_string()
             } else {
-                "FINAL WARNING: call a tool now or the task will fail.".to_string()
+                "Ready to act? Include a tool call in your next response to make progress.".to_string()
             }
         });
         append_message_to_contexts(
@@ -1868,7 +1920,7 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
             let options = args.get(2).and_then(|a| a.as_dict()).cloned();
             let max_iterations = opt_int(&options, "max_iterations").unwrap_or(50) as usize;
             let persistent = opt_bool(&options, "persistent");
-            let max_nudges = opt_int(&options, "max_nudges").unwrap_or(3) as usize;
+            let max_nudges = opt_int(&options, "max_nudges").unwrap_or(8) as usize;
             let custom_nudge = opt_str(&options, "nudge");
             let tool_retries = opt_int(&options, "tool_retries").unwrap_or(0) as usize;
             let tool_backoff_ms = opt_int(&options, "tool_backoff_ms").unwrap_or(1000) as u64;
@@ -1963,7 +2015,7 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                     context_callback,
                     policy,
                     daemon,
-                    llm_retries: opt_int(&options, "llm_retries").unwrap_or(2) as usize,
+                    llm_retries: opt_int(&options, "llm_retries").unwrap_or(3) as usize,
                     llm_backoff_ms: opt_int(&options, "llm_backoff_ms").unwrap_or(2000) as u64,
                     exit_when_verified: opt_bool(&options, "exit_when_verified"),
                 },

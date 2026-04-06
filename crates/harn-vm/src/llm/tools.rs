@@ -1427,11 +1427,98 @@ pub(crate) fn parse_text_tool_calls_with_tools(
         collapse_blank_lines(&buf).trim().to_string()
     };
 
+    // Fallback: if no text-format calls were found, check whether the model
+    // emitted native OpenAI-style function calling JSON as raw text. This
+    // happens when models trained on function calling ignore the text-format
+    // instructions and emit `[{"id":"call_...","function":{...}}]` instead.
+    // Rather than wasting an iteration nudging the model, parse and execute
+    // the calls directly.
+    if calls.is_empty() && errors.is_empty() {
+        let native_calls = parse_native_json_tool_calls(text, &known);
+        if !native_calls.is_empty() {
+            return TextToolParseResult {
+                calls: native_calls,
+                errors: Vec::new(),
+                prose: String::new(),
+            };
+        }
+    }
+
     TextToolParseResult {
         calls,
         errors,
         prose,
     }
+}
+
+/// Detect and parse OpenAI-style native function calling JSON that a model
+/// emitted as raw text. Looks for `[{"id":"call_...","function":{"name":"...",
+/// "arguments":"..."}}]` patterns (array or single object) embedded anywhere
+/// in the text.
+fn parse_native_json_tool_calls(
+    text: &str,
+    known_tools: &BTreeSet<String>,
+) -> Vec<serde_json::Value> {
+    let mut results = Vec::new();
+
+    // Find the first `[{` or `{"id":"call_` in the text
+    let json_start = text.find("[{\"id\":")
+        .or_else(|| text.find("[{\"id\":"))
+        .or_else(|| text.find("{\"id\":\"call_"));
+
+    let Some(start) = json_start else {
+        return results;
+    };
+
+    // Try to parse as JSON array or single object
+    let json_text = &text[start..];
+    let parsed: Option<Vec<serde_json::Value>> = serde_json::from_str(json_text)
+        .ok()
+        .or_else(|| {
+            // Try single object
+            serde_json::from_str::<serde_json::Value>(json_text)
+                .ok()
+                .map(|v| vec![v])
+        })
+        .or_else(|| {
+            // The JSON might have trailing text. Try to find the closing bracket.
+            for end in (start + 10..text.len()).rev() {
+                let slice = &text[start..=end];
+                if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(slice) {
+                    return Some(arr);
+                }
+            }
+            None
+        });
+
+    let Some(items) = parsed else {
+        return results;
+    };
+
+    for item in items {
+        let func = item.get("function").and_then(|f| f.as_object());
+        let Some(func) = func else { continue };
+        let name = func.get("name").and_then(|n| n.as_str()).unwrap_or("");
+        if name.is_empty() || !known_tools.contains(name) {
+            continue;
+        }
+        // Arguments may be a JSON string (OpenAI format) or an object
+        let arguments = match func.get("arguments") {
+            Some(serde_json::Value::String(s)) => {
+                serde_json::from_str(s).unwrap_or(serde_json::Value::Object(Default::default()))
+            }
+            Some(obj @ serde_json::Value::Object(_)) => obj.clone(),
+            _ => serde_json::Value::Object(Default::default()),
+        };
+        let call_id = item.get("id").and_then(|i| i.as_str()).unwrap_or("native_fallback");
+        results.push(serde_json::json!({
+            "id": call_id,
+            "name": name,
+            "arguments": arguments,
+        }));
+    }
+
+    results
 }
 
 fn unwrap_exact_code_wrapper(text: &str) -> Option<&str> {
