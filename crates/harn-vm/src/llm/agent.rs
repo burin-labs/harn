@@ -993,11 +993,18 @@ pub async fn run_agent_loop_internal(
                 );
                 let feedback = format!(
                     "Your tool call could not be parsed: {error_summary}\n\n\
-                     Common fix: if your template literal (backtick string) contains \
-                     a literal backtick character (e.g. Go raw strings), escape it as \\` \
-                     or use double-quoted strings with \\n for newlines instead. \
-                     Alternatively, use edit({{ action: \"create\", path: \"...\", \
-                     content: \"line1\\nline2\\n...\" }}) with double quotes."
+                     Use heredoc syntax for multiline content — it requires NO escaping:\n\
+                     edit({{\n\
+                         action: \"create\",\n\
+                         path: \"...\",\n\
+                         content: <<EOF\n\
+                     package main\n\
+                     // backticks, quotes, backslashes — all fine inside heredoc\n\
+                     EOF\n\
+                     }})\n\n\
+                     Do NOT use backtick template literals for code that contains \
+                     backtick characters (Go raw strings, Rust raw strings, shell). \
+                     Heredoc avoids all escaping issues."
                 );
                 append_message_to_contexts(
                     &mut visible_messages,
@@ -1784,7 +1791,7 @@ pub async fn run_agent_loop_internal(
                     "STOP explaining and USE TOOLS NOW. Include a concrete tool call."
                         .to_string()
                 } else {
-                    "STOP explaining and call a tool NOW. A plain-English plan is a failure here. Your next response must begin with a TypeScript tool call expression — e.g. `read({ path: \"...\" })` or `edit({ action: \"create\", path: \"...\", content: `...` })` — not narration.".to_string()
+                    "STOP explaining and call a tool NOW. A plain-English plan is a failure here. Your next response must begin with a tool call — e.g. `read({ path: \"...\" })` or:\nedit({\n    action: \"create\",\n    path: \"...\",\n    content: <<EOF\n...\nEOF\n})".to_string()
                 }
             } else {
                 "FINAL WARNING: call a tool now or the task will fail.".to_string()
