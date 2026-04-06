@@ -1595,9 +1595,14 @@ pub async fn run_agent_loop_internal(
                 consecutive_text_only = 0;
             }
 
-            // Auto-compaction check after tool processing
+            // Auto-compaction check after tool processing.
+            // Include the system prompt + tool definitions in the estimate
+            // since they consume context window alongside messages.
             if let Some(ref ac) = auto_compact {
-                let est = crate::orchestration::estimate_message_tokens(&visible_messages);
+                let mut est = crate::orchestration::estimate_message_tokens(&visible_messages);
+                if let Some(ref sys) = opts.system {
+                    est += sys.len() / 4;
+                }
                 if est > ac.token_threshold {
                     let mut compact_opts = opts.clone();
                     compact_opts.messages = visible_messages.clone();

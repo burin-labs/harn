@@ -1239,7 +1239,7 @@ Rules:
 - Form: `name({ key: value })`. No `call:` or `tool:` prefix.
 - Multiline strings: use `<<TAG` ... `TAG` (heredoc). Content is raw — no escaping. TAG must be alone on its closing line.
 - Single-line strings: use double quotes `\"...\"`.
-- Backtick template literals also work but require escaping literal backticks as `\\``. Prefer heredoc when content may contain backticks.
+- Backtick template literals work for simple strings but BREAK when content contains backtick characters (Go raw strings, Rust, shell). Always use heredoc for code.
 - Trailing commas optional. Arrays: `[a, b]`. Nested objects: `{ k: v }`.
 - Tool mentions inside Markdown fenced code blocks are documentation, not invocations.
 - Prefer tool calls over prose. When you have work to do, act with tools rather than explaining.
