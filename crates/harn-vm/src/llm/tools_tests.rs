@@ -652,7 +652,7 @@ EOF
 })"#;
     let result = parse_text_tool_calls_with_tools(text, Some(&tools));
     assert!(
-        result.calls.is_empty() || result.errors.len() > 0,
+        result.calls.is_empty() || !result.errors.is_empty(),
         "missing tag should error"
     );
 }

@@ -988,9 +988,9 @@ mod tests {
             ),
         ]);
         let partial = schema_partial_dict(&schema);
-        assert!(partial.get("required").is_none());
+        assert!(!partial.contains_key("required"));
         // Properties should still be there
-        assert!(partial.get("properties").is_some());
+        assert!(partial.contains_key("properties"));
     }
 
     #[test]
@@ -1009,7 +1009,7 @@ mod tests {
             ("properties", make_vm_dict(vec![("nested", inner)])),
         ]);
         let partial = schema_partial_dict(&schema);
-        assert!(partial.get("required").is_none());
+        assert!(!partial.contains_key("required"));
         // Nested properties should also lose their "required"
         if let Some(props) = partial.get("properties").and_then(|v| v.as_dict()) {
             if let Some(nested) = props.get("nested").and_then(|v| v.as_dict()) {
