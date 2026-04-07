@@ -8,4 +8,5 @@ tree-sitter-harn/*.dylib
 tree-sitter-harn/*.so
 tree-sitter-harn/*.dll
 .harn/
+.claude/
 meta_scratch/
