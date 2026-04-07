@@ -72,7 +72,8 @@ impl super::Vm {
                     "reverse" => Ok(VmValue::String(Rc::from(
                         s.chars().rev().collect::<String>(),
                     ))),
-                    "pad_left" => {
+                    "pad_left" | "pad_right" => {
+                        let left = method == "pad_left";
                         let width = args.first().and_then(|a| a.as_int()).unwrap_or(0) as usize;
                         let pad_char = args
                             .get(1)
@@ -85,23 +86,11 @@ impl super::Vm {
                         } else {
                             let padding: String =
                                 std::iter::repeat_n(pad_char, width - current_len).collect();
-                            Ok(VmValue::String(Rc::from(format!("{padding}{s}"))))
-                        }
-                    }
-                    "pad_right" => {
-                        let width = args.first().and_then(|a| a.as_int()).unwrap_or(0) as usize;
-                        let pad_char = args
-                            .get(1)
-                            .map(|a| a.display())
-                            .and_then(|s| s.chars().next())
-                            .unwrap_or(' ');
-                        let current_len = s.chars().count();
-                        if current_len >= width {
-                            Ok(VmValue::String(Rc::clone(s)))
-                        } else {
-                            let padding: String =
-                                std::iter::repeat_n(pad_char, width - current_len).collect();
-                            Ok(VmValue::String(Rc::from(format!("{s}{padding}"))))
+                            if left {
+                                Ok(VmValue::String(Rc::from(format!("{padding}{s}"))))
+                            } else {
+                                Ok(VmValue::String(Rc::from(format!("{s}{padding}"))))
+                            }
                         }
                     }
                     "trim_start" => Ok(VmValue::String(Rc::from(s.trim_start()))),

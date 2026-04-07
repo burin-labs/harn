@@ -1,7 +1,40 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
+use std::sync::{Mutex, OnceLock};
 
 use crate::value::{VmError, VmValue};
+
+// =============================================================================
+// Provider API-key availability cache
+// =============================================================================
+
+/// Cache of provider name → whether a usable API key is available.
+/// Populated lazily on first check per provider and reused for the process
+/// lifetime (env vars don't change mid-run).
+static PROVIDER_KEY_CACHE: OnceLock<Mutex<HashMap<String, bool>>> = OnceLock::new();
+
+/// Check whether `provider` has a usable API key (or needs none).
+/// Results are cached so repeated resolution attempts for the same provider
+/// don't redundantly probe environment variables.
+pub(crate) fn provider_key_available(provider: &str) -> bool {
+    let cache = PROVIDER_KEY_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut map = cache.lock().unwrap();
+    if let Some(&available) = map.get(provider) {
+        return available;
+    }
+    // Probe: try resolving the key — if it succeeds the provider is usable.
+    let available = vm_resolve_api_key(provider).is_ok();
+    map.insert(provider.to_string(), available);
+    available
+}
+
+/// Clear the provider key cache (for tests that manipulate env vars).
+#[cfg(test)]
+pub(crate) fn reset_provider_key_cache() {
+    if let Some(cache) = PROVIDER_KEY_CACHE.get() {
+        cache.lock().unwrap().clear();
+    }
+}
 
 const TRANSCRIPT_TYPE: &str = "transcript";
 const TRANSCRIPT_ASSET_TYPE: &str = "transcript_asset";
@@ -76,13 +109,31 @@ pub(crate) fn vm_resolve_provider(options: &Option<BTreeMap<String, VmValue>>) -
     {
         if let Some((model, provider)) = llm_config::resolve_tier_model(&tier, None) {
             let _ = model;
-            return provider;
+            if provider_key_available(&provider) {
+                return provider;
+            }
+            // Tier provider has no key — fall through to defaults.
         }
     }
     if let Ok(m) = std::env::var("HARN_LLM_MODEL") {
         return llm_config::infer_provider(&m);
     }
-    "anthropic".to_string()
+    // Default to anthropic — but if the key is missing, try providers that
+    // don't need one (ollama, local) before giving up.  This avoids noisy
+    // "Missing API key" errors when the user is running with a local model
+    // and a sub-pipeline (e.g. enrichment) doesn't inherit the provider env.
+    let default = "anthropic";
+    if provider_key_available(default) {
+        return default.to_string();
+    }
+    for fallback in ["ollama", "local"] {
+        if provider_key_available(fallback) {
+            return fallback.to_string();
+        }
+    }
+    // No provider has a key — return the default so the caller gets the
+    // usual descriptive error from vm_resolve_api_key.
+    default.to_string()
 }
 
 pub(crate) fn vm_resolve_model(
@@ -823,21 +874,41 @@ pub(crate) fn extract_llm_options(args: &[VmValue]) -> Result<super::api::LlmCal
     let model = vm_resolve_model(&options, &provider);
     let api_key = vm_resolve_api_key(&provider)?;
 
-    // Default output ceiling. 4096 was tight enough for long repairs or
-    // No hardcoded default — let the provider decide the output limit.
-    // Callers that need a tight cap (classification, enrichment, ghost-text)
-    // pass max_tokens explicitly. A value of 0 means "omit from request".
-    let max_tokens = opt_int(&options, "max_tokens").unwrap_or(0);
-    let temperature = opt_float(&options, "temperature");
-    let top_p = opt_float(&options, "top_p");
-    let top_k = opt_int(&options, "top_k");
+    // Default output ceiling. A value of 0 means "omit from request" (let
+    // provider decide). 8192 prevents degenerate repetition loops while
+    // leaving headroom on providers that allocate output tokens to internal
+    // reasoning (e.g. DeepInfra's 16K limit for Qwen models).
+    // Apply model_defaults from providers.toml as fallbacks for parameters
+    // the caller didn't specify. This ensures recommended defaults (e.g.
+    // presence_penalty=1.5 for Qwen) are applied automatically.
+    let model_defaults = crate::llm_config::model_params(&model);
+    let default_float =
+        |key: &str| -> Option<f64> { model_defaults.get(key).and_then(|v| v.as_float()) };
+    let default_int =
+        |key: &str| -> Option<i64> { model_defaults.get(key).and_then(|v| v.as_integer()) };
+
+    let max_tokens = opt_int(&options, "max_tokens").unwrap_or(16384);
+    let temperature = opt_float(&options, "temperature").or_else(|| default_float("temperature"));
+    let top_p = opt_float(&options, "top_p").or_else(|| default_float("top_p"));
+    let top_k = opt_int(&options, "top_k").or_else(|| default_int("top_k"));
     let stop = opt_str_list(&options, "stop");
     let seed = opt_int(&options, "seed");
-    let frequency_penalty = opt_float(&options, "frequency_penalty");
-    let presence_penalty = opt_float(&options, "presence_penalty");
+    let frequency_penalty =
+        opt_float(&options, "frequency_penalty").or_else(|| default_float("frequency_penalty"));
+    let presence_penalty =
+        opt_float(&options, "presence_penalty").or_else(|| default_float("presence_penalty"));
     let response_format = opt_str(&options, "response_format");
     let timeout = opt_int(&options, "timeout").map(|t| t as u64);
     let cache = opt_bool(&options, "cache");
+    let stream = options
+        .as_ref()
+        .and_then(|o| o.get("stream"))
+        .map(|v| v.is_truthy())
+        .unwrap_or_else(|| {
+            std::env::var("HARN_LLM_STREAM")
+                .map(|v| v != "0" && v.to_lowercase() != "false")
+                .unwrap_or(true)
+        });
     let output_validation = opt_str(&options, "output_validation");
 
     // Thinking: bool or {budget_tokens: N}
@@ -953,6 +1024,7 @@ pub(crate) fn extract_llm_options(args: &[VmValue]) -> Result<super::api::LlmCal
         tool_choice,
         cache,
         timeout,
+        stream,
         provider_overrides,
     };
 
@@ -1069,6 +1141,7 @@ mod tests {
             std::env::remove_var("HARN_LLM_PROVIDER");
             std::env::remove_var("HARN_LLM_MODEL");
         }
+        reset_provider_key_cache();
 
         assert_eq!(vm_resolve_provider(&None), "local");
         assert_eq!(vm_resolve_model(&None, "local"), "qwen2.5-coder-32b");
@@ -1092,5 +1165,6 @@ mod tests {
                 None => std::env::remove_var("HARN_LLM_MODEL"),
             }
         }
+        reset_provider_key_cache();
     }
 }

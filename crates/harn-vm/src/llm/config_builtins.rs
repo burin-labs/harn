@@ -170,14 +170,10 @@ pub(crate) fn register_config_builtins(vm: &mut Vm) {
                 } else {
                     format!("{provider_name} returned HTTP {status}: {body_text}")
                 };
-                let mut dict = BTreeMap::new();
-                dict.insert("valid".to_string(), VmValue::Bool(valid));
-                dict.insert("message".to_string(), VmValue::String(Rc::from(message)));
                 let mut meta = BTreeMap::new();
                 meta.insert("status".to_string(), VmValue::Int(status as i64));
                 meta.insert("url".to_string(), VmValue::String(Rc::from(url)));
-                dict.insert("metadata".to_string(), VmValue::Dict(Rc::new(meta)));
-                Ok(VmValue::Dict(Rc::new(dict)))
+                Ok(healthcheck_result_with_meta(valid, &message, meta))
             }
             Err(e) => Ok(healthcheck_result(
                 false,
@@ -232,14 +228,20 @@ fn provider_def_to_vm_value(pdef: &llm_config::ProviderDef) -> VmValue {
     VmValue::Dict(Rc::new(dict))
 }
 
-/// Build a healthcheck result dict.
-fn healthcheck_result(valid: bool, message: &str) -> VmValue {
+/// Build a healthcheck result dict with optional metadata.
+fn healthcheck_result_with_meta(
+    valid: bool,
+    message: &str,
+    meta: BTreeMap<String, VmValue>,
+) -> VmValue {
     let mut dict = BTreeMap::new();
     dict.insert("valid".to_string(), VmValue::Bool(valid));
     dict.insert("message".to_string(), VmValue::String(Rc::from(message)));
-    dict.insert(
-        "metadata".to_string(),
-        VmValue::Dict(Rc::new(BTreeMap::new())),
-    );
+    dict.insert("metadata".to_string(), VmValue::Dict(Rc::new(meta)));
     VmValue::Dict(Rc::new(dict))
+}
+
+/// Build a healthcheck result dict.
+fn healthcheck_result(valid: bool, message: &str) -> VmValue {
+    healthcheck_result_with_meta(valid, message, BTreeMap::new())
 }

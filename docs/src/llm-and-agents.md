@@ -111,6 +111,7 @@ println(result.text)
 | `tools` | list | nil | Tool definitions |
 | `tool_choice` | string/dict | `"auto"` | `"auto"`, `"none"`, `"required"`, or `{name: "tool"}` |
 | `cache` | bool | `false` | Enable prompt caching (Anthropic) |
+| `stream` | bool | `true` | Use streaming SSE transport. Set `false` for synchronous request/response. Env: `HARN_LLM_STREAM` |
 | `timeout` | int | `120` | Request timeout in seconds |
 | `messages` | list | nil | Full message list (overrides prompt) |
 | `transcript` | dict | nil | Continue from a previous transcript; prompt is appended as the next user turn |
@@ -197,6 +198,9 @@ Same as `llm_call`, plus additional options:
 | `tool_backoff_ms` | int | `1000` | Base backoff delay in ms for tool retries (doubles each attempt) |
 | `context_callback` | closure | nil | Per-turn hook that can rewrite prompt-visible `messages` and/or the effective `system` prompt before the next LLM call |
 | `context_filter` | closure | nil | Alias for `context_callback` |
+| `loop_detect_warn` | int | `2` | Consecutive identical tool calls before appending a redirection hint |
+| `loop_detect_block` | int | `3` | Consecutive identical tool calls before replacing the result with a hard redirect |
+| `loop_detect_skip` | int | `4` | Consecutive identical tool calls before skipping execution entirely |
 
 Default nudge message:
 

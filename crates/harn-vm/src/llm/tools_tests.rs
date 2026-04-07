@@ -161,17 +161,24 @@ fn escapes_inside_template_literals_are_honored() {
 }
 
 #[test]
-fn ignores_tool_name_mentions_inside_markdown_code_fences() {
+fn parses_tool_calls_inside_markdown_code_fences() {
     let tools = sample_tool_registry();
-    let text = "Here's how to use it in prose:\n```\nedit({ action: \"create\", path: \"oops.go\" })\n```\nNow the real call:\nedit({ action: \"create\", path: \"real.go\" })\n";
+    let text = "Here's how to use it:\n```python\nedit({ action: \"create\", path: \"fenced.go\" })\n```\nAnd another:\nedit({ action: \"create\", path: \"bare.go\" })\n";
     let result = parse_text_tool_calls_with_tools(text, Some(&tools));
     assert!(result.errors.is_empty());
     assert_eq!(
         result.calls.len(),
-        1,
-        "only the call outside the fence counts"
+        2,
+        "both fenced and bare calls are parsed"
     );
-    assert_eq!(result.calls[0]["arguments"]["path"], json!("real.go"));
+    assert_eq!(result.calls[0]["arguments"]["path"], json!("fenced.go"));
+    assert_eq!(result.calls[1]["arguments"]["path"], json!("bare.go"));
+    // Fence lines should be stripped from prose when they bracket tool calls
+    assert!(
+        !result.prose.contains("```"),
+        "fence markers should be stripped from prose: {:?}",
+        result.prose
+    );
 }
 
 #[test]
@@ -368,7 +375,7 @@ fn contract_prompt_help_block_has_ts_call_example() {
     // The help constant is included verbatim in text mode and must show a
     // real TS call example, not the old Python/heredoc syntax.
     assert!(TS_CALL_CONTRACT_HELP.contains("edit({"));
-    assert!(TS_CALL_CONTRACT_HELP.contains("template literal"));
+    assert!(TS_CALL_CONTRACT_HELP.contains("heredoc"));
     assert!(!TS_CALL_CONTRACT_HELP.contains("```call"));
     assert!(!TS_CALL_CONTRACT_HELP.contains("<<'EOF'"));
 }

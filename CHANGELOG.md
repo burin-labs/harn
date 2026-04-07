@@ -2,6 +2,69 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.44
+
+### Added
+
+- **`unused-function` lint rule** — the linter now warns when a non-pub,
+  non-method function is declared but never called. Functions prefixed with
+  `_` are exempt. Includes suggestion to remove or prefix.
+- **Tool loop detection** — the agent loop tracks repeated identical tool
+  calls (same tool + args + result) and intervenes with increasingly forceful
+  redirections: warn (append hint), block (replace result), skip (don't
+  execute). Configurable via `loop_detect_warn`, `loop_detect_block`, and
+  `loop_detect_skip` options (defaults: 2, 3, 4).
+- **Compact tool schemas** — tools can set `compact: true` to render as
+  one-liner summaries in the prompt instead of full TypeScript declarations,
+  reducing token usage for well-known tools.
+- **`stream` option** — `llm_call` and `agent_loop` accept `stream: false`
+  to use synchronous request/response instead of SSE streaming. Default:
+  `true`. Environment variable: `HARN_LLM_STREAM`.
+- **Custom `nudge` in ModelPolicy** — workflow stage model policies can
+  specify a custom nudge message via the `nudge` field.
+- **Provider key cache** — API key availability is cached per-provider for
+  the process lifetime, avoiding redundant environment variable probes.
+- **Provider auto-fallback** — when the default provider (anthropic) has no
+  API key, the runtime falls back to `ollama` or `local` if available.
+- **Model-specific parameter defaults** — `providers.toml` `model_params`
+  entries (temperature, presence_penalty, etc.) are applied automatically
+  when the caller doesn't specify them.
+- **Tool calls inside Markdown fences** — the text tool parser now extracts
+  tool calls from inside `` ``` `` fences instead of ignoring them.
+- **Angle-bracket tool call wrapping** — handles `<tool(...)>` syntax
+  emitted by some models (Qwen).
+- **Thinking tag stripping** — leaked `<think>`/`</think>` tags from
+  Qwen/Gemma models are stripped before tool-call parsing.
+- **Done sentinel requires tool use** — the `##DONE##` sentinel is only
+  honoured after the model has made at least one tool call, preventing
+  premature exit without action.
+
+### Changed
+
+- **Default `max_tokens`** — raised from 0 (provider default) to 16384 to
+  prevent degenerate repetition loops while leaving headroom for reasoning.
+- **Simplified nudge handling** — prose-only turn collapsing and multi-tier
+  nudge messages replaced with a single concise nudge.
+- **Tool-call contract prompt** — shortened the how-to-call-tools
+  instructions for lower prompt overhead.
+
+### Fixed
+
+- **OpenRouter `enable_thinking`** — skipped for OpenRouter providers where
+  it causes empty all-thinking responses.
+- **OpenRouter duplicate `finish_reason`** — only the first `finish_reason`
+  SSE chunk is honoured, preventing in-progress tool calls from being
+  truncated.
+- **Ollama tuning defaults** — `min_p=0.05`, `repeat_penalty=1.05`, and
+  `num_predict` from `max_tokens` are set automatically for Ollama to
+  reduce garbage tokens and unbounded generation.
+
+### Internal
+
+- Deduplicated HTTP verb handlers, `collect_harn_files`, crypto hash
+  registration, JSON validation helpers, error category checks,
+  `pad_left`/`pad_right`, and LLM fallback provider logic.
+
 ## v0.5.43
 
 ### Added

@@ -382,9 +382,12 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                 context_callback,
                 policy,
                 daemon,
-                llm_retries: opt_int(&options, "llm_retries").unwrap_or(2) as usize,
+                llm_retries: opt_int(&options, "llm_retries").unwrap_or(3) as usize,
                 llm_backoff_ms: opt_int(&options, "llm_backoff_ms").unwrap_or(2000) as u64,
                 exit_when_verified,
+                loop_detect_warn: opt_int(&options, "loop_detect_warn").unwrap_or(2) as usize,
+                loop_detect_block: opt_int(&options, "loop_detect_block").unwrap_or(3) as usize,
+                loop_detect_skip: opt_int(&options, "loop_detect_skip").unwrap_or(4) as usize,
             },
         )
         .await?;
@@ -487,6 +490,7 @@ mod tests {
             native_tools: None,
             tool_choice: None,
             cache: false,
+            stream: true,
             timeout: None,
             provider_overrides: None,
         }

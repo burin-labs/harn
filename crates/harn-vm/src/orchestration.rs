@@ -1095,6 +1095,9 @@ pub struct ModelPolicy {
     pub max_iterations: Option<usize>,
     /// Maximum consecutive text-only (no tool call) responses before declaring stuck.
     pub max_nudges: Option<usize>,
+    /// Custom nudge message injected when the model produces text without tool calls.
+    /// If omitted, the VM uses a generic "Continue — use a tool call" message.
+    pub nudge: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -3243,7 +3246,7 @@ pub async fn execute_stage_node(
                     persistent: true,
                     max_iterations: node.model_policy.max_iterations.unwrap_or(16),
                     max_nudges: node.model_policy.max_nudges.unwrap_or(3),
-                    nudge: None,
+                    nudge: node.model_policy.nudge.clone(),
                     done_sentinel: node.done_sentinel.clone(),
                     break_unless_phase: None,
                     tool_retries: 0,
@@ -3256,6 +3259,9 @@ pub async fn execute_stage_node(
                     llm_retries: 2,
                     llm_backoff_ms: 2000,
                     exit_when_verified: false,
+                    loop_detect_warn: 2,
+                    loop_detect_block: 3,
+                    loop_detect_skip: 4,
                 },
             )
             .await?

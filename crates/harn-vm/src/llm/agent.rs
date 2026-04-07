@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use serde::Deserialize;
@@ -15,6 +16,140 @@ use super::tools::{
     normalize_tool_args, parse_text_tool_calls_with_tools,
 };
 use super::trace::{trace_llm_call, LlmTraceEntry};
+
+// ---------------------------------------------------------------------------
+// Tool loop detection
+// ---------------------------------------------------------------------------
+// Tracks repeated tool calls with identical arguments and results to detect
+// stuck loops.  When the model calls the same tool with the same args and
+// gets the same result N times in a row, it's stuck.  We intervene with
+// increasingly forceful messages to redirect it.
+
+/// Hash a serde_json::Value deterministically for dedup purposes.
+fn stable_hash(val: &serde_json::Value) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    let canonical = serde_json::to_string(val).unwrap_or_default();
+    canonical.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn stable_hash_str(s: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    s.hash(&mut hasher);
+    hasher.finish()
+}
+
+struct ToolCallTracker {
+    /// (tool_name, args_hash) -> (consecutive_count, last_result_hash)
+    entries: HashMap<(String, u64), (usize, u64)>,
+    /// Thresholds for intervention tiers
+    warn_threshold: usize,
+    block_threshold: usize,
+    skip_threshold: usize,
+}
+
+/// What the tracker recommends for a given tool call.
+enum LoopIntervention {
+    /// No loop detected — proceed normally.
+    Proceed,
+    /// Warn: append a redirection hint after the tool result.
+    Warn { count: usize },
+    /// Block: replace the result with a hard redirect, still execute to track.
+    Block { count: usize },
+    /// Skip: do not execute, inject a skip message.
+    Skip { count: usize },
+}
+
+impl ToolCallTracker {
+    fn new(warn: usize, block: usize, skip: usize) -> Self {
+        Self {
+            entries: HashMap::new(),
+            warn_threshold: warn,
+            block_threshold: block,
+            skip_threshold: skip,
+        }
+    }
+
+    /// Check if a tool call is a repeated loop.  Call BEFORE execution.
+    fn check(&self, tool_name: &str, args_hash: u64) -> LoopIntervention {
+        let key = (tool_name.to_string(), args_hash);
+        if let Some(&(count, _result_hash)) = self.entries.get(&key) {
+            // count is how many times we've ALREADY seen this exact call
+            // with an identical result.  The thresholds apply to the
+            // upcoming call number (count + 1).
+            let next = count + 1;
+            if next >= self.skip_threshold {
+                return LoopIntervention::Skip { count: next };
+            }
+            if next >= self.block_threshold {
+                return LoopIntervention::Block { count: next };
+            }
+            if next >= self.warn_threshold {
+                return LoopIntervention::Warn { count: next };
+            }
+        }
+        LoopIntervention::Proceed
+    }
+
+    /// Record a tool call result.  Returns the intervention to apply
+    /// based on whether the result is new or identical to the last one.
+    fn record(&mut self, tool_name: &str, args_hash: u64, result_hash: u64) -> LoopIntervention {
+        let key = (tool_name.to_string(), args_hash);
+        if let Some(entry) = self.entries.get_mut(&key) {
+            if entry.1 == result_hash {
+                // Same args, same result — stuck loop
+                entry.0 += 1;
+                let count = entry.0;
+                if count >= self.skip_threshold {
+                    return LoopIntervention::Skip { count };
+                }
+                if count >= self.block_threshold {
+                    return LoopIntervention::Block { count };
+                }
+                if count >= self.warn_threshold {
+                    return LoopIntervention::Warn { count };
+                }
+            } else {
+                // Same args, different result — progress was made, reset
+                entry.0 = 1;
+                entry.1 = result_hash;
+            }
+        } else {
+            self.entries.insert(key, (1, result_hash));
+        }
+        LoopIntervention::Proceed
+    }
+}
+
+fn loop_intervention_message(
+    tool_name: &str,
+    result_text: &str,
+    intervention: &LoopIntervention,
+) -> Option<String> {
+    match intervention {
+        LoopIntervention::Proceed => None,
+        LoopIntervention::Warn { count, .. } => {
+            let first_line = result_text.lines().next().unwrap_or("(empty)");
+            Some(format!(
+                "\n[LOOP DETECTED] This exact {tool_name}() call has produced the same result {count} times. \
+                 The result says: \"{first_line}\". \
+                 Try a DIFFERENT tool or DIFFERENT parameters."
+            ))
+        }
+        LoopIntervention::Block { count } => Some(format!(
+            "BLOCKED: {tool_name}() has failed {count} times identically. \
+                 You MUST use a different approach. \
+                 Read the Available tools section and pick a different strategy."
+        )),
+        LoopIntervention::Skip { count } => Some(format!(
+            "BLOCKED: {tool_name}() was NOT executed (repeated {count} times identically). \
+                 This call will not be executed again with these arguments. \
+                 You MUST change your approach NOW."
+        )),
+    }
+}
 
 fn next_call_id() -> String {
     uuid::Uuid::now_v7().to_string()
@@ -171,6 +306,15 @@ pub struct AgentLoopConfig {
     /// call returned exit code 0.  If the model emits the sentinel without a
     /// passing verification, the loop injects a corrective and continues.
     pub exit_when_verified: bool,
+    /// Tool loop detection thresholds.  When the same tool+args produces
+    /// the same result N consecutive times, the loop intervenes:
+    ///   warn (default 2):  append a redirection hint
+    ///   block (default 3): replace result with hard redirect
+    ///   skip (default 4):  don't execute, inject skip message
+    /// Set all to 0 to disable loop detection.
+    pub loop_detect_warn: usize,
+    pub loop_detect_block: usize,
+    pub loop_detect_skip: usize,
 }
 
 /// Classify whether a VmError from an LLM call is transient and worth retrying.
@@ -394,29 +538,6 @@ fn compact_malformed_assistant_turn(error_count: usize) -> String {
         "<assistant turn elided: produced {error_count} malformed tool call{plural} \
          (see parse error below). Emit a corrected call in the next turn.>"
     )
-}
-
-/// Collapse `n` trailing messages in `visible_messages` into a single compact
-/// marker.  Called when the model is in a prose-only loop to reclaim context
-/// tokens.  The recorded transcript is left untouched for debugging.
-///
-/// The function walks backwards from the end and removes the first `n`
-/// assistant or user messages it finds, then inserts one compact marker.
-fn collapse_trailing_prose_turns(visible_messages: &mut Vec<serde_json::Value>, n: usize) {
-    if n == 0 || visible_messages.len() < n {
-        return;
-    }
-    // Remove the last `n` messages (prose turns and/or nudges).
-    let start = visible_messages.len() - n;
-    visible_messages.drain(start..);
-    // Insert a compact marker so the model knows turns were elided.
-    visible_messages.push(serde_json::json!({
-        "role": "assistant",
-        "content": format!(
-            "<{n} prior prose-only turn(s) collapsed to save context. \
-             Use a tool call to make progress.>"
-        ),
-    }));
 }
 
 fn append_host_messages_to_recorded(
@@ -723,6 +844,15 @@ pub async fn run_agent_loop_internal(
     let daemon = config.daemon;
     let exit_when_verified = config.exit_when_verified;
     let mut last_run_exit_code: Option<i32> = None;
+
+    // Tool loop detection — catches stuck loops where the model calls the
+    // same tool with the same args and gets the same result repeatedly.
+    let loop_detect_enabled = config.loop_detect_warn > 0;
+    let mut loop_tracker = ToolCallTracker::new(
+        config.loop_detect_warn,
+        config.loop_detect_block,
+        config.loop_detect_skip,
+    );
 
     // Push per-agent policy if configured
     if let Some(ref policy) = config.policy {
@@ -1061,7 +1191,12 @@ pub async fn run_agent_loop_internal(
         // last run() tool call returned exit code 0.  This prevents premature
         // exit when the model claims it's done but verification hasn't passed.
         let verified = !exit_when_verified || last_run_exit_code == Some(0);
-        let sentinel_hit = persistent && ((sentinel_in_text && verified) || phase_change);
+        // Guard: the model must have made at least one tool call before the
+        // done sentinel is honoured.  This prevents premature exits where the
+        // model describes a plan and emits ##DONE## without actually acting.
+        let has_acted = !all_tools_used.is_empty() || !tool_calls.is_empty();
+        let sentinel_hit =
+            persistent && ((sentinel_in_text && verified && has_acted) || phase_change);
 
         // If the model emitted the sentinel but verification hasn't passed,
         // inject a corrective so the model knows it must keep going.
@@ -1072,6 +1207,23 @@ pub async fn run_agent_loop_internal(
                  (last run exit code: {code_str}). The loop will continue. \
                  Run the verification command and fix any failures before finishing."
             );
+            visible_messages.push(serde_json::json!({
+                "role": "user",
+                "content": corrective
+            }));
+            recorded_messages.push(serde_json::json!({
+                "role": "user",
+                "content": corrective
+            }));
+        }
+        // If the model emitted the sentinel without having made any tool
+        // calls, it's trying to declare done without doing any work.
+        if sentinel_in_text && !has_acted && persistent && has_tools {
+            let corrective = "You emitted the done sentinel without making any tool calls. \
+                 You MUST use tools to complete the task — read source files, \
+                 create test files, and run verification before finishing. \
+                 Start by using lookup() or read() to explore the codebase."
+                .to_string();
             visible_messages.push(serde_json::json!({
                 "role": "user",
                 "content": corrective
@@ -1412,6 +1564,62 @@ pub async fn run_agent_loop_internal(
                     );
                 }
 
+                // Tool loop detection: check BEFORE dispatch whether this
+                // exact call has been stuck in a loop.
+                let args_hash = if loop_detect_enabled {
+                    stable_hash(&tool_args)
+                } else {
+                    0
+                };
+                if loop_detect_enabled {
+                    if let LoopIntervention::Skip { count } =
+                        loop_tracker.check(tool_name, args_hash)
+                    {
+                        // Skip execution entirely — the model is stuck.
+                        let skip_msg = loop_intervention_message(
+                            tool_name,
+                            "",
+                            &LoopIntervention::Skip { count },
+                        )
+                        .unwrap_or_default();
+                        transcript_events.push(transcript_event(
+                            "tool_execution",
+                            "tool",
+                            "internal",
+                            &skip_msg,
+                            Some(serde_json::json!({
+                                "tool_name": tool_name,
+                                "tool_use_id": tool_id,
+                                "loop_skipped": true,
+                                "repeat_count": count,
+                            })),
+                        ));
+                        if tool_format == "native" {
+                            append_message_to_contexts(
+                                &mut visible_messages,
+                                &mut recorded_messages,
+                                build_tool_result_message(tool_id, &skip_msg, &opts.provider),
+                            );
+                        } else {
+                            observations.push_str(&format!(
+                                "[result of {tool_name}]\n{skip_msg}\n[end of {tool_name} result]\n\n"
+                            ));
+                        }
+                        crate::tracing::span_end(tool_span_id);
+                        if let Some(bridge) = bridge.as_ref() {
+                            bridge.send_call_end(
+                                &tool_call_id,
+                                "tool",
+                                tool_name,
+                                0,
+                                "loop_skipped",
+                                serde_json::json!({"loop_skipped": true, "repeat_count": count}),
+                            );
+                        }
+                        continue;
+                    }
+                }
+
                 // Prefer a pre-computed result from the parallel pre-fetch
                 // pass above, when available. That pass runs read-only tool
                 // executions concurrently via join_all before this sequential
@@ -1554,6 +1762,33 @@ pub async fn run_agent_loop_internal(
                     );
                 }
                 crate::tracing::span_end(tool_span_id);
+
+                // Tool loop detection: record the result and check for
+                // repeated identical outcomes.  If we detect a loop,
+                // append a redirection hint or replace the result.
+                let result_text = if loop_detect_enabled && !is_rejected {
+                    let result_hash = stable_hash_str(&result_text);
+                    let intervention = loop_tracker.record(tool_name, args_hash, result_hash);
+                    if let Some(msg) =
+                        loop_intervention_message(tool_name, &result_text, &intervention)
+                    {
+                        match intervention {
+                            LoopIntervention::Warn { .. } => {
+                                // Append hint after the real result
+                                format!("{result_text}{msg}")
+                            }
+                            LoopIntervention::Block { .. } => {
+                                // Replace the result entirely with the redirect
+                                msg
+                            }
+                            _ => result_text,
+                        }
+                    } else {
+                        result_text
+                    }
+                } else {
+                    result_text
+                };
 
                 transcript_events.push(transcript_event(
                     "tool_execution",
@@ -1817,43 +2052,9 @@ pub async fn run_agent_loop_internal(
         // context with nudge messages and the "nudge → rephrase → nudge"
         // loop seen with chatty models.
         //
-        // Guards:
-        //  - Only in tool-using mode (has_tools) — pure Q&A should stop
-        //  - Only for the first few text-only turns
-        //  - Skip if the model output the done_sentinel (it's finishing)
-        let output_tokens = result.output_tokens as usize;
-        if has_tools
-            && consecutive_text_only <= 3
-            && output_tokens < 150
-            && !sentinel_hit
-        {
-            // Silent continuation — no nudge, just loop back
-            continue;
-        }
-
-        // Collapse prior prose-only turns in visible_messages to save context.
-        // After the silent-continuation phase (turns 1-3), each additional
-        // prose turn wastes ~100+ tokens of "Let me think..." narration.
-        // We keep the last prose message (the model needs continuity) but
-        // replace older prose+nudge pairs with a compact marker.
-        if consecutive_text_only == 4 {
-            // First nudge after silent continuation: collapse the 3 silent
-            // prose turns into a single marker so the model doesn't see
-            // its own repeated thinking as useful context.
-            collapse_trailing_prose_turns(&mut visible_messages, 3);
-        } else if consecutive_text_only > 4 {
-            // For subsequent nudges: collapse the previous prose+nudge pair
-            // (2 messages) to avoid unbounded growth.
-            collapse_trailing_prose_turns(&mut visible_messages, 2);
-        }
-
-        let nudge = custom_nudge.clone().unwrap_or_else(|| {
-            if consecutive_text_only <= 5 {
-                "Continue — when you're ready, include a tool call.".to_string()
-            } else {
-                "Ready to act? Include a tool call in your next response to make progress.".to_string()
-            }
-        });
+        let nudge = custom_nudge
+            .clone()
+            .unwrap_or_else(|| "Continue — use a tool call to make progress.".to_string());
         append_message_to_contexts(
             &mut visible_messages,
             &mut recorded_messages,
@@ -2015,9 +2216,12 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                     context_callback,
                     policy,
                     daemon,
-                    llm_retries: opt_int(&options, "llm_retries").unwrap_or(3) as usize,
+                    llm_retries: opt_int(&options, "llm_retries").unwrap_or(4) as usize,
                     llm_backoff_ms: opt_int(&options, "llm_backoff_ms").unwrap_or(2000) as u64,
                     exit_when_verified: opt_bool(&options, "exit_when_verified"),
+                    loop_detect_warn: opt_int(&options, "loop_detect_warn").unwrap_or(2) as usize,
+                    loop_detect_block: opt_int(&options, "loop_detect_block").unwrap_or(3) as usize,
+                    loop_detect_skip: opt_int(&options, "loop_detect_skip").unwrap_or(4) as usize,
                 },
             )
             .await?;

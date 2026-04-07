@@ -65,8 +65,11 @@ pub(crate) struct LlmCallOptions {
     // --- Caching ---
     pub cache: bool,
 
-    // --- Advanced ---
+    // --- Transport ---
     pub timeout: Option<u64>,
+    /// When true, use streaming SSE transport (token-by-token deltas).
+    /// When false, use synchronous request/response. Default: true.
+    pub stream: bool,
 
     // --- Provider-specific overrides ---
     pub provider_overrides: Option<serde_json::Value>,
@@ -95,6 +98,7 @@ pub(crate) struct LlmRequestPayload {
     pub tool_choice: Option<serde_json::Value>,
     pub cache: bool,
     pub timeout: Option<u64>,
+    pub stream: bool,
     pub provider_overrides: Option<serde_json::Value>,
 }
 
@@ -121,6 +125,7 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             tool_choice: opts.tool_choice.clone(),
             cache: opts.cache,
             timeout: opts.timeout,
+            stream: opts.stream,
             provider_overrides: opts.provider_overrides.clone(),
         }
     }
@@ -356,7 +361,9 @@ async fn vm_call_llm_full_inner_request(
     let primary_message = result.as_ref().err().map(ToString::to_string);
     let result = match (result, primary_message) {
         (Ok(r), _) => r,
-        (Err(_), Some(message)) => fallback_or_primary_error(request, message).await?,
+        (Err(_), Some(message)) => try_fallback_provider(request, message)
+            .await
+            .map_err(|msg| VmError::Thrown(VmValue::String(Rc::from(msg))))?,
         (Err(_), None) => unreachable!("error branch must capture a message"),
     };
 
@@ -397,7 +404,7 @@ async fn vm_call_llm_full_inner_offthread(
         .map_err(|err| err.to_string());
     let result = match result {
         Ok(result) => result,
-        Err(message) => fallback_or_primary_message(request, message).await?,
+        Err(message) => try_fallback_provider(request, message).await?,
     };
 
     if replay_mode == LlmReplayMode::Record {
@@ -410,32 +417,10 @@ async fn vm_call_llm_full_inner_offthread(
     Ok(result)
 }
 
-async fn fallback_or_primary_error(
-    request: &LlmRequestPayload,
-    primary_message: String,
-) -> Result<LlmResult, VmError> {
-    let Some(pdef) = crate::llm_config::provider_config(&request.provider) else {
-        return Err(VmError::Thrown(VmValue::String(Rc::from(primary_message))));
-    };
-    let Some(ref fallback_provider) = pdef.fallback else {
-        return Err(VmError::Thrown(VmValue::String(Rc::from(primary_message))));
-    };
-
-    let fb_key = super::helpers::vm_resolve_api_key(fallback_provider).unwrap_or_default();
-    if fb_key.is_empty() {
-        return Err(VmError::Thrown(VmValue::String(Rc::from(primary_message))));
-    }
-
-    let mut fb_request = request.clone();
-    fb_request.provider = fallback_provider.clone();
-    fb_request.api_key = fb_key;
-    match vm_call_llm_api(&fb_request, None).await {
-        Ok(result) => Ok(result),
-        Err(_) => Err(VmError::Thrown(VmValue::String(Rc::from(primary_message)))),
-    }
-}
-
-async fn fallback_or_primary_message(
+/// Attempt the request on the configured fallback provider.  Returns the
+/// original `primary_message` as the error if no fallback is available or
+/// the fallback also fails.
+async fn try_fallback_provider(
     request: &LlmRequestPayload,
     primary_message: String,
 ) -> Result<LlmResult, String> {
@@ -863,7 +848,7 @@ async fn vm_call_llm_api(
 ) -> Result<LlmResult, VmError> {
     let provider = &opts.provider;
     let model = &opts.model;
-    let streaming = delta_tx.is_some();
+    let wants_streaming = delta_tx.is_some() && opts.stream;
     let llm_timeout = opts.timeout.unwrap_or_else(|| {
         std::env::var("HARN_LLM_TIMEOUT")
             .ok()
@@ -878,7 +863,12 @@ async fn vm_call_llm_api(
 
     let resolved = super::helpers::ResolvedProvider::resolve(provider);
     let is_ollama = provider == "ollama" || resolved.endpoint.contains("/api/chat");
-    let use_stream_transport = streaming || is_ollama;
+    let use_stream_transport = if is_ollama && !opts.stream {
+        eprintln!("[harn] warning: stream=false is not supported by Ollama, using streaming");
+        true
+    } else {
+        wants_streaming || is_ollama
+    };
 
     // Build request body based on API style
     let mut body = if resolved.is_anthropic_style {
@@ -1016,7 +1006,11 @@ async fn vm_call_llm_api(
         // response parser. We only set this when the caller explicitly
         // asked for thinking AND the provider isn't Anthropic or Ollama
         // (those have their own mechanisms handled above).
-        if !is_ollama && opts.thinking.is_some() {
+        // Only send enable_thinking for providers that reliably support it.
+        // OpenRouter proxies to various backends where this parameter is
+        // unpredictable and can cause all-thinking-no-content empty responses.
+        let is_openrouter = opts.provider.to_lowercase().contains("openrouter");
+        if !is_ollama && !is_openrouter && opts.thinking.is_some() {
             body["chat_template_kwargs"] = serde_json::json!({
                 "enable_thinking": true,
             });
@@ -1024,13 +1018,27 @@ async fn vm_call_llm_api(
         body
     };
 
-    // Ollama thinking support
+    // Ollama thinking support and parameter tuning
     if is_ollama {
         if let Some(num_ctx) = ollama_num_ctx_override() {
             body["options"]["num_ctx"] = serde_json::json!(num_ctx);
         }
         if let Some(keep_alive) = ollama_keep_alive_override() {
             body["keep_alive"] = keep_alive;
+        }
+        // Ollama-specific tuning for coding agents:
+        //  - min_p=0.05 filters garbage tokens without hurting quality
+        //  - repeat_penalty=1.05 (default 1.1 is too aggressive for code —
+        //    repeated variable names, imports, and boilerplate are correct)
+        //  - num_predict from max_tokens to avoid unlimited generation
+        if body["options"].get("min_p").is_none() {
+            body["options"]["min_p"] = serde_json::json!(0.05);
+        }
+        if body["options"].get("repeat_penalty").is_none() {
+            body["options"]["repeat_penalty"] = serde_json::json!(1.05);
+        }
+        if body["options"].get("num_predict").is_none() && opts.max_tokens > 0 {
+            body["options"]["num_predict"] = serde_json::json!(opts.max_tokens);
         }
         // Always ask ollama to surface thinking tokens for thinking-capable
         // models (gemma3/gemma4, qwen3 with reasoning, etc). Without this,
@@ -1505,9 +1513,13 @@ async fn vm_call_llm_api_sse_from_response(
                 }
             }
 
-            // Capture finish_reason
-            if let Some(fr) = choice["finish_reason"].as_str() {
-                stop_reason = Some(fr.to_string());
+            // Capture finish_reason — only on first occurrence. OpenRouter
+            // can send duplicate finish_reason chunks (upstream bug
+            // qwen-code#2402) which truncate in-progress tool calls.
+            if stop_reason.is_none() {
+                if let Some(fr) = choice["finish_reason"].as_str() {
+                    stop_reason = Some(fr.to_string());
+                }
             }
 
             // Tool calls
@@ -2317,6 +2329,7 @@ mod tests {
                 "function": {"name": "tool"}
             })),
             cache: true,
+            stream: true,
             timeout: Some(5),
             provider_overrides: Some(serde_json::json!({"custom_flag": true})),
         }

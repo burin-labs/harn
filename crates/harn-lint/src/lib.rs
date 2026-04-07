@@ -40,6 +40,14 @@ struct ParamDeclaration {
     span: Span,
 }
 
+/// A function declaration tracked for unused-function detection.
+struct FnDeclaration {
+    name: String,
+    span: Span,
+    is_pub: bool,
+    is_method: bool,
+}
+
 /// The linter walks the AST and collects diagnostics.
 struct Linter<'a> {
     diagnostics: Vec<LintDiagnostic>,
@@ -58,6 +66,13 @@ struct Linter<'a> {
     /// Whether the file has wildcard imports (import "module").
     /// If true, skip undefined-function checks since we can't know what was imported.
     has_wildcard_import: bool,
+    /// Track function declarations for unused-function detection.
+    fn_declarations: Vec<FnDeclaration>,
+    /// Track actual function usage sites (calls + value references).
+    /// Separate from `references` because FnDecl used to self-insert into `references`.
+    function_references: HashSet<String>,
+    /// Whether the current function is inside an impl block.
+    in_impl_block: bool,
     source: Option<&'a str>,
 }
 
@@ -75,6 +90,9 @@ impl<'a> Linter<'a> {
             known_functions: Self::builtin_names(),
             function_calls: Vec::new(),
             has_wildcard_import: false,
+            fn_declarations: Vec::new(),
+            function_references: HashSet::new(),
+            in_impl_block: false,
             source,
         }
     }
@@ -245,7 +263,12 @@ impl<'a> Linter<'a> {
                 ..
             } => {
                 self.known_functions.insert(name.clone());
-                self.references.insert(name.clone());
+                self.fn_declarations.push(FnDeclaration {
+                    name: name.clone(),
+                    span: snode.span,
+                    is_pub: *is_pub,
+                    is_method: self.in_impl_block,
+                });
                 if *is_pub
                     && self
                         .source
@@ -274,9 +297,12 @@ impl<'a> Linter<'a> {
             }
 
             Node::ImplBlock { methods, .. } => {
+                let saved = self.in_impl_block;
+                self.in_impl_block = true;
                 for method in methods {
                     self.lint_node(method);
                 }
+                self.in_impl_block = saved;
             }
 
             Node::LetBinding { pattern, value, .. } => {
@@ -299,10 +325,12 @@ impl<'a> Linter<'a> {
 
             Node::Identifier(name) => {
                 self.references.insert(name.clone());
+                self.function_references.insert(name.clone());
             }
 
             Node::FunctionCall { name, args } => {
                 self.references.insert(name.clone());
+                self.function_references.insert(name.clone());
                 self.function_calls.push((name.clone(), snode.span));
                 for arg in args {
                     self.lint_node(arg);
@@ -695,6 +723,7 @@ impl<'a> Linter<'a> {
                                     .is_some_and(|c| c.is_alphabetic() || c == '_')
                             {
                                 self.references.insert(token.to_string());
+                                self.function_references.insert(token.to_string());
                             }
                         }
                     }
@@ -917,6 +946,25 @@ impl<'a> Linter<'a> {
                     span: decl.span,
                     severity: LintSeverity::Warning,
                     suggestion: Some("use `let` instead of `var`".to_string()),
+                });
+            }
+        }
+
+        // Rule: unused-function
+        for decl in &self.fn_declarations {
+            if decl.is_pub || decl.is_method || decl.name.starts_with('_') {
+                continue;
+            }
+            if !self.function_references.contains(&decl.name) {
+                self.diagnostics.push(LintDiagnostic {
+                    rule: "unused-function",
+                    message: format!("function `{}` is declared but never used", decl.name),
+                    span: decl.span,
+                    severity: LintSeverity::Warning,
+                    suggestion: Some(format!(
+                        "remove the function or prefix with underscore: `_{}`",
+                        decl.name
+                    )),
                 });
             }
         }
@@ -1524,6 +1572,278 @@ pipeline default(task) {
         assert!(
             has_rule(&diags, "unreachable-code"),
             "expected unreachable-code after break, got: {diags:?}"
+        );
+    }
+
+    // ===== unused-function tests =====
+
+    #[test]
+    fn test_unused_function_basic() {
+        let diags = lint_source(
+            r#"
+pipeline default(task) {
+    fn helper() {
+        return 42
+    }
+    log("hello")
+}
+"#,
+        );
+        assert!(
+            has_rule(&diags, "unused-function"),
+            "expected unused-function warning, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_used_function_no_warning() {
+        let diags = lint_source(
+            r#"
+pipeline default(task) {
+    fn helper() {
+        return 42
+    }
+    log(helper())
+}
+"#,
+        );
+        assert!(
+            !has_rule(&diags, "unused-function"),
+            "used function should not trigger unused-function: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_pub_function_exempt() {
+        let diags = lint_source(
+            r#"
+/// Documented public function.
+pub fn api_endpoint() {
+    return "ok"
+}
+"#,
+        );
+        assert!(
+            !has_rule(&diags, "unused-function"),
+            "pub functions should be exempt: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_function_passed_as_value() {
+        let diags = lint_source(
+            r#"
+pipeline default(task) {
+    fn transformer(x) {
+        return x * 2
+    }
+    let f = transformer
+    log(f(5))
+}
+"#,
+        );
+        assert!(
+            !has_rule(&diags, "unused-function"),
+            "function referenced as value should not trigger: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_function_called_from_another_function() {
+        let diags = lint_source(
+            r#"
+pipeline default(task) {
+    fn inner() {
+        return 42
+    }
+    fn outer() {
+        return inner()
+    }
+    log(outer())
+}
+"#,
+        );
+        assert!(
+            !has_rule(&diags, "unused-function"),
+            "function called from another function should not trigger: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_pipeline_not_flagged_as_unused() {
+        let diags = lint_source(
+            r#"
+pipeline default(task) {
+    log("hello")
+}
+"#,
+        );
+        assert!(
+            !has_rule(&diags, "unused-function"),
+            "pipelines should never trigger unused-function: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_impl_methods_exempt() {
+        let diags = lint_source(
+            r#"
+pipeline default(task) {
+    struct Point {
+        x: int
+        y: int
+    }
+    impl Point {
+        fn distance(self) {
+            return self.x + self.y
+        }
+    }
+    let p = Point({x: 3, y: 4})
+    log(p)
+}
+"#,
+        );
+        assert!(
+            !has_rule(&diags, "unused-function"),
+            "impl methods should be exempt: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_recursive_function_called_externally() {
+        let diags = lint_source(
+            r#"
+pipeline default(task) {
+    fn factorial(n) {
+        if n <= 1 {
+            return 1
+        }
+        return n * factorial(n - 1)
+    }
+    log(factorial(5))
+}
+"#,
+        );
+        assert!(
+            !has_rule(&diags, "unused-function"),
+            "recursive function called externally should not trigger: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_mutually_recursive_functions_one_called() {
+        let diags = lint_source(
+            r#"
+pipeline default(task) {
+    fn is_even(n) {
+        if n == 0 { return true }
+        return is_odd(n - 1)
+    }
+    fn is_odd(n) {
+        if n == 0 { return false }
+        return is_even(n - 1)
+    }
+    log(is_even(4))
+}
+"#,
+        );
+        assert!(
+            !has_rule(&diags, "unused-function"),
+            "mutually recursive functions where one is called should not trigger: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_underscore_prefixed_function_exempt() {
+        let diags = lint_source(
+            r#"
+pipeline default(task) {
+    fn _unused_helper() {
+        return 42
+    }
+    log("hello")
+}
+"#,
+        );
+        assert!(
+            !has_rule(&diags, "unused-function"),
+            "underscore-prefixed functions should be exempt: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_unused_function_suggestion_message() {
+        let diags = lint_source(
+            r#"
+pipeline default(task) {
+    fn helper() {
+        return 42
+    }
+    log("hello")
+}
+"#,
+        );
+        let unused = diags
+            .iter()
+            .find(|d| d.rule == "unused-function")
+            .expect("expected unused-function diagnostic");
+        assert!(unused.message.contains("helper"));
+        assert!(unused.suggestion.as_ref().unwrap().contains("_helper"));
+    }
+
+    #[test]
+    fn test_multiple_unused_functions() {
+        let diags = lint_source(
+            r#"
+pipeline default(task) {
+    fn helper1() { return 1 }
+    fn helper2() { return 2 }
+    fn used() { return 3 }
+    log(used())
+}
+"#,
+        );
+        assert_eq!(
+            count_rule(&diags, "unused-function"),
+            2,
+            "expected 2 unused-function warnings, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_top_level_unused_function() {
+        let diags = lint_source(
+            r#"
+fn orphan() {
+    return 42
+}
+pipeline default(task) {
+    log("hello")
+}
+"#,
+        );
+        assert!(
+            has_rule(&diags, "unused-function"),
+            "top-level unused function should trigger: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_unused_function_with_wildcard_import() {
+        // Wildcard imports shouldn't suppress unused-function checks —
+        // external code can't call local non-pub functions.
+        let diags = lint_source(
+            r#"
+import "some_module"
+pipeline default(task) {
+    fn helper() { return 1 }
+    log("hello")
+}
+"#,
+        );
+        assert!(
+            has_rule(&diags, "unused-function"),
+            "unused-function should still fire with wildcard imports: {diags:?}"
         );
     }
 }

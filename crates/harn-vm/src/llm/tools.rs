@@ -900,6 +900,12 @@ pub(crate) struct ToolSchema {
     pub(crate) name: String,
     pub(crate) description: String,
     pub(crate) params: Vec<ToolParamSchema>,
+    /// When true, render as a compact one-liner (name + params type + first
+    /// sentence of description) instead of the full TypeScript declaration with
+    /// JSDoc.  Tools marked compact are still fully dispatchable — only the
+    /// prompt rendering changes.  The model can call `tool_schema({ name })`
+    /// to get the full description on demand.
+    pub(crate) compact: bool,
 }
 
 fn collect_vm_tool_schemas(
@@ -936,10 +942,15 @@ fn collect_vm_tool_schemas(
                     .map(|v| v.display())
                     .unwrap_or_default();
                 let params = extract_params_from_vm_dict(td, &root_json, registry);
+                let compact = td
+                    .get("compact")
+                    .map(|v| matches!(v, VmValue::Bool(true)))
+                    .unwrap_or(false);
                 Some(ToolSchema {
                     name,
                     description,
                     params,
+                    compact,
                 })
             }
             _ => None,
@@ -1035,6 +1046,7 @@ fn collect_native_tool_schemas(
                 name: name.to_string(),
                 description,
                 params: extract_params_from_native_schema(&input_schema, &root, registry),
+                compact: false,
             })
         })
         .collect()
@@ -1109,9 +1121,12 @@ pub(crate) fn build_tool_calling_contract_prompt(
         prompt.push('\n');
     }
 
+    // Split into expanded and compact tools for progressive disclosure.
+    let (expanded, compact): (Vec<_>, Vec<_>) = schemas.iter().partition(|s| !s.compact);
+
     prompt.push_str("## Available tools\n\n");
 
-    for schema in &schemas {
+    for schema in &expanded {
         // Required params come first, then optional. Each tool is presented
         // as a single-arg TypeScript function declaration so the model sees
         // optionality, enums, nested objects, and array item types directly
@@ -1123,8 +1138,6 @@ pub(crate) fn build_tool_calling_contract_prompt(
             args_type.render()
         ));
         if !schema.description.trim().is_empty() {
-            // Description goes in a JSDoc comment above the per-param @param
-            // lines so everything the model needs for a tool reads top-to-bottom.
             prompt.push_str("/**\n");
             for line in schema.description.lines() {
                 prompt.push_str(&format!(" * {line}\n"));
@@ -1173,6 +1186,28 @@ pub(crate) fn build_tool_calling_contract_prompt(
         prompt.push('\n');
     }
 
+    // Render compact tools as a brief summary section.
+    if !compact.is_empty() {
+        prompt.push_str("## Other tools (call directly — parameters are intuitive, or call tool_schema for details)\n\n");
+        for schema in &compact {
+            let args_type = build_tool_args_type(&schema.params);
+            // Take first sentence of description as summary
+            let summary = schema
+                .description
+                .split(&['.', '\n'][..])
+                .next()
+                .unwrap_or("")
+                .trim();
+            prompt.push_str(&format!(
+                "- `{}({})` — {}\n",
+                schema.name,
+                args_type.render(),
+                summary,
+            ));
+        }
+        prompt.push('\n');
+    }
+
     if mode == "native" {
         prompt.push_str("Use the provider's native tool-calling channel for tool invocations.\n");
     } else if include_format {
@@ -1216,33 +1251,17 @@ fn build_tool_args_type(params: &[ToolParamSchema]) -> TypeExpr {
 pub(crate) const TS_CALL_CONTRACT_HELP: &str = "
 ## How to call tools
 
-Write a plain function call on its own line. The argument is a single object literal matching the tool's signature. Prose before/after tool calls is ignored by the harness.
-
-For multiline string values (file content, code), use heredoc syntax — no escaping needed:
-
-edit({
-    action: \"create\",
-    path: \"parser_extra_test.go\",
-    content: <<EOF
-package manifest
-
-import \"testing\"
-
-func TestParseExtra(t *testing.T) {
-\tyaml := `version: \"1.0\"`
-\t// backticks, quotes, backslashes — all fine, no escaping
-}
+Write `name({ key: value })` on its own line. Use heredoc for multiline strings:
+edit({ action: \"create\", path: \"test.go\", content: <<EOF
+package main
+func Test() {}
 EOF
 })
 
-Rules:
-- Form: `name({ key: value })`. No `call:` or `tool:` prefix.
-- Multiline strings: use `<<TAG` ... `TAG` (heredoc). Content is raw — no escaping. TAG must be alone on its closing line.
-- Single-line strings: use double quotes `\"...\"`.
-- Backtick template literals work for simple strings but BREAK when content contains backtick characters (Go raw strings, Rust, shell). Always use heredoc for code.
-- Trailing commas optional. Arrays: `[a, b]`. Nested objects: `{ k: v }`.
-- Tool mentions inside Markdown fenced code blocks are documentation, not invocations.
-- Prefer tool calls over prose. When you have work to do, act with tools rather than explaining.
+- Heredoc `<<TAG` ... `TAG`: raw content, no escaping needed. TAG alone on closing line.
+- Double quotes for single-line strings. Trailing commas optional.
+- Tool calls work with or without Markdown fences.
+- Prefer tool calls over prose.
 ";
 
 /// Result of parsing a prose-interleaved TS tool-call stream.
@@ -1273,10 +1292,40 @@ pub(crate) struct TextToolParseResult {
 /// The returned `prose` field is the input text with every successfully
 /// parsed call expression excised — useful for building a clean "what the
 /// model said" string separate from the structured tool-call list.
+/// Strip leaked thinking tags from model output. Some models (Qwen, Gemma)
+/// emit `</think>` or `<think>` markers in their response text when the
+/// streaming transport merges thinking and content channels. These tags
+/// break tool-call parsing because they appear between or before valid
+/// tool invocations.
+fn strip_thinking_tags(text: &str) -> std::borrow::Cow<'_, str> {
+    if !text.contains("<think>") && !text.contains("</think>") {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    let mut result = text.to_string();
+    // Remove <think>...</think> blocks entirely (leaked thinking)
+    while let Some(start) = result.find("<think>") {
+        if let Some(end) = result[start..].find("</think>") {
+            result.replace_range(start..start + end + "</think>".len(), "");
+        } else {
+            // Unclosed <think> — remove just the tag
+            result.replace_range(start..start + "<think>".len(), "");
+        }
+    }
+    // Remove stray </think> tags
+    while result.contains("</think>") {
+        result = result.replace("</think>", "");
+    }
+    std::borrow::Cow::Owned(result)
+}
+
 pub(crate) fn parse_text_tool_calls_with_tools(
     text: &str,
     tools_val: Option<&VmValue>,
 ) -> TextToolParseResult {
+    // Strip leaked thinking tags before any parsing
+    let cleaned = strip_thinking_tags(text);
+    let text = cleaned.as_ref();
+
     if let Some(unwrapped) = unwrap_exact_code_wrapper(text) {
         let result = parse_text_tool_calls_with_tools(unwrapped, tools_val);
         if !result.calls.is_empty() || !result.errors.is_empty() {
@@ -1298,42 +1347,55 @@ pub(crate) fn parse_text_tool_calls_with_tools(
     let bytes = text.as_bytes();
     let mut i = 0usize;
     let mut at_line_start = true;
-    // Nesting of Markdown fenced code blocks we are currently inside. Any
-    // line starting with ```<info> opens a fence; a matching ``` closes it.
-    // We do NOT attempt to nest by length (4-backtick fences inside
-    // 3-backtick fences); the common case is flat one-level fences.
-    let mut in_fence = false;
     let mut in_inline_code = false;
+    // Track fence line byte ranges so we can strip them from prose when
+    // they bracket tool calls. Each entry is (fence_start, fence_end,
+    // calls_before_count). After parsing, if calls were added between a
+    // pair of fences, both fence lines are added to call_ranges.
+    let mut fence_lines: Vec<(usize, usize, usize)> = Vec::new();
 
     while i < bytes.len() {
-        // Line-start fence toggle: `^\s*````. Absorb the whole fence line so
-        // the rest of the scanner does not walk inside it.
         if at_line_start && !in_inline_code {
-            // Skip leading whitespace on this line (for fence/call detection).
+            // Skip leading whitespace on this line (for call detection).
             let mut j = i;
             while j < bytes.len() && (bytes[j] == b' ' || bytes[j] == b'\t') {
                 j += 1;
             }
+            // Skip Markdown fence lines (```lang / ```) themselves — they
+            // are never tool calls. But do NOT skip the content between
+            // fences: models routinely wrap tool calls in ```python fences,
+            // and skipping those silently drops ~24% of real calls.
             if bytes.get(j) == Some(&b'`')
                 && bytes.get(j + 1) == Some(&b'`')
                 && bytes.get(j + 2) == Some(&b'`')
             {
-                in_fence = !in_fence;
-                // Consume to end of line.
+                let fence_start = i;
+                // Consume the fence line itself.
                 while i < bytes.len() && bytes[i] != b'\n' {
                     i += 1;
                 }
                 if i < bytes.len() {
                     i += 1;
                 }
+                fence_lines.push((fence_start, i, calls.len()));
                 at_line_start = true;
                 continue;
             }
-            if !in_fence {
+            {
                 // Strip common model-generated prefixes before the actual
                 // tool name.  Models sometimes emit `call:edit(...)` or
                 // `tool:read(...)` instead of bare `edit(...)`.
+                // Also strip angle brackets: `<read(...)>` — common with
+                // Qwen models that wrap tool calls in XML-like tags.
                 let mut k = j;
+                // Strip leading angle bracket
+                if bytes.get(k) == Some(&b'<') {
+                    k += 1;
+                    // Skip whitespace after <
+                    while k < bytes.len() && (bytes[k] == b' ' || bytes[k] == b'\t') {
+                        k += 1;
+                    }
+                }
                 for prefix in ["call:", "tool:", "use:"] {
                     if text[k..].starts_with(prefix) {
                         k += prefix.len();
@@ -1363,8 +1425,19 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                                 // Record the call's byte range so we can
                                 // strip it from `prose` below. Use j (original
                                 // line start) to also excise the prefix.
-                                call_ranges.push((j, k + consumed));
-                                i = k + consumed;
+                                // Also consume trailing `>` if the model
+                                // wrapped the call in angle brackets.
+                                let mut end = k + consumed;
+                                while end < bytes.len()
+                                    && (bytes[end] == b' ' || bytes[end] == b'\t')
+                                {
+                                    end += 1;
+                                }
+                                if end < bytes.len() && bytes[end] == b'>' {
+                                    end += 1;
+                                }
+                                call_ranges.push((j, end));
+                                i = end;
                                 at_line_start = bytes.get(i.saturating_sub(1)) == Some(&b'\n');
                                 continue;
                             }
@@ -1381,13 +1454,6 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                     }
                 }
             }
-        }
-
-        // Inside a fenced code block → treat everything as narration/display.
-        if in_fence {
-            at_line_start = bytes[i] == b'\n';
-            i += 1;
-            continue;
         }
 
         // Inline code spans: `code`. Tool names inside backtick-wrapped
@@ -1407,11 +1473,48 @@ pub(crate) fn parse_text_tool_calls_with_tools(
         i += 1;
     }
 
+    // Strip fence lines that bracketed tool calls. We look at consecutive
+    // fence pairs: if new calls appeared between them, both fence lines
+    // should be stripped from prose (they were just formatting wrappers).
+    for pair in fence_lines.windows(2) {
+        let (open_start, open_end, calls_before_open) = pair[0];
+        let (_close_start, close_end, calls_before_close) = pair[1];
+        if calls_before_close > calls_before_open {
+            // Calls were parsed between these fences — strip both fence lines
+            call_ranges.push((open_start, open_end));
+            call_ranges.push((_close_start, close_end));
+        }
+    }
+    // Also handle a trailing unclosed fence (model didn't close it)
+    if fence_lines.len() % 2 == 1 {
+        let (start, end, calls_before) = *fence_lines.last().unwrap();
+        if calls.len() > calls_before {
+            call_ranges.push((start, end));
+        }
+    }
+    // Sort ranges so prose-building iterates them in order
+    call_ranges.sort_by_key(|r| r.0);
+
+    // Also strip empty fence pairs (```lang\n```) that don't contain calls.
+    // Models often emit these as failed tool-call attempts. If left in prose
+    // they accumulate in conversation history and cause duplication loops.
+    for pair in fence_lines.windows(2) {
+        let (open_start, _open_end, calls_before_open) = pair[0];
+        let (_close_start, close_end, calls_before_close) = pair[1];
+        if calls_before_close == calls_before_open {
+            // No calls between these fences — it's an empty block, strip both
+            call_ranges.push((open_start, close_end));
+        }
+    }
+    call_ranges.sort_by_key(|r| r.0);
+    // Deduplicate overlapping ranges
+    call_ranges.dedup_by(|b, a| a.0 == b.0);
+
     // Build `prose` by copying every byte range NOT inside a parsed-call
     // window. Collapse runs of blank lines that form purely because a call
     // was removed so the final prose reads naturally.
     let prose = if call_ranges.is_empty() {
-        text.to_string()
+        strip_empty_fences(text)
     } else {
         let mut buf = String::with_capacity(text.len());
         let mut cursor = 0usize;
@@ -1424,7 +1527,9 @@ pub(crate) fn parse_text_tool_calls_with_tools(
         if cursor < text.len() {
             buf.push_str(&text[cursor..]);
         }
-        collapse_blank_lines(&buf).trim().to_string()
+        collapse_blank_lines(&strip_empty_fences(&buf))
+            .trim()
+            .to_string()
     };
 
     // Fallback: if no text-format calls were found, check whether the model
@@ -1462,7 +1567,8 @@ fn parse_native_json_tool_calls(
     let mut results = Vec::new();
 
     // Find the first `[{` or `{"id":"call_` in the text
-    let json_start = text.find("[{\"id\":")
+    let json_start = text
+        .find("[{\"id\":")
         .or_else(|| text.find("[{\"id\":"))
         .or_else(|| text.find("{\"id\":\"call_"));
 
@@ -1510,7 +1616,10 @@ fn parse_native_json_tool_calls(
             Some(obj @ serde_json::Value::Object(_)) => obj.clone(),
             _ => serde_json::Value::Object(Default::default()),
         };
-        let call_id = item.get("id").and_then(|i| i.as_str()).unwrap_or("native_fallback");
+        let call_id = item
+            .get("id")
+            .and_then(|i| i.as_str())
+            .unwrap_or("native_fallback");
         results.push(serde_json::json!({
             "id": call_id,
             "name": name,
@@ -1539,6 +1648,15 @@ fn unwrap_exact_code_wrapper(text: &str) -> Option<&str> {
 /// Collapse runs of ≥3 consecutive newlines down to 2 (one blank line). Used
 /// to tidy the `prose` output after tool-call ranges are excised, so the
 /// removed bytes don't leave an ugly vertical gap between surrounding prose.
+/// Strip empty Markdown fence pairs (```lang\n``` or ```lang\n\n```) from text.
+/// Models sometimes emit these as failed tool-call attempts. If left in prose
+/// they accumulate in conversation history and cause duplication loops.
+fn strip_empty_fences(text: &str) -> String {
+    // Match: optional whitespace, ```, optional lang tag, newline(s), ```, newline
+    let re = regex::Regex::new(r"(?m)^[ \t]*```[^\n]*\n\s*```[ \t]*\n?").unwrap();
+    re.replace_all(text, "").to_string()
+}
+
 fn collapse_blank_lines(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut newline_run = 0usize;
@@ -1939,6 +2057,13 @@ impl<'a> TsValueParser<'a> {
         // Consume "<<"
         self.advance();
         self.advance();
+        // Skip optional quotes around the heredoc tag. Models commonly
+        // emit <<'EOF' or <<"EOF" (bash-style quoting) instead of bare <<EOF.
+        let has_quote = matches!(self.peek(), Some(b'\'') | Some(b'"'));
+        let quote_char = self.peek();
+        if has_quote {
+            self.advance();
+        }
         // Read tag: uppercase letters, digits, underscore
         let tag_start = self.pos;
         while let Some(b) = self.peek() {
@@ -1951,6 +2076,10 @@ impl<'a> TsValueParser<'a> {
         let tag = &self.text[tag_start..self.pos];
         if tag.is_empty() {
             return Err("heredoc requires a tag after << (e.g. <<EOF)".to_string());
+        }
+        // Skip closing quote if we had an opening one
+        if has_quote && self.peek() == quote_char {
+            self.advance();
         }
         // Consume the newline after the tag
         if self.peek() == Some(b'\r') {

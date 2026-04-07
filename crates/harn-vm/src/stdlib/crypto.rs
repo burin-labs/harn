@@ -37,42 +37,22 @@ pub(crate) fn register_crypto_builtins(vm: &mut Vm) {
         Ok(VmValue::Int(hash as i64))
     });
 
-    vm.register_builtin("sha256", |args, _out| {
-        use sha2::Digest;
-        let val = args.first().map(|a| a.display()).unwrap_or_default();
-        let hash = sha2::Sha256::digest(val.as_bytes());
-        Ok(VmValue::String(Rc::from(format!("{hash:x}"))))
-    });
-    vm.register_builtin("sha224", |args, _out| {
-        use sha2::Digest;
-        let val = args.first().map(|a| a.display()).unwrap_or_default();
-        let hash = sha2::Sha224::digest(val.as_bytes());
-        Ok(VmValue::String(Rc::from(format!("{hash:x}"))))
-    });
-    vm.register_builtin("sha384", |args, _out| {
-        use sha2::Digest;
-        let val = args.first().map(|a| a.display()).unwrap_or_default();
-        let hash = sha2::Sha384::digest(val.as_bytes());
-        Ok(VmValue::String(Rc::from(format!("{hash:x}"))))
-    });
-    vm.register_builtin("sha512", |args, _out| {
-        use sha2::Digest;
-        let val = args.first().map(|a| a.display()).unwrap_or_default();
-        let hash = sha2::Sha512::digest(val.as_bytes());
-        Ok(VmValue::String(Rc::from(format!("{hash:x}"))))
-    });
-    vm.register_builtin("sha512_256", |args, _out| {
-        use sha2::Digest;
-        let val = args.first().map(|a| a.display()).unwrap_or_default();
-        let hash = sha2::Sha512_256::digest(val.as_bytes());
-        Ok(VmValue::String(Rc::from(format!("{hash:x}"))))
-    });
-    vm.register_builtin("md5", |args, _out| {
-        use md5::Digest;
-        let val = args.first().map(|a| a.display()).unwrap_or_default();
-        let hash = md5::Md5::digest(val.as_bytes());
-        Ok(VmValue::String(Rc::from(format!("{hash:x}"))))
-    });
+    macro_rules! register_hash {
+        ($vm:expr, $name:expr, $hasher:ty) => {
+            $vm.register_builtin($name, |args, _out| {
+                use sha2::Digest as _;
+                let val = args.first().map(|a| a.display()).unwrap_or_default();
+                let hash = <$hasher>::digest(val.as_bytes());
+                Ok(VmValue::String(Rc::from(format!("{hash:x}"))))
+            });
+        };
+    }
+    register_hash!(vm, "sha256", sha2::Sha256);
+    register_hash!(vm, "sha224", sha2::Sha224);
+    register_hash!(vm, "sha384", sha2::Sha384);
+    register_hash!(vm, "sha512", sha2::Sha512);
+    register_hash!(vm, "sha512_256", sha2::Sha512_256);
+    register_hash!(vm, "md5", md5::Md5);
 
     vm.register_builtin("url_encode", |args, _out| {
         let val = args.first().map(|a| a.display()).unwrap_or_default();

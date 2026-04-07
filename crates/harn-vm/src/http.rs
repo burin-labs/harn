@@ -73,82 +73,68 @@ fn url_matches(pattern: &str, url: &str) -> bool {
     true
 }
 
+/// Build a standard HTTP response dict with status, headers, body, and ok fields.
+fn build_http_response(status: i64, headers: BTreeMap<String, VmValue>, body: String) -> VmValue {
+    let mut result = BTreeMap::new();
+    result.insert("status".to_string(), VmValue::Int(status));
+    result.insert("headers".to_string(), VmValue::Dict(Rc::new(headers)));
+    result.insert("body".to_string(), VmValue::String(Rc::from(body)));
+    result.insert(
+        "ok".to_string(),
+        VmValue::Bool((200..300).contains(&(status as u16))),
+    );
+    VmValue::Dict(Rc::new(result))
+}
+
+/// Extract URL, validate it, and pull an options dict from `args`.
+/// For methods with a body (POST/PUT/PATCH), the body is at index 1 and
+/// options at index 2; for methods without (GET/DELETE), options are at index 1.
+async fn http_verb_handler(
+    method: &str,
+    has_body: bool,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let url = args.first().map(|a| a.display()).unwrap_or_default();
+    if url.is_empty() {
+        return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+            "http_{}: URL is required",
+            method.to_ascii_lowercase()
+        )))));
+    }
+    let mut options = if has_body {
+        match args.get(2) {
+            Some(VmValue::Dict(d)) => (**d).clone(),
+            _ => BTreeMap::new(),
+        }
+    } else {
+        match args.get(1) {
+            Some(VmValue::Dict(d)) => (**d).clone(),
+            _ => BTreeMap::new(),
+        }
+    };
+    if has_body {
+        let body = args.get(1).map(|a| a.display()).unwrap_or_default();
+        options.insert("body".to_string(), VmValue::String(Rc::from(body)));
+    }
+    vm_execute_http_request(method, &url, &options).await
+}
+
 /// Register HTTP builtins on a VM.
 pub fn register_http_builtins(vm: &mut Vm) {
     vm.register_async_builtin("http_get", |args| async move {
-        let url = args.first().map(|a| a.display()).unwrap_or_default();
-        if url.is_empty() {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
-                "http_get: URL is required",
-            ))));
-        }
-        let options = match args.get(1) {
-            Some(VmValue::Dict(d)) => (**d).clone(),
-            _ => BTreeMap::new(),
-        };
-        vm_execute_http_request("GET", &url, &options).await
+        http_verb_handler("GET", false, args).await
     });
-
     vm.register_async_builtin("http_post", |args| async move {
-        let url = args.first().map(|a| a.display()).unwrap_or_default();
-        if url.is_empty() {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
-                "http_post: URL is required",
-            ))));
-        }
-        let body = args.get(1).map(|a| a.display()).unwrap_or_default();
-        let mut options = match args.get(2) {
-            Some(VmValue::Dict(d)) => (**d).clone(),
-            _ => BTreeMap::new(),
-        };
-        options.insert("body".to_string(), VmValue::String(Rc::from(body)));
-        vm_execute_http_request("POST", &url, &options).await
+        http_verb_handler("POST", true, args).await
     });
-
     vm.register_async_builtin("http_put", |args| async move {
-        let url = args.first().map(|a| a.display()).unwrap_or_default();
-        if url.is_empty() {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
-                "http_put: URL is required",
-            ))));
-        }
-        let body = args.get(1).map(|a| a.display()).unwrap_or_default();
-        let mut options = match args.get(2) {
-            Some(VmValue::Dict(d)) => (**d).clone(),
-            _ => BTreeMap::new(),
-        };
-        options.insert("body".to_string(), VmValue::String(Rc::from(body)));
-        vm_execute_http_request("PUT", &url, &options).await
+        http_verb_handler("PUT", true, args).await
     });
-
     vm.register_async_builtin("http_patch", |args| async move {
-        let url = args.first().map(|a| a.display()).unwrap_or_default();
-        if url.is_empty() {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
-                "http_patch: URL is required",
-            ))));
-        }
-        let body = args.get(1).map(|a| a.display()).unwrap_or_default();
-        let mut options = match args.get(2) {
-            Some(VmValue::Dict(d)) => (**d).clone(),
-            _ => BTreeMap::new(),
-        };
-        options.insert("body".to_string(), VmValue::String(Rc::from(body)));
-        vm_execute_http_request("PATCH", &url, &options).await
+        http_verb_handler("PATCH", true, args).await
     });
-
     vm.register_async_builtin("http_delete", |args| async move {
-        let url = args.first().map(|a| a.display()).unwrap_or_default();
-        if url.is_empty() {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
-                "http_delete: URL is required",
-            ))));
-        }
-        let options = match args.get(1) {
-            Some(VmValue::Dict(d)) => (**d).clone(),
-            _ => BTreeMap::new(),
-        };
-        vm_execute_http_request("DELETE", &url, &options).await
+        http_verb_handler("DELETE", false, args).await
     });
 
     // --- Mock HTTP builtins ---
@@ -291,16 +277,7 @@ async fn vm_execute_http_request(
                 body: body_str,
             });
         });
-        // Return mock response
-        let mut result = BTreeMap::new();
-        result.insert("status".to_string(), VmValue::Int(status));
-        result.insert("headers".to_string(), VmValue::Dict(Rc::new(headers)));
-        result.insert("body".to_string(), VmValue::String(Rc::from(body)));
-        result.insert(
-            "ok".to_string(),
-            VmValue::Bool((200..300).contains(&(status as u16))),
-        );
-        return Ok(VmValue::Dict(Rc::new(result)));
+        return Ok(build_http_response(status, headers, body));
     }
 
     if !url.starts_with("http://") && !url.starts_with("https://") {
@@ -421,9 +398,7 @@ async fn vm_execute_http_request(
 
         match req.send().await {
             Ok(response) => {
-                let status_code = response.status().as_u16();
-                let ok = (200..300).contains(&status_code);
-                let status = status_code as i64;
+                let status = response.status().as_u16() as i64;
 
                 let mut resp_headers = BTreeMap::new();
                 for (name, value) in response.headers() {
@@ -446,12 +421,7 @@ async fn vm_execute_http_request(
                     continue;
                 }
 
-                let mut result = BTreeMap::new();
-                result.insert("status".to_string(), VmValue::Int(status));
-                result.insert("headers".to_string(), VmValue::Dict(Rc::new(resp_headers)));
-                result.insert("body".to_string(), VmValue::String(Rc::from(body_text)));
-                result.insert("ok".to_string(), VmValue::Bool(ok));
-                return Ok(VmValue::Dict(Rc::new(result)));
+                return Ok(build_http_response(status, resp_headers, body_text));
             }
             Err(e) => {
                 let retryable = e.is_timeout() || e.is_connect();

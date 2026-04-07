@@ -1,7 +1,9 @@
-fn double(x) {
+/// Double a value.
+pub fn double(x) {
   return x * 2
 }
 
-fn greet(name) {
+/// Greet by name.
+pub fn greet(name) {
   return "hello " + name
 }

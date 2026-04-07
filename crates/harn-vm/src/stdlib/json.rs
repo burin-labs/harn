@@ -13,6 +13,26 @@ pub(crate) fn reset_json_state() {
     JSON_PARSE_CACHE.with(|cache| cache.borrow_mut().clear());
 }
 
+fn require_args(args: &[VmValue], min: usize, name: &str) -> Result<(), VmError> {
+    if args.len() < min {
+        return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+            "{name} requires {min} arguments"
+        )))));
+    }
+    Ok(())
+}
+
+fn require_dict<'a>(
+    val: &'a VmValue,
+    context: &str,
+) -> Result<&'a BTreeMap<String, VmValue>, VmError> {
+    val.as_dict().ok_or_else(|| {
+        VmError::Thrown(VmValue::String(Rc::from(format!(
+            "{context}: argument must be a dict"
+        ))))
+    })
+}
+
 pub(crate) fn register_json_builtins(vm: &mut Vm) {
     vm.register_builtin("json_stringify", |args, _out| {
         let val = args.first().unwrap_or(&VmValue::Nil);
@@ -39,21 +59,9 @@ pub(crate) fn register_json_builtins(vm: &mut Vm) {
     });
 
     vm.register_builtin("json_validate", |args, _out| {
-        if args.len() < 2 {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
-                "json_validate requires 2 arguments: data and schema",
-            ))));
-        }
+        require_args(args, 2, "json_validate")?;
         let data = &args[0];
-        let schema = &args[1];
-        let schema_dict = match schema.as_dict() {
-            Some(d) => d,
-            None => {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(
-                    "json_validate: schema must be a dict",
-                ))));
-            }
-        };
+        let schema_dict = require_dict(&args[1], "json_validate")?;
         let mut errors = Vec::new();
         validate_value(data, schema_dict, "", &mut errors);
         if errors.is_empty() {
@@ -66,96 +74,44 @@ pub(crate) fn register_json_builtins(vm: &mut Vm) {
     });
 
     vm.register_builtin("schema_check", |args, _out| {
-        if args.len() < 2 {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
-                "schema_check requires 2 arguments: data and schema",
-            ))));
-        }
+        require_args(args, 2, "schema_check")?;
         Ok(schema_result_value(&args[0], &args[1], false))
     });
 
     vm.register_builtin("schema_parse", |args, _out| {
-        if args.len() < 2 {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
-                "schema_parse requires 2 arguments: data and schema",
-            ))));
-        }
+        require_args(args, 2, "schema_parse")?;
         Ok(schema_result_value(&args[0], &args[1], true))
     });
 
     vm.register_builtin("schema_to_json_schema", |args, _out| {
-        if args.is_empty() {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
-                "schema_to_json_schema requires 1 argument: schema",
-            ))));
-        }
-        let schema = args[0].as_dict().ok_or_else(|| {
-            VmError::Thrown(VmValue::String(Rc::from(
-                "schema_to_json_schema: schema must be a dict",
-            )))
-        })?;
+        require_args(args, 1, "schema_to_json_schema")?;
+        let schema = require_dict(&args[0], "schema_to_json_schema")?;
         Ok(json_to_vm_value(&schema_dict_to_json_schema(schema)))
     });
 
     vm.register_builtin("schema_extend", |args, _out| {
-        if args.len() < 2 {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
-                "schema_extend requires 2 arguments: base and overrides",
-            ))));
-        }
-        let base = args[0].as_dict().ok_or_else(|| {
-            VmError::Thrown(VmValue::String(Rc::from(
-                "schema_extend: base must be a dict",
-            )))
-        })?;
-        let overrides = args[1].as_dict().ok_or_else(|| {
-            VmError::Thrown(VmValue::String(Rc::from(
-                "schema_extend: overrides must be a dict",
-            )))
-        })?;
+        require_args(args, 2, "schema_extend")?;
+        let base = require_dict(&args[0], "schema_extend")?;
+        let overrides = require_dict(&args[1], "schema_extend")?;
         Ok(VmValue::Dict(Rc::new(merge_schema_dicts(base, overrides))))
     });
 
     vm.register_builtin("schema_partial", |args, _out| {
-        if args.is_empty() {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
-                "schema_partial requires 1 argument: schema",
-            ))));
-        }
-        let schema = args[0].as_dict().ok_or_else(|| {
-            VmError::Thrown(VmValue::String(Rc::from(
-                "schema_partial: schema must be a dict",
-            )))
-        })?;
+        require_args(args, 1, "schema_partial")?;
+        let schema = require_dict(&args[0], "schema_partial")?;
         Ok(VmValue::Dict(Rc::new(schema_partial_dict(schema))))
     });
 
     vm.register_builtin("schema_pick", |args, _out| {
-        if args.len() < 2 {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
-                "schema_pick requires 2 arguments: schema and keys",
-            ))));
-        }
-        let schema = args[0].as_dict().ok_or_else(|| {
-            VmError::Thrown(VmValue::String(Rc::from(
-                "schema_pick: schema must be a dict",
-            )))
-        })?;
+        require_args(args, 2, "schema_pick")?;
+        let schema = require_dict(&args[0], "schema_pick")?;
         let keys = schema_key_list(&args[1], "schema_pick")?;
         Ok(VmValue::Dict(Rc::new(schema_pick_dict(schema, &keys))))
     });
 
     vm.register_builtin("schema_omit", |args, _out| {
-        if args.len() < 2 {
-            return Err(VmError::Thrown(VmValue::String(Rc::from(
-                "schema_omit requires 2 arguments: schema and keys",
-            ))));
-        }
-        let schema = args[0].as_dict().ok_or_else(|| {
-            VmError::Thrown(VmValue::String(Rc::from(
-                "schema_omit: schema must be a dict",
-            )))
-        })?;
+        require_args(args, 2, "schema_omit")?;
+        let schema = require_dict(&args[0], "schema_omit")?;
         let keys = schema_key_list(&args[1], "schema_omit")?;
         Ok(VmValue::Dict(Rc::new(schema_omit_dict(schema, &keys))))
     });

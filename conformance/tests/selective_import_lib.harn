@@ -1,4 +1,5 @@
-fn greet(name) {
+/// Greet by name.
+pub fn greet(name) {
   return "Hello, " + name + "!"
 }
 
@@ -7,6 +8,6 @@ pub fn add(a, b) {
   return a + b
 }
 
-fn secret() {
+fn _secret() {
   return "hidden"
 }

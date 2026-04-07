@@ -149,7 +149,7 @@ pub(crate) fn fmt_targets(targets: &[&str], check_mode: bool, opts: &FmtOptions)
     for target in targets {
         let path = std::path::Path::new(target);
         if path.is_dir() {
-            collect_harn_files(path, &mut files);
+            super::collect_harn_files(path, &mut files);
         } else {
             files.push(path.to_path_buf());
         }
@@ -170,28 +170,12 @@ pub(crate) fn fmt_targets(targets: &[&str], check_mode: bool, opts: &FmtOptions)
     }
 }
 
-/// Recursively collect .harn files in a directory.
-fn collect_harn_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        let mut entries: Vec<_> = entries.filter_map(|e| e.ok()).collect();
-        entries.sort_by_key(|e| e.path());
-        for entry in entries {
-            let path = entry.path();
-            if path.is_dir() {
-                collect_harn_files(&path, out);
-            } else if path.extension().is_some_and(|ext| ext == "harn") {
-                out.push(path);
-            }
-        }
-    }
-}
-
 pub(crate) fn collect_harn_targets(targets: &[&str]) -> Vec<PathBuf> {
     let mut files = Vec::new();
     for target in targets {
         let path = Path::new(target);
         if path.is_dir() {
-            collect_harn_files(path, &mut files);
+            super::collect_harn_files(path, &mut files);
         } else {
             files.push(path.to_path_buf());
         }

@@ -106,35 +106,33 @@ pub(crate) fn register_testing_builtins(vm: &mut Vm) {
 
     // is_timeout(err) -> bool
     vm.register_builtin("is_timeout", |args, _out| {
-        let val = args.first().unwrap_or(&VmValue::Nil);
-        let is = match val {
-            VmValue::Dict(d) => d
-                .get("category")
-                .map(|v| v.display() == "timeout")
-                .unwrap_or(false),
-            VmValue::String(s) => {
-                let err = VmError::Runtime(s.to_string());
-                error_to_category(&err) == ErrorCategory::Timeout
-            }
-            _ => false,
-        };
-        Ok(VmValue::Bool(is))
+        Ok(VmValue::Bool(check_error_category(
+            args.first().unwrap_or(&VmValue::Nil),
+            "timeout",
+            ErrorCategory::Timeout,
+        )))
     });
 
     // is_rate_limited(err) -> bool
     vm.register_builtin("is_rate_limited", |args, _out| {
-        let val = args.first().unwrap_or(&VmValue::Nil);
-        let is = match val {
-            VmValue::Dict(d) => d
-                .get("category")
-                .map(|v| v.display() == "rate_limit")
-                .unwrap_or(false),
-            VmValue::String(s) => {
-                let err = VmError::Runtime(s.to_string());
-                error_to_category(&err) == ErrorCategory::RateLimit
-            }
-            _ => false,
-        };
-        Ok(VmValue::Bool(is))
+        Ok(VmValue::Bool(check_error_category(
+            args.first().unwrap_or(&VmValue::Nil),
+            "rate_limit",
+            ErrorCategory::RateLimit,
+        )))
     });
+}
+
+fn check_error_category(val: &VmValue, category_str: &str, category: ErrorCategory) -> bool {
+    match val {
+        VmValue::Dict(d) => d
+            .get("category")
+            .map(|v| v.display() == category_str)
+            .unwrap_or(false),
+        VmValue::String(s) => {
+            let err = VmError::Runtime(s.to_string());
+            error_to_category(&err) == category
+        }
+        _ => false,
+    }
 }

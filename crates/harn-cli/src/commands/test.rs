@@ -94,22 +94,9 @@ fn write_junit_xml(path: &str, results: &[(String, bool, String, u64)]) {
     }
 }
 
-fn collect_harn_files_recursive(dir: &Path) -> Vec<PathBuf> {
+fn collect_harn_files_sorted(dir: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
-    let Ok(entries) = fs::read_dir(dir) else {
-        return files;
-    };
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false) {
-            files.extend(collect_harn_files_recursive(&path));
-        } else if path.extension().is_some_and(|ext| ext == "harn") {
-            files.push(path);
-        }
-    }
-
-    files.sort();
+    super::collect_harn_files(dir, &mut files);
     files
 }
 
@@ -125,7 +112,7 @@ fn resolve_conformance_selection(
     let suite_root = canonicalize_or_err(suite_root)?;
 
     let Some(selection) = selection else {
-        return Ok(collect_harn_files_recursive(&suite_root));
+        return Ok(collect_harn_files_sorted(&suite_root));
     };
 
     let raw = PathBuf::from(selection);
@@ -160,7 +147,7 @@ fn resolve_conformance_selection(
         ));
     }
 
-    let files = collect_harn_files_recursive(&canonical);
+    let files = collect_harn_files_sorted(&canonical);
     if files.is_empty() {
         return Err(format!(
             "No .harn conformance tests found under {}",
@@ -566,7 +553,7 @@ pub(crate) async fn run_watch_tests(
 
 #[cfg(test)]
 mod tests {
-    use super::{collect_harn_files_recursive, resolve_conformance_selection};
+    use super::{collect_harn_files_sorted, resolve_conformance_selection};
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -610,14 +597,14 @@ mod tests {
     }
 
     #[test]
-    fn collect_harn_files_recursive_descends_and_sorts() {
+    fn collect_harn_files_sorted_descends_and_sorts() {
         let temp = TempTestDir::new();
         temp.write("suite/zeta.harn");
         temp.write("suite/alpha.harn");
         temp.write("suite/nested/beta.harn");
         fs::write(temp.path().join("suite/ignore.txt"), "").unwrap();
 
-        let files = collect_harn_files_recursive(&temp.path().join("suite"));
+        let files = collect_harn_files_sorted(&temp.path().join("suite"));
         let relative: Vec<String> = files
             .iter()
             .map(|path| {
