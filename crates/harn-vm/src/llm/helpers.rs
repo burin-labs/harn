@@ -1248,16 +1248,15 @@ mod tests {
             transcript,
         )])));
 
-        let opts = extract_llm_options(&[
-            VmValue::String(Rc::from("")),
-            VmValue::Nil,
-            options,
-        ])
-        .expect("llm options");
+        let opts = extract_llm_options(&[VmValue::String(Rc::from("")), VmValue::Nil, options])
+            .expect("llm options");
 
         assert_eq!(opts.messages.len(), 2);
         assert_eq!(opts.messages[0]["tool_calls"][0]["id"], "call_123");
-        assert_eq!(opts.messages[0]["reasoning"], "need to inspect the file first");
+        assert_eq!(
+            opts.messages[0]["reasoning"],
+            "need to inspect the file first"
+        );
         assert_eq!(opts.messages[1]["tool_call_id"], "call_123");
     }
 }

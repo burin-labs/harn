@@ -814,6 +814,51 @@ pub(crate) fn normalize_openai_style_messages(
         .collect()
 }
 
+fn should_debug_message_shapes() -> bool {
+    std::env::var("HARN_DEBUG_MESSAGE_SHAPES")
+        .map(|value| value != "0" && !value.eq_ignore_ascii_case("false"))
+        .unwrap_or(false)
+}
+
+pub(crate) fn debug_log_message_shapes(label: &str, messages: &[serde_json::Value]) {
+    if !should_debug_message_shapes() {
+        return;
+    }
+    let summary = messages
+        .iter()
+        .enumerate()
+        .map(|(idx, message)| {
+            let role = message
+                .get("role")
+                .and_then(|value| value.as_str())
+                .unwrap_or("?");
+            let content_kind = match message.get("content") {
+                Some(serde_json::Value::String(_)) => "string",
+                Some(serde_json::Value::Null) => "null",
+                Some(serde_json::Value::Array(_)) => "array",
+                Some(serde_json::Value::Object(_)) => "object",
+                Some(_) => "other",
+                None => "missing",
+            };
+            let has_tool_call_id = message.get("tool_call_id").is_some();
+            let tool_calls = message
+                .get("tool_calls")
+                .and_then(|value| value.as_array())
+                .map(|calls| calls.len())
+                .unwrap_or(0);
+            let has_reasoning = message
+                .get("reasoning")
+                .map(|value| !value.is_null())
+                .unwrap_or(false);
+            format!(
+                "#{idx}:{role}:content={content_kind}:tool_call_id={has_tool_call_id}:tool_calls={tool_calls}:reasoning={has_reasoning}"
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" | ");
+    crate::events::log_info("llm.message_shape", &format!("{label}: {summary}"));
+}
+
 /// Build a tagged, provider-prefixed error message from a non-2xx HTTP
 /// response so downstream agent loops can react (e.g. trigger compaction on
 /// `context_overflow`, back off on `rate_limited`, surface everything else as
@@ -961,6 +1006,13 @@ pub(crate) async fn vm_call_llm_api_with_body(
                 body[k] = v.clone();
             }
         }
+    }
+
+    if let Some(messages) = body.get("messages").and_then(|value| value.as_array()) {
+        debug_log_message_shapes(
+            &format!("outbound provider={provider} model={model}"),
+            messages,
+        );
     }
 
     if use_stream_transport {

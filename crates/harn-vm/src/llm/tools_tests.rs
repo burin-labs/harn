@@ -7,6 +7,7 @@
 //! items as if it were inlined.
 
 use super::{
+    build_assistant_response_message, build_assistant_tool_message,
     build_tool_calling_contract_prompt, collect_tool_schemas_with_registry, normalize_tool_args,
     parse_native_json_tool_calls, parse_text_tool_calls_with_tools, ComponentRegistry,
     TS_CALL_CONTRACT_HELP,
@@ -1015,4 +1016,40 @@ fn text_parser_prefers_text_format_over_native_json() {
     // Text parser should find the edit call and NOT fall through to native
     assert_eq!(result.calls.len(), 1, "text format should take priority");
     assert_eq!(result.calls[0]["name"], json!("edit"));
+}
+
+#[test]
+fn assistant_tool_message_includes_empty_content_for_openai_style() {
+    let message = build_assistant_tool_message(
+        "",
+        &[json!({
+            "id": "call_001",
+            "name": "read",
+            "arguments": {"path": "main.rs"},
+        })],
+        "together",
+    );
+
+    assert_eq!(message["role"], "assistant");
+    assert_eq!(message["content"], "");
+    assert_eq!(message["tool_calls"][0]["id"], "call_001");
+}
+
+#[test]
+fn assistant_response_message_preserves_reasoning() {
+    let message = build_assistant_response_message(
+        "",
+        &[],
+        &[json!({
+            "id": "call_001",
+            "name": "read",
+            "arguments": {"path": "main.rs"},
+        })],
+        Some("inspect the file before editing"),
+        "together",
+    );
+
+    assert_eq!(message["reasoning"], "inspect the file before editing");
+    assert_eq!(message["content"], "");
+    assert_eq!(message["tool_calls"][0]["id"], "call_001");
 }

@@ -42,7 +42,7 @@ pub(crate) fn build_assistant_tool_message(
                 })
             })
             .collect();
-        let mut msg = serde_json::json!({
+        let msg = serde_json::json!({
             "role": "assistant",
             "content": if text.is_empty() { serde_json::Value::String(String::new()) } else { serde_json::json!(text) },
             "tool_calls": calls,

@@ -90,6 +90,25 @@ pub fn estimate_message_tokens(messages: &[serde_json::Value]) -> usize {
         / 4
 }
 
+fn is_reasoning_or_tool_turn_message(message: &serde_json::Value) -> bool {
+    let role = message
+        .get("role")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default();
+    role == "tool"
+        || message.get("tool_calls").is_some()
+        || message
+            .get("reasoning")
+            .map(|value| !value.is_null())
+            .unwrap_or(false)
+}
+
+fn find_prev_user_boundary(messages: &[serde_json::Value], start: usize) -> Option<usize> {
+    (0..=start)
+        .rev()
+        .find(|idx| messages[*idx].get("role").and_then(|value| value.as_str()) == Some("user"))
+}
+
 /// Microcompact a tool result: if it exceeds `max_chars`, keep the first and
 /// last portions with a snip marker in between.
 pub fn microcompact_tool_output(output: &str, max_chars: usize) -> String {
@@ -496,6 +515,22 @@ pub(crate) async fn auto_compact_messages(
     if split_at == 0 {
         split_at = original_split;
     }
+    if let Some(volatile_start) = messages[split_at..]
+        .iter()
+        .position(is_reasoning_or_tool_turn_message)
+        .map(|offset| split_at + offset)
+    {
+        if let Some(boundary) = volatile_start
+            .checked_sub(1)
+            .and_then(|idx| find_prev_user_boundary(messages, idx))
+            .filter(|boundary| *boundary > 0)
+        {
+            split_at = boundary;
+        }
+    }
+    if split_at == 0 {
+        return Ok(None);
+    }
     let old_messages: Vec<_> = messages.drain(..split_at).collect();
     let archived_count = old_messages.len();
 
@@ -541,4 +576,48 @@ pub(crate) async fn auto_compact_messages(
         }),
     );
     Ok(Some(summary))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn auto_compact_preserves_reasoning_tool_suffix() {
+        let mut messages = vec![
+            serde_json::json!({"role": "user", "content": "old task"}),
+            serde_json::json!({"role": "assistant", "content": "old reply"}),
+            serde_json::json!({"role": "user", "content": "new task"}),
+            serde_json::json!({
+                "role": "assistant",
+                "content": "",
+                "reasoning": "think first",
+                "tool_calls": [{
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "read", "arguments": "{\"path\":\"foo.rs\"}"}
+                }],
+            }),
+            serde_json::json!({"role": "tool", "tool_call_id": "call_1", "content": "file"}),
+        ];
+        let config = AutoCompactConfig {
+            keep_last: 2,
+            ..Default::default()
+        };
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let summary = runtime
+            .block_on(auto_compact_messages(&mut messages, &config, None))
+            .expect("compaction succeeds");
+
+        assert!(summary.is_some());
+        assert_eq!(messages[1]["role"], "user");
+        assert_eq!(messages[2]["role"], "assistant");
+        assert_eq!(messages[2]["tool_calls"][0]["id"], "call_1");
+        assert_eq!(messages[3]["role"], "tool");
+        assert_eq!(messages[3]["tool_call_id"], "call_1");
+    }
 }

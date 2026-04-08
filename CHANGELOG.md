@@ -2,6 +2,24 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.46
+
+### Added
+
+- **Message-shape debug logging** — set `HARN_DEBUG_MESSAGE_SHAPES=1` to emit
+  compact summaries of outbound/provider-facing transcript message structure
+  during agent preflight and LLM API calls.
+- **Transcript/tool message regression tests** — added coverage for
+  OpenAI-style assistant tool messages with empty `content`, preserved
+  `reasoning` fields, and compaction over reasoning-plus-tool suffixes.
+
+### Changed
+
+- **Compaction boundary safeguard** — auto-compaction now preserves the active
+  user turn when recent messages contain assistant reasoning or tool traffic,
+  avoiding invalid mid-turn truncation while still compacting instead of
+  silently bailing out.
+
 ## v0.5.45
 
 ### Added

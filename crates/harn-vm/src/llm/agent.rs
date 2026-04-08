@@ -1152,6 +1152,10 @@ pub async fn run_agent_loop_internal(
         } else {
             (visible_messages.clone(), default_system)
         };
+        crate::llm::api::debug_log_message_shapes(
+            &format!("agent iteration={iteration} preflight"),
+            &call_messages,
+        );
         opts.messages = call_messages;
         opts.system = call_system;
         let result = observed_llm_call(
