@@ -385,6 +385,14 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                     .as_ref()
                     .and_then(|o| o.get("post_turn_callback"))
                     .cloned(),
+                on_tool_call: options
+                    .as_ref()
+                    .and_then(|o| o.get("on_tool_call"))
+                    .cloned(),
+                on_tool_result: options
+                    .as_ref()
+                    .and_then(|o| o.get("on_tool_result"))
+                    .cloned(),
             },
         )
         .await?;

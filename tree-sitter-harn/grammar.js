@@ -229,7 +229,7 @@ module.exports = grammar({
     dict_pattern_field: ($) =>
       choice(
         seq("...", $.identifier),
-        seq($.identifier, optional(seq(":", $.identifier)))
+        seq($.identifier, optional(seq(":", $.identifier)), optional(seq("=", $._expression)))
       ),
 
     list_pattern: ($) =>
@@ -238,7 +238,7 @@ module.exports = grammar({
     list_pattern_element: ($) =>
       choice(
         seq("...", $.identifier),
-        $.identifier
+        seq($.identifier, optional(seq("=", $._expression)))
       ),
 
     assignment: ($) =>

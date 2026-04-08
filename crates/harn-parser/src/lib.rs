@@ -6,7 +6,9 @@ pub mod typechecker;
 
 pub use ast::*;
 pub use parser::*;
-pub use typechecker::{format_type, DiagnosticSeverity, TypeChecker, TypeDiagnostic};
+pub use typechecker::{
+    format_type, DiagnosticSeverity, InlayHintInfo, TypeChecker, TypeDiagnostic,
+};
 
 /// Returns `true` if `name` is a builtin recognized by the parser's static
 /// analyzer. Exposed for cross-crate drift tests (see

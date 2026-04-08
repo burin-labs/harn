@@ -2,6 +2,33 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.52
+
+### Added
+
+- **Default values in destructuring patterns** — dict and list destructuring
+  patterns now support `= expr` syntax for default values. When the extracted
+  value is `nil` (missing key or out-of-bounds index), the default expression
+  is evaluated and used instead. Works with field renaming (`{key: alias = default}`),
+  in `for`-`in` loops, and with both `let` and `var` bindings.
+- **Tool lifecycle hooks on agent()** — `on_tool_call` and `on_tool_result`
+  closure callbacks on the `agent()` and `llm()` options dict. `on_tool_call`
+  receives `{tool_name, args}` and returns `{allow: bool}` to gate or
+  `{args: dict}` to rewrite arguments. `on_tool_result` receives
+  `{tool_name, result}` and returns a replacement string or nil.
+- **LSP inlay hints** — the language server now provides type inlay hints for
+  `let`/`var` bindings without explicit type annotations. Hints are suppressed
+  for literal assignments where the type is obvious.
+- **Exhaustive match checking for union types** — `match` on a union-typed
+  value (e.g. `string | int | nil`) now warns when not all type branches are
+  covered, extending the existing enum exhaustiveness checks.
+
+### Fixed
+
+- **`??` type inference** — nil-coalescing (`??`) now correctly preserves the
+  left-hand type when the left side is a known non-nil type. Previously it
+  returned the right-hand type, which could discard type information.
+
 ## v0.5.51
 
 ### Added

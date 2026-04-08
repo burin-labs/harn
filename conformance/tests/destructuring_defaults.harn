@@ -1,0 +1,49 @@
+pipeline default() {
+  // Dict destructuring with defaults — missing keys get default values
+  let {name = "workflow", system = "none"} = {name: "custom"}
+  println(name)
+  println(system)
+  // Default NOT triggered when key exists
+  let {x = 99} = {x: 42}
+  println(x)
+  // Dict default with alias
+  let {name: displayName = "Unknown"} = {}
+  println(displayName)
+  // Alias NOT triggered when key exists
+  let {name: label = "fallback"} = {name: "real"}
+  println(label)
+  // List destructuring with defaults
+  let [a = 10, b = 20, c = 30] = [1, 2]
+  println(a)
+  println(b)
+  println(c)
+  // List default NOT triggered when element exists
+  let [p = 100] = [7]
+  println(p)
+  // For-in with dict destructuring defaults
+  let tasks = [{status: "done"}, {priority: 5}, {status: "active", priority: 1}]
+  for {status = "pending", priority = 0} in tasks {
+    println("${status}:${priority}")
+  }
+  // Default expressions evaluated fresh per iteration
+  let items = [{id: 10}, {}, {id: 30}]
+  for {id = 0} in items {
+    println(id)
+  }
+  // Empty source dict — all defaults apply
+  let {a: alpha = "A", b: beta = "B"} = {}
+  println(alpha)
+  println(beta)
+  // Mixed: some with defaults, some without
+  let {present, missing = "default"} = {present: "here"}
+  println(present)
+  println(missing)
+  // Nested usage in function body
+  fn configure(opts = {}) {
+    let {max = 100, min = 0} = opts
+    return max - min
+  }
+  println(configure({}))
+  println(configure({max: 50}))
+  println(configure({max: 200, min: 50}))
+}

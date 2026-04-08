@@ -328,6 +328,13 @@ pub struct AgentLoopConfig {
     /// consecutive_single_tool_turns). If it returns a non-empty string, that
     /// string is injected as a user message before the next LLM call.
     pub post_turn_callback: Option<VmValue>,
+    /// Pre-execution hook: called with `{tool_name, args}` before each tool call.
+    /// Must return a dict: `{allow: bool}` to allow/deny, optionally `{args: dict}`
+    /// to modify arguments. Returning `{allow: false, reason: "..."}` denies the call.
+    pub on_tool_call: Option<VmValue>,
+    /// Post-execution hook: called with `{tool_name, result}` after each tool call.
+    /// Returns a string to replace the result, or nil to keep it unchanged.
+    pub on_tool_result: Option<VmValue>,
 }
 
 /// Classify whether a VmError from an LLM call is transient and worth retrying.
@@ -1572,6 +1579,49 @@ pub async fn run_agent_loop_internal(
                     }
                 }
 
+                // on_tool_call closure hook (Harn-level pre-execution)
+                if let Some(VmValue::Closure(ref closure)) = config.on_tool_call {
+                    if let Some(mut vm) = crate::vm::clone_async_builtin_child_vm() {
+                        let hook_arg = crate::stdlib::json_to_vm_value(&serde_json::json!({
+                            "tool_name": tool_name,
+                            "args": tool_args,
+                        }));
+                        if let Ok(result) = vm.call_closure_pub(closure, &[hook_arg], &[]).await {
+                            if let Some(dict) = result.as_dict() {
+                                if matches!(dict.get("allow"), Some(VmValue::Bool(false))) {
+                                    let reason = dict
+                                        .get("reason")
+                                        .map(|v| v.display())
+                                        .unwrap_or_else(|| "denied by on_tool_call hook".into());
+                                    let result_text = format!("REJECTED by on_tool_call: {reason}");
+                                    if !rejected_tools.contains(&tool_name.to_string()) {
+                                        rejected_tools.push(tool_name.to_string());
+                                    }
+                                    if tool_format == "native" {
+                                        append_message_to_contexts(
+                                            &mut visible_messages,
+                                            &mut recorded_messages,
+                                            build_tool_result_message(
+                                                tool_id,
+                                                &result_text,
+                                                &opts.provider,
+                                            ),
+                                        );
+                                    } else {
+                                        observations.push_str(&format!(
+                                            "[result of {tool_name}]\n{result_text}\n[end of {tool_name} result]\n\n"
+                                        ));
+                                    }
+                                    continue;
+                                }
+                                if let Some(new_args) = dict.get("args") {
+                                    tool_args = crate::llm::vm_value_to_json(new_args);
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Bridge-level PreToolUse gate: host can allow/deny/modify
                 if let Some(bridge) = bridge.as_ref() {
                     let mutation = crate::orchestration::current_mutation_session();
@@ -1909,6 +1959,25 @@ pub async fn run_agent_loop_internal(
                 // PostToolUse hooks (in-process)
                 let result_text =
                     crate::orchestration::run_post_tool_hooks(tool_name, &result_text);
+
+                // on_tool_result closure hook (Harn-level post-execution)
+                let result_text = if let Some(VmValue::Closure(ref closure)) = config.on_tool_result
+                {
+                    if let Some(mut vm) = crate::vm::clone_async_builtin_child_vm() {
+                        let hook_arg = crate::stdlib::json_to_vm_value(&serde_json::json!({
+                            "tool_name": tool_name,
+                            "result": result_text,
+                        }));
+                        match vm.call_closure_pub(closure, &[hook_arg], &[]).await {
+                            Ok(VmValue::String(s)) if !s.is_empty() => s.to_string(),
+                            _ => result_text,
+                        }
+                    } else {
+                        result_text
+                    }
+                } else {
+                    result_text
+                };
 
                 // Bridge-level PostToolUse gate: host can inspect/modify result
                 let result_text = if let Some(bridge) = bridge.as_ref() {
@@ -2500,6 +2569,14 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                     post_turn_callback: options
                         .as_ref()
                         .and_then(|o| o.get("post_turn_callback"))
+                        .cloned(),
+                    on_tool_call: options
+                        .as_ref()
+                        .and_then(|o| o.get("on_tool_call"))
+                        .cloned(),
+                    on_tool_result: options
+                        .as_ref()
+                        .and_then(|o| o.get("on_tool_result"))
                         .cloned(),
                 },
             )

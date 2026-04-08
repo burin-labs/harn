@@ -58,6 +58,12 @@ impl tower_lsp::LanguageServer for HarnLsp {
                 code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
                 rename_provider: Some(OneOf::Left(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
+                inlay_hint_provider: Some(OneOf::Right(InlayHintServerCapabilities::Options(
+                    InlayHintOptions {
+                        work_done_progress_options: Default::default(),
+                        resolve_provider: None,
+                    },
+                ))),
                 ..Default::default()
             },
             ..Default::default()
@@ -1012,5 +1018,38 @@ impl tower_lsp::LanguageServer for HarnLsp {
             result_id: None,
             data: semantic_tokens,
         })))
+    }
+
+    async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
+        let uri = params.text_document.uri;
+        let docs = self.documents.lock().unwrap();
+        let Some(state) = docs.get(&uri) else {
+            return Ok(None);
+        };
+
+        let range = params.range;
+        let hints: Vec<InlayHint> = state
+            .inlay_hints
+            .iter()
+            .filter(|h| {
+                let line = h.line.saturating_sub(1) as u32;
+                line >= range.start.line && line <= range.end.line
+            })
+            .map(|h| InlayHint {
+                position: Position::new(
+                    h.line.saturating_sub(1) as u32,
+                    h.column.saturating_sub(1) as u32,
+                ),
+                label: InlayHintLabel::String(h.label.clone()),
+                kind: Some(InlayHintKind::TYPE),
+                text_edits: None,
+                tooltip: None,
+                padding_left: None,
+                padding_right: None,
+                data: None,
+            })
+            .collect();
+
+        Ok(if hints.is_empty() { None } else { Some(hints) })
     }
 }

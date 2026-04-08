@@ -4,6 +4,13 @@ use harn_parser::{BindingPattern, Node, SNode, TypeExpr, TypeParam, TypedParam, 
 
 use crate::Formatter;
 
+/// Format a default-value expression in a destructuring pattern.
+/// Creates a temporary formatter to render the expression.
+fn format_default_expr(node: &SNode) -> String {
+    let fmt = Formatter::new(BTreeMap::new(), 100);
+    fmt.format_expr(node)
+}
+
 /// Return a numeric precedence for binary operators (higher = tighter binding).
 ///
 /// `??` sits between additive and multiplicative — tighter than
@@ -96,10 +103,16 @@ pub(crate) fn format_pattern(pattern: &BindingPattern) -> String {
                 .map(|f| {
                     if f.is_rest {
                         format!("...{}", f.key)
-                    } else if let Some(alias) = &f.alias {
-                        format!("{}: {}", f.key, alias)
                     } else {
-                        f.key.clone()
+                        let mut s = f.key.clone();
+                        if let Some(alias) = &f.alias {
+                            s = format!("{}: {}", f.key, alias);
+                        }
+                        if let Some(default) = &f.default_value {
+                            let default_str = format_default_expr(default);
+                            s = format!("{} = {}", s, default_str);
+                        }
+                        s
                     }
                 })
                 .collect();
@@ -111,6 +124,9 @@ pub(crate) fn format_pattern(pattern: &BindingPattern) -> String {
                 .map(|e| {
                     if e.is_rest {
                         format!("...{}", e.name)
+                    } else if let Some(default) = &e.default_value {
+                        let default_str = format_default_expr(default);
+                        format!("{} = {}", e.name, default_str)
                     } else {
                         e.name.clone()
                     }

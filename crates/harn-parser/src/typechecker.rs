@@ -4,6 +4,16 @@ use crate::ast::*;
 use crate::builtin_signatures;
 use harn_lexer::{FixEdit, Span};
 
+/// An inlay hint produced during type checking.
+#[derive(Debug, Clone)]
+pub struct InlayHintInfo {
+    /// Position (line, column) where the hint should be displayed (after the variable name).
+    pub line: usize,
+    pub column: usize,
+    /// The type label to display (e.g. ": string").
+    pub label: String,
+}
+
 /// A diagnostic produced by the type checker.
 #[derive(Debug, Clone)]
 pub struct TypeDiagnostic {
@@ -237,6 +247,7 @@ pub struct TypeChecker {
     diagnostics: Vec<TypeDiagnostic>,
     scope: TypeScope,
     source: Option<String>,
+    hints: Vec<InlayHintInfo>,
 }
 
 impl TypeChecker {
@@ -245,21 +256,32 @@ impl TypeChecker {
             diagnostics: Vec::new(),
             scope: TypeScope::new(),
             source: None,
+            hints: Vec::new(),
         }
     }
 
     /// Check a program with source text for autofix generation.
     pub fn check_with_source(mut self, program: &[SNode], source: &str) -> Vec<TypeDiagnostic> {
         self.source = Some(source.to_string());
-        self.check_inner(program)
+        self.check_inner(program).0
     }
 
     /// Check a program and return diagnostics.
     pub fn check(self, program: &[SNode]) -> Vec<TypeDiagnostic> {
+        self.check_inner(program).0
+    }
+
+    /// Check a program and return both diagnostics and inlay hints.
+    pub fn check_with_hints(
+        mut self,
+        program: &[SNode],
+        source: &str,
+    ) -> (Vec<TypeDiagnostic>, Vec<InlayHintInfo>) {
+        self.source = Some(source.to_string());
         self.check_inner(program)
     }
 
-    fn check_inner(mut self, program: &[SNode]) -> Vec<TypeDiagnostic> {
+    fn check_inner(mut self, program: &[SNode]) -> (Vec<TypeDiagnostic>, Vec<InlayHintInfo>) {
         // First pass: register type and enum declarations into root scope
         Self::register_declarations_into(&mut self.scope, program);
 
@@ -322,7 +344,7 @@ impl TypeChecker {
             }
         }
 
-        self.diagnostics
+        (self.diagnostics, self.hints)
     }
 
     /// Register type, enum, interface, and struct declarations from AST nodes into a scope.
@@ -416,6 +438,27 @@ impl TypeChecker {
         }
     }
 
+    /// Type-check default value expressions within a destructuring pattern.
+    fn check_pattern_defaults(&mut self, pattern: &BindingPattern, scope: &mut TypeScope) {
+        match pattern {
+            BindingPattern::Identifier(_) => {}
+            BindingPattern::Dict(fields) => {
+                for field in fields {
+                    if let Some(default) = &field.default_value {
+                        self.check_binops(default, scope);
+                    }
+                }
+            }
+            BindingPattern::List(elements) => {
+                for elem in elements {
+                    if let Some(default) = &elem.default_value {
+                        self.check_binops(default, scope);
+                    }
+                }
+            }
+        }
+    }
+
     fn check_node(&mut self, snode: &SNode, scope: &mut TypeScope) {
         let span = snode.span;
         match &snode.node {
@@ -443,9 +486,22 @@ impl TypeChecker {
                             }
                         }
                     }
+                    // Collect inlay hint when type is inferred (no annotation)
+                    if type_ann.is_none() {
+                        if let Some(ref ty) = inferred {
+                            if !is_obvious_type(value, ty) {
+                                self.hints.push(InlayHintInfo {
+                                    line: span.line,
+                                    column: span.column + "let ".len() + name.len(),
+                                    label: format!(": {}", format_type(ty)),
+                                });
+                            }
+                        }
+                    }
                     let ty = type_ann.clone().or(inferred);
                     scope.define_var(name, ty);
                 } else {
+                    self.check_pattern_defaults(pattern, scope);
                     Self::define_pattern_vars(pattern, scope, false);
                 }
             }
@@ -474,9 +530,21 @@ impl TypeChecker {
                             }
                         }
                     }
+                    if type_ann.is_none() {
+                        if let Some(ref ty) = inferred {
+                            if !is_obvious_type(value, ty) {
+                                self.hints.push(InlayHintInfo {
+                                    line: span.line,
+                                    column: span.column + "var ".len() + name.len(),
+                                    label: format!(": {}", format_type(ty)),
+                                });
+                            }
+                        }
+                    }
                     let ty = type_ann.clone().or(inferred);
                     scope.define_var_mutable(name, ty);
                 } else {
+                    self.check_pattern_defaults(pattern, scope);
                     Self::define_pattern_vars(pattern, scope, true);
                 }
             }
@@ -593,6 +661,7 @@ impl TypeChecker {
                     };
                     loop_scope.define_var(variable, elem_type);
                 } else {
+                    self.check_pattern_defaults(pattern, &mut loop_scope);
                     Self::define_pattern_vars(pattern, &mut loop_scope, false);
                 }
                 self.check_block(body, &mut loop_scope);
@@ -1680,6 +1749,8 @@ impl TypeChecker {
         };
 
         let Some(enum_name) = enum_name else {
+            // Try union type exhaustiveness instead
+            self.check_match_exhaustiveness_union(value, arms, scope, span);
             return;
         };
         let Some(variants) = scope.get_enum(&enum_name) else {
@@ -1724,6 +1795,90 @@ impl TypeChecker {
                 format!(
                     "Non-exhaustive match on enum {}: missing variants {}",
                     enum_name, missing_str
+                ),
+                span,
+            );
+        }
+    }
+
+    /// Check exhaustiveness for match on union types (e.g. `string | int | nil`).
+    fn check_match_exhaustiveness_union(
+        &mut self,
+        value: &SNode,
+        arms: &[MatchArm],
+        scope: &TypeScope,
+        span: Span,
+    ) {
+        let Some(TypeExpr::Union(members)) = self.infer_type(value, scope) else {
+            return;
+        };
+        // Only check unions of named types (string, int, nil, bool, etc.)
+        if !members.iter().all(|m| matches!(m, TypeExpr::Named(_))) {
+            return;
+        }
+
+        let mut has_wildcard = false;
+        let mut covered_types: Vec<String> = Vec::new();
+
+        for arm in arms {
+            match &arm.pattern.node {
+                // type_of(x) == "string" style patterns are common but hard to detect here
+                // Literal patterns cover specific types
+                Node::NilLiteral => covered_types.push("nil".into()),
+                Node::BoolLiteral(_) => {
+                    if !covered_types.contains(&"bool".into()) {
+                        covered_types.push("bool".into());
+                    }
+                }
+                Node::IntLiteral(_) => {
+                    if !covered_types.contains(&"int".into()) {
+                        covered_types.push("int".into());
+                    }
+                }
+                Node::FloatLiteral(_) => {
+                    if !covered_types.contains(&"float".into()) {
+                        covered_types.push("float".into());
+                    }
+                }
+                Node::StringLiteral(_) => {
+                    if !covered_types.contains(&"string".into()) {
+                        covered_types.push("string".into());
+                    }
+                }
+                Node::Identifier(name) if name == "_" => {
+                    has_wildcard = true;
+                }
+                _ => {
+                    has_wildcard = true;
+                }
+            }
+        }
+
+        if has_wildcard {
+            return;
+        }
+
+        let type_names: Vec<&str> = members
+            .iter()
+            .filter_map(|m| match m {
+                TypeExpr::Named(n) => Some(n.as_str()),
+                _ => None,
+            })
+            .collect();
+        let missing: Vec<&&str> = type_names
+            .iter()
+            .filter(|t| !covered_types.iter().any(|c| c == **t))
+            .collect();
+        if !missing.is_empty() {
+            let missing_str = missing
+                .iter()
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            self.warning_at(
+                format!(
+                    "Non-exhaustive match on union type: missing {}",
+                    missing_str
                 ),
                 span,
             );
@@ -2386,6 +2541,7 @@ fn infer_binary_op_type(op: &str, left: &InferredType, right: &InferredType) -> 
             _ => None,
         },
         "??" => match (left, right) {
+            // Union containing nil: strip nil, use non-nil members
             (Some(TypeExpr::Union(members)), _) => {
                 let non_nil: Vec<_> = members
                     .iter()
@@ -2400,7 +2556,12 @@ fn infer_binary_op_type(op: &str, left: &InferredType, right: &InferredType) -> 
                     Some(TypeExpr::Union(non_nil))
                 }
             }
-            _ => right.clone(),
+            // Left is nil: result is always the right side
+            (Some(TypeExpr::Named(n)), _) if n == "nil" => right.clone(),
+            // Left is a known non-nil type: right is unreachable, preserve left
+            (Some(l), _) => Some(l.clone()),
+            // Unknown left: use right as best guess
+            (None, _) => right.clone(),
         },
         "|>" => None,
         _ => None,
@@ -2444,6 +2605,22 @@ pub fn shape_mismatch_detail(expected: &TypeExpr, actual: &TypeExpr) -> Option<S
     } else {
         None
     }
+}
+
+/// Returns true when the type is obvious from the RHS expression
+/// (e.g. `let x = 42` is obviously int — no hint needed).
+fn is_obvious_type(value: &SNode, _ty: &TypeExpr) -> bool {
+    matches!(
+        &value.node,
+        Node::IntLiteral(_)
+            | Node::FloatLiteral(_)
+            | Node::StringLiteral(_)
+            | Node::BoolLiteral(_)
+            | Node::NilLiteral
+            | Node::ListLiteral(_)
+            | Node::DictLiteral(_)
+            | Node::InterpolatedString(_)
+    )
 }
 
 pub fn format_type(ty: &TypeExpr) -> String {
@@ -3632,5 +3809,69 @@ add("hello", 2) }"#,
             fixable.is_empty(),
             "without source, no fix should be generated"
         );
+    }
+
+    // --- Union exhaustiveness tests ---
+
+    #[test]
+    fn test_union_exhaustive_match_no_warning() {
+        let warns = warnings(
+            r#"pipeline t(task) {
+  let x: string | int | nil = nil
+  match x {
+    "hello" -> { log("s") }
+    42 -> { log("i") }
+    nil -> { log("n") }
+  }
+}"#,
+        );
+        let union_warns: Vec<_> = warns
+            .iter()
+            .filter(|w| w.contains("Non-exhaustive match on union"))
+            .collect();
+        assert!(union_warns.is_empty());
+    }
+
+    #[test]
+    fn test_union_non_exhaustive_match_warning() {
+        let warns = warnings(
+            r#"pipeline t(task) {
+  let x: string | int | nil = nil
+  match x {
+    "hello" -> { log("s") }
+    42 -> { log("i") }
+  }
+}"#,
+        );
+        let union_warns: Vec<_> = warns
+            .iter()
+            .filter(|w| w.contains("Non-exhaustive match on union"))
+            .collect();
+        assert_eq!(union_warns.len(), 1);
+        assert!(union_warns[0].contains("nil"));
+    }
+
+    // --- Nil-coalescing type inference tests ---
+
+    #[test]
+    fn test_nil_coalesce_non_union_preserves_left_type() {
+        // When left is a known non-nil type, ?? should preserve it
+        let errs = errors(
+            r#"pipeline t(task) {
+  let x: int = 42
+  let y: int = x ?? 0
+}"#,
+        );
+        assert!(errs.is_empty());
+    }
+
+    #[test]
+    fn test_nil_coalesce_nil_returns_right_type() {
+        let errs = errors(
+            r#"pipeline t(task) {
+  let x: string = nil ?? "fallback"
+}"#,
+        );
+        assert!(errs.is_empty());
     }
 }

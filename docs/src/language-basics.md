@@ -556,10 +556,28 @@ for {key, value} in entries {
 }
 ```
 
+### Default values
+
+Pattern fields can specify defaults with `= expr`. The default is used when
+the value would otherwise be `nil`:
+
+```harn
+let { name = "anon", role = "user" } = { name: "Alice" }
+println(name)  // Alice
+println(role)  // user
+
+let [a = 0, b = 0, c = 0] = [1, 2]
+println(c)     // 0
+
+// Combine with renaming
+let { name: display = "Unknown" } = {}
+println(display)  // Unknown
+```
+
 ### Missing keys and empty rest
 
-Missing keys destructure to `nil`. A rest pattern with no remaining
-items gives an empty collection:
+Missing keys destructure to `nil` (unless a default is specified). A rest
+pattern with no remaining items gives an empty collection:
 
 ```harn
 let {name, email} = {name: "Alice"}

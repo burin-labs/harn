@@ -398,6 +398,8 @@ pub struct DictPatternField {
     pub alias: Option<String>,
     /// True for `...rest` (rest pattern).
     pub is_rest: bool,
+    /// Default value if the key is missing (nil), e.g. `{name = "default"}`.
+    pub default_value: Option<Box<SNode>>,
 }
 
 /// An element in a list destructuring pattern.
@@ -407,6 +409,8 @@ pub struct ListPatternElement {
     pub name: String,
     /// True for `...rest` (rest pattern).
     pub is_rest: bool,
+    /// Default value if the index is out of bounds (nil), e.g. `[a = 0]`.
+    pub default_value: Option<Box<SNode>>,
 }
 
 /// A generic type parameter on a function or pipeline declaration.

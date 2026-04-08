@@ -627,6 +627,32 @@ let {name, age} = {name: "Alice", age: 30}
 Each field name in the pattern extracts the value for the matching key.
 If the key is missing from the dict, the variable is bound to `nil`.
 
+### Default values
+
+Pattern fields can specify default values with `= expr` syntax. The
+default expression is evaluated when the extracted value is `nil` (i.e.
+when the key is missing from the dict or the index is out of bounds for
+a list):
+
+```harn
+let { name = "workflow", system = "" } = { name: "custom" }
+// name == "custom" (key exists), system == "" (default applied)
+
+let [a = 10, b = 20, c = 30] = [1, 2]
+// a == 1, b == 2, c == 30 (default applied)
+```
+
+Defaults can be combined with field renaming:
+
+```harn
+let { name: displayName = "Unknown" } = {}
+// displayName == "Unknown"
+```
+
+Default expressions are evaluated fresh each time the pattern is matched
+(they are not memoized). Rest patterns (`...rest`) do not support
+default values.
+
 ### List destructuring
 
 ```harn
@@ -635,7 +661,8 @@ let [first, second, third] = [10, 20, 30]
 ```
 
 Elements are bound positionally. If there are more bindings than elements
-in the list, the excess bindings receive `nil`.
+in the list, the excess bindings receive `nil` (unless a default value is
+specified).
 
 ### Field renaming
 

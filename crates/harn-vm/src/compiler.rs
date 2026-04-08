@@ -2534,6 +2534,20 @@ impl Compiler {
                     let key_idx = self.chunk.add_constant(Constant::String(field.key.clone()));
                     self.chunk.emit_u16(Op::Constant, key_idx, self.line);
                     self.chunk.emit(Op::Subscript, self.line);
+                    // If field has a default, emit nil-coalescing logic
+                    if let Some(default_expr) = &field.default_value {
+                        self.chunk.emit(Op::Dup, self.line);
+                        self.chunk.emit(Op::Nil, self.line);
+                        self.chunk.emit(Op::NotEqual, self.line);
+                        let skip_default = self.chunk.emit_jump(Op::JumpIfTrue, self.line);
+                        self.chunk.emit(Op::Pop, self.line); // pop comparison result
+                        self.chunk.emit(Op::Pop, self.line); // pop nil value
+                        self.compile_node(default_expr)?;
+                        let end = self.chunk.emit_jump(Op::Jump, self.line);
+                        self.chunk.patch_jump(skip_default);
+                        self.chunk.emit(Op::Pop, self.line); // pop comparison result
+                        self.chunk.patch_jump(end);
+                    }
                     let binding_name = field.alias.as_deref().unwrap_or(&field.key);
                     let name_idx = self
                         .chunk
@@ -2587,6 +2601,20 @@ impl Compiler {
                     let idx_const = self.chunk.add_constant(Constant::Int(i as i64));
                     self.chunk.emit_u16(Op::Constant, idx_const, self.line);
                     self.chunk.emit(Op::Subscript, self.line);
+                    // If element has a default, emit nil-coalescing logic
+                    if let Some(default_expr) = &elem.default_value {
+                        self.chunk.emit(Op::Dup, self.line);
+                        self.chunk.emit(Op::Nil, self.line);
+                        self.chunk.emit(Op::NotEqual, self.line);
+                        let skip_default = self.chunk.emit_jump(Op::JumpIfTrue, self.line);
+                        self.chunk.emit(Op::Pop, self.line); // pop comparison result
+                        self.chunk.emit(Op::Pop, self.line); // pop nil value
+                        self.compile_node(default_expr)?;
+                        let end = self.chunk.emit_jump(Op::Jump, self.line);
+                        self.chunk.patch_jump(skip_default);
+                        self.chunk.emit(Op::Pop, self.line); // pop comparison result
+                        self.chunk.patch_jump(end);
+                    }
                     let name_idx = self.chunk.add_constant(Constant::String(elem.name.clone()));
                     self.chunk.emit_u16(def_op, name_idx, self.line);
                 }

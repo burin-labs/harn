@@ -449,6 +449,7 @@ impl Parser {
                         key: name,
                         alias: None,
                         is_rest: true,
+                        default_value: None,
                     });
                     // Rest must be last
                     break;
@@ -460,10 +461,17 @@ impl Parser {
                 } else {
                     None
                 };
+                let default_value = if self.check(&TokenKind::Assign) {
+                    self.advance(); // consume =
+                    Some(Box::new(self.parse_expression()?))
+                } else {
+                    None
+                };
                 fields.push(DictPatternField {
                     key,
                     alias,
                     is_rest: false,
+                    default_value,
                 });
                 if self.check(&TokenKind::Comma) {
                     self.advance();
@@ -485,14 +493,22 @@ impl Parser {
                     elements.push(ListPatternElement {
                         name,
                         is_rest: true,
+                        default_value: None,
                     });
                     // Rest must be last
                     break;
                 }
                 let name = self.consume_identifier("element name")?;
+                let default_value = if self.check(&TokenKind::Assign) {
+                    self.advance(); // consume =
+                    Some(Box::new(self.parse_expression()?))
+                } else {
+                    None
+                };
                 elements.push(ListPatternElement {
                     name,
                     is_rest: false,
+                    default_value,
                 });
                 if self.check(&TokenKind::Comma) {
                     self.advance();

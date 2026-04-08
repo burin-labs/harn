@@ -16,6 +16,7 @@ pub(crate) struct DocumentState {
     pub(crate) diagnostics: Vec<Diagnostic>,
     pub(crate) lint_diagnostics: Vec<harn_lint::LintDiagnostic>,
     pub(crate) type_diagnostics: Vec<harn_parser::TypeDiagnostic>,
+    pub(crate) inlay_hints: Vec<harn_parser::InlayHintInfo>,
 }
 
 impl DocumentState {
@@ -27,6 +28,7 @@ impl DocumentState {
             diagnostics: Vec::new(),
             lint_diagnostics: Vec::new(),
             type_diagnostics: Vec::new(),
+            inlay_hints: Vec::new(),
         };
         state.reparse();
         state
@@ -41,6 +43,7 @@ impl DocumentState {
         self.diagnostics.clear();
         self.lint_diagnostics.clear();
         self.type_diagnostics.clear();
+        self.inlay_hints.clear();
         self.symbols.clear();
         self.ast = None;
 
@@ -66,8 +69,9 @@ impl DocumentState {
             }
         };
 
-        // Type check (with source for autofix generation)
-        let type_diags = TypeChecker::new().check_with_source(&program, &self.source);
+        // Type check (with source for autofix generation and inlay hints)
+        let (type_diags, inlay_hints) = TypeChecker::new().check_with_hints(&program, &self.source);
+        self.inlay_hints = inlay_hints;
         for diag in &type_diags {
             let severity = match diag.severity {
                 harn_parser::DiagnosticSeverity::Error => DiagnosticSeverity::ERROR,

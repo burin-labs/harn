@@ -842,6 +842,18 @@ pub async fn execute_stage_node(
                         .and_then(|v| v.as_dict())
                         .and_then(|d| d.get("post_turn_callback"))
                         .cloned(),
+                    on_tool_call: node
+                        .raw_model_policy
+                        .as_ref()
+                        .and_then(|v| v.as_dict())
+                        .and_then(|d| d.get("on_tool_call"))
+                        .cloned(),
+                    on_tool_result: node
+                        .raw_model_policy
+                        .as_ref()
+                        .and_then(|v| v.as_dict())
+                        .and_then(|d| d.get("on_tool_result"))
+                        .cloned(),
                 },
             )
             .await?
