@@ -2037,6 +2037,10 @@ pub async fn run_agent_loop_internal(
                         let msg = val.display();
                         let msg = msg.trim();
                         if !msg.is_empty() {
+                            crate::events::log_debug(
+                                "agent.post_turn",
+                                &format!("iter={iteration} injecting nudge ({} chars)", msg.len()),
+                            );
                             append_message_to_contexts(
                                 &mut visible_messages,
                                 &mut recorded_messages,

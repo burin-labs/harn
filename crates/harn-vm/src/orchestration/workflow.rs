@@ -45,6 +45,10 @@ pub struct WorkflowNode {
     /// fields (compress_callback, mask_callback) that can't go through serde.
     #[serde(skip)]
     pub raw_transcript_policy: Option<VmValue>,
+    /// Raw model_policy VmValue dict — preserved for extracting closure
+    /// fields (post_turn_callback) that can't go through serde.
+    #[serde(skip)]
+    pub raw_model_policy: Option<VmValue>,
 }
 
 impl PartialEq for WorkflowNode {
@@ -269,6 +273,7 @@ pub fn parse_workflow_node_value(value: &VmValue, label: &str) -> Result<Workflo
     let dict = value.as_dict();
     node.raw_tools = dict.and_then(|d| d.get("tools")).cloned();
     node.raw_transcript_policy = dict.and_then(|d| d.get("transcript_policy")).cloned();
+    node.raw_model_policy = dict.and_then(|d| d.get("model_policy")).cloned();
     Ok(node)
 }
 
@@ -825,11 +830,13 @@ pub async fn execute_stage_node(
                     loop_detect_block: 3,
                     loop_detect_skip: 4,
                     tool_examples: node.model_policy.tool_examples.clone(),
+                    // Extract post_turn_callback from raw dict since serde(skip) drops it
                     post_turn_callback: node
-                        .model_policy
-                        .post_turn_callback
+                        .raw_model_policy
                         .as_ref()
-                        .map(|w| w.0.clone()),
+                        .and_then(|v| v.as_dict())
+                        .and_then(|d| d.get("post_turn_callback"))
+                        .cloned(),
                 },
             )
             .await?
