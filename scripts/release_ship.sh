@@ -26,6 +26,7 @@ This script then:
   6. Runs ./scripts/release_gate.sh publish
   7. Creates tag vX.Y.Z
   8. Pushes the current branch and tag unless --no-push was passed
+  9. Creates/updates a GitHub release with the rendered notes (requires gh CLI)
 EOF
 }
 
@@ -144,6 +145,22 @@ if [[ "$NO_PUSH" -eq 0 ]]; then
   git push origin "$TAG"
 fi
 
+# Create or update GitHub release with rendered notes
+GH_RELEASE_URL=""
+if [[ "$NO_PUSH" -eq 0 ]] && command -v gh &>/dev/null; then
+  echo "=== GitHub release ==="
+  if gh release view "$TAG" &>/dev/null; then
+    GH_RELEASE_URL="$(gh release edit "$TAG" --notes-file "$NOTES_OUTPUT" 2>&1)"
+    echo "Updated existing release: $GH_RELEASE_URL"
+  else
+    GH_RELEASE_URL="$(gh release create "$TAG" --title "$TAG" --notes-file "$NOTES_OUTPUT" 2>&1)"
+    echo "Created release: $GH_RELEASE_URL"
+  fi
+elif [[ "$NO_PUSH" -eq 0 ]]; then
+  echo "warning: gh CLI not found — skipping GitHub release creation"
+  echo "hint: run 'gh release create $TAG --title \"$TAG\" --notes-file \"$NOTES_OUTPUT\"' manually"
+fi
+
 echo ""
 echo "Release shipped:"
 echo "  Previous version: $PREVIOUS_VERSION"
@@ -155,6 +172,9 @@ if [[ "$NO_PUSH" -eq 1 ]]; then
   echo "  Push status:      skipped (--no-push)"
 else
   echo "  Push status:      pushed branch and tag"
+fi
+if [[ -n "$GH_RELEASE_URL" ]]; then
+  echo "  GitHub release:   $GH_RELEASE_URL"
 fi
 
 if [[ "$CLEANUP_NOTES" -eq 1 ]]; then
