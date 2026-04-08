@@ -1,0 +1,3 @@
+pipeline test(task) {
+  log(true * 5)
+}

@@ -2,6 +2,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process;
 
+use regex::Regex;
+
 use crate::execute;
 use crate::test_runner;
 
@@ -47,6 +49,37 @@ fn simple_diff(expected: &str, actual: &str) -> String {
         }
     }
     result
+}
+
+/// Check whether an actual error message matches the expected error spec.
+///
+/// The `.error` file supports three modes:
+/// - Plain text: substring match (backward compatible)
+/// - `re:` prefix: regex match against the full error message
+/// - Multiple lines: union — passes if any line matches
+fn error_matches(actual_error: &str, expected_spec: &str) -> bool {
+    let lines: Vec<&str> = expected_spec.lines().collect();
+    if lines.len() > 1 {
+        // Union: any line matching is sufficient
+        return lines
+            .iter()
+            .any(|line| error_line_matches(actual_error, line.trim()));
+    }
+    error_line_matches(actual_error, expected_spec.trim())
+}
+
+fn error_line_matches(actual_error: &str, pattern: &str) -> bool {
+    if let Some(re_pattern) = pattern.strip_prefix("re:") {
+        match Regex::new(re_pattern.trim()) {
+            Ok(re) => re.is_match(actual_error),
+            Err(_) => {
+                eprintln!("    warning: invalid regex in .error file: {re_pattern}");
+                false
+            }
+        }
+    } else {
+        actual_error.contains(pattern)
+    }
 }
 
 /// Write JUnit XML report.
@@ -199,13 +232,26 @@ pub(crate) async fn run_conformance_tests(
             .display()
             .to_string();
 
-        // Apply filter (supports substring match or regex with | for OR)
+        // Apply filter:
+        //   re:<regex>   — full regex match against the relative path
+        //   foo|bar      — OR of substring matches
+        //   *_runtime*   — glob-style wildcards (translated to regex)
+        //   plain        — substring match (default)
         if let Some(pattern) = filter {
-            if pattern.contains('|') {
-                if !pattern.split('|').any(|p| rel_path.contains(p.trim())) {
-                    continue;
-                }
-            } else if !rel_path.contains(pattern) {
+            let matched = if let Some(re_pat) = pattern.strip_prefix("re:") {
+                Regex::new(re_pat).is_ok_and(|re| re.is_match(&rel_path))
+            } else if pattern.contains('|') {
+                pattern.split('|').any(|p| rel_path.contains(p.trim()))
+            } else if pattern.contains('*') || pattern.contains('?') {
+                // Convert glob to regex: * → .*, ? → ., escape the rest
+                let escaped = regex::escape(pattern)
+                    .replace(r"\*", ".*")
+                    .replace(r"\?", ".");
+                Regex::new(&escaped).is_ok_and(|re| re.is_match(&rel_path))
+            } else {
+                rel_path.contains(pattern)
+            };
+            if !matched {
                 continue;
             }
         }
@@ -332,7 +378,7 @@ pub(crate) async fn run_conformance_tests(
             let duration_ms = start.elapsed().as_millis() as u64;
 
             match result {
-                Ok(Err(ref err)) if err.contains(&expected_error) => {
+                Ok(Err(ref err)) if error_matches(err, &expected_error) => {
                     if verbose {
                         println!("  \x1b[32mPASS\x1b[0m  {rel_path} ({duration_ms} ms)");
                     } else {

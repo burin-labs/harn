@@ -226,6 +226,9 @@ Ordered by precedence (lowest to highest):
 | 11 | `.` `?.` `[]` `[:]` `()` `?` | Member access, optional chaining, subscript, slice, call, try |
 
 Division by zero returns `nil`. Integer division truncates.
+Arithmetic operators are strictly typed — mismatched operands (e.g.
+`"hello" + 5`) produce a `TypeError`. Use `to_string()` or string
+interpolation (`"value=${x}"`) for explicit conversion.
 
 ### Optional chaining (`?.`)
 

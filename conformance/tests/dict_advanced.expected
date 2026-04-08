@@ -1,12 +1,12 @@
 [harn] [a, b, c]
 [harn] [1, 2, 3]
 [harn] nil
-[harn] nil
-[harn] nil
-[harn] nil
+[harn] 2
+[harn] 4
+[harn] 6
 [harn] false
-[harn] false
-[harn] false
+[harn] true
+[harn] true
 [harn] true
 [harn] true
 [harn] true

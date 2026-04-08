@@ -134,15 +134,15 @@ impl super::Vm {
         } else if op == Op::Add as u8 {
             let b = self.pop()?;
             let a = self.pop()?;
-            self.stack.push(self.add(a, b));
+            self.stack.push(self.add(a, b)?);
         } else if op == Op::Sub as u8 {
             let b = self.pop()?;
             let a = self.pop()?;
-            self.stack.push(self.sub(a, b));
+            self.stack.push(self.sub(a, b)?);
         } else if op == Op::Mul as u8 {
             let b = self.pop()?;
             let a = self.pop()?;
-            self.stack.push(self.mul(a, b));
+            self.stack.push(self.mul(a, b)?);
         } else if op == Op::Div as u8 {
             let b = self.pop()?;
             let a = self.pop()?;
@@ -1374,48 +1374,62 @@ impl super::Vm {
 
     // --- Arithmetic helpers ---
 
-    fn add(&self, a: VmValue, b: VmValue) -> VmValue {
+    fn add(&self, a: VmValue, b: VmValue) -> Result<VmValue, VmError> {
         match (&a, &b) {
-            (VmValue::Int(x), VmValue::Int(y)) => VmValue::Int(x.wrapping_add(*y)),
-            (VmValue::Float(x), VmValue::Float(y)) => VmValue::Float(x + y),
-            (VmValue::Int(x), VmValue::Float(y)) => VmValue::Float(*x as f64 + y),
-            (VmValue::Float(x), VmValue::Int(y)) => VmValue::Float(x + *y as f64),
-            (VmValue::String(x), _) => VmValue::String(Rc::from(format!("{x}{}", b.display()))),
+            (VmValue::Int(x), VmValue::Int(y)) => Ok(VmValue::Int(x.wrapping_add(*y))),
+            (VmValue::Float(x), VmValue::Float(y)) => Ok(VmValue::Float(x + y)),
+            (VmValue::Int(x), VmValue::Float(y)) => Ok(VmValue::Float(*x as f64 + y)),
+            (VmValue::Float(x), VmValue::Int(y)) => Ok(VmValue::Float(x + *y as f64)),
+            (VmValue::String(x), VmValue::String(y)) => {
+                Ok(VmValue::String(Rc::from(format!("{x}{y}"))))
+            }
             (VmValue::List(x), VmValue::List(y)) => {
                 let mut result = (**x).clone();
                 result.extend(y.iter().cloned());
-                VmValue::List(Rc::new(result))
+                Ok(VmValue::List(Rc::new(result)))
             }
             (VmValue::Dict(x), VmValue::Dict(y)) => {
                 let mut result = (**x).clone();
                 result.extend(y.iter().map(|(k, v)| (k.clone(), v.clone())));
-                VmValue::Dict(Rc::new(result))
+                Ok(VmValue::Dict(Rc::new(result)))
             }
-            _ => VmValue::String(Rc::from(format!("{}{}", a.display(), b.display()))),
+            _ => Err(VmError::TypeError(format!(
+                "Cannot add {} and {}",
+                a.type_name(),
+                b.type_name()
+            ))),
         }
     }
 
-    fn sub(&self, a: VmValue, b: VmValue) -> VmValue {
+    fn sub(&self, a: VmValue, b: VmValue) -> Result<VmValue, VmError> {
         match (&a, &b) {
-            (VmValue::Int(x), VmValue::Int(y)) => VmValue::Int(x.wrapping_sub(*y)),
-            (VmValue::Float(x), VmValue::Float(y)) => VmValue::Float(x - y),
-            (VmValue::Int(x), VmValue::Float(y)) => VmValue::Float(*x as f64 - y),
-            (VmValue::Float(x), VmValue::Int(y)) => VmValue::Float(x - *y as f64),
-            _ => VmValue::Nil,
+            (VmValue::Int(x), VmValue::Int(y)) => Ok(VmValue::Int(x.wrapping_sub(*y))),
+            (VmValue::Float(x), VmValue::Float(y)) => Ok(VmValue::Float(x - y)),
+            (VmValue::Int(x), VmValue::Float(y)) => Ok(VmValue::Float(*x as f64 - y)),
+            (VmValue::Float(x), VmValue::Int(y)) => Ok(VmValue::Float(x - *y as f64)),
+            _ => Err(VmError::TypeError(format!(
+                "Cannot subtract {} from {}",
+                b.type_name(),
+                a.type_name()
+            ))),
         }
     }
 
-    fn mul(&self, a: VmValue, b: VmValue) -> VmValue {
+    fn mul(&self, a: VmValue, b: VmValue) -> Result<VmValue, VmError> {
         match (&a, &b) {
-            (VmValue::Int(x), VmValue::Int(y)) => VmValue::Int(x.wrapping_mul(*y)),
-            (VmValue::Float(x), VmValue::Float(y)) => VmValue::Float(x * y),
-            (VmValue::Int(x), VmValue::Float(y)) => VmValue::Float(*x as f64 * y),
-            (VmValue::Float(x), VmValue::Int(y)) => VmValue::Float(x * *y as f64),
+            (VmValue::Int(x), VmValue::Int(y)) => Ok(VmValue::Int(x.wrapping_mul(*y))),
+            (VmValue::Float(x), VmValue::Float(y)) => Ok(VmValue::Float(x * y)),
+            (VmValue::Int(x), VmValue::Float(y)) => Ok(VmValue::Float(*x as f64 * y)),
+            (VmValue::Float(x), VmValue::Int(y)) => Ok(VmValue::Float(x * *y as f64)),
             (VmValue::String(s), VmValue::Int(n)) | (VmValue::Int(n), VmValue::String(s)) => {
                 let count = (*n).max(0) as usize;
-                VmValue::String(s.repeat(count).into())
+                Ok(VmValue::String(s.repeat(count).into()))
             }
-            _ => VmValue::Nil,
+            _ => Err(VmError::TypeError(format!(
+                "Cannot multiply {} and {}",
+                a.type_name(),
+                b.type_name()
+            ))),
         }
     }
 

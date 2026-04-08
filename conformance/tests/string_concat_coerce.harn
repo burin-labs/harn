@@ -1,0 +1,6 @@
+pipeline test(task) {
+  log("hello" + " " + "world")
+  log("val=" + to_string(5))
+  log("flag=" + to_string(true))
+  log("items=" + to_string([1, 2, 3]))
+}

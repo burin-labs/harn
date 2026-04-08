@@ -2,6 +2,49 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.50
+
+### Added
+
+- **Strict arithmetic type safety** — binary operators `+`, `-`, `*` now
+  return `TypeError` for mismatched operand types instead of silently
+  coercing. `"hello" + 5` is no longer valid; use `"hello" + to_string(5)`
+  or `"hello ${5}"` instead. The type checker reports these as compile-time
+  errors when operand types are statically known.
+- **`invalid-binary-op-literal` lint rule** — the linter warns when boolean
+  or nil literals appear as operands to arithmetic operators (`+`, `-`, `*`,
+  `/`, `%`), catching bugs before they become runtime type errors.
+- **Comparison operator type checking** — the type checker now warns when
+  `<`, `>`, `<=`, `>=` are used with non-comparable types, or when comparing
+  strings with numbers.
+- **Conformance regex error matching** — `.error` files now support `re:`
+  prefix for regex patterns and multi-line union matching (any line matches).
+- **Conformance glob filter** — `--filter` now supports glob-style wildcards:
+  `harn test conformance --filter "*runtime*"`, plus `re:` prefix for full
+  regex filtering.
+- **Dict `+` merge** — `dict + dict` merges two dicts (right-hand side wins
+  on key conflicts). Previously undocumented.
+
+### Changed
+
+- **Dict `map_values` / `filter` signatures** — these now take single-argument
+  closures `{ v -> ... }` (value only) instead of two-argument `{ k, v -> ... }`.
+- **`+` operator** — no longer auto-coerces non-string types to strings.
+  `string + string` concatenation still works. For mixed types, use explicit
+  `to_string()` or string interpolation.
+- **`-`, `*` operators** — no longer return `nil` for invalid operand types;
+  they produce a `TypeError` instead.
+- **Type inference for `+`** — the type checker no longer infers `string` as
+  the result type for `+` when one operand is not a string.
+
+### Breaking
+
+- `"str" + int` and `int + "str"` now produce `TypeError` (use `to_string()`
+  or `"${expr}"`)
+- `bool + X`, `nil + X`, and other invalid operator combinations now produce
+  `TypeError` instead of returning coerced values or `nil`
+- `dict.map_values` and `dict.filter` take 1-arg closures (value only)
+
 ## v0.5.49
 
 ### Added

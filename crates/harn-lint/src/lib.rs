@@ -430,6 +430,26 @@ impl<'a> Linter<'a> {
                         });
                     }
                 }
+                // Rule: invalid-binary-op-literal
+                if matches!(op.as_str(), "+" | "-" | "*" | "/" | "%") {
+                    let has_bad_literal =
+                        matches!(left.node, Node::BoolLiteral(_) | Node::NilLiteral)
+                            || matches!(right.node, Node::BoolLiteral(_) | Node::NilLiteral);
+                    if has_bad_literal {
+                        self.diagnostics.push(LintDiagnostic {
+                            rule: "invalid-binary-op-literal",
+                            message: format!(
+                                "operator '{}' used with boolean or nil literal — this will cause a runtime error",
+                                op
+                            ),
+                            span: snode.span,
+                            severity: LintSeverity::Warning,
+                            suggestion: Some(
+                                "use to_string() or string interpolation to convert values explicitly".to_string(),
+                            ),
+                        });
+                    }
+                }
                 self.lint_node(left);
                 self.lint_node(right);
             }
@@ -1956,6 +1976,56 @@ fn truly_unused() { return 1 }
                 .iter()
                 .any(|d| d.rule == "unused-function" && d.message.contains("truly_unused")),
             "the remaining warning should be for truly_unused: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_invalid_binary_op_literal_bool() {
+        let diags = lint_source(
+            r#"
+pipeline default(task) {
+    let x = true + 1
+    log(x)
+}
+"#,
+        );
+        assert!(
+            has_rule(&diags, "invalid-binary-op-literal"),
+            "expected invalid-binary-op-literal for bool in arithmetic: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_invalid_binary_op_literal_nil() {
+        let diags = lint_source(
+            r#"
+pipeline default(task) {
+    let x = nil - 5
+    log(x)
+}
+"#,
+        );
+        assert!(
+            has_rule(&diags, "invalid-binary-op-literal"),
+            "expected invalid-binary-op-literal for nil in arithmetic: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_no_invalid_binary_op_for_valid_types() {
+        let diags = lint_source(
+            r#"
+pipeline default(task) {
+    let x = 1 + 2
+    let y = "a" + "b"
+    log(x)
+    log(y)
+}
+"#,
+        );
+        assert!(
+            !has_rule(&diags, "invalid-binary-op-literal"),
+            "should not fire for valid operand types: {diags:?}"
         );
     }
 

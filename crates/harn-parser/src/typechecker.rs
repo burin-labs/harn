@@ -825,10 +825,10 @@ impl TypeChecker {
                         "-" | "/" | "%" => {
                             let numeric = ["int", "float"];
                             if !numeric.contains(&l.as_str()) || !numeric.contains(&r.as_str()) {
-                                self.warning_at(
+                                self.error_at(
                                     format!(
-                                        "Operator '{op}' may not be valid for types {} and {}",
-                                        l, r
+                                        "Operator '{}' requires numeric operands, got {} and {}",
+                                        op, l, r
                                     ),
                                     span,
                                 );
@@ -841,9 +841,9 @@ impl TypeChecker {
                             let is_string_repeat =
                                 (l == "string" && r == "int") || (l == "int" && r == "string");
                             if !is_numeric && !is_string_repeat {
-                                self.warning_at(
+                                self.error_at(
                                     format!(
-                                        "Operator '{op}' may not be valid for types {} and {}",
+                                        "Operator '*' requires numeric operands or string * int, got {} and {}",
                                         l, r
                                     ),
                                     span,
@@ -851,13 +851,37 @@ impl TypeChecker {
                             }
                         }
                         "+" => {
-                            // + is valid for int, float, string, list, dict
-                            let valid = ["int", "float", "string", "list", "dict"];
-                            if !valid.contains(&l.as_str()) && !valid.contains(&r.as_str()) {
+                            let valid = matches!(
+                                (l.as_str(), r.as_str()),
+                                ("int" | "float", "int" | "float")
+                                    | ("string", "string")
+                                    | ("list", "list")
+                                    | ("dict", "dict")
+                            );
+                            if !valid {
+                                self.error_at(
+                                    format!("Operator '+' is not valid for types {} and {}", l, r),
+                                    span,
+                                );
+                            }
+                        }
+                        "<" | ">" | "<=" | ">=" => {
+                            let comparable = ["int", "float", "string"];
+                            if !comparable.contains(&l.as_str())
+                                || !comparable.contains(&r.as_str())
+                            {
                                 self.warning_at(
                                     format!(
-                                        "Operator '+' may not be valid for types {} and {}",
-                                        l, r
+                                        "Comparison '{}' may not be meaningful for types {} and {}",
+                                        op, l, r
+                                    ),
+                                    span,
+                                );
+                            } else if (l == "string") != (r == "string") {
+                                self.warning_at(
+                                    format!(
+                                        "Comparing {} with {} using '{}' may give unexpected results",
+                                        l, r, op
                                     ),
                                     span,
                                 );
@@ -2186,10 +2210,10 @@ fn infer_binary_op_type(op: &str, left: &InferredType, right: &InferredType) -> 
                 match (l.as_str(), r.as_str()) {
                     ("int", "int") => Some(TypeExpr::Named("int".into())),
                     ("float", _) | (_, "float") => Some(TypeExpr::Named("float".into())),
-                    ("string", _) => Some(TypeExpr::Named("string".into())),
+                    ("string", "string") => Some(TypeExpr::Named("string".into())),
                     ("list", "list") => Some(TypeExpr::Named("list".into())),
                     ("dict", "dict") => Some(TypeExpr::Named("dict".into())),
-                    _ => Some(TypeExpr::Named("string".into())),
+                    _ => None,
                 }
             }
             _ => None,

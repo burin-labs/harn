@@ -767,6 +767,7 @@ dependencies = [
  "nu-ansi-term",
  "rand 0.8.5",
  "reedline",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",

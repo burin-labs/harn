@@ -2004,7 +2004,7 @@ log(x)
             r#"pipeline t(task) {
 let label = "outer"
 for item in [1, 2] {
-  let label = "loop " + item
+  let label = "loop ${item}"
   log(label)
 }
 try {

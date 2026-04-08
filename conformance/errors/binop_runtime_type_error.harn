@@ -1,0 +1,5 @@
+pipeline test(task) {
+  let data = json_parse("{\"val\": true}")
+  let x = data.val + 1
+  log(x)
+}

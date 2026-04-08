@@ -31,6 +31,7 @@ url = "2"
 webbrowser = "1"
 keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native"] }
 rand = "0.8"
+regex = "1"
 clap = { version = "4", features = ["derive"] }
 tower = { version = "0.5", features = ["util"] }
 time = { version = "0.3", features = ["formatting", "parsing"] }

@@ -796,14 +796,22 @@ Comparison between other types returns 0 (equal).
 |---|---|---|---|---|---|
 | int | int | int | int | int | int (truncating) |
 | float | float | float | float | float | float |
-| string | int | string (concatenation) | nil | string (repetition) | nil |
-| int | string | string (concatenation) | nil | string (repetition) | nil |
-| string | any | string (concatenation) | nil | nil | nil |
-| list | list | list (concatenation) | nil | nil | nil |
-| other | other | string (both `.asString` concatenated) | nil | nil | nil |
+| int | float | float | float | float | float |
+| float | int | float | float | float | float |
+| string | string | string (concatenation) | **TypeError** | **TypeError** | **TypeError** |
+| string | int | **TypeError** | **TypeError** | string (repetition) | **TypeError** |
+| int | string | **TypeError** | **TypeError** | string (repetition) | **TypeError** |
+| list | list | list (concatenation) | **TypeError** | **TypeError** | **TypeError** |
+| dict | dict | dict (merge, right wins) | **TypeError** | **TypeError** | **TypeError** |
+| other | other | **TypeError** | **TypeError** | **TypeError** | **TypeError** |
 
 Division by zero returns `nil`.
 `string * int` repeats the string; negative or zero counts return `""`.
+
+Type mismatches that are not listed as valid combinations above produce a
+`TypeError` at runtime. The type checker reports these as compile-time errors
+when operand types are statically known. Use `to_string()` or string
+interpolation (`"${expr}"`) for explicit type conversion.
 
 ### Logical (`&&`, `||`)
 
