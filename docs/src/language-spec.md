@@ -141,6 +141,24 @@ Escape sequences: `\n` (newline), `\t` (tab), `\\` (backslash), `\"` (double quo
 `\$` (dollar sign). Any other character after `\` produces a literal backslash
 followed by that character.
 
+#### Raw string literals
+
+```javascript
+raw_string_literal ::= 'r"' char* '"'
+```
+
+Raw strings use the `r"..."` prefix. No escape processing or interpolation is
+performed inside a raw string -- backslashes, dollar signs, and other characters
+are taken literally. Raw strings cannot span multiple lines.
+
+Raw strings are useful for regex patterns and file paths where backslashes are
+common:
+
+```harn
+let pattern = r"\d+\.\d+"
+let path = r"C:\Users\alice\docs"
+```
+
 #### Multi-line strings
 
 ```javascript
@@ -151,7 +169,17 @@ Triple-quoted strings can span multiple lines. The optional newline immediately 
 opening `"""` is consumed. Common leading whitespace is stripped from all non-empty lines.
 A trailing newline before the closing `"""` is removed.
 
-Multi-line strings do not support interpolation.
+Multi-line strings support `${expression}` interpolation with automatic indent
+stripping. If at least one `${...}` interpolation is present, the result is an
+`interpolatedString` token; otherwise it is a plain `stringLiteral` token.
+
+```harn
+let name = "world"
+let doc = """
+  Hello, ${name}!
+  Today is ${timestamp()}.
+"""
+```
 
 ### Operators
 
@@ -184,7 +212,7 @@ Multi-line strings do not support interpolation.
 | `.` | `.dot` | Member access |
 | `+` | `.plus` | Addition / concatenation |
 | `-` | `.minus` | Subtraction / negation |
-| `*` | `.star` | Multiplication |
+| `*` | `.star` | Multiplication / string repetition |
 | `/` | `.slash` | Division |
 | `<` | `.lt` | Less than |
 | `>` | `.gt` | Greater than |
@@ -340,9 +368,33 @@ generic_params     ::= '<' IDENTIFIER (',' IDENTIFIER)* '>'
 where_clause       ::= 'where' IDENTIFIER ':' IDENTIFIER
                        (',' IDENTIFIER ':' IDENTIFIER)*
 
-fn_param_list      ::= (fn_param (',' fn_param)*)?
+fn_param_list      ::= (fn_param (',' fn_param)*)? [',' rest_param]
+                     | rest_param
 fn_param           ::= IDENTIFIER [':' type_expr] ['=' expression]
+rest_param         ::= '...' IDENTIFIER
 
+A rest parameter (`...name`) must be the last parameter in the list. At call
+time, any arguments beyond the positional parameters are collected into a list
+and bound to the rest parameter name. If no extra arguments are provided, the
+rest parameter is an empty list.
+
+```harn
+fn sum(...nums) {
+  var total = 0
+  for n in nums {
+    total = total + n
+  }
+  return total
+}
+sum(1, 2, 3)  // 6
+
+fn log(level, ...parts) {
+  println("[${level}] ${join(parts, " ")}")
+}
+log("INFO", "server", "started")  // [INFO] server started
+```
+
+```text
 expression_statement ::= expression
                        | assignable '=' expression
                        | assignable ('+=' | '-=' | '*=' | '/=' | '%=') expression
@@ -427,6 +479,20 @@ primary            ::= STRING_LITERAL
 ask_expr           ::= 'ask' '{' (IDENTIFIER ':' expression
                        (',' IDENTIFIER ':' expression)*)? '}'
 
+The `ask` expression is syntactic sugar for an LLM call. It builds a dict from
+its key-value fields and passes it to the LLM runtime. Common fields include
+`system` (system prompt), `user` (user message), `model`, `max_tokens`, and
+`provider`. The expression evaluates to the LLM response string.
+
+```harn
+let answer = ask {
+  system: "You are a helpful assistant.",
+  user: "What is 2 + 2?"
+}
+println(answer)
+```
+
+```text
 list_literal       ::= '[' (list_element (',' list_element)*)? ']'
 list_element       ::= '...' expression | expression
 
@@ -730,11 +796,14 @@ Comparison between other types returns 0 (equal).
 |---|---|---|---|---|---|
 | int | int | int | int | int | int (truncating) |
 | float | float | float | float | float | float |
+| string | int | string (concatenation) | nil | string (repetition) | nil |
+| int | string | string (concatenation) | nil | string (repetition) | nil |
 | string | any | string (concatenation) | nil | nil | nil |
 | list | list | list (concatenation) | nil | nil | nil |
 | other | other | string (both `.asString` concatenated) | nil | nil | nil |
 
 Division by zero returns `nil`.
+`string * int` repeats the string; negative or zero counts return `""`.
 
 ### Logical (`&&`, `||`)
 

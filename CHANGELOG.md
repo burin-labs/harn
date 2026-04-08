@@ -32,6 +32,17 @@ All notable changes to Harn are documented in this file.
   statement, raw strings, rest parameters, and multiline interpolation.
 - **Documentation** — new "Configuring LLM Providers" and "Debugging Agent
   Runs" reference pages in the mdBook.
+- **Tool validation errors** — unknown tool names are now reported back to the
+  LLM with the list of available tools (both text and native parsing paths).
+  Malformed JSON arguments from OpenAI-compatible providers produce clear error
+  messages instead of silently defaulting to empty args. Required parameters
+  are validated before tool dispatch with actionable error messages.
+- **Mock tool arguments** — the mock LLM provider now generates realistic tool
+  call arguments from the tool's JSON Schema, filling required parameters with
+  type-appropriate placeholder values.
+- **String repetition** — `"ab" * 3` produces `"ababab"`. Works with
+  `int * string` too. Negative or zero counts return an empty string. The
+  type checker recognizes `string * int` and `int * string` as valid.
 
 ### Changed
 
@@ -44,6 +55,8 @@ All notable changes to Harn are documented in this file.
 - **ACP description generalized** — ACP docs no longer reference
   coding-specific use cases; Harn is described as a general-purpose agent
   runtime.
+- **Improved unavailable-tool error** — error message when a tool is
+  unavailable no longer leaks internal "host bridge" terminology.
 
 ### Breaking
 

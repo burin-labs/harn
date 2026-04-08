@@ -1103,6 +1103,38 @@ pub(crate) fn collect_tool_schemas(
 ) -> Vec<ToolSchema> {
     collect_tool_schemas_with_registry(tools_val, native_tools).0
 }
+
+/// Validate that all required parameters (those without defaults) are present
+/// in the tool call arguments. Returns `Ok(())` when valid, or an error string
+/// listing the missing parameters.
+pub(crate) fn validate_tool_args(
+    tool_name: &str,
+    args: &serde_json::Value,
+    schemas: &[ToolSchema],
+) -> Result<(), String> {
+    let Some(schema) = schemas.iter().find(|s| s.name == tool_name) else {
+        return Ok(()); // Unknown tool — handled by the unknown-tool error path
+    };
+    let obj = args.as_object();
+    let missing: Vec<&str> = schema
+        .params
+        .iter()
+        .filter(|p| p.required && p.default.is_none())
+        .filter(|p| obj.is_none_or(|o| !o.contains_key(&p.name) || o[&p.name].is_null()))
+        .map(|p| p.name.as_str())
+        .collect();
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Tool '{}' is missing required parameter(s): {}. \
+             Provide all required parameters and try again.",
+            tool_name,
+            missing.join(", ")
+        ))
+    }
+}
+
 /// Build a runtime-owned tool-calling contract prompt.
 /// The runtime injects this block so prompt templates do not need to carry
 /// stale tool syntax examples that can drift from actual parser behavior.
@@ -1441,48 +1473,56 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                 }
                 // Candidate tool call at line start: <ident>( directly.
                 if let Some(name_len) = ident_length(&bytes[k..]) {
-                    if bytes.get(k + name_len) == Some(&b'(')
-                        && known
-                            .contains(std::str::from_utf8(&bytes[k..k + name_len]).unwrap_or(""))
-                    {
-                        let name = std::str::from_utf8(&bytes[k..k + name_len])
-                            .unwrap()
-                            .to_string();
-                        match parse_ts_call_from(&text[k..], name.clone()) {
-                            Ok((arguments, consumed)) => {
-                                calls.push(serde_json::json!({
-                                    "id": format!("tc_{}", calls.len()),
-                                    "name": name,
-                                    "arguments": arguments,
-                                }));
-                                // Record the call's byte range so we can
-                                // strip it from `prose` below. Use j (original
-                                // line start) to also excise the prefix.
-                                // Also consume trailing `>` if the model
-                                // wrapped the call in angle brackets.
-                                let mut end = k + consumed;
-                                while end < bytes.len()
-                                    && (bytes[end] == b' ' || bytes[end] == b'\t')
-                                {
-                                    end += 1;
+                    if bytes.get(k + name_len) == Some(&b'(') {
+                        let name_str = std::str::from_utf8(&bytes[k..k + name_len]).unwrap_or("");
+                        if known.contains(name_str) {
+                            let name = name_str.to_string();
+                            match parse_ts_call_from(&text[k..], name.clone()) {
+                                Ok((arguments, consumed)) => {
+                                    calls.push(serde_json::json!({
+                                        "id": format!("tc_{}", calls.len()),
+                                        "name": name,
+                                        "arguments": arguments,
+                                    }));
+                                    // Record the call's byte range so we can
+                                    // strip it from `prose` below. Use j (original
+                                    // line start) to also excise the prefix.
+                                    // Also consume trailing `>` if the model
+                                    // wrapped the call in angle brackets.
+                                    let mut end = k + consumed;
+                                    while end < bytes.len()
+                                        && (bytes[end] == b' ' || bytes[end] == b'\t')
+                                    {
+                                        end += 1;
+                                    }
+                                    if end < bytes.len() && bytes[end] == b'>' {
+                                        end += 1;
+                                    }
+                                    call_ranges.push((j, end));
+                                    i = end;
+                                    at_line_start = bytes.get(i.saturating_sub(1)) == Some(&b'\n');
+                                    continue;
                                 }
-                                if end < bytes.len() && bytes[end] == b'>' {
-                                    end += 1;
+                                Err(msg) => {
+                                    errors.push(msg);
+                                    // Advance past the offending `(` so we can
+                                    // keep scanning and (hopefully) find the
+                                    // next well-formed call.
+                                    i = k + name_len + 1;
+                                    at_line_start = false;
+                                    continue;
                                 }
-                                call_ranges.push((j, end));
-                                i = end;
-                                at_line_start = bytes.get(i.saturating_sub(1)) == Some(&b'\n');
-                                continue;
                             }
-                            Err(msg) => {
-                                errors.push(msg);
-                                // Advance past the offending `(` so we can
-                                // keep scanning and (hopefully) find the
-                                // next well-formed call.
-                                i = k + name_len + 1;
-                                at_line_start = false;
-                                continue;
-                            }
+                        } else {
+                            let available: Vec<_> = known.iter().take(20).cloned().collect();
+                            errors.push(format!(
+                                "Unknown tool '{}'. Available tools: [{}]",
+                                name_str,
+                                available.join(", ")
+                            ));
+                            i = k + name_len + 1;
+                            at_line_start = false;
+                            continue;
                         }
                     }
                 }
@@ -1572,11 +1612,11 @@ pub(crate) fn parse_text_tool_calls_with_tools(
     // Rather than wasting an iteration nudging the model, parse and execute
     // the calls directly.
     if calls.is_empty() && errors.is_empty() {
-        let native_calls = parse_native_json_tool_calls(text, &known);
-        if !native_calls.is_empty() {
+        let (native_calls, native_errors) = parse_native_json_tool_calls(text, &known);
+        if !native_calls.is_empty() || !native_errors.is_empty() {
             return TextToolParseResult {
                 calls: native_calls,
-                errors: Vec::new(),
+                errors: native_errors,
                 prose: String::new(),
             };
         }
@@ -1596,8 +1636,9 @@ pub(crate) fn parse_text_tool_calls_with_tools(
 fn parse_native_json_tool_calls(
     text: &str,
     known_tools: &BTreeSet<String>,
-) -> Vec<serde_json::Value> {
+) -> (Vec<serde_json::Value>, Vec<String>) {
     let mut results = Vec::new();
+    let mut errors = Vec::new();
 
     // Find the first `[{` or `{"id":"call_` in the text
     let json_start = text
@@ -1606,7 +1647,7 @@ fn parse_native_json_tool_calls(
         .or_else(|| text.find("{\"id\":\"call_"));
 
     let Some(start) = json_start else {
-        return results;
+        return (results, errors);
     };
 
     // Try to parse as JSON array or single object
@@ -1631,21 +1672,39 @@ fn parse_native_json_tool_calls(
         });
 
     let Some(items) = parsed else {
-        return results;
+        return (results, errors);
     };
 
     for item in items {
         let func = item.get("function").and_then(|f| f.as_object());
         let Some(func) = func else { continue };
         let name = func.get("name").and_then(|n| n.as_str()).unwrap_or("");
-        if name.is_empty() || !known_tools.contains(name) {
+        if name.is_empty() {
+            continue;
+        }
+        if !known_tools.contains(name) {
+            let available: Vec<_> = known_tools.iter().take(20).cloned().collect();
+            errors.push(format!(
+                "Unknown tool '{}'. Available tools: [{}]",
+                name,
+                available.join(", ")
+            ));
             continue;
         }
         // Arguments may be a JSON string (OpenAI format) or an object
         let arguments = match func.get("arguments") {
-            Some(serde_json::Value::String(s)) => {
-                serde_json::from_str(s).unwrap_or(serde_json::Value::Object(Default::default()))
-            }
+            Some(serde_json::Value::String(s)) => match serde_json::from_str(s) {
+                Ok(v) => v,
+                Err(e) => {
+                    errors.push(format!(
+                        "Could not parse arguments for tool '{}': {}. Raw: {}",
+                        name,
+                        e,
+                        &s[..s.len().min(200)]
+                    ));
+                    continue;
+                }
+            },
             Some(obj @ serde_json::Value::Object(_)) => obj.clone(),
             _ => serde_json::Value::Object(Default::default()),
         };
@@ -1660,7 +1719,7 @@ fn parse_native_json_tool_calls(
         }));
     }
 
-    results
+    (results, errors)
 }
 
 fn unwrap_exact_code_wrapper(text: &str) -> Option<&str> {

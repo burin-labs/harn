@@ -822,9 +822,25 @@ impl TypeChecker {
                 let rt = self.infer_type(right, scope);
                 if let (Some(TypeExpr::Named(l)), Some(TypeExpr::Named(r))) = (&lt, &rt) {
                     match op.as_str() {
-                        "-" | "*" | "/" | "%" => {
+                        "-" | "/" | "%" => {
                             let numeric = ["int", "float"];
                             if !numeric.contains(&l.as_str()) || !numeric.contains(&r.as_str()) {
+                                self.warning_at(
+                                    format!(
+                                        "Operator '{op}' may not be valid for types {} and {}",
+                                        l, r
+                                    ),
+                                    span,
+                                );
+                            }
+                        }
+                        "*" => {
+                            let numeric = ["int", "float"];
+                            let is_numeric =
+                                numeric.contains(&l.as_str()) && numeric.contains(&r.as_str());
+                            let is_string_repeat =
+                                (l == "string" && r == "int") || (l == "int" && r == "string");
+                            if !is_numeric && !is_string_repeat {
                                 self.warning_at(
                                     format!(
                                         "Operator '{op}' may not be valid for types {} and {}",
@@ -2178,9 +2194,20 @@ fn infer_binary_op_type(op: &str, left: &InferredType, right: &InferredType) -> 
             }
             _ => None,
         },
-        "-" | "*" | "/" | "%" => match (left, right) {
+        "-" | "/" | "%" => match (left, right) {
             (Some(TypeExpr::Named(l)), Some(TypeExpr::Named(r))) => {
                 match (l.as_str(), r.as_str()) {
+                    ("int", "int") => Some(TypeExpr::Named("int".into())),
+                    ("float", _) | (_, "float") => Some(TypeExpr::Named("float".into())),
+                    _ => None,
+                }
+            }
+            _ => None,
+        },
+        "*" => match (left, right) {
+            (Some(TypeExpr::Named(l)), Some(TypeExpr::Named(r))) => {
+                match (l.as_str(), r.as_str()) {
+                    ("string", "int") | ("int", "string") => Some(TypeExpr::Named("string".into())),
                     ("int", "int") => Some(TypeExpr::Named("int".into())),
                     ("float", _) | (_, "float") => Some(TypeExpr::Named("float".into())),
                     _ => None,

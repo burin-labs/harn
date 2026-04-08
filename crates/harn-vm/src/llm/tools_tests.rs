@@ -8,9 +8,9 @@
 
 use super::{
     build_assistant_response_message, build_assistant_tool_message,
-    build_tool_calling_contract_prompt, collect_tool_schemas_with_registry, normalize_tool_args,
-    parse_native_json_tool_calls, parse_text_tool_calls_with_tools, ComponentRegistry,
-    TS_CALL_CONTRACT_HELP,
+    build_tool_calling_contract_prompt, collect_tool_schemas, collect_tool_schemas_with_registry,
+    normalize_tool_args, parse_native_json_tool_calls, parse_text_tool_calls_with_tools,
+    validate_tool_args, ComponentRegistry, TS_CALL_CONTRACT_HELP,
 };
 use crate::value::VmValue;
 use serde_json::json;
@@ -212,14 +212,25 @@ fn recovers_single_fenced_tool_call_when_it_is_the_entire_response() {
 }
 
 #[test]
-fn ignores_unknown_tool_names() {
+fn reports_unknown_tool_names() {
     let tools = sample_tool_registry();
     // `fictitious_tool(...)` looks like a call but the name is not in the
-    // registry, so the scanner should leave it alone.
+    // registry, so the scanner should report an error and still parse the
+    // valid `edit` call.
     let text = "fictitious_tool({ x: 1 })\nedit({ action: \"create\", path: \"a.go\" })";
     let result = parse_text_tool_calls_with_tools(text, Some(&tools));
-    assert!(result.errors.is_empty());
-    assert_eq!(result.calls.len(), 1);
+    assert_eq!(result.errors.len(), 1, "should report unknown tool");
+    assert!(
+        result.errors[0].contains("Unknown tool 'fictitious_tool'"),
+        "error should name the unknown tool: {}",
+        result.errors[0]
+    );
+    assert!(
+        result.errors[0].contains("Available tools:"),
+        "error should list available tools: {}",
+        result.errors[0]
+    );
+    assert_eq!(result.calls.len(), 1, "valid edit call should still parse");
     assert_eq!(result.calls[0]["name"], json!("edit"));
 }
 
@@ -922,7 +933,8 @@ fn native_json_fallback_parses_openai_array_format() {
     let text = r#"I'll create the test file now.
 
 [{"id":"call_001","type":"function","function":{"name":"edit","arguments":"{\"action\":\"create\",\"path\":\"test.go\",\"content\":\"package main\"}"}}]"#;
-    let calls = parse_native_json_tool_calls(text, &known);
+    let (calls, errors) = parse_native_json_tool_calls(text, &known);
+    assert!(errors.is_empty());
     assert_eq!(calls.len(), 1, "should parse one call from array");
     assert_eq!(calls[0]["name"], json!("edit"));
     assert_eq!(calls[0]["arguments"]["action"], json!("create"));
@@ -934,7 +946,8 @@ fn native_json_fallback_parses_openai_array_format() {
 fn native_json_fallback_parses_multiple_calls() {
     let known = known_tools_set();
     let text = r#"[{"id":"call_001","type":"function","function":{"name":"edit","arguments":"{\"action\":\"create\",\"path\":\"a.go\",\"content\":\"pkg a\"}"}},{"id":"call_002","type":"function","function":{"name":"run","arguments":"{\"command\":\"go test\"}"}}]"#;
-    let calls = parse_native_json_tool_calls(text, &known);
+    let (calls, errors) = parse_native_json_tool_calls(text, &known);
+    assert!(errors.is_empty());
     assert_eq!(calls.len(), 2, "should parse both calls");
     assert_eq!(calls[0]["name"], json!("edit"));
     assert_eq!(calls[1]["name"], json!("run"));
@@ -942,19 +955,45 @@ fn native_json_fallback_parses_multiple_calls() {
 }
 
 #[test]
-fn native_json_fallback_ignores_unknown_tools() {
+fn native_json_fallback_reports_unknown_tools() {
     let known = known_tools_set();
     let text = r#"[{"id":"call_001","type":"function","function":{"name":"unknown_tool","arguments":"{}"}}]"#;
-    let calls = parse_native_json_tool_calls(text, &known);
+    let (calls, errors) = parse_native_json_tool_calls(text, &known);
     assert_eq!(calls.len(), 0, "should not parse unknown tools");
+    assert_eq!(errors.len(), 1, "should report one error");
+    assert!(
+        errors[0].contains("Unknown tool 'unknown_tool'"),
+        "error should name the unknown tool: {}",
+        errors[0]
+    );
+    assert!(
+        errors[0].contains("Available tools:"),
+        "error should list available tools: {}",
+        errors[0]
+    );
+}
+
+#[test]
+fn native_json_fallback_reports_malformed_arguments() {
+    let known = known_tools_set();
+    let text = r#"[{"id":"call_001","type":"function","function":{"name":"edit","arguments":"not valid json {"}}]"#;
+    let (calls, errors) = parse_native_json_tool_calls(text, &known);
+    assert_eq!(calls.len(), 0, "should not produce a call with bad args");
+    assert_eq!(errors.len(), 1, "should report one parse error");
+    assert!(
+        errors[0].contains("Could not parse arguments"),
+        "error should describe the parse failure: {}",
+        errors[0]
+    );
 }
 
 #[test]
 fn native_json_fallback_returns_empty_for_no_json() {
     let known = known_tools_set();
     let text = "Just some prose without any tool calls.";
-    let calls = parse_native_json_tool_calls(text, &known);
+    let (calls, errors) = parse_native_json_tool_calls(text, &known);
     assert!(calls.is_empty(), "should return empty for plain text");
+    assert!(errors.is_empty());
 }
 
 #[test]
@@ -962,7 +1001,8 @@ fn native_json_fallback_handles_object_arguments() {
     let known = known_tools_set();
     // Some models emit arguments as an object instead of a JSON string
     let text = r#"[{"id":"call_001","type":"function","function":{"name":"read","arguments":{"path":"main.go"}}}]"#;
-    let calls = parse_native_json_tool_calls(text, &known);
+    let (calls, errors) = parse_native_json_tool_calls(text, &known);
+    assert!(errors.is_empty());
     assert_eq!(calls.len(), 1, "should parse call with object arguments");
     assert_eq!(calls[0]["arguments"]["path"], json!("main.go"));
 }
@@ -975,7 +1015,8 @@ fn native_json_fallback_handles_prose_before_json() {
 Now I'll create the test:
 
 [{"id":"call_0v95900000000000000002","function":{"name":"edit","arguments":"{\"action\":\"replace_body\",\"path\":\"test.go\",\"function_name\":\"TestMain\",\"new_body\":\"t.Fatal(\\\"fail\\\")\"}"}}]"#;
-    let calls = parse_native_json_tool_calls(text, &known);
+    let (calls, errors) = parse_native_json_tool_calls(text, &known);
+    assert!(errors.is_empty());
     assert_eq!(calls.len(), 1, "should find call after prose");
     assert_eq!(calls[0]["name"], json!("edit"));
     assert_eq!(calls[0]["arguments"]["action"], json!("replace_body"));
@@ -1100,4 +1141,85 @@ fn read_file_offset_and_limit() {
     // Clean up.
     let _ = std::fs::remove_file(&path);
     let _ = std::fs::remove_dir(&dir);
+}
+
+// ── validate_tool_args ─────────────────────────────────────────────────────
+
+#[test]
+fn validate_tool_args_reports_missing_required_params() {
+    let tools = sample_tool_registry();
+    let schemas = collect_tool_schemas(Some(&tools), None);
+    // edit requires "action" and "path" — omit "path"
+    let args = json!({"action": "create"});
+    let result = validate_tool_args("edit", &args, &schemas);
+    assert!(result.is_err(), "should report missing required param");
+    let msg = result.unwrap_err();
+    assert!(msg.contains("path"), "error should mention 'path': {msg}");
+    assert!(
+        msg.contains("missing required parameter"),
+        "error should say missing required: {msg}"
+    );
+}
+
+#[test]
+fn validate_tool_args_passes_when_all_required_present() {
+    let tools = sample_tool_registry();
+    let schemas = collect_tool_schemas(Some(&tools), None);
+    let args = json!({"action": "create", "path": "test.go", "content": "pkg main"});
+    let result = validate_tool_args("edit", &args, &schemas);
+    assert!(result.is_ok(), "should pass with all required params");
+}
+
+#[test]
+fn validate_tool_args_skips_unknown_tool() {
+    let tools = sample_tool_registry();
+    let schemas = collect_tool_schemas(Some(&tools), None);
+    let args = json!({"foo": "bar"});
+    let result = validate_tool_args("nonexistent_tool", &args, &schemas);
+    assert!(
+        result.is_ok(),
+        "should pass for unknown tool (handled elsewhere)"
+    );
+}
+
+#[test]
+fn validate_tool_args_treats_null_as_missing() {
+    let tools = sample_tool_registry();
+    let schemas = collect_tool_schemas(Some(&tools), None);
+    let args = json!({"action": "create", "path": null});
+    let result = validate_tool_args("edit", &args, &schemas);
+    assert!(result.is_err(), "null should count as missing");
+    assert!(result.unwrap_err().contains("path"));
+}
+
+#[test]
+fn validate_tool_args_passes_with_empty_args_when_no_required() {
+    let tools = sample_tool_registry();
+    let schemas = collect_tool_schemas(Some(&tools), None);
+    // "run" tool requires "command" — but let's test with a tool that has
+    // no required params. Since sample_tool_registry tools all have required
+    // params, just verify an unknown tool passes.
+    let result = validate_tool_args("no_such_tool", &json!({}), &schemas);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn text_parser_reports_unknown_tool_in_native_json_fallback() {
+    // End-to-end through parse_text_tool_calls_with_tools: when a native
+    // JSON fallback call references an unknown tool, it should surface as
+    // an error in the TextToolParseResult.
+    let tools = sample_tool_registry();
+    let text = r#"[{"id":"call_001","type":"function","function":{"name":"nonexistent","arguments":"{}"}}]"#;
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert!(result.calls.is_empty(), "no valid calls");
+    assert!(
+        !result.errors.is_empty(),
+        "should surface unknown tool error: {:?}",
+        result.errors
+    );
+    assert!(
+        result.errors[0].contains("Unknown tool"),
+        "error message: {}",
+        result.errors[0]
+    );
 }

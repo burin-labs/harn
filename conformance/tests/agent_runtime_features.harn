@@ -28,11 +28,18 @@ pipeline test(task) {
   ),
   )
   clear_tool_hooks()
-  register_tool_hook({pattern: "list_directory", max_output: 200})
+  var trunc_tools = tool_registry()
+  trunc_tools = tool_define(
+    trunc_tools,
+    "verbose_tool",
+    "Returns long output",
+    {handler: { _args -> "x" * 300 }, parameters: {}},
+  )
+  register_tool_hook({pattern: "verbose_tool", max_output: 200})
   let truncated = agent_loop(
-    "Inspect the workspace",
+    "Run the tool",
     "You are helpful",
-    {provider: "mock", tools: list_tools(), tool_format: "native", max_iterations: 1},
+    {provider: "mock", tools: trunc_tools, tool_format: "native", max_iterations: 1},
   )
   println(json_stringify(transcript_messages(truncated?.transcript)).contains("snipped"))
   clear_tool_hooks()

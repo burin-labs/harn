@@ -210,7 +210,7 @@ let doc = """
 | `.` | `.dot` | Member access |
 | `+` | `.plus` | Addition / concatenation |
 | `-` | `.minus` | Subtraction / negation |
-| `*` | `.star` | Multiplication |
+| `*` | `.star` | Multiplication / string repetition |
 | `/` | `.slash` | Division |
 | `<` | `.lt` | Less than |
 | `>` | `.gt` | Greater than |
@@ -794,11 +794,14 @@ Comparison between other types returns 0 (equal).
 |---|---|---|---|---|---|
 | int | int | int | int | int | int (truncating) |
 | float | float | float | float | float | float |
+| string | int | string (concatenation) | nil | string (repetition) | nil |
+| int | string | string (concatenation) | nil | string (repetition) | nil |
 | string | any | string (concatenation) | nil | nil | nil |
 | list | list | list (concatenation) | nil | nil | nil |
 | other | other | string (both `.asString` concatenated) | nil | nil | nil |
 
 Division by zero returns `nil`.
+`string * int` repeats the string; negative or zero counts return `""`.
 
 ### Logical (`&&`, `||`)
 

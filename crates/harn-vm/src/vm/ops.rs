@@ -1411,6 +1411,10 @@ impl super::Vm {
             (VmValue::Float(x), VmValue::Float(y)) => VmValue::Float(x * y),
             (VmValue::Int(x), VmValue::Float(y)) => VmValue::Float(*x as f64 * y),
             (VmValue::Float(x), VmValue::Int(y)) => VmValue::Float(x * *y as f64),
+            (VmValue::String(s), VmValue::Int(n)) | (VmValue::Int(n), VmValue::String(s)) => {
+                let count = (*n).max(0) as usize;
+                VmValue::String(s.repeat(count).into())
+            }
             _ => VmValue::Nil,
         }
     }

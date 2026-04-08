@@ -12,8 +12,8 @@ use super::helpers::{
 };
 use super::tools::{
     build_assistant_response_message, build_assistant_tool_message,
-    build_tool_calling_contract_prompt, build_tool_result_message, handle_tool_locally,
-    normalize_tool_args, parse_text_tool_calls_with_tools,
+    build_tool_calling_contract_prompt, build_tool_result_message, collect_tool_schemas,
+    handle_tool_locally, normalize_tool_args, parse_text_tool_calls_with_tools, validate_tool_args,
 };
 use super::trace::{trace_llm_call, LlmTraceEntry};
 
@@ -225,7 +225,11 @@ async fn dispatch_tool_execution(
                 .await
         } else {
             Err(VmError::CategorizedError {
-                message: format!("tool not available without host bridge: {tool_name}"),
+                message: format!(
+                    "Tool '{}' is not available in the current environment. \
+                     Use only the tools listed in the tool-calling contract.",
+                    tool_name
+                ),
                 category: ErrorCategory::ToolRejected,
             })
         };
@@ -1394,6 +1398,7 @@ pub async fn run_agent_loop_internal(
             let mut observations = String::new();
             let mut tools_used_this_iter = Vec::new();
             let mut rejection_followups: Vec<String> = Vec::new();
+            let tool_schemas = collect_tool_schemas(tools_val, opts.native_tools.as_deref());
 
             // Parallel dispatch for read-only exploration batches. When the
             // leading run of tool calls in this assistant response are all in
@@ -1463,6 +1468,35 @@ pub async fn run_agent_loop_internal(
                 let tool_id = tc["id"].as_str().unwrap_or("");
                 let tool_name = tc["name"].as_str().unwrap_or("");
                 let mut tool_args = normalize_tool_args(tool_name, &tc["arguments"]);
+
+                // Detect malformed JSON arguments that the provider returned
+                // (marked with __parse_error sentinel during response parsing).
+                if let Some(parse_err) = tool_args.get("__parse_error").and_then(|v| v.as_str()) {
+                    let result_text = format!("ERROR: {parse_err}");
+                    transcript_events.push(transcript_event(
+                        "tool_execution",
+                        "tool",
+                        "internal",
+                        &result_text,
+                        Some(serde_json::json!({
+                            "tool_name": tool_name,
+                            "tool_use_id": tool_id,
+                            "rejected": true,
+                        })),
+                    ));
+                    if tool_format == "native" {
+                        append_message_to_contexts(
+                            &mut visible_messages,
+                            &mut recorded_messages,
+                            build_tool_result_message(tool_id, &result_text, &opts.provider),
+                        );
+                    } else {
+                        observations.push_str(&format!(
+                            "[result of {tool_name}]\n{result_text}\n[end of {tool_name} result]\n\n"
+                        ));
+                    }
+                    continue;
+                }
 
                 let policy_result = crate::orchestration::enforce_current_policy_for_tool(
                     tool_name,
@@ -1607,6 +1641,36 @@ pub async fn run_agent_loop_internal(
                     // If the bridge call fails (host doesn't implement tool/pre_use),
                     // we silently proceed — the host can opt in to this protocol.
                 }
+                // Validate required parameters before dispatch so the LLM gets
+                // a clear error instead of a cryptic handler failure.
+                if let Err(msg) = validate_tool_args(tool_name, &tool_args, &tool_schemas) {
+                    let result_text = format!("ERROR: {msg}");
+                    transcript_events.push(transcript_event(
+                        "tool_execution",
+                        "tool",
+                        "internal",
+                        &result_text,
+                        Some(serde_json::json!({
+                            "tool_name": tool_name,
+                            "tool_use_id": tool_id,
+                            "rejected": true,
+                            "arguments": tool_args.clone(),
+                        })),
+                    ));
+                    if tool_format == "native" {
+                        append_message_to_contexts(
+                            &mut visible_messages,
+                            &mut recorded_messages,
+                            build_tool_result_message(tool_id, &result_text, &opts.provider),
+                        );
+                    } else {
+                        observations.push_str(&format!(
+                            "[result of {tool_name}]\n{result_text}\n[end of {tool_name} result]\n\n"
+                        ));
+                    }
+                    continue;
+                }
+
                 transcript_events.push(transcript_event(
                     "tool_intent",
                     "assistant",

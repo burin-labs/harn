@@ -103,6 +103,58 @@ pub(crate) fn load_fixture(hash: &str) -> Option<LlmResult> {
     })
 }
 
+/// Generate stub argument values for required parameters in a tool schema.
+/// This makes mock tool calls realistic — a real model would always fill
+/// required fields, so the mock should too.
+fn mock_required_args(tool_schema: &serde_json::Value) -> serde_json::Value {
+    let mut args = serde_json::Map::new();
+    // Anthropic: {name, input_schema: {properties, required}}
+    // OpenAI:    {function: {name, parameters: {properties, required}}}
+    // Harn VM:   {parameters: {name: {type, required}}}  (from tool_define)
+    let input_schema = tool_schema
+        .get("input_schema")
+        .or_else(|| tool_schema.get("inputSchema"))
+        .or_else(|| {
+            tool_schema
+                .get("function")
+                .and_then(|f| f.get("parameters"))
+        })
+        .or_else(|| tool_schema.get("parameters"));
+    let Some(schema) = input_schema else {
+        return serde_json::Value::Object(args);
+    };
+    let required: std::collections::BTreeSet<String> = schema
+        .get("required")
+        .and_then(|r| r.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    if let Some(props) = schema.get("properties").and_then(|p| p.as_object()) {
+        for (name, prop) in props {
+            if !required.contains(name) {
+                continue;
+            }
+            let ty = prop
+                .get("type")
+                .and_then(|t| t.as_str())
+                .unwrap_or("string");
+            let placeholder = match ty {
+                "integer" => serde_json::json!(0),
+                "number" => serde_json::json!(0.0),
+                "boolean" => serde_json::json!(false),
+                "array" => serde_json::json!([]),
+                "object" => serde_json::json!({}),
+                _ => serde_json::json!(""),
+            };
+            args.insert(name.clone(), placeholder);
+        }
+    }
+    serde_json::Value::Object(args)
+}
+
 /// Mock LLM provider -- deterministic responses for testing without API keys.
 pub(crate) fn mock_llm_response(
     messages: &[serde_json::Value],
@@ -117,6 +169,8 @@ pub(crate) fn mock_llm_response(
         .unwrap_or("");
 
     // If tools are provided, generate a mock tool call for the first tool.
+    // Fill required parameters with placeholder values so mock calls pass
+    // schema validation the same way a real model would.
     if let Some(tools) = native_tools {
         if let Some(first_tool) = tools.first() {
             let tool_name = first_tool
@@ -124,13 +178,14 @@ pub(crate) fn mock_llm_response(
                 .or_else(|| first_tool.get("function").and_then(|f| f.get("name")))
                 .and_then(|n| n.as_str())
                 .unwrap_or("unknown");
+            let mock_args = mock_required_args(first_tool);
             return LlmResult {
                 text: String::new(),
                 tool_calls: vec![serde_json::json!({
                     "id": "mock_call_1",
                     "type": "tool_call",
                     "name": tool_name,
-                    "arguments": {}
+                    "arguments": mock_args
                 })],
                 input_tokens: last_msg.len() as i64,
                 output_tokens: 20,
@@ -144,7 +199,7 @@ pub(crate) fn mock_llm_response(
                     "type": "tool_call",
                     "id": "mock_call_1",
                     "name": tool_name,
-                    "arguments": {},
+                    "arguments": mock_args,
                     "visibility": "internal",
                 })],
             };

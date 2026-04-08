@@ -1,0 +1,7 @@
+pipeline test(task) {
+  println("ab" * 3)
+  println(4 * "xy")
+  println(len("z" * 100))
+  println("hi" * 0)
+  println("hi" * -1)
+}
