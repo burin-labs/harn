@@ -331,15 +331,36 @@ pub(crate) fn handle_tool_locally(name: &str, args: &serde_json::Value) -> Optio
                     Err(e) => Some(format!("Error: cannot list directory '{}': {}", path, e)),
                 };
             }
+            // Parse optional offset (1-based line number) and limit
+            let offset = args
+                .get("offset")
+                .and_then(|v| v.as_i64())
+                .map(|v| v.max(1) as usize)
+                .unwrap_or(1);
+            let limit = args
+                .get("limit")
+                .and_then(|v| v.as_i64())
+                .map(|v| v.clamp(1, 2000) as usize)
+                .unwrap_or(2000);
             match std::fs::read_to_string(&resolved) {
                 Ok(content) => {
-                    // Add line numbers like the Swift read_file does
-                    let numbered: String = content
-                        .lines()
+                    let lines: Vec<&str> = content.lines().collect();
+                    let total_lines = lines.len();
+                    let start_idx = (offset - 1).min(total_lines);
+                    let end_idx = (start_idx + limit).min(total_lines);
+                    let mut numbered: String = lines[start_idx..end_idx]
+                        .iter()
                         .enumerate()
-                        .map(|(i, line)| format!("{}\t{}", i + 1, line))
+                        .map(|(i, line)| format!("{}\t{}", start_idx + i + 1, line))
                         .collect::<Vec<_>>()
                         .join("\n");
+                    if end_idx < total_lines {
+                        numbered.push_str(&format!(
+                            "\n\n[... {} more lines not shown. Use offset={} to continue reading]",
+                            total_lines - end_idx,
+                            end_idx + 1
+                        ));
+                    }
                     Some(numbered)
                 }
                 Err(e) => Some(format!("Error: cannot read file '{}': {}", path, e)),

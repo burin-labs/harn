@@ -1675,14 +1675,18 @@ fn known_model_context_window(model: &str) -> Option<usize> {
 /// Fetch context window from Ollama's `/api/show` endpoint.
 /// Returns the num_ctx from model parameters, or the default 2048 if not set.
 async fn fetch_ollama_context_window(model: &str, base_url: &str) -> Option<usize> {
-    let client = reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(3))
-        .timeout(std::time::Duration::from_secs(5))
-        .build()
-        .ok()?;
+    let client = super::shared_utility_client();
     let url = format!("{}/api/show", base_url.trim_end_matches('/'));
     let body = serde_json::json!({"name": model});
-    let response = client.post(&url).json(&body).send().await.ok()?;
+    // Ollama is typically local — use a tight per-request timeout so we fail
+    // fast when it isn't running, while still reusing the shared connection pool.
+    let response = client
+        .post(&url)
+        .json(&body)
+        .timeout(std::time::Duration::from_secs(5))
+        .send()
+        .await
+        .ok()?;
     if !response.status().is_success() {
         return None;
     }
@@ -1715,13 +1719,12 @@ async fn fetch_openai_compatible_context_window(
     base_url: &str,
 ) -> Option<usize> {
     let pdef = crate::llm_config::provider_config(provider);
-    let client = reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(5))
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .ok()?;
+    let client = super::shared_utility_client();
     let url = format!("{base_url}/models");
-    let req = client.get(&url).header("Content-Type", "application/json");
+    let req = client
+        .get(&url)
+        .header("Content-Type", "application/json")
+        .timeout(std::time::Duration::from_secs(10));
     let req = apply_auth_headers(req, api_key, pdef);
     let response = req.send().await.ok()?;
     if !response.status().is_success() {

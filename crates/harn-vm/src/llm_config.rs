@@ -55,6 +55,9 @@ pub struct ProviderDef {
     /// Delay between retries in milliseconds (default 1000).
     #[serde(default)]
     pub retry_delay_ms: Option<u64>,
+    /// Maximum requests per minute. None = unlimited.
+    #[serde(default)]
+    pub rpm: Option<u32>,
 }
 
 impl Default for ProviderDef {
@@ -73,6 +76,7 @@ impl Default for ProviderDef {
             fallback: None,
             retry_count: None,
             retry_delay_ms: None,
+            rpm: None,
         }
     }
 }

@@ -251,6 +251,28 @@ pub struct ModelPolicy {
     /// shown before the tool schema listing. Pipelines provide these —
     /// the VM has no hardcoded tool names.
     pub tool_examples: Option<String>,
+    /// Optional Harn closure called after each tool-calling turn.
+    /// Receives turn metadata; returns an optional user message to inject.
+    /// Wrapped in EqIgnored so it doesn't affect PartialEq derivation.
+    #[serde(skip)]
+    pub post_turn_callback: Option<EqIgnored<VmValue>>,
+}
+
+/// Wrapper that always compares equal, allowing non-Eq types in derived PartialEq structs.
+#[derive(Clone, Debug, Default)]
+pub struct EqIgnored<T>(pub T);
+
+impl<T> PartialEq for EqIgnored<T> {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl<T> std::ops::Deref for EqIgnored<T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        &self.0
+    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -261,6 +283,18 @@ pub struct TranscriptPolicy {
     pub summarize: bool,
     pub compact: bool,
     pub keep_last: Option<usize>,
+    /// Enable per-turn auto-compaction within agent loops.
+    pub auto_compact: bool,
+    /// Token threshold for tier-1 compaction.
+    pub compact_threshold: Option<usize>,
+    /// Max chars per tool result before compression.
+    pub tool_output_max_chars: Option<usize>,
+    /// Tier-1 compaction strategy name (e.g., "observation_mask", "llm").
+    pub compact_strategy: Option<String>,
+    /// Token threshold for tier-2 aggressive compaction.
+    pub hard_limit_tokens: Option<usize>,
+    /// Tier-2 compaction strategy name.
+    pub hard_limit_strategy: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]

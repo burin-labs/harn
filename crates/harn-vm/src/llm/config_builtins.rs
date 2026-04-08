@@ -116,6 +116,41 @@ pub(crate) fn register_config_builtins(vm: &mut Vm) {
         }
     });
 
+    // llm_rate_limit — set, query, or clear per-provider RPM rate limits.
+    //   llm_rate_limit("together", {rpm: 600})  -> set
+    //   llm_rate_limit("together")              -> query (returns Int or Nil)
+    //   llm_rate_limit("together", {rpm: 0})    -> clear
+    vm.register_builtin("llm_rate_limit", |args, _out| {
+        let provider = args.first().map(|a| a.display()).unwrap_or_default();
+        if provider.is_empty() {
+            return Err(crate::value::VmError::Runtime(
+                "llm_rate_limit: provider name is required".to_string(),
+            ));
+        }
+        if let Some(VmValue::Int(rpm)) = args
+            .get(1)
+            .and_then(|a| a.as_dict())
+            .and_then(|o| o.get("rpm").cloned())
+        {
+            if rpm <= 0 {
+                super::rate_limit::clear_rate_limit(&provider);
+            } else {
+                super::rate_limit::set_rate_limit(&provider, rpm as u32);
+            }
+            return Ok(VmValue::Bool(true));
+        }
+        if args.get(1).and_then(|a| a.as_dict()).is_some() {
+            return Err(crate::value::VmError::Runtime(
+                "llm_rate_limit: options must include 'rpm' (integer)".to_string(),
+            ));
+        }
+        // Query mode
+        match super::rate_limit::get_rate_limit(&provider) {
+            Some(rpm) => Ok(VmValue::Int(rpm as i64)),
+            None => Ok(VmValue::Nil),
+        }
+    });
+
     vm.register_async_builtin("llm_healthcheck", |args| async move {
         let provider_name = args
             .first()
@@ -153,11 +188,7 @@ pub(crate) fn register_config_builtins(vm: &mut Vm) {
             format!("{base}{path}")
         };
 
-        let client = reqwest::Client::builder()
-            .connect_timeout(std::time::Duration::from_secs(10))
-            .timeout(std::time::Duration::from_secs(15))
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
+        let client = super::shared_utility_client();
 
         let mut req = match hc.method.to_uppercase().as_str() {
             "POST" => {
@@ -242,6 +273,9 @@ fn provider_def_to_vm_value(pdef: &llm_config::ProviderDef) -> VmValue {
             .map(|f| VmValue::String(Rc::from(f.as_str())))
             .collect();
         dict.insert("features".to_string(), VmValue::List(Rc::new(features)));
+    }
+    if let Some(rpm) = pdef.rpm {
+        dict.insert("rpm".to_string(), VmValue::Int(rpm as i64));
     }
     VmValue::Dict(Rc::new(dict))
 }

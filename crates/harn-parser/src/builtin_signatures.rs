@@ -642,6 +642,10 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("list")),
     },
     BuiltinSig {
+        name: "llm_rate_limit",
+        return_type: None,
+    },
+    BuiltinSig {
         name: "llm_resolve_model",
         return_type: Some(BuiltinReturn::Named("dict")),
     },

@@ -1,0 +1,13 @@
+pipeline test(task) {
+  // Query with no limit configured -> nil
+  let none = llm_rate_limit("test_provider_xyz")
+  log(none)
+  // Set a limit
+  llm_rate_limit("test_provider_xyz", {rpm: 100})
+  let limit = llm_rate_limit("test_provider_xyz")
+  log(limit)
+  // Clear it
+  llm_rate_limit("test_provider_xyz", {rpm: 0})
+  let cleared = llm_rate_limit("test_provider_xyz")
+  log(cleared)
+}

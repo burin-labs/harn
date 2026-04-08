@@ -41,6 +41,10 @@ pub struct WorkflowNode {
     pub metadata: BTreeMap<String, serde_json::Value>,
     #[serde(skip)]
     pub raw_tools: Option<VmValue>,
+    /// Raw transcript_policy VmValue dict — preserved for extracting closure
+    /// fields (compress_callback, mask_callback) that can't go through serde.
+    #[serde(skip)]
+    pub raw_transcript_policy: Option<VmValue>,
 }
 
 impl PartialEq for WorkflowNode {
@@ -262,7 +266,9 @@ pub struct WorkflowValidationReport {
 
 pub fn parse_workflow_node_value(value: &VmValue, label: &str) -> Result<WorkflowNode, VmError> {
     let mut node: WorkflowNode = super::parse_json_payload(vm_value_to_json(value), label)?;
-    node.raw_tools = value.as_dict().and_then(|dict| dict.get("tools")).cloned();
+    let dict = value.as_dict();
+    node.raw_tools = dict.and_then(|d| d.get("tools")).cloned();
+    node.raw_transcript_policy = dict.and_then(|d| d.get("transcript_policy")).cloned();
     Ok(node)
 }
 
@@ -743,6 +749,59 @@ pub async fn execute_stage_node(
         let mut opts = extract_llm_options(&args)?;
 
         if node.mode.as_deref() == Some("agent") || !tool_names.is_empty() {
+            // Build auto-compact config from transcript_policy fields
+            let auto_compact = if node.transcript_policy.auto_compact {
+                let mut ac = crate::orchestration::AutoCompactConfig::default();
+                if let Some(v) = node.transcript_policy.compact_threshold {
+                    ac.token_threshold = v;
+                }
+                if let Some(v) = node.transcript_policy.tool_output_max_chars {
+                    ac.tool_output_max_chars = v;
+                }
+                if let Some(ref strategy) = node.transcript_policy.compact_strategy {
+                    if let Ok(s) = crate::orchestration::parse_compact_strategy(strategy) {
+                        ac.compact_strategy = s;
+                    }
+                }
+                if let Some(v) = node.transcript_policy.hard_limit_tokens {
+                    ac.hard_limit_tokens = Some(v);
+                }
+                if let Some(ref strategy) = node.transcript_policy.hard_limit_strategy {
+                    if let Ok(s) = crate::orchestration::parse_compact_strategy(strategy) {
+                        ac.hard_limit_strategy = s;
+                    }
+                }
+                // Extract closure fields from raw transcript_policy dict
+                if let Some(ref raw_tp) = node.raw_transcript_policy {
+                    if let Some(dict) = raw_tp.as_dict() {
+                        if let Some(cb) = dict.get("compress_callback") {
+                            ac.compress_callback = Some(cb.clone());
+                        }
+                        if let Some(cb) = dict.get("mask_callback") {
+                            ac.mask_callback = Some(cb.clone());
+                        }
+                    }
+                }
+                // Adapt thresholds to provider context window
+                {
+                    let user_specified_threshold =
+                        node.transcript_policy.compact_threshold.is_some();
+                    let user_specified_hard_limit =
+                        node.transcript_policy.hard_limit_tokens.is_some();
+                    crate::llm::api::adapt_auto_compact_to_provider(
+                        &mut ac,
+                        user_specified_threshold,
+                        user_specified_hard_limit,
+                        &opts.provider,
+                        &opts.model,
+                        &opts.api_key,
+                    )
+                    .await;
+                }
+                Some(ac)
+            } else {
+                None
+            };
             crate::llm::run_agent_loop_internal(
                 &mut opts,
                 crate::llm::AgentLoopConfig {
@@ -755,7 +814,7 @@ pub async fn execute_stage_node(
                     tool_retries: 0,
                     tool_backoff_ms: 1000,
                     tool_format: tool_format.clone(),
-                    auto_compact: None,
+                    auto_compact,
                     context_callback: None,
                     policy: None,
                     daemon: false,
@@ -766,6 +825,11 @@ pub async fn execute_stage_node(
                     loop_detect_block: 3,
                     loop_detect_skip: 4,
                     tool_examples: node.model_policy.tool_examples.clone(),
+                    post_turn_callback: node
+                        .model_policy
+                        .post_turn_callback
+                        .as_ref()
+                        .map(|w| w.0.clone()),
                 },
             )
             .await?

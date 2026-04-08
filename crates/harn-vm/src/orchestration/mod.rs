@@ -899,9 +899,17 @@ mod tests {
 
     #[test]
     fn observation_mask_preserves_errors_masks_verbose_output() {
+        // Build a verbose output string (>500 chars) that should be masked
+        let verbose_lines: Vec<String> = (0..60)
+            .map(|i| format!("// source line {} of the generated file", i))
+            .collect();
+        let verbose_content = format!(
+            "File created: a.go\npackage main\n{}",
+            verbose_lines.join("\n")
+        );
         let mut messages = vec![
             serde_json::json!({"role": "assistant", "content": "I'll create the file now."}),
-            serde_json::json!({"role": "user", "content": "File created: a.go\npackage main\nimport \"fmt\"\nfunc main() {\n\tfmt.Println(\"hello\")\n}\n// more lines\n// more lines\n// more lines\n// more lines"}),
+            serde_json::json!({"role": "user", "content": verbose_content}),
             serde_json::json!({"role": "assistant", "content": "Now let me run the tests."}),
             serde_json::json!({"role": "user", "content": "error: cannot find module\nexit code 1\nfailed to compile"}),
             serde_json::json!({"role": "assistant", "content": "I see the issue. Let me fix it."}),
@@ -928,13 +936,13 @@ mod tests {
         assert!(summary.contains("I'll create the file now."));
         assert!(summary.contains("Now let me run the tests."));
         assert!(summary.contains("I see the issue. Let me fix it."));
-        // Error output preserved verbatim
+        // Short error output preserved verbatim (under 500 chars)
         assert!(summary.contains("error: cannot find module"));
         assert!(summary.contains("exit code 1"));
-        // Verbose tool output masked
+        // Verbose tool output masked (over 500 chars)
         assert!(summary.contains("masked]"));
         assert!(summary.contains("File created: a.go"));
-        // Short tool output kept in retained portion (not in summary)
+        // Short tool output in kept portion (boundary adjustment moves split_at to user msg)
         assert!(!summary.contains("File patched successfully."));
         // Kept messages not in summary
         assert!(!summary.contains("Running tests again."));

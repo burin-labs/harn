@@ -6,6 +6,27 @@ All notable changes to Harn are documented in this file.
 
 ### Added
 
+- **Per-provider rate limiting** — proactive RPM (requests per minute)
+  throttling for outbound LLM requests. Configure via `providers.toml`
+  (`rpm` field), environment variables (`HARN_RATE_LIMIT_<PROVIDER>=N`),
+  or the new `llm_rate_limit` builtin. When throttled, the VM cooperatively
+  yields to other spawn_local tasks and parallel pipelines.
+- **`llm_rate_limit` builtin** — set, query, or clear per-provider rate
+  limits at runtime: `llm_rate_limit("together", {rpm: 600})`.
+- **`post_turn_callback` agent option** — optional Harn closure called
+  after each tool-calling turn with turn metadata (tool names, count,
+  consecutive single-tool turns). Returned non-empty strings are injected
+  as user messages before the next LLM call.
+- **`compress_callback` auto-compact option** — pipeline-defined callback
+  for per-tool-result compression, replacing the built-in microcompact
+  heuristics with LLM-based or custom compression.
+- **`read_file` tool offset/limit** — the built-in `read_file` tool now
+  supports `offset` (1-based line) and `limit` parameters for paginated
+  file reading, with truncation hints for remaining content.
+- **Workflow transcript policy** — `transcript_policy` on workflow nodes
+  now supports `auto_compact`, `compact_threshold`, `tool_output_max_chars`,
+  `compact_strategy`, `hard_limit_tokens`, and `hard_limit_strategy` fields,
+  wired into agent loop execution.
 - **Message-shape debug logging** — set `HARN_DEBUG_MESSAGE_SHAPES=1` to emit
   compact summaries of outbound/provider-facing transcript message structure
   during agent preflight and LLM API calls.
@@ -15,10 +36,24 @@ All notable changes to Harn are documented in this file.
 
 ### Changed
 
+- **Compaction line-boundary snapping** — microcompaction now snaps head/tail
+  splits to line boundaries instead of cutting mid-line, producing cleaner
+  preserved context.
 - **Compaction boundary safeguard** — auto-compaction now preserves the active
   user turn when recent messages contain assistant reasoning or tool traffic,
   avoiding invalid mid-turn truncation while still compacting instead of
   silently bailing out.
+- **Observation mask heuristic** — replaced keyword-based error detection
+  (`content_has_error_signal`) with length-based heuristic: tool results
+  under 500 chars are preserved verbatim (cheap to keep, risky to mask).
+- **Shared HTTP client for utility requests** — healthchecks, Ollama context
+  window lookups, and OpenAI-compatible model queries now reuse a shared
+  connection-pooled client instead of creating one-off clients per request.
+
+### Fixed
+
+- **Clippy warnings** — resolved collapsible `if let` and manual clamp
+  patterns flagged by clippy.
 
 ## v0.5.45
 

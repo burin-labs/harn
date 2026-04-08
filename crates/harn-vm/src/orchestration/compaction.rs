@@ -59,6 +59,12 @@ pub struct AutoCompactConfig {
     /// This lets the host (e.g. burin-code) inject AST outlines, file
     /// summaries, etc. without putting language-specific logic in Harn.
     pub mask_callback: Option<VmValue>,
+    /// Optional callback for per-tool-result compression. Called with
+    /// `{tool_name, output, max_chars}` and returns compressed output string.
+    /// When set, used INSTEAD of the built-in `microcompact_tool_output`.
+    /// This allows the pipeline to use LLM-based compression rather than
+    /// keyword heuristics.
+    pub compress_callback: Option<VmValue>,
 }
 
 impl Default for AutoCompactConfig {
@@ -72,6 +78,7 @@ impl Default for AutoCompactConfig {
             hard_limit_strategy: CompactStrategy::Llm,
             custom_compactor: None,
             mask_callback: None,
+            compress_callback: None,
         }
     }
 }
@@ -161,22 +168,89 @@ pub fn microcompact_tool_output(output: &str, max_chars: usize) -> String {
         let budget = max_chars.saturating_sub(diagnostics.len() + 64);
         let keep = budget / 2;
         if keep >= 80 && output.len() > keep * 2 {
-            let head_end = output.floor_char_boundary(keep);
-            let tail_start = output.ceil_char_boundary(output.len() - keep);
-            let head = &output[..head_end];
-            let tail = &output[tail_start..];
+            let head = snap_to_line_end(output, keep);
+            let tail = snap_to_line_start(output, output.len().saturating_sub(keep));
             return format!(
                 "{head}\n\n[diagnostic lines preserved]\n{diagnostics}\n\n[... output compacted ...]\n\n{tail}"
             );
         }
     }
     let keep = max_chars / 2;
-    let head_end = output.floor_char_boundary(keep);
-    let tail_start = output.ceil_char_boundary(output.len() - keep);
-    let head = &output[..head_end];
-    let tail = &output[tail_start..];
-    let snipped = output.len() - max_chars;
+    let head = snap_to_line_end(output, keep);
+    let tail = snap_to_line_start(output, output.len().saturating_sub(keep));
+    let snipped = output.len().saturating_sub(head.len() + tail.len());
     format!("{head}\n\n[... {snipped} characters snipped ...]\n\n{tail}")
+}
+
+/// Invoke the compress_callback to compress a tool result via pipeline-defined
+/// logic (typically an LLM call). Returns the compressed output, or falls back
+/// to `microcompact_tool_output` on error.
+pub(crate) async fn invoke_compress_callback(
+    callback: &VmValue,
+    tool_name: &str,
+    output: &str,
+    max_chars: usize,
+) -> String {
+    let VmValue::Closure(closure) = callback.clone() else {
+        return microcompact_tool_output(output, max_chars);
+    };
+    let mut vm = match crate::vm::clone_async_builtin_child_vm() {
+        Some(vm) => vm,
+        None => return microcompact_tool_output(output, max_chars),
+    };
+    let args_dict = VmValue::Dict(Rc::new({
+        let mut dict = std::collections::BTreeMap::new();
+        dict.insert(
+            "tool_name".to_string(),
+            VmValue::String(Rc::from(tool_name)),
+        );
+        dict.insert("output".to_string(), VmValue::String(Rc::from(output)));
+        dict.insert("max_chars".to_string(), VmValue::Int(max_chars as i64));
+        dict
+    }));
+    match vm.call_closure_pub(&closure, &[args_dict], &[]).await {
+        Ok(VmValue::String(s)) if !s.is_empty() => s.to_string(),
+        _ => microcompact_tool_output(output, max_chars),
+    }
+}
+
+/// Snap a byte offset to the nearest preceding line boundary (end of a complete line).
+/// Returns the substring from the start up to and including the last complete line
+/// that fits within `max_bytes`. Never cuts mid-line.
+fn snap_to_line_end(s: &str, max_bytes: usize) -> &str {
+    if max_bytes >= s.len() {
+        return s;
+    }
+    // Find the last newline at or before max_bytes
+    let search_end = s.floor_char_boundary(max_bytes);
+    match s[..search_end].rfind('\n') {
+        Some(pos) => &s[..pos + 1],
+        None => &s[..search_end], // single long line — fall back to char boundary
+    }
+}
+
+/// Snap a byte offset to the nearest following line boundary (start of a complete line).
+/// Returns the substring from the first complete line at or after `start_byte`.
+/// Never cuts mid-line.
+fn snap_to_line_start(s: &str, start_byte: usize) -> &str {
+    if start_byte == 0 {
+        return s;
+    }
+    let search_start = s.ceil_char_boundary(start_byte);
+    if search_start >= s.len() {
+        return "";
+    }
+    match s[search_start..].find('\n') {
+        Some(pos) => {
+            let line_start = search_start + pos + 1;
+            if line_start < s.len() {
+                &s[line_start..]
+            } else {
+                &s[search_start..]
+            }
+        }
+        None => &s[search_start..], // already at start of last line
+    }
 }
 
 fn format_compaction_messages(messages: &[serde_json::Value]) -> String {
@@ -332,17 +406,13 @@ async fn custom_compaction_summary(
     }
 }
 
-/// Check whether a tool-result string contains error signals that should
-/// be preserved verbatim during observation masking.
-fn content_has_error_signal(content: &str) -> bool {
-    let lower = content.to_ascii_lowercase();
-    lower.contains("error")
-        || lower.contains("fail")
-        || lower.contains("panic")
-        || lower.contains("non-zero exit")
-        || lower.contains("exit code")
-        || lower.contains("traceback")
-        || lower.contains("exception")
+/// Check whether a tool-result string should be preserved verbatim during
+/// observation masking. Uses content length as the primary heuristic:
+/// short results (< 500 chars) are kept since they're typically error messages,
+/// status lines, or concise answers that are cheap to retain and risky to mask.
+/// Long results are masked to save context budget.
+fn content_should_preserve(content: &str) -> bool {
+    content.len() < 500
 }
 
 /// Default per-message masking for tool results.
@@ -389,7 +459,7 @@ fn observation_mask_compaction_with_callback(
             parts.push(format!("[assistant] {content}"));
             continue;
         }
-        if content_has_error_signal(content) {
+        if content_should_preserve(content) {
             parts.push(format!("[{role}] {content}"));
         } else if let Some(Some(custom)) = mask_results.and_then(|r| r.get(idx)) {
             parts.push(custom.clone());
@@ -581,6 +651,73 @@ pub(crate) async fn auto_compact_messages(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn microcompact_short_output_unchanged() {
+        let output = "line1\nline2\nline3\n";
+        assert_eq!(microcompact_tool_output(output, 1000), output);
+    }
+
+    #[test]
+    fn microcompact_snaps_to_line_boundaries() {
+        // Build output with 10 lines, each ~20 chars
+        let lines: Vec<String> = (0..20)
+            .map(|i| format!("line {:02} content here", i))
+            .collect();
+        let output = lines.join("\n");
+        let result = microcompact_tool_output(&output, 200);
+        // Head and tail should end/start at line boundaries (contain \n, not mid-line)
+        assert!(result.contains("[... "), "should have snip marker");
+        // The head portion should end with a complete line (newline before the marker)
+        let parts: Vec<&str> = result.split("\n\n[... ").collect();
+        assert!(parts.len() >= 2, "should split at marker");
+        let head = parts[0];
+        // Head should be complete lines only
+        for line in head.lines() {
+            assert!(
+                line.starts_with("line "),
+                "head line should be complete: {line}"
+            );
+        }
+    }
+
+    #[test]
+    fn microcompact_preserves_diagnostic_lines_with_line_boundaries() {
+        let mut lines = Vec::new();
+        for i in 0..50 {
+            lines.push(format!("verbose output line {i}"));
+        }
+        lines.push("src/main.rs:42: error: cannot find value".to_string());
+        for i in 50..100 {
+            lines.push(format!("verbose output line {i}"));
+        }
+        let output = lines.join("\n");
+        let result = microcompact_tool_output(&output, 600);
+        assert!(result.contains("cannot find value"), "diagnostic preserved");
+        assert!(
+            result.contains("[diagnostic lines preserved]"),
+            "has diagnostic marker"
+        );
+    }
+
+    #[test]
+    fn snap_to_line_end_finds_newline() {
+        let s = "line1\nline2\nline3\nline4\n";
+        let head = snap_to_line_end(s, 12); // "line1\nline2\n" is 12 chars
+        assert!(head.ends_with('\n'), "should end at newline");
+        assert!(head.contains("line1"));
+    }
+
+    #[test]
+    fn snap_to_line_start_finds_newline() {
+        let s = "line1\nline2\nline3\nline4\n";
+        let tail = snap_to_line_start(s, 12);
+        // Should start at the beginning of a complete line
+        assert!(
+            tail.starts_with("line"),
+            "should start at line boundary: {tail}"
+        );
+    }
 
     #[test]
     fn auto_compact_preserves_reasoning_tool_suffix() {

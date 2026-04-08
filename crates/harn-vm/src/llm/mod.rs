@@ -50,11 +50,27 @@ pub(crate) fn shared_blocking_client() -> &'static reqwest::Client {
             .unwrap_or_else(|_| reqwest::Client::new())
     })
 }
+
+/// Utility client for short-lived requests (healthchecks, context window
+/// lookups). Shorter timeouts than the blocking client, shared connection pool.
+pub(crate) fn shared_utility_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .timeout(std::time::Duration::from_secs(15))
+            .pool_max_idle_per_host(2)
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    })
+}
+
 pub use mock::{
     drain_tool_recordings, load_tool_replay_fixtures, set_tool_recording_mode, ToolRecordingMode,
 };
 pub(crate) mod provider;
 pub(crate) mod providers;
+pub(crate) mod rate_limit;
 mod stream;
 mod tools;
 mod trace;
@@ -177,15 +193,17 @@ pub use self::helpers::vm_value_to_json;
 pub use self::mock::{set_replay_mode, LlmReplayMode};
 pub use self::trace::{enable_tracing, peek_trace, peek_trace_summary, take_trace, LlmTraceEntry};
 
-/// Reset all thread-local LLM state (cost, trace, mock). Call between test runs.
+/// Reset all thread-local LLM state (cost, trace, mock, rate limits). Call between test runs.
 pub fn reset_llm_state() {
     cost::reset_cost_state();
     trace::reset_trace_state();
     provider::register_default_providers();
+    rate_limit::reset_rate_limit_state();
 }
 
 /// Register LLM builtins on a VM.
 pub fn register_llm_builtins(vm: &mut Vm) {
+    rate_limit::init_from_config();
     // =========================================================================
     // llm_call -- core LLM request with structured output + tool use
     // =========================================================================
@@ -324,6 +342,9 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                     ac.compact_strategy = crate::orchestration::CompactStrategy::Custom;
                 }
             }
+            if let Some(callback) = options.as_ref().and_then(|o| o.get("compress_callback")) {
+                ac.compress_callback = Some(callback.clone());
+            }
             Some(ac)
         } else {
             None
@@ -360,6 +381,10 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                 loop_detect_block: opt_int(&options, "loop_detect_block").unwrap_or(3) as usize,
                 loop_detect_skip: opt_int(&options, "loop_detect_skip").unwrap_or(4) as usize,
                 tool_examples: opt_str(&options, "tool_examples"),
+                post_turn_callback: options
+                    .as_ref()
+                    .and_then(|o| o.get("post_turn_callback"))
+                    .cloned(),
             },
         )
         .await?;

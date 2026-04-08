@@ -319,6 +319,11 @@ pub struct AgentLoopConfig {
     /// prompt, shown to the model before the tool schema listing. Provided
     /// by the pipeline (.harn) — Harn itself has no hardcoded tool names.
     pub tool_examples: Option<String>,
+    /// Optional Harn closure called after each tool-calling turn completes.
+    /// Receives a dict with turn metadata (tool_names, tool_count, iteration,
+    /// consecutive_single_tool_turns). If it returns a non-empty string, that
+    /// string is injected as a user message before the next LLM call.
+    pub post_turn_callback: Option<VmValue>,
 }
 
 /// Classify whether a VmError from an LLM call is transient and worth retrying.
@@ -860,6 +865,9 @@ pub(crate) async fn observed_llm_call(
 ) -> Result<super::api::LlmResult, VmError> {
     let mut attempt = 0usize;
     loop {
+        // Rate limit: yield until the provider's RPM window has capacity.
+        super::rate_limit::acquire_permit(&opts.provider).await;
+
         let call_id = next_call_id();
         let prompt_chars: usize = opts
             .messages
@@ -1103,6 +1111,7 @@ pub async fn run_agent_loop_internal(
     let mut total_text = String::new();
     let mut last_iteration_text = String::new();
     let mut consecutive_text_only = 0usize;
+    let mut consecutive_single_tool_turns = 0usize;
     let mut all_tools_used: Vec<String> = Vec::new();
     let mut rejected_tools: Vec<String> = Vec::new();
     let mut deferred_user_messages: Vec<String> = Vec::new();
@@ -1799,12 +1808,26 @@ pub async fn run_agent_loop_internal(
                     }
                 }
 
-                // Microcompaction: snip oversized tool outputs
+                // Microcompaction: compress oversized tool outputs
                 let result_text = if let Some(ref ac) = auto_compact {
-                    crate::orchestration::microcompact_tool_output(
-                        &result_text,
-                        ac.tool_output_max_chars,
-                    )
+                    if result_text.len() > ac.tool_output_max_chars {
+                        if let Some(ref cb) = ac.compress_callback {
+                            crate::orchestration::invoke_compress_callback(
+                                cb,
+                                tool_name,
+                                &result_text,
+                                ac.tool_output_max_chars,
+                            )
+                            .await
+                        } else {
+                            crate::orchestration::microcompact_tool_output(
+                                &result_text,
+                                ac.tool_output_max_chars,
+                            )
+                        }
+                    } else {
+                        result_text
+                    }
                 } else {
                     result_text
                 };
@@ -1981,6 +2004,51 @@ pub async fn run_agent_loop_internal(
             }
             if !finish_step_messages.is_empty() {
                 consecutive_text_only = 0;
+            }
+
+            // Post-turn callback: let the pipeline inspect each tool turn
+            // and optionally inject a user message (e.g. batching hints,
+            // progress tracking, adaptive instructions).
+            if tool_calls.len() == 1 {
+                consecutive_single_tool_turns += 1;
+            } else {
+                consecutive_single_tool_turns = 0;
+            }
+            if let Some(VmValue::Closure(ref closure)) = config.post_turn_callback {
+                let tool_names: Vec<&str> = tool_calls
+                    .iter()
+                    .filter_map(|tc| tc["name"].as_str())
+                    .collect();
+                let session_has_edit = all_tools_used.iter().any(|t| {
+                    t == "edit" || t == "scaffold" || t == "create"
+                });
+                let turn_info = serde_json::json!({
+                    "tool_names": tool_names,
+                    "tool_count": tool_calls.len(),
+                    "iteration": iteration,
+                    "consecutive_single_tool_turns": consecutive_single_tool_turns,
+                    "session_has_edit": session_has_edit,
+                });
+                let cb_arg = crate::stdlib::json_to_vm_value(&turn_info);
+                if let Ok(mut vm) = crate::vm::clone_async_builtin_child_vm()
+                    .ok_or_else(|| VmError::Runtime("no VM context".into()))
+                {
+                    if let Ok(val) = vm.call_closure_pub(closure, &[cb_arg], &[]).await {
+                        let msg = val.display();
+                        let msg = msg.trim();
+                        if !msg.is_empty() {
+                            append_message_to_contexts(
+                                &mut visible_messages,
+                                &mut recorded_messages,
+                                serde_json::json!({
+                                    "role": "user",
+                                    "content": msg,
+                                }),
+                            );
+                            consecutive_single_tool_turns = 0;
+                        }
+                    }
+                }
             }
 
             // Auto-compaction check after tool processing.
@@ -2306,6 +2374,9 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                         ac.compact_strategy = crate::orchestration::CompactStrategy::Custom;
                     }
                 }
+                if let Some(callback) = options.as_ref().and_then(|o| o.get("compress_callback")) {
+                    ac.compress_callback = Some(callback.clone());
+                }
                 // Adapt both tier-1 and tier-2 thresholds to the provider's
                 // actual context window. Tier-1 stays at the configured
                 // value unless it would overflow; tier-2 (hard_limit) is
@@ -2358,6 +2429,10 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                     loop_detect_block: opt_int(&options, "loop_detect_block").unwrap_or(3) as usize,
                     loop_detect_skip: opt_int(&options, "loop_detect_skip").unwrap_or(4) as usize,
                     tool_examples: opt_str(&options, "tool_examples"),
+                    post_turn_callback: options
+                        .as_ref()
+                        .and_then(|o| o.get("post_turn_callback"))
+                        .cloned(),
                 },
             )
             .await?;
