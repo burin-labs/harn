@@ -1,0 +1,35 @@
+// Test flow-sensitive nil narrowing in both if branches
+pipeline test(task) {
+  fn check_neq(x: string | nil) -> string {
+    if x != nil {
+      return x
+    }
+    return "was nil"
+  }
+  fn check_eq(x: string | nil) -> string {
+    if x == nil {
+      return "was nil"
+    }
+    return x
+  }
+  fn check_truthiness(x: string | nil) -> string {
+    if x {
+      return x
+    }
+    return "falsy"
+  }
+  fn check_negation(x: string | nil) -> string {
+    if !x {
+      return "was nil"
+    }
+    return x
+  }
+  log(check_neq("hello"))
+  log(check_neq(nil))
+  log(check_eq("world"))
+  log(check_eq(nil))
+  log(check_truthiness("yes"))
+  log(check_truthiness(nil))
+  log(check_negation(nil))
+  log(check_negation("no"))
+}

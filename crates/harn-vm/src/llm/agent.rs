@@ -749,6 +749,7 @@ pub(crate) fn agent_loop_result_from_llm(
         &result.text,
         &result.blocks,
         &result.tool_calls,
+        result.thinking.as_deref(),
         &opts.provider,
     ));
     let mut events = vec![transcript_event(
@@ -2250,8 +2251,13 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
             let custom_nudge = opt_str(&options, "nudge");
             let tool_retries = opt_int(&options, "tool_retries").unwrap_or(0) as usize;
             let tool_backoff_ms = opt_int(&options, "tool_backoff_ms").unwrap_or(1000) as u64;
-            let tool_format =
-                opt_str(&options, "tool_format").unwrap_or_else(|| "text".to_string());
+            let tool_format = opt_str(&options, "tool_format").unwrap_or_else(|| {
+                // Auto-detect from model/provider alias config.
+                let opts = extract_llm_options(&args).ok();
+                let model = opts.as_ref().map(|o| o.model.as_str()).unwrap_or("");
+                let provider = opts.as_ref().map(|o| o.provider.as_str()).unwrap_or("");
+                crate::llm_config::default_tool_format(model, provider)
+            });
             let done_sentinel = opt_str(&options, "done_sentinel");
             let break_unless_phase = opt_str(&options, "break_unless_phase");
             let context_callback = options
@@ -2399,6 +2405,7 @@ pub(crate) fn build_llm_call_result(
         &result.text,
         &result.blocks,
         &result.tool_calls,
+        result.thinking.as_deref(),
         &opts.provider,
     ));
     let mut extra_events = vec![transcript_event(

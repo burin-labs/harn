@@ -934,13 +934,13 @@ mod tests {
         // Verbose tool output masked
         assert!(summary.contains("masked]"));
         assert!(summary.contains("File created: a.go"));
-        // Short tool output kept
-        assert!(summary.contains("File patched successfully."));
+        // Short tool output kept in retained portion (not in summary)
+        assert!(!summary.contains("File patched successfully."));
         // Kept messages not in summary
         assert!(!summary.contains("Running tests again."));
         assert!(!summary.contains("All tests passed."));
-        // 2 kept + 1 summary = 3
-        assert_eq!(messages.len(), 3);
+        // 3 kept (split moved backward to user boundary) + 1 summary = 4
+        assert_eq!(messages.len(), 4);
     }
 
     #[test]

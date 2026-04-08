@@ -330,10 +330,25 @@ pub(crate) fn vm_messages_to_json(msg_list: &[VmValue]) -> Result<Vec<serde_json
                     }],
                 }));
             } else {
-                messages.push(serde_json::json!({
-                    "role": role,
-                    "content": content_json,
-                }));
+                // Preserve the full message dict so OpenAI-compatible fields
+                // like tool_call_id, tool_calls, reasoning, and provider-
+                // specific metadata survive transcript/message round-trips.
+                let mut message = vm_value_dict_to_json(d);
+                if !message
+                    .get("content")
+                    .map(|value| !value.is_null())
+                    .unwrap_or(false)
+                {
+                    message["content"] = content_json;
+                }
+                if message
+                    .get("role")
+                    .and_then(|value| value.as_str())
+                    .is_none()
+                {
+                    message["role"] = serde_json::json!(role);
+                }
+                messages.push(message);
             }
         }
     }
@@ -410,6 +425,15 @@ pub(crate) fn json_messages_to_vm(msg_list: &[serde_json::Value]) -> Vec<VmValue
         .iter()
         .filter_map(|msg| {
             let role = msg.get("role").and_then(|v| v.as_str())?;
+
+            // For OpenAI-compatible tool messages, preserve all fields so the
+            // message round-trips correctly through transcript serialization.
+            // Previously only role+content were kept, stripping tool_calls and
+            // tool_call_id which Together AI (and other strict providers) require.
+            if role == "tool" || msg.get("tool_calls").is_some() {
+                return Some(crate::stdlib::json_to_vm_value(msg));
+            }
+
             if let Some(content) = msg.get("content").and_then(|v| v.as_str()) {
                 return Some(vm_message(role, content));
             }
@@ -1128,6 +1152,8 @@ pub fn vm_value_to_json(val: &VmValue) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
+    use std::rc::Rc;
 
     #[test]
     fn local_provider_is_selected_when_local_base_url_and_model_are_set() {
@@ -1171,5 +1197,67 @@ mod tests {
             }
         }
         reset_provider_key_cache();
+    }
+
+    #[test]
+    fn vm_messages_to_json_preserves_tool_message_fields() {
+        let message = VmValue::Dict(Rc::new(BTreeMap::from([
+            ("role".to_string(), VmValue::String(Rc::from("tool"))),
+            (
+                "tool_call_id".to_string(),
+                VmValue::String(Rc::from("call_123")),
+            ),
+            ("content".to_string(), VmValue::String(Rc::from("ok"))),
+        ])));
+
+        let json = vm_messages_to_json(&[message]).expect("message json");
+        assert_eq!(json[0]["role"], "tool");
+        assert_eq!(json[0]["tool_call_id"], "call_123");
+        assert_eq!(json[0]["content"], "ok");
+    }
+
+    #[test]
+    fn extract_llm_options_preserves_transcript_tool_fields() {
+        let transcript = new_transcript_with(
+            None,
+            vec![
+                crate::stdlib::json_to_vm_value(&serde_json::json!({
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "call_123",
+                        "type": "function",
+                        "function": {
+                            "name": "read",
+                            "arguments": "{\"path\":\"foo.rs\"}",
+                        }
+                    }],
+                    "reasoning": "need to inspect the file first",
+                })),
+                crate::stdlib::json_to_vm_value(&serde_json::json!({
+                    "role": "tool",
+                    "tool_call_id": "call_123",
+                    "content": "file contents",
+                })),
+            ],
+            None,
+            None,
+        );
+        let options = VmValue::Dict(Rc::new(BTreeMap::from([(
+            "transcript".to_string(),
+            transcript,
+        )])));
+
+        let opts = extract_llm_options(&[
+            VmValue::String(Rc::from("")),
+            VmValue::Nil,
+            options,
+        ])
+        .expect("llm options");
+
+        assert_eq!(opts.messages.len(), 2);
+        assert_eq!(opts.messages[0]["tool_calls"][0]["id"], "call_123");
+        assert_eq!(opts.messages[0]["reasoning"], "need to inspect the file first");
+        assert_eq!(opts.messages[1]["tool_call_id"], "call_123");
     }
 }

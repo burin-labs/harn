@@ -49,6 +49,33 @@ All notable changes to Harn are documented in this file.
   quotes from environment variable values (common `.env` parser issue).
 - **Structured warning output** — LLM parameter validation warnings
   now use the events system instead of raw `eprintln!`.
+- **Flow-sensitive type refinement** — the type checker now performs
+  bidirectional narrowing on union types: nil checks (`x != nil`,
+  `x == nil`), `type_of()` checks, truthiness, logical operators
+  (`&&`, `||`, `!`), guard statements, early-exit narrowing (when one
+  branch returns/throws), while-loop conditions, ternary expressions,
+  match-arm literal patterns, and `.has()` on optional shape fields.
+  Reassignment invalidates narrowing and restores the original type.
+- **Let immutability warning** — assigning to a `let`-declared variable
+  now produces a compile-time warning (runtime error already existed).
+- **Per-alias `tool_format`** — `providers.toml` aliases support an
+  optional `tool_format` field (`"native"` or `"text"`) that overrides
+  the provider-level default. Auto-detection resolves from alias config
+  when `tool_format` is not explicitly set on `agent_loop` or
+  `workflow_execute`.
+- **Provider API style dispatch** — tool message formatting, tool schema
+  generation, and tool result messages now use `ResolvedProvider` trait
+  dispatch instead of string-matching on provider names, making custom
+  and OpenAI-compatible providers work correctly out of the box.
+- **Compaction boundary fix** — `auto_compact_messages` now splits at
+  user-role message boundaries to avoid orphaned mid-turn messages that
+  strict providers (Together AI) reject. Falls back to the original
+  split point when no user boundary is found.
+- **Transcript tool field preservation** — OpenAI-compatible tool
+  messages (`tool_calls`, `tool_call_id`) are now fully preserved
+  through transcript serialization round-trips.
+- **Temp dir collision fix** — CLI test harness uses an atomic counter
+  to avoid directory name collisions in parallel test runs.
 
 ## v0.5.44
 

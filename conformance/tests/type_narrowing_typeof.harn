@@ -1,0 +1,23 @@
+// Test type_of() based narrowing
+pipeline test(task) {
+  fn describe(x: string | int | nil) -> string {
+    if type_of(x) == "string" {
+      return "string: ${x}"
+    }
+    if type_of(x) == "int" {
+      return "int: ${x}"
+    }
+    return "nil"
+  }
+  fn not_string(x: string | int) -> string {
+    if type_of(x) != "string" {
+      return "not string: ${x}"
+    }
+    return "is string: ${x}"
+  }
+  log(describe("hello"))
+  log(describe(42))
+  log(describe(nil))
+  log(not_string(99))
+  log(not_string("hi"))
+}

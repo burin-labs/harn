@@ -1,0 +1,6 @@
+[harn] string: hello
+[harn] other
+[harn] other
+[harn] at least one truthy
+[harn] at least one truthy
+[harn] both nil

@@ -107,6 +107,12 @@ pub struct HealthcheckDef {
 pub struct AliasDef {
     pub id: String,
     pub provider: String,
+    /// Per-model tool format override: "native" or "text". When set, this
+    /// takes precedence over the provider-level default. Models with strong
+    /// tool-calling fine-tuning (Kimi-K2.5, GPT-4o) should use "native";
+    /// models better served by text-based tool calling use "text".
+    #[serde(default)]
+    pub tool_format: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -297,6 +303,34 @@ pub fn model_params(model_id: &str) -> BTreeMap<String, toml::Value> {
 /// Get list of configured provider names.
 pub fn provider_names() -> Vec<String> {
     load_config().providers.keys().cloned().collect()
+}
+
+/// Check if a provider advertises a feature (e.g., "native_tools").
+pub fn provider_has_feature(provider: &str, feature: &str) -> bool {
+    provider_config(provider)
+        .map(|p| p.features.iter().any(|f| f == feature))
+        .unwrap_or(false)
+}
+
+/// Resolve the default tool format for a model+provider combination.
+/// Priority: alias `tool_format` (matched by model ID) > provider feature > "text".
+pub fn default_tool_format(model: &str, provider: &str) -> String {
+    let config = load_config();
+    // Check aliases — match by model ID + provider, or by alias name
+    for (name, alias) in &config.aliases {
+        let matches = (alias.id == model && alias.provider == provider) || name == model;
+        if matches {
+            if let Some(ref fmt) = alias.tool_format {
+                return fmt.clone();
+            }
+        }
+    }
+    // Fall back to provider feature
+    if provider_has_feature(provider, "native_tools") {
+        "native".to_string()
+    } else {
+        "text".to_string()
+    }
 }
 
 /// Resolve a tier or alias into a concrete model/provider pair.
@@ -601,6 +635,7 @@ fn default_config() -> ProvidersConfig {
         AliasDef {
             id: "claude-sonnet-4-20250514".to_string(),
             provider: "anthropic".to_string(),
+            tool_format: None,
         },
     );
     config.aliases.insert(
@@ -608,6 +643,7 @@ fn default_config() -> ProvidersConfig {
         AliasDef {
             id: "claude-sonnet-4-20250514".to_string(),
             provider: "anthropic".to_string(),
+            tool_format: None,
         },
     );
     config.aliases.insert(
@@ -615,6 +651,7 @@ fn default_config() -> ProvidersConfig {
         AliasDef {
             id: "gpt-4o-mini".to_string(),
             provider: "openai".to_string(),
+            tool_format: None,
         },
     );
     config.aliases.insert(
@@ -622,6 +659,7 @@ fn default_config() -> ProvidersConfig {
         AliasDef {
             id: "gpt-4o-mini".to_string(),
             provider: "openai".to_string(),
+            tool_format: None,
         },
     );
     config.aliases.insert(
@@ -629,6 +667,7 @@ fn default_config() -> ProvidersConfig {
         AliasDef {
             id: "Qwen/Qwen3.5-9B".to_string(),
             provider: "openrouter".to_string(),
+            tool_format: None,
         },
     );
     config.aliases.insert(
@@ -636,6 +675,7 @@ fn default_config() -> ProvidersConfig {
         AliasDef {
             id: "Qwen/Qwen3.5-9B".to_string(),
             provider: "openrouter".to_string(),
+            tool_format: None,
         },
     );
 

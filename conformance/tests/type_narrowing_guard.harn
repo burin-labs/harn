@@ -1,0 +1,20 @@
+// Test guard statement narrowing applies to outer scope
+pipeline test(task) {
+  fn require_string(x: string | nil) -> string {
+    guard x != nil else {
+      return "missing"
+    }
+    // x is narrowed to string after guard
+    return "got: ${x}"
+  }
+  fn require_typeof(x: string | int) -> string {
+    guard type_of(x) == "string" else {
+      return "not a string"
+    }
+    return "string: ${x}"
+  }
+  log(require_string("hello"))
+  log(require_string(nil))
+  log(require_typeof("yes"))
+  log(require_typeof(42))
+}

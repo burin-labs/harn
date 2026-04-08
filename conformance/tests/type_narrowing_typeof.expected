@@ -1,0 +1,5 @@
+[harn] string: hello
+[harn] int: 42
+[harn] nil
+[harn] not string: 99
+[harn] is string: hi

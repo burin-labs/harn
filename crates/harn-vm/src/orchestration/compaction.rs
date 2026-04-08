@@ -475,7 +475,27 @@ pub(crate) async fn auto_compact_messages(
     if messages.len() <= config.keep_last {
         return Ok(None);
     }
-    let split_at = messages.len().saturating_sub(config.keep_last);
+    let original_split = messages.len().saturating_sub(config.keep_last);
+    let mut split_at = original_split;
+    // Move split_at backward to the nearest user-role message boundary so
+    // the kept portion always starts at a clean turn boundary.  This
+    // prevents orphaned mid-turn messages (e.g. tool results separated from
+    // their assistant request) which OpenAI-compatible APIs reject, while
+    // preserving at least keep_last messages.
+    while split_at > 0
+        && messages[split_at]
+            .get("role")
+            .and_then(|r| r.as_str())
+            .is_none_or(|r| r != "user")
+    {
+        split_at -= 1;
+    }
+    // If no user-role boundary was found, fall back to the original split
+    // point so compaction still proceeds (e.g. tool-heavy transcripts
+    // where the only user message is at index 0).
+    if split_at == 0 {
+        split_at = original_split;
+    }
     let old_messages: Vec<_> = messages.drain(..split_at).collect();
     let archived_count = old_messages.len();
 

@@ -5,53 +5,49 @@ use super::vm_value_to_json;
 use crate::value::{VmError, VmValue};
 
 /// Build an assistant message with tool_calls for the conversation history.
-/// Format varies by provider (OpenAI vs Anthropic).
+/// Format varies by API style (OpenAI-compatible vs Anthropic).
 pub(crate) fn build_assistant_tool_message(
     text: &str,
     tool_calls: &[serde_json::Value],
     provider: &str,
 ) -> serde_json::Value {
-    match provider {
-        "openai" | "openrouter" => {
-            // OpenAI format: assistant message with tool_calls array
-            let calls: Vec<serde_json::Value> = tool_calls
-                .iter()
-                .map(|tc| {
-                    serde_json::json!({
-                        "id": tc["id"],
-                        "type": "function",
-                        "function": {
-                            "name": tc["name"],
-                            "arguments": serde_json::to_string(&tc["arguments"]).unwrap_or_default(),
-                        }
-                    })
-                })
-                .collect();
-            let mut msg = serde_json::json!({
-                "role": "assistant",
-                "tool_calls": calls,
-            });
-            if !text.is_empty() {
-                msg["content"] = serde_json::json!(text);
-            }
-            msg
+    let is_anthropic = super::helpers::ResolvedProvider::resolve(provider).is_anthropic_style;
+    if is_anthropic {
+        // Anthropic format: content blocks with text and tool_use
+        let mut content = Vec::new();
+        if !text.is_empty() {
+            content.push(serde_json::json!({"type": "text", "text": text}));
         }
-        _ => {
-            // Anthropic format: content blocks with text and tool_use
-            let mut content = Vec::new();
-            if !text.is_empty() {
-                content.push(serde_json::json!({"type": "text", "text": text}));
-            }
-            for tc in tool_calls {
-                content.push(serde_json::json!({
-                    "type": "tool_use",
+        for tc in tool_calls {
+            content.push(serde_json::json!({
+                "type": "tool_use",
+                "id": tc["id"],
+                "name": tc["name"],
+                "input": tc["arguments"],
+            }));
+        }
+        serde_json::json!({"role": "assistant", "content": content})
+    } else {
+        // OpenAI-compatible format: assistant message with tool_calls array
+        let calls: Vec<serde_json::Value> = tool_calls
+            .iter()
+            .map(|tc| {
+                serde_json::json!({
                     "id": tc["id"],
-                    "name": tc["name"],
-                    "input": tc["arguments"],
-                }));
-            }
-            serde_json::json!({"role": "assistant", "content": content})
-        }
+                    "type": "function",
+                    "function": {
+                        "name": tc["name"],
+                        "arguments": serde_json::to_string(&tc["arguments"]).unwrap_or_default(),
+                    }
+                })
+            })
+            .collect();
+        let mut msg = serde_json::json!({
+            "role": "assistant",
+            "content": if text.is_empty() { serde_json::Value::String(String::new()) } else { serde_json::json!(text) },
+            "tool_calls": calls,
+        });
+        msg
     }
 }
 
@@ -62,21 +58,26 @@ pub(crate) fn build_assistant_response_message(
     text: &str,
     blocks: &[serde_json::Value],
     tool_calls: &[serde_json::Value],
+    reasoning: Option<&str>,
     provider: &str,
 ) -> serde_json::Value {
-    if !tool_calls.is_empty() {
-        return build_assistant_tool_message(text, tool_calls, provider);
-    }
-    if !blocks.is_empty() {
-        return serde_json::json!({
+    let mut message = if !tool_calls.is_empty() {
+        build_assistant_tool_message(text, tool_calls, provider)
+    } else if !blocks.is_empty() {
+        serde_json::json!({
             "role": "assistant",
             "content": blocks,
-        });
+        })
+    } else {
+        serde_json::json!({
+            "role": "assistant",
+            "content": text,
+        })
+    };
+    if let Some(reasoning) = reasoning.filter(|value| !value.is_empty()) {
+        message["reasoning"] = serde_json::json!(reasoning);
     }
-    serde_json::json!({
-        "role": "assistant",
-        "content": text,
-    })
+    message
 }
 
 /// Build a tool result message for the conversation history.
@@ -85,25 +86,24 @@ pub(crate) fn build_tool_result_message(
     result: &str,
     provider: &str,
 ) -> serde_json::Value {
-    match provider {
-        "openai" | "openrouter" => {
-            serde_json::json!({
-                "role": "tool",
-                "tool_call_id": tool_call_id,
+    let is_anthropic = super::helpers::ResolvedProvider::resolve(provider).is_anthropic_style;
+    if is_anthropic {
+        // Anthropic: tool_result inside a user message
+        serde_json::json!({
+            "role": "user",
+            "content": [{
+                "type": "tool_result",
+                "tool_use_id": tool_call_id,
                 "content": result,
-            })
-        }
-        _ => {
-            // Anthropic: tool_result inside a user message
-            serde_json::json!({
-                "role": "user",
-                "content": [{
-                    "type": "tool_result",
-                    "tool_use_id": tool_call_id,
-                    "content": result,
-                }]
-            })
-        }
+            }]
+        })
+    } else {
+        // OpenAI-compatible: distinct "tool" role
+        serde_json::json!({
+            "role": "tool",
+            "tool_call_id": tool_call_id,
+            "content": result,
+        })
     }
 }
 
@@ -2253,33 +2253,34 @@ pub(crate) fn vm_tools_to_native(
 
                 let input_schema = vm_build_json_schema(params);
 
-                match provider {
-                    "openai" | "openrouter" => {
-                        let mut tool = serde_json::json!({
-                            "type": "function",
-                            "function": {
-                                "name": name,
-                                "description": description,
-                                "parameters": input_schema,
-                            }
-                        });
-                        if let Some(output_schema) = output_schema.clone() {
-                            tool["function"]["x-harn-output-schema"] = output_schema;
-                        }
-                        native_tools.push(tool);
+                // Use API style, not provider name, to determine schema format.
+                // Anthropic uses {name, description, input_schema}; everything
+                // else (OpenAI-compatible) uses {type: "function", function: {...}}.
+                let is_anthropic =
+                    super::helpers::ResolvedProvider::resolve(provider).is_anthropic_style;
+                if is_anthropic {
+                    let mut tool_json = serde_json::json!({
+                        "name": name,
+                        "description": description,
+                        "input_schema": input_schema,
+                    });
+                    if let Some(output_schema) = output_schema {
+                        tool_json["x-harn-output-schema"] = output_schema;
                     }
-                    _ => {
-                        // Anthropic format
-                        let mut tool = serde_json::json!({
+                    native_tools.push(tool_json);
+                } else {
+                    let mut tool_json = serde_json::json!({
+                        "type": "function",
+                        "function": {
                             "name": name,
                             "description": description,
-                            "input_schema": input_schema,
-                        });
-                        if let Some(output_schema) = output_schema {
-                            tool["x-harn-output-schema"] = output_schema;
+                            "parameters": input_schema,
                         }
-                        native_tools.push(tool);
+                    });
+                    if let Some(output_schema) = output_schema {
+                        tool_json["function"]["x-harn-output-schema"] = output_schema;
                     }
+                    native_tools.push(tool_json);
                 }
             }
             VmValue::String(_) => {

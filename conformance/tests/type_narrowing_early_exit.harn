@@ -1,0 +1,23 @@
+// Test post-branch narrowing when one branch exits early
+pipeline test(task) {
+  fn early_return(x: string | nil) -> string {
+    if x == nil {
+      return "was nil"
+    }
+    // x is narrowed to string after the if (then exits)
+    return "got: ${x}"
+  }
+  fn early_throw_else(x: string | nil) -> string {
+    if x != nil {
+      // x is string here — use it to prove narrowing
+      let _s: string = x
+    } else {
+      throw "missing value"
+    }
+    // else branch threw, so truthy refinements apply: x is string
+    return "safe: ${x}"
+  }
+  log(early_return("hello"))
+  log(early_return(nil))
+  log(early_throw_else("world"))
+}

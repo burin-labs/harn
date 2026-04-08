@@ -1527,24 +1527,140 @@ fn add(a: int, b: int) -> int {
 - Shape-to-`dict<K, V>`: all field values must be compatible with `V`.
 - Type errors are reported at compile time and halt execution.
 
-### Union type narrowing
+### Flow-sensitive type refinement
 
-The type checker narrows union types after nil checks. When a condition
-like `x != nil` guards an `if` branch, the type of `x` is narrowed within
-the then-branch by removing `nil` from the union:
+The type checker performs flow-sensitive type refinement (narrowing) on
+union types based on control flow conditions.  Refinements are
+bidirectional — both the truthy and falsy paths of a condition are
+narrowed.
+
+#### Nil checks
+
+`x != nil` narrows to non-nil in the then-branch and to `nil` in the
+else-branch.  `x == nil` applies the inverse.
 
 ```harn
 fn greet(name: string | nil) -> string {
   if name != nil {
-    // name is narrowed to `string` here
+    // name is `string` here
     return "hello ${name}"
   }
+  // name is `nil` here
   return "hello stranger"
 }
 ```
 
-This avoids false type errors when accessing a value that has been
-confirmed non-nil by a conditional check.
+#### `type_of()` checks
+
+`type_of(x) == "typename"` narrows to that type in the then-branch and
+removes it from the union in the else-branch.
+
+```harn
+fn describe(x: string | int) {
+  if type_of(x) == "string" {
+    log(x)  // x is `string`
+  } else {
+    log(x)  // x is `int`
+  }
+}
+```
+
+#### Truthiness
+
+A bare identifier in condition position narrows by removing `nil`:
+
+```harn
+fn check(x: string | nil) {
+  if x {
+    log(x)  // x is `string`
+  }
+}
+```
+
+#### Logical operators
+
+- `a && b`: combines both refinements on the truthy path.
+- `a || b`: combines both refinements on the falsy path.
+- `!cond`: inverts truthy and falsy refinements.
+
+```harn
+fn check(x: string | int | nil) {
+  if x != nil && type_of(x) == "string" {
+    log(x)  // x is `string`
+  }
+}
+```
+
+#### Guard statements
+
+After a `guard` statement, the truthy refinements apply to the outer
+scope (since the else-body must exit):
+
+```harn
+fn process(x: string | nil) {
+  guard x != nil else { return }
+  log(x)  // x is `string` here
+}
+```
+
+#### Early-exit narrowing
+
+When one branch of an `if`/`else` definitely exits (via `return`,
+`throw`, `break`, or `continue`), the opposite refinements apply after
+the `if`:
+
+```harn
+fn process(x: string | nil) {
+  if x == nil { return }
+  log(x)  // x is `string` — the nil path returned
+}
+```
+
+#### While loops
+
+The condition's truthy refinements apply inside the loop body.
+
+#### Ternary expressions
+
+The condition's refinements apply to the true and false branches
+respectively.
+
+#### Match expressions
+
+When matching a union-typed variable against literal patterns, the
+variable's type is narrowed in each arm:
+
+```harn
+fn check(x: string | int) {
+  match x {
+    "hello" -> { log(x) }  // x is `string`
+    42 -> { log(x) }       // x is `int`
+    _ -> {}
+  }
+}
+```
+
+#### `.has()` on shapes
+
+`dict.has("key")` narrows optional shape fields to required:
+
+```harn
+fn check(x: {name?: string, age: int}) {
+  if x.has("name") {
+    log(x)  // x.name is now required (non-optional)
+  }
+}
+```
+
+#### Reassignment invalidation
+
+When a narrowed variable is reassigned, the narrowing is invalidated and
+the original declared type is restored.
+
+#### Mutability
+
+Variables declared with `let` are immutable.  Assigning to a `let`
+variable produces a compile-time warning (and a runtime error).
 
 ### Runtime parameter type enforcement
 

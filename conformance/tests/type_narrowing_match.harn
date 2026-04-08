@@ -1,0 +1,16 @@
+// Test match arm type narrowing
+pipeline test(task) {
+  fn classify(x: string | int | nil) -> string {
+    match x {
+      nil -> { return "nil" }
+      "hello" -> { return "greeting" }
+      42 -> { return "answer" }
+      _ -> { return "other" }
+    }
+  }
+  log(classify(nil))
+  log(classify("hello"))
+  log(classify(42))
+  log(classify("world"))
+  log(classify(7))
+}

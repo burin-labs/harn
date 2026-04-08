@@ -44,6 +44,12 @@ struct TypeScope {
     /// Where-clause constraints: type_param → interface_bound.
     /// Used for definition-site checking of generic function bodies.
     where_constraints: BTreeMap<String, String>,
+    /// Variables declared with `var` (mutable). Variables not in this set
+    /// are immutable (`let`, function params, loop vars, etc.).
+    mutable_vars: std::collections::BTreeSet<String>,
+    /// Variables that have been narrowed by flow-sensitive refinement.
+    /// Maps var name → pre-narrowing type (used to restore on reassignment).
+    narrowed_vars: BTreeMap<String, InferredType>,
     parent: Option<Box<TypeScope>>,
 }
 
@@ -83,6 +89,8 @@ impl TypeScope {
             impl_methods: BTreeMap::new(),
             generic_type_params: std::collections::BTreeSet::new(),
             where_constraints: BTreeMap::new(),
+            mutable_vars: std::collections::BTreeSet::new(),
+            narrowed_vars: BTreeMap::new(),
             parent: None,
         }
     }
@@ -98,6 +106,8 @@ impl TypeScope {
             impl_methods: BTreeMap::new(),
             generic_type_params: std::collections::BTreeSet::new(),
             where_constraints: BTreeMap::new(),
+            mutable_vars: std::collections::BTreeSet::new(),
+            narrowed_vars: BTreeMap::new(),
             parent: Some(Box::new(self.clone())),
         }
     }
@@ -167,8 +177,42 @@ impl TypeScope {
         self.vars.insert(name.to_string(), ty);
     }
 
+    fn define_var_mutable(&mut self, name: &str, ty: InferredType) {
+        self.vars.insert(name.to_string(), ty);
+        self.mutable_vars.insert(name.to_string());
+    }
+
+    /// Check if a variable is mutable (declared with `var`).
+    fn is_mutable(&self, name: &str) -> bool {
+        self.mutable_vars.contains(name) || self.parent.as_ref().is_some_and(|p| p.is_mutable(name))
+    }
+
     fn define_fn(&mut self, name: &str, sig: FnSignature) {
         self.functions.insert(name.to_string(), sig);
+    }
+}
+
+/// Bidirectional type refinements extracted from a condition.
+/// Each path contains a list of (variable_name, narrowed_type) pairs.
+#[derive(Debug, Clone, Default)]
+struct Refinements {
+    /// Narrowings when the condition evaluates to true/truthy.
+    truthy: Vec<(String, InferredType)>,
+    /// Narrowings when the condition evaluates to false/falsy.
+    falsy: Vec<(String, InferredType)>,
+}
+
+impl Refinements {
+    fn empty() -> Self {
+        Self::default()
+    }
+
+    /// Swap truthy and falsy (used for negation).
+    fn inverted(self) -> Self {
+        Self {
+            truthy: self.falsy,
+            falsy: self.truthy,
+        }
     }
 }
 
@@ -254,6 +298,9 @@ impl TypeChecker {
                     for (name, ty) in scope.vars {
                         self.scope.vars.entry(name).or_insert(ty);
                     }
+                    for name in scope.mutable_vars {
+                        self.scope.mutable_vars.insert(name);
+                    }
                 }
             }
         }
@@ -326,20 +373,27 @@ impl TypeChecker {
     }
 
     /// Define variables from a destructuring pattern in the given scope (as unknown type).
-    fn define_pattern_vars(pattern: &BindingPattern, scope: &mut TypeScope) {
+    fn define_pattern_vars(pattern: &BindingPattern, scope: &mut TypeScope, mutable: bool) {
+        let define = |scope: &mut TypeScope, name: &str| {
+            if mutable {
+                scope.define_var_mutable(name, None);
+            } else {
+                scope.define_var(name, None);
+            }
+        };
         match pattern {
             BindingPattern::Identifier(name) => {
-                scope.define_var(name, None);
+                define(scope, name);
             }
             BindingPattern::Dict(fields) => {
                 for field in fields {
                     let name = field.alias.as_deref().unwrap_or(&field.key);
-                    scope.define_var(name, None);
+                    define(scope, name);
                 }
             }
             BindingPattern::List(elements) => {
                 for elem in elements {
-                    scope.define_var(&elem.name, None);
+                    define(scope, &elem.name);
                 }
             }
         }
@@ -374,7 +428,7 @@ impl TypeChecker {
                     let ty = type_ann.clone().or(inferred);
                     scope.define_var(name, ty);
                 } else {
-                    Self::define_pattern_vars(pattern, scope);
+                    Self::define_pattern_vars(pattern, scope, false);
                 }
             }
 
@@ -402,9 +456,9 @@ impl TypeChecker {
                         }
                     }
                     let ty = type_ann.clone().or(inferred);
-                    scope.define_var(name, ty);
+                    scope.define_var_mutable(name, ty);
                 } else {
-                    Self::define_pattern_vars(pattern, scope);
+                    Self::define_pattern_vars(pattern, scope, true);
                 }
             }
 
@@ -470,15 +524,33 @@ impl TypeChecker {
                 else_body,
             } => {
                 self.check_node(condition, scope);
+                let refs = Self::extract_refinements(condition, scope);
+
                 let mut then_scope = scope.child();
-                // Narrow union types after nil checks: if x != nil, narrow x
-                if let Some((var_name, narrowed)) = Self::extract_nil_narrowing(condition, scope) {
-                    then_scope.define_var(&var_name, narrowed);
-                }
+                apply_refinements(&mut then_scope, &refs.truthy);
                 self.check_block(then_body, &mut then_scope);
+
                 if let Some(else_body) = else_body {
                     let mut else_scope = scope.child();
+                    apply_refinements(&mut else_scope, &refs.falsy);
                     self.check_block(else_body, &mut else_scope);
+
+                    // Post-branch narrowing: if one branch definitely exits,
+                    // apply the other branch's refinements to the outer scope
+                    if Self::block_definitely_exits(then_body)
+                        && !Self::block_definitely_exits(else_body)
+                    {
+                        apply_refinements(scope, &refs.falsy);
+                    } else if Self::block_definitely_exits(else_body)
+                        && !Self::block_definitely_exits(then_body)
+                    {
+                        apply_refinements(scope, &refs.truthy);
+                    }
+                } else {
+                    // No else: if then-body always exits, apply falsy after
+                    if Self::block_definitely_exits(then_body) {
+                        apply_refinements(scope, &refs.falsy);
+                    }
                 }
             }
 
@@ -500,14 +572,16 @@ impl TypeChecker {
                     };
                     loop_scope.define_var(variable, elem_type);
                 } else {
-                    Self::define_pattern_vars(pattern, &mut loop_scope);
+                    Self::define_pattern_vars(pattern, &mut loop_scope, false);
                 }
                 self.check_block(body, &mut loop_scope);
             }
 
             Node::WhileLoop { condition, body } => {
                 self.check_node(condition, scope);
+                let refs = Self::extract_refinements(condition, scope);
                 let mut loop_scope = scope.child();
+                apply_refinements(&mut loop_scope, &refs.truthy);
                 self.check_block(body, &mut loop_scope);
             }
 
@@ -554,6 +628,17 @@ impl TypeChecker {
             } => {
                 self.check_node(value, scope);
                 if let Node::Identifier(name) = &target.node {
+                    // Compile-time immutability check
+                    if scope.get_var(name).is_some() && !scope.is_mutable(name) {
+                        self.warning_at(
+                            format!(
+                                "Cannot assign to '{}': variable is immutable (declared with 'let')",
+                                name
+                            ),
+                            span,
+                        );
+                    }
+
                     if let Some(Some(var_type)) = scope.get_var(name) {
                         let value_type = self.infer_type(value, scope);
                         let assigned = if let Some(op) = op {
@@ -563,18 +648,29 @@ impl TypeChecker {
                             value_type
                         };
                         if let Some(actual) = &assigned {
-                            if !self.types_compatible(var_type, actual, scope) {
+                            // Check against the original (pre-narrowing) type if narrowed
+                            let check_type = scope
+                                .narrowed_vars
+                                .get(name)
+                                .and_then(|t| t.as_ref())
+                                .unwrap_or(var_type);
+                            if !self.types_compatible(check_type, actual, scope) {
                                 self.error_at(
                                     format!(
                                         "Type mismatch: cannot assign {} to '{}' (declared as {})",
                                         format_type(actual),
                                         name,
-                                        format_type(var_type)
+                                        format_type(check_type)
                                     ),
                                     span,
                                 );
                             }
                         }
+                    }
+
+                    // Invalidate narrowing on reassignment: restore original type
+                    if let Some(original) = scope.narrowed_vars.remove(name) {
+                        scope.define_var(name, original);
                     }
                 }
             }
@@ -691,6 +787,22 @@ impl TypeChecker {
                         }
                     }
                     let mut arm_scope = scope.child();
+                    // Narrow the matched value's type in each arm
+                    if let Node::Identifier(var_name) = &value.node {
+                        if let Some(Some(TypeExpr::Union(members))) = scope.get_var(var_name) {
+                            let narrowed = match &arm.pattern.node {
+                                Node::NilLiteral => narrow_to_single(members, "nil"),
+                                Node::StringLiteral(_) => narrow_to_single(members, "string"),
+                                Node::IntLiteral(_) => narrow_to_single(members, "int"),
+                                Node::FloatLiteral(_) => narrow_to_single(members, "float"),
+                                Node::BoolLiteral(_) => narrow_to_single(members, "bool"),
+                                _ => None,
+                            };
+                            if let Some(narrowed_type) = narrowed {
+                                arm_scope.define_var(var_name, Some(narrowed_type));
+                            }
+                        }
+                    }
                     self.check_block(&arm.body, &mut arm_scope);
                 }
                 self.check_match_exhaustiveness(value, arms, scope, span);
@@ -799,8 +911,15 @@ impl TypeChecker {
                 false_expr,
             } => {
                 self.check_node(condition, scope);
-                self.check_node(true_expr, scope);
-                self.check_node(false_expr, scope);
+                let refs = Self::extract_refinements(condition, scope);
+
+                let mut true_scope = scope.child();
+                apply_refinements(&mut true_scope, &refs.truthy);
+                self.check_node(true_expr, &mut true_scope);
+
+                let mut false_scope = scope.child();
+                apply_refinements(&mut false_scope, &refs.falsy);
+                self.check_node(false_expr, &mut false_scope);
             }
 
             Node::ThrowStmt { value } => {
@@ -812,8 +931,15 @@ impl TypeChecker {
                 else_body,
             } => {
                 self.check_node(condition, scope);
+                let refs = Self::extract_refinements(condition, scope);
+
                 let mut else_scope = scope.child();
+                apply_refinements(&mut else_scope, &refs.falsy);
                 self.check_block(else_body, &mut else_scope);
+
+                // After guard, condition is true — apply truthy refinements
+                // to the OUTER scope (guard's else-body must exit)
+                apply_refinements(scope, &refs.truthy);
             }
 
             Node::SpawnExpr { body } => {
@@ -1048,17 +1174,26 @@ impl TypeChecker {
                 self.check_node(default, &mut fn_scope);
             }
         }
+        // Snapshot scope before main pass (which may mutate it with narrowing)
+        // so that return-type checking starts from the original parameter types.
+        let ret_scope_base = if return_type.is_some() {
+            Some(fn_scope.child())
+        } else {
+            None
+        };
+
         self.check_block(body, &mut fn_scope);
 
         // Check return statements against declared return type
         if let Some(ret_type) = return_type {
+            let mut ret_scope = ret_scope_base.unwrap();
             for stmt in body {
-                self.check_return_type(stmt, ret_type, &fn_scope);
+                self.check_return_type(stmt, ret_type, &mut ret_scope);
             }
         }
     }
 
-    fn check_return_type(&mut self, snode: &SNode, expected: &TypeExpr, scope: &TypeScope) {
+    fn check_return_type(&mut self, snode: &SNode, expected: &TypeExpr, scope: &mut TypeScope) {
         let span = snode.span;
         match &snode.node {
             Node::ReturnStmt { value: Some(val) } => {
@@ -1077,16 +1212,36 @@ impl TypeChecker {
                 }
             }
             Node::IfElse {
+                condition,
                 then_body,
                 else_body,
-                ..
             } => {
+                let refs = Self::extract_refinements(condition, scope);
+                let mut then_scope = scope.child();
+                apply_refinements(&mut then_scope, &refs.truthy);
                 for stmt in then_body {
-                    self.check_return_type(stmt, expected, scope);
+                    self.check_return_type(stmt, expected, &mut then_scope);
                 }
                 if let Some(else_body) = else_body {
+                    let mut else_scope = scope.child();
+                    apply_refinements(&mut else_scope, &refs.falsy);
                     for stmt in else_body {
-                        self.check_return_type(stmt, expected, scope);
+                        self.check_return_type(stmt, expected, &mut else_scope);
+                    }
+                    // Post-branch narrowing for return type checking
+                    if Self::block_definitely_exits(then_body)
+                        && !Self::block_definitely_exits(else_body)
+                    {
+                        apply_refinements(scope, &refs.falsy);
+                    } else if Self::block_definitely_exits(else_body)
+                        && !Self::block_definitely_exits(then_body)
+                    {
+                        apply_refinements(scope, &refs.truthy);
+                    }
+                } else {
+                    // No else: if then-body always exits, apply falsy after
+                    if Self::block_definitely_exits(then_body) {
+                        apply_refinements(scope, &refs.falsy);
                     }
                 }
             }
@@ -1215,41 +1370,211 @@ impl TypeChecker {
         }
     }
 
-    fn extract_nil_narrowing(
-        condition: &SNode,
+    /// Extract bidirectional type refinements from a condition expression.
+    fn extract_refinements(condition: &SNode, scope: &TypeScope) -> Refinements {
+        match &condition.node {
+            // --- Nil checks and type_of checks ---
+            Node::BinaryOp { op, left, right } if op == "!=" || op == "==" => {
+                let nil_ref = Self::extract_nil_refinements(op, left, right, scope);
+                if !nil_ref.truthy.is_empty() || !nil_ref.falsy.is_empty() {
+                    return nil_ref;
+                }
+                let typeof_ref = Self::extract_typeof_refinements(op, left, right, scope);
+                if !typeof_ref.truthy.is_empty() || !typeof_ref.falsy.is_empty() {
+                    return typeof_ref;
+                }
+                Refinements::empty()
+            }
+
+            // --- Logical AND: both must be true on truthy path ---
+            Node::BinaryOp { op, left, right } if op == "&&" => {
+                let left_ref = Self::extract_refinements(left, scope);
+                let right_ref = Self::extract_refinements(right, scope);
+                let mut truthy = left_ref.truthy;
+                truthy.extend(right_ref.truthy);
+                Refinements {
+                    truthy,
+                    falsy: vec![],
+                }
+            }
+
+            // --- Logical OR: both must be false on falsy path ---
+            Node::BinaryOp { op, left, right } if op == "||" => {
+                let left_ref = Self::extract_refinements(left, scope);
+                let right_ref = Self::extract_refinements(right, scope);
+                let mut falsy = left_ref.falsy;
+                falsy.extend(right_ref.falsy);
+                Refinements {
+                    truthy: vec![],
+                    falsy,
+                }
+            }
+
+            // --- Negation: swap truthy/falsy ---
+            Node::UnaryOp { op, operand } if op == "!" => {
+                Self::extract_refinements(operand, scope).inverted()
+            }
+
+            // --- Truthiness: bare identifier in condition position ---
+            Node::Identifier(name) => {
+                if let Some(Some(TypeExpr::Union(members))) = scope.get_var(name) {
+                    if members
+                        .iter()
+                        .any(|m| matches!(m, TypeExpr::Named(n) if n == "nil"))
+                    {
+                        if let Some(narrowed) = remove_from_union(members, "nil") {
+                            return Refinements {
+                                truthy: vec![(name.clone(), Some(narrowed))],
+                                falsy: vec![(name.clone(), Some(TypeExpr::Named("nil".into())))],
+                            };
+                        }
+                    }
+                }
+                Refinements::empty()
+            }
+
+            // --- .has("key") on shapes ---
+            Node::MethodCall {
+                object,
+                method,
+                args,
+            } if method == "has" && args.len() == 1 => {
+                Self::extract_has_refinements(object, args, scope)
+            }
+
+            _ => Refinements::empty(),
+        }
+    }
+
+    /// Extract nil-check refinements from `x != nil` / `x == nil` patterns.
+    fn extract_nil_refinements(
+        op: &str,
+        left: &SNode,
+        right: &SNode,
         scope: &TypeScope,
-    ) -> Option<(String, InferredType)> {
-        if let Node::BinaryOp { op, left, right } = &condition.node {
-            if op == "!=" {
-                // Check for `x != nil` or `nil != x`
-                let (var_node, nil_node) = if matches!(right.node, Node::NilLiteral) {
-                    (left, right)
-                } else if matches!(left.node, Node::NilLiteral) {
-                    (right, left)
-                } else {
-                    return None;
+    ) -> Refinements {
+        let var_node = if matches!(right.node, Node::NilLiteral) {
+            left
+        } else if matches!(left.node, Node::NilLiteral) {
+            right
+        } else {
+            return Refinements::empty();
+        };
+
+        if let Node::Identifier(name) = &var_node.node {
+            if let Some(Some(TypeExpr::Union(members))) = scope.get_var(name) {
+                if let Some(narrowed) = remove_from_union(members, "nil") {
+                    let neq_refs = Refinements {
+                        truthy: vec![(name.clone(), Some(narrowed))],
+                        falsy: vec![(name.clone(), Some(TypeExpr::Named("nil".into())))],
+                    };
+                    return if op == "!=" {
+                        neq_refs
+                    } else {
+                        neq_refs.inverted()
+                    };
+                }
+            }
+        }
+        Refinements::empty()
+    }
+
+    /// Extract type_of refinements from `type_of(x) == "typename"` patterns.
+    fn extract_typeof_refinements(
+        op: &str,
+        left: &SNode,
+        right: &SNode,
+        scope: &TypeScope,
+    ) -> Refinements {
+        let (var_name, type_name) = if let (Some(var), Node::StringLiteral(tn)) =
+            (extract_type_of_var(left), &right.node)
+        {
+            (var, tn.clone())
+        } else if let (Node::StringLiteral(tn), Some(var)) =
+            (&left.node, extract_type_of_var(right))
+        {
+            (var, tn.clone())
+        } else {
+            return Refinements::empty();
+        };
+
+        const KNOWN_TYPES: &[&str] = &[
+            "int", "string", "float", "bool", "nil", "list", "dict", "closure",
+        ];
+        if !KNOWN_TYPES.contains(&type_name.as_str()) {
+            return Refinements::empty();
+        }
+
+        if let Some(Some(TypeExpr::Union(members))) = scope.get_var(&var_name) {
+            let narrowed = narrow_to_single(members, &type_name);
+            let remaining = remove_from_union(members, &type_name);
+            if narrowed.is_some() || remaining.is_some() {
+                let eq_refs = Refinements {
+                    truthy: narrowed
+                        .map(|n| vec![(var_name.clone(), Some(n))])
+                        .unwrap_or_default(),
+                    falsy: remaining
+                        .map(|r| vec![(var_name.clone(), Some(r))])
+                        .unwrap_or_default(),
                 };
-                let _ = nil_node;
-                if let Node::Identifier(name) = &var_node.node {
-                    // Look up the variable's type and narrow it
-                    if let Some(Some(TypeExpr::Union(members))) = scope.get_var(name) {
-                        let narrowed: Vec<TypeExpr> = members
+                return if op == "==" {
+                    eq_refs
+                } else {
+                    eq_refs.inverted()
+                };
+            }
+        }
+        Refinements::empty()
+    }
+
+    /// Extract .has("key") refinements on shape types.
+    fn extract_has_refinements(object: &SNode, args: &[SNode], scope: &TypeScope) -> Refinements {
+        if let Node::Identifier(var_name) = &object.node {
+            if let Node::StringLiteral(key) = &args[0].node {
+                if let Some(Some(TypeExpr::Shape(fields))) = scope.get_var(var_name) {
+                    if fields.iter().any(|f| f.name == *key && f.optional) {
+                        let narrowed_fields: Vec<ShapeField> = fields
                             .iter()
-                            .filter(|m| !matches!(m, TypeExpr::Named(n) if n == "nil"))
-                            .cloned()
+                            .map(|f| {
+                                if f.name == *key {
+                                    ShapeField {
+                                        name: f.name.clone(),
+                                        type_expr: f.type_expr.clone(),
+                                        optional: false,
+                                    }
+                                } else {
+                                    f.clone()
+                                }
+                            })
                             .collect();
-                        return if narrowed.len() == 1 {
-                            Some((name.clone(), Some(narrowed.into_iter().next().unwrap())))
-                        } else if narrowed.is_empty() {
-                            None
-                        } else {
-                            Some((name.clone(), Some(TypeExpr::Union(narrowed))))
+                        return Refinements {
+                            truthy: vec![(
+                                var_name.clone(),
+                                Some(TypeExpr::Shape(narrowed_fields)),
+                            )],
+                            falsy: vec![],
                         };
                     }
                 }
             }
         }
-        None
+        Refinements::empty()
+    }
+
+    /// Check whether a block definitely exits (return/throw/break/continue).
+    fn block_definitely_exits(stmts: &[SNode]) -> bool {
+        stmts.iter().any(|s| match &s.node {
+            Node::ReturnStmt { .. }
+            | Node::ThrowStmt { .. }
+            | Node::BreakStmt
+            | Node::ContinueStmt => true,
+            Node::IfElse {
+                then_body,
+                else_body: Some(else_body),
+                ..
+            } => Self::block_definitely_exits(then_body) && Self::block_definitely_exits(else_body),
+            _ => false,
+        })
     }
 
     fn check_match_exhaustiveness(
@@ -1517,12 +1842,20 @@ impl TypeChecker {
             }
 
             Node::Ternary {
+                condition,
                 true_expr,
                 false_expr,
-                ..
             } => {
-                let tt = self.infer_type(true_expr, scope);
-                let ft = self.infer_type(false_expr, scope);
+                let refs = Self::extract_refinements(condition, scope);
+
+                let mut true_scope = scope.child();
+                apply_refinements(&mut true_scope, &refs.truthy);
+                let tt = self.infer_type(true_expr, &true_scope);
+
+                let mut false_scope = scope.child();
+                apply_refinements(&mut false_scope, &refs.falsy);
+                let ft = self.infer_type(false_expr, &false_scope);
+
                 match (&tt, &ft) {
                     (Some(a), Some(b)) if a == b => tt,
                     (Some(a), Some(b)) => Some(TypeExpr::Union(vec![a.clone(), b.clone()])),
@@ -1690,6 +2023,15 @@ impl TypeChecker {
 
         match (&expected, &actual) {
             (TypeExpr::Named(a), TypeExpr::Named(b)) => a == b || (a == "float" && b == "int"),
+            // Union-to-Union: every member of actual must be compatible with
+            // at least one member of expected.
+            (TypeExpr::Union(exp_members), TypeExpr::Union(act_members)) => {
+                act_members.iter().all(|am| {
+                    exp_members
+                        .iter()
+                        .any(|em| self.types_compatible(em, am, scope))
+                })
+            }
             (TypeExpr::Union(members), actual_type) => members
                 .iter()
                 .any(|m| self.types_compatible(m, actual_type, scope)),
@@ -1931,6 +2273,57 @@ pub fn format_type(ty: &TypeExpr) -> String {
                 .join(", ");
             format!("fn({}) -> {}", params_str, format_type(return_type))
         }
+    }
+}
+
+/// Remove a named type from a union, collapsing single-element unions.
+fn remove_from_union(members: &[TypeExpr], to_remove: &str) -> InferredType {
+    let remaining: Vec<TypeExpr> = members
+        .iter()
+        .filter(|m| !matches!(m, TypeExpr::Named(n) if n == to_remove))
+        .cloned()
+        .collect();
+    match remaining.len() {
+        0 => None,
+        1 => Some(remaining.into_iter().next().unwrap()),
+        _ => Some(TypeExpr::Union(remaining)),
+    }
+}
+
+/// Narrow a union to just one named type, if that type is a member.
+fn narrow_to_single(members: &[TypeExpr], target: &str) -> InferredType {
+    if members
+        .iter()
+        .any(|m| matches!(m, TypeExpr::Named(n) if n == target))
+    {
+        Some(TypeExpr::Named(target.to_string()))
+    } else {
+        None
+    }
+}
+
+/// Extract the variable name from a `type_of(x)` call.
+fn extract_type_of_var(node: &SNode) -> Option<String> {
+    if let Node::FunctionCall { name, args } = &node.node {
+        if name == "type_of" && args.len() == 1 {
+            if let Node::Identifier(var) = &args[0].node {
+                return Some(var.clone());
+            }
+        }
+    }
+    None
+}
+
+/// Apply a list of refinements to a scope, tracking pre-narrowing types.
+fn apply_refinements(scope: &mut TypeScope, refinements: &[(String, InferredType)]) {
+    for (var_name, narrowed_type) in refinements {
+        // Save the pre-narrowing type so we can restore it on reassignment
+        if !scope.narrowed_vars.contains_key(var_name) {
+            if let Some(original) = scope.get_var(var_name).cloned() {
+                scope.narrowed_vars.insert(var_name.clone(), original);
+            }
+        }
+        scope.define_var(var_name, narrowed_type.clone());
     }
 }
 
@@ -2634,5 +3027,340 @@ add("hello", 2) }"#,
 }"#,
         );
         assert!(warns.is_empty(), "expected no warnings, got: {:?}", warns);
+    }
+
+    // --- Flow-sensitive type refinement tests ---
+
+    #[test]
+    fn test_nil_narrowing_then_branch() {
+        // Existing behavior: x != nil narrows to string in then-branch
+        let errs = errors(
+            r#"pipeline t(task) {
+  fn greet(name: string | nil) {
+    if name != nil {
+      let s: string = name
+    }
+  }
+}"#,
+        );
+        assert!(errs.is_empty(), "got: {:?}", errs);
+    }
+
+    #[test]
+    fn test_nil_narrowing_else_branch() {
+        // NEW: x != nil narrows to nil in else-branch
+        let errs = errors(
+            r#"pipeline t(task) {
+  fn check(x: string | nil) {
+    if x != nil {
+      let s: string = x
+    } else {
+      let n: nil = x
+    }
+  }
+}"#,
+        );
+        assert!(errs.is_empty(), "got: {:?}", errs);
+    }
+
+    #[test]
+    fn test_nil_equality_narrows_both() {
+        // x == nil narrows then to nil, else to non-nil
+        let errs = errors(
+            r#"pipeline t(task) {
+  fn check(x: string | nil) {
+    if x == nil {
+      let n: nil = x
+    } else {
+      let s: string = x
+    }
+  }
+}"#,
+        );
+        assert!(errs.is_empty(), "got: {:?}", errs);
+    }
+
+    #[test]
+    fn test_truthiness_narrowing() {
+        // Bare identifier in condition removes nil
+        let errs = errors(
+            r#"pipeline t(task) {
+  fn check(x: string | nil) {
+    if x {
+      let s: string = x
+    }
+  }
+}"#,
+        );
+        assert!(errs.is_empty(), "got: {:?}", errs);
+    }
+
+    #[test]
+    fn test_negation_narrowing() {
+        // !x swaps truthy/falsy
+        let errs = errors(
+            r#"pipeline t(task) {
+  fn check(x: string | nil) {
+    if !x {
+      let n: nil = x
+    } else {
+      let s: string = x
+    }
+  }
+}"#,
+        );
+        assert!(errs.is_empty(), "got: {:?}", errs);
+    }
+
+    #[test]
+    fn test_typeof_narrowing() {
+        // type_of(x) == "string" narrows to string
+        let errs = errors(
+            r#"pipeline t(task) {
+  fn check(x: string | int) {
+    if type_of(x) == "string" {
+      let s: string = x
+    }
+  }
+}"#,
+        );
+        assert!(errs.is_empty(), "got: {:?}", errs);
+    }
+
+    #[test]
+    fn test_typeof_narrowing_else() {
+        // else removes the tested type
+        let errs = errors(
+            r#"pipeline t(task) {
+  fn check(x: string | int) {
+    if type_of(x) == "string" {
+      let s: string = x
+    } else {
+      let i: int = x
+    }
+  }
+}"#,
+        );
+        assert!(errs.is_empty(), "got: {:?}", errs);
+    }
+
+    #[test]
+    fn test_typeof_neq_narrowing() {
+        // type_of(x) != "string" removes string in then, narrows to string in else
+        let errs = errors(
+            r#"pipeline t(task) {
+  fn check(x: string | int) {
+    if type_of(x) != "string" {
+      let i: int = x
+    } else {
+      let s: string = x
+    }
+  }
+}"#,
+        );
+        assert!(errs.is_empty(), "got: {:?}", errs);
+    }
+
+    #[test]
+    fn test_and_combines_narrowing() {
+        // && combines truthy refinements
+        let errs = errors(
+            r#"pipeline t(task) {
+  fn check(x: string | int | nil) {
+    if x != nil && type_of(x) == "string" {
+      let s: string = x
+    }
+  }
+}"#,
+        );
+        assert!(errs.is_empty(), "got: {:?}", errs);
+    }
+
+    #[test]
+    fn test_or_falsy_narrowing() {
+        // || combines falsy refinements
+        let errs = errors(
+            r#"pipeline t(task) {
+  fn check(x: string | nil, y: int | nil) {
+    if x || y {
+      // conservative: can't narrow
+    } else {
+      let xn: nil = x
+      let yn: nil = y
+    }
+  }
+}"#,
+        );
+        assert!(errs.is_empty(), "got: {:?}", errs);
+    }
+
+    #[test]
+    fn test_guard_narrows_outer_scope() {
+        let errs = errors(
+            r#"pipeline t(task) {
+  fn check(x: string | nil) {
+    guard x != nil else { return }
+    let s: string = x
+  }
+}"#,
+        );
+        assert!(errs.is_empty(), "got: {:?}", errs);
+    }
+
+    #[test]
+    fn test_while_narrows_body() {
+        let errs = errors(
+            r#"pipeline t(task) {
+  fn check(x: string | nil) {
+    while x != nil {
+      let s: string = x
+      break
+    }
+  }
+}"#,
+        );
+        assert!(errs.is_empty(), "got: {:?}", errs);
+    }
+
+    #[test]
+    fn test_early_return_narrows_after_if() {
+        // if then-body returns, falsy refinements apply after
+        let errs = errors(
+            r#"pipeline t(task) {
+  fn check(x: string | nil) -> string {
+    if x == nil {
+      return "default"
+    }
+    let s: string = x
+    return s
+  }
+}"#,
+        );
+        assert!(errs.is_empty(), "got: {:?}", errs);
+    }
+
+    #[test]
+    fn test_early_throw_narrows_after_if() {
+        let errs = errors(
+            r#"pipeline t(task) {
+  fn check(x: string | nil) {
+    if x == nil {
+      throw "missing"
+    }
+    let s: string = x
+  }
+}"#,
+        );
+        assert!(errs.is_empty(), "got: {:?}", errs);
+    }
+
+    #[test]
+    fn test_no_narrowing_unknown_type() {
+        // Gradual typing: untyped vars don't get narrowed
+        let errs = errors(
+            r#"pipeline t(task) {
+  fn check(x) {
+    if x != nil {
+      let s: string = x
+    }
+  }
+}"#,
+        );
+        // No narrowing possible, so assigning untyped x to string should be fine
+        // (gradual typing allows it)
+        assert!(errs.is_empty(), "got: {:?}", errs);
+    }
+
+    #[test]
+    fn test_reassignment_invalidates_narrowing() {
+        // After reassigning a narrowed var, the original type should be restored
+        let errs = errors(
+            r#"pipeline t(task) {
+  fn check(x: string | nil) {
+    var y: string | nil = x
+    if y != nil {
+      let s: string = y
+      y = nil
+      let s2: string = y
+    }
+  }
+}"#,
+        );
+        // s2 should fail because y was reassigned, invalidating the narrowing
+        assert_eq!(errs.len(), 1, "expected 1 error, got: {:?}", errs);
+        assert!(
+            errs[0].contains("Type mismatch"),
+            "expected type mismatch, got: {}",
+            errs[0]
+        );
+    }
+
+    #[test]
+    fn test_let_immutable_warning() {
+        let all = check_source(
+            r#"pipeline t(task) {
+  let x = 42
+  x = 43
+}"#,
+        );
+        let warnings: Vec<_> = all
+            .iter()
+            .filter(|d| d.severity == DiagnosticSeverity::Warning)
+            .collect();
+        assert!(
+            warnings.iter().any(|w| w.message.contains("immutable")),
+            "expected immutability warning, got: {:?}",
+            warnings
+        );
+    }
+
+    #[test]
+    fn test_nested_narrowing() {
+        let errs = errors(
+            r#"pipeline t(task) {
+  fn check(x: string | int | nil) {
+    if x != nil {
+      if type_of(x) == "int" {
+        let i: int = x
+      }
+    }
+  }
+}"#,
+        );
+        assert!(errs.is_empty(), "got: {:?}", errs);
+    }
+
+    #[test]
+    fn test_match_narrows_arms() {
+        let errs = errors(
+            r#"pipeline t(task) {
+  fn check(x: string | int) {
+    match x {
+      "hello" -> {
+        let s: string = x
+      }
+      42 -> {
+        let i: int = x
+      }
+      _ -> {}
+    }
+  }
+}"#,
+        );
+        assert!(errs.is_empty(), "got: {:?}", errs);
+    }
+
+    #[test]
+    fn test_has_narrows_optional_field() {
+        let errs = errors(
+            r#"pipeline t(task) {
+  fn check(x: {name?: string, age: int}) {
+    if x.has("name") {
+      let n: {name: string, age: int} = x
+    }
+  }
+}"#,
+        );
+        assert!(errs.is_empty(), "got: {:?}", errs);
     }
 }

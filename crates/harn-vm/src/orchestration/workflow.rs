@@ -627,7 +627,12 @@ pub async fn execute_stage_node(
     let tool_format = std::env::var("HARN_AGENT_TOOL_FORMAT")
         .ok()
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| "text".to_string());
+        .unwrap_or_else(|| {
+            // Auto-detect from model/provider alias config.
+            let model = std::env::var("HARN_LLM_MODEL").unwrap_or_default();
+            let provider = std::env::var("HARN_LLM_PROVIDER").unwrap_or_default();
+            crate::llm_config::default_tool_format(&model, &provider)
+        });
     let mut llm_result = if node.kind == "verify" {
         if let Some(command) = node
             .verify

@@ -1,0 +1,22 @@
+// Test logical operator narrowing (&&, ||, !)
+pipeline test(task) {
+  fn and_check(x: string | int | nil) -> string {
+    if x != nil && type_of(x) == "string" {
+      return "string: ${x}"
+    }
+    return "other"
+  }
+  fn or_falsy(x: string | nil, y: int | nil) -> string {
+    if x || y {
+      return "at least one truthy"
+    }
+    // Both are nil in else path
+    return "both nil"
+  }
+  log(and_check("hello"))
+  log(and_check(42))
+  log(and_check(nil))
+  log(or_falsy("a", nil))
+  log(or_falsy(nil, 1))
+  log(or_falsy(nil, nil))
+}
