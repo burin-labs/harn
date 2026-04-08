@@ -86,6 +86,7 @@ The following identifiers are reserved:
 | `pub` | `.pub` |
 | `from` | `.from` |
 | `thru` | `.thru` |
+| `tool` | `.tool` |
 | `upto` | `.upto` |
 | `guard` | `.guard` |
 | `require` | `.require` |
@@ -1043,6 +1044,29 @@ let add = { x, y = 10 -> x + y }  // closures support defaults too
 Explicit `nil` counts as a provided argument (does NOT trigger the default).
 Arguments are positional — fill left to right, only trailing defaults can
 be omitted.
+
+### tool declarations
+
+```harn
+tool read_file(path: string, encoding: string) -> string {
+  description "Read a file from the filesystem"
+  read_file(path)
+}
+```
+
+Declares a named tool and registers it with a tool registry. The body is
+compiled as a closure and attached as the tool's handler. An optional
+`description` metadata string may appear as the first statement in the body.
+
+Parameter types are mapped to JSON Schema types (`string` -> `"string"`,
+`int` -> `"integer"`, `float` -> `"number"`, `bool` -> `"boolean"`).
+
+The result of a `tool` declaration is a tool registry dict (the return
+value of `tool_define`). Multiple `tool` declarations accumulate into
+separate registries; use `tool_registry()` and `tool_define(...)` for
+multi-tool registries.
+
+Like `fn`, `tool` may be prefixed with `pub`.
 
 ### Closures
 

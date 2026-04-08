@@ -315,6 +315,10 @@ pub struct AgentLoopConfig {
     pub loop_detect_warn: usize,
     pub loop_detect_block: usize,
     pub loop_detect_skip: usize,
+    /// Optional few-shot examples injected into the tool-calling contract
+    /// prompt, shown to the model before the tool schema listing. Provided
+    /// by the pipeline (.harn) — Harn itself has no hardcoded tool names.
+    pub tool_examples: Option<String>,
 }
 
 /// Classify whether a VmError from an LLM call is transient and worth retrying.
@@ -809,6 +813,186 @@ fn spawn_progress_forwarder(
     tx
 }
 
+// ---------------------------------------------------------------------------
+// observed_llm_call — shared single-LLM-call wrapper with full observability
+// ---------------------------------------------------------------------------
+// Both `llm_call` and `agent_loop` previously duplicated call-id generation,
+// bridge notifications, span annotation, retry logic, and tracing.  This
+// function is the single source of truth for "make one LLM call with all
+// production instrumentation."
+
+/// Configuration for LLM call retries.
+pub(crate) struct LlmRetryConfig {
+    /// Maximum number of retries for transient errors (429, 5xx, connection).
+    pub retries: usize,
+    /// Base backoff in milliseconds between retries.
+    pub backoff_ms: u64,
+}
+
+impl Default for LlmRetryConfig {
+    fn default() -> Self {
+        Self {
+            retries: 0,
+            backoff_ms: 2000,
+        }
+    }
+}
+
+/// Make one LLM call with full observability: call-id generation, bridge
+/// notifications (call_start / call_progress / call_end), span annotation,
+/// retry with exponential backoff, and tracing.  Returns the raw `LlmResult`.
+///
+/// - `bridge`: when present, sends call_start/call_end notifications and
+///   streams token-by-token deltas to the host via a progress forwarder.
+/// - `retry_config`: controls transient-error retry behavior.
+/// - `iteration`: optional loop iteration index for span context (used by
+///   `agent_loop`; `llm_call` passes `None`).
+/// - `offthread`: when true, runs provider I/O on Tokio's multithreaded
+///   scheduler via `vm_call_llm_full_streaming_offthread`. Use this for
+///   standalone calls that must not block the VM's LocalSet.
+pub(crate) async fn observed_llm_call(
+    opts: &super::api::LlmCallOptions,
+    bridge: Option<&Rc<crate::bridge::HostBridge>>,
+    retry_config: &LlmRetryConfig,
+    iteration: Option<usize>,
+    offthread: bool,
+) -> Result<super::api::LlmResult, VmError> {
+    let mut attempt = 0usize;
+    loop {
+        let call_id = next_call_id();
+        let prompt_chars: usize = opts
+            .messages
+            .iter()
+            .filter_map(|m| m.get("content").and_then(|c| c.as_str()))
+            .map(|s| s.len())
+            .sum();
+
+        // Span annotation
+        let mut span_meta = vec![
+            ("call_id", serde_json::json!(call_id.clone())),
+            ("model", serde_json::json!(opts.model.clone())),
+            ("provider", serde_json::json!(opts.provider.clone())),
+            ("prompt_chars", serde_json::json!(prompt_chars)),
+        ];
+        if let Some(iter) = iteration {
+            span_meta.push(("iteration", serde_json::json!(iter)));
+            span_meta.push(("llm_attempt", serde_json::json!(attempt)));
+        }
+        annotate_current_span(&span_meta);
+
+        // Bridge: call_start notification
+        let mut call_start_meta =
+            serde_json::json!({"model": opts.model, "prompt_chars": prompt_chars});
+        if let Some(iter) = iteration {
+            call_start_meta["iteration"] = serde_json::json!(iter);
+            call_start_meta["llm_attempt"] = serde_json::json!(attempt);
+        }
+        if let Some(b) = bridge {
+            b.send_call_start(&call_id, "llm", "llm_call", call_start_meta);
+        }
+
+        // Transcript dump (enabled by HARN_LLM_TRANSCRIPT_DIR)
+        dump_llm_request(iteration.unwrap_or(0), &call_id, opts);
+
+        // Execute the LLM call
+        let start = std::time::Instant::now();
+        let llm_result = if let Some(b) = bridge {
+            let delta_tx = spawn_progress_forwarder(b, call_id.clone());
+            if offthread {
+                vm_call_llm_full_streaming_offthread(opts, delta_tx).await
+            } else {
+                vm_call_llm_full_streaming(opts, delta_tx).await
+            }
+        } else if offthread {
+            // No bridge but offthread requested — still use streaming with a
+            // discarding receiver so the call runs on the multithreaded scheduler.
+            let (delta_tx, _delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+            vm_call_llm_full_streaming_offthread(opts, delta_tx).await
+        } else {
+            super::api::vm_call_llm_full(opts).await
+        };
+        let duration_ms = start.elapsed().as_millis() as u64;
+
+        match llm_result {
+            Ok(result) => {
+                // Success: annotate span, dump response, notify bridge, trace
+                annotate_current_span(&[
+                    ("status", serde_json::json!("ok")),
+                    ("input_tokens", serde_json::json!(result.input_tokens)),
+                    ("output_tokens", serde_json::json!(result.output_tokens)),
+                ]);
+                dump_llm_response(iteration.unwrap_or(0), &call_id, &result, duration_ms);
+                if let Some(b) = bridge {
+                    b.send_call_end(
+                        &call_id,
+                        "llm",
+                        "llm_call",
+                        duration_ms,
+                        "ok",
+                        serde_json::json!({
+                            "model": result.model,
+                            "input_tokens": result.input_tokens,
+                            "output_tokens": result.output_tokens,
+                        }),
+                    );
+                }
+                trace_llm_call(LlmTraceEntry {
+                    model: result.model.clone(),
+                    input_tokens: result.input_tokens,
+                    output_tokens: result.output_tokens,
+                    duration_ms,
+                });
+                return Ok(result);
+            }
+            Err(error) => {
+                let retryable = is_retryable_llm_error(&error);
+                let can_retry = retryable && attempt < retry_config.retries;
+                let status = if can_retry {
+                    "retrying"
+                } else if retryable {
+                    "retries_exhausted"
+                } else {
+                    "error"
+                };
+                annotate_current_span(&[
+                    ("status", serde_json::json!(status)),
+                    ("error", serde_json::json!(error.to_string())),
+                    ("retryable", serde_json::json!(retryable)),
+                    ("attempt", serde_json::json!(attempt)),
+                ]);
+                if let Some(b) = bridge {
+                    b.send_call_end(
+                        &call_id,
+                        "llm",
+                        "llm_call",
+                        duration_ms,
+                        status,
+                        serde_json::json!({
+                            "error": error.to_string(),
+                            "retryable": retryable,
+                            "attempt": attempt,
+                        }),
+                    );
+                }
+                if !can_retry {
+                    return Err(error);
+                }
+                attempt += 1;
+                let backoff = extract_retry_after_ms(&error)
+                    .unwrap_or(retry_config.backoff_ms * (1 << attempt.min(4)) as u64);
+                crate::events::log_warn(
+                    "llm",
+                    &format!(
+                        "LLM call failed ({}), retrying in {}ms (attempt {}/{})",
+                        error, backoff, attempt, retry_config.retries
+                    ),
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(backoff)).await;
+            }
+        }
+    }
+}
+
 pub async fn run_agent_loop_internal(
     opts: &mut super::api::LlmCallOptions,
     config: AgentLoopConfig,
@@ -873,12 +1057,14 @@ pub async fn run_agent_loop_internal(
     if has_tools && tool_format != "native" {
         opts.native_tools = None;
     }
+    let tool_examples = config.tool_examples.clone();
     let tool_contract_prompt = if has_tools {
         Some(build_tool_calling_contract_prompt(
             tools_val,
             native_tools_for_prompt.as_deref(),
             &tool_format,
             tool_format == "text",
+            tool_examples.as_deref(),
         ))
     } else {
         None
@@ -967,113 +1153,17 @@ pub async fn run_agent_loop_internal(
         };
         opts.messages = call_messages;
         opts.system = call_system;
-        let start = std::time::Instant::now();
-        let result = if let Some(bridge) = bridge.as_ref() {
-            let mut llm_attempt = 0usize;
-            loop {
-                let llm_call_id = next_call_id();
-                let prompt_chars: usize = opts
-                    .messages
-                    .iter()
-                    .filter_map(|m| m.get("content").and_then(|c| c.as_str()))
-                    .map(|s| s.len())
-                    .sum();
-                annotate_current_span(&[
-                    ("call_id", serde_json::json!(llm_call_id.clone())),
-                    ("iteration", serde_json::json!(iteration)),
-                    ("model", serde_json::json!(opts.model.clone())),
-                    ("provider", serde_json::json!(opts.provider.clone())),
-                    ("prompt_chars", serde_json::json!(prompt_chars)),
-                ]);
-                bridge.send_call_start(
-                    &llm_call_id,
-                    "llm",
-                    "llm_call",
-                    serde_json::json!({
-                        "model": opts.model,
-                        "prompt_chars": prompt_chars,
-                        "iteration": iteration,
-                        "llm_attempt": llm_attempt,
-                    }),
-                );
-                dump_llm_request(iteration, &llm_call_id, opts);
-                let delta_tx = spawn_progress_forwarder(bridge, llm_call_id.clone());
-                let llm_result = vm_call_llm_full_streaming(opts, delta_tx).await;
-                let llm_duration = start.elapsed().as_millis() as u64;
-                match llm_result {
-                    Ok(result) => {
-                        annotate_current_span(&[
-                            ("status", serde_json::json!("ok")),
-                            ("input_tokens", serde_json::json!(result.input_tokens)),
-                            ("output_tokens", serde_json::json!(result.output_tokens)),
-                        ]);
-                        dump_llm_response(iteration, &llm_call_id, &result, llm_duration);
-                        bridge.send_call_end(
-                            &llm_call_id,
-                            "llm",
-                            "llm_call",
-                            llm_duration,
-                            "ok",
-                            serde_json::json!({
-                                "model": result.model,
-                                "input_tokens": result.input_tokens,
-                                "output_tokens": result.output_tokens,
-                            }),
-                        );
-                        break result;
-                    }
-                    Err(error) => {
-                        let retryable = is_retryable_llm_error(&error);
-                        let can_retry = retryable && llm_attempt < config.llm_retries;
-                        let status = if can_retry {
-                            "retrying"
-                        } else if retryable {
-                            "retries_exhausted"
-                        } else {
-                            "error"
-                        };
-                        annotate_current_span(&[
-                            ("status", serde_json::json!(status)),
-                            ("error", serde_json::json!(error.to_string())),
-                            ("retryable", serde_json::json!(retryable)),
-                            ("attempt", serde_json::json!(llm_attempt)),
-                        ]);
-                        bridge.send_call_end(
-                            &llm_call_id,
-                            "llm",
-                            "llm_call",
-                            llm_duration,
-                            status,
-                            serde_json::json!({
-                                "error": error.to_string(),
-                                "retryable": retryable,
-                                "attempt": llm_attempt,
-                            }),
-                        );
-                        if !can_retry {
-                            return Err(error);
-                        }
-                        llm_attempt += 1;
-                        let backoff = extract_retry_after_ms(&error)
-                            .unwrap_or(config.llm_backoff_ms * (1 << llm_attempt.min(4)) as u64);
-                        eprintln!(
-                            "[harn] LLM call failed ({}), retrying in {}ms (attempt {}/{})",
-                            error, backoff, llm_attempt, config.llm_retries
-                        );
-                        tokio::time::sleep(std::time::Duration::from_millis(backoff)).await;
-                    }
-                }
-            }
-        } else {
-            super::api::vm_call_llm_full(opts).await?
-        };
-
-        trace_llm_call(LlmTraceEntry {
-            model: result.model.clone(),
-            input_tokens: result.input_tokens,
-            output_tokens: result.output_tokens,
-            duration_ms: start.elapsed().as_millis() as u64,
-        });
+        let result = observed_llm_call(
+            opts,
+            bridge.as_ref(),
+            &LlmRetryConfig {
+                retries: config.llm_retries,
+                backoff_ms: config.llm_backoff_ms,
+            },
+            Some(iteration),
+            false, // agent_loop runs on the local set, not offthread
+        )
+        .await?;
 
         let text = result.text.clone();
         total_text.push_str(&text);
@@ -1120,9 +1210,12 @@ pub async fn run_agent_loop_internal(
             // emit ```call blocks.
             let parse_result = parse_text_tool_calls_with_tools(&text, tools_val);
             if !parse_result.calls.is_empty() && tool_format == "native" {
-                eprintln!(
-                    "[harn] text_fallback_triggered: model emitted {} text call(s) in native mode",
-                    parse_result.calls.len()
+                crate::events::log_info(
+                    "llm.tool",
+                    &format!(
+                        "text_fallback_triggered: model emitted {} text call(s) in native mode",
+                        parse_result.calls.len()
+                    ),
                 );
             }
             tool_parse_errors = parse_result.errors;
@@ -1142,10 +1235,13 @@ pub async fn run_agent_loop_internal(
                     .cloned()
                     .collect::<Vec<_>>()
                     .join("; ");
-                eprintln!(
-                    "[harn] {} tool-call parse error(s): {}",
-                    tool_parse_errors.len(),
-                    &error_summary[..error_summary.len().min(200)]
+                crate::events::log_warn(
+                    "llm.tool",
+                    &format!(
+                        "{} tool-call parse error(s): {}",
+                        tool_parse_errors.len(),
+                        &error_summary[..error_summary.len().min(200)]
+                    ),
                 );
                 let feedback = format!(
                     "Your tool call could not be parsed: {error_summary}\n\n\
@@ -1620,51 +1716,61 @@ pub async fn run_agent_loop_internal(
                     }
                 }
 
-                // Prefer a pre-computed result from the parallel pre-fetch
-                // pass above, when available. That pass runs read-only tool
-                // executions concurrently via join_all before this sequential
-                // loop begins, so the loop just consumes results here without
-                // waiting on I/O. Falls through to the inline dispatch if no
-                // cached result exists (non-read-only tools, or read-only
-                // tools whose args were modified by a hook in this loop).
-                let call_result = if let Some(cached) = parallel_results.remove(&tc_index) {
-                    cached
+                // Tool replay: if replay mode is active, try to use a
+                // recorded fixture instead of executing the tool.
+                let replay_hit = if crate::llm::mock::get_tool_recording_mode()
+                    == crate::llm::mock::ToolRecordingMode::Replay
+                {
+                    crate::llm::mock::find_tool_replay_fixture(tool_name, &tool_args)
                 } else {
-                    dispatch_tool_execution(
-                        tool_name,
-                        &tool_args,
-                        tools_val,
-                        bridge.as_ref(),
-                        tool_retries,
-                        tool_backoff_ms,
-                    )
-                    .await
+                    None
                 };
 
-                let is_rejected = matches!(
-                    &call_result,
-                    Err(VmError::CategorizedError {
-                        category: ErrorCategory::ToolRejected,
-                        ..
-                    })
-                );
-                let result_text = match &call_result {
-                    Ok(val) => {
-                        if let Some(text) = val.as_str() {
-                            text.to_string()
-                        } else if val.is_null() {
-                            "(no output)".to_string()
-                        } else {
-                            serde_json::to_string_pretty(val).unwrap_or_default()
+                let (is_rejected, result_text) = if let Some(fixture) = replay_hit {
+                    (fixture.is_rejected, fixture.result.clone())
+                } else {
+                    // Prefer a pre-computed result from the parallel pre-fetch
+                    // pass above, when available.
+                    let call_result = if let Some(cached) = parallel_results.remove(&tc_index) {
+                        cached
+                    } else {
+                        dispatch_tool_execution(
+                            tool_name,
+                            &tool_args,
+                            tools_val,
+                            bridge.as_ref(),
+                            tool_retries,
+                            tool_backoff_ms,
+                        )
+                        .await
+                    };
+
+                    let rejected = matches!(
+                        &call_result,
+                        Err(VmError::CategorizedError {
+                            category: ErrorCategory::ToolRejected,
+                            ..
+                        })
+                    );
+                    let text = match &call_result {
+                        Ok(val) => {
+                            if let Some(text) = val.as_str() {
+                                text.to_string()
+                            } else if val.is_null() {
+                                "(no output)".to_string()
+                            } else {
+                                serde_json::to_string_pretty(val).unwrap_or_default()
+                            }
                         }
-                    }
-                    Err(VmError::CategorizedError {
-                        message,
-                        category: ErrorCategory::ToolRejected,
-                    }) => {
-                        format!("REJECTED: {message} Do not retry this tool.")
-                    }
-                    Err(error) => format!("Error: {error}"),
+                        Err(VmError::CategorizedError {
+                            message,
+                            category: ErrorCategory::ToolRejected,
+                        }) => {
+                            format!("REJECTED: {message} Do not retry this tool.")
+                        }
+                        Err(error) => format!("Error: {error}"),
+                    };
+                    (rejected, text)
                 };
 
                 if is_rejected && !rejected_tools.contains(&tool_name.to_string()) {
@@ -1762,6 +1868,22 @@ pub async fn run_agent_loop_internal(
                     );
                 }
                 crate::tracing::span_end(tool_span_id);
+
+                // Record tool call result if recording mode is active.
+                if crate::llm::mock::get_tool_recording_mode()
+                    == crate::llm::mock::ToolRecordingMode::Record
+                {
+                    crate::llm::mock::record_tool_call(crate::orchestration::ToolCallRecord {
+                        tool_name: tool_name.to_string(),
+                        tool_use_id: tool_call_id.clone(),
+                        args_hash: crate::orchestration::tool_fixture_hash(tool_name, &tool_args),
+                        result: result_text.clone(),
+                        is_rejected,
+                        duration_ms: tool_started_at.elapsed().as_millis() as u64,
+                        iteration,
+                        timestamp: crate::orchestration::now_rfc3339(),
+                    });
+                }
 
                 // Tool loop detection: record the result and check for
                 // repeated identical outcomes.  If we detect a loop,
@@ -1905,10 +2027,13 @@ pub async fn run_agent_loop_internal(
             }
             if sentinel_hit {
                 if !tool_parse_errors.is_empty() {
-                    eprintln!(
-                        "[harn] {} tool-call parse error(s) suppressed by sentinel: {}",
-                        tool_parse_errors.len(),
-                        tool_parse_errors.join("; ")
+                    crate::events::log_warn(
+                        "llm.tool",
+                        &format!(
+                            "{} tool-call parse error(s) suppressed by sentinel: {}",
+                            tool_parse_errors.len(),
+                            tool_parse_errors.join("; ")
+                        ),
                     );
                 }
                 break;
@@ -2222,6 +2347,7 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                     loop_detect_warn: opt_int(&options, "loop_detect_warn").unwrap_or(2) as usize,
                     loop_detect_block: opt_int(&options, "loop_detect_block").unwrap_or(3) as usize,
                     loop_detect_skip: opt_int(&options, "loop_detect_skip").unwrap_or(4) as usize,
+                    tool_examples: opt_str(&options, "tool_examples"),
                 },
             )
             .await?;
@@ -2233,146 +2359,90 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
 /// Register a bridge-aware `llm_call` that emits call_start/call_end notifications.
 /// This overrides the native llm_call with one that reports to the host for observability.
 pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::HostBridge>) {
-    use super::api::vm_build_llm_result;
-    use super::helpers::extract_json;
-    use crate::stdlib::json_to_vm_value;
-
     let b = bridge;
     vm.register_async_builtin("llm_call", move |args| {
         let bridge = b.clone();
         async move {
             let opts = extract_llm_options(&args)?;
-
-            let call_id = next_call_id();
-            let prompt_chars: usize = opts
-                .messages
-                .iter()
-                .filter_map(|m| m.get("content").and_then(|c| c.as_str()))
-                .map(|s| s.len())
-                .sum();
-            annotate_current_span(&[
-                ("call_id", serde_json::json!(call_id.clone())),
-                ("model", serde_json::json!(opts.model.clone())),
-                ("provider", serde_json::json!(opts.provider.clone())),
-                ("prompt_chars", serde_json::json!(prompt_chars)),
-            ]);
-            bridge.send_call_start(
-                &call_id,
-                "llm",
-                "llm_call",
-                serde_json::json!({"model": opts.model, "prompt_chars": prompt_chars}),
-            );
-
-            let start = std::time::Instant::now();
-            let delta_tx = spawn_progress_forwarder(&bridge, call_id.clone());
-            let llm_result = vm_call_llm_full_streaming_offthread(&opts, delta_tx).await;
-            let duration_ms = start.elapsed().as_millis() as u64;
-            let result = match llm_result {
-                Ok(r) => r,
-                Err(e) => {
-                    annotate_current_span(&[
-                        ("status", serde_json::json!("error")),
-                        ("error", serde_json::json!(e.to_string())),
-                    ]);
-                    bridge.send_call_end(
-                        &call_id,
-                        "llm",
-                        "llm_call",
-                        duration_ms,
-                        "error",
-                        serde_json::json!({"error": e.to_string()}),
-                    );
-                    return Err(e);
-                }
+            let options = args.get(2).and_then(|a| a.as_dict()).cloned();
+            let retry_config = LlmRetryConfig {
+                retries: opt_int(&options, "llm_retries").unwrap_or(0) as usize,
+                backoff_ms: opt_int(&options, "llm_backoff_ms").unwrap_or(2000) as u64,
             };
 
-            trace_llm_call(LlmTraceEntry {
-                model: result.model.clone(),
-                input_tokens: result.input_tokens,
-                output_tokens: result.output_tokens,
-                duration_ms,
-            });
-            annotate_current_span(&[
-                ("status", serde_json::json!("ok")),
-                ("input_tokens", serde_json::json!(result.input_tokens)),
-                ("output_tokens", serde_json::json!(result.output_tokens)),
-            ]);
-
-            bridge.send_call_end(
-                &call_id,
-                "llm",
-                "llm_call",
-                duration_ms,
-                "ok",
-                serde_json::json!({
-                    "model": result.model,
-                    "input_tokens": result.input_tokens,
-                    "output_tokens": result.output_tokens,
-                }),
-            );
-
-            let mut transcript_messages = opts.messages.clone();
-            transcript_messages.push(build_assistant_response_message(
-                &result.text,
-                &result.blocks,
-                &result.tool_calls,
-                &opts.provider,
-            ));
-            let mut extra_events = vec![transcript_event(
-                "provider_payload",
-                "assistant",
-                "internal",
-                "",
-                Some(serde_json::json!({
-                    "model": result.model.clone(),
-                    "input_tokens": result.input_tokens,
-                    "output_tokens": result.output_tokens,
-                    "tool_calls": result.tool_calls.clone(),
-                })),
-            )];
-            if let Some(thinking) = result.thinking.clone() {
-                if !thinking.is_empty() {
-                    extra_events.push(transcript_event(
-                        "private_reasoning",
-                        "assistant",
-                        "private",
-                        &thinking,
-                        None,
-                    ));
-                }
-            }
-            let transcript = transcript_to_vm_with_events(
-                opts.transcript_id.clone(),
-                opts.transcript_summary.clone(),
-                opts.transcript_metadata.clone(),
-                &transcript_messages,
-                extra_events,
-                Vec::new(),
-                Some("active"),
-            );
-
-            // Always return dict (breaking change: no more plain string)
-            if opts.response_format.as_deref() == Some("json") {
-                let json_str = extract_json(&result.text);
-                let parsed = serde_json::from_str::<serde_json::Value>(json_str)
-                    .ok()
-                    .map(|jv| json_to_vm_value(&jv));
-                return Ok(vm_build_llm_result(
-                    &result,
-                    parsed,
-                    Some(transcript),
-                    opts.tools.as_ref(),
-                ));
-            }
-
-            Ok(vm_build_llm_result(
-                &result,
+            let result = observed_llm_call(
+                &opts,
+                Some(&bridge),
+                &retry_config,
                 None,
-                Some(transcript),
-                opts.tools.as_ref(),
-            ))
+                true, // offthread: standalone call, avoid blocking the VM LocalSet
+            )
+            .await?;
+
+            Ok(build_llm_call_result(&result, &opts))
         }
     });
+}
+
+/// Assemble the user-facing result dict for `llm_call` from a raw `LlmResult`.
+/// Shared by both the bridge-aware and non-bridge registrations.
+pub(crate) fn build_llm_call_result(
+    result: &super::api::LlmResult,
+    opts: &super::api::LlmCallOptions,
+) -> VmValue {
+    use super::api::vm_build_llm_result;
+    use super::helpers::extract_json;
+    use crate::stdlib::json_to_vm_value;
+
+    let mut transcript_messages = opts.messages.clone();
+    transcript_messages.push(build_assistant_response_message(
+        &result.text,
+        &result.blocks,
+        &result.tool_calls,
+        &opts.provider,
+    ));
+    let mut extra_events = vec![transcript_event(
+        "provider_payload",
+        "assistant",
+        "internal",
+        "",
+        Some(serde_json::json!({
+            "model": result.model.clone(),
+            "input_tokens": result.input_tokens,
+            "output_tokens": result.output_tokens,
+            "tool_calls": result.tool_calls.clone(),
+        })),
+    )];
+    if let Some(thinking) = result.thinking.clone() {
+        if !thinking.is_empty() {
+            extra_events.push(transcript_event(
+                "private_reasoning",
+                "assistant",
+                "private",
+                &thinking,
+                None,
+            ));
+        }
+    }
+    let transcript = transcript_to_vm_with_events(
+        opts.transcript_id.clone(),
+        opts.transcript_summary.clone(),
+        opts.transcript_metadata.clone(),
+        &transcript_messages,
+        extra_events,
+        Vec::new(),
+        Some("active"),
+    );
+
+    if opts.response_format.as_deref() == Some("json") {
+        let json_str = extract_json(&result.text);
+        let parsed = serde_json::from_str::<serde_json::Value>(json_str)
+            .ok()
+            .map(|jv| json_to_vm_value(&jv));
+        return vm_build_llm_result(result, parsed, Some(transcript), opts.tools.as_ref());
+    }
+
+    vm_build_llm_result(result, None, Some(transcript), opts.tools.as_ref())
 }
 
 #[cfg(test)]

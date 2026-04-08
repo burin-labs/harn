@@ -42,7 +42,11 @@ fn print_lint_diagnostics(path: &str, diagnostics: &[harn_lint::LintDiagnostic])
     has_error
 }
 
-pub(crate) fn check_file_inner(path: &Path, config: &CheckConfig) -> CommandOutcome {
+pub(crate) fn check_file_inner(
+    path: &Path,
+    config: &CheckConfig,
+    externally_imported_names: &std::collections::HashSet<String>,
+) -> CommandOutcome {
     let path_str = path.to_string_lossy().to_string();
     let (source, program) = parse_source_file(&path_str);
 
@@ -81,8 +85,12 @@ pub(crate) fn check_file_inner(path: &Path, config: &CheckConfig) -> CommandOutc
     }
 
     // Linting
-    let lint_diagnostics =
-        harn_lint::lint_with_config_and_source(&program, &config.disable_rules, Some(&source));
+    let lint_diagnostics = harn_lint::lint_with_cross_file_imports(
+        &program,
+        &config.disable_rules,
+        Some(&source),
+        externally_imported_names,
+    );
     diagnostic_count += lint_diagnostics.len();
     if lint_diagnostics
         .iter()
@@ -120,12 +128,20 @@ pub(crate) fn check_file_inner(path: &Path, config: &CheckConfig) -> CommandOutc
     }
 }
 
-pub(crate) fn lint_file_inner(path: &Path, config: &CheckConfig) -> CommandOutcome {
+pub(crate) fn lint_file_inner(
+    path: &Path,
+    config: &CheckConfig,
+    externally_imported_names: &std::collections::HashSet<String>,
+) -> CommandOutcome {
     let path_str = path.to_string_lossy().to_string();
     let (source, program) = parse_source_file(&path_str);
 
-    let diagnostics =
-        harn_lint::lint_with_config_and_source(&program, &config.disable_rules, Some(&source));
+    let diagnostics = harn_lint::lint_with_cross_file_imports(
+        &program,
+        &config.disable_rules,
+        Some(&source),
+        externally_imported_names,
+    );
 
     if diagnostics.is_empty() {
         println!("{path_str}: no issues found");
@@ -183,6 +199,20 @@ pub(crate) fn collect_harn_targets(targets: &[&str]) -> Vec<PathBuf> {
     files.sort();
     files.dedup();
     files
+}
+
+/// Pre-scan all files and collect every function name that appears in a
+/// selective import (`import { foo } from "..."`).  The union of these names
+/// is passed to the linter so that library functions consumed by other files
+/// are not falsely flagged as unused.
+pub(crate) fn collect_cross_file_imports(files: &[PathBuf]) -> std::collections::HashSet<String> {
+    let mut names = std::collections::HashSet::new();
+    for file in files {
+        let path_str = file.to_string_lossy().to_string();
+        let (_, program) = parse_source_file(&path_str);
+        names.extend(harn_lint::collect_selective_import_names(&program));
+    }
+    names
 }
 
 /// Format a single file. Returns true on success, false on error.
@@ -292,6 +322,7 @@ fn collect_mock_host_capabilities_from_node(
         Node::Pipeline { body, .. }
         | Node::OverrideDecl { body, .. }
         | Node::FnDecl { body, .. }
+        | Node::ToolDecl { body, .. }
         | Node::SpawnExpr { body }
         | Node::TryExpr { body }
         | Node::MutexBlock { body }
@@ -1727,7 +1758,8 @@ fn scan_node_preflight(
         }
         Node::Pipeline { body, .. }
         | Node::OverrideDecl { body, .. }
-        | Node::FnDecl { body, .. } => {
+        | Node::FnDecl { body, .. }
+        | Node::ToolDecl { body, .. } => {
             scan_children(
                 body,
                 file_path,

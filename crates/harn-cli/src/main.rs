@@ -69,6 +69,10 @@ async fn main() {
                 eprintln!("No .harn files found");
                 process::exit(1);
             }
+            // Pre-scan: collect all selectively-imported function names so
+            // the linter can suppress false unused-function warnings for
+            // library functions consumed by other files.
+            let cross_file_imports = commands::check::collect_cross_file_imports(&files);
             let mut should_fail = false;
             for file in &files {
                 let mut config = package::load_check_config(Some(file));
@@ -78,7 +82,7 @@ async fn main() {
                 if let Some(path) = args.bundle_root.as_ref() {
                     config.bundle_root = Some(path.clone());
                 }
-                let outcome = commands::check::check_file_inner(file, &config);
+                let outcome = commands::check::check_file_inner(file, &config, &cross_file_imports);
                 should_fail |= outcome.should_fail(config.strict);
             }
             if should_fail {
@@ -92,10 +96,11 @@ async fn main() {
                 eprintln!("No .harn files found");
                 process::exit(1);
             }
+            let cross_file_imports = commands::check::collect_cross_file_imports(&files);
             let mut should_fail = false;
             for file in &files {
                 let config = package::load_check_config(Some(file));
-                let outcome = commands::check::lint_file_inner(file, &config);
+                let outcome = commands::check::lint_file_inner(file, &config, &cross_file_imports);
                 should_fail |= outcome.should_fail(config.strict);
             }
             if should_fail {

@@ -1,0 +1,524 @@
+//! Auto-compaction — transcript size management strategies.
+
+use std::rc::Rc;
+
+use crate::llm::{vm_call_llm_full, vm_value_to_json};
+use crate::value::{VmError, VmValue};
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CompactStrategy {
+    Llm,
+    Truncate,
+    Custom,
+    ObservationMask,
+}
+
+pub fn parse_compact_strategy(value: &str) -> Result<CompactStrategy, VmError> {
+    match value {
+        "llm" => Ok(CompactStrategy::Llm),
+        "truncate" => Ok(CompactStrategy::Truncate),
+        "custom" => Ok(CompactStrategy::Custom),
+        "observation_mask" => Ok(CompactStrategy::ObservationMask),
+        other => Err(VmError::Runtime(format!(
+            "unknown compact_strategy '{other}' (expected 'llm', 'truncate', 'custom', or 'observation_mask')"
+        ))),
+    }
+}
+
+/// Configuration for automatic transcript compaction in agent loops.
+///
+/// Two-tier compaction:
+///   Tier 1 (`token_threshold` / `compact_strategy`): lightweight, deterministic
+///     observation masking that fires early. Masks verbose tool results while
+///     preserving assistant prose and error output.
+///   Tier 2 (`hard_limit_tokens` / `hard_limit_strategy`): aggressive LLM-powered
+///     summarization that fires when tier-1 alone isn't enough, typically as the
+///     transcript approaches the model's actual context window.
+#[derive(Clone, Debug)]
+pub struct AutoCompactConfig {
+    /// Tier-1 threshold: estimated tokens before lightweight compaction.
+    pub token_threshold: usize,
+    /// Maximum character length for a single tool result before microcompaction.
+    pub tool_output_max_chars: usize,
+    /// Number of recent messages to keep during compaction.
+    pub keep_last: usize,
+    /// Tier-1 strategy (default: ObservationMask).
+    pub compact_strategy: CompactStrategy,
+    /// Tier-2 threshold: fires when tier-1 result still exceeds this.
+    /// Typically set to ~75% of the model's actual context window.
+    /// When `None`, tier-2 is disabled.
+    pub hard_limit_tokens: Option<usize>,
+    /// Tier-2 strategy (default: Llm).
+    pub hard_limit_strategy: CompactStrategy,
+    /// Optional Harn callback used when a strategy is `custom`.
+    pub custom_compactor: Option<VmValue>,
+    /// Optional callback for domain-specific per-message masking during
+    /// observation mask compaction. Called with a list of archived messages,
+    /// returns a list of `Option<String>` — `Some(masked)` to override the
+    /// default mask for that message, `None` to use the default.
+    /// This lets the host (e.g. burin-code) inject AST outlines, file
+    /// summaries, etc. without putting language-specific logic in Harn.
+    pub mask_callback: Option<VmValue>,
+}
+
+impl Default for AutoCompactConfig {
+    fn default() -> Self {
+        Self {
+            token_threshold: 48_000,
+            tool_output_max_chars: 16_000,
+            keep_last: 12,
+            compact_strategy: CompactStrategy::ObservationMask,
+            hard_limit_tokens: None,
+            hard_limit_strategy: CompactStrategy::Llm,
+            custom_compactor: None,
+            mask_callback: None,
+        }
+    }
+}
+
+/// Estimate token count from a list of JSON messages (chars / 4 heuristic).
+pub fn estimate_message_tokens(messages: &[serde_json::Value]) -> usize {
+    messages
+        .iter()
+        .map(|m| {
+            m.get("content")
+                .and_then(|c| c.as_str())
+                .map(|s| s.len())
+                .unwrap_or(0)
+        })
+        .sum::<usize>()
+        / 4
+}
+
+/// Microcompact a tool result: if it exceeds `max_chars`, keep the first and
+/// last portions with a snip marker in between.
+pub fn microcompact_tool_output(output: &str, max_chars: usize) -> String {
+    if output.len() <= max_chars || max_chars < 200 {
+        return output.to_string();
+    }
+    let diagnostic_lines = output
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            let lower = trimmed.to_lowercase();
+            let has_file_line = {
+                let bytes = trimmed.as_bytes();
+                let mut i = 0;
+                let mut found_colon = false;
+                while i < bytes.len() {
+                    if bytes[i] == b':' {
+                        found_colon = true;
+                        break;
+                    }
+                    i += 1;
+                }
+                found_colon && i + 1 < bytes.len() && bytes[i + 1].is_ascii_digit()
+            };
+            let has_strong_keyword =
+                trimmed.contains("FAIL") || trimmed.contains("panic") || trimmed.contains("Panic");
+            let has_weak_keyword = trimmed.contains("error")
+                || trimmed.contains("undefined")
+                || trimmed.contains("expected")
+                || trimmed.contains("got")
+                || lower.contains("cannot find")
+                || lower.contains("not found")
+                || lower.contains("no such")
+                || lower.contains("unresolved")
+                || lower.contains("missing")
+                || lower.contains("declared but not used")
+                || lower.contains("unused")
+                || lower.contains("mismatch");
+            let positional = lower.contains(" error ")
+                || lower.starts_with("error:")
+                || lower.starts_with("warning:")
+                || lower.starts_with("note:")
+                || lower.contains("panic:");
+            has_strong_keyword || (has_file_line && has_weak_keyword) || positional
+        })
+        .take(32)
+        .collect::<Vec<_>>();
+    if !diagnostic_lines.is_empty() {
+        let diagnostics = diagnostic_lines.join("\n");
+        let budget = max_chars.saturating_sub(diagnostics.len() + 64);
+        let keep = budget / 2;
+        if keep >= 80 && output.len() > keep * 2 {
+            let head_end = output.floor_char_boundary(keep);
+            let tail_start = output.ceil_char_boundary(output.len() - keep);
+            let head = &output[..head_end];
+            let tail = &output[tail_start..];
+            return format!(
+                "{head}\n\n[diagnostic lines preserved]\n{diagnostics}\n\n[... output compacted ...]\n\n{tail}"
+            );
+        }
+    }
+    let keep = max_chars / 2;
+    let head_end = output.floor_char_boundary(keep);
+    let tail_start = output.ceil_char_boundary(output.len() - keep);
+    let head = &output[..head_end];
+    let tail = &output[tail_start..];
+    let snipped = output.len() - max_chars;
+    format!("{head}\n\n[... {snipped} characters snipped ...]\n\n{tail}")
+}
+
+fn format_compaction_messages(messages: &[serde_json::Value]) -> String {
+    messages
+        .iter()
+        .map(|msg| {
+            let role = msg
+                .get("role")
+                .and_then(|v| v.as_str())
+                .unwrap_or("user")
+                .to_uppercase();
+            let content = msg
+                .get("content")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            format!("{role}: {content}")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn truncate_compaction_summary(
+    old_messages: &[serde_json::Value],
+    archived_count: usize,
+) -> String {
+    truncate_compaction_summary_with_context(old_messages, archived_count, false)
+}
+
+fn truncate_compaction_summary_with_context(
+    old_messages: &[serde_json::Value],
+    archived_count: usize,
+    is_llm_fallback: bool,
+) -> String {
+    let per_msg_limit = 500_usize;
+    let summary_parts: Vec<String> = old_messages
+        .iter()
+        .filter_map(|m| {
+            let role = m.get("role")?.as_str()?;
+            let content = m.get("content")?.as_str()?;
+            if content.is_empty() {
+                return None;
+            }
+            let truncated = if content.len() > per_msg_limit {
+                format!(
+                    "{}... [truncated from {} chars]",
+                    &content[..content.floor_char_boundary(per_msg_limit)],
+                    content.len()
+                )
+            } else {
+                content.to_string()
+            };
+            Some(format!("[{role}] {truncated}"))
+        })
+        .take(15)
+        .collect();
+    let header = if is_llm_fallback {
+        format!(
+            "[auto-compact fallback: LLM summarizer returned empty; {archived_count} older messages abbreviated to ~{per_msg_limit} chars each]"
+        )
+    } else {
+        format!("[auto-compacted {archived_count} older messages via truncate strategy]")
+    };
+    format!(
+        "{header}\n{}{}",
+        summary_parts.join("\n"),
+        if archived_count > 15 {
+            format!("\n... and {} more", archived_count - 15)
+        } else {
+            String::new()
+        }
+    )
+}
+
+fn compact_summary_text_from_value(value: &VmValue) -> Result<String, VmError> {
+    if let Some(map) = value.as_dict() {
+        if let Some(summary) = map.get("summary").or_else(|| map.get("text")) {
+            return Ok(summary.display());
+        }
+    }
+    match value {
+        VmValue::String(text) => Ok(text.to_string()),
+        VmValue::Nil => Ok(String::new()),
+        _ => serde_json::to_string_pretty(&vm_value_to_json(value))
+            .map_err(|e| VmError::Runtime(format!("custom compactor encode error: {e}"))),
+    }
+}
+
+async fn llm_compaction_summary(
+    old_messages: &[serde_json::Value],
+    archived_count: usize,
+    llm_opts: &crate::llm::api::LlmCallOptions,
+) -> Result<String, VmError> {
+    let mut compact_opts = llm_opts.clone();
+    let formatted = format_compaction_messages(old_messages);
+    compact_opts.system = None;
+    compact_opts.transcript_id = None;
+    compact_opts.transcript_summary = None;
+    compact_opts.transcript_metadata = None;
+    compact_opts.native_tools = None;
+    compact_opts.tool_choice = None;
+    compact_opts.response_format = None;
+    compact_opts.json_schema = None;
+    compact_opts.messages = vec![serde_json::json!({
+        "role": "user",
+        "content": format!(
+            "Summarize these archived conversation messages for a follow-on coding agent. Preserve goals, constraints, decisions, completed tool work, unresolved issues, and next actions. Output only the summary text.\n\nArchived message count: {archived_count}\n\nConversation:\n{formatted}"
+        ),
+    })];
+    let result = vm_call_llm_full(&compact_opts).await?;
+    let summary = result.text.trim();
+    if summary.is_empty() {
+        Ok(truncate_compaction_summary_with_context(
+            old_messages,
+            archived_count,
+            true,
+        ))
+    } else {
+        Ok(format!(
+            "[auto-compacted {archived_count} older messages]\n{summary}"
+        ))
+    }
+}
+
+async fn custom_compaction_summary(
+    old_messages: &[serde_json::Value],
+    archived_count: usize,
+    callback: &VmValue,
+) -> Result<String, VmError> {
+    let Some(VmValue::Closure(closure)) = Some(callback.clone()) else {
+        return Err(VmError::Runtime(
+            "compact_callback must be a closure when compact_strategy is 'custom'".to_string(),
+        ));
+    };
+    let mut vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
+        VmError::Runtime(
+            "custom transcript compaction requires an async builtin VM context".to_string(),
+        )
+    })?;
+    let messages_vm = VmValue::List(Rc::new(
+        old_messages
+            .iter()
+            .map(crate::stdlib::json_to_vm_value)
+            .collect(),
+    ));
+    let result = vm.call_closure_pub(&closure, &[messages_vm], &[]).await;
+    let summary = compact_summary_text_from_value(&result?)?;
+    if summary.trim().is_empty() {
+        Ok(truncate_compaction_summary(old_messages, archived_count))
+    } else {
+        Ok(format!(
+            "[auto-compacted {archived_count} older messages]\n{summary}"
+        ))
+    }
+}
+
+/// Check whether a tool-result string contains error signals that should
+/// be preserved verbatim during observation masking.
+fn content_has_error_signal(content: &str) -> bool {
+    let lower = content.to_ascii_lowercase();
+    lower.contains("error")
+        || lower.contains("fail")
+        || lower.contains("panic")
+        || lower.contains("non-zero exit")
+        || lower.contains("exit code")
+        || lower.contains("traceback")
+        || lower.contains("exception")
+}
+
+/// Default per-message masking for tool results.
+fn default_mask_tool_result(role: &str, content: &str) -> String {
+    let first_line = content.lines().next().unwrap_or(content);
+    let line_count = content.lines().count();
+    let char_count = content.len();
+    if line_count <= 3 {
+        format!("[{role}] {content}")
+    } else {
+        let preview = &first_line[..first_line.len().min(120)];
+        format!("[{role}] {preview}... [{line_count} lines, {char_count} chars masked]")
+    }
+}
+
+/// Deterministic observation-mask compaction.
+#[cfg(test)]
+pub(crate) fn observation_mask_compaction(
+    old_messages: &[serde_json::Value],
+    archived_count: usize,
+) -> String {
+    observation_mask_compaction_with_callback(old_messages, archived_count, None)
+}
+
+fn observation_mask_compaction_with_callback(
+    old_messages: &[serde_json::Value],
+    archived_count: usize,
+    mask_results: Option<&[Option<String>]>,
+) -> String {
+    let mut parts = Vec::new();
+    parts.push(format!(
+        "[auto-compacted {archived_count} older messages via observation masking]"
+    ));
+    for (idx, msg) in old_messages.iter().enumerate() {
+        let role = msg.get("role").and_then(|v| v.as_str()).unwrap_or("user");
+        let content = msg
+            .get("content")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        if content.is_empty() {
+            continue;
+        }
+        if role == "assistant" {
+            parts.push(format!("[assistant] {content}"));
+            continue;
+        }
+        if content_has_error_signal(content) {
+            parts.push(format!("[{role}] {content}"));
+        } else if let Some(Some(custom)) = mask_results.and_then(|r| r.get(idx)) {
+            parts.push(custom.clone());
+        } else {
+            parts.push(default_mask_tool_result(role, content));
+        }
+    }
+    parts.join("\n")
+}
+
+/// Invoke the mask_callback to get per-message custom masks.
+async fn invoke_mask_callback(
+    callback: &VmValue,
+    old_messages: &[serde_json::Value],
+) -> Result<Vec<Option<String>>, VmError> {
+    let VmValue::Closure(closure) = callback.clone() else {
+        return Err(VmError::Runtime(
+            "mask_callback must be a closure".to_string(),
+        ));
+    };
+    let mut vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
+        VmError::Runtime("mask_callback requires an async builtin VM context".to_string())
+    })?;
+    let messages_vm = VmValue::List(Rc::new(
+        old_messages
+            .iter()
+            .map(crate::stdlib::json_to_vm_value)
+            .collect(),
+    ));
+    let result = vm.call_closure_pub(&closure, &[messages_vm], &[]).await?;
+    let list = match result {
+        VmValue::List(items) => items,
+        _ => return Ok(vec![None; old_messages.len()]),
+    };
+    Ok(list
+        .iter()
+        .map(|v| match v {
+            VmValue::String(s) => Some(s.to_string()),
+            VmValue::Nil => None,
+            _ => None,
+        })
+        .collect())
+}
+
+/// Apply a single compaction strategy to a list of archived messages.
+async fn apply_compaction_strategy(
+    strategy: &CompactStrategy,
+    old_messages: &[serde_json::Value],
+    archived_count: usize,
+    llm_opts: Option<&crate::llm::api::LlmCallOptions>,
+    custom_compactor: Option<&VmValue>,
+    mask_callback: Option<&VmValue>,
+) -> Result<String, VmError> {
+    match strategy {
+        CompactStrategy::Truncate => Ok(truncate_compaction_summary(old_messages, archived_count)),
+        CompactStrategy::Llm => {
+            llm_compaction_summary(
+                old_messages,
+                archived_count,
+                llm_opts.ok_or_else(|| {
+                    VmError::Runtime(
+                        "LLM transcript compaction requires active LLM call options".to_string(),
+                    )
+                })?,
+            )
+            .await
+        }
+        CompactStrategy::Custom => {
+            custom_compaction_summary(
+                old_messages,
+                archived_count,
+                custom_compactor.ok_or_else(|| {
+                    VmError::Runtime(
+                        "compact_callback is required when compact_strategy is 'custom'"
+                            .to_string(),
+                    )
+                })?,
+            )
+            .await
+        }
+        CompactStrategy::ObservationMask => {
+            let mask_results = if let Some(cb) = mask_callback {
+                Some(invoke_mask_callback(cb, old_messages).await?)
+            } else {
+                None
+            };
+            Ok(observation_mask_compaction_with_callback(
+                old_messages,
+                archived_count,
+                mask_results.as_deref(),
+            ))
+        }
+    }
+}
+
+/// Auto-compact a message list in place using two-tier compaction.
+pub(crate) async fn auto_compact_messages(
+    messages: &mut Vec<serde_json::Value>,
+    config: &AutoCompactConfig,
+    llm_opts: Option<&crate::llm::api::LlmCallOptions>,
+) -> Result<Option<String>, VmError> {
+    if messages.len() <= config.keep_last {
+        return Ok(None);
+    }
+    let split_at = messages.len().saturating_sub(config.keep_last);
+    let old_messages: Vec<_> = messages.drain(..split_at).collect();
+    let archived_count = old_messages.len();
+
+    // Tier 1: lightweight compaction (with optional mask callback).
+    let mut summary = apply_compaction_strategy(
+        &config.compact_strategy,
+        &old_messages,
+        archived_count,
+        llm_opts,
+        config.custom_compactor.as_ref(),
+        config.mask_callback.as_ref(),
+    )
+    .await?;
+
+    // Tier 2: if hard limit set and still too large, apply aggressive strategy.
+    if let Some(hard_limit) = config.hard_limit_tokens {
+        let summary_msg = serde_json::json!({"role": "user", "content": &summary});
+        let mut estimate_msgs = vec![summary_msg];
+        estimate_msgs.extend_from_slice(messages.as_slice());
+        let estimated = estimate_message_tokens(&estimate_msgs);
+        if estimated > hard_limit {
+            let tier1_as_messages = vec![serde_json::json!({
+                "role": "user",
+                "content": summary,
+            })];
+            summary = apply_compaction_strategy(
+                &config.hard_limit_strategy,
+                &tier1_as_messages,
+                archived_count,
+                llm_opts,
+                config.custom_compactor.as_ref(),
+                None,
+            )
+            .await?;
+        }
+    }
+
+    messages.insert(
+        0,
+        serde_json::json!({
+            "role": "user",
+            "content": summary,
+        }),
+    );
+    Ok(Some(summary))
+}

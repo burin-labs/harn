@@ -1,0 +1,46 @@
+pipeline test(task) {
+  // Test 1: basic tool declaration
+  tool greet(name: string) -> string {
+    "Hello, " + name
+  }
+  // greet is bound as a tool registry dict
+  assert(tool_count(greet) == 1, "tool decl should create a registry with 1 tool")
+  let t = tool_find(greet, "greet")
+  assert(t != nil, "tool_find should find the tool")
+  assert(t.name == "greet", "tool name should match")
+  assert(t.parameters.name.type == "string", "param type should be string")
+  // Test 2: tool with description
+  tool read_file(path: string, _encoding: string) -> string {
+    description "Read a file from the filesystem"
+    "content of " + path
+  }
+  let rf = tool_find(read_file, "read_file")
+  assert(rf != nil, "tool_find should find read_file")
+  assert(rf.description == "Read a file from the filesystem", "description should match")
+  assert(rf.parameters.path.type == "string", "path param type should be string")
+  assert(rf.parameters._encoding.type == "string", "encoding param type should be string")
+  // Test 3: tool handler is callable (takes individual params, not a dict)
+  let handler = rf.handler
+  let result = handler("test.txt", "utf-8")
+  assert(result == "content of test.txt", "handler should execute tool body")
+  // Test 4: tool with int parameter type
+  tool add(a: int, b: int) -> int {
+    a + b
+  }
+  let add_tool = tool_find(add, "add")
+  assert(add_tool.parameters.a.type == "integer", "int maps to integer in JSON schema")
+  assert(add_tool.parameters.b.type == "integer", "int maps to integer in JSON schema")
+  // Test 5: tool with bool parameter
+  tool toggle(flag: bool) -> bool {
+    !flag
+  }
+  let toggle_tool = tool_find(toggle, "toggle")
+  assert(toggle_tool.parameters.flag.type == "boolean", "bool maps to boolean in JSON schema")
+  // Test 6: tool with float parameter
+  tool scale(factor: float) -> float {
+    factor * 2.0
+  }
+  let scale_tool = tool_find(scale, "scale")
+  assert(scale_tool.parameters.factor.type == "number", "float maps to number in JSON schema")
+  log("tool_decl tests passed")
+}

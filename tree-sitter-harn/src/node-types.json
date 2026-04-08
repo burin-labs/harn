@@ -572,6 +572,10 @@
           "named": true
         },
         {
+          "type": "tool_declaration",
+          "named": true
+        },
+        {
           "type": "try_catch_statement",
           "named": true
         },
@@ -747,6 +751,10 @@
         },
         {
           "type": "throw_statement",
+          "named": true
+        },
+        {
+          "type": "tool_declaration",
           "named": true
         },
         {
@@ -3887,6 +3895,10 @@
           "named": true
         },
         {
+          "type": "tool_declaration",
+          "named": true
+        },
+        {
           "type": "try_catch_statement",
           "named": true
         },
@@ -4171,6 +4183,10 @@
           "named": true
         },
         {
+          "type": "tool_declaration",
+          "named": true
+        },
+        {
           "type": "try_catch_statement",
           "named": true
         },
@@ -4452,6 +4468,10 @@
         },
         {
           "type": "throw_statement",
+          "named": true
+        },
+        {
+          "type": "tool_declaration",
           "named": true
         },
         {
@@ -6396,6 +6416,10 @@
           "named": true
         },
         {
+          "type": "tool_declaration",
+          "named": true
+        },
+        {
           "type": "try_catch_statement",
           "named": true
         },
@@ -7211,6 +7235,46 @@
         },
         {
           "type": "unary_expression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "tool_declaration",
+    "named": true,
+    "fields": {
+      "body": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "block",
+            "named": true
+          }
+        ]
+      },
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "parameter_list",
+          "named": true
+        },
+        {
+          "type": "type_annotation",
           "named": true
         }
       ]
@@ -8630,6 +8694,10 @@
   },
   {
     "type": "timeout",
+    "named": false
+  },
+  {
+    "type": "tool",
     "named": false
   },
   {

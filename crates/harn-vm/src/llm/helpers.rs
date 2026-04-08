@@ -899,6 +899,7 @@ pub(crate) fn extract_llm_options(args: &[VmValue]) -> Result<super::api::LlmCal
         opt_float(&options, "presence_penalty").or_else(|| default_float("presence_penalty"));
     let response_format = opt_str(&options, "response_format");
     let timeout = opt_int(&options, "timeout").map(|t| t as u64);
+    let idle_timeout = opt_int(&options, "idle_timeout").map(|t| t as u64);
     let cache = opt_bool(&options, "cache");
     let stream = options
         .as_ref()
@@ -1024,6 +1025,7 @@ pub(crate) fn extract_llm_options(args: &[VmValue]) -> Result<super::api::LlmCal
         tool_choice,
         cache,
         timeout,
+        idle_timeout,
         stream,
         provider_overrides,
     };
@@ -1051,7 +1053,10 @@ fn opt_str_list(options: &Option<BTreeMap<String, VmValue>>, key: &str) -> Optio
 fn validate_options(opts: &super::api::LlmCallOptions) {
     let p = opts.provider.as_str();
     let warn = |param: &str| {
-        eprintln!("[harn] warning: \"{param}\" is not supported by provider \"{p}\", ignoring");
+        crate::events::log_warn(
+            "llm",
+            &format!("\"{param}\" is not supported by provider \"{p}\", ignoring"),
+        );
     };
 
     match p {

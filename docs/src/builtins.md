@@ -937,6 +937,23 @@ as an MCP server using `harn mcp-serve`. The CLI serves them over stdio
 using the MCP protocol, making them callable by Claude Desktop, Cursor,
 or any MCP client.
 
+**Declarative syntax** (preferred):
+
+```harn
+tool greet(name: string) -> string {
+  description "Greet someone by name"
+  "Hello, " + name + "!"
+}
+```
+
+The `tool` keyword declares a tool with typed parameters, an optional
+description, and a body. Parameter types map to JSON Schema
+(`string` -> `"string"`, `int` -> `"integer"`, `float` -> `"number"`,
+`bool` -> `"boolean"`). Each `tool` declaration produces its own
+tool registry dict.
+
+**Programmatic API**:
+
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `tool_registry()` | — | dict | Create an empty tool registry |

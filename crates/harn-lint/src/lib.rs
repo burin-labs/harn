@@ -74,6 +74,10 @@ struct Linter<'a> {
     /// Whether the current function is inside an impl block.
     in_impl_block: bool,
     source: Option<&'a str>,
+    /// Function names imported by other files (cross-module analysis).
+    /// Functions in this set are not flagged as unused even if they have
+    /// no local references, because another file explicitly imports them.
+    externally_imported_names: HashSet<String>,
 }
 
 impl<'a> Linter<'a> {
@@ -94,6 +98,7 @@ impl<'a> Linter<'a> {
             function_references: HashSet::new(),
             in_impl_block: false,
             source,
+            externally_imported_names: HashSet::new(),
         }
     }
 
@@ -288,6 +293,31 @@ impl<'a> Linter<'a> {
                 self.push_scope();
                 let saved_loop_depth = self.loop_depth;
                 self.loop_depth = 0; // Functions are a new scope
+                for p in params {
+                    self.declare_parameter(&p.name, snode.span);
+                }
+                self.lint_block(body);
+                self.loop_depth = saved_loop_depth;
+                self.pop_scope();
+            }
+
+            Node::ToolDecl {
+                name,
+                params,
+                body,
+                is_pub,
+                ..
+            } => {
+                self.known_functions.insert(name.clone());
+                self.fn_declarations.push(FnDeclaration {
+                    name: name.clone(),
+                    span: snode.span,
+                    is_pub: *is_pub,
+                    is_method: false,
+                });
+                self.push_scope();
+                let saved_loop_depth = self.loop_depth;
+                self.loop_depth = 0;
                 for p in params {
                     self.declare_parameter(&p.name, snode.span);
                 }
@@ -955,6 +985,9 @@ impl<'a> Linter<'a> {
             if decl.is_pub || decl.is_method || decl.name.starts_with('_') {
                 continue;
             }
+            if self.externally_imported_names.contains(&decl.name) {
+                continue;
+            }
             if !self.function_references.contains(&decl.name) {
                 self.diagnostics.push(LintDiagnostic {
                     rule: "unused-function",
@@ -1062,7 +1095,31 @@ pub fn lint_with_config_and_source(
     disabled_rules: &[String],
     source: Option<&str>,
 ) -> Vec<LintDiagnostic> {
+    lint_full(program, disabled_rules, source, &HashSet::new())
+}
+
+/// Lint with cross-file import awareness.  `externally_imported_names` is the
+/// set of function names that other files import from this file — these are
+/// exempt from the unused-function lint even without local references.
+pub fn lint_with_cross_file_imports(
+    program: &[SNode],
+    disabled_rules: &[String],
+    source: Option<&str>,
+    externally_imported_names: &HashSet<String>,
+) -> Vec<LintDiagnostic> {
+    lint_full(program, disabled_rules, source, externally_imported_names)
+}
+
+fn lint_full(
+    program: &[SNode],
+    disabled_rules: &[String],
+    source: Option<&str>,
+    externally_imported_names: &HashSet<String>,
+) -> Vec<LintDiagnostic> {
     let mut linter = Linter::new(source);
+    linter
+        .externally_imported_names
+        .clone_from(externally_imported_names);
     linter.lint_program(program);
     linter.finalize();
     if disabled_rules.is_empty() {
@@ -1074,6 +1131,22 @@ pub fn lint_with_config_and_source(
             .filter(|d| !disabled_rules.iter().any(|r| r == d.rule))
             .collect()
     }
+}
+
+/// Extract all function names that appear in selective import statements
+/// (`import { foo, bar } from "module"`).  Used by the CLI to build a
+/// cross-file "externally imported" name set before linting.
+pub fn collect_selective_import_names(program: &[SNode]) -> HashSet<String> {
+    let mut names = HashSet::new();
+    for snode in program {
+        if let harn_parser::Node::SelectiveImport {
+            names: imported, ..
+        } = &snode.node
+        {
+            names.extend(imported.iter().cloned());
+        }
+    }
+    names
 }
 
 #[cfg(test)]
@@ -1845,5 +1918,63 @@ pipeline default(task) {
             has_rule(&diags, "unused-function"),
             "unused-function should still fire with wildcard imports: {diags:?}"
         );
+    }
+
+    #[test]
+    fn test_unused_function_suppressed_by_cross_file_imports() {
+        // When another file imports a function by name, it should not be
+        // flagged as unused even if it has no local references.
+        let source = r###"
+fn done_sentinel() { return "##DONE##" }
+fn truly_unused() { return 1 }
+"###;
+        let mut lexer = Lexer::new(source);
+        let tokens = lexer.tokenize().unwrap();
+        let mut parser = Parser::new(tokens);
+        let program = parser.parse().unwrap();
+
+        // Without cross-file info: both flagged
+        let diags = lint_with_config_and_source(&program, &[], Some(source));
+        assert_eq!(
+            count_rule(&diags, "unused-function"),
+            2,
+            "both functions should be flagged without cross-file info: {diags:?}"
+        );
+
+        // With cross-file info: only truly_unused flagged
+        let mut imported = HashSet::new();
+        imported.insert("done_sentinel".to_string());
+        let diags = lint_with_cross_file_imports(&program, &[], Some(source), &imported);
+        assert_eq!(
+            count_rule(&diags, "unused-function"),
+            1,
+            "only truly_unused should be flagged: {diags:?}"
+        );
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.rule == "unused-function" && d.message.contains("truly_unused")),
+            "the remaining warning should be for truly_unused: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_collect_selective_import_names() {
+        let source = r#"
+import { foo, bar } from "module_a"
+import { baz } from "module_b"
+import "wildcard_module"
+fn local() { return foo() + bar() + baz() }
+"#;
+        let mut lexer = Lexer::new(source);
+        let tokens = lexer.tokenize().unwrap();
+        let mut parser = Parser::new(tokens);
+        let program = parser.parse().unwrap();
+
+        let names = collect_selective_import_names(&program);
+        assert!(names.contains("foo"), "should contain foo");
+        assert!(names.contains("bar"), "should contain bar");
+        assert!(names.contains("baz"), "should contain baz");
+        assert_eq!(names.len(), 3, "should have exactly 3 names: {names:?}");
     }
 }

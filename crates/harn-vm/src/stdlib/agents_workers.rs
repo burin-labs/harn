@@ -818,7 +818,7 @@ async fn execute_worker_config(
                 ),
             );
             options.insert("delegated".to_string(), VmValue::Bool(true));
-            let result = super::execute_workflow(task, *graph, artifacts, options).await;
+            let result = super::workflow::execute_workflow(task, *graph, artifacts, options).await;
             crate::stdlib::process::set_thread_execution_context(None);
             cleanup_worker_execution(&execution);
             let result = result?;

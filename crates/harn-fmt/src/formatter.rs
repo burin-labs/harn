@@ -219,6 +219,32 @@ impl Formatter {
                 self.dedent();
                 self.writeln("}");
             }
+            Node::ToolDecl {
+                name,
+                description,
+                params,
+                return_type,
+                body,
+                is_pub,
+            } => {
+                let pub_prefix = if *is_pub { "pub " } else { "" };
+                let ret = if let Some(rt) = return_type {
+                    format!(" -> {}", format_type_expr(rt))
+                } else {
+                    String::new()
+                };
+                let prefix_len = self.indent * 2 + pub_prefix.len() + 5 + name.len() + 1;
+                let params_str = self.format_typed_params_wrapped(params, prefix_len);
+                self.writeln(&format!("{pub_prefix}tool {name}({params_str}){ret} {{"));
+                self.indent();
+                if let Some(desc) = description {
+                    let escaped = escape_string(desc);
+                    self.writeln(&format!("description \"{escaped}\""));
+                }
+                self.format_body(body, node_line);
+                self.dedent();
+                self.writeln("}");
+            }
             Node::IfElse {
                 condition,
                 then_body,
@@ -955,6 +981,36 @@ impl Formatter {
                 );
                 self.format_block_expr(&format!("{sig} {{"), body)
             }
+            Node::ToolDecl {
+                name,
+                description,
+                params,
+                return_type,
+                body,
+                is_pub,
+            } => {
+                let pub_prefix = if *is_pub { "pub " } else { "" };
+                let ret = if let Some(rt) = return_type {
+                    format!(" -> {}", format_type_expr(rt))
+                } else {
+                    String::new()
+                };
+                let prefix_len = self.indent * 2 + pub_prefix.len() + 5 + name.len() + 1;
+                let params_str = self.format_typed_params_wrapped(params, prefix_len);
+                let mut effective_body = Vec::new();
+                if let Some(desc) = description {
+                    let escaped = escape_string(desc);
+                    effective_body.push(harn_parser::Spanned::dummy(Node::FunctionCall {
+                        name: "description".to_string(),
+                        args: vec![harn_parser::Spanned::dummy(Node::StringLiteral(escaped))],
+                    }));
+                }
+                effective_body.extend(body.iter().cloned());
+                self.format_block_expr(
+                    &format!("{pub_prefix}tool {name}({params_str}){ret} {{"),
+                    &effective_body,
+                )
+            }
             Node::LetBinding {
                 pattern,
                 type_ann,
@@ -1158,6 +1214,37 @@ impl Formatter {
                     indent_level,
                 );
                 self.format_block_at(&format!("{sig} {{"), body, indent_level)
+            }
+            Node::ToolDecl {
+                name,
+                description,
+                params,
+                return_type,
+                body,
+                is_pub,
+            } => {
+                let pub_prefix = if *is_pub { "pub " } else { "" };
+                let ret = if let Some(rt) = return_type {
+                    format!(" -> {}", format_type_expr(rt))
+                } else {
+                    String::new()
+                };
+                let prefix_len = indent_level * 2 + pub_prefix.len() + 5 + name.len() + 1;
+                let params_str = self.format_typed_params_wrapped(params, prefix_len);
+                let mut effective_body = Vec::new();
+                if let Some(desc) = description {
+                    let escaped = escape_string(desc);
+                    effective_body.push(harn_parser::Spanned::dummy(Node::FunctionCall {
+                        name: "description".to_string(),
+                        args: vec![harn_parser::Spanned::dummy(Node::StringLiteral(escaped))],
+                    }));
+                }
+                effective_body.extend(body.iter().cloned());
+                self.format_block_at(
+                    &format!("{pub_prefix}tool {name}({params_str}){ret} {{"),
+                    &effective_body,
+                    indent_level,
+                )
             }
             Node::LetBinding {
                 pattern,

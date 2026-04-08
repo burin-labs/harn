@@ -174,6 +174,7 @@ module.exports = grammar({
         $.return_statement,
         $.throw_statement,
         $.fn_declaration,
+        $.tool_declaration,
         $.override_declaration,
         $.enum_declaration,
         $.struct_declaration,
@@ -373,6 +374,18 @@ module.exports = grammar({
         ")",
         optional(seq("->", $.type_annotation)),
         optional($.where_clause),
+        field("body", $.block)
+      ),
+
+    tool_declaration: ($) =>
+      seq(
+        optional("pub"),
+        "tool",
+        field("name", $.identifier),
+        "(",
+        optional($.parameter_list),
+        ")",
+        optional(seq("->", $.type_annotation)),
         field("body", $.block)
       ),
 

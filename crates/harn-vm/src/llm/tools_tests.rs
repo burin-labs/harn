@@ -338,7 +338,7 @@ fn rejects_legacy_named_argument_call_form() {
 #[test]
 fn contract_prompt_renders_edit_signature_with_enum_and_required_markers() {
     let tools = sample_tool_registry();
-    let prompt = build_tool_calling_contract_prompt(Some(&tools), None, "text", true);
+    let prompt = build_tool_calling_contract_prompt(Some(&tools), None, "text", true, None);
     // TypeScript declaration header.
     assert!(
         prompt.contains("declare function edit(args:"),
@@ -383,9 +383,43 @@ fn contract_prompt_help_block_has_ts_call_example() {
 #[test]
 fn contract_prompt_native_mode_omits_text_help() {
     let tools = sample_tool_registry();
-    let prompt = build_tool_calling_contract_prompt(Some(&tools), None, "native", true);
+    let prompt = build_tool_calling_contract_prompt(Some(&tools), None, "native", true, None);
     assert!(prompt.contains("native tool-calling channel"));
     assert!(!prompt.contains("How to call tools"));
+}
+
+#[test]
+fn contract_prompt_includes_tool_examples_before_schemas() {
+    let tools = sample_tool_registry();
+    let examples = "read({ path: \"src/main.rs\" })\n\nedit({ action: \"create\", path: \"test.rs\", content: <<EOF\nfn main() {}\nEOF\n})";
+    let prompt =
+        build_tool_calling_contract_prompt(Some(&tools), None, "text", true, Some(examples));
+    // Examples section is present.
+    assert!(
+        prompt.contains("## Tool call examples"),
+        "missing examples header: {prompt}"
+    );
+    assert!(
+        prompt.contains("read({ path: \"src/main.rs\" })"),
+        "missing example content: {prompt}"
+    );
+    // Examples appear BEFORE the tool schemas.
+    let examples_pos = prompt.find("Tool call examples").unwrap();
+    let schemas_pos = prompt.find("Available tools").unwrap();
+    assert!(
+        examples_pos < schemas_pos,
+        "examples ({examples_pos}) should appear before schemas ({schemas_pos})"
+    );
+}
+
+#[test]
+fn contract_prompt_omits_examples_section_when_none() {
+    let tools = sample_tool_registry();
+    let prompt = build_tool_calling_contract_prompt(Some(&tools), None, "text", true, None);
+    assert!(
+        !prompt.contains("Tool call examples"),
+        "should not have examples section when None"
+    );
 }
 
 // ─── $ref / ComponentRegistry ───────────────────────────────────────────────
@@ -422,7 +456,7 @@ fn native_schema_ref_resolves_to_component_alias() {
         "expected type alias for FilePath: {aliases}"
     );
     // The signature for `touch` should reference `FilePath` by name.
-    let prompt = build_tool_calling_contract_prompt(None, Some(&native_tools), "text", false);
+    let prompt = build_tool_calling_contract_prompt(None, Some(&native_tools), "text", false, None);
     assert!(
         prompt.contains("type FilePath = string;"),
         "prompt missing alias: {prompt}"

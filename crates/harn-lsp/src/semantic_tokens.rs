@@ -83,6 +83,7 @@ fn token_kind_to_semantic(kind: &TokenKind) -> Option<u32> {
         | TokenKind::Pub
         | TokenKind::From
         | TokenKind::Thru
+        | TokenKind::Tool
         | TokenKind::Upto
         | TokenKind::Guard
         | TokenKind::Require

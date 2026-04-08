@@ -361,8 +361,10 @@ fn dirs_or_home() -> Option<String> {
 pub fn resolve_base_url(pdef: &ProviderDef) -> String {
     if let Some(env_name) = &pdef.base_url_env {
         if let Ok(val) = std::env::var(env_name) {
-            if !val.is_empty() {
-                return val;
+            // Strip surrounding quotes that some .env parsers leave intact.
+            let trimmed = val.trim().trim_matches('"').trim_matches('\'');
+            if !trimmed.is_empty() {
+                return trimmed.to_string();
             }
         }
     }
@@ -476,6 +478,26 @@ fn default_config() -> ProvidersConfig {
             healthcheck: Some(HealthcheckDef {
                 method: "GET".to_string(),
                 path: Some("/api/tags".to_string()),
+                url: None,
+                body: None,
+            }),
+            ..Default::default()
+        },
+    );
+
+    // Together AI (OpenAI-compatible)
+    config.providers.insert(
+        "together".to_string(),
+        ProviderDef {
+            base_url: "https://api.together.xyz/v1".to_string(),
+            base_url_env: Some("TOGETHER_AI_BASE_URL".to_string()),
+            auth_style: "bearer".to_string(),
+            auth_env: AuthEnv::Single("TOGETHER_AI_API_KEY".to_string()),
+            chat_endpoint: "/chat/completions".to_string(),
+            completion_endpoint: Some("/completions".to_string()),
+            healthcheck: Some(HealthcheckDef {
+                method: "GET".to_string(),
+                path: Some("/models".to_string()),
                 url: None,
                 body: None,
             }),
@@ -683,8 +705,9 @@ mod tests {
     #[test]
     fn test_provider_names() {
         let names = provider_names();
-        assert!(names.len() >= 6);
+        assert!(names.len() >= 7);
         assert!(names.contains(&"anthropic".to_string()));
+        assert!(names.contains(&"together".to_string()));
         assert!(names.contains(&"local".to_string()));
         assert!(names.contains(&"openai".to_string()));
         assert!(names.contains(&"ollama".to_string()));

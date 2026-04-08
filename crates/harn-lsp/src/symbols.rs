@@ -227,6 +227,47 @@ fn collect_symbols(
                 recurse!(s, Some(snode.span));
             }
         }
+        Node::ToolDecl {
+            name,
+            params,
+            return_type,
+            body,
+            ..
+        } => {
+            let params_str = params
+                .iter()
+                .map(format_param)
+                .collect::<Vec<_>>()
+                .join(", ");
+            let ret_str = match return_type {
+                Some(t) => format!(" -> {}", format_type(t)),
+                None => String::new(),
+            };
+            let sig = format!("tool {name}({params_str}){ret_str}");
+            symbols.push(SymbolInfo {
+                name: name.clone(),
+                kind: HarnSymbolKind::Function,
+                def_span: snode.span,
+                type_info: return_type.clone(),
+                signature: Some(sig),
+                scope_span,
+                doc_comment: extract_doc_comment(source, &snode.span),
+                impl_type: None,
+            });
+            for p in params {
+                symbols.push(simple_sym!(
+                    p.name.clone(),
+                    HarnSymbolKind::Parameter,
+                    snode.span,
+                    p.type_expr.clone(),
+                    None,
+                    Some(snode.span)
+                ));
+            }
+            for s in body {
+                recurse!(s, Some(snode.span));
+            }
+        }
         Node::LetBinding {
             pattern,
             type_ann,

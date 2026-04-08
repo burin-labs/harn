@@ -1106,11 +1106,29 @@ pub(crate) fn build_tool_calling_contract_prompt(
     native_tools: Option<&[serde_json::Value]>,
     mode: &str,
     include_format: bool,
+    tool_examples: Option<&str>,
 ) -> String {
     let mut prompt = String::from("\n\n## Tool Calling Contract\n");
     prompt.push_str(&format!(
         "Active mode: `{mode}`. Follow this runtime-owned contract even if older prompt text suggests another tool syntax.\n\n"
     ));
+
+    // Front-load format instructions and examples BEFORE schemas so that
+    // weaker models encounter the calling convention early, while attention
+    // is strongest.
+    if mode == "native" {
+        prompt.push_str("Use the provider's native tool-calling channel for tool invocations.\n\n");
+    } else if include_format {
+        prompt.push_str(TS_CALL_CONTRACT_HELP);
+        if let Some(examples) = tool_examples {
+            let trimmed = examples.trim();
+            if !trimmed.is_empty() {
+                prompt.push_str("\n## Tool call examples\n\n");
+                prompt.push_str(trimmed);
+                prompt.push_str("\n\n");
+            }
+        }
+    }
 
     let (schemas, registry) = collect_tool_schemas_with_registry(tools_val, native_tools);
 
@@ -1206,12 +1224,6 @@ pub(crate) fn build_tool_calling_contract_prompt(
             ));
         }
         prompt.push('\n');
-    }
-
-    if mode == "native" {
-        prompt.push_str("Use the provider's native tool-calling channel for tool invocations.\n");
-    } else if include_format {
-        prompt.push_str(TS_CALL_CONTRACT_HELP);
     }
 
     prompt

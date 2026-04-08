@@ -129,6 +129,14 @@ pub enum Node {
         body: Vec<SNode>,
         is_pub: bool,
     },
+    ToolDecl {
+        name: String,
+        description: Option<String>,
+        params: Vec<TypedParam>,
+        return_type: Option<TypeExpr>,
+        body: Vec<SNode>,
+        is_pub: bool,
+    },
     TypeDecl {
         name: String,
         type_expr: TypeExpr,

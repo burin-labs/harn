@@ -61,29 +61,24 @@ println(result.visible_text)
 Persistent agent loop with tools:
 
 ```harn
-fn coding_tools() {
-  var tools = tool_registry()
-  tools = tool_define(tools, "read", "Read a file", {
-    parameters: {path: {type: "string", description: "Path to read"}},
-    returns: {type: "string"},
-    handler: nil,
-  })
-  tools = tool_define(tools, "search", "Search project files", {
-    parameters: {pattern: {type: "string", description: "Pattern to search"}},
-    returns: {type: "string"},
-    handler: nil,
-  })
-  tools = tool_define(tools, "edit", "Edit a file", {
-    parameters: {path: {type: "string", description: "Path to edit"}},
-    returns: {type: "string"},
-    handler: nil,
-  })
-  tools = tool_define(tools, "run", "Run a command", {
-    parameters: {command: {type: "string", description: "Command to run"}},
-    returns: {type: "string"},
-    handler: nil,
-  })
-  return tools
+tool read(path: string) -> string {
+  description "Read a file"
+  read_file(path)
+}
+
+tool search(pattern: string) -> string {
+  description "Search project files"
+  shell("rg " + pattern)
+}
+
+tool edit(path: string, content: string) -> string {
+  description "Edit a file"
+  write_file(path, content)
+}
+
+tool run(command: string) -> string {
+  description "Run a command"
+  shell(command)
 }
 
 let result = agent_loop(
@@ -91,7 +86,7 @@ let result = agent_loop(
   "You are a senior engineer.",
   {
     persistent: true,
-    tools: coding_tools(),
+    tools: read,
     max_iterations: 24
   }
 )
@@ -100,9 +95,10 @@ println(result.status)
 println(result.visible_text)
 ```
 
-`tool_define(...)` also preserves extra config keys such as `policy`, so
-workflow runtimes can enforce capability metadata attached directly to the tool
-registry instead of duplicating the same ceilings in separate node config.
+The `tool` keyword declares tools with typed parameters and optional
+descriptions. For programmatic tool registration, use `tool_define(...)`,
+which also preserves extra config keys such as `policy` for capability
+enforcement.
 
 ## Core Capabilities
 

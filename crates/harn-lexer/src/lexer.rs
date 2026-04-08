@@ -558,6 +558,7 @@ impl Lexer {
             "pub" => TokenKind::Pub,
             "from" => TokenKind::From,
             "thru" => TokenKind::Thru,
+            "tool" => TokenKind::Tool,
             "upto" => TokenKind::Upto,
             "guard" => TokenKind::Guard,
             "require" => TokenKind::Require,

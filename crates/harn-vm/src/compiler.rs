@@ -1255,6 +1255,102 @@ impl Compiler {
                 self.chunk.emit_u16(Op::DefLet, name_idx, self.line);
             }
 
+            Node::ToolDecl {
+                name,
+                description,
+                params,
+                return_type: _,
+                body,
+                ..
+            } => {
+                // 1. Compile the body as a closure (same as FnDecl)
+                let mut fn_compiler = Compiler::new();
+                fn_compiler.enum_names = self.enum_names.clone();
+                fn_compiler.emit_default_preamble(params)?;
+                fn_compiler.emit_type_checks(params);
+                fn_compiler.compile_block(body)?;
+                // Use closure-like return: the last expression value is the return value
+                fn_compiler.chunk.emit(Op::Return, self.line);
+
+                let func = CompiledFunction {
+                    name: name.clone(),
+                    params: TypedParam::names(params),
+                    default_start: TypedParam::default_start(params),
+                    chunk: fn_compiler.chunk,
+                    is_generator: false,
+                };
+                let fn_idx = self.chunk.functions.len();
+                self.chunk.functions.push(func);
+
+                // 2. Push "tool_define" function name (Call convention: fn first, then args)
+                let define_name = self
+                    .chunk
+                    .add_constant(Constant::String("tool_define".into()));
+                self.chunk.emit_u16(Op::Constant, define_name, self.line);
+
+                // 3. Arg 1: tool_registry()
+                let reg_name = self
+                    .chunk
+                    .add_constant(Constant::String("tool_registry".into()));
+                self.chunk.emit_u16(Op::Constant, reg_name, self.line);
+                self.chunk.emit_u8(Op::Call, 0, self.line);
+
+                // 4. Arg 2: tool name string
+                let tool_name_idx = self.chunk.add_constant(Constant::String(name.clone()));
+                self.chunk.emit_u16(Op::Constant, tool_name_idx, self.line);
+
+                // 5. Arg 3: description string
+                let desc = description.as_deref().unwrap_or("");
+                let desc_idx = self.chunk.add_constant(Constant::String(desc.to_string()));
+                self.chunk.emit_u16(Op::Constant, desc_idx, self.line);
+
+                // 6. Arg 4: config dict { parameters: {...}, handler: <closure> }
+                // Build parameters dict: { param_name: { type: "<json_type>" }, ... }
+                let mut param_count: u16 = 0;
+                for p in params {
+                    let pn_idx = self.chunk.add_constant(Constant::String(p.name.clone()));
+                    self.chunk.emit_u16(Op::Constant, pn_idx, self.line);
+
+                    let type_str = match &p.type_expr {
+                        Some(harn_parser::TypeExpr::Named(n)) => match n.as_str() {
+                            "string" => "string",
+                            "int" => "integer",
+                            "float" => "number",
+                            "bool" => "boolean",
+                            _ => "string",
+                        },
+                        _ => "string",
+                    };
+                    let type_key = self.chunk.add_constant(Constant::String("type".into()));
+                    self.chunk.emit_u16(Op::Constant, type_key, self.line);
+                    let type_val = self.chunk.add_constant(Constant::String(type_str.into()));
+                    self.chunk.emit_u16(Op::Constant, type_val, self.line);
+                    self.chunk.emit_u16(Op::BuildDict, 1, self.line);
+                    param_count += 1;
+                }
+                self.chunk.emit_u16(Op::BuildDict, param_count, self.line);
+
+                // Build config dict: { "parameters": <params_dict>, "handler": <closure> }
+                let params_key = self
+                    .chunk
+                    .add_constant(Constant::String("parameters".into()));
+                self.chunk.emit_u16(Op::Constant, params_key, self.line);
+                self.chunk.emit(Op::Swap, self.line);
+
+                let handler_key = self.chunk.add_constant(Constant::String("handler".into()));
+                self.chunk.emit_u16(Op::Constant, handler_key, self.line);
+                self.chunk.emit_u16(Op::Closure, fn_idx as u16, self.line);
+
+                self.chunk.emit_u16(Op::BuildDict, 2, self.line);
+
+                // 7. Call tool_define(registry, name, description, config)
+                self.chunk.emit_u8(Op::Call, 4, self.line);
+
+                // 8. Bind the result (the registry with the tool) as a let variable
+                let bind_idx = self.chunk.add_constant(Constant::String(name.clone()));
+                self.chunk.emit_u16(Op::DefLet, bind_idx, self.line);
+            }
+
             Node::Closure { params, body, .. } => {
                 let mut fn_compiler = Compiler::new();
                 fn_compiler.enum_names = self.enum_names.clone();
@@ -2502,6 +2598,7 @@ impl Compiler {
             | Node::Assignment { .. }
             | Node::ReturnStmt { .. }
             | Node::FnDecl { .. }
+            | Node::ToolDecl { .. }
             | Node::ImplBlock { .. }
             | Node::StructDecl { .. }
             | Node::EnumDecl { .. }
@@ -2612,6 +2709,7 @@ impl Compiler {
             if matches!(
                 &sn.node,
                 Node::FnDecl { .. }
+                    | Node::ToolDecl { .. }
                     | Node::ImplBlock { .. }
                     | Node::StructDecl { .. }
                     | Node::EnumDecl { .. }
@@ -2636,7 +2734,7 @@ impl Compiler {
                 Node::Pipeline { body, .. } => {
                     Self::collect_enum_names(body, names);
                 }
-                Node::FnDecl { body, .. } => {
+                Node::FnDecl { body, .. } | Node::ToolDecl { body, .. } => {
                     Self::collect_enum_names(body, names);
                 }
                 Node::Block(stmts) => {
@@ -2658,7 +2756,9 @@ impl Compiler {
                         methods.iter().map(|m| m.name.clone()).collect();
                     interfaces.insert(name.clone(), method_names);
                 }
-                Node::Pipeline { body, .. } | Node::FnDecl { body, .. } => {
+                Node::Pipeline { body, .. }
+                | Node::FnDecl { body, .. }
+                | Node::ToolDecl { body, .. } => {
                     Self::collect_interface_methods(body, interfaces);
                 }
                 Node::Block(stmts) => {

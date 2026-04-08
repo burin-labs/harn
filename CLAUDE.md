@@ -134,13 +134,21 @@ hardcoded name list.
 ### Runtime modules worth knowing
 
 - `crates/harn-vm/src/llm/`
-  provider clients, response normalization, transcript helpers,
-  agent loops, tool handling, replay fixtures.
-- `crates/harn-vm/src/orchestration.rs`
-  workflow graphs, artifact records, capability policies,
+  provider clients, provider trait (`provider.rs`, `providers/`),
+  response normalization, transcript helpers, agent loops, tool
+  handling, replay fixtures.
+- `crates/harn-vm/src/orchestration/`
+  module directory: artifacts, compaction, hooks, policy, records,
+  workflow. Workflow graphs, artifact records, capability policies,
   run records, validation, execution helpers.
+- `crates/harn-vm/src/events.rs`
+  structured observability events (EventSink trait, StderrSink).
 - `crates/harn-vm/src/stdlib/agents.rs`
-  Harn-facing orchestration builtins.
+  Harn-facing agent/LLM builtins (worker lifecycle, spawn/wait).
+- `crates/harn-vm/src/stdlib/workflow.rs`
+  workflow graph/execution builtins.
+- `crates/harn-vm/src/stdlib/records.rs`
+  run-record and artifact builtins.
 - `crates/harn-vm/src/bridge.rs`
   host bridge, JSON-RPC integration, queued user messages.
 - `crates/harn-vm/src/llm/conversation.rs`

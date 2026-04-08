@@ -436,6 +436,30 @@ impl TypeChecker {
                 self.check_fn_body(type_params, params, return_type, body, where_clauses);
             }
 
+            Node::ToolDecl {
+                name,
+                params,
+                return_type,
+                body,
+                ..
+            } => {
+                // Register the tool like a function for type checking purposes
+                let required_params = params.iter().filter(|p| p.default_value.is_none()).count();
+                let sig = FnSignature {
+                    params: params
+                        .iter()
+                        .map(|p| (p.name.clone(), p.type_expr.clone()))
+                        .collect(),
+                    return_type: return_type.clone(),
+                    type_param_names: Vec::new(),
+                    required_params,
+                    where_clauses: Vec::new(),
+                };
+                scope.define_fn(name, sig);
+                scope.define_var(name, None);
+                self.check_fn_body(&[], params, return_type, body, &[]);
+            }
+
             Node::FunctionCall { name, args } => {
                 self.check_call(name, args, scope, span);
             }

@@ -926,6 +926,10 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Union(UNION_STRING_NIL)),
     },
     BuiltinSig {
+        name: "provider_register",
+        return_type: Some(BuiltinReturn::Named("bool")),
+    },
+    BuiltinSig {
         name: "random",
         return_type: Some(BuiltinReturn::Named("float")),
     },

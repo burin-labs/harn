@@ -9,8 +9,8 @@ pipeline default() {
   let tools = mcp_list_tools(client)
   println(tools.count)
   // Get tool names
-  for tool in tools {
-    println(tool.name)
+  for t in tools {
+    println(t.name)
   }
   // Call echo tool
   let result = mcp_call(client, "echo", {message: "hello from harn"})

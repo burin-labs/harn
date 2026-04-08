@@ -145,6 +145,7 @@ impl Parser {
                     | TokenKind::Deadline
                     | TokenKind::Yield
                     | TokenKind::Mutex
+                    | TokenKind::Tool
             )
         )
     }
@@ -294,6 +295,7 @@ impl Parser {
             TokenKind::Try => self.parse_try_catch(),
             TokenKind::Select => self.parse_select(),
             TokenKind::Fn => self.parse_fn_decl_with_pub(false),
+            TokenKind::Tool => self.parse_tool_decl(false),
             TokenKind::Pub => {
                 self.advance(); // consume 'pub'
                 let tok = self.current().ok_or_else(|| ParserError::UnexpectedEof {
@@ -302,10 +304,11 @@ impl Parser {
                 })?;
                 match &tok.kind {
                     TokenKind::Fn => self.parse_fn_decl_with_pub(true),
+                    TokenKind::Tool => self.parse_tool_decl(true),
                     TokenKind::Pipeline => self.parse_pipeline_with_pub(true),
                     TokenKind::Enum => self.parse_enum_decl_with_pub(true),
                     TokenKind::Struct => self.parse_struct_decl_with_pub(true),
-                    _ => Err(self.error("fn, struct, enum, or pipeline after pub")),
+                    _ => Err(self.error("fn, tool, struct, enum, or pipeline after pub")),
                 }
             }
             TokenKind::TypeKw => self.parse_type_decl(),
@@ -883,6 +886,60 @@ impl Parser {
                 params,
                 return_type,
                 where_clauses,
+                body,
+                is_pub,
+            },
+            Span::merge(start, self.prev_span()),
+        ))
+    }
+
+    fn parse_tool_decl(&mut self, is_pub: bool) -> Result<SNode, ParserError> {
+        let start = self.current_span();
+        self.consume(&TokenKind::Tool, "tool")?;
+        let name = self.consume_identifier("tool name")?;
+
+        self.consume(&TokenKind::LParen, "(")?;
+        let params = self.parse_typed_param_list()?;
+        self.consume(&TokenKind::RParen, ")")?;
+
+        // Optional return type: -> type
+        let return_type = if self.check(&TokenKind::Arrow) {
+            self.advance();
+            Some(self.parse_type_expr()?)
+        } else {
+            None
+        };
+
+        self.consume(&TokenKind::LBrace, "{")?;
+
+        // Check for optional `description "..."` metadata before the body.
+        self.skip_newlines();
+        let mut description = None;
+        if let Some(TokenKind::Identifier(id)) = self.current_kind().cloned() {
+            if id == "description" {
+                // Peek ahead to see if next non-newline token is a string literal
+                let saved_pos = self.pos;
+                self.advance(); // consume "description"
+                self.skip_newlines();
+                if let Some(TokenKind::StringLiteral(s)) = self.current_kind().cloned() {
+                    description = Some(s);
+                    self.advance(); // consume the string literal
+                } else {
+                    // Not a description metadata, rewind
+                    self.pos = saved_pos;
+                }
+            }
+        }
+
+        let body = self.parse_block()?;
+        self.consume(&TokenKind::RBrace, "}")?;
+
+        Ok(spanned(
+            Node::ToolDecl {
+                name,
+                description,
+                params,
+                return_type,
                 body,
                 is_pub,
             },
@@ -2360,7 +2417,20 @@ impl Parser {
             self.advance();
             Ok(name)
         } else {
-            Err(self.make_error(expected))
+            // Produce a clearer error when a reserved keyword is used where
+            // an identifier is expected (e.g. `for tool in list`).
+            let kw_name = harn_lexer::KEYWORDS
+                .iter()
+                .find(|&&kw| kw == tok.kind.to_string());
+            if let Some(kw) = kw_name {
+                Err(ParserError::Unexpected {
+                    got: format!("'{kw}' (reserved keyword)"),
+                    expected: expected.into(),
+                    span: tok.span,
+                })
+            } else {
+                Err(self.make_error(expected))
+            }
         }
     }
 
@@ -2409,6 +2479,7 @@ impl Parser {
             TokenKind::Pub => "pub",
             TokenKind::From => "from",
             TokenKind::Thru => "thru",
+            TokenKind::Tool => "tool",
             TokenKind::Upto => "upto",
             TokenKind::Guard => "guard",
             TokenKind::Ask => "ask",

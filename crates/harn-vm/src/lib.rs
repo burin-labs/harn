@@ -4,6 +4,7 @@ pub mod bridge;
 pub mod checkpoint;
 mod chunk;
 mod compiler;
+pub mod events;
 mod http;
 pub mod llm;
 pub mod llm_config;
@@ -45,4 +46,5 @@ pub fn reset_thread_local_state() {
     llm::reset_llm_state();
     http::reset_http_state();
     stdlib::reset_stdlib_state();
+    events::reset_event_sinks();
 }

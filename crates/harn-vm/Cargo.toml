@@ -6,6 +6,10 @@ license.workspace = true
 repository.workspace = true
 description = "Async bytecode virtual machine for the Harn programming language"
 
+[features]
+default = []
+otel = ["opentelemetry", "opentelemetry_sdk", "opentelemetry-otlp"]
+
 [dependencies]
 harn-lexer = { path = "../harn-lexer", version = "0.5" }
 harn-parser = { path = "../harn-parser", version = "0.5" }
@@ -25,3 +29,6 @@ serde_path_to_error = "0.1"
 uuid = { version = "1", features = ["v7"] }
 tokio-util = { version = "0.7", features = ["io"] }
 futures = "0.3.32"
+opentelemetry = { version = "0.24", optional = true }
+opentelemetry_sdk = { version = "0.24", optional = true, features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.17", optional = true }

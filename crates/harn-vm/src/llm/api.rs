@@ -67,12 +67,30 @@ pub(crate) struct LlmCallOptions {
 
     // --- Transport ---
     pub timeout: Option<u64>,
+    /// Per-chunk idle timeout for streaming responses (seconds).
+    pub idle_timeout: Option<u64>,
     /// When true, use streaming SSE transport (token-by-token deltas).
     /// When false, use synchronous request/response. Default: true.
     pub stream: bool,
 
     // --- Provider-specific overrides ---
     pub provider_overrides: Option<serde_json::Value>,
+}
+
+/// Resolve effective request timeout: explicit value > `HARN_LLM_TIMEOUT` env > 120s default.
+fn resolve_timeout(explicit: Option<u64>) -> u64 {
+    explicit.unwrap_or_else(|| {
+        std::env::var("HARN_LLM_TIMEOUT")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(120)
+    })
+}
+
+impl LlmCallOptions {
+    pub(crate) fn resolve_timeout(&self) -> u64 {
+        resolve_timeout(self.timeout)
+    }
 }
 
 /// Send-safe subset of `LlmCallOptions` used for provider transport.
@@ -100,6 +118,12 @@ pub(crate) struct LlmRequestPayload {
     pub timeout: Option<u64>,
     pub stream: bool,
     pub provider_overrides: Option<serde_json::Value>,
+}
+
+impl LlmRequestPayload {
+    pub(crate) fn resolve_timeout(&self) -> u64 {
+        resolve_timeout(self.timeout)
+    }
 }
 
 impl From<&LlmCallOptions> for LlmRequestPayload {
@@ -479,17 +503,8 @@ async fn vm_call_completion_openai_style(
     prefix: &str,
     suffix: Option<&str>,
 ) -> Result<LlmResult, VmError> {
-    let llm_timeout = opts.timeout.unwrap_or_else(|| {
-        std::env::var("HARN_LLM_TIMEOUT")
-            .ok()
-            .and_then(|v| v.parse::<u64>().ok())
-            .unwrap_or(120)
-    });
-    let client = reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(30))
-        .timeout(std::time::Duration::from_secs(llm_timeout))
-        .build()
-        .unwrap_or_else(|_| reqwest::Client::new());
+    let llm_timeout = opts.resolve_timeout();
+    let client = super::shared_blocking_client().clone();
 
     let pdef = crate::llm_config::provider_config(&opts.provider);
     let base_url = pdef
@@ -530,6 +545,7 @@ async fn vm_call_completion_openai_style(
     let req = client
         .post(format!("{base_url}{endpoint}"))
         .header("Content-Type", "application/json")
+        .timeout(std::time::Duration::from_secs(llm_timeout))
         .json(&body);
     let req = apply_auth_headers(req, &opts.api_key, pdef);
 
@@ -583,17 +599,8 @@ async fn vm_call_completion_ollama(
     prefix: &str,
     suffix: Option<&str>,
 ) -> Result<LlmResult, VmError> {
-    let llm_timeout = opts.timeout.unwrap_or_else(|| {
-        std::env::var("HARN_LLM_TIMEOUT")
-            .ok()
-            .and_then(|v| v.parse::<u64>().ok())
-            .unwrap_or(120)
-    });
-    let client = reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(30))
-        .timeout(std::time::Duration::from_secs(llm_timeout))
-        .build()
-        .unwrap_or_else(|_| reqwest::Client::new());
+    let llm_timeout = opts.resolve_timeout();
+    let client = super::shared_blocking_client().clone();
     let pdef = crate::llm_config::provider_config(&opts.provider);
     let base_url = pdef
         .map(crate::llm_config::resolve_base_url)
@@ -653,6 +660,7 @@ async fn vm_call_completion_ollama(
     let req = client
         .post(format!("{base_url}{endpoint}"))
         .header("Content-Type", "application/json")
+        .timeout(std::time::Duration::from_secs(llm_timeout))
         .json(&body);
     let req = apply_auth_headers(req, &opts.api_key, pdef);
 
@@ -780,7 +788,7 @@ fn render_openai_message_content_as_text(content: &serde_json::Value) -> String 
     }
 }
 
-fn normalize_openai_style_messages(
+pub(crate) fn normalize_openai_style_messages(
     messages: Vec<serde_json::Value>,
     force_string_content: bool,
 ) -> Vec<serde_json::Value> {
@@ -842,221 +850,109 @@ pub(crate) fn classify_http_error(
     msg
 }
 
+/// Dispatch an LLM API call to the appropriate provider. This is the main
+/// entry point that routes to provider-specific implementations via the
+/// provider plugin architecture.
+///
+/// The dispatch order is:
+/// 1. Check the thread-local provider registry (populated by `register_default_providers`)
+/// 2. Fall back to config-based resolution (for dynamically-configured providers)
+/// 3. Use the legacy inline dispatch as a final fallback
 async fn vm_call_llm_api(
     opts: &LlmRequestPayload,
     delta_tx: Option<DeltaSender>,
 ) -> Result<LlmResult, VmError> {
     let provider = &opts.provider;
-    let model = &opts.model;
-    let wants_streaming = delta_tx.is_some() && opts.stream;
-    let llm_timeout = opts.timeout.unwrap_or_else(|| {
-        std::env::var("HARN_LLM_TIMEOUT")
-            .ok()
-            .and_then(|v| v.parse::<u64>().ok())
-            .unwrap_or(120)
-    });
-    let client = reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(30))
-        .timeout(std::time::Duration::from_secs(llm_timeout))
-        .build()
-        .unwrap_or_else(|_| reqwest::Client::new());
 
+    // Dispatch through the provider registry. The registry is populated at
+    // VM startup by `register_default_providers()`. For providers not in the
+    // registry (e.g. custom config-defined providers), we fall through to
+    // config-based resolution which determines the API style and delegates
+    // to the appropriate transport.
+    if super::provider::is_provider_registered(provider) {
+        return dispatch_to_registered_provider(opts, delta_tx).await;
+    }
+
+    // Fallback for providers not in the registry: resolve via config and
+    // dispatch based on API style (anthropic vs openai-compatible vs ollama).
     let resolved = super::helpers::ResolvedProvider::resolve(provider);
     let is_ollama = provider == "ollama" || resolved.endpoint.contains("/api/chat");
+    let is_anthropic = resolved.is_anthropic_style;
+
+    let body = if is_ollama {
+        super::providers::OllamaProvider::build_request_body(opts)
+    } else if is_anthropic {
+        super::providers::AnthropicProvider::build_request_body(opts)
+    } else {
+        super::providers::OpenAiCompatibleProvider::build_request_body(opts, false)
+    };
+
+    vm_call_llm_api_with_body(opts, delta_tx, body, is_anthropic, is_ollama).await
+}
+
+/// Dispatch to a registered provider by name.
+async fn dispatch_to_registered_provider(
+    opts: &LlmRequestPayload,
+    delta_tx: Option<DeltaSender>,
+) -> Result<LlmResult, VmError> {
+    // Providers are zero-cost unit structs, so we construct them inline
+    // rather than borrowing from the registry (which would conflict with
+    // the RefCell across await points).
+    let provider = &opts.provider;
+    let resolved = super::helpers::ResolvedProvider::resolve(provider);
+    let is_ollama = provider == "ollama" || resolved.endpoint.contains("/api/chat");
+
+    if provider == "mock" {
+        return super::providers::MockProvider
+            .chat_impl(opts, delta_tx)
+            .await;
+    }
+    if is_ollama {
+        return super::providers::OllamaProvider
+            .chat_impl(opts, delta_tx)
+            .await;
+    }
+    if resolved.is_anthropic_style {
+        return super::providers::AnthropicProvider
+            .chat_impl(opts, delta_tx)
+            .await;
+    }
+    // Default: OpenAI-compatible
+    super::providers::OpenAiCompatibleProvider::new(provider.to_string())
+        .chat_impl(opts, delta_tx)
+        .await
+}
+
+/// Execute an LLM API call with a pre-built request body. This is the shared
+/// transport layer used by all provider implementations. It handles:
+/// - Provider-specific overrides merging
+/// - Stream vs non-stream transport selection
+/// - HTTP error classification
+/// - SSE and NDJSON response parsing
+///
+/// Provider implementations call this after building their provider-specific
+/// request body via `build_request_body()`.
+pub(crate) async fn vm_call_llm_api_with_body(
+    opts: &LlmRequestPayload,
+    delta_tx: Option<DeltaSender>,
+    mut body: serde_json::Value,
+    is_anthropic_style: bool,
+    is_ollama: bool,
+) -> Result<LlmResult, VmError> {
+    let provider = &opts.provider;
+    let model = &opts.model;
+    let wants_streaming = delta_tx.is_some() && opts.stream;
+
+    let resolved = super::helpers::ResolvedProvider::resolve(provider);
     let use_stream_transport = if is_ollama && !opts.stream {
-        eprintln!("[harn] warning: stream=false is not supported by Ollama, using streaming");
+        crate::events::log_warn(
+            "llm",
+            "stream=false is not supported by Ollama, using streaming",
+        );
         true
     } else {
         wants_streaming || is_ollama
     };
-
-    // Build request body based on API style
-    let mut body = if resolved.is_anthropic_style {
-        // Anthropic requires max_tokens; default to 8192 if not specified.
-        let anthropic_max = if opts.max_tokens > 0 {
-            opts.max_tokens
-        } else {
-            8192
-        };
-        let mut body = serde_json::json!({
-            "model": model,
-            "messages": opts.messages,
-            "max_tokens": anthropic_max,
-        });
-        if let Some(ref sys) = opts.system {
-            if opts.cache {
-                // Anthropic cache control: wrap system in content blocks
-                body["system"] = serde_json::json!([{
-                    "type": "text",
-                    "text": sys,
-                    "cache_control": {"type": "ephemeral"},
-                }]);
-            } else {
-                body["system"] = serde_json::json!(sys);
-            }
-        }
-        if let Some(temp) = opts.temperature {
-            body["temperature"] = serde_json::json!(temp);
-        }
-        if let Some(top_p) = opts.top_p {
-            body["top_p"] = serde_json::json!(top_p);
-        }
-        if let Some(top_k) = opts.top_k {
-            body["top_k"] = serde_json::json!(top_k);
-        }
-        if let Some(ref stop) = opts.stop {
-            body["stop_sequences"] = serde_json::json!(stop);
-        }
-        if let Some(ref tools) = opts.native_tools {
-            if !tools.is_empty() {
-                body["tools"] = serde_json::json!(tools);
-            }
-        }
-        if let Some(ref tc) = opts.tool_choice {
-            body["tool_choice"] = tc.clone();
-        }
-        // Anthropic structured output via tool-use constraint
-        if opts.response_format.as_deref() == Some("json") {
-            if let Some(ref schema) = opts.json_schema {
-                body["tools"] = {
-                    let mut tools = body["tools"].as_array().cloned().unwrap_or_default();
-                    tools.push(serde_json::json!({
-                        "name": "json_response",
-                        "description": "Return a structured JSON response matching the schema.",
-                        "input_schema": schema,
-                    }));
-                    serde_json::json!(tools)
-                };
-                body["tool_choice"] = serde_json::json!({"type": "tool", "name": "json_response"});
-            }
-        }
-        // Anthropic thinking
-        if let Some(ref thinking) = opts.thinking {
-            let budget = match thinking {
-                ThinkingConfig::Enabled => 10000,
-                ThinkingConfig::WithBudget(b) => *b,
-            };
-            body["thinking"] = serde_json::json!({
-                "type": "enabled",
-                "budget_tokens": budget,
-            });
-        }
-        body
-    } else {
-        let mut msgs = Vec::new();
-        if let Some(ref sys) = opts.system {
-            msgs.push(serde_json::json!({"role": "system", "content": sys}));
-        }
-        msgs.extend(opts.messages.iter().cloned());
-        msgs = normalize_openai_style_messages(msgs, is_ollama);
-
-        let mut body = serde_json::json!({
-            "model": model,
-            "messages": msgs,
-        });
-        // Only include max_tokens when explicitly set — otherwise let the
-        // provider use its own default output limit.
-        if opts.max_tokens > 0 {
-            body["max_tokens"] = serde_json::json!(opts.max_tokens);
-        }
-        if let Some(temp) = opts.temperature {
-            body["temperature"] = serde_json::json!(temp);
-        }
-        if let Some(top_p) = opts.top_p {
-            body["top_p"] = serde_json::json!(top_p);
-        }
-        if let Some(ref stop) = opts.stop {
-            body["stop"] = serde_json::json!(stop);
-        }
-        if let Some(seed) = opts.seed {
-            body["seed"] = serde_json::json!(seed);
-        }
-        if let Some(fp) = opts.frequency_penalty {
-            body["frequency_penalty"] = serde_json::json!(fp);
-        }
-        if let Some(pp) = opts.presence_penalty {
-            body["presence_penalty"] = serde_json::json!(pp);
-        }
-        if opts.response_format.as_deref() == Some("json") {
-            if let Some(ref schema) = opts.json_schema {
-                body["response_format"] = serde_json::json!({
-                    "type": "json_schema",
-                    "json_schema": {
-                        "name": "response",
-                        "schema": schema,
-                        "strict": true,
-                    }
-                });
-            } else {
-                body["response_format"] = serde_json::json!({"type": "json_object"});
-            }
-        }
-        if let Some(ref tools) = opts.native_tools {
-            if !tools.is_empty() {
-                body["tools"] = serde_json::json!(tools);
-            }
-        }
-        if let Some(ref tc) = opts.tool_choice {
-            body["tool_choice"] = tc.clone();
-        }
-        // OpenAI-compatible thinking (qwen3/qwen3.5 via vLLM and similar).
-        // Passes `chat_template_kwargs.enable_thinking` through so the
-        // server-side chat template emits `<think>...</think>` blocks as
-        // part of the streamed content, which we then split out in the
-        // response parser. We only set this when the caller explicitly
-        // asked for thinking AND the provider isn't Anthropic or Ollama
-        // (those have their own mechanisms handled above).
-        // Only send enable_thinking for providers that reliably support it.
-        // OpenRouter proxies to various backends where this parameter is
-        // unpredictable and can cause all-thinking-no-content empty responses.
-        let is_openrouter = opts.provider.to_lowercase().contains("openrouter");
-        if !is_ollama && !is_openrouter && opts.thinking.is_some() {
-            body["chat_template_kwargs"] = serde_json::json!({
-                "enable_thinking": true,
-            });
-        }
-        body
-    };
-
-    // Ollama thinking support and parameter tuning
-    if is_ollama {
-        if let Some(num_ctx) = ollama_num_ctx_override() {
-            body["options"]["num_ctx"] = serde_json::json!(num_ctx);
-        }
-        if let Some(keep_alive) = ollama_keep_alive_override() {
-            body["keep_alive"] = keep_alive;
-        }
-        // Ollama-specific tuning for coding agents:
-        //  - min_p=0.05 filters garbage tokens without hurting quality
-        //  - repeat_penalty=1.05 (default 1.1 is too aggressive for code —
-        //    repeated variable names, imports, and boilerplate are correct)
-        //  - num_predict from max_tokens to avoid unlimited generation
-        if body["options"].get("min_p").is_none() {
-            body["options"]["min_p"] = serde_json::json!(0.05);
-        }
-        if body["options"].get("repeat_penalty").is_none() {
-            body["options"]["repeat_penalty"] = serde_json::json!(1.05);
-        }
-        if body["options"].get("num_predict").is_none() && opts.max_tokens > 0 {
-            body["options"]["num_predict"] = serde_json::json!(opts.max_tokens);
-        }
-        // Always ask ollama to surface thinking tokens for thinking-capable
-        // models (gemma3/gemma4, qwen3 with reasoning, etc). Without this,
-        // ollama silently drops tokens generated inside its reasoning
-        // channel and the client sees an empty `message.content` even
-        // though `eval_count` is non-zero. The NDJSON parser folds
-        // `message.thinking` into the visible text when no content is
-        // emitted, so the caller still gets the model's output.
-        //
-        // Explicit caller opt-out via `ThinkingConfig::Disabled`-style is
-        // not currently expressible in ThinkingConfig; if that becomes
-        // necessary, extend the enum and branch here.
-        body["think"] = match opts.thinking {
-            Some(ThinkingConfig::Enabled) | Some(ThinkingConfig::WithBudget(_)) | None => {
-                serde_json::json!(true)
-            }
-        };
-    }
 
     // Merge provider-specific overrides
     if let Some(ref overrides) = opts.provider_overrides {
@@ -1070,15 +966,23 @@ async fn vm_call_llm_api(
     if use_stream_transport {
         body["stream"] = serde_json::json!(true);
         // OpenAI-style: request usage in the final streaming chunk.
-        if !resolved.is_anthropic_style && !is_ollama {
+        if !is_anthropic_style && !is_ollama {
             body["stream_options"] = serde_json::json!({"include_usage": true});
         }
     }
+
+    // Reuse shared clients for connection pooling and TLS session caching.
+    let client = if use_stream_transport {
+        super::shared_streaming_client().clone()
+    } else {
+        super::shared_blocking_client().clone()
+    };
 
     // Send request
     let req = client
         .post(resolved.url())
         .header("Content-Type", "application/json")
+        .timeout(std::time::Duration::from_secs(opts.resolve_timeout()))
         .json(&body);
     let req = resolved.apply_headers(req, &opts.api_key);
 
@@ -1090,9 +994,24 @@ async fn vm_call_llm_api(
             tx
         };
         let response = req.send().await.map_err(|e| {
-            VmError::Thrown(VmValue::String(Rc::from(format!(
-                "{provider} stream error: {e}"
-            ))))
+            let kind = if e.is_timeout() {
+                "timeout"
+            } else if e.is_connect() {
+                "connect"
+            } else if e.is_request() {
+                "request_build"
+            } else if e.is_body() {
+                "body"
+            } else {
+                "unknown"
+            };
+            // Include Debug repr for "unknown" errors to surface the inner cause
+            let detail = if kind == "unknown" {
+                format!("{provider} stream error ({kind}): {e:?}")
+            } else {
+                format!("{provider} stream error ({kind}): {e}")
+            };
+            VmError::Thrown(VmValue::String(Rc::from(detail)))
         })?;
         if !response.status().is_success() {
             let status = response.status();
@@ -2166,7 +2085,7 @@ async fn vm_call_llm_api_ndjson_from_response(
     })
 }
 
-fn ollama_num_ctx_override() -> Option<u64> {
+pub(crate) fn ollama_num_ctx_override() -> Option<u64> {
     for key in [
         "BURIN_OLLAMA_NUM_CTX",
         "OLLAMA_CONTEXT_LENGTH",
@@ -2183,7 +2102,7 @@ fn ollama_num_ctx_override() -> Option<u64> {
     None
 }
 
-fn ollama_keep_alive_override() -> Option<serde_json::Value> {
+pub(crate) fn ollama_keep_alive_override() -> Option<serde_json::Value> {
     for key in ["BURIN_OLLAMA_KEEP_ALIVE", "OLLAMA_KEEP_ALIVE"] {
         if let Ok(raw) = std::env::var(key) {
             let trimmed = raw.trim();
@@ -2331,6 +2250,7 @@ mod tests {
             cache: true,
             stream: true,
             timeout: Some(5),
+            idle_timeout: None,
             provider_overrides: Some(serde_json::json!({"custom_flag": true})),
         }
     }

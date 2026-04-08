@@ -17,7 +17,44 @@ mod config_builtins;
 mod conversation;
 pub(crate) mod cost;
 pub(crate) mod helpers;
-mod mock;
+pub(crate) mod mock;
+
+// ---------------------------------------------------------------------------
+// Shared HTTP clients — reuse connections and TLS sessions across LLM calls.
+// ---------------------------------------------------------------------------
+
+use std::sync::OnceLock;
+
+/// Streaming client: no overall request timeout (per-chunk idle timeout
+/// handles stalls), connection pooling and TLS session reuse.
+pub(crate) fn shared_streaming_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(30))
+            .pool_max_idle_per_host(4)
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    })
+}
+
+/// Non-streaming client: 120s request timeout, connection pooling.
+pub(crate) fn shared_blocking_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(30))
+            .timeout(std::time::Duration::from_secs(120))
+            .pool_max_idle_per_host(4)
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    })
+}
+pub use mock::{
+    drain_tool_recordings, load_tool_replay_fixtures, set_tool_recording_mode, ToolRecordingMode,
+};
+pub(crate) mod provider;
+pub(crate) mod providers;
 mod stream;
 mod tools;
 mod trace;
@@ -45,11 +82,8 @@ use crate::value::{VmChannelHandle, VmValue};
 use crate::vm::Vm;
 
 use self::api::{vm_build_llm_result, vm_call_completion_full};
-use self::helpers::{
-    extract_json, opt_bool, opt_int, opt_str, transcript_event, transcript_to_vm_with_events,
-};
+use self::helpers::{opt_bool, opt_int, opt_str};
 use self::stream::vm_stream_llm;
-use self::tools::build_assistant_response_message;
 use self::trace::trace_llm_call;
 
 fn output_validation_mode(opts: &api::LlmCallOptions) -> &str {
@@ -91,7 +125,7 @@ fn validated_output_data(
     let message = format!("LLM output failed schema validation: {}", errors.join("; "));
     match output_validation_mode(opts) {
         "warn" => {
-            eprintln!("[harn] warning: {message}");
+            crate::events::log_warn("llm", &message);
             Ok(Some(data.clone()))
         }
         "error" => Err(VmValue::String(Rc::from(message))),
@@ -135,6 +169,8 @@ pub(crate) use self::agent::{
     agent_loop_result_from_llm, current_host_bridge, run_agent_loop_internal, AgentLoopConfig,
 };
 pub use self::agent::{register_agent_loop_with_bridge, register_llm_call_with_bridge};
+// observed_llm_call, LlmRetryConfig, build_llm_call_result are used by
+// register_llm_builtins above but accessed via the agent module path.
 pub(crate) use self::api::vm_call_llm_full;
 pub(crate) use self::helpers::extract_llm_options;
 pub use self::helpers::vm_value_to_json;
@@ -145,6 +181,7 @@ pub use self::trace::{enable_tracing, peek_trace, peek_trace_summary, take_trace
 pub fn reset_llm_state() {
     cost::reset_cost_state();
     trace::reset_trace_state();
+    provider::register_default_providers();
 }
 
 /// Register LLM builtins on a VM.
@@ -154,108 +191,42 @@ pub fn register_llm_builtins(vm: &mut Vm) {
     // =========================================================================
     vm.register_async_builtin("llm_call", |args| async move {
         let opts = extract_llm_options(&args)?;
-        if let Some(span_id) = crate::tracing::current_span_id() {
-            crate::tracing::span_set_metadata(
-                span_id,
-                "model",
-                serde_json::json!(opts.model.clone()),
-            );
-            crate::tracing::span_set_metadata(
-                span_id,
-                "provider",
-                serde_json::json!(opts.provider.clone()),
-            );
-        }
+        let options = args.get(2).and_then(|a| a.as_dict()).cloned();
+        let retry_config = agent::LlmRetryConfig {
+            retries: helpers::opt_int(&options, "llm_retries").unwrap_or(0) as usize,
+            backoff_ms: helpers::opt_int(&options, "llm_backoff_ms").unwrap_or(2000) as u64,
+        };
 
-        let start = std::time::Instant::now();
-        let result = vm_call_llm_full(&opts).await?;
-        let mut transcript_messages = opts.messages.clone();
-        transcript_messages.push(build_assistant_response_message(
-            &result.text,
-            &result.blocks,
-            &result.tool_calls,
-            &opts.provider,
-        ));
-        let mut extra_events = vec![transcript_event(
-            "provider_payload",
-            "assistant",
-            "internal",
-            "",
-            Some(serde_json::json!({
-                "model": result.model.clone(),
-                "input_tokens": result.input_tokens,
-                "output_tokens": result.output_tokens,
-                "tool_calls": result.tool_calls.clone(),
-            })),
-        )];
-        if let Some(thinking) = result.thinking.clone() {
-            if !thinking.is_empty() {
-                extra_events.push(transcript_event(
-                    "private_reasoning",
-                    "assistant",
-                    "private",
-                    &thinking,
-                    None,
-                ));
+        let result = agent::observed_llm_call(
+            &opts,
+            None, // no bridge
+            &retry_config,
+            None,
+            false, // non-bridge path runs on the local set
+        )
+        .await?;
+
+        // Output schema validation (non-bridge only; bridge path delegates
+        // to the same build_llm_call_result which skips validation — the
+        // host is expected to handle schema enforcement).
+        let mut vm_result = agent::build_llm_call_result(&result, &opts);
+        if opts.response_format.as_deref() == Some("json") {
+            if let VmValue::Dict(ref dict) = vm_result {
+                if let Some(data) = dict.get("data") {
+                    match validated_output_data(data, &opts) {
+                        Ok(validated) => {
+                            if let Some(val) = validated {
+                                let mut d = dict.as_ref().clone();
+                                d.insert("data".to_string(), val);
+                                vm_result = VmValue::Dict(Rc::new(d));
+                            }
+                        }
+                        Err(error) => return Err(crate::value::VmError::Thrown(error)),
+                    }
+                }
             }
         }
-        let transcript = transcript_to_vm_with_events(
-            opts.transcript_id.clone(),
-            opts.transcript_summary.clone(),
-            opts.transcript_metadata.clone(),
-            &transcript_messages,
-            extra_events,
-            Vec::new(),
-            Some("active"),
-        );
-        trace_llm_call(LlmTraceEntry {
-            model: result.model.clone(),
-            input_tokens: result.input_tokens,
-            output_tokens: result.output_tokens,
-            duration_ms: start.elapsed().as_millis() as u64,
-        });
-        if let Some(span_id) = crate::tracing::current_span_id() {
-            crate::tracing::span_set_metadata(span_id, "status", serde_json::json!("ok"));
-            crate::tracing::span_set_metadata(
-                span_id,
-                "input_tokens",
-                serde_json::json!(result.input_tokens),
-            );
-            crate::tracing::span_set_metadata(
-                span_id,
-                "output_tokens",
-                serde_json::json!(result.output_tokens),
-            );
-        }
-
-        // If response_format is "json", parse the response and optionally
-        // validate it against a configured output contract.
-        if opts.response_format.as_deref() == Some("json") {
-            let json_str = extract_json(&result.text);
-            let parsed = serde_json::from_str::<serde_json::Value>(json_str)
-                .ok()
-                .map(|jv| json_to_vm_value(&jv));
-            let validated = match parsed.as_ref() {
-                Some(data) => match validated_output_data(data, &opts) {
-                    Ok(value) => value,
-                    Err(error) => return Err(crate::value::VmError::Thrown(error)),
-                },
-                None => parsed,
-            };
-            return Ok(vm_build_llm_result(
-                &result,
-                validated,
-                Some(transcript),
-                opts.tools.as_ref(),
-            ));
-        }
-
-        Ok(vm_build_llm_result(
-            &result,
-            None,
-            Some(transcript),
-            opts.tools.as_ref(),
-        ))
+        Ok(vm_result)
     });
 
     vm.register_async_builtin("llm_completion", |args| async move {
@@ -388,6 +359,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                 loop_detect_warn: opt_int(&options, "loop_detect_warn").unwrap_or(2) as usize,
                 loop_detect_block: opt_int(&options, "loop_detect_block").unwrap_or(3) as usize,
                 loop_detect_skip: opt_int(&options, "loop_detect_skip").unwrap_or(4) as usize,
+                tool_examples: opt_str(&options, "tool_examples"),
             },
         )
         .await?;
@@ -492,6 +464,7 @@ mod tests {
             cache: false,
             stream: true,
             timeout: None,
+            idle_timeout: None,
             provider_overrides: None,
         }
     }

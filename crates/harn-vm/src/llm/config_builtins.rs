@@ -67,12 +67,30 @@ pub(crate) fn register_config_builtins(vm: &mut Vm) {
     });
 
     vm.register_builtin("llm_providers", |_args, _out| {
-        let names = llm_config::provider_names();
-        let list: Vec<VmValue> = names
+        let config_names = llm_config::provider_names();
+        let registry_names = super::provider::registered_provider_names();
+        // Merge config-defined and registry-defined provider names
+        let mut all: std::collections::BTreeSet<String> = config_names.into_iter().collect();
+        all.extend(registry_names);
+        let list: Vec<VmValue> = all
             .into_iter()
             .map(|n| VmValue::String(Rc::from(n)))
             .collect();
         Ok(VmValue::List(Rc::new(list)))
+    });
+
+    // provider_register — register a custom provider name at runtime so
+    // `llm_call` can dispatch to it. The provider must be OpenAI-compatible
+    // and configured via llm_config or environment variables.
+    vm.register_builtin("provider_register", |args, _out| {
+        let name = args.first().map(|a| a.display()).unwrap_or_default();
+        if name.is_empty() {
+            return Err(crate::value::VmError::Runtime(
+                "provider_register: name is required".to_string(),
+            ));
+        }
+        super::provider::register_provider_name(&name);
+        Ok(VmValue::Bool(true))
     });
 
     vm.register_builtin("llm_config", |args, _out| {

@@ -2,6 +2,54 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.45
+
+### Added
+
+- **`tool` keyword** — declarative tool definition syntax:
+  `tool name(params) -> type { description "..."; body }`. Compiles to
+  `tool_define` under the hood. Supported across parser, typechecker,
+  compiler, formatter, linter, LSP, and tree-sitter grammar.
+- **Together AI provider** — built-in provider configuration
+  (`TOGETHER_AI_API_KEY`, `TOGETHER_AI_BASE_URL`).
+- **`provider_register` builtin** — register custom provider names at
+  runtime so `llm_call` can dispatch to them.
+- **LLM provider trait architecture** — new `llm/provider.rs` and
+  `llm/providers/` directory with trait-based provider dispatch
+  (Anthropic, OpenAI-compatible, Ollama, Mock).
+- **Events system** — `events.rs` module with `EventSink` trait and
+  `StderrSink` default for structured observability.
+- **`observed_llm_call` wrapper** — unified single-LLM-call function
+  with call-ID generation, bridge notifications, retry logic, and span
+  annotation. Deduplicates instrumentation previously split across
+  `llm_call` and `agent_loop`.
+- **OpenTelemetry support** — optional `otel` feature flag on harn-vm
+  (opentelemetry, opentelemetry_sdk, opentelemetry-otlp dependencies).
+- **Cross-file unused-function lint** — `harn check` and `harn lint`
+  pre-scan selective imports across files so library functions consumed
+  by other files are not falsely flagged as unused.
+- **Per-request LLM timeout** — the `timeout` option on `llm_call`
+  and `llm_completion` is now applied to HTTP requests (previously
+  computed but unused).
+- **`tool_examples` agent config** — optional few-shot examples
+  injected into the tool-calling contract prompt.
+
+### Changed
+
+- **Orchestration module split** — monolithic `orchestration.rs`
+  (4379 lines) refactored into `orchestration/` directory with modules:
+  artifacts, compaction, hooks, policy, records, workflow.
+- **Agents stdlib refactor** — workflow and run-record builtins
+  extracted from `agents.rs` into `stdlib/workflow.rs` and
+  `stdlib/records.rs`.
+- **Better keyword error messages** — parser now reports
+  `'tool' (reserved keyword)` when a keyword is used where an
+  identifier is expected.
+- **Env var quote stripping** — `resolve_base_url` strips surrounding
+  quotes from environment variable values (common `.env` parser issue).
+- **Structured warning output** — LLM parameter validation warnings
+  now use the events system instead of raw `eprintln!`.
+
 ## v0.5.44
 
 ### Added

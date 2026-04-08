@@ -108,6 +108,9 @@ impl SpanCollector {
         let parent_id = self.active_stack.last().copied();
         let now = Instant::now();
 
+        // Emit structured span-start event to registered sinks.
+        crate::events::emit_span_start(id, parent_id, &name, kind.as_str(), BTreeMap::new());
+
         self.open.insert(
             id,
             OpenSpan {
@@ -135,6 +138,15 @@ impl SpanCollector {
         if let Some(span) = self.open.remove(&span_id) {
             let duration = span.started_at.elapsed();
             let start_ms = span.started_at.duration_since(self.epoch).as_millis() as u64;
+            let duration_ms = duration.as_millis() as u64;
+
+            // Emit structured span-end event to registered sinks.
+            let mut end_meta = span.metadata.clone();
+            end_meta.insert(
+                "duration_ms".to_string(),
+                serde_json::Value::Number(serde_json::Number::from(duration_ms)),
+            );
+            crate::events::emit_span_end(span_id, end_meta);
 
             self.completed.push(Span {
                 span_id: span.span_id,
@@ -142,7 +154,7 @@ impl SpanCollector {
                 kind: span.kind,
                 name: span.name,
                 start_ms,
-                duration_ms: duration.as_millis() as u64,
+                duration_ms,
                 metadata: span.metadata,
             });
 

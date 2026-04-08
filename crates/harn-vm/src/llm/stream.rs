@@ -17,10 +17,7 @@ pub(crate) async fn vm_stream_llm(
     use tokio_stream::StreamExt;
 
     let provider = &opts.provider;
-    let client = reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(30))
-        .build()
-        .unwrap_or_else(|_| reqwest::Client::new());
+    let client = super::shared_streaming_client().clone();
 
     let resolved = ResolvedProvider::resolve(provider);
 
@@ -68,7 +65,25 @@ pub(crate) async fn vm_stream_llm(
         ))))
     })?;
 
-    while let Some(event) = es.next().await {
+    let idle_timeout_secs = opts.idle_timeout.unwrap_or_else(|| {
+        std::env::var("HARN_LLM_IDLE_TIMEOUT")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(30)
+    });
+    let idle_dur = std::time::Duration::from_secs(idle_timeout_secs);
+
+    loop {
+        let event = match tokio::time::timeout(idle_dur, es.next()).await {
+            Ok(Some(event)) => event,
+            Ok(None) => break,
+            Err(_) => {
+                es.close();
+                return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                    "stream idle timeout: no data received for {idle_timeout_secs}s"
+                )))));
+            }
+        };
         match event {
             Ok(Event::Message(msg)) => {
                 if msg.data == "[DONE]" {
