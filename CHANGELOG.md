@@ -2,7 +2,7 @@
 
 All notable changes to Harn are documented in this file.
 
-## v0.5.48
+## v0.5.49
 
 ### Added
 
