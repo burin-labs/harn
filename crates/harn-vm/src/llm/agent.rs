@@ -2019,9 +2019,9 @@ pub async fn run_agent_loop_internal(
                     .iter()
                     .filter_map(|tc| tc["name"].as_str())
                     .collect();
-                let session_has_edit = all_tools_used.iter().any(|t| {
-                    t == "edit" || t == "scaffold" || t == "create"
-                });
+                let session_has_edit = all_tools_used
+                    .iter()
+                    .any(|t| t == "edit" || t == "scaffold" || t == "create");
                 let turn_info = serde_json::json!({
                     "tool_names": tool_names,
                     "tool_count": tool_calls.len(),
