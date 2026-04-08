@@ -1,0 +1,60 @@
+// Tool Hooks Example
+//
+// Demonstrates registering pre-hook and post-hook functions on tool
+// calls for observability, access control, and output management.
+//
+// Tool hooks let you:
+//   - Deny specific tools by pattern (pre-hook)
+//   - Truncate oversized tool output (post-hook)
+//   - Apply policies across all tools with wildcard patterns
+//
+// Run with: cargo run --bin harn -- run examples/tool-hooks.harn
+
+pipeline main(task) {
+  log("=== Tool Hooks Demo ===")
+  log("")
+
+  // 1. Register a deny hook: block any tool matching "dangerous_*"
+  //    If an agent tries to call a tool whose name starts with
+  //    "dangerous_", the call is rejected with the given reason.
+  register_tool_hook({
+    pattern: "dangerous_*",
+    deny: "This tool is blocked by policy",
+  })
+  log("Registered deny hook for 'dangerous_*' tools")
+
+  // 2. Register an output-limiting hook: truncate any tool output
+  //    longer than 500 characters. Applies to all tools via wildcard.
+  register_tool_hook({
+    pattern: "*",
+    max_output: 500,
+  })
+  log("Registered max_output hook (500 chars) for all tools")
+
+  // 3. Register a hook for a specific tool pattern
+  register_tool_hook({
+    pattern: "read_file_*",
+    max_output: 200,
+  })
+  log("Registered max_output hook (200 chars) for 'read_file_*' tools")
+
+  log("")
+  log("All hooks registered. These hooks will be evaluated in order")
+  log("whenever an agent invokes a tool during its execution loop.")
+  log("")
+
+  // Hooks are now active for any subsequent agent_loop or workflow
+  // execution in this pipeline. For example:
+  //
+  //   let result = agent_loop(
+  //     "Analyze this codebase",
+  //     "You are a code reviewer.",
+  //     {persistent: true, max_nudges: 3}
+  //   )
+  //
+  // Any tool call the agent makes will pass through these hooks.
+
+  // Clean up all hooks when done
+  clear_tool_hooks()
+  log("Cleared all tool hooks.")
+}

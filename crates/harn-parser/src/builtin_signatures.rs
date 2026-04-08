@@ -402,6 +402,14 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("int")),
     },
     BuiltinSig {
+        name: "eval_metric",
+        return_type: Some(BuiltinReturn::Named("nil")),
+    },
+    BuiltinSig {
+        name: "eval_metrics",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
         name: "eval_suite_manifest",
         return_type: Some(BuiltinReturn::Named("dict")),
     },

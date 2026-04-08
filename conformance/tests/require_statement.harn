@@ -1,0 +1,21 @@
+pipeline test(task) {
+  // require with true condition passes silently
+  require true, "this should not throw"
+  log("passed")
+  // require with custom message
+  try {
+    require false, "custom error message"
+  } catch (e) {
+    log(e)
+  }
+  // require without message
+  try {
+    require 1 == 2
+  } catch (e) {
+    log(e)
+  }
+  // require with expression
+  let x = 5
+  require x > 0, "x must be positive"
+  log("x is positive")
+}

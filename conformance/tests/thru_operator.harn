@@ -1,0 +1,16 @@
+pipeline test(task) {
+  // thru creates an inclusive range
+  let r = 1 thru 5
+  log(r)
+  // thru in a for loop
+  var sum = 0
+  for i in 1 thru 4 {
+    sum += i
+  }
+  log(sum)
+  // compare with upto (exclusive)
+  let inclusive = 1 thru 3
+  let exclusive = 1 upto 3
+  log(len(inclusive))
+  log(len(exclusive))
+}

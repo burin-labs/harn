@@ -75,6 +75,8 @@ struct FnSignature {
     required_params: usize,
     /// Where-clause constraints: (type_param_name, interface_bound).
     where_clauses: Vec<(String, String)>,
+    /// True if the last parameter is a rest parameter.
+    has_rest: bool,
 }
 
 impl TypeScope {
@@ -287,6 +289,7 @@ impl TypeChecker {
                             .iter()
                             .map(|wc| (wc.type_name.clone(), wc.bound.clone()))
                             .collect(),
+                        has_rest: params.last().is_some_and(|p| p.rest),
                     };
                     self.scope.define_fn(name, sig);
                     self.check_fn_body(type_params, params, return_type, body, where_clauses);
@@ -484,6 +487,7 @@ impl TypeChecker {
                         .iter()
                         .map(|wc| (wc.type_name.clone(), wc.bound.clone()))
                         .collect(),
+                    has_rest: params.last().is_some_and(|p| p.rest),
                 };
                 scope.define_fn(name, sig.clone());
                 scope.define_var(name, None);
@@ -508,6 +512,7 @@ impl TypeChecker {
                     type_param_names: Vec::new(),
                     required_params,
                     where_clauses: Vec::new(),
+                    has_rest: params.last().is_some_and(|p| p.rest),
                 };
                 scope.define_fn(name, sig);
                 scope.define_var(name, None);
@@ -1127,6 +1132,7 @@ impl TypeChecker {
 
             // --- Terminals: no children to check ---
             Node::StringLiteral(_)
+            | Node::RawStringLiteral(_)
             | Node::IntLiteral(_)
             | Node::FloatLiteral(_)
             | Node::BoolLiteral(_)
@@ -1665,6 +1671,7 @@ impl TypeChecker {
         if let Some(sig) = scope.get_fn(name).cloned() {
             if !has_spread
                 && !is_builtin(name)
+                && !sig.has_rest
                 && (args.len() < sig.required_params || args.len() > sig.params.len())
             {
                 let expected = if sig.required_params == sig.params.len() {

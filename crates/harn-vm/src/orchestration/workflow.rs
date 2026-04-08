@@ -38,6 +38,11 @@ pub struct WorkflowNode {
     pub reduce_policy: ReducePolicy,
     pub escalation_policy: EscalationPolicy,
     pub verify: Option<serde_json::Value>,
+    /// Optional per-stage timeout in milliseconds.  When set, stage execution
+    /// is wrapped in `tokio::time::timeout` and will fail with a timeout error
+    /// if it exceeds the given duration.
+    #[serde(default)]
+    pub timeout_ms: Option<u64>,
     pub metadata: BTreeMap<String, serde_json::Value>,
     #[serde(skip)]
     pub raw_tools: Option<VmValue>,

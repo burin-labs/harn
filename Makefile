@@ -66,10 +66,14 @@ lint-harn:
 	if [ "$$status" -ne 0 ]; then echo "Lint issues found in conformance tests"; exit 1; fi
 	@echo "    Harn lint OK."
 
-# Check harn formatting on conformance tests (CI, not pre-commit)
+# Check harn formatting on conformance tests (CI, not pre-commit).
+# Skip tests that exercise syntax the formatter intentionally normalizes
+# (triple-quoted multiline strings → single-line escaped strings).
+FMT_HARN_SKIP := multiline_strings.harn multiline_string_interpolation.harn
 fmt-harn:
 	@echo "=== Checking Harn formatting ==="
-	@cargo run --quiet --bin harn -- fmt --check conformance/tests/
+	@find conformance/tests -name '*.harn' $(foreach s,$(FMT_HARN_SKIP),-not -name $(s)) -print0 \
+		| xargs -0 cargo run --quiet --bin harn -- fmt --check
 	@echo "    Harn formatting OK."
 
 # Format check (no changes, for CI)

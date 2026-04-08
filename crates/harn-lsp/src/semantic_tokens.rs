@@ -95,7 +95,9 @@ fn token_kind_to_semantic(kind: &TokenKind) -> Option<u32> {
         | TokenKind::Continue => Some(sem::KEYWORD),
 
         // Strings
-        TokenKind::StringLiteral(_) | TokenKind::InterpolatedString(_) => Some(sem::STRING),
+        TokenKind::StringLiteral(_)
+        | TokenKind::RawStringLiteral(_)
+        | TokenKind::InterpolatedString(_) => Some(sem::STRING),
 
         // Numbers
         TokenKind::IntLiteral(_) | TokenKind::FloatLiteral(_) | TokenKind::DurationLiteral(_) => {

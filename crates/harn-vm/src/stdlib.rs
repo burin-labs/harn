@@ -116,4 +116,5 @@ pub fn reset_stdlib_state() {
     fs::reset_fs_state();
     json::reset_json_state();
     host::reset_host_state();
+    agents::records::reset_eval_metrics();
 }

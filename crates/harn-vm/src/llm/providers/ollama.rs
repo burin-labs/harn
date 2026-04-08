@@ -11,6 +11,10 @@ impl LlmProvider for OllamaProvider {
     fn name(&self) -> &str {
         "ollama"
     }
+
+    fn is_local(&self) -> bool {
+        true
+    }
 }
 
 impl LlmProviderChat for OllamaProvider {

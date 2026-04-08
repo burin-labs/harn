@@ -6,6 +6,7 @@ use crate::value::{VmError, VmValue};
 use super::mock::{
     fixture_hash, get_replay_mode, load_fixture, mock_llm_response, save_fixture, LlmReplayMode,
 };
+use super::provider::LlmProvider;
 
 /// Sender for streaming text deltas from an in-flight LLM call.
 pub(crate) type DeltaSender = tokio::sync::mpsc::UnboundedSender<String>;
@@ -936,6 +937,10 @@ async fn vm_call_llm_api(
 }
 
 /// Dispatch to a registered provider by name.
+///
+/// Provider selection uses trait methods (`is_mock()`, `is_local()`,
+/// `is_anthropic_style()`) instead of string comparisons so that each
+/// provider owns its own dispatch semantics.
 async fn dispatch_to_registered_provider(
     opts: &LlmRequestPayload,
     delta_tx: Option<DeltaSender>,
@@ -945,23 +950,23 @@ async fn dispatch_to_registered_provider(
     // the RefCell across await points).
     let provider = &opts.provider;
     let resolved = super::helpers::ResolvedProvider::resolve(provider);
-    let is_ollama = provider == "ollama" || resolved.endpoint.contains("/api/chat");
 
-    if provider == "mock" {
-        return super::providers::MockProvider
-            .chat_impl(opts, delta_tx)
-            .await;
+    // Build a concrete provider and dispatch via trait methods.
+    let mock = super::providers::MockProvider;
+    if mock.is_mock() && provider == mock.name() {
+        return mock.chat_impl(opts, delta_tx).await;
     }
-    if is_ollama {
-        return super::providers::OllamaProvider
-            .chat_impl(opts, delta_tx)
-            .await;
+
+    let ollama = super::providers::OllamaProvider;
+    if (provider == ollama.name() || resolved.endpoint.contains("/api/chat")) && ollama.is_local() {
+        return ollama.chat_impl(opts, delta_tx).await;
     }
+
     if resolved.is_anthropic_style {
-        return super::providers::AnthropicProvider
-            .chat_impl(opts, delta_tx)
-            .await;
+        let anthropic = super::providers::AnthropicProvider;
+        return anthropic.chat_impl(opts, delta_tx).await;
     }
+
     // Default: OpenAI-compatible
     super::providers::OpenAiCompatibleProvider::new(provider.to_string())
         .chat_impl(opts, delta_tx)
@@ -1237,8 +1242,18 @@ fn parse_llm_response(
             for call in calls {
                 let name = call["function"]["name"].as_str().unwrap_or("").to_string();
                 let args_str = call["function"]["arguments"].as_str().unwrap_or("{}");
-                let arguments: serde_json::Value =
-                    serde_json::from_str(args_str).unwrap_or(serde_json::json!({}));
+                let arguments: serde_json::Value = match serde_json::from_str(args_str) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        serde_json::json!({
+                            "__parse_error": format!(
+                                "Could not parse tool arguments as JSON: {}. Raw input: {}",
+                                e,
+                                &args_str[..args_str.len().min(200)]
+                            )
+                        })
+                    }
+                };
                 let id = call["id"].as_str().unwrap_or("").to_string();
                 tool_calls.push(serde_json::json!({
                     "id": id,
@@ -1249,7 +1264,7 @@ fn parse_llm_response(
                     "type": "tool_call",
                     "id": call["id"].clone(),
                     "name": call["function"]["name"].clone(),
-                    "arguments": serde_json::from_str::<serde_json::Value>(args_str).unwrap_or(serde_json::json!({})),
+                    "arguments": arguments.clone(),
                     "visibility": "internal",
                 }));
             }

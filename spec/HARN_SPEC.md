@@ -139,6 +139,24 @@ Escape sequences: `\n` (newline), `\t` (tab), `\\` (backslash), `\"` (double quo
 `\$` (dollar sign). Any other character after `\` produces a literal backslash
 followed by that character.
 
+#### Raw string literals
+
+```javascript
+raw_string_literal ::= 'r"' char* '"'
+```
+
+Raw strings use the `r"..."` prefix. No escape processing or interpolation is
+performed inside a raw string -- backslashes, dollar signs, and other characters
+are taken literally. Raw strings cannot span multiple lines.
+
+Raw strings are useful for regex patterns and file paths where backslashes are
+common:
+
+```harn
+let pattern = r"\d+\.\d+"
+let path = r"C:\Users\alice\docs"
+```
+
 #### Multi-line strings
 
 ```javascript
@@ -149,7 +167,17 @@ Triple-quoted strings can span multiple lines. The optional newline immediately 
 opening `"""` is consumed. Common leading whitespace is stripped from all non-empty lines.
 A trailing newline before the closing `"""` is removed.
 
-Multi-line strings do not support interpolation.
+Multi-line strings support `${expression}` interpolation with automatic indent
+stripping. If at least one `${...}` interpolation is present, the result is an
+`interpolatedString` token; otherwise it is a plain `stringLiteral` token.
+
+```harn
+let name = "world"
+let doc = """
+  Hello, ${name}!
+  Today is ${timestamp()}.
+"""
+```
 
 ### Operators
 
@@ -338,9 +366,33 @@ generic_params     ::= '<' IDENTIFIER (',' IDENTIFIER)* '>'
 where_clause       ::= 'where' IDENTIFIER ':' IDENTIFIER
                        (',' IDENTIFIER ':' IDENTIFIER)*
 
-fn_param_list      ::= (fn_param (',' fn_param)*)?
+fn_param_list      ::= (fn_param (',' fn_param)*)? [',' rest_param]
+                     | rest_param
 fn_param           ::= IDENTIFIER [':' type_expr] ['=' expression]
+rest_param         ::= '...' IDENTIFIER
 
+A rest parameter (`...name`) must be the last parameter in the list. At call
+time, any arguments beyond the positional parameters are collected into a list
+and bound to the rest parameter name. If no extra arguments are provided, the
+rest parameter is an empty list.
+
+```harn
+fn sum(...nums) {
+  var total = 0
+  for n in nums {
+    total = total + n
+  }
+  return total
+}
+sum(1, 2, 3)  // 6
+
+fn log(level, ...parts) {
+  println("[${level}] ${join(parts, " ")}")
+}
+log("INFO", "server", "started")  // [INFO] server started
+```
+
+```text
 expression_statement ::= expression
                        | assignable '=' expression
                        | assignable ('+=' | '-=' | '*=' | '/=' | '%=') expression
@@ -425,6 +477,20 @@ primary            ::= STRING_LITERAL
 ask_expr           ::= 'ask' '{' (IDENTIFIER ':' expression
                        (',' IDENTIFIER ':' expression)*)? '}'
 
+The `ask` expression is syntactic sugar for an LLM call. It builds a dict from
+its key-value fields and passes it to the LLM runtime. Common fields include
+`system` (system prompt), `user` (user message), `model`, `max_tokens`, and
+`provider`. The expression evaluates to the LLM response string.
+
+```harn
+let answer = ask {
+  system: "You are a helpful assistant.",
+  user: "What is 2 + 2?"
+}
+println(answer)
+```
+
+```text
 list_literal       ::= '[' (list_element (',' list_element)*)? ']'
 list_element       ::= '...' expression | expression
 
@@ -666,7 +732,7 @@ though this is mostly relevant for closures and parallel bodies.
 
 1. If path starts with `std/`, loads embedded stdlib module (e.g. `std/text`)
 2. Relative to current file's directory; auto-adds `.harn` extension
-3. `.harn/packages/<path>` then `.burin/packages/<path>` directories
+3. `.harn/packages/<path>` directories
 4. Package directories with `lib.harn` entry point
 
 Selective imports: `import { name1, name2 } from "module"` imports only
@@ -1052,6 +1118,11 @@ tool read_file(path: string, encoding: string) -> string {
   description "Read a file from the filesystem"
   read_file(path)
 }
+
+tool search(query: string, file_glob: string = "*.py") -> string {
+  description "Search files matching an optional glob"
+  "..."
+}
 ```
 
 Declares a named tool and registers it with a tool registry. The body is
@@ -1060,6 +1131,9 @@ compiled as a closure and attached as the tool's handler. An optional
 
 Parameter types are mapped to JSON Schema types (`string` -> `"string"`,
 `int` -> `"integer"`, `float` -> `"number"`, `bool` -> `"boolean"`).
+Parameters with default values are emitted as optional schema fields
+(`required: false`) and include their `default` value in the generated
+tool registry entry.
 
 The result of a `tool` declaration is a tool registry dict (the return
 value of `tool_define`). Multiple `tool` declarations accumulate into

@@ -1,8 +1,8 @@
 //! Agent Client Protocol (ACP) server implementation.
 //!
 //! Implements the ACP specification (<https://agentclientprotocol.com>) so that
-//! harn can act as a coding agent usable from any editor (JetBrains, VS Code,
-//! etc.).  Communication is JSON-RPC 2.0 over stdin/stdout, following the same
+//! harn can act as an agent runtime accessible from any host application
+//! (IDEs, CLI tools, web apps, etc.).  Communication is JSON-RPC 2.0 over stdin/stdout, following the same
 //! structural pattern as the existing `--bridge` mode.
 
 use std::collections::{BTreeMap, HashMap};

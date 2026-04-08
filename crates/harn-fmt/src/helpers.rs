@@ -220,10 +220,11 @@ pub(crate) fn render_typed_params(params: &[TypedParam]) -> Vec<String> {
     params
         .iter()
         .map(|p| {
+            let prefix = if p.rest { "..." } else { "" };
             let mut s = if let Some(te) = &p.type_expr {
-                format!("{}: {}", p.name, format_type_expr(te))
+                format!("{prefix}{}: {}", p.name, format_type_expr(te))
             } else {
-                p.name.clone()
+                format!("{prefix}{}", p.name)
             };
             if let Some(default) = &p.default_value {
                 s.push_str(&format!(" = {}", format_inline_expr(default)));

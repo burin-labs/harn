@@ -33,5 +33,7 @@
 
 - [CLI reference](./cli-reference.md)
 - [Builtin functions](./builtins.md)
+- [Configuring LLM providers](./providers.md)
+- [Debugging agent runs](./debugging.md)
 - [Editor integration](./editor-integration.md)
 - [Testing](./testing.md)

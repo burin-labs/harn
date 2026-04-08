@@ -1,0 +1,41 @@
+// Parallel Pipeline Example
+//
+// Demonstrates using parallel_map to process a batch of inputs
+// concurrently, then formatting and displaying the collected results.
+//
+// Run with: cargo run --bin harn -- run examples/parallel-pipeline.harn
+
+pipeline main(task) {
+  let prompts = [
+    "What is 2 + 2?",
+    "Name one planet in our solar system.",
+    "What color is the sky on a clear day?",
+    "How many legs does a spider have?",
+    "What is the chemical symbol for water?",
+  ]
+
+  log("Processing ${len(prompts)} prompts in parallel...")
+
+  // parallel_map runs the closure concurrently for each item
+  let results = parallel_map(prompts) { prompt ->
+    // In production, replace with: llm_call(prompt, "Answer in one word.")
+    // Using string transform here so the example runs without an API key.
+    "Answer to: ${prompt}"
+  }
+
+  log("")
+  log("=== Results ===")
+  let idx = 0
+  for result in results {
+    log("[${idx + 1}] ${prompts[idx]}")
+    log("    -> ${result}")
+    idx = idx + 1
+  }
+
+  log("")
+  log("Processed ${len(results)} items total.")
+
+  // Demonstrate chaining: filter results by length
+  let short_answers = results.filter({ r -> len(r) < 40 })
+  log("Short answers (< 40 chars): ${len(short_answers)}")
+}

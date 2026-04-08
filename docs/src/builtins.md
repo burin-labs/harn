@@ -240,7 +240,6 @@ let name = json_extract(result.text, "name") // extract just one key
 | `set_contains(s, value)` | s: set, value: any | bool | Check if set contains a value |
 | `set_union(a, b)` | a: set, b: set | set | Union of two sets |
 | `set_intersect(a, b)` | a: set, b: set | set | Intersection of two sets |
-| `set_intersection(a, b)` | a: set, b: set | set | Alias for `set_intersect` |
 | `set_difference(a, b)` | a: set, b: set | set | Difference (elements in a but not b) |
 | `set_symmetric_difference(a, b)` | a: set, b: set | set | Elements in either but not both |
 | `set_is_subset(a, b)` | a: set, b: set | bool | True if all elements of a are in b |
@@ -627,7 +626,7 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `llm_completion(prefix, suffix?, system?, options?)` | prefix: string, suffix: string, system: string, options: dict | dict | Text completion / fill-in-the-middle request. Returns `{text, model, input_tokens, output_tokens}` |
 | `agent_loop(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Multi-turn agent loop with `##DONE##` sentinel and optional per-turn context filtering. Returns `{status, text, iterations, duration_ms, tools_used}` |
 | `llm_info()` | — | dict | Current LLM config: `{provider, model, api_key_set}` |
-| `llm_usage()` | — | dict | Cumulative usage: `{input_tokens, output_tokens, total_duration_ms, call_count}` |
+| `llm_usage()` | — | dict | Cumulative usage: `{input_tokens, output_tokens, total_duration_ms, call_count, total_calls}` |
 | `llm_resolve_model(alias)` | alias: string | dict | Resolve model alias to `{id, provider}` via providers.toml |
 | `llm_pick_model(target, options?)` | target: string, options: dict | dict | Resolve a model alias or tier to `{id, provider, tier}` |
 | `llm_infer_provider(model_id)` | model_id: string | string | Infer provider from model ID (e.g. `"claude-*"` → `"anthropic"`) |
@@ -950,7 +949,9 @@ tool greet(name: string) -> string {
 The `tool` keyword declares a tool with typed parameters, an optional
 description, and a body. Parameter types map to JSON Schema
 (`string` -> `"string"`, `int` -> `"integer"`, `float` -> `"number"`,
-`bool` -> `"boolean"`). Each `tool` declaration produces its own
+`bool` -> `"boolean"`). Parameters with default values are emitted as
+optional schema fields (`required: false`) and carry their `default`
+value into the generated tool registry entry. Each `tool` declaration produces its own
 tool registry dict.
 
 **Programmatic API**:
@@ -1103,6 +1104,8 @@ These builtins expose Harn's typed orchestration runtime.
 | `run_record_diff(left, right)` | left, right | dict | Compare two run records and summarize stage/status deltas |
 | `eval_suite_manifest(payload)` | payload: dict | dict | Normalize a grouped eval suite manifest |
 | `eval_suite_run(manifest)` | manifest: dict | dict | Evaluate a manifest of saved runs, fixtures, and optional baselines |
+| `eval_metric(name, value, metadata?)` | name: string, value: any, metadata: dict | nil | Record a named metric into the eval metric store |
+| `eval_metrics()` | — | list | Return all recorded eval metrics as `{name, value, metadata?}` dicts |
 
 `workflow_execute` options currently include:
 

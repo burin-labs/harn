@@ -253,6 +253,8 @@ pub struct CompiledFunction {
     pub chunk: Chunk,
     /// True if the function body contains `yield` expressions (generator function).
     pub is_generator: bool,
+    /// True if the last parameter is a rest parameter (`...name`).
+    pub has_rest_param: bool,
 }
 
 impl Chunk {

@@ -2,6 +2,56 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.48
+
+### Added
+
+- **Raw string literals** — `r"..."` syntax for strings with no escape
+  processing or interpolation. Useful for regex patterns and file paths.
+- **Multiline string interpolation** — triple-quoted strings (`"""..."""`)
+  now support `${expression}` interpolation with automatic indent stripping.
+- **Rest parameters** — functions can declare `...rest` as the last parameter
+  to collect variadic arguments into a list:
+  `fn sum(...nums) { nums.reduce(0, fn(a,b) { a + b }) }`.
+- **`llm_usage()` builtin** — returns a dict with `input_tokens`,
+  `output_tokens`, `total_duration_ms`, and `total_calls` for the current
+  session.
+- **`eval_metric(name, value, metadata?)` builtin** — records named metrics
+  into run records for evaluation pipelines.
+- **`eval_metrics()` builtin** — returns all recorded eval metrics as a list.
+- **Stage-level timeouts** — workflow nodes now support an optional
+  `timeout_ms` field. When set, stage execution fails with a timeout error
+  if it exceeds the given duration.
+- **Retry backoff** — `RetryPolicy` now supports `backoff_ms` (initial delay)
+  and `backoff_multiplier` (exponential factor, default 2.0) for exponential
+  backoff between retry attempts.
+- **Conformance filter OR** — `--filter` now supports `|`-separated patterns:
+  `harn test conformance --filter "strings|closures|workflow"`.
+- **New conformance tests** — added tests for `require` statement, `thru`
+  operator, multiline strings, optional chaining + nil coalescing, `guard`
+  statement, raw strings, rest parameters, and multiline interpolation.
+- **Documentation** — new "Configuring LLM Providers" and "Debugging Agent
+  Runs" reference pages in the mdBook.
+
+### Changed
+
+- **Removed `.burin/` coupling** — the metadata store now writes to
+  `.harn/metadata/` instead of `.burin/metadata/`. Package imports search
+  only `.harn/packages/`. The MCP keyring service is now `dev.harn.mcp`.
+  Host applications that previously relied on `.burin/` paths should update
+  to use `.harn/` equivalents.
+- **Removed `set_intersection` alias** — use `set_intersect` instead.
+- **ACP description generalized** — ACP docs no longer reference
+  coding-specific use cases; Harn is described as a general-purpose agent
+  runtime.
+
+### Breaking
+
+- `.burin/metadata/` → `.harn/metadata/` (host apps must update paths)
+- `.burin/packages/` fallback removed (use `.harn/packages/` only)
+- MCP keyring service: `dev.burin.harn.mcp` → `dev.harn.mcp` (re-auth needed)
+- `set_intersection` alias removed (use `set_intersect`)
+
 ## v0.5.47
 
 ### Added

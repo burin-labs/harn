@@ -78,6 +78,45 @@ try {
 
 Errors that don't match the typed catch propagate up the call stack.
 
+## require
+
+The `require` statement checks a condition and throws an error if it is
+false. An optional second argument provides the error message:
+
+```harn
+require len(items) > 0, "items list must not be empty"
+require user != nil, "user is required"
+require score >= 0    // throws a generic error if false
+```
+
+`require` is useful at the top of a function to validate preconditions
+before proceeding. If the condition is falsy, execution stops with a
+thrown error that can be caught by `try`/`catch` or will surface as a
+runtime error.
+
+## guard
+
+The `guard` statement provides an early-return pattern. If the condition
+is false, the `else` block executes. The `else` block must exit the
+current scope (typically via `return` or `throw`):
+
+```harn
+fn process(input) {
+  guard input != nil else {
+    return "no input"
+  }
+  guard type_of(input) == "string" else {
+    throw "expected string, got ${type_of(input)}"
+  }
+  // input is guaranteed non-nil and a string here
+  return input.uppercase()
+}
+```
+
+After a `guard` statement, the type checker narrows the variable's type
+based on the condition. For example, `guard x != nil` ensures `x` is
+non-nil in subsequent code.
+
 ## retry
 
 Automatically retry a block up to N times:

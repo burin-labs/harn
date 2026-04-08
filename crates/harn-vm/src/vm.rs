@@ -840,8 +840,17 @@ impl Vm {
             .func
             .default_start
             .unwrap_or(closure.func.params.len());
+        let param_count = closure.func.params.len();
         for (i, param) in closure.func.params.iter().enumerate() {
-            if i < args.len() {
+            if closure.func.has_rest_param && i == param_count - 1 {
+                // Rest parameter: collect remaining args into a list
+                let rest_args = if i < args.len() {
+                    args[i..].to_vec()
+                } else {
+                    Vec::new()
+                };
+                let _ = call_env.define(param, VmValue::List(std::rc::Rc::new(rest_args)), false);
+            } else if i < args.len() {
                 let _ = call_env.define(param, args[i].clone(), false);
             } else if i < default_start {
                 let _ = call_env.define(param, VmValue::Nil, false);
@@ -890,8 +899,16 @@ impl Vm {
             .func
             .default_start
             .unwrap_or(closure.func.params.len());
+        let param_count = closure.func.params.len();
         for (i, param) in closure.func.params.iter().enumerate() {
-            if i < args.len() {
+            if closure.func.has_rest_param && i == param_count - 1 {
+                let rest_args = if i < args.len() {
+                    args[i..].to_vec()
+                } else {
+                    Vec::new()
+                };
+                let _ = call_env.define(param, VmValue::List(std::rc::Rc::new(rest_args)), false);
+            } else if i < args.len() {
                 let _ = call_env.define(param, args[i].clone(), false);
             } else if i < default_start {
                 let _ = call_env.define(param, VmValue::Nil, false);
@@ -969,8 +986,17 @@ impl Vm {
                 .func
                 .default_start
                 .unwrap_or(closure.func.params.len());
+            let param_count = closure.func.params.len();
             for (i, param) in closure.func.params.iter().enumerate() {
-                if i < args.len() {
+                if closure.func.has_rest_param && i == param_count - 1 {
+                    let rest_args = if i < args.len() {
+                        args[i..].to_vec()
+                    } else {
+                        Vec::new()
+                    };
+                    let _ =
+                        call_env.define(param, VmValue::List(std::rc::Rc::new(rest_args)), false);
+                } else if i < args.len() {
                     let _ = call_env.define(param, args[i].clone(), false);
                 } else if i < default_start {
                     let _ = call_env.define(param, VmValue::Nil, false);

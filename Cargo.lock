@@ -751,7 +751,7 @@ dependencies = [
 
 [[package]]
 name = "harn-cli"
-version = "0.5.47"
+version = "0.5.48"
 dependencies = [
  "axum 0.8.8",
  "base64",
@@ -782,7 +782,7 @@ dependencies = [
 
 [[package]]
 name = "harn-dap"
-version = "0.5.47"
+version = "0.5.48"
 dependencies = [
  "harn-lexer",
  "harn-parser",
@@ -794,7 +794,7 @@ dependencies = [
 
 [[package]]
 name = "harn-fmt"
-version = "0.5.47"
+version = "0.5.48"
 dependencies = [
  "harn-lexer",
  "harn-parser",
@@ -802,11 +802,11 @@ dependencies = [
 
 [[package]]
 name = "harn-lexer"
-version = "0.5.47"
+version = "0.5.48"
 
 [[package]]
 name = "harn-lint"
-version = "0.5.47"
+version = "0.5.48"
 dependencies = [
  "harn-lexer",
  "harn-parser",
@@ -815,7 +815,7 @@ dependencies = [
 
 [[package]]
 name = "harn-lsp"
-version = "0.5.47"
+version = "0.5.48"
 dependencies = [
  "harn-lexer",
  "harn-lint",
@@ -827,14 +827,14 @@ dependencies = [
 
 [[package]]
 name = "harn-parser"
-version = "0.5.47"
+version = "0.5.48"
 dependencies = [
  "harn-lexer",
 ]
 
 [[package]]
 name = "harn-vm"
-version = "0.5.47"
+version = "0.5.48"
 dependencies = [
  "base64",
  "futures",

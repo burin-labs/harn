@@ -42,5 +42,18 @@ pipeline test(task) {
   }
   let scale_tool = tool_find(scale, "scale")
   assert(scale_tool.parameters.factor.type == "number", "float maps to number in JSON schema")
+  // Test 7: defaulted tool params become optional schema fields
+  tool search(query: string, file_glob: string = "*.py", max_results: int = 20) -> string {
+    query + ":" + file_glob + ":" + to_string(max_results)
+  }
+  let search_tool = tool_find(search, "search")
+  assert(search_tool.parameters.query.type == "string", "required param should keep its type")
+  assert(!search_tool.parameters.file_glob.required, "defaulted params should be optional")
+  assert(!search_tool.parameters.max_results.required, "later defaulted params should be optional")
+  assert(search_tool.parameters.file_glob.default == "*.py", "string defaults should be preserved")
+  assert(search_tool.parameters.max_results.default == 20, "int defaults should be preserved")
+  let search_handler = search_tool.handler
+  let default_result = search_handler("needle")
+  assert(default_result == "needle:*.py:20", "handler should still honor defaulted params")
   log("tool_decl tests passed")
 }

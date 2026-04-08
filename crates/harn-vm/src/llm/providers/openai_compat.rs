@@ -25,6 +25,17 @@ impl LlmProvider for OpenAiCompatibleProvider {
     fn name(&self) -> &str {
         &self.provider_name
     }
+
+    /// Apply provider-specific request body transformations. For OpenRouter,
+    /// strip the `chat_template_kwargs` thinking field since OpenRouter does
+    /// not reliably support it.
+    fn transform_request(&self, body: &mut serde_json::Value) {
+        if self.provider_name.to_lowercase().contains("openrouter") {
+            if let Some(obj) = body.as_object_mut() {
+                obj.remove("chat_template_kwargs");
+            }
+        }
+    }
 }
 
 impl LlmProviderChat for OpenAiCompatibleProvider {
@@ -97,9 +108,10 @@ impl OpenAiCompatibleProvider {
         if let Some(ref tc) = opts.tool_choice {
             body["tool_choice"] = tc.clone();
         }
-        // OpenAI-compatible thinking — only for providers that reliably support it.
-        let is_openrouter = opts.provider.to_lowercase().contains("openrouter");
-        if !is_openrouter && opts.thinking.is_some() {
+        // OpenAI-compatible thinking — added unconditionally here; providers
+        // that don't support it (e.g. OpenRouter) strip it via
+        // `transform_request()`.
+        if opts.thinking.is_some() {
             body["chat_template_kwargs"] = serde_json::json!({
                 "enable_thinking": true,
             });
@@ -113,7 +125,8 @@ impl OpenAiCompatibleProvider {
         request: &LlmRequestPayload,
         delta_tx: Option<DeltaSender>,
     ) -> Result<LlmResult, VmError> {
-        let body = Self::build_request_body(request, false);
+        let mut body = Self::build_request_body(request, false);
+        self.transform_request(&mut body);
         crate::llm::api::vm_call_llm_api_with_body(
             request, delta_tx, body, false, // is_anthropic_style
             false, // is_ollama

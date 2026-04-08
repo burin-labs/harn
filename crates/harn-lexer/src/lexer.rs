@@ -120,6 +120,12 @@ impl Lexer {
                 }
             }
 
+            // Raw string literals: r"..."
+            if ch == 'r' && self.peek() == Some('"') {
+                tokens.push(self.read_raw_string()?);
+                continue;
+            }
+
             // String literals
             if ch == '"' {
                 tokens.push(self.read_string()?);
@@ -378,6 +384,9 @@ impl Lexer {
         }
 
         let mut value = String::new();
+        let mut segments: Vec<StringSegment> = Vec::new();
+        let mut has_interpolation = false;
+
         while self.pos < self.source.len() {
             if self.source[self.pos] == '"'
                 && self.pos + 2 < self.source.len()
@@ -387,12 +396,85 @@ impl Lexer {
                 self.advance(); // skip first "
                 self.advance(); // skip second "
                 self.advance(); // skip third "
+                if has_interpolation {
+                    if !value.is_empty() {
+                        segments.push(StringSegment::Literal(std::mem::take(&mut value)));
+                    }
+                    // Compute common indent across ALL literal content, then
+                    // strip it from each literal segment uniformly.
+                    let full_text: String = segments
+                        .iter()
+                        .map(|seg| match seg {
+                            StringSegment::Literal(s) => s.as_str(),
+                            _ => "",
+                        })
+                        .collect();
+                    let indent = common_indent(&full_text);
+                    let segments = if indent > 0 {
+                        segments
+                            .into_iter()
+                            .map(|seg| match seg {
+                                StringSegment::Literal(s) => {
+                                    StringSegment::Literal(strip_indent(&s, indent))
+                                }
+                                other => other,
+                            })
+                            .collect()
+                    } else {
+                        strip_trailing_newline_segments(segments)
+                    };
+                    let mut span =
+                        Span::with_offsets(start_byte, self.byte_pos, start.line, start.column);
+                    span.end_line = self.line;
+                    return Ok(Token::with_span(
+                        TokenKind::InterpolatedString(segments),
+                        span,
+                    ));
+                }
                 let stripped = strip_common_indent(&value);
-                return Ok(Token::with_span(
-                    TokenKind::StringLiteral(stripped),
-                    Span::with_offsets(start_byte, self.byte_pos, start.line, start.column),
-                ));
+                let mut span =
+                    Span::with_offsets(start_byte, self.byte_pos, start.line, start.column);
+                span.end_line = self.line;
+                return Ok(Token::with_span(TokenKind::StringLiteral(stripped), span));
             }
+
+            // String interpolation: ${expression}
+            if self.source[self.pos] == '$' && self.peek() == Some('{') {
+                has_interpolation = true;
+                if !value.is_empty() {
+                    segments.push(StringSegment::Literal(std::mem::take(&mut value)));
+                }
+                self.advance(); // skip $
+                self.advance(); // skip {
+                let expr_line = self.line;
+                let expr_col = self.column;
+                let mut depth = 1;
+                let mut expr = String::new();
+                while self.pos < self.source.len() && depth > 0 {
+                    if self.source[self.pos] == '{' {
+                        depth += 1;
+                    }
+                    if self.source[self.pos] == '}' {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                    if self.source[self.pos] == '\n' {
+                        self.line += 1;
+                        self.column = 0; // will be incremented by advance
+                    }
+                    expr.push(self.source[self.pos]);
+                    self.advance();
+                }
+                if self.pos >= self.source.len() {
+                    return Err(LexerError::UnterminatedString(start));
+                }
+                self.advance(); // skip closing }
+                segments.push(StringSegment::Expression(expr, expr_line, expr_col));
+                continue;
+            }
+
             if self.source[self.pos] == '\n' {
                 value.push('\n');
                 self.advance();
@@ -402,6 +484,32 @@ impl Lexer {
                 value.push(self.source[self.pos]);
                 self.advance();
             }
+        }
+        Err(LexerError::UnterminatedString(start))
+    }
+
+    /// Read a raw string literal `r"..."`. No escape processing, no interpolation.
+    fn read_raw_string(&mut self) -> Result<Token, LexerError> {
+        let start_byte = self.byte_pos;
+        let start = Span::with_offsets(start_byte, start_byte, self.line, self.column);
+        self.advance(); // skip 'r'
+        self.advance(); // skip opening '"'
+
+        let mut value = String::new();
+        while self.pos < self.source.len() {
+            let ch = self.source[self.pos];
+            if ch == '"' {
+                self.advance(); // skip closing "
+                return Ok(Token::with_span(
+                    TokenKind::RawStringLiteral(value),
+                    Span::with_offsets(start_byte, self.byte_pos, start.line, start.column),
+                ));
+            }
+            if ch == '\n' {
+                return Err(LexerError::UnterminatedString(start));
+            }
+            value.push(ch);
+            self.advance();
         }
         Err(LexerError::UnterminatedString(start))
     }
@@ -676,6 +784,45 @@ fn strip_common_indent(text: &str) -> String {
         .join("\n");
 
     stripped.strip_suffix('\n').unwrap_or(&stripped).to_string()
+}
+
+/// Compute the common leading indent (spaces/tabs) across non-empty lines.
+fn common_indent(text: &str) -> usize {
+    text.split('\n')
+        .filter(|l| !l.trim().is_empty())
+        .map(|line| line.chars().take_while(|c| *c == ' ' || *c == '\t').count())
+        .min()
+        .unwrap_or(0)
+}
+
+/// Strip up to `n` leading whitespace characters from each line and remove trailing newline.
+fn strip_indent(text: &str, n: usize) -> String {
+    let lines: Vec<&str> = text.split('\n').collect();
+    let stripped: String = lines
+        .iter()
+        .map(|line| {
+            if line.trim().is_empty() {
+                ""
+            } else {
+                let ws = line.chars().take_while(|c| *c == ' ' || *c == '\t').count();
+                let skip = n.min(ws);
+                &line[skip..]
+            }
+        })
+        .collect::<Vec<&str>>()
+        .join("\n");
+    stripped.strip_suffix('\n').unwrap_or(&stripped).to_string()
+}
+
+/// Remove a trailing-newline-only literal segment (for multiline strings
+/// where the last segment before `"""` is just whitespace).
+fn strip_trailing_newline_segments(mut segments: Vec<StringSegment>) -> Vec<StringSegment> {
+    if let Some(StringSegment::Literal(s)) = segments.last() {
+        if s.trim().is_empty() {
+            segments.pop();
+        }
+    }
+    segments
 }
 
 #[cfg(test)]

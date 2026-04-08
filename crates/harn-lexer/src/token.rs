@@ -182,6 +182,8 @@ pub enum TokenKind {
     Identifier(String),
     StringLiteral(String),
     InterpolatedString(Vec<StringSegment>),
+    /// Raw string literal `r"..."` — no escape processing, no interpolation.
+    RawStringLiteral(String),
     IntLiteral(i64),
     FloatLiteral(f64),
     /// Duration literal in milliseconds: 500ms, 5s, 30m, 2h
@@ -289,6 +291,7 @@ impl fmt::Display for TokenKind {
             TokenKind::Identifier(s) => write!(f, "id({s})"),
             TokenKind::StringLiteral(s) => write!(f, "str({s})"),
             TokenKind::InterpolatedString(_) => write!(f, "istr(...)"),
+            TokenKind::RawStringLiteral(s) => write!(f, "rstr({s})"),
             TokenKind::IntLiteral(n) => write!(f, "int({n})"),
             TokenKind::FloatLiteral(n) => write!(f, "float({n})"),
             TokenKind::DurationLiteral(ms) => write!(f, "duration({ms}ms)"),

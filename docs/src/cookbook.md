@@ -71,8 +71,8 @@ pipeline default(task) {
     } else {
       var tool_output = ""
       for call in calls {
-        let tool = tool_find(tools, call.name)
-        let handler = tool.handler
+        let t = tool_find(tools, call.name)
+        let handler = t.handler
         let result = handler(call.arguments[call.arguments.keys()[0]])
         tool_output = tool_output + tool_format_result(call.name, result)
       }
@@ -143,8 +143,8 @@ pipeline default(task) {
 
   // List available tools
   let tools = mcp_list_tools(client)
-  for tool in tools {
-    println("Tool: ${tool.name} - ${tool.description}")
+  for t in tools {
+    println("Tool: ${t.name} - ${t.description}")
   }
 
   // Write a file, then read it back
@@ -602,4 +602,55 @@ pipeline default(task) {
 
   println(sum_to(10000, 0))
 }
+```
+
+## 15. Multi-agent delegation
+
+Spawn worker agents for different roles and collect their results in
+parallel.
+
+```harn
+// Spawn workers and collect results
+let agents = ["research", "analyze", "summarize"]
+let results = parallel_map(agents) { role ->
+  let agent = spawn_agent({name: role, system: "You are a ${role} agent."})
+  send_input(agent, task)
+  wait_agent(agent)
+}
+```
+
+## 16. Parallel LLM evaluation
+
+Evaluate multiple prompts concurrently using `parallel_map`.
+
+```harn
+// Evaluate multiple prompts in parallel
+let prompts = ["Explain X", "Explain Y", "Explain Z"]
+let responses = parallel_map(prompts) { p ->
+  llm_call({prompt: p})
+}
+```
+
+## 17. MCP client usage
+
+Connect to an MCP server, list tools, call one, and disconnect.
+
+```harn
+// Connect to an MCP server and call tools
+let client = mcp_connect({command: "npx", args: ["-y", "some-mcp-server"]})
+let tools = mcp_list_tools(client)
+log("Available: ${len(tools)} tools")
+let result = mcp_call(client, "tool_name", {arg: "value"})
+mcp_disconnect(client)
+```
+
+## 18. Eval metrics tracking
+
+Track quality metrics during agent execution for later analysis.
+
+```harn
+// Track quality metrics during agent execution
+eval_metric("accuracy", score, {model: model_name})
+let usage = llm_usage()
+eval_metric("cost_tokens", usage.input_tokens + usage.output_tokens)
 ```

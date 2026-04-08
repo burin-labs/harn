@@ -858,6 +858,7 @@ fn collect_mock_host_capabilities_from_node(
         }
         Node::InterpolatedString(_)
         | Node::StringLiteral(_)
+        | Node::RawStringLiteral(_)
         | Node::IntLiteral(_)
         | Node::FloatLiteral(_)
         | Node::BoolLiteral(_)
@@ -1852,6 +1853,7 @@ fn scan_node_preflight(
         | Node::DurationLiteral(_)
         | Node::InterpolatedString(_)
         | Node::StringLiteral(_)
+        | Node::RawStringLiteral(_)
         | Node::IntLiteral(_)
         | Node::FloatLiteral(_)
         | Node::BoolLiteral(_)
@@ -1893,8 +1895,8 @@ fn resolve_import_path(current_file: &Path, import_path: &str) -> Option<PathBuf
     if file_path.exists() {
         return Some(file_path);
     }
-    for pkg_dir in [".harn/packages", ".burin/packages"] {
-        let pkg_path = base.join(pkg_dir).join(import_path);
+    {
+        let pkg_path = base.join(".harn/packages").join(import_path);
         if pkg_path.exists() {
             return Some(if pkg_path.is_dir() {
                 let lib = pkg_path.join("lib.harn");

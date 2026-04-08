@@ -199,9 +199,13 @@ pub(crate) async fn run_conformance_tests(
             .display()
             .to_string();
 
-        // Apply filter
+        // Apply filter (supports substring match or regex with | for OR)
         if let Some(pattern) = filter {
-            if !rel_path.contains(pattern) {
+            if pattern.contains('|') {
+                if !pattern.split('|').any(|p| rel_path.contains(p.trim())) {
+                    continue;
+                }
+            } else if !rel_path.contains(pattern) {
                 continue;
             }
         }

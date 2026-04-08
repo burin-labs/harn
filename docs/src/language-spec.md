@@ -668,7 +668,7 @@ though this is mostly relevant for closures and parallel bodies.
 
 1. If path starts with `std/`, loads embedded stdlib module (e.g. `std/text`)
 2. Relative to current file's directory; auto-adds `.harn` extension
-3. `.harn/packages/<path>` then `.burin/packages/<path>` directories
+3. `.harn/packages/<path>` directories
 4. Package directories with `lib.harn` entry point
 
 Selective imports: `import { name1, name2 } from "module"` imports only
@@ -1054,6 +1054,11 @@ tool read_file(path: string, encoding: string) -> string {
   description "Read a file from the filesystem"
   read_file(path)
 }
+
+tool search(query: string, file_glob: string = "*.py") -> string {
+  description "Search files matching an optional glob"
+  "..."
+}
 ```
 
 Declares a named tool and registers it with a tool registry. The body is
@@ -1062,6 +1067,9 @@ compiled as a closure and attached as the tool's handler. An optional
 
 Parameter types are mapped to JSON Schema types (`string` -> `"string"`,
 `int` -> `"integer"`, `float` -> `"number"`, `bool` -> `"boolean"`).
+Parameters with default values are emitted as optional schema fields
+(`required: false`) and include their `default` value in the generated
+tool registry entry.
 
 The result of a `tool` declaration is a tool registry dict (the return
 value of `tool_define`). Multiple `tool` declarations accumulate into

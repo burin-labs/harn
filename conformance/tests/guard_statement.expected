@@ -1,0 +1,4 @@
+[harn] positive: 5
+[harn] not positive
+[harn] string: hello
+[harn] not a string

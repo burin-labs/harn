@@ -94,26 +94,23 @@ impl Vm {
             }
 
             if !file_path.exists() {
-                for pkg_dir in [".harn/packages", ".burin/packages"] {
-                    let pkg_path = base.join(pkg_dir).join(path);
-                    if pkg_path.exists() {
-                        file_path = if pkg_path.is_dir() {
-                            let lib = pkg_path.join("lib.harn");
-                            if lib.exists() {
-                                lib
-                            } else {
-                                pkg_path
-                            }
+                let pkg_path = base.join(".harn/packages").join(path);
+                if pkg_path.exists() {
+                    file_path = if pkg_path.is_dir() {
+                        let lib = pkg_path.join("lib.harn");
+                        if lib.exists() {
+                            lib
                         } else {
                             pkg_path
-                        };
-                        break;
-                    }
+                        }
+                    } else {
+                        pkg_path
+                    };
+                } else {
                     let mut pkg_harn = pkg_path.clone();
                     pkg_harn.set_extension("harn");
                     if pkg_harn.exists() {
                         file_path = pkg_harn;
-                        break;
                     }
                 }
             }

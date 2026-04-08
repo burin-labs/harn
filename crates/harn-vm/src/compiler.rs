@@ -482,7 +482,7 @@ impl Compiler {
                 let idx = self.chunk.add_constant(Constant::Float(*n));
                 self.chunk.emit_u16(Op::Constant, idx, self.line);
             }
-            Node::StringLiteral(s) => {
+            Node::StringLiteral(s) | Node::RawStringLiteral(s) => {
                 let idx = self.chunk.add_constant(Constant::String(s.clone()));
                 self.chunk.emit_u16(Op::Constant, idx, self.line);
             }
@@ -617,6 +617,7 @@ impl Compiler {
                                     name: "__pipe".into(),
                                     type_expr: None,
                                     default_value: None,
+                                    rest: false,
                                 }],
                                 body: vec![replaced],
                                 fn_syntax: false,
@@ -1246,6 +1247,7 @@ impl Compiler {
                     default_start: TypedParam::default_start(params),
                     chunk: fn_compiler.chunk,
                     is_generator: is_gen,
+                    has_rest_param: params.last().is_some_and(|p| p.rest),
                 };
                 let fn_idx = self.chunk.functions.len();
                 self.chunk.functions.push(func);
@@ -1278,6 +1280,7 @@ impl Compiler {
                     default_start: TypedParam::default_start(params),
                     chunk: fn_compiler.chunk,
                     is_generator: false,
+                    has_rest_param: params.last().is_some_and(|p| p.rest),
                 };
                 let fn_idx = self.chunk.functions.len();
                 self.chunk.functions.push(func);
@@ -1325,7 +1328,21 @@ impl Compiler {
                     self.chunk.emit_u16(Op::Constant, type_key, self.line);
                     let type_val = self.chunk.add_constant(Constant::String(type_str.into()));
                     self.chunk.emit_u16(Op::Constant, type_val, self.line);
-                    self.chunk.emit_u16(Op::BuildDict, 1, self.line);
+                    let mut param_schema_entries: u16 = 1;
+                    if let Some(default_expr) = &p.default_value {
+                        let required_key =
+                            self.chunk.add_constant(Constant::String("required".into()));
+                        self.chunk.emit_u16(Op::Constant, required_key, self.line);
+                        let required_val = self.chunk.add_constant(Constant::Bool(false));
+                        self.chunk.emit_u16(Op::Constant, required_val, self.line);
+                        let default_key =
+                            self.chunk.add_constant(Constant::String("default".into()));
+                        self.chunk.emit_u16(Op::Constant, default_key, self.line);
+                        self.compile_node(default_expr)?;
+                        param_schema_entries += 2;
+                    }
+                    self.chunk
+                        .emit_u16(Op::BuildDict, param_schema_entries, self.line);
                     param_count += 1;
                 }
                 self.chunk.emit_u16(Op::BuildDict, param_count, self.line);
@@ -1367,6 +1384,7 @@ impl Compiler {
                     default_start: TypedParam::default_start(params),
                     chunk: fn_compiler.chunk,
                     is_generator: is_gen,
+                    has_rest_param: false,
                 };
                 let fn_idx = self.chunk.functions.len();
                 self.chunk.functions.push(func);
@@ -1963,6 +1981,7 @@ impl Compiler {
                             default_start: TypedParam::default_start(params),
                             chunk: fn_compiler.chunk,
                             is_generator: false,
+                            has_rest_param: false,
                         };
                         let fn_idx = self.chunk.functions.len();
                         self.chunk.functions.push(func);
@@ -2015,6 +2034,7 @@ impl Compiler {
                     default_start: None,
                     chunk: fn_compiler.chunk,
                     is_generator: false,
+                    has_rest_param: false,
                 };
                 let fn_idx = self.chunk.functions.len();
                 self.chunk.functions.push(func);
@@ -2296,6 +2316,7 @@ impl Compiler {
                     default_start: None,
                     chunk: fn_compiler.chunk,
                     is_generator: false,
+                    has_rest_param: false,
                 };
                 let fn_idx = self.chunk.functions.len();
                 self.chunk.functions.push(func);
@@ -2319,6 +2340,7 @@ impl Compiler {
                     default_start: None,
                     chunk: fn_compiler.chunk,
                     is_generator: false,
+                    has_rest_param: false,
                 };
                 let fn_idx = self.chunk.functions.len();
                 self.chunk.functions.push(func);
@@ -2342,6 +2364,7 @@ impl Compiler {
                     default_start: None,
                     chunk: fn_compiler.chunk,
                     is_generator: false,
+                    has_rest_param: false,
                 };
                 let fn_idx = self.chunk.functions.len();
                 self.chunk.functions.push(func);
@@ -2360,6 +2383,7 @@ impl Compiler {
                     default_start: None,
                     chunk: fn_compiler.chunk,
                     is_generator: false,
+                    has_rest_param: false,
                 };
                 let fn_idx = self.chunk.functions.len();
                 self.chunk.functions.push(func);
@@ -2656,6 +2680,7 @@ impl Compiler {
             default_start: TypedParam::default_start(params),
             chunk: fn_compiler.chunk,
             is_generator: is_gen,
+            has_rest_param: false,
         })
     }
 

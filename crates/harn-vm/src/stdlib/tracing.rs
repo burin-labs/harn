@@ -158,6 +158,7 @@ pub(crate) fn register_tracing_builtins(vm: &mut Vm) {
             VmValue::Int(total_duration),
         );
         usage.insert("call_count".to_string(), VmValue::Int(call_count));
+        usage.insert("total_calls".to_string(), VmValue::Int(call_count));
         Ok(VmValue::Dict(Rc::new(usage)))
     });
 }

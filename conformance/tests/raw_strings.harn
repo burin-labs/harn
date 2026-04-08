@@ -1,0 +1,14 @@
+pipeline test(task) {
+  // Raw strings have no escape processing
+  let path = r"C:\Users\name\file.txt"
+  log(path)
+  // Raw strings preserve backslashes literally
+  let regex = r"\d+\.\d+"
+  log(regex)
+  // Dollar signs are literal, no interpolation
+  let price = r"costs $100"
+  log(price)
+  // Empty raw string
+  let empty = r""
+  log(len(empty))
+}

@@ -2,7 +2,7 @@
 //!
 //! When `harn run --bridge` is used, the VM delegates builtins (llm_call,
 //! file I/O, tool execution) to a host process over stdin/stdout JSON-RPC.
-//! The host (e.g., Burin IDE) handles these requests using its own providers.
+//! The host application handles these requests using its own providers.
 
 use std::collections::{HashMap, VecDeque};
 use std::io::Write;

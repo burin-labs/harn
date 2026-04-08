@@ -154,13 +154,36 @@ println("2 + 2 = ${2 + 2}")
 
 Any expression works inside `${}`.
 
+### Raw strings
+
+Raw strings use the `r"..."` prefix. No escape processing or interpolation
+is performed -- backslashes and dollar signs are taken literally. Useful for
+regex patterns and file paths:
+
+```harn
+let pattern = r"\d+\.\d+"
+let path = r"C:\Users\alice\docs"
+```
+
+Raw strings cannot span multiple lines.
+
 ### Multi-line strings
 
 ```harn
 let doc = """
   This is a multi-line string.
   Common leading whitespace is stripped.
-  Interpolation is NOT supported here.
+"""
+```
+
+Multi-line strings support `${expression}` interpolation with automatic
+indent stripping:
+
+```harn
+let name = "world"
+let greeting = """
+  Hello, ${name}!
+  Welcome to Harn.
 """
 ```
 
@@ -384,6 +407,29 @@ fn greet(name: string) -> string {
 ```
 
 Functions can be declared at the top level (for library files) or inside pipelines.
+
+### Rest parameters
+
+Use `...name` as the last parameter to collect any remaining arguments into
+a list:
+
+```harn
+fn sum(...nums) {
+  var total = 0
+  for n in nums {
+    total = total + n
+  }
+  return total
+}
+println(sum(1, 2, 3))  // 6
+
+fn log(level, ...parts) {
+  println("[${level}] ${join(parts, " ")}")
+}
+log("INFO", "server", "started")  // [INFO] server started
+```
+
+If no extra arguments are provided, the rest parameter is an empty list.
 
 ### Closures
 
@@ -842,6 +888,23 @@ fn compute(x) {
 
 No `catch` or `finally` is needed. If a `catch` follows `try`, it is
 parsed as the traditional `try`/`catch` statement instead.
+
+## Ask expression
+
+The `ask` expression is syntactic sugar for making an LLM call. It takes
+a set of key-value fields and returns the LLM response as a string:
+
+```harn
+let answer = ask {
+  system: "You are a helpful assistant.",
+  user: "What is 2 + 2?"
+}
+println(answer)
+```
+
+Common fields include `system` (system prompt), `user` (user message),
+`model`, `max_tokens`, and `provider`. The `ask` expression is equivalent
+to building a dict and passing it to `llm_call`.
 
 ## Duration literals
 

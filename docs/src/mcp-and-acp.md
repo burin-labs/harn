@@ -26,8 +26,8 @@ println("Connected to: ${info.name}")
 
 ```harn
 let tools = mcp_list_tools(client)
-for tool in tools {
-  println("${tool.name}: ${tool.description}")
+for t in tools {
+  println("${t.name}: ${t.description}")
 }
 
 let content = mcp_call(client, "read_file", {path: "/tmp/data.txt"})

@@ -1,0 +1,18 @@
+pipeline test(task) {
+  fn check_positive(x) {
+    guard x > 0 else {
+      return "not positive"
+    }
+    return "positive: ${x}"
+  }
+  log(check_positive(5))
+  log(check_positive(-1))
+  fn check_string(val) {
+    guard type_of(val) == "string" else {
+      return "not a string"
+    }
+    return "string: ${val}"
+  }
+  log(check_string("hello"))
+  log(check_string(42))
+}

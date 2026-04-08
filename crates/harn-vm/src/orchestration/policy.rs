@@ -313,12 +313,20 @@ pub struct ContextPolicy {
     pub render: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct RetryPolicy {
     pub max_attempts: usize,
     pub verify: bool,
     pub repair: bool,
+    /// Initial backoff duration in milliseconds between retry attempts.
+    /// When `None`, retries proceed without delay.
+    #[serde(default)]
+    pub backoff_ms: Option<u64>,
+    /// Multiplier applied to `backoff_ms` after each retry attempt.
+    /// Defaults to 2.0 when `backoff_ms` is set and this field is `None`.
+    #[serde(default)]
+    pub backoff_multiplier: Option<f64>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]

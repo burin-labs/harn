@@ -585,10 +585,32 @@ impl Formatter {
     pub(crate) fn format_expr(&self, node: &SNode) -> String {
         match &node.node {
             Node::StringLiteral(s) => {
-                let escaped = escape_string(s);
-                format!("\"{escaped}\"")
+                if node.span.line != node.span.end_line {
+                    // Multiline string: reconstruct """...""" form
+                    format!("\"\"\"\n{s}\n\"\"\"")
+                } else {
+                    let escaped = escape_string(s);
+                    format!("\"{escaped}\"")
+                }
+            }
+            Node::RawStringLiteral(s) => {
+                format!("r\"{s}\"")
             }
             Node::InterpolatedString(segments) => {
+                if node.span.line != node.span.end_line {
+                    // Multiline interpolated string: reconstruct """...""" form
+                    let mut result = String::from("\"\"\"\n");
+                    for seg in segments {
+                        match seg {
+                            StringSegment::Literal(s) => result.push_str(s),
+                            StringSegment::Expression(e, _, _) => {
+                                result.push_str(&format!("${{{e}}}"));
+                            }
+                        }
+                    }
+                    result.push_str("\n\"\"\"");
+                    return result;
+                }
                 let mut result = String::from("\"");
                 for seg in segments {
                     match seg {

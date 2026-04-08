@@ -279,6 +279,8 @@ pub enum Node {
     // Literals
     InterpolatedString(Vec<StringSegment>),
     StringLiteral(String),
+    /// Raw string literal `r"..."` — no escape processing.
+    RawStringLiteral(String),
     IntLiteral(i64),
     FloatLiteral(f64),
     BoolLiteral(bool),
@@ -426,6 +428,8 @@ pub struct TypedParam {
     pub name: String,
     pub type_expr: Option<TypeExpr>,
     pub default_value: Option<Box<SNode>>,
+    /// If true, this is a rest parameter (`...name`) that collects remaining arguments.
+    pub rest: bool,
 }
 
 impl TypedParam {
@@ -435,6 +439,7 @@ impl TypedParam {
             name: name.into(),
             type_expr: None,
             default_value: None,
+            rest: false,
         }
     }
 
@@ -444,6 +449,7 @@ impl TypedParam {
             name: name.into(),
             type_expr: Some(type_expr),
             default_value: None,
+            rest: false,
         }
     }
 

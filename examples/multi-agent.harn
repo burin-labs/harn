@@ -1,0 +1,58 @@
+// Multi-Agent Delegation Example
+//
+// Demonstrates spawning multiple worker agents to handle subtasks in
+// parallel, then collecting and aggregating their results.
+//
+// Requires an LLM provider API key (e.g. ANTHROPIC_API_KEY) unless
+// you switch model_policy to {provider: "mock"} for local testing.
+//
+// Run with: cargo run --bin harn -- run examples/multi-agent.harn
+
+import "std/agents"
+
+pipeline main(task) {
+  let subtasks = [
+    {name: "researcher", prompt: "List 3 benefits of Rust for CLI tools. Be brief."},
+    {name: "critic", prompt: "List 3 downsides of Rust for CLI tools. Be brief."},
+    {name: "summarizer", prompt: "Write a one-sentence summary of Rust for CLI tools."},
+  ]
+
+  // Spawn a worker agent for each subtask
+  let workers = []
+  for sub in subtasks {
+    let worker = spawn_agent({
+      name: sub.name,
+      task: sub.prompt,
+      node: {
+        kind: "subagent",
+        mode: "llm",
+        model_policy: {provider: "mock"},
+        transcript_policy: {mode: "fork", compact: true, keep_last: 2},
+        output_contract: {output_kinds: ["summary"]},
+      },
+    })
+    log("Spawned agent: ${sub.name} (status: ${worker?.status})")
+    workers = workers + [worker]
+  }
+
+  // Wait for all workers and collect results
+  let results = []
+  for worker in workers {
+    let done = wait_agent(worker)
+    log("Agent ${done?.name} finished (status: ${done?.status})")
+    results = results + [done]
+  }
+
+  // Aggregate results
+  log("")
+  log("=== Aggregated Results ===")
+  for r in results {
+    log("${r?.name}: artifacts=${r?.artifact_count}, has_transcript=${r?.has_transcript}")
+  }
+  log("Total agents completed: ${len(results)}")
+
+  // Clean up
+  for r in results {
+    close_agent(r)
+  }
+}

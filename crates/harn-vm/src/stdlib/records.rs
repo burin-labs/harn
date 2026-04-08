@@ -1,5 +1,6 @@
 //! Artifact and run-record builtins.
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
@@ -13,6 +14,34 @@ use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 use super::workflow::load_run_tree;
+
+// =============================================================================
+// Thread-local eval metric store
+// =============================================================================
+
+/// A named metric recorded during evaluation.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct EvalMetric {
+    pub name: String,
+    pub value: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
+}
+
+thread_local! {
+    static EVAL_METRICS: RefCell<Vec<EvalMetric>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Reset thread-local eval metrics. Call between test runs to avoid leaking.
+pub fn reset_eval_metrics() {
+    EVAL_METRICS.with(|m| m.borrow_mut().clear());
+}
+
+/// Peek at recorded eval metrics without consuming them.
+#[allow(dead_code)]
+pub(crate) fn peek_eval_metrics() -> Vec<EvalMetric> {
+    EVAL_METRICS.with(|m| m.borrow().clone())
+}
 
 fn to_vm<T: serde::Serialize>(value: &T) -> Result<VmValue, VmError> {
     let json = serde_json::to_value(value)
@@ -659,5 +688,59 @@ pub(crate) fn register_record_builtins(vm: &mut Vm) {
             VmError::Runtime("eval_suite_run: missing manifest payload".to_string())
         })?)?;
         to_vm(&evaluate_run_suite_manifest(&manifest)?)
+    });
+
+    // eval_metric(name, value, metadata?) -> nil
+    // Record a named metric into the thread-local eval metric store.
+    vm.register_builtin("eval_metric", |args, _out| {
+        let name = args
+            .first()
+            .map(|v| v.display())
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| VmError::Runtime("eval_metric: missing name".to_string()))?;
+        let value = args
+            .get(1)
+            .ok_or_else(|| VmError::Runtime("eval_metric: missing value".to_string()))?;
+        let value_json = crate::llm::vm_value_to_json(value);
+        let metadata = args
+            .get(2)
+            .filter(|v| !matches!(v, VmValue::Nil))
+            .map(crate::llm::vm_value_to_json);
+        EVAL_METRICS.with(|m| {
+            m.borrow_mut().push(EvalMetric {
+                name,
+                value: value_json,
+                metadata,
+            });
+        });
+        Ok(VmValue::Nil)
+    });
+
+    // eval_metrics() -> list of dicts
+    // Return all recorded eval metrics.
+    vm.register_builtin("eval_metrics", |_args, _out| {
+        let metrics = EVAL_METRICS.with(|m| m.borrow().clone());
+        let list: Vec<VmValue> = metrics
+            .iter()
+            .map(|metric| {
+                let mut dict = BTreeMap::new();
+                dict.insert(
+                    "name".to_string(),
+                    VmValue::String(Rc::from(metric.name.as_str())),
+                );
+                dict.insert(
+                    "value".to_string(),
+                    crate::stdlib::json_to_vm_value(&metric.value),
+                );
+                if let Some(ref meta) = metric.metadata {
+                    dict.insert(
+                        "metadata".to_string(),
+                        crate::stdlib::json_to_vm_value(meta),
+                    );
+                }
+                VmValue::Dict(Rc::new(dict))
+            })
+            .collect();
+        Ok(VmValue::List(Rc::from(list)))
     });
 }

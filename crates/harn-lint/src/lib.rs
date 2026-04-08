@@ -848,6 +848,7 @@ impl<'a> Linter<'a> {
 
             // Leaf nodes and declarations that don't need recursion.
             Node::StringLiteral(_)
+            | Node::RawStringLiteral(_)
             | Node::IntLiteral(_)
             | Node::FloatLiteral(_)
             | Node::BoolLiteral(_)

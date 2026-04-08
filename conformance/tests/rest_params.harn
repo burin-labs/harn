@@ -1,0 +1,24 @@
+pipeline test(task) {
+  fn sum(...nums) {
+    var total = 0
+    for n in nums {
+      total += n
+    }
+    return total
+  }
+  log(sum(1, 2, 3))
+  log(sum(10))
+  log(sum())
+  // Rest param with leading required params
+  fn greet(greeting, ...names) {
+    for name in names {
+      log("${greeting}, ${name}!")
+    }
+  }
+  greet("Hello", "Alice", "Bob")
+  // Rest param is always a list
+  fn check_type(...args) {
+    log(type_of(args))
+  }
+  check_type()
+}

@@ -1,0 +1,13 @@
+pipeline test(task) {
+  // Optional chaining with nil coalescing
+  let obj = {name: "Alice", age: 30}
+  log(obj?.name ?? "unknown")
+  log(obj?.missing ?? "default")
+  // Chained operations
+  let nested = {inner: {value: 42}}
+  log(nested?.inner?.value ?? 0)
+  log(nested?.nonexistent?.value ?? 0)
+  // Nil coalescing with nil
+  let x = nil
+  log(x ?? "fallback")
+}

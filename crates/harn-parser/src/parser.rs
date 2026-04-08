@@ -1369,8 +1369,8 @@ impl Parser {
     // reach for when writing `xs?.count ?? 0 > 0` or `xs[xs?.count ?? 0 - 1]`
     // — both parse as `(xs?.count ?? 0) <op> rhs`. The previous placement
     // above `parse_logical_or` caused `?? 0 > 0` to parse as `?? (0 > 0)`
-    // which silently broke correctness in ~118 sites across Burin's pipeline
-    // library. See project_pipeline_batch_apr04_v4.md for impact analysis.
+    // which silently broke correctness in ~118 call sites in downstream
+    // pipeline libraries.
     fn parse_nil_coalescing(&mut self) -> Result<SNode, ParserError> {
         let mut left = self.parse_multiplicative()?;
         while self.check(&TokenKind::NilCoal) {
@@ -1767,6 +1767,14 @@ impl Parser {
                     Span::merge(start, self.prev_span()),
                 ))
             }
+            TokenKind::RawStringLiteral(s) => {
+                let s = s.clone();
+                self.advance();
+                Ok(spanned(
+                    Node::RawStringLiteral(s),
+                    Span::merge(start, self.prev_span()),
+                ))
+            }
             TokenKind::InterpolatedString(segments) => {
                 let segments = segments.clone();
                 self.advance();
@@ -2116,6 +2124,26 @@ impl Parser {
             } else {
                 break;
             }
+            // Check for rest parameter: ...name
+            let is_rest = if self.check(&TokenKind::Dot) {
+                // Peek ahead for two more dots
+                let p1 = self.pos + 1;
+                let p2 = self.pos + 2;
+                let is_ellipsis = p1 < self.tokens.len()
+                    && p2 < self.tokens.len()
+                    && self.tokens[p1].kind == TokenKind::Dot
+                    && self.tokens[p2].kind == TokenKind::Dot;
+                if is_ellipsis {
+                    self.advance(); // skip .
+                    self.advance(); // skip .
+                    self.advance(); // skip .
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
             let name = self.consume_identifier("parameter name")?;
             let type_expr = self.try_parse_type_annotation()?;
             let default_value = if self.check(&TokenKind::Assign) {
@@ -2123,17 +2151,28 @@ impl Parser {
                 seen_default = true;
                 Some(Box::new(self.parse_expression()?))
             } else {
-                if seen_default {
+                if seen_default && !is_rest {
                     return Err(self.error(
                         "Required parameter cannot follow a parameter with a default value",
                     ));
                 }
                 None
             };
+            if is_rest
+                && !is_terminator(
+                    &self
+                        .current()
+                        .map(|t| t.kind.clone())
+                        .unwrap_or(TokenKind::Eof),
+                )
+            {
+                return Err(self.error("Rest parameter must be the last parameter"));
+            }
             params.push(TypedParam {
                 name,
                 type_expr,
                 default_value,
+                rest: is_rest,
             });
             if self.check(&TokenKind::Comma) {
                 self.advance();

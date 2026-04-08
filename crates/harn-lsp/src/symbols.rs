@@ -83,6 +83,7 @@ fn format_default_value(snode: &SNode) -> String {
         Node::IntLiteral(n) => n.to_string(),
         Node::FloatLiteral(n) => n.to_string(),
         Node::StringLiteral(s) => format!("\"{s}\""),
+        Node::RawStringLiteral(s) => format!("r\"{s}\""),
         Node::BoolLiteral(b) => b.to_string(),
         Node::NilLiteral => "nil".to_string(),
         Node::ListLiteral(items) if items.is_empty() => "[]".to_string(),
@@ -703,6 +704,7 @@ fn collect_symbols(
         }
         Node::InterpolatedString(_)
         | Node::StringLiteral(_)
+        | Node::RawStringLiteral(_)
         | Node::IntLiteral(_)
         | Node::FloatLiteral(_)
         | Node::BoolLiteral(_)
@@ -738,7 +740,7 @@ pub(crate) fn infer_literal_type(snode: &SNode) -> Option<TypeExpr> {
     match &snode.node {
         Node::IntLiteral(_) => Some(TypeExpr::Named("int".into())),
         Node::FloatLiteral(_) => Some(TypeExpr::Named("float".into())),
-        Node::StringLiteral(_) | Node::InterpolatedString(_) => {
+        Node::StringLiteral(_) | Node::RawStringLiteral(_) | Node::InterpolatedString(_) => {
             Some(TypeExpr::Named("string".into()))
         }
         Node::BoolLiteral(_) => Some(TypeExpr::Named("bool".into())),

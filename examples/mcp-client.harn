@@ -1,0 +1,47 @@
+// MCP Client Example
+//
+// Demonstrates connecting to an external MCP server, discovering its
+// tools, invoking them, and cleaning up the connection.
+//
+// This example connects to the echo server bundled with the conformance
+// suite. For real use, replace the server command with your MCP server.
+//
+// Run with: cargo run --bin harn -- run examples/mcp-client.harn
+
+pipeline main(task) {
+  // Locate the bundled echo server for demonstration
+  let root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  let server_path = root + "/conformance/helpers/mcp_echo_server.py"
+
+  log("Connecting to MCP echo server...")
+  let client = mcp_connect("python3", [server_path])
+  log("Connected (type: ${type_of(client)})")
+
+  // Discover available tools
+  let tools = mcp_list_tools(client)
+  log("")
+  log("=== Available Tools (${tools.count}) ===")
+  for t in tools {
+    log("  - ${t.name}: ${t.description}")
+  }
+
+  // Call the echo tool
+  log("")
+  log("Calling echo tool...")
+  let echo_result = mcp_call(client, "echo", {message: "hello from harn"})
+  log("Echo result: ${echo_result}")
+
+  // Call the add tool
+  log("Calling add tool...")
+  let sum = mcp_call(client, "add", {a: 17, b: 25})
+  log("17 + 25 = ${sum}")
+
+  // Check server info
+  let info = mcp_server_info(client)
+  log("")
+  log("Server connected: ${info.connected}")
+
+  // Clean up
+  mcp_disconnect(client)
+  log("Disconnected from MCP server.")
+}

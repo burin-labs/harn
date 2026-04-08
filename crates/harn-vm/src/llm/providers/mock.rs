@@ -12,6 +12,14 @@ impl LlmProvider for MockProvider {
     fn name(&self) -> &str {
         "mock"
     }
+
+    fn is_mock(&self) -> bool {
+        true
+    }
+
+    fn requires_model(&self) -> bool {
+        false
+    }
 }
 
 impl LlmProviderChat for MockProvider {

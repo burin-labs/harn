@@ -43,6 +43,25 @@ pub(crate) trait LlmProvider {
     fn supports_thinking(&self) -> bool {
         false
     }
+
+    /// Whether this is the mock provider (deterministic test responses, no API).
+    fn is_mock(&self) -> bool {
+        false
+    }
+
+    /// Whether this is a local provider (e.g. Ollama) that uses NDJSON streaming.
+    fn is_local(&self) -> bool {
+        false
+    }
+
+    /// Whether the provider requires a model to be specified.
+    fn requires_model(&self) -> bool {
+        true
+    }
+
+    /// Apply provider-specific transformations to the request body after it has
+    /// been built by `build_request_body()`. Default is a no-op.
+    fn transform_request(&self, _body: &mut serde_json::Value) {}
 }
 
 /// Async chat operation. Each provider implements this to execute LLM calls.

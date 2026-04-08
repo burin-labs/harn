@@ -1,0 +1,18 @@
+pipeline test(task) {
+  // Basic multiline string
+  let s = """
+    hello
+    world
+    """
+  log(s)
+  // Multiline preserves internal newlines
+  let multi = """
+    line1
+    line2
+    line3
+    """
+  log(len(multi.split("\n")))
+  // Empty multiline
+  let empty = """"""
+  log(len(empty))
+}

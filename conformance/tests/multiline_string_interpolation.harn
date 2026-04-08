@@ -1,0 +1,14 @@
+pipeline test(task) {
+  let name = "world"
+  let greeting = """
+    hello ${name}!
+    """
+  log(greeting)
+  let x = 10
+  let y = 20
+  let report = """
+    sum: ${x + y}
+    product: ${x * y}
+    """
+  log(report)
+}
