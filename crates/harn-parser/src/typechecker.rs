@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use crate::ast::*;
 use crate::builtin_signatures;
-use harn_lexer::Span;
+use harn_lexer::{FixEdit, Span};
 
 /// A diagnostic produced by the type checker.
 #[derive(Debug, Clone)]
@@ -11,6 +11,8 @@ pub struct TypeDiagnostic {
     pub severity: DiagnosticSeverity,
     pub span: Option<Span>,
     pub help: Option<String>,
+    /// Machine-applicable fix edits.
+    pub fix: Option<Vec<FixEdit>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -234,6 +236,7 @@ fn is_builtin(name: &str) -> bool {
 pub struct TypeChecker {
     diagnostics: Vec<TypeDiagnostic>,
     scope: TypeScope,
+    source: Option<String>,
 }
 
 impl TypeChecker {
@@ -241,11 +244,22 @@ impl TypeChecker {
         Self {
             diagnostics: Vec::new(),
             scope: TypeScope::new(),
+            source: None,
         }
     }
 
+    /// Check a program with source text for autofix generation.
+    pub fn check_with_source(mut self, program: &[SNode], source: &str) -> Vec<TypeDiagnostic> {
+        self.source = Some(source.to_string());
+        self.check_inner(program)
+    }
+
     /// Check a program and return diagnostics.
-    pub fn check(mut self, program: &[SNode]) -> Vec<TypeDiagnostic> {
+    pub fn check(self, program: &[SNode]) -> Vec<TypeDiagnostic> {
+        self.check_inner(program)
+    }
+
+    fn check_inner(mut self, program: &[SNode]) -> Vec<TypeDiagnostic> {
         // First pass: register type and enum declarations into root scope
         Self::register_declarations_into(&mut self.scope, program);
 
@@ -410,6 +424,7 @@ impl TypeChecker {
                 type_ann,
                 value,
             } => {
+                self.check_binops(value, scope);
                 let inferred = self.infer_type(value, scope);
                 if let BindingPattern::Identifier(name) = pattern {
                     if let Some(expected) = type_ann {
@@ -440,6 +455,7 @@ impl TypeChecker {
                 type_ann,
                 value,
             } => {
+                self.check_binops(value, scope);
                 let inferred = self.infer_type(value, scope);
                 if let BindingPattern::Identifier(name) = pattern {
                     if let Some(expected) = type_ann {
@@ -859,10 +875,19 @@ impl TypeChecker {
                                     | ("dict", "dict")
                             );
                             if !valid {
-                                self.error_at(
-                                    format!("Operator '+' is not valid for types {} and {}", l, r),
-                                    span,
-                                );
+                                let msg =
+                                    format!("Operator '+' is not valid for types {} and {}", l, r);
+                                // Offer interpolation fix when one side is string
+                                let fix = if l == "string" || r == "string" {
+                                    self.build_interpolation_fix(left, right, l == "string", span)
+                                } else {
+                                    None
+                                };
+                                if let Some(fix) = fix {
+                                    self.error_at_with_fix(msg, span, fix);
+                                } else {
+                                    self.error_at(msg, span);
+                                }
                             }
                         }
                         "<" | ">" | "<=" | ">=" => {
@@ -2160,6 +2185,7 @@ impl TypeChecker {
             severity: DiagnosticSeverity::Error,
             span: Some(span),
             help: None,
+            fix: None,
         });
     }
 
@@ -2170,6 +2196,17 @@ impl TypeChecker {
             severity: DiagnosticSeverity::Error,
             span: Some(span),
             help: Some(help),
+            fix: None,
+        });
+    }
+
+    fn error_at_with_fix(&mut self, message: String, span: Span, fix: Vec<FixEdit>) {
+        self.diagnostics.push(TypeDiagnostic {
+            message,
+            severity: DiagnosticSeverity::Error,
+            span: Some(span),
+            help: None,
+            fix: Some(fix),
         });
     }
 
@@ -2179,6 +2216,7 @@ impl TypeChecker {
             severity: DiagnosticSeverity::Warning,
             span: Some(span),
             help: None,
+            fix: None,
         });
     }
 
@@ -2189,7 +2227,115 @@ impl TypeChecker {
             severity: DiagnosticSeverity::Warning,
             span: Some(span),
             help: Some(help),
+            fix: None,
         });
+    }
+
+    /// Recursively validate binary operations in an expression tree.
+    /// Unlike `check_node`, this only checks BinaryOp type compatibility
+    /// without triggering other validations (e.g., function call arg checks).
+    fn check_binops(&mut self, snode: &SNode, scope: &mut TypeScope) {
+        match &snode.node {
+            Node::BinaryOp { op, left, right } => {
+                self.check_binops(left, scope);
+                self.check_binops(right, scope);
+                let lt = self.infer_type(left, scope);
+                let rt = self.infer_type(right, scope);
+                if let (Some(TypeExpr::Named(l)), Some(TypeExpr::Named(r))) = (&lt, &rt) {
+                    let span = snode.span;
+                    match op.as_str() {
+                        "+" => {
+                            let valid = matches!(
+                                (l.as_str(), r.as_str()),
+                                ("int" | "float", "int" | "float")
+                                    | ("string", "string")
+                                    | ("list", "list")
+                                    | ("dict", "dict")
+                            );
+                            if !valid {
+                                let msg =
+                                    format!("Operator '+' is not valid for types {} and {}", l, r);
+                                let fix = if l == "string" || r == "string" {
+                                    self.build_interpolation_fix(left, right, l == "string", span)
+                                } else {
+                                    None
+                                };
+                                if let Some(fix) = fix {
+                                    self.error_at_with_fix(msg, span, fix);
+                                } else {
+                                    self.error_at(msg, span);
+                                }
+                            }
+                        }
+                        "-" | "/" | "%" => {
+                            let numeric = ["int", "float"];
+                            if !numeric.contains(&l.as_str()) || !numeric.contains(&r.as_str()) {
+                                self.error_at(
+                                    format!(
+                                        "Operator '{}' requires numeric operands, got {} and {}",
+                                        op, l, r
+                                    ),
+                                    span,
+                                );
+                            }
+                        }
+                        "*" => {
+                            let numeric = ["int", "float"];
+                            let is_numeric =
+                                numeric.contains(&l.as_str()) && numeric.contains(&r.as_str());
+                            let is_string_repeat =
+                                (l == "string" && r == "int") || (l == "int" && r == "string");
+                            if !is_numeric && !is_string_repeat {
+                                self.error_at(
+                                    format!(
+                                        "Operator '*' requires numeric operands or string * int, got {} and {}",
+                                        l, r
+                                    ),
+                                    span,
+                                );
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            // Recurse into sub-expressions that might contain BinaryOps
+            Node::UnaryOp { operand, .. } => self.check_binops(operand, scope),
+            _ => {}
+        }
+    }
+
+    /// Build a fix that converts `"str" + expr` or `expr + "str"` to string interpolation.
+    fn build_interpolation_fix(
+        &self,
+        left: &SNode,
+        right: &SNode,
+        left_is_string: bool,
+        expr_span: Span,
+    ) -> Option<Vec<FixEdit>> {
+        let src = self.source.as_ref()?;
+        let (str_node, other_node) = if left_is_string {
+            (left, right)
+        } else {
+            (right, left)
+        };
+        let str_text = src.get(str_node.span.start..str_node.span.end)?;
+        let other_text = src.get(other_node.span.start..other_node.span.end)?;
+        // Only handle simple double-quoted strings (not multiline/raw)
+        let inner = str_text.strip_prefix('"')?.strip_suffix('"')?;
+        // Skip if the expression contains characters that would break interpolation
+        if other_text.contains('}') || other_text.contains('"') {
+            return None;
+        }
+        let replacement = if left_is_string {
+            format!("\"{inner}${{{other_text}}}\"")
+        } else {
+            format!("\"${{{other_text}}}{inner}\"")
+        };
+        Some(vec![FixEdit {
+            span: expr_span,
+            replacement,
+        }])
     }
 }
 
@@ -3420,5 +3566,71 @@ add("hello", 2) }"#,
 }"#,
         );
         assert!(errs.is_empty(), "got: {:?}", errs);
+    }
+
+    // -----------------------------------------------------------------------
+    // Autofix tests
+    // -----------------------------------------------------------------------
+
+    fn check_source_with_source(source: &str) -> Vec<TypeDiagnostic> {
+        let mut lexer = Lexer::new(source);
+        let tokens = lexer.tokenize().unwrap();
+        let mut parser = Parser::new(tokens);
+        let program = parser.parse().unwrap();
+        TypeChecker::new().check_with_source(&program, source)
+    }
+
+    #[test]
+    fn test_fix_string_plus_int_literal() {
+        let source = "pipeline t(task) {\n  let x = \"hello \" + 42\n  log(x)\n}";
+        let diags = check_source_with_source(source);
+        let fixable: Vec<_> = diags.iter().filter(|d| d.fix.is_some()).collect();
+        assert_eq!(fixable.len(), 1, "expected 1 fixable diagnostic");
+        let fix = fixable[0].fix.as_ref().unwrap();
+        assert_eq!(fix.len(), 1);
+        assert_eq!(fix[0].replacement, "\"hello ${42}\"");
+    }
+
+    #[test]
+    fn test_fix_int_plus_string_literal() {
+        let source = "pipeline t(task) {\n  let x = 42 + \"hello\"\n  log(x)\n}";
+        let diags = check_source_with_source(source);
+        let fixable: Vec<_> = diags.iter().filter(|d| d.fix.is_some()).collect();
+        assert_eq!(fixable.len(), 1, "expected 1 fixable diagnostic");
+        let fix = fixable[0].fix.as_ref().unwrap();
+        assert_eq!(fix[0].replacement, "\"${42}hello\"");
+    }
+
+    #[test]
+    fn test_fix_string_plus_variable() {
+        let source = "pipeline t(task) {\n  let n: int = 5\n  let x = \"count: \" + n\n  log(x)\n}";
+        let diags = check_source_with_source(source);
+        let fixable: Vec<_> = diags.iter().filter(|d| d.fix.is_some()).collect();
+        assert_eq!(fixable.len(), 1, "expected 1 fixable diagnostic");
+        let fix = fixable[0].fix.as_ref().unwrap();
+        assert_eq!(fix[0].replacement, "\"count: ${n}\"");
+    }
+
+    #[test]
+    fn test_no_fix_int_plus_int() {
+        // int + float should error but no interpolation fix
+        let source = "pipeline t(task) {\n  let x: int = 5\n  let y: float = 3.0\n  let z = x - y\n  log(z)\n}";
+        let diags = check_source_with_source(source);
+        let fixable: Vec<_> = diags.iter().filter(|d| d.fix.is_some()).collect();
+        assert!(
+            fixable.is_empty(),
+            "no fix expected for numeric ops, got: {fixable:?}"
+        );
+    }
+
+    #[test]
+    fn test_no_fix_without_source() {
+        let source = "pipeline t(task) {\n  let x = \"hello \" + 42\n  log(x)\n}";
+        let diags = check_source(source);
+        let fixable: Vec<_> = diags.iter().filter(|d| d.fix.is_some()).collect();
+        assert!(
+            fixable.is_empty(),
+            "without source, no fix should be generated"
+        );
     }
 }

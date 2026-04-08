@@ -14,6 +14,8 @@ pub(crate) struct DocumentState {
     pub(crate) ast: Option<Vec<SNode>>,
     pub(crate) symbols: Vec<SymbolInfo>,
     pub(crate) diagnostics: Vec<Diagnostic>,
+    pub(crate) lint_diagnostics: Vec<harn_lint::LintDiagnostic>,
+    pub(crate) type_diagnostics: Vec<harn_parser::TypeDiagnostic>,
 }
 
 impl DocumentState {
@@ -23,6 +25,8 @@ impl DocumentState {
             ast: None,
             symbols: Vec::new(),
             diagnostics: Vec::new(),
+            lint_diagnostics: Vec::new(),
+            type_diagnostics: Vec::new(),
         };
         state.reparse();
         state
@@ -35,6 +39,8 @@ impl DocumentState {
 
     fn reparse(&mut self) {
         self.diagnostics.clear();
+        self.lint_diagnostics.clear();
+        self.type_diagnostics.clear();
         self.symbols.clear();
         self.ast = None;
 
@@ -60,9 +66,9 @@ impl DocumentState {
             }
         };
 
-        // Type check
-        let type_diags = TypeChecker::new().check(&program);
-        for diag in type_diags {
+        // Type check (with source for autofix generation)
+        let type_diags = TypeChecker::new().check_with_source(&program, &self.source);
+        for diag in &type_diags {
             let severity = match diag.severity {
                 harn_parser::DiagnosticSeverity::Error => DiagnosticSeverity::ERROR,
                 harn_parser::DiagnosticSeverity::Warning => DiagnosticSeverity::WARNING,
@@ -79,14 +85,15 @@ impl DocumentState {
                 range,
                 severity: Some(severity),
                 source: Some("harn-typecheck".to_string()),
-                message: diag.message,
+                message: diag.message.clone(),
                 ..Default::default()
             });
         }
+        self.type_diagnostics = type_diags;
 
         // Lint
         let lint_diags = harn_lint::lint_with_source(&program, &self.source);
-        for ld in lint_diags {
+        for ld in &lint_diags {
             let severity = match ld.severity {
                 harn_lint::LintSeverity::Warning => DiagnosticSeverity::WARNING,
                 harn_lint::LintSeverity::Error => DiagnosticSeverity::ERROR,
@@ -100,6 +107,7 @@ impl DocumentState {
                 ..Default::default()
             });
         }
+        self.lint_diagnostics = lint_diags;
 
         // Build symbol table
         self.symbols = build_symbol_table(&program, &self.source);

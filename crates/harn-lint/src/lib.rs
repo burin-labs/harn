@@ -1,17 +1,19 @@
 use std::collections::HashSet;
 
-use harn_lexer::{Span, StringSegment};
+use harn_lexer::{FixEdit, Span, StringSegment};
 use harn_parser::diagnostic::find_closest_match;
 use harn_parser::{BindingPattern, Node, SNode};
 
 /// A lint diagnostic reported by the linter.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LintDiagnostic {
     pub rule: &'static str,
     pub message: String,
     pub span: Span,
     pub severity: LintSeverity,
     pub suggestion: Option<String>,
+    /// Machine-applicable fix edits (applied in order, non-overlapping).
+    pub fix: Option<Vec<FixEdit>>,
 }
 
 /// Severity level for lint diagnostics.
@@ -175,6 +177,7 @@ impl<'a> Linter<'a> {
                         suggestion: Some(format!(
                             "use `var {name}` for a mutable binding, or choose a different name"
                         )),
+                        fix: None,
                     });
                 }
             }
@@ -190,6 +193,7 @@ impl<'a> Linter<'a> {
                     span,
                     severity: LintSeverity::Warning,
                     suggestion: Some(format!("consider renaming to avoid shadowing `{name}`")),
+                    fix: None,
                 });
             }
         }
@@ -222,6 +226,7 @@ impl<'a> Linter<'a> {
                     span,
                     severity: LintSeverity::Warning,
                     suggestion: Some(format!("consider renaming to avoid shadowing `{name}`")),
+                    fix: None,
                 });
             }
         }
@@ -288,6 +293,7 @@ impl<'a> Linter<'a> {
                         suggestion: Some(format!(
                             "add a contiguous `///` HarnDoc block above `pub fn {name}`"
                         )),
+                        fix: None,
                     });
                 }
                 self.push_scope();
@@ -421,12 +427,21 @@ impl<'a> Linter<'a> {
                                 "`!= false` is redundant",
                             )
                         };
+                        let fix = self.source.and_then(|src| {
+                            let expr_text = src.get(snode.span.start..snode.span.end)?;
+                            let replacement = simplify_bool_comparison(expr_text)?;
+                            Some(vec![FixEdit {
+                                span: snode.span,
+                                replacement,
+                            }])
+                        });
                         self.diagnostics.push(LintDiagnostic {
                             rule: "comparison-to-bool",
                             message: msg.to_string(),
                             span: snode.span,
                             severity: LintSeverity::Warning,
                             suggestion: Some(suggestion.to_string()),
+                            fix,
                         });
                     }
                 }
@@ -436,6 +451,37 @@ impl<'a> Linter<'a> {
                         matches!(left.node, Node::BoolLiteral(_) | Node::NilLiteral)
                             || matches!(right.node, Node::BoolLiteral(_) | Node::NilLiteral);
                     if has_bad_literal {
+                        // Offer interpolation fix when op is `+` and one side is a string literal
+                        let fix = if op == "+" {
+                            self.source.and_then(|src| {
+                                let is_left_str = matches!(&left.node, Node::StringLiteral(_));
+                                let is_right_str = matches!(&right.node, Node::StringLiteral(_));
+                                if !is_left_str && !is_right_str {
+                                    return None;
+                                }
+                                let (str_node, other_node) = if is_left_str {
+                                    (&**left, &**right)
+                                } else {
+                                    (&**right, &**left)
+                                };
+                                let str_text = src.get(str_node.span.start..str_node.span.end)?;
+                                let other_text =
+                                    src.get(other_node.span.start..other_node.span.end)?;
+                                // Strip quotes from string literal
+                                let inner = str_text.strip_prefix('"')?.strip_suffix('"')?;
+                                let replacement = if is_left_str {
+                                    format!("\"{inner}${{{other_text}}}\"")
+                                } else {
+                                    format!("\"${{{other_text}}}{inner}\"")
+                                };
+                                Some(vec![FixEdit {
+                                    span: snode.span,
+                                    replacement,
+                                }])
+                            })
+                        } else {
+                            None
+                        };
                         self.diagnostics.push(LintDiagnostic {
                             rule: "invalid-binary-op-literal",
                             message: format!(
@@ -447,6 +493,7 @@ impl<'a> Linter<'a> {
                             suggestion: Some(
                                 "use to_string() or string interpolation to convert values explicitly".to_string(),
                             ),
+                            fix,
                         });
                     }
                 }
@@ -482,6 +529,7 @@ impl<'a> Linter<'a> {
                         span: snode.span,
                         severity: LintSeverity::Warning,
                         suggestion: Some("remove the empty if or add a body".to_string()),
+                        fix: None,
                     });
                 }
                 // Rule: unnecessary-else-return
@@ -493,6 +541,39 @@ impl<'a> Linter<'a> {
                         .last()
                         .is_some_and(|s| matches!(s.node, Node::ReturnStmt { .. }));
                     if then_returns && else_returns {
+                        // Build fix: replace `} else { <body> }` with `}\n<body>`
+                        let fix = self.source.and_then(|src| {
+                            let then_last = then_body.last()?;
+                            let else_first = else_b.first()?;
+                            let else_last = else_b.last()?;
+                            // Find the `} else {` region between then-body end and else-body start
+                            let search_start = then_last.span.end;
+                            // The else body content in source
+                            let body_text = src.get(else_first.span.start..else_last.span.end)?;
+                            // Find closing `}` of the else block (end of the whole if-else node)
+                            let else_block_end = snode.span.end;
+                            // Find where `else` starts: scan backwards from else_first for `else`
+                            let between = src.get(search_start..else_first.span.start)?;
+                            let else_kw_off = between.find("else")?;
+                            let else_start = search_start + else_kw_off;
+                            // Determine indentation from the if statement's line
+                            let line_start =
+                                src[..snode.span.start].rfind('\n').map_or(0, |p| p + 1);
+                            let indent = &src[line_start..snode.span.start];
+                            // Replace from `} else { ... }` to `}\n<indent><body>`
+                            // The span to replace: from the `}` before else to the final `}`
+                            let close_brace = src.get(search_start..else_start)?.rfind('}')?;
+                            let replace_start = search_start + close_brace + 1; // after the `}`
+                            Some(vec![FixEdit {
+                                span: Span::with_offsets(
+                                    replace_start,
+                                    else_block_end,
+                                    then_last.span.end_line,
+                                    1,
+                                ),
+                                replacement: format!("\n{indent}{body_text}"),
+                            }])
+                        });
                         self.diagnostics.push(LintDiagnostic {
                             rule: "unnecessary-else-return",
                             message: "both if and else branches return — else is unnecessary"
@@ -502,6 +583,7 @@ impl<'a> Linter<'a> {
                             suggestion: Some(
                                 "remove the else and place its body after the if".to_string(),
                             ),
+                            fix,
                         });
                     }
                 }
@@ -528,6 +610,7 @@ impl<'a> Linter<'a> {
                         span: snode.span,
                         severity: LintSeverity::Warning,
                         suggestion: Some("remove the empty for loop or add a body".to_string()),
+                        fix: None,
                     });
                 }
                 self.push_scope();
@@ -553,6 +636,7 @@ impl<'a> Linter<'a> {
                         span: snode.span,
                         severity: LintSeverity::Warning,
                         suggestion: Some("remove the empty while loop or add a body".to_string()),
+                        fix: None,
                     });
                 }
                 self.push_scope();
@@ -576,6 +660,7 @@ impl<'a> Linter<'a> {
                         span: snode.span,
                         severity: LintSeverity::Warning,
                         suggestion: Some("remove the empty try/catch or add a body".to_string()),
+                        fix: None,
                     });
                 }
                 self.push_scope();
@@ -615,6 +700,7 @@ impl<'a> Linter<'a> {
                                 span: arm.pattern.span,
                                 severity: LintSeverity::Warning,
                                 suggestion: Some("remove the duplicate arm".to_string()),
+                                fix: None,
                             });
                             break;
                         }
@@ -896,6 +982,7 @@ impl<'a> Linter<'a> {
                         suggestion: Some(format!(
                             "`{keyword}` can only be used inside for or while loops"
                         )),
+                        fix: None,
                     });
                 }
             }
@@ -914,6 +1001,7 @@ impl<'a> Linter<'a> {
                     span: node.span,
                     severity: LintSeverity::Warning,
                     suggestion: Some("remove the unreachable code".to_string()),
+                    fix: None,
                 });
                 // Only report the first unreachable statement per block.
                 break;
@@ -947,6 +1035,7 @@ impl<'a> Linter<'a> {
                     span: decl.span,
                     severity: LintSeverity::Warning,
                     suggestion: Some(format!("prefix with underscore: `_{}`", decl.name)),
+                    fix: None,
                 });
             }
         }
@@ -963,22 +1052,78 @@ impl<'a> Linter<'a> {
                     span: decl.span,
                     severity: LintSeverity::Warning,
                     suggestion: Some(format!("prefix with underscore: `_{}`", decl.name)),
+                    fix: None,
                 });
             }
         }
 
         // Rule: unused-import
         for import in &self.imports {
-            for name in &import.names {
-                if !self.references.contains(name) {
-                    self.diagnostics.push(LintDiagnostic {
-                        rule: "unused-import",
-                        message: format!("imported name `{name}` is never used"),
-                        span: import.span,
-                        severity: LintSeverity::Warning,
-                        suggestion: Some(format!("remove `{name}` from the import")),
-                    });
-                }
+            let unused: Vec<&String> = import
+                .names
+                .iter()
+                .filter(|n| !self.references.contains(*n))
+                .collect();
+            let all_unused = unused.len() == import.names.len();
+            for name in &unused {
+                let fix = self.source.and_then(|src| {
+                    if all_unused {
+                        // Remove the entire import statement including trailing newline
+                        let end = if src.get(import.span.end..import.span.end + 1) == Some("\n") {
+                            import.span.end + 1
+                        } else {
+                            import.span.end
+                        };
+                        Some(vec![FixEdit {
+                            span: Span::with_offsets(
+                                import.span.start,
+                                end,
+                                import.span.line,
+                                import.span.column,
+                            ),
+                            replacement: String::new(),
+                        }])
+                    } else {
+                        // Remove just this name from the import list
+                        let region = src.get(import.span.start..import.span.end)?;
+                        // Find the name in the { ... } block
+                        let name_pos = region.find(name.as_str())?;
+                        let abs_start = import.span.start + name_pos;
+                        let abs_end = abs_start + name.len();
+                        // Also remove surrounding comma and whitespace
+                        let after = src.get(abs_end..import.span.end)?;
+                        let before = src.get(import.span.start..abs_start)?;
+                        let (rm_start, rm_end) = if after.starts_with(',') {
+                            // Remove name + comma + optional space after
+                            let extra = if after.get(1..2) == Some(" ") { 2 } else { 1 };
+                            (abs_start, abs_end + extra)
+                        } else if before.ends_with(", ") {
+                            // Last item: remove preceding ", " + name
+                            (abs_start - 2, abs_end)
+                        } else if before.ends_with(',') {
+                            (abs_start - 1, abs_end)
+                        } else {
+                            (abs_start, abs_end)
+                        };
+                        Some(vec![FixEdit {
+                            span: Span::with_offsets(
+                                rm_start,
+                                rm_end,
+                                import.span.line,
+                                import.span.column,
+                            ),
+                            replacement: String::new(),
+                        }])
+                    }
+                });
+                self.diagnostics.push(LintDiagnostic {
+                    rule: "unused-import",
+                    message: format!("imported name `{name}` is never used"),
+                    span: import.span,
+                    severity: LintSeverity::Warning,
+                    suggestion: Some(format!("remove `{name}` from the import")),
+                    fix,
+                });
             }
         }
 
@@ -988,6 +1133,20 @@ impl<'a> Linter<'a> {
                 continue;
             }
             if !self.assignments.contains(&decl.name) {
+                let fix = self.source.and_then(|src| {
+                    let region = src.get(decl.span.start..decl.span.end)?;
+                    let var_off = region.find("var")?;
+                    let abs = decl.span.start + var_off;
+                    Some(vec![FixEdit {
+                        span: Span::with_offsets(
+                            abs,
+                            abs + 3,
+                            decl.span.line,
+                            decl.span.column + var_off,
+                        ),
+                        replacement: "let".to_string(),
+                    }])
+                });
                 self.diagnostics.push(LintDiagnostic {
                     rule: "mutable-never-reassigned",
                     message: format!(
@@ -997,6 +1156,7 @@ impl<'a> Linter<'a> {
                     span: decl.span,
                     severity: LintSeverity::Warning,
                     suggestion: Some("use `let` instead of `var`".to_string()),
+                    fix,
                 });
             }
         }
@@ -1019,6 +1179,7 @@ impl<'a> Linter<'a> {
                         "remove the function or prefix with underscore: `_{}`",
                         decl.name
                     )),
+                    fix: None,
                 });
             }
         }
@@ -1061,6 +1222,7 @@ impl<'a> Linter<'a> {
                 span: *span,
                 severity: LintSeverity::Warning,
                 suggestion: Some(suggestion),
+                fix: None,
             });
         }
     }
@@ -1168,6 +1330,32 @@ pub fn collect_selective_import_names(program: &[SNode]) -> HashSet<String> {
         }
     }
     names
+}
+
+/// Simplify a boolean comparison expression like `x == true` → `x`.
+pub fn simplify_bool_comparison(expr: &str) -> Option<String> {
+    let trimmed = expr.trim();
+    for op in &["==", "!="] {
+        if let Some(idx) = trimmed.find(op) {
+            let lhs = trimmed[..idx].trim();
+            let rhs = trimmed[idx + op.len()..].trim();
+            let (bool_val, other) = if rhs == "true" || rhs == "false" {
+                (rhs, lhs)
+            } else if lhs == "true" || lhs == "false" {
+                (lhs, rhs)
+            } else {
+                continue;
+            };
+            let is_eq = *op == "==";
+            let is_true = bool_val == "true";
+            return if is_eq == is_true {
+                Some(other.to_string())
+            } else {
+                Some(format!("!{other}"))
+            };
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -2047,5 +2235,204 @@ fn local() { return foo() + bar() + baz() }
         assert!(names.contains("bar"), "should contain bar");
         assert!(names.contains("baz"), "should contain baz");
         assert_eq!(names.len(), 3, "should have exactly 3 names: {names:?}");
+    }
+
+    // -----------------------------------------------------------------------
+    // Autofix tests
+    // -----------------------------------------------------------------------
+
+    /// Get the first fix for a given rule, or None.
+    fn get_fix(diagnostics: &[LintDiagnostic], rule: &str) -> Option<Vec<FixEdit>> {
+        diagnostics
+            .iter()
+            .find(|d| d.rule == rule)
+            .and_then(|d| d.fix.clone())
+    }
+
+    /// Apply all non-overlapping fixes to the source (reverse order).
+    fn apply_fixes(source: &str, diagnostics: &[LintDiagnostic]) -> String {
+        let mut edits: Vec<&FixEdit> = diagnostics
+            .iter()
+            .filter_map(|d| d.fix.as_ref())
+            .flatten()
+            .collect();
+        edits.sort_by(|a, b| b.span.start.cmp(&a.span.start));
+        let mut accepted: Vec<&FixEdit> = Vec::new();
+        for edit in &edits {
+            let overlaps = accepted
+                .iter()
+                .any(|prev| edit.span.start < prev.span.end && edit.span.end > prev.span.start);
+            if !overlaps {
+                accepted.push(edit);
+            }
+        }
+        let mut result = source.to_string();
+        for edit in &accepted {
+            let before = &result[..edit.span.start];
+            let after = &result[edit.span.end..];
+            result = format!("{before}{}{after}", edit.replacement);
+        }
+        result
+    }
+
+    #[test]
+    fn test_fix_mutable_never_reassigned() {
+        let source = "pipeline default(task) {\n  var x = 10\n  log(x)\n}";
+        let diags = lint_source(source);
+        let fix = get_fix(&diags, "mutable-never-reassigned");
+        assert!(fix.is_some(), "expected fix for mutable-never-reassigned");
+        let result = apply_fixes(source, &diags);
+        assert!(
+            result.contains("let x = 10"),
+            "expected var→let, got: {result}"
+        );
+        assert!(
+            !result.contains("var x"),
+            "var should be replaced, got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_fix_comparison_to_bool_true() {
+        let source = "pipeline default(task) {\n  let x = true\n  let y = x == true\n  log(y)\n}";
+        let diags = lint_source(source);
+        let fix = get_fix(&diags, "comparison-to-bool");
+        assert!(fix.is_some(), "expected fix for comparison-to-bool");
+        let result = apply_fixes(source, &diags);
+        assert!(
+            result.contains("let y = x"),
+            "expected simplified comparison, got: {result}"
+        );
+        assert!(
+            !result.contains("== true"),
+            "should remove == true, got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_fix_comparison_to_bool_false() {
+        let source = "pipeline default(task) {\n  let x = true\n  let y = x == false\n  log(y)\n}";
+        let diags = lint_source(source);
+        let fix = get_fix(&diags, "comparison-to-bool");
+        assert!(fix.is_some(), "expected fix for comparison-to-bool");
+        let result = apply_fixes(source, &diags);
+        assert!(
+            result.contains("let y = !x"),
+            "expected negated, got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_fix_comparison_to_bool_ne_true() {
+        let source = "pipeline default(task) {\n  let x = true\n  let y = x != true\n  log(y)\n}";
+        let diags = lint_source(source);
+        let fix = get_fix(&diags, "comparison-to-bool");
+        assert!(fix.is_some(), "expected fix for comparison-to-bool");
+        let result = apply_fixes(source, &diags);
+        assert!(
+            result.contains("let y = !x"),
+            "!= true should become !x, got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_fix_unused_import_all_unused() {
+        let source = "import { foo, bar } from \"mod\"\npipeline default(task) {\n  log(task)\n}";
+        let diags = lint_source(source);
+        assert!(
+            count_rule(&diags, "unused-import") >= 1,
+            "expected unused-import warnings"
+        );
+        // When all names are unused, the fix should remove the entire import line
+        let fix = get_fix(&diags, "unused-import");
+        assert!(fix.is_some(), "expected fix for unused-import");
+        let edits = fix.unwrap();
+        assert_eq!(edits.len(), 1);
+        assert!(
+            edits[0].replacement.is_empty(),
+            "expected deletion, got: {:?}",
+            edits[0].replacement
+        );
+    }
+
+    #[test]
+    fn test_fix_unused_import_partial() {
+        let source = "import { foo, bar } from \"mod\"\npipeline default(task) {\n  log(foo)\n}";
+        let diags = lint_source(source);
+        // bar is unused, foo is used
+        assert_eq!(
+            count_rule(&diags, "unused-import"),
+            1,
+            "expected 1 unused-import warning"
+        );
+        let fix = get_fix(&diags, "unused-import");
+        assert!(fix.is_some(), "expected fix for unused-import");
+        let result = apply_fixes(source, &diags);
+        assert!(
+            result.contains("{ foo }") || result.contains("{foo}"),
+            "expected bar removed from import, got: {result}"
+        );
+        assert!(
+            !result.contains("bar"),
+            "bar should be removed, got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_fix_invalid_binop_string_plus_bool() {
+        let source = "pipeline default(task) {\n  let x = \"hello\" + true\n  log(x)\n}";
+        let diags = lint_source(source);
+        let fix = get_fix(&diags, "invalid-binary-op-literal");
+        assert!(
+            fix.is_some(),
+            "expected interpolation fix for string + bool"
+        );
+        let result = apply_fixes(source, &diags);
+        assert!(
+            result.contains("\"hello${true}\""),
+            "expected interpolation, got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_fix_invalid_binop_no_fix_for_non_string() {
+        let source = "pipeline default(task) {\n  let x = true + 1\n  log(x)\n}";
+        let diags = lint_source(source);
+        let fix = get_fix(&diags, "invalid-binary-op-literal");
+        assert!(
+            fix.is_none(),
+            "should not offer fix for non-string binop, got: {fix:?}"
+        );
+    }
+
+    #[test]
+    fn test_fix_multiple_fixes_applied() {
+        let source = "pipeline default(task) {\n  var x = 10\n  let y = x == true\n  log(y)\n}";
+        let diags = lint_source(source);
+        let result = apply_fixes(source, &diags);
+        assert!(
+            result.contains("let x = 10"),
+            "var should be fixed to let, got: {result}"
+        );
+        assert!(
+            result.contains("let y = x"),
+            "comparison should be simplified, got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_no_fix_when_source_unavailable() {
+        // lint without source — fixes should be None
+        let source = "pipeline default(task) {\n  var x = 10\n  log(x)\n}";
+        let mut lexer = Lexer::new(source);
+        let tokens = lexer.tokenize().unwrap();
+        let mut parser = Parser::new(tokens);
+        let program = parser.parse().unwrap();
+        let diags = lint(&program); // no source
+        let fix = get_fix(&diags, "mutable-never-reassigned");
+        assert!(
+            fix.is_none(),
+            "without source, fix should be None, got: {fix:?}"
+        );
     }
 }

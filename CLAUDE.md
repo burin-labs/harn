@@ -49,6 +49,7 @@ cargo test --workspace
 # Type-check / lint / format
 cargo run --bin harn -- check examples/hello.harn
 cargo run --bin harn -- lint examples/hello.harn
+cargo run --bin harn -- lint --fix examples/hello.harn
 cargo run --bin harn -- fmt --check examples/hello.harn
 
 # ACP

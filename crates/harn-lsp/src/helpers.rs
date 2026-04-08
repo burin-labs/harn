@@ -288,37 +288,3 @@ pub(crate) fn find_word_in_region(region: &str, word: &str) -> Option<usize> {
     }
     None
 }
-
-/// Simplify a boolean comparison expression.
-/// Handles patterns like `x == true`, `x == false`, `true == x`, `false == x`.
-pub(crate) fn simplify_bool_comparison(expr: &str) -> Option<String> {
-    let trimmed = expr.trim();
-
-    // Try to split on `==` or `!=`
-    for op in &["==", "!="] {
-        if let Some(idx) = trimmed.find(op) {
-            let lhs = trimmed[..idx].trim();
-            let rhs = trimmed[idx + op.len()..].trim();
-
-            let (bool_val, other) = if rhs == "true" || rhs == "false" {
-                (rhs, lhs)
-            } else if lhs == "true" || lhs == "false" {
-                (lhs, rhs)
-            } else {
-                continue;
-            };
-
-            let is_eq = *op == "==";
-            let is_true = bool_val == "true";
-
-            // `x == true` -> `x`, `x == false` -> `!x`
-            // `x != true` -> `!x`, `x != false` -> `x`
-            return if is_eq == is_true {
-                Some(other.to_string())
-            } else {
-                Some(format!("!{other}"))
-            };
-        }
-    }
-    None
-}

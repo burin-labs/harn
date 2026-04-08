@@ -72,6 +72,15 @@ impl fmt::Display for Span {
     }
 }
 
+/// A machine-applicable text replacement for autofixing diagnostics.
+#[derive(Debug, Clone)]
+pub struct FixEdit {
+    /// The source span to replace.
+    pub span: Span,
+    /// The replacement text (empty string = deletion).
+    pub replacement: String,
+}
+
 /// Canonical list of Harn language keywords.
 ///
 /// This is the single source of truth for keyword tokens. The lexer's

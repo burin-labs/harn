@@ -818,6 +818,7 @@ dependencies = [
 name = "harn-lsp"
 version = "0.5.50"
 dependencies = [
+ "harn-fmt",
  "harn-lexer",
  "harn-lint",
  "harn-parser",

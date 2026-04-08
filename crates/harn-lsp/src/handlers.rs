@@ -11,8 +11,8 @@ use crate::constants::{
 use crate::document::DocumentState;
 use crate::helpers::{
     char_before_position, extract_backtick_name, find_word_in_region, infer_dot_receiver_type,
-    lsp_position_to_offset, offset_to_position, position_in_span, simplify_bool_comparison,
-    span_to_full_range, word_at_position,
+    lsp_position_to_offset, offset_to_position, position_in_span, span_to_full_range,
+    span_to_range, word_at_position,
 };
 use crate::references::find_references;
 use crate::semantic_tokens::{build_semantic_tokens, semantic_token_legend};
@@ -57,6 +57,7 @@ impl tower_lsp::LanguageServer for HarnLsp {
                 workspace_symbol_provider: Some(OneOf::Left(true)),
                 code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
                 rename_provider: Some(OneOf::Left(true)),
+                document_formatting_provider: Some(OneOf::Left(true)),
                 ..Default::default()
             },
             ..Default::default()
@@ -697,44 +698,94 @@ impl tower_lsp::LanguageServer for HarnLsp {
         let uri = &params.text_document.uri;
         let mut actions = Vec::new();
 
-        let docs = self.documents.lock().unwrap();
-        let state = match docs.get(uri) {
-            Some(s) => s,
-            None => return Ok(Some(actions)),
+        let (source, lint_diags, type_diags) = {
+            let docs = self.documents.lock().unwrap();
+            let state = match docs.get(uri) {
+                Some(s) => s,
+                None => return Ok(Some(actions)),
+            };
+            (
+                state.source.clone(),
+                state.lint_diagnostics.clone(),
+                state.type_diagnostics.clone(),
+            )
         };
-        let source = state.source.clone();
-        drop(docs);
 
+        // Build code actions from structured FixEdit data in lint diagnostics
         for diag in &params.context.diagnostics {
             let msg = &diag.message;
 
-            // --- [mutable-never-reassigned]: replace `var` with `let` ---
-            if msg.contains("[mutable-never-reassigned]") {
-                // Find the `var` keyword at the start of the diagnostic range
-                let offset = lsp_position_to_offset(&source, diag.range.start);
-                // Scan forward from the line start to find "var" keyword
-                if let Some(var_pos) = source[offset..].find("var") {
-                    let abs_pos = offset + var_pos;
-                    // Verify it's actually the `var` keyword (next char is space or newline)
-                    if abs_pos + 3 <= source.len()
-                        && (abs_pos == 0 || !source.as_bytes()[abs_pos - 1].is_ascii_alphanumeric())
-                        && (abs_pos + 3 == source.len()
-                            || !source.as_bytes()[abs_pos + 3].is_ascii_alphanumeric())
-                    {
-                        let start = offset_to_position(&source, abs_pos);
-                        let end = offset_to_position(&source, abs_pos + 3);
-                        let edit_range = Range { start, end };
+            // Try to find a matching LintDiagnostic with a fix
+            if let Some(ld) = lint_diags.iter().find(|ld| {
+                msg.contains(&format!("[{}]", ld.rule)) && span_to_range(&ld.span) == diag.range
+            }) {
+                if let Some(ref fix_edits) = ld.fix {
+                    let text_edits: Vec<TextEdit> = fix_edits
+                        .iter()
+                        .map(|fe| TextEdit {
+                            range: Range {
+                                start: offset_to_position(&source, fe.span.start),
+                                end: offset_to_position(&source, fe.span.end),
+                            },
+                            new_text: fe.replacement.clone(),
+                        })
+                        .collect();
+
+                    let title = match ld.rule {
+                        "mutable-never-reassigned" => "Change `var` to `let`".to_string(),
+                        "comparison-to-bool" => "Simplify boolean comparison".to_string(),
+                        "unnecessary-else-return" => "Remove unnecessary else".to_string(),
+                        "unused-import" => {
+                            let name =
+                                extract_backtick_name(msg).unwrap_or_else(|| "name".to_string());
+                            format!("Remove unused import `{name}`")
+                        }
+                        "invalid-binary-op-literal" => {
+                            "Convert to string interpolation".to_string()
+                        }
+                        _ => ld
+                            .suggestion
+                            .clone()
+                            .unwrap_or_else(|| "Apply fix".to_string()),
+                    };
+
+                    let mut changes = HashMap::new();
+                    changes.insert(uri.clone(), text_edits);
+                    actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+                        title,
+                        kind: Some(CodeActionKind::QUICKFIX),
+                        diagnostics: Some(vec![diag.clone()]),
+                        edit: Some(WorkspaceEdit {
+                            changes: Some(changes),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }));
+                    continue;
+                }
+            }
+
+            // Check type diagnostics for fixes (e.g. string interpolation)
+            if diag.source.as_deref() == Some("harn-typecheck") {
+                if let Some(td) = type_diags.iter().find(|td| {
+                    td.message == *msg && td.span.as_ref().map(span_to_range) == Some(diag.range)
+                }) {
+                    if let Some(ref fix_edits) = td.fix {
+                        let text_edits: Vec<TextEdit> = fix_edits
+                            .iter()
+                            .map(|fe| TextEdit {
+                                range: Range {
+                                    start: offset_to_position(&source, fe.span.start),
+                                    end: offset_to_position(&source, fe.span.end),
+                                },
+                                new_text: fe.replacement.clone(),
+                            })
+                            .collect();
 
                         let mut changes = HashMap::new();
-                        changes.insert(
-                            uri.clone(),
-                            vec![TextEdit {
-                                range: edit_range,
-                                new_text: "let".to_string(),
-                            }],
-                        );
+                        changes.insert(uri.clone(), text_edits);
                         actions.push(CodeActionOrCommand::CodeAction(CodeAction {
-                            title: "Change `var` to `let`".to_string(),
+                            title: "Convert to string interpolation".to_string(),
                             kind: Some(CodeActionKind::QUICKFIX),
                             diagnostics: Some(vec![diag.clone()]),
                             edit: Some(WorkspaceEdit {
@@ -743,16 +794,15 @@ impl tower_lsp::LanguageServer for HarnLsp {
                             }),
                             ..Default::default()
                         }));
+                        continue;
                     }
                 }
             }
 
+            // Fallback: manual code actions for rules without structured fixes
             // --- [unused-variable] / [unused-parameter]: add `_` prefix ---
             if msg.contains("[unused-variable]") || msg.contains("[unused-parameter]") {
-                // Extract the variable name from the message: "variable `foo` is declared..."
-                // or "parameter `foo` is declared..."
                 if let Some(name) = extract_backtick_name(msg) {
-                    // Find the name in the source around the diagnostic range
                     let offset = lsp_position_to_offset(&source, diag.range.start);
                     let end_offset = lsp_position_to_offset(&source, diag.range.end)
                         .max(offset + 1)
@@ -790,41 +840,43 @@ impl tower_lsp::LanguageServer for HarnLsp {
                     }
                 }
             }
-
-            // --- [comparison-to-bool]: simplify boolean comparison ---
-            if msg.contains("[comparison-to-bool]") {
-                let offset = lsp_position_to_offset(&source, diag.range.start);
-                let end_offset = lsp_position_to_offset(&source, diag.range.end)
-                    .max(offset + 1)
-                    .min(source.len());
-                let expr_text = &source[offset..end_offset];
-
-                // Try to produce a simplified replacement
-                let replacement = simplify_bool_comparison(expr_text);
-                if let Some(new_text) = replacement {
-                    let mut changes = HashMap::new();
-                    changes.insert(
-                        uri.clone(),
-                        vec![TextEdit {
-                            range: diag.range,
-                            new_text,
-                        }],
-                    );
-                    actions.push(CodeActionOrCommand::CodeAction(CodeAction {
-                        title: "Simplify boolean comparison".to_string(),
-                        kind: Some(CodeActionKind::QUICKFIX),
-                        diagnostics: Some(vec![diag.clone()]),
-                        edit: Some(WorkspaceEdit {
-                            changes: Some(changes),
-                            ..Default::default()
-                        }),
-                        ..Default::default()
-                    }));
-                }
-            }
         }
 
         Ok(Some(actions))
+    }
+
+    // -----------------------------------------------------------------------
+    // Document formatting (delegates to harn-fmt)
+    // -----------------------------------------------------------------------
+    async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
+        let uri = &params.text_document.uri;
+        let source = {
+            let docs = self.documents.lock().unwrap();
+            match docs.get(uri) {
+                Some(s) => s.source.clone(),
+                None => return Ok(None),
+            }
+        };
+
+        let formatted = match harn_fmt::format_source(&source) {
+            Ok(f) => f,
+            Err(_) => return Ok(None),
+        };
+
+        if formatted == source {
+            return Ok(None);
+        }
+
+        // Replace the entire document
+        let line_count = source.lines().count() as u32;
+        let last_line_len = source.lines().last().map_or(0, |l| l.len()) as u32;
+        Ok(Some(vec![TextEdit {
+            range: Range {
+                start: Position::new(0, 0),
+                end: Position::new(line_count, last_line_len),
+            },
+            new_text: formatted,
+        }]))
     }
 
     // -----------------------------------------------------------------------

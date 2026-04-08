@@ -2,6 +2,48 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.51
+
+### Added
+
+- **Autofix infrastructure** — `FixEdit` struct in `harn-lexer` provides a
+  shared representation for machine-applicable text replacements, consumed by
+  the linter, type checker, CLI, and LSP.
+- **`harn lint --fix`** — automatically applies safe lint and type-check fixes.
+  Edits are sorted by position, non-overlapping, and applied in a single pass.
+  Remaining unfixable diagnostics are reported after the rewrite.
+- **Lint autofixes** for five rules:
+  - `mutable-never-reassigned` → replaces `var` with `let`
+  - `comparison-to-bool` → simplifies `x == true` to `x`, `x == false` to `!x`
+  - `unnecessary-else-return` → removes redundant `else` when both branches return
+  - `unused-import` → removes the unused name (or the entire import statement
+    when all names are unused)
+  - `invalid-binary-op-literal` → converts `"str" + bool/nil` to string
+    interpolation when one operand is a string literal
+- **Type-check autofix: string interpolation** — when the type checker detects
+  `string + non-string`, it offers a fix converting to `"${expr}"` syntax.
+  Works for literals and variables with known types.
+- **LSP document formatting** — `textDocument/formatting` now delegates to
+  `harn-fmt`, enabling format-on-save in editors.
+- **LSP code actions from `FixEdit`** — code actions are now generated
+  directly from structured fix data in lint and type-check diagnostics,
+  replacing hand-rolled edit logic for most rules.
+- **`simplify_bool_comparison` in `harn-lint`** — moved from `harn-lsp` to
+  the linter so both CLI and LSP share the same simplification logic.
+- **`TypeChecker::check_with_source`** — new entry point that accepts source
+  text, enabling the type checker to generate autofix edits.
+- **`check_binops` in typechecker** — targeted validation that catches
+  binary-op type errors inside `let`/`var` binding values without triggering
+  unrelated compile-time checks (e.g., function-call argument validation that
+  would change runtime error behavior).
+
+### Changed
+
+- **LSP code action handler** — refactored to use `FixEdit`-based dispatch
+  with a fallback path for rules that don't yet have structured fixes
+  (e.g., `unused-variable`, `unused-parameter`).
+- **`LintDiagnostic`** now derives `Clone` (required for LSP state caching).
+
 ## v0.5.50
 
 ### Added

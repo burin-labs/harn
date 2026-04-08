@@ -113,6 +113,14 @@ harn lint main.harn
 harn lint src/ tests/
 ```
 
+Pass `--fix` to automatically apply safe fixes (e.g., `var` → `let` for
+never-reassigned bindings, boolean comparison simplification, unused import
+removal, and string interpolation conversion):
+
+```bash
+harn lint --fix main.harn
+```
+
 ## harn check
 
 Type-check one or more `.harn` files or directories and run preflight

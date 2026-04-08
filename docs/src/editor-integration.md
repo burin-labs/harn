@@ -43,8 +43,9 @@ over stdin/stdout using the Language Server Protocol.
 | **Document symbols** | Outline view of pipelines, functions, structs, enums |
 | **Workspace symbols** | Cross-file search for pipelines and functions |
 | **Semantic tokens** | Fine-grained syntax highlighting for keywords, types, functions, parameters, enums, and more |
-| **Code actions** | Quick fixes and refactoring suggestions |
+| **Code actions** | Quick fixes for lint warnings (var→let, boolean simplification, unused import removal, string interpolation) and type errors |
 | **Rename** | Rename symbols across the document |
+| **Document formatting** | Delegates to `harn-fmt` for format-on-save support |
 
 ### Configuration
 
@@ -111,7 +112,10 @@ Run the linter for static analysis:
 
 ```bash
 harn lint file.harn
+harn lint --fix file.harn   # automatically apply safe fixes
 ```
 
 The linter checks for: shadow variables, unused variables, unreachable code,
-missing harndoc comments, and other code quality issues.
+missing harndoc comments, and other code quality issues. With `--fix`, the
+linter automatically rewrites fixable issues (e.g., `var` → `let`,
+boolean comparison simplification, unused import removal).

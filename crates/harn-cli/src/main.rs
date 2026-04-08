@@ -97,14 +97,22 @@ async fn main() {
                 process::exit(1);
             }
             let cross_file_imports = commands::check::collect_cross_file_imports(&files);
-            let mut should_fail = false;
-            for file in &files {
-                let config = package::load_check_config(Some(file));
-                let outcome = commands::check::lint_file_inner(file, &config, &cross_file_imports);
-                should_fail |= outcome.should_fail(config.strict);
-            }
-            if should_fail {
-                process::exit(1);
+            if args.fix {
+                for file in &files {
+                    let config = package::load_check_config(Some(file));
+                    commands::check::lint_fix_file(file, &config, &cross_file_imports);
+                }
+            } else {
+                let mut should_fail = false;
+                for file in &files {
+                    let config = package::load_check_config(Some(file));
+                    let outcome =
+                        commands::check::lint_file_inner(file, &config, &cross_file_imports);
+                    should_fail |= outcome.should_fail(config.strict);
+                }
+                if should_fail {
+                    process::exit(1);
+                }
             }
         }
         Command::Fmt(args) => {

@@ -159,6 +159,84 @@ pub(crate) fn lint_file_inner(
     }
 }
 
+/// Apply autofix edits from lint and type-check diagnostics and write back to disk.
+/// Returns the number of fixes applied.
+pub(crate) fn lint_fix_file(
+    path: &Path,
+    config: &CheckConfig,
+    externally_imported_names: &HashSet<String>,
+) -> usize {
+    let path_str = path.to_string_lossy().to_string();
+    let (source, program) = parse_source_file(&path_str);
+
+    // Collect lint fixes
+    let lint_diags = harn_lint::lint_with_cross_file_imports(
+        &program,
+        &config.disable_rules,
+        Some(&source),
+        externally_imported_names,
+    );
+
+    // Collect type-check fixes
+    let type_diags = TypeChecker::new().check_with_source(&program, &source);
+
+    // Merge all fixable edits
+    let mut edits: Vec<&harn_lexer::FixEdit> = lint_diags
+        .iter()
+        .filter_map(|d| d.fix.as_ref())
+        .chain(type_diags.iter().filter_map(|d| d.fix.as_ref()))
+        .flatten()
+        .collect();
+
+    if edits.is_empty() {
+        return 0;
+    }
+
+    // Sort by span.start descending so we can apply in reverse order
+    edits.sort_by(|a, b| b.span.start.cmp(&a.span.start));
+
+    // Filter overlapping edits (keep the first = highest offset)
+    let mut accepted: Vec<&harn_lexer::FixEdit> = Vec::new();
+    for edit in &edits {
+        let overlaps = accepted
+            .iter()
+            .any(|prev| edit.span.start < prev.span.end && edit.span.end > prev.span.start);
+        if !overlaps {
+            accepted.push(edit);
+        }
+    }
+
+    // Apply edits in reverse order (already sorted descending)
+    let mut result = source.clone();
+    for edit in &accepted {
+        let before = &result[..edit.span.start];
+        let after = &result[edit.span.end..];
+        result = format!("{before}{}{after}", edit.replacement);
+    }
+
+    let applied = accepted.len();
+    std::fs::write(path, &result).unwrap_or_else(|e| {
+        eprintln!("Failed to write {path_str}: {e}");
+        process::exit(1);
+    });
+
+    println!("{path_str}: applied {applied} fix(es)");
+
+    // Re-lint to report remaining issues
+    let (source2, program2) = parse_source_file(&path_str);
+    let remaining = harn_lint::lint_with_cross_file_imports(
+        &program2,
+        &config.disable_rules,
+        Some(&source2),
+        externally_imported_names,
+    );
+    if !remaining.is_empty() {
+        print_lint_diagnostics(&path_str, &remaining);
+    }
+
+    applied
+}
+
 /// Format one or more files or directories. Accepts multiple targets.
 pub(crate) fn fmt_targets(targets: &[&str], check_mode: bool, opts: &FmtOptions) {
     let mut files = Vec::new();

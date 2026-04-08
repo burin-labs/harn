@@ -95,6 +95,9 @@ pub(crate) struct CheckArgs {
 
 #[derive(Debug, Args)]
 pub(crate) struct PathTargetsArgs {
+    /// Automatically apply safe fixes.
+    #[arg(long)]
+    pub fix: bool,
     /// One or more .harn files or directories.
     #[arg(required = true)]
     pub targets: Vec<String>,
