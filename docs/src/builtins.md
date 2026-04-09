@@ -78,7 +78,12 @@ println(unwrap_err(bad))         // something went wrong
 | `json_validate(data, schema)` | data: any, schema: dict | bool | Validate data against a schema. Returns `true` if valid, throws with details if not |
 | `schema_check(data, schema)` | data: any, schema: dict | Result | Validate data against an extended schema and return `Result.Ok(data)` or `Result.Err({message, errors, value?})` |
 | `schema_parse(data, schema)` | data: any, schema: dict | Result | Same as `schema_check`, but applies `default` values recursively |
+| `schema_is(data, schema)` | data: any, schema: dict | bool | Validate data against a schema and return `true`/`false` without throwing |
+| `schema_expect(data, schema, apply_defaults?)` | data: any, schema: dict, bool (optional) | any | Validate data and return the normalized value, throwing on failure |
+| `schema_from_json_schema(schema)` | schema: dict | dict | Convert a JSON Schema object into Harn's canonical schema dict |
+| `schema_from_openapi_schema(schema)` | schema: dict | dict | Convert an OpenAPI Schema Object into Harn's canonical schema dict |
 | `schema_to_json_schema(schema)` | schema: dict | dict | Convert an extended Harn schema into JSON Schema |
+| `schema_to_openapi_schema(schema)` | schema: dict | dict | Convert an extended Harn schema into an OpenAPI-friendly schema object |
 | `schema_extend(base, overrides)` | base: dict, overrides: dict | dict | Shallow-merge two schema dicts |
 | `schema_partial(schema)` | schema: dict | dict | Remove `required` recursively so properties become optional |
 | `schema_pick(schema, keys)` | schema: dict, keys: list | dict | Keep only selected top-level properties |
@@ -97,9 +102,15 @@ Type mapping:
 | array | list |
 | object | dict |
 
-### json_validate schema format
+### Canonical schema format
 
-The schema is a plain Harn dict (not JSON Schema). Supported keys:
+The canonical schema is a plain Harn dict. The validator also accepts compatible
+JSON Schema / OpenAPI Schema Object spellings such as `object`, `array`,
+`integer`, `number`, `boolean`, `oneOf`, `allOf`, `minLength`, `maxLength`,
+`minItems`, `maxItems`, and `additionalProperties`, normalizing them into the
+same internal form.
+
+Supported canonical keys:
 
 | Key | Type | Description |
 |---|---|---|
@@ -107,6 +118,7 @@ The schema is a plain Harn dict (not JSON Schema). Supported keys:
 | `required` | list | List of required key names (for dicts) |
 | `properties` | dict | Dict mapping property names to sub-schemas (for dicts) |
 | `items` | dict | Schema to validate each item against (for lists) |
+| `additional_properties` | bool or dict | Whether unknown dict keys are allowed, or which schema they must satisfy |
 
 Example:
 
@@ -134,8 +146,10 @@ The schema builtins support these additional keys:
 | `min_length` / `max_length` | int | String length bounds |
 | `pattern` | string | Regex pattern for strings |
 | `enum` | list | Allowed literal values |
+| `const` | any | Exact required literal value |
 | `min_items` / `max_items` | int | List length bounds |
 | `union` | list of schemas | Value must match one schema |
+| `all_of` | list of schemas | Value must satisfy every schema |
 | `default` | any | Default value applied by `schema_parse` |
 
 Example:
@@ -156,6 +170,14 @@ println(is_ok(parsed))
 println(unwrap(parsed).role)
 println(schema_to_json_schema(user_schema).type)
 ```
+
+`schema_is(...)` is useful for dynamic checks and can participate in static
+type refinement when the schema is a literal (or a variable bound from a
+literal schema).
+
+The lazy `std/schema` module provides ergonomic builders such as
+`schema_string()`, `schema_object(...)`, `schema_union(...)`,
+`get_typed_result(...)`, `get_typed_value(...)`, and `is_type(...)`.
 
 Composition helpers:
 

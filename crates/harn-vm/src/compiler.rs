@@ -1,7 +1,12 @@
+use std::collections::BTreeMap;
+use std::rc::Rc;
+
 use harn_lexer::StringSegment;
 use harn_parser::{BindingPattern, Node, SNode, TypedParam};
 
 use crate::chunk::{Chunk, CompiledFunction, Constant, Op};
+use crate::schema;
+use crate::value::VmValue;
 
 /// Compile error.
 #[derive(Debug)]
@@ -229,34 +234,12 @@ impl Compiler {
     }
 
     /// Emit runtime type checks for parameters with type annotations.
-    /// For each param with a type annotation, emits CheckType(var_name, type_name)
-    /// or calls __assert_shape for shape types.
+    /// Interface types keep their dedicated runtime guard; all other supported
+    /// runtime-checkable types compile to a schema literal and call
+    /// `__assert_schema(value, param_name, schema)`.
     fn emit_type_checks(&mut self, params: &[TypedParam]) {
         for param in params {
             if let Some(type_expr) = &param.type_expr {
-                // Handle shape types via __assert_shape builtin call
-                if let harn_parser::TypeExpr::Shape(fields) = type_expr {
-                    let spec = Self::shape_to_spec_string(fields);
-                    // Emit: __assert_shape(param_value, param_name, spec)
-                    let fn_idx = self
-                        .chunk
-                        .add_constant(Constant::String("__assert_shape".into()));
-                    self.chunk.emit_u16(Op::Constant, fn_idx, self.line);
-                    let var_idx = self
-                        .chunk
-                        .add_constant(Constant::String(param.name.clone()));
-                    self.chunk.emit_u16(Op::GetVar, var_idx, self.line);
-                    let name_idx = self
-                        .chunk
-                        .add_constant(Constant::String(param.name.clone()));
-                    self.chunk.emit_u16(Op::Constant, name_idx, self.line);
-                    let spec_idx = self.chunk.add_constant(Constant::String(spec));
-                    self.chunk.emit_u16(Op::Constant, spec_idx, self.line);
-                    self.chunk.emit_u8(Op::Call, 3, self.line);
-                    self.chunk.emit(Op::Pop, self.line);
-                    continue;
-                }
-
                 // Check if this is an interface type — emit __assert_interface
                 if let harn_parser::TypeExpr::Named(name) = type_expr {
                     if let Some(methods) = self.interface_methods.get(name) {
@@ -283,68 +266,132 @@ impl Compiler {
                     }
                 }
 
-                let type_name = Self::type_expr_to_runtime_name(type_expr);
-                if let Some(type_name) = type_name {
+                if let Some(schema) = Self::type_expr_to_schema_value(type_expr) {
+                    let fn_idx = self
+                        .chunk
+                        .add_constant(Constant::String("__assert_schema".into()));
+                    self.chunk.emit_u16(Op::Constant, fn_idx, self.line);
                     let var_idx = self
                         .chunk
                         .add_constant(Constant::String(param.name.clone()));
-                    let type_idx = self.chunk.add_constant(Constant::String(type_name));
-                    self.chunk.emit_u16(Op::CheckType, var_idx, self.line);
-                    // Emit the type name index as two extra bytes
-                    let hi = (type_idx >> 8) as u8;
-                    let lo = type_idx as u8;
-                    self.chunk.code.push(hi);
-                    self.chunk.code.push(lo);
+                    self.chunk.emit_u16(Op::GetVar, var_idx, self.line);
+                    let name_idx = self
+                        .chunk
+                        .add_constant(Constant::String(param.name.clone()));
+                    self.chunk.emit_u16(Op::Constant, name_idx, self.line);
+                    self.emit_vm_value_literal(&schema);
+                    self.chunk.emit_u8(Op::Call, 3, self.line);
+                    self.chunk.emit(Op::Pop, self.line);
                 }
             }
         }
     }
 
-    /// Serialize a list of ShapeFields into a spec string for __assert_shape.
-    /// Format: `name:string,age:int,active:?bool,addr:{city:string,zip:string}`
-    fn shape_to_spec_string(fields: &[harn_parser::ShapeField]) -> String {
-        fields
-            .iter()
-            .map(|f| {
-                let opt = if f.optional { "?" } else { "" };
-                let type_str = Self::type_expr_to_spec(&f.type_expr);
-                format!("{}:{}{}", f.name, opt, type_str)
-            })
-            .collect::<Vec<_>>()
-            .join(",")
-    }
-
-    /// Convert a TypeExpr into a spec string fragment for shape validation.
-    fn type_expr_to_spec(type_expr: &harn_parser::TypeExpr) -> String {
-        match type_expr {
-            harn_parser::TypeExpr::Named(name) => name.clone(),
-            harn_parser::TypeExpr::Shape(fields) => {
-                let inner = Self::shape_to_spec_string(fields);
-                format!("{{{}}}", inner)
-            }
-            harn_parser::TypeExpr::List(_) => "list".to_string(),
-            harn_parser::TypeExpr::DictType(_, _) => "dict".to_string(),
-            harn_parser::TypeExpr::Union(members) => {
-                // Serialize union as "type1|type2|type3" for runtime validation
-                members
-                    .iter()
-                    .map(Self::type_expr_to_spec)
-                    .collect::<Vec<_>>()
-                    .join("|")
-            }
-            harn_parser::TypeExpr::FnType { .. } => "closure".to_string(),
-        }
-    }
-
-    /// Convert a TypeExpr to a runtime type name string for CheckType.
-    fn type_expr_to_runtime_name(type_expr: &harn_parser::TypeExpr) -> Option<String> {
+    fn type_expr_to_schema_value(type_expr: &harn_parser::TypeExpr) -> Option<VmValue> {
         match type_expr {
             harn_parser::TypeExpr::Named(name) => match name.as_str() {
                 "int" | "float" | "string" | "bool" | "list" | "dict" | "set" | "nil"
-                | "closure" => Some(name.clone()),
-                _ => None, // Unknown types are not checked at runtime
+                | "closure" => Some(VmValue::Dict(Rc::new(BTreeMap::from([(
+                    "type".to_string(),
+                    VmValue::String(Rc::from(name.as_str())),
+                )])))),
+                _ => None,
             },
-            _ => None, // Union types, shapes, etc. are not checked at runtime
+            harn_parser::TypeExpr::Shape(fields) => {
+                let mut properties = BTreeMap::new();
+                let mut required = Vec::new();
+                for field in fields {
+                    let field_schema = Self::type_expr_to_schema_value(&field.type_expr)?;
+                    properties.insert(field.name.clone(), field_schema);
+                    if !field.optional {
+                        required.push(VmValue::String(Rc::from(field.name.as_str())));
+                    }
+                }
+                let mut out = BTreeMap::new();
+                out.insert("type".to_string(), VmValue::String(Rc::from("dict")));
+                out.insert("properties".to_string(), VmValue::Dict(Rc::new(properties)));
+                if !required.is_empty() {
+                    out.insert("required".to_string(), VmValue::List(Rc::new(required)));
+                }
+                Some(VmValue::Dict(Rc::new(out)))
+            }
+            harn_parser::TypeExpr::List(inner) => {
+                let mut out = BTreeMap::new();
+                out.insert("type".to_string(), VmValue::String(Rc::from("list")));
+                if let Some(item_schema) = Self::type_expr_to_schema_value(inner) {
+                    out.insert("items".to_string(), item_schema);
+                }
+                Some(VmValue::Dict(Rc::new(out)))
+            }
+            harn_parser::TypeExpr::DictType(key, value) => {
+                let mut out = BTreeMap::new();
+                out.insert("type".to_string(), VmValue::String(Rc::from("dict")));
+                if matches!(key.as_ref(), harn_parser::TypeExpr::Named(name) if name == "string") {
+                    if let Some(value_schema) = Self::type_expr_to_schema_value(value) {
+                        out.insert("additional_properties".to_string(), value_schema);
+                    }
+                }
+                Some(VmValue::Dict(Rc::new(out)))
+            }
+            harn_parser::TypeExpr::Union(members) => {
+                let branches = members
+                    .iter()
+                    .filter_map(Self::type_expr_to_schema_value)
+                    .collect::<Vec<_>>();
+                if branches.is_empty() {
+                    None
+                } else {
+                    Some(VmValue::Dict(Rc::new(BTreeMap::from([(
+                        "union".to_string(),
+                        VmValue::List(Rc::new(branches)),
+                    )]))))
+                }
+            }
+            harn_parser::TypeExpr::FnType { .. } => {
+                Some(VmValue::Dict(Rc::new(BTreeMap::from([(
+                    "type".to_string(),
+                    VmValue::String(Rc::from("closure")),
+                )]))))
+            }
+        }
+    }
+
+    fn emit_vm_value_literal(&mut self, value: &VmValue) {
+        match value {
+            VmValue::String(text) => {
+                let idx = self.chunk.add_constant(Constant::String(text.to_string()));
+                self.chunk.emit_u16(Op::Constant, idx, self.line);
+            }
+            VmValue::Int(number) => {
+                let idx = self.chunk.add_constant(Constant::Int(*number));
+                self.chunk.emit_u16(Op::Constant, idx, self.line);
+            }
+            VmValue::Float(number) => {
+                let idx = self.chunk.add_constant(Constant::Float(*number));
+                self.chunk.emit_u16(Op::Constant, idx, self.line);
+            }
+            VmValue::Bool(value) => {
+                let idx = self.chunk.add_constant(Constant::Bool(*value));
+                self.chunk.emit_u16(Op::Constant, idx, self.line);
+            }
+            VmValue::Nil => self.chunk.emit(Op::Nil, self.line),
+            VmValue::List(items) => {
+                for item in items.iter() {
+                    self.emit_vm_value_literal(item);
+                }
+                self.chunk
+                    .emit_u16(Op::BuildList, items.len() as u16, self.line);
+            }
+            VmValue::Dict(entries) => {
+                for (key, item) in entries.iter() {
+                    let key_idx = self.chunk.add_constant(Constant::String(key.clone()));
+                    self.chunk.emit_u16(Op::Constant, key_idx, self.line);
+                    self.emit_vm_value_literal(item);
+                }
+                self.chunk
+                    .emit_u16(Op::BuildDict, entries.len() as u16, self.line);
+            }
+            _ => {}
         }
     }
 
@@ -1261,7 +1308,7 @@ impl Compiler {
                 name,
                 description,
                 params,
-                return_type: _,
+                return_type,
                 body,
                 ..
             } => {
@@ -1308,46 +1355,59 @@ impl Compiler {
                 self.chunk.emit_u16(Op::Constant, desc_idx, self.line);
 
                 // 6. Arg 4: config dict { parameters: {...}, handler: <closure> }
-                // Build parameters dict: { param_name: { type: "<json_type>" }, ... }
+                // Build parameters dict from the same schema lowering used for
+                // runtime param validation so tools can expose nested shapes,
+                // unions, list item schemas, defaults, and dict value schemas.
                 let mut param_count: u16 = 0;
                 for p in params {
                     let pn_idx = self.chunk.add_constant(Constant::String(p.name.clone()));
                     self.chunk.emit_u16(Op::Constant, pn_idx, self.line);
 
-                    let type_str = match &p.type_expr {
-                        Some(harn_parser::TypeExpr::Named(n)) => match n.as_str() {
-                            "string" => "string",
-                            "int" => "integer",
-                            "float" => "number",
-                            "bool" => "boolean",
-                            _ => "string",
-                        },
-                        _ => "string",
+                    let base_schema = p
+                        .type_expr
+                        .as_ref()
+                        .and_then(Self::type_expr_to_schema_value)
+                        .unwrap_or_else(|| {
+                            VmValue::Dict(Rc::new(BTreeMap::from([(
+                                "type".to_string(),
+                                VmValue::String(Rc::from("any")),
+                            )])))
+                        });
+                    let public_schema =
+                        schema::schema_to_json_schema_value(&base_schema).map_err(|error| {
+                            CompileError {
+                                message: format!(
+                                    "failed to lower tool parameter schema for '{}': {}",
+                                    p.name, error
+                                ),
+                                line: self.line,
+                            }
+                        })?;
+                    let mut param_schema = match public_schema {
+                        VmValue::Dict(map) => (*map).clone(),
+                        _ => BTreeMap::new(),
                     };
-                    let type_key = self.chunk.add_constant(Constant::String("type".into()));
-                    self.chunk.emit_u16(Op::Constant, type_key, self.line);
-                    let type_val = self.chunk.add_constant(Constant::String(type_str.into()));
-                    self.chunk.emit_u16(Op::Constant, type_val, self.line);
-                    let mut param_schema_entries: u16 = 1;
-                    if let Some(default_expr) = &p.default_value {
-                        let required_key =
-                            self.chunk.add_constant(Constant::String("required".into()));
-                        self.chunk.emit_u16(Op::Constant, required_key, self.line);
-                        let required_val = self.chunk.add_constant(Constant::Bool(false));
-                        self.chunk.emit_u16(Op::Constant, required_val, self.line);
+
+                    if p.default_value.is_some() {
+                        param_schema.insert("required".to_string(), VmValue::Bool(false));
+                    }
+
+                    self.emit_vm_value_literal(&VmValue::Dict(Rc::new(param_schema)));
+
+                    if let Some(default_value) = p.default_value.as_ref() {
                         let default_key =
                             self.chunk.add_constant(Constant::String("default".into()));
                         self.chunk.emit_u16(Op::Constant, default_key, self.line);
-                        self.compile_node(default_expr)?;
-                        param_schema_entries += 2;
+                        self.compile_node(default_value)?;
+                        self.chunk.emit_u16(Op::BuildDict, 1, self.line);
+                        self.chunk.emit(Op::Add, self.line);
                     }
-                    self.chunk
-                        .emit_u16(Op::BuildDict, param_schema_entries, self.line);
+
                     param_count += 1;
                 }
                 self.chunk.emit_u16(Op::BuildDict, param_count, self.line);
 
-                // Build config dict: { "parameters": <params_dict>, "handler": <closure> }
+                // Build config dict: { "parameters": <params_dict>, "handler": <closure>, "returns"?: <schema> }
                 let params_key = self
                     .chunk
                     .add_constant(Constant::String("parameters".into()));
@@ -1358,7 +1418,29 @@ impl Compiler {
                 self.chunk.emit_u16(Op::Constant, handler_key, self.line);
                 self.chunk.emit_u16(Op::Closure, fn_idx as u16, self.line);
 
-                self.chunk.emit_u16(Op::BuildDict, 2, self.line);
+                let mut config_entries = 2u16;
+                if let Some(return_type) = return_type
+                    .as_ref()
+                    .and_then(Self::type_expr_to_schema_value)
+                {
+                    let return_type =
+                        schema::schema_to_json_schema_value(&return_type).map_err(|error| {
+                            CompileError {
+                                message: format!(
+                                    "failed to lower tool return schema for '{}': {}",
+                                    name, error
+                                ),
+                                line: self.line,
+                            }
+                        })?;
+                    let returns_key = self.chunk.add_constant(Constant::String("returns".into()));
+                    self.chunk.emit_u16(Op::Constant, returns_key, self.line);
+                    self.emit_vm_value_literal(&return_type);
+                    config_entries += 1;
+                }
+
+                self.chunk
+                    .emit_u16(Op::BuildDict, config_entries, self.line);
 
                 // 7. Call tool_define(registry, name, description, config)
                 self.chunk.emit_u8(Op::Call, 4, self.line);

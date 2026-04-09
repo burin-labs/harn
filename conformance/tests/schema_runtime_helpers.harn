@@ -1,0 +1,15 @@
+import "std/schema"
+
+pipeline test(task) {
+  let user_schema = schema_object(
+    {name: schema_field(schema_string()), role: schema_default(schema_string(), "user")},
+    {additional_properties: false},
+  )
+  println(is_type({name: "Ada"}, user_schema))
+  let parsed = get_typed_value({name: "Ada"}, user_schema, true)
+  println(parsed.role)
+  let openapi = schema_openapi(user_schema)
+  println(openapi.type)
+  let from_json = from_json_schema({type: "object", properties: {name: {type: "string"}}, required: ["name"]})
+  println(is_type({name: "Bob"}, from_json))
+}

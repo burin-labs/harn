@@ -128,6 +128,17 @@ pub(crate) fn register_shape_builtins(vm: &mut Vm) {
         assert_shape_fields(fields, &param_name, &spec)
     });
 
+    vm.register_builtin("__assert_schema", |args, _out| {
+        let val = args.first().cloned().unwrap_or(VmValue::Nil);
+        let param_name = match args.get(1) {
+            Some(VmValue::String(s)) => s.to_string(),
+            _ => "value".to_string(),
+        };
+        let schema = args.get(2).cloned().unwrap_or(VmValue::Nil);
+        crate::schema::schema_assert_param(&val, &param_name, &schema)?;
+        Ok(VmValue::Nil)
+    });
+
     vm.register_builtin("__dict_rest", |args, _out| {
         let dict = args.first().cloned().unwrap_or(VmValue::Nil);
         let keys_list = args.get(1).cloned().unwrap_or(VmValue::Nil);

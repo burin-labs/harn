@@ -558,6 +558,10 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("bool")),
     },
     BuiltinSig {
+        name: "is_type",
+        return_type: Some(BuiltinReturn::Named("bool")),
+    },
+    BuiltinSig {
         name: "join",
         return_type: Some(BuiltinReturn::Named("string")),
     },
@@ -1038,8 +1042,24 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
         return_type: None,
     },
     BuiltinSig {
+        name: "schema_expect",
+        return_type: None,
+    },
+    BuiltinSig {
         name: "schema_extend",
         return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "schema_from_json_schema",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "schema_from_openapi_schema",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "schema_is",
+        return_type: Some(BuiltinReturn::Named("bool")),
     },
     BuiltinSig {
         name: "schema_omit",
@@ -1059,6 +1079,10 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
     },
     BuiltinSig {
         name: "schema_to_json_schema",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "schema_to_openapi_schema",
         return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {

@@ -2,6 +2,52 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.57
+
+### Added
+
+- **Unified runtime schema helpers** — new builtins `schema_is`,
+  `schema_expect`, `schema_from_json_schema`, `schema_from_openapi_schema`,
+  and `schema_to_openapi_schema` join the existing schema validation surface so
+  Harn programs can validate and normalize values against a shared canonical
+  schema model.
+- **Lazy `std/schema` module** — `import "std/schema"` now provides ergonomic
+  schema builders and helpers such as object/list/union constructors,
+  nullable/default wrappers, JSON Schema/OpenAPI conversion, and typed-result
+  convenience helpers without loading extra runtime machinery unless the module
+  is imported.
+- **Schema-aware conformance coverage** — new tests cover runtime schema
+  helpers, richer tool declaration schemas, runtime validation of
+  `list<T>`/`dict<string, T>`/union params, and compiler narrowing through
+  `schema_is(...)`.
+
+### Changed
+
+- **Runtime validation now uses one shared schema engine** — JSON validation,
+  typed parameter checks, and LLM structured-output validation now normalize
+  through the same internal schema representation instead of maintaining
+  separate ad hoc validation paths.
+- **Tool declarations expose JSON Schema-compatible metadata** — tool
+  parameter and return schemas now lower nested shapes, lists, unions, dict
+  value schemas, defaults, and optionality into JSON Schema-style public
+  metadata while preserving Harn’s internal canonical schema model.
+- **`schema_is(...)` participates in static refinement** — when the compiler
+  can reduce the schema argument to a literal/canonical shape, the typechecker
+  narrows the guarded value accordingly.
+
+### Fixed
+
+- **Richer runtime typed-parameter enforcement** — annotated params such as
+  `string | int`, `list<int>`, `dict<string, int>`, and nested shape values are
+  now checked consistently at runtime, including additional-property schemas.
+- **Type-check error compatibility for params and shapes** — parameter
+  validation now keeps the high-signal, field-oriented error messages expected
+  by existing typed-call and caught-shape error flows while still using the new
+  shared validator internally.
+- **Schema/docs drift** — the language spec, builtins docs, LLM docs, and
+  syntax-highlighting keyword registry now reflect the shipped schema and tool
+  surfaces.
+
 ## v0.5.56
 
 ### Added

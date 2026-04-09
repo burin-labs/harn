@@ -106,7 +106,7 @@ println(result.text)
 | `frequency_penalty` | float | nil | Frequency penalty (OpenAI only) |
 | `presence_penalty` | float | nil | Presence penalty (OpenAI only) |
 | `response_format` | string | `"text"` | `"text"` or `"json"` |
-| `schema` | dict | nil | JSON Schema for structured output |
+| `schema` | dict | nil | JSON Schema, OpenAPI Schema Object, or canonical Harn schema dict for structured output |
 | `thinking` | bool/dict | nil | Enable extended reasoning. `true` or `{budget_tokens: N}` |
 | `tools` | list | nil | Tool definitions |
 | `tool_choice` | string/dict | `"auto"` | `"auto"`, `"none"`, `"required"`, or `{name: "tool"}` |
@@ -312,7 +312,7 @@ The callback receives:
 Each `tool_results` entry has:
 
 ```harn
-{tool_name: string, status: "ok" | "error" | "rejected", rejected: bool}
+{tool_name: string, status: string, rejected: bool}
 ```
 
 It may return:

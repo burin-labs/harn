@@ -1,0 +1,17 @@
+pipeline test(task) {
+  let string_schema = {type: "string"}
+  let x: string | int | nil = "hello"
+  if schema_is(x, string_schema) {
+    println(x.upper())
+  }
+  let user_schema = {type: "dict", properties: {name: {type: "string"}}, required: ["name"]}
+  let y: dict | nil = {name: "Ada"}
+  if schema_is(y, user_schema) {
+    println(y.name)
+  }
+  let list_schema = {type: "list", items: {type: "string"}}
+  let z: list<string> | string | nil = ["a", "b"]
+  if schema_is(z, list_schema) {
+    println(z[1])
+  }
+}

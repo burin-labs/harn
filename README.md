@@ -117,7 +117,9 @@ enforcement.
   transcript fork/reset/compaction, workflow resume control, and normalized
   `worker_result` artifacts.
 - Runtime schema helpers for structured LLM I/O: `schema_check(...)`,
-  `schema_parse(...)`, JSON Schema export, and schema composition helpers.
+  `schema_parse(...)`, `schema_is(...)`, JSON Schema/OpenAPI conversion, and
+  schema composition helpers, plus a lazy `std/schema` builder module for
+  ergonomic schema authoring when imported.
 - Design-by-contract and project/runtime helpers: `require ...`,
   metadata/scanner runtime builtins, `import "std/project"` for
   freshness-aware metadata and scan state, and `import "std/runtime"` for

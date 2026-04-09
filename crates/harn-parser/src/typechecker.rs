@@ -62,6 +62,9 @@ struct TypeScope {
     /// Variables that have been narrowed by flow-sensitive refinement.
     /// Maps var name → pre-narrowing type (used to restore on reassignment).
     narrowed_vars: BTreeMap<String, InferredType>,
+    /// Schema literals bound to variables, reduced to a TypeExpr subset so
+    /// `schema_is(x, some_schema)` can participate in flow refinement.
+    schema_bindings: BTreeMap<String, InferredType>,
     parent: Option<Box<TypeScope>>,
 }
 
@@ -105,6 +108,7 @@ impl TypeScope {
             where_constraints: BTreeMap::new(),
             mutable_vars: std::collections::BTreeSet::new(),
             narrowed_vars: BTreeMap::new(),
+            schema_bindings: BTreeMap::new(),
             parent: None,
         }
     }
@@ -122,6 +126,7 @@ impl TypeScope {
             where_constraints: BTreeMap::new(),
             mutable_vars: std::collections::BTreeSet::new(),
             narrowed_vars: BTreeMap::new(),
+            schema_bindings: BTreeMap::new(),
             parent: Some(Box::new(self.clone())),
         }
     }
@@ -136,6 +141,12 @@ impl TypeScope {
         self.functions
             .get(name)
             .or_else(|| self.parent.as_ref()?.get_fn(name))
+    }
+
+    fn get_schema_binding(&self, name: &str) -> Option<&InferredType> {
+        self.schema_bindings
+            .get(name)
+            .or_else(|| self.parent.as_ref()?.get_schema_binding(name))
     }
 
     fn resolve_type(&self, name: &str) -> Option<&TypeExpr> {
@@ -194,6 +205,10 @@ impl TypeScope {
     fn define_var_mutable(&mut self, name: &str, ty: InferredType) {
         self.vars.insert(name.to_string(), ty);
         self.mutable_vars.insert(name.to_string());
+    }
+
+    fn define_schema_binding(&mut self, name: &str, ty: InferredType) {
+        self.schema_bindings.insert(name.to_string(), ty);
     }
 
     /// Check if a variable is mutable (declared with `var`).
@@ -500,6 +515,7 @@ impl TypeChecker {
                     }
                     let ty = type_ann.clone().or(inferred);
                     scope.define_var(name, ty);
+                    scope.define_schema_binding(name, schema_type_expr_from_node(value, scope));
                 } else {
                     self.check_pattern_defaults(pattern, scope);
                     Self::define_pattern_vars(pattern, scope, false);
@@ -543,6 +559,7 @@ impl TypeChecker {
                     }
                     let ty = type_ann.clone().or(inferred);
                     scope.define_var_mutable(name, ty);
+                    scope.define_schema_binding(name, schema_type_expr_from_node(value, scope));
                 } else {
                     self.check_pattern_defaults(pattern, scope);
                     Self::define_pattern_vars(pattern, scope, true);
@@ -762,6 +779,7 @@ impl TypeChecker {
                     if let Some(original) = scope.narrowed_vars.remove(name) {
                         scope.define_var(name, original);
                     }
+                    scope.define_schema_binding(name, None);
                 }
             }
 
@@ -1691,6 +1709,12 @@ impl TypeChecker {
                 Self::extract_has_refinements(object, args, scope)
             }
 
+            Node::FunctionCall { name, args }
+                if (name == "schema_is" || name == "is_type") && args.len() == 2 =>
+            {
+                Self::extract_schema_refinements(args, scope)
+            }
+
             _ => Refinements::empty(),
         }
     }
@@ -1808,6 +1832,27 @@ impl TypeChecker {
             }
         }
         Refinements::empty()
+    }
+
+    fn extract_schema_refinements(args: &[SNode], scope: &TypeScope) -> Refinements {
+        let Node::Identifier(var_name) = &args[0].node else {
+            return Refinements::empty();
+        };
+        let Some(schema_type) = schema_type_expr_from_node(&args[1], scope) else {
+            return Refinements::empty();
+        };
+        let Some(Some(var_type)) = scope.get_var(var_name).cloned() else {
+            return Refinements::empty();
+        };
+
+        let truthy = intersect_types(&var_type, &schema_type)
+            .map(|ty| vec![(var_name.clone(), Some(ty))])
+            .unwrap_or_default();
+        let falsy = subtract_type(&var_type, &schema_type)
+            .map(|ty| vec![(var_name.clone(), Some(ty))])
+            .unwrap_or_default();
+
+        Refinements { truthy, falsy }
     }
 
     /// Check whether a block definitely exits (return/throw/break/continue).
@@ -2823,6 +2868,258 @@ fn extract_type_of_var(node: &SNode) -> Option<String> {
         }
     }
     None
+}
+
+fn schema_type_expr_from_node(node: &SNode, scope: &TypeScope) -> Option<TypeExpr> {
+    match &node.node {
+        Node::Identifier(name) => scope.get_schema_binding(name).cloned().flatten(),
+        Node::DictLiteral(entries) => schema_type_expr_from_dict(entries, scope),
+        _ => None,
+    }
+}
+
+fn schema_type_expr_from_dict(entries: &[DictEntry], scope: &TypeScope) -> Option<TypeExpr> {
+    let mut type_name: Option<String> = None;
+    let mut properties: Option<&SNode> = None;
+    let mut required: Option<Vec<String>> = None;
+    let mut items: Option<&SNode> = None;
+    let mut union: Option<&SNode> = None;
+    let mut nullable = false;
+    let mut additional_properties: Option<&SNode> = None;
+
+    for entry in entries {
+        let key = schema_entry_key(&entry.key)?;
+        match key.as_str() {
+            "type" => match &entry.value.node {
+                Node::StringLiteral(text) | Node::RawStringLiteral(text) => {
+                    type_name = Some(normalize_schema_type_name(text));
+                }
+                Node::ListLiteral(items_list) => {
+                    let union_members = items_list
+                        .iter()
+                        .filter_map(|item| match &item.node {
+                            Node::StringLiteral(text) | Node::RawStringLiteral(text) => {
+                                Some(TypeExpr::Named(normalize_schema_type_name(text)))
+                            }
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>();
+                    if !union_members.is_empty() {
+                        return Some(TypeExpr::Union(union_members));
+                    }
+                }
+                _ => {}
+            },
+            "properties" => properties = Some(&entry.value),
+            "required" => {
+                required = schema_required_names(&entry.value);
+            }
+            "items" => items = Some(&entry.value),
+            "union" | "oneOf" | "anyOf" => union = Some(&entry.value),
+            "nullable" => {
+                nullable = matches!(entry.value.node, Node::BoolLiteral(true));
+            }
+            "additional_properties" | "additionalProperties" => {
+                additional_properties = Some(&entry.value);
+            }
+            _ => {}
+        }
+    }
+
+    let mut schema_type = if let Some(union_node) = union {
+        schema_union_type_expr(union_node, scope)?
+    } else if let Some(properties_node) = properties {
+        let property_entries = match &properties_node.node {
+            Node::DictLiteral(entries) => entries,
+            _ => return None,
+        };
+        let required_names = required.unwrap_or_default();
+        let mut fields = Vec::new();
+        for entry in property_entries {
+            let field_name = schema_entry_key(&entry.key)?;
+            let field_type = schema_type_expr_from_node(&entry.value, scope)?;
+            fields.push(ShapeField {
+                name: field_name.clone(),
+                type_expr: field_type,
+                optional: !required_names.contains(&field_name),
+            });
+        }
+        TypeExpr::Shape(fields)
+    } else if let Some(item_node) = items {
+        TypeExpr::List(Box::new(schema_type_expr_from_node(item_node, scope)?))
+    } else if let Some(type_name) = type_name {
+        if type_name == "dict" {
+            if let Some(extra_node) = additional_properties {
+                let value_type = match &extra_node.node {
+                    Node::BoolLiteral(_) => None,
+                    _ => schema_type_expr_from_node(extra_node, scope),
+                };
+                if let Some(value_type) = value_type {
+                    TypeExpr::DictType(
+                        Box::new(TypeExpr::Named("string".into())),
+                        Box::new(value_type),
+                    )
+                } else {
+                    TypeExpr::Named(type_name)
+                }
+            } else {
+                TypeExpr::Named(type_name)
+            }
+        } else {
+            TypeExpr::Named(type_name)
+        }
+    } else {
+        return None;
+    };
+
+    if nullable {
+        schema_type = match schema_type {
+            TypeExpr::Union(mut members) => {
+                if !members
+                    .iter()
+                    .any(|member| matches!(member, TypeExpr::Named(name) if name == "nil"))
+                {
+                    members.push(TypeExpr::Named("nil".into()));
+                }
+                TypeExpr::Union(members)
+            }
+            other => TypeExpr::Union(vec![other, TypeExpr::Named("nil".into())]),
+        };
+    }
+
+    Some(schema_type)
+}
+
+fn schema_union_type_expr(node: &SNode, scope: &TypeScope) -> Option<TypeExpr> {
+    let Node::ListLiteral(items) = &node.node else {
+        return None;
+    };
+    let members = items
+        .iter()
+        .filter_map(|item| schema_type_expr_from_node(item, scope))
+        .collect::<Vec<_>>();
+    match members.len() {
+        0 => None,
+        1 => members.into_iter().next(),
+        _ => Some(TypeExpr::Union(members)),
+    }
+}
+
+fn schema_required_names(node: &SNode) -> Option<Vec<String>> {
+    let Node::ListLiteral(items) = &node.node else {
+        return None;
+    };
+    Some(
+        items
+            .iter()
+            .filter_map(|item| match &item.node {
+                Node::StringLiteral(text) | Node::RawStringLiteral(text) => Some(text.clone()),
+                Node::Identifier(text) => Some(text.clone()),
+                _ => None,
+            })
+            .collect(),
+    )
+}
+
+fn schema_entry_key(node: &SNode) -> Option<String> {
+    match &node.node {
+        Node::Identifier(name) => Some(name.clone()),
+        Node::StringLiteral(name) | Node::RawStringLiteral(name) => Some(name.clone()),
+        _ => None,
+    }
+}
+
+fn normalize_schema_type_name(text: &str) -> String {
+    match text {
+        "object" => "dict".into(),
+        "array" => "list".into(),
+        "integer" => "int".into(),
+        "number" => "float".into(),
+        "boolean" => "bool".into(),
+        "null" => "nil".into(),
+        other => other.into(),
+    }
+}
+
+fn intersect_types(current: &TypeExpr, schema_type: &TypeExpr) -> Option<TypeExpr> {
+    match (current, schema_type) {
+        (TypeExpr::Union(members), other) => {
+            let kept = members
+                .iter()
+                .filter_map(|member| intersect_types(member, other))
+                .collect::<Vec<_>>();
+            match kept.len() {
+                0 => None,
+                1 => kept.into_iter().next(),
+                _ => Some(TypeExpr::Union(kept)),
+            }
+        }
+        (other, TypeExpr::Union(members)) => {
+            let kept = members
+                .iter()
+                .filter_map(|member| intersect_types(other, member))
+                .collect::<Vec<_>>();
+            match kept.len() {
+                0 => None,
+                1 => kept.into_iter().next(),
+                _ => Some(TypeExpr::Union(kept)),
+            }
+        }
+        (TypeExpr::Named(left), TypeExpr::Named(right)) if left == right => {
+            Some(TypeExpr::Named(left.clone()))
+        }
+        (TypeExpr::Named(name), TypeExpr::Shape(fields)) if name == "dict" => {
+            Some(TypeExpr::Shape(fields.clone()))
+        }
+        (TypeExpr::Shape(fields), TypeExpr::Named(name)) if name == "dict" => {
+            Some(TypeExpr::Shape(fields.clone()))
+        }
+        (TypeExpr::Named(name), TypeExpr::List(inner)) if name == "list" => {
+            Some(TypeExpr::List(inner.clone()))
+        }
+        (TypeExpr::List(inner), TypeExpr::Named(name)) if name == "list" => {
+            Some(TypeExpr::List(inner.clone()))
+        }
+        (TypeExpr::Named(name), TypeExpr::DictType(key, value)) if name == "dict" => {
+            Some(TypeExpr::DictType(key.clone(), value.clone()))
+        }
+        (TypeExpr::DictType(key, value), TypeExpr::Named(name)) if name == "dict" => {
+            Some(TypeExpr::DictType(key.clone(), value.clone()))
+        }
+        (TypeExpr::Shape(_), TypeExpr::Shape(fields)) => Some(TypeExpr::Shape(fields.clone())),
+        (TypeExpr::List(current_inner), TypeExpr::List(schema_inner)) => {
+            intersect_types(current_inner, schema_inner)
+                .map(|inner| TypeExpr::List(Box::new(inner)))
+        }
+        (
+            TypeExpr::DictType(current_key, current_value),
+            TypeExpr::DictType(schema_key, schema_value),
+        ) => {
+            let key = intersect_types(current_key, schema_key)?;
+            let value = intersect_types(current_value, schema_value)?;
+            Some(TypeExpr::DictType(Box::new(key), Box::new(value)))
+        }
+        _ => None,
+    }
+}
+
+fn subtract_type(current: &TypeExpr, schema_type: &TypeExpr) -> Option<TypeExpr> {
+    match current {
+        TypeExpr::Union(members) => {
+            let remaining = members
+                .iter()
+                .filter(|member| intersect_types(member, schema_type).is_none())
+                .cloned()
+                .collect::<Vec<_>>();
+            match remaining.len() {
+                0 => None,
+                1 => remaining.into_iter().next(),
+                _ => Some(TypeExpr::Union(remaining)),
+            }
+        }
+        other if intersect_types(other, schema_type).is_some() => None,
+        other => Some(other.clone()),
+    }
 }
 
 /// Apply a list of refinements to a scope, tracking pre-narrowing types.

@@ -4,7 +4,7 @@ use std::rc::Rc;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
-use super::json::json_to_vm_value;
+use crate::schema::json_to_vm_value;
 
 pub(crate) fn register_tool_builtins(vm: &mut Vm) {
     vm.register_builtin("tool_registry", |_args, _out| {

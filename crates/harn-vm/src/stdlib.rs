@@ -30,8 +30,7 @@ use crate::mcp_server::register_mcp_server_builtins;
 use crate::vm::Vm;
 
 // Re-export helpers used by other modules in harn-vm
-pub(crate) use json::json_to_vm_value;
-pub(crate) use json::schema_result_value;
+pub(crate) use crate::schema::{json_to_vm_value, schema_result_value};
 pub(crate) fn set_thread_source_dir(dir: &std::path::Path) {
     process::set_thread_source_dir(dir);
 }

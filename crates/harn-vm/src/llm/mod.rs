@@ -134,7 +134,7 @@ fn validated_output_data(
     let Some(schema_json) = &opts.output_schema else {
         return Ok(Some(data.clone()));
     };
-    let schema_vm = json_to_vm_value(&normalize_validation_schema(schema_json.clone()));
+    let schema_vm = json_to_vm_value(schema_json);
     let validation = schema_result_value(data, &schema_vm, false);
     let errors = schema_validation_errors(&validation);
     if errors.is_empty() {
@@ -148,34 +148,6 @@ fn validated_output_data(
         }
         "error" => Err(VmValue::String(Rc::from(message))),
         _ => Ok(Some(data.clone())),
-    }
-}
-
-fn normalize_validation_schema(value: serde_json::Value) -> serde_json::Value {
-    match value {
-        serde_json::Value::Object(map) => {
-            let mut normalized = serde_json::Map::new();
-            for (key, child) in map {
-                if key == "type" {
-                    let normalized_type = match child.as_str() {
-                        Some("object") => serde_json::Value::String("dict".to_string()),
-                        Some("array") => serde_json::Value::String("list".to_string()),
-                        Some("integer") => serde_json::Value::String("int".to_string()),
-                        Some("number") => serde_json::Value::String("float".to_string()),
-                        Some("boolean") => serde_json::Value::String("bool".to_string()),
-                        _ => normalize_validation_schema(child),
-                    };
-                    normalized.insert(key, normalized_type);
-                } else {
-                    normalized.insert(key, normalize_validation_schema(child));
-                }
-            }
-            serde_json::Value::Object(normalized)
-        }
-        serde_json::Value::Array(items) => {
-            serde_json::Value::Array(items.into_iter().map(normalize_validation_schema).collect())
-        }
-        other => other,
     }
 }
 

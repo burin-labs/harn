@@ -1,0 +1,152 @@
+// std/schema — ergonomic schema builders and typed-value helpers
+//
+// Import with: import "std/schema"
+
+pub fn schema_any() {
+  return {type: "any"}
+}
+
+pub fn schema_string() {
+  return {type: "string"}
+}
+
+pub fn schema_int() {
+  return {type: "int"}
+}
+
+pub fn schema_float() {
+  return {type: "float"}
+}
+
+pub fn schema_bool() {
+  return {type: "bool"}
+}
+
+pub fn schema_nil() {
+  return {type: "nil"}
+}
+
+pub fn schema_literal(value) {
+  return {const: value}
+}
+
+pub fn schema_enum(values) {
+  return {enum: values}
+}
+
+pub fn schema_list(item_schema = nil, options = nil) {
+  var out = {type: "list"}
+  if item_schema != nil {
+    out = out + {items: item_schema}
+  }
+  if options != nil {
+    out = schema_extend(out, options)
+  }
+  return out
+}
+
+pub fn schema_array(item_schema = nil, options = nil) {
+  return schema_list(item_schema, options)
+}
+
+pub fn schema_dict(value_schema = nil, options = nil) {
+  var out = {type: "dict"}
+  if value_schema != nil {
+    out = out + {additional_properties: value_schema}
+  }
+  if options != nil {
+    out = schema_extend(out, options)
+  }
+  return out
+}
+
+pub fn schema_field(schema, required = true) {
+  return schema_extend(schema, {required: required})
+}
+
+pub fn schema_object(fields, options = nil) {
+  var properties = {}
+  var required = []
+
+  for entry in fields {
+    let raw_schema = entry.value
+    let is_required = raw_schema.required == nil || raw_schema.required
+    let field_schema = schema_omit(raw_schema, ["required"])
+    properties = properties + {[entry.key]: field_schema}
+    if is_required {
+      required = required + [entry.key]
+    }
+  }
+
+  var out = {type: "dict", properties: properties}
+  if len(required) > 0 {
+    out = out + {required: required}
+  }
+  if options != nil {
+    out = schema_extend(out, options)
+  }
+  return out
+}
+
+pub fn schema_union(branches) {
+  return {union: branches}
+}
+
+pub fn schema_all_of(branches) {
+  return {all_of: branches}
+}
+
+pub fn schema_nullable(schema) {
+  return schema_extend(schema, {nullable: true})
+}
+
+pub fn schema_default(schema, value) {
+  return schema_extend(schema, {default: value, required: false})
+}
+
+pub fn schema_pick_keys(schema, keys) {
+  return schema_pick(schema, keys)
+}
+
+pub fn schema_omit_keys(schema, keys) {
+  return schema_omit(schema, keys)
+}
+
+pub fn schema_partial_deep(schema) {
+  return schema_partial(schema)
+}
+
+pub fn schema_json(schema) {
+  return schema_to_json_schema(schema)
+}
+
+pub fn schema_openapi(schema) {
+  return schema_to_openapi_schema(schema)
+}
+
+pub fn from_json_schema(schema) {
+  return schema_from_json_schema(schema)
+}
+
+pub fn from_openapi_schema(schema) {
+  return schema_from_openapi_schema(schema)
+}
+
+pub fn get_typed_result(value, schema, apply_defaults = false) {
+  if apply_defaults {
+    return schema_parse(value, schema)
+  }
+  return schema_check(value, schema)
+}
+
+pub fn get_typed_value(value, schema, apply_defaults = false) {
+  let result = get_typed_result(value, schema, apply_defaults)
+  if is_ok(result) {
+    return unwrap(result)
+  }
+  throw_error(unwrap_err(result).message)
+}
+
+pub fn is_type(value, schema) {
+  return schema_is(value, schema)
+}

@@ -1,0 +1,29 @@
+pipeline test(task) {
+  fn take_union(v: string | int) -> string {
+    return to_string(v)
+  }
+  fn take_nums(v: list<int>) -> int {
+    return v[0]
+  }
+  fn take_counts(v: dict<string, int>) -> int {
+    return v["a"]
+  }
+  try {
+    take_union(json_parse("true"))
+  } catch (e) {
+    println(to_string(e).contains("expected string|int"))
+  }
+  try {
+    take_nums(json_parse("[1, \"x\"]"))
+  } catch (e2) {
+    println(to_string(e2).contains("[1]") && to_string(e2).contains("expected type 'int'"))
+  }
+  try {
+    take_counts(json_parse("{\"a\": 1, \"b\": \"x\"}"))
+  } catch (e3) {
+    println(
+      to_string(e3).contains("b")
+      && (to_string(e3).contains("expected int") || to_string(e3).contains("expected type 'int'")),
+    )
+  }
+}

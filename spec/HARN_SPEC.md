@@ -1167,11 +1167,12 @@ Declares a named tool and registers it with a tool registry. The body is
 compiled as a closure and attached as the tool's handler. An optional
 `description` metadata string may appear as the first statement in the body.
 
-Parameter types are mapped to JSON Schema types (`string` -> `"string"`,
-`int` -> `"integer"`, `float` -> `"number"`, `bool` -> `"boolean"`).
-Parameters with default values are emitted as optional schema fields
-(`required: false`) and include their `default` value in the generated
-tool registry entry.
+Annotated tool parameter and return types are lowered into the same schema
+model used by runtime validation and structured LLM I/O. Primitive types map to
+their JSON Schema equivalents, while nested shapes, `list<T>`,
+`dict<string, V>`, and unions produce nested schema objects. Parameters with
+default values are emitted as optional schema fields (`required: false`) and
+include their `default` value in the generated tool registry entry.
 
 The result of a `tool` declaration is a tool registry dict (the return
 value of `tool_define`). Multiple `tool` declarations accumulate into
@@ -1789,7 +1790,8 @@ TypeError: parameter 'name' expected string, got int (42)
 The following types are enforced at runtime: `int`, `float`, `string`, `bool`,
 `list`, `dict`, `set`, `nil`, and `closure`. `int` and `float` are mutually
 compatible (passing an `int` to a `float` parameter is allowed, and vice versa).
-Union types are not checked at runtime.
+Union types, `list<T>`, `dict<string, V>`, and nested shapes are also checked at
+runtime when the parameter annotation can be lowered into a runtime schema.
 
 ### Runtime shape validation
 
@@ -2181,13 +2183,6 @@ be addressed in future versions.
   parameter is not caught at runtime.
 
 ### Runtime
-
-- **Shape validation does not check union types**: If a shape field has a
-  union type annotation (`field: string | nil`), runtime validation only
-  checks the base type name, not the full union.
-- **No runtime generic type checking**: `list<int>` annotations are
-  checked at compile-time but not at runtime. A `list<int>` parameter
-  accepts any list at runtime.
 
 ### Syntax limitations
 
