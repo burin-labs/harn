@@ -92,7 +92,7 @@ pub fn stdlib_builtin_names() -> Vec<String> {
     crate::store::register_store_builtins(&mut vm, &tmp);
     crate::checkpoint::register_checkpoint_builtins(&mut vm, &tmp, "default");
     crate::metadata::register_metadata_builtins(&mut vm, &tmp);
-    crate::metadata::register_scan_builtins(&mut vm, &tmp);
+    crate::metadata::register_scan_builtins(&mut vm);
     let mut names = vm.builtin_names();
     // These are handled as special opcodes/keywords, not registered builtins,
     // but the linter should recognize them as valid function calls.

@@ -409,32 +409,12 @@ fn apply_scan_options_dict(options: &mut ScanOptions, dict: &BTreeMap<String, Vm
     options.include_files = bool_arg(dict, "include_files", options.include_files);
 }
 
-fn resolve_scan_root(base_dir: &Path, rel_dir: &str) -> PathBuf {
+fn resolve_scan_root(rel_dir: &str) -> PathBuf {
     let candidate = PathBuf::from(rel_dir);
     if candidate.is_absolute() {
         return candidate;
     }
-    // Mirror `stdlib::process::resolve_source_relative_path` so
-    // `scan_directory` agrees with `mkdir`/`write_file`/`read_file` about where
-    // Harn-relative paths live. Without this, v0.5.36's switch to prefer
-    // VM_SOURCE_DIR in the fs resolvers left `scan_directory` reading a
-    // different root (the process cwd), which broke conformance tests that
-    // mkdir'd into the source tree and then scanned it.
-    //
-    // Priority: explicit execution-context cwd → VM source dir → process
-    // cwd → the base dir captured at builtin registration.
-    if let Some(cwd) =
-        crate::stdlib::process::current_execution_context().and_then(|context| context.cwd)
-    {
-        return PathBuf::from(cwd).join(candidate);
-    }
-    if let Some(source_dir) = crate::stdlib::process::VM_SOURCE_DIR.with(|sd| sd.borrow().clone()) {
-        return source_dir.join(candidate);
-    }
-    if let Ok(cwd) = std::env::current_dir() {
-        return cwd.join(candidate);
-    }
-    base_dir.join(candidate)
+    crate::stdlib::process::resolve_source_relative_path(rel_dir)
 }
 
 /// Register metadata builtins on a VM.
@@ -763,7 +743,7 @@ pub fn register_metadata_builtins(vm: &mut Vm, base_dir: &Path) {
     vm.register_builtin("invalidate_facts", |_args, _out| Ok(VmValue::Nil));
 
     // Also register scan builtins (scan_directory)
-    register_scan_builtins(vm, base_dir);
+    register_scan_builtins(vm);
 }
 
 /// Compute structure hash for a directory (file names + sizes).
@@ -815,13 +795,12 @@ fn fnv_hash(data: &[u8]) -> u64 {
 }
 
 /// Register scan_directory builtin: native Rust file enumeration.
-pub fn register_scan_builtins(vm: &mut Vm, base_dir: &Path) {
-    let base = base_dir.to_path_buf();
+pub fn register_scan_builtins(vm: &mut Vm) {
     // scan_directory(path?, pattern?) -> [{path, size, modified, is_dir}, ...]
     vm.register_builtin("scan_directory", move |args, _out| {
         let rel_dir = args.first().map(|a| a.display()).unwrap_or_default();
         let options = parse_scan_options(args.get(1), args.get(2));
-        let scan_base = resolve_scan_root(&base, ".");
+        let scan_base = resolve_scan_root(".");
         let full_dir = if rel_dir.is_empty() {
             scan_base.clone()
         } else {

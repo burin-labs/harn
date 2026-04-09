@@ -691,6 +691,11 @@ pub(crate) async fn execute(source: &str, source_path: Option<&Path>) -> Result<
                 .unwrap_or(std::path::Path::new("."));
             let project_root = harn_vm::stdlib::process::find_project_root(source_parent);
             let store_base = project_root.as_deref().unwrap_or(source_parent);
+            let execution_cwd = std::env::current_dir()
+                .unwrap_or_else(|_| std::path::PathBuf::from("."))
+                .to_string_lossy()
+                .to_string();
+            let source_dir = source_parent.to_string_lossy().to_string();
             harn_vm::register_store_builtins(&mut vm, store_base);
             harn_vm::register_metadata_builtins(&mut vm, store_base);
             let pipeline_name = source_path
@@ -698,6 +703,19 @@ pub(crate) async fn execute(source: &str, source_path: Option<&Path>) -> Result<
                 .and_then(|s| s.to_str())
                 .unwrap_or("default");
             harn_vm::register_checkpoint_builtins(&mut vm, store_base, pipeline_name);
+            harn_vm::stdlib::process::set_thread_execution_context(Some(
+                harn_vm::orchestration::RunExecutionRecord {
+                    cwd: Some(execution_cwd),
+                    source_dir: Some(source_dir),
+                    env: std::collections::BTreeMap::new(),
+                    adapter: None,
+                    repo_path: None,
+                    worktree_path: None,
+                    branch: None,
+                    base_ref: None,
+                    cleanup: None,
+                },
+            ));
             if let Some(ref root) = project_root {
                 vm.set_project_root(root);
             }
@@ -708,7 +726,9 @@ pub(crate) async fn execute(source: &str, source_path: Option<&Path>) -> Result<
                     }
                 }
             }
-            vm.execute(&chunk).await.map_err(|e| e.to_string())?;
+            let execution_result = vm.execute(&chunk).await.map_err(|e| e.to_string());
+            harn_vm::stdlib::process::set_thread_execution_context(None);
+            execution_result?;
             let mut output = String::new();
             for wl in &warning_lines {
                 output.push_str(wl);
