@@ -317,6 +317,7 @@ pub(super) fn persist_worker_state_snapshot(state: &WorkerState) -> Result<(), V
             "transcript_policy": state.carry_policy.transcript_policy,
             "resume_workflow": state.carry_policy.resume_workflow,
             "persist_state": state.carry_policy.persist_state,
+            "policy": state.carry_policy.policy,
         },
         "execution": state.execution,
         "snapshot_path": state.snapshot_path,
@@ -358,7 +359,9 @@ pub(super) fn load_worker_state_snapshot(target: &str) -> Result<WorkerState, Vm
             transcript_policy: parse_transcript_policy(dict.get("transcript_policy"))?,
             resume_workflow: !matches!(dict.get("resume_workflow"), Some(VmValue::Bool(false))),
             persist_state: !matches!(dict.get("persist_state"), Some(VmValue::Bool(false))),
-            policy: None,
+            policy: worker_policy_value(dict.get("policy"))
+                .map(parse_worker_policy_value)
+                .transpose()?,
         }
     } else {
         WorkerCarryPolicy::default()
@@ -516,10 +519,6 @@ pub(super) fn parse_worker_carry_policy(
             .map(|value| value.display())
             .filter(|value| matches!(value.as_str(), "inherit" | "reset" | "fork"));
     }
-    let policy = carry.get("policy").or_else(|| dict.get("policy")).map(|v| {
-        let json = crate::llm::helpers::vm_value_to_json(v);
-        serde_json::from_value::<CapabilityPolicy>(json).unwrap_or_default()
-    });
 
     Ok(WorkerCarryPolicy {
         artifact_mode,
@@ -527,8 +526,93 @@ pub(super) fn parse_worker_carry_policy(
         transcript_policy,
         resume_workflow: !matches!(carry.get("resume_workflow"), Some(VmValue::Bool(false))),
         persist_state: !matches!(carry.get("persist_state"), Some(VmValue::Bool(false))),
-        policy,
+        policy: None,
     })
+}
+
+fn parse_worker_policy_value(value: &VmValue) -> Result<CapabilityPolicy, VmError> {
+    let json = crate::llm::helpers::vm_value_to_json(value);
+    serde_json::from_value(json)
+        .map_err(|e| VmError::Runtime(format!("spawn_agent: policy parse error: {e}")))
+}
+
+fn worker_policy_value(value: Option<&VmValue>) -> Option<&VmValue> {
+    value.filter(|value| !matches!(value, VmValue::Nil))
+}
+
+fn parse_worker_tools_policy(value: Option<&VmValue>) -> Result<Option<CapabilityPolicy>, VmError> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let tools = match value {
+        VmValue::List(list) => list,
+        _ => {
+            return Err(VmError::Runtime(
+                "spawn_agent: tools shorthand must be a list of strings".to_string(),
+            ))
+        }
+    };
+    let mut allowed = Vec::new();
+    for tool in tools.iter() {
+        let name = match tool {
+            VmValue::String(text) => text.trim().to_string(),
+            _ => {
+                return Err(VmError::Runtime(
+                    "spawn_agent: tools shorthand must be a list of strings".to_string(),
+                ))
+            }
+        };
+        if !name.is_empty() && !allowed.contains(&name) {
+            allowed.push(name);
+        }
+    }
+    if allowed.is_empty() {
+        return Err(VmError::Runtime(
+            "spawn_agent: tools shorthand must include at least one tool name".to_string(),
+        ));
+    }
+    Ok(Some(CapabilityPolicy {
+        tools: allowed,
+        ..Default::default()
+    }))
+}
+
+fn resolve_worker_policy(
+    dict: &BTreeMap<String, VmValue>,
+) -> Result<Option<CapabilityPolicy>, VmError> {
+    let carry = dict
+        .get("carry")
+        .and_then(|value| value.as_dict())
+        .cloned()
+        .unwrap_or_default();
+    let explicit = carry
+        .get("policy")
+        .or_else(|| dict.get("policy"))
+        .filter(|value| !matches!(value, VmValue::Nil))
+        .map(parse_worker_policy_value)
+        .transpose()?;
+    let tools = parse_worker_tools_policy(carry.get("tools").or_else(|| dict.get("tools")))?;
+    let requested = match (explicit, tools) {
+        (Some(policy), Some(tool_policy)) => Some(
+            policy
+                .intersect(&tool_policy)
+                .map_err(|e| VmError::Runtime(format!("spawn_agent: {e}")))?,
+        ),
+        (Some(policy), None) => Some(policy),
+        (None, Some(tool_policy)) => Some(tool_policy),
+        (None, None) => None,
+    };
+    let parent = crate::orchestration::current_execution_policy();
+    match (parent, requested) {
+        (Some(parent), Some(requested)) => {
+            Ok(Some(parent.intersect(&requested).map_err(|e| {
+                VmError::Runtime(format!("spawn_agent: {e}"))
+            })?))
+        }
+        (Some(parent), None) => Ok(Some(parent)),
+        (None, Some(requested)) => Ok(Some(requested)),
+        (None, None) => Ok(None),
+    }
 }
 
 fn parse_worker_audit(dict: &BTreeMap<String, VmValue>) -> Result<MutationSessionRecord, VmError> {
@@ -623,7 +707,8 @@ pub(super) fn parse_worker_config(value: &VmValue) -> Result<WorkerInit, VmError
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| "worker".to_string());
     let wait = matches!(dict.get("wait"), Some(VmValue::Bool(true)));
-    let carry_policy = parse_worker_carry_policy(dict)?;
+    let mut carry_policy = parse_worker_carry_policy(dict)?;
+    carry_policy.policy = resolve_worker_policy(dict)?;
     let execution = parse_worker_execution_profile(dict.get("execution"))?;
     let audit = parse_worker_audit(dict)?;
 
@@ -1059,7 +1144,7 @@ pub(super) async fn execute_delegated_stage(
             transcript_policy: TranscriptPolicy::default(),
             resume_workflow: true,
             persist_state: true,
-            policy: None,
+            policy: crate::orchestration::current_execution_policy(),
         },
         execution,
         snapshot_path: worker_snapshot_path(&worker_id),
@@ -1190,7 +1275,11 @@ mod tests {
                 },
                 resume_workflow: false,
                 persist_state: true,
-                policy: None,
+                policy: Some(CapabilityPolicy {
+                    tools: vec!["read".to_string()],
+                    side_effect_level: Some("read_only".to_string()),
+                    ..Default::default()
+                }),
             },
             execution: WorkerExecutionProfile::default(),
             snapshot_path: snapshot_path.clone(),
@@ -1220,6 +1309,14 @@ mod tests {
             loaded.carry_policy.transcript_policy.mode.as_deref(),
             Some("reset")
         );
+        assert_eq!(
+            loaded.carry_policy.policy,
+            Some(CapabilityPolicy {
+                tools: vec!["read".to_string()],
+                side_effect_level: Some("read_only".to_string()),
+                ..Default::default()
+            })
+        );
         assert_eq!(loaded.audit.session_id, "session_worker_test");
         assert_eq!(loaded.audit.mutation_scope, "apply_worktree");
 
@@ -1239,5 +1336,67 @@ mod tests {
         }];
         let selected = apply_worker_artifact_policy(&artifacts, &policy);
         assert!(selected.is_empty());
+    }
+
+    #[test]
+    fn worker_policy_inherits_parent_ceiling_when_unspecified() {
+        crate::orchestration::push_execution_policy(CapabilityPolicy {
+            tools: vec!["read".to_string()],
+            side_effect_level: Some("read_only".to_string()),
+            ..Default::default()
+        });
+
+        let dict = BTreeMap::from([("task".to_string(), VmValue::String(Rc::from("draft note")))]);
+        let resolved = resolve_worker_policy(&dict).unwrap();
+
+        crate::orchestration::pop_execution_policy();
+
+        assert_eq!(
+            resolved,
+            Some(CapabilityPolicy {
+                tools: vec!["read".to_string()],
+                side_effect_level: Some("read_only".to_string()),
+                ..Default::default()
+            })
+        );
+    }
+
+    #[test]
+    fn worker_policy_intersects_explicit_policy_and_tools_shorthand() {
+        crate::orchestration::push_execution_policy(CapabilityPolicy {
+            tools: vec!["read".to_string(), "write".to_string()],
+            side_effect_level: Some("workspace_write".to_string()),
+            ..Default::default()
+        });
+
+        let dict = BTreeMap::from([
+            ("task".to_string(), VmValue::String(Rc::from("draft note"))),
+            (
+                "policy".to_string(),
+                VmValue::Dict(Rc::new(BTreeMap::from([(
+                    "tools".to_string(),
+                    VmValue::List(Rc::new(vec![
+                        VmValue::String(Rc::from("read")),
+                        VmValue::String(Rc::from("write")),
+                    ])),
+                )]))),
+            ),
+            (
+                "tools".to_string(),
+                VmValue::List(Rc::new(vec![VmValue::String(Rc::from("read"))])),
+            ),
+        ]);
+        let resolved = resolve_worker_policy(&dict).unwrap();
+
+        crate::orchestration::pop_execution_policy();
+
+        assert_eq!(
+            resolved,
+            Some(CapabilityPolicy {
+                tools: vec!["read".to_string()],
+                side_effect_level: Some("workspace_write".to_string()),
+                ..Default::default()
+            })
+        );
     }
 }

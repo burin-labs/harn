@@ -35,7 +35,7 @@ over stdin/stdout using the Language Server Protocol.
 | Feature | Description |
 |---------|-------------|
 | **Diagnostics** | Real-time parse errors, type errors, and warnings |
-| **Completions** | Scope-aware: pipelines, functions, variables, parameters, enums, structs, interfaces. Dot-completions for methods. Builtins and keywords. |
+| **Completions** | Scope-aware: pipelines, functions, variables, parameters, enums, structs, interfaces. Dot-completions for methods plus inferred shape fields, struct members, and enum payload fields. Builtins and keywords. |
 | **Go-to-definition** | Jump to the declaration of pipelines, functions, and variables |
 | **Find references** | Locate all usages of a symbol across the document |
 | **Hover** | Shows type information and documentation for builtins |

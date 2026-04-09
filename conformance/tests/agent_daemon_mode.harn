@@ -1,0 +1,32 @@
+pipeline test(task) {
+  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
+  let dir = path_join(temp_dir(), "harn-agent-daemon-" + unique)
+  mkdir(dir)
+  let snapshot = path_join(dir, "daemon.json")
+  let result = agent_loop(
+    "Poll for background work",
+    "You are helpful",
+    {
+    provider: "mock",
+    daemon: true,
+    max_iterations: 2,
+    wake_interval_ms: 1,
+    persist_path: snapshot,
+    consolidate_on_idle: true,
+    auto_compact: true,
+    compact_threshold: 1,
+    compact_keep_last: 1,
+    compact_strategy: "custom",
+    compact_callback: { archived -> {summary: "daemon compact " + to_string(len(archived))} },
+  },
+  )
+  let saved = json_parse(read_file(snapshot))
+  println(result.status)
+  println(result.daemon_state)
+  println(result.daemon_snapshot_path == snapshot)
+  println(result.iterations)
+  println(saved.daemon_state)
+  println(saved.total_iterations)
+  println(saved.transcript_summary.contains("daemon compact"))
+  delete_file(dir)
+}

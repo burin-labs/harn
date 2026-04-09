@@ -45,14 +45,20 @@ conformance:
 lint-md:
 	npx markdownlint-cli2 "**/*.md"
 
-# Lint Harn conformance tests (check for warnings)
+# Lint Harn conformance tests (check for warnings).
+# Skip .harn files that have a paired .error file — those are intentional
+# error tests whose diagnostics are validated by the conformance runner.
 lint-harn:
 	@echo "=== Linting Harn conformance tests ==="
 	@cargo build --quiet --bin harn
 	@workers=$$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 8); \
 	tmp=$$(mktemp -d); \
 	status=0; \
-	find conformance/tests -name '*.harn' -print0 | \
+	find conformance/tests -name '*.harn' -print0 | while IFS= read -r -d '' f; do \
+		error_file="$${f%.harn}.error"; \
+		[ -f "$$error_file" ] && continue; \
+		printf '%s\0' "$$f"; \
+	done | \
 		TMP_RESULTS="$$tmp" xargs -0 -P "$$workers" -I{} sh -c '\
 			output=$$(target/debug/harn check "$$1" 2>&1); \
 			if echo "$$output" | grep -qE "^.+: (warning|error)\["; then \

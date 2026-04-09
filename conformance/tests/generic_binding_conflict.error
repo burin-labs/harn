@@ -1,0 +1,1 @@
+type parameter 'T' was inferred as both int and string

@@ -23,9 +23,7 @@ pipeline test(task) {
   println(denied?.rejected_tools[0])
   println(
     json_stringify(transcript_messages(denied?.transcript))
-    .contains(
-    "REJECTED by hook: listing disabled",
-  ),
+    .contains("permission_denied"),
   )
   clear_tool_hooks()
   var trunc_tools = tool_registry()

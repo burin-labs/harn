@@ -17,6 +17,12 @@ pub(crate) enum HarnSymbolKind {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) struct EnumVariantInfo {
+    pub(crate) name: String,
+    pub(crate) fields: Vec<ShapeField>,
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct SymbolInfo {
     pub(crate) name: String,
     pub(crate) kind: HarnSymbolKind,
@@ -31,6 +37,10 @@ pub(crate) struct SymbolInfo {
     pub(crate) doc_comment: Option<String>,
     /// For methods inside `impl` blocks: the type name (e.g. "Point").
     pub(crate) impl_type: Option<String>,
+    /// Structural fields for shape-like symbols such as structs.
+    pub(crate) fields: Vec<ShapeField>,
+    /// Enum variants available on this enum symbol.
+    pub(crate) enum_variants: Vec<EnumVariantInfo>,
 }
 
 /// Walk the parsed AST and collect all definitions.
@@ -137,6 +147,8 @@ fn collect_symbols(
                 scope_span: $scope,
                 doc_comment: None,
                 impl_type: None,
+                fields: Vec::new(),
+                enum_variants: Vec::new(),
             }
         };
     }
@@ -171,6 +183,8 @@ fn collect_symbols(
                 scope_span,
                 doc_comment: extract_doc_comment(source, &snode.span),
                 impl_type: None,
+                fields: Vec::new(),
+                enum_variants: Vec::new(),
             });
             // Params are plain strings (no individual spans), register them scoped to body.
             for p in params {
@@ -213,6 +227,8 @@ fn collect_symbols(
                 scope_span,
                 doc_comment: extract_doc_comment(source, &snode.span),
                 impl_type: impl_type_name.map(String::from),
+                fields: Vec::new(),
+                enum_variants: Vec::new(),
             });
             for p in params {
                 symbols.push(simple_sym!(
@@ -254,6 +270,8 @@ fn collect_symbols(
                 scope_span,
                 doc_comment: extract_doc_comment(source, &snode.span),
                 impl_type: None,
+                fields: Vec::new(),
+                enum_variants: Vec::new(),
             });
             for p in params {
                 symbols.push(simple_sym!(
@@ -279,7 +297,9 @@ fn collect_symbols(
                     name,
                     HarnSymbolKind::Variable,
                     snode.span,
-                    type_ann.clone().or_else(|| infer_literal_type(value)),
+                    type_ann
+                        .clone()
+                        .or_else(|| infer_symbol_type(value, symbols)),
                     None,
                     scope_span
                 ));
@@ -296,24 +316,49 @@ fn collect_symbols(
                     name,
                     HarnSymbolKind::Variable,
                     snode.span,
-                    type_ann.clone().or_else(|| infer_literal_type(value)),
+                    type_ann
+                        .clone()
+                        .or_else(|| infer_symbol_type(value, symbols)),
                     None,
                     scope_span
                 ));
             }
             recurse!(value, scope_span);
         }
-        Node::EnumDecl { name, is_pub, .. } => {
+        Node::EnumDecl {
+            name,
+            variants,
+            is_pub,
+        } => {
             let pub_prefix = if *is_pub { "pub " } else { "" };
             symbols.push(SymbolInfo {
                 name: name.clone(),
                 kind: HarnSymbolKind::Enum,
                 def_span: snode.span,
-                type_info: None,
+                type_info: Some(TypeExpr::Named(name.clone())),
                 signature: Some(format!("{pub_prefix}enum {name}")),
                 scope_span,
                 doc_comment: extract_doc_comment(source, &snode.span),
                 impl_type: None,
+                fields: Vec::new(),
+                enum_variants: variants
+                    .iter()
+                    .map(|variant| EnumVariantInfo {
+                        name: variant.name.clone(),
+                        fields: variant
+                            .fields
+                            .iter()
+                            .map(|field| ShapeField {
+                                name: field.name.clone(),
+                                type_expr: field
+                                    .type_expr
+                                    .clone()
+                                    .unwrap_or(TypeExpr::Named("any".to_string())),
+                                optional: false,
+                            })
+                            .collect(),
+                    })
+                    .collect(),
             });
         }
         Node::StructDecl {
@@ -322,6 +367,17 @@ fn collect_symbols(
             is_pub,
         } => {
             let pub_prefix = if *is_pub { "pub " } else { "" };
+            let shape_fields = fields
+                .iter()
+                .map(|field| ShapeField {
+                    name: field.name.clone(),
+                    type_expr: field
+                        .type_expr
+                        .clone()
+                        .unwrap_or(TypeExpr::Named("any".to_string())),
+                    optional: field.optional,
+                })
+                .collect::<Vec<_>>();
             let fields_str = fields
                 .iter()
                 .map(|f| {
@@ -337,11 +393,13 @@ fn collect_symbols(
                 name: name.clone(),
                 kind: HarnSymbolKind::Struct,
                 def_span: snode.span,
-                type_info: None,
+                type_info: Some(TypeExpr::Shape(shape_fields.clone())),
                 signature: Some(format!("{pub_prefix}struct {name} {{ {fields_str} }}")),
                 scope_span,
                 doc_comment: extract_doc_comment(source, &snode.span),
                 impl_type: None,
+                fields: shape_fields,
+                enum_variants: Vec::new(),
             });
         }
         Node::InterfaceDecl {
@@ -373,6 +431,8 @@ fn collect_symbols(
                 scope_span,
                 doc_comment: extract_doc_comment(source, &snode.span),
                 impl_type: None,
+                fields: Vec::new(),
+                enum_variants: Vec::new(),
             });
         }
         Node::ImplBlock {
@@ -387,6 +447,8 @@ fn collect_symbols(
                 scope_span,
                 doc_comment: None,
                 impl_type: None,
+                fields: Vec::new(),
+                enum_variants: Vec::new(),
             });
             for m in methods {
                 collect_symbols(m, symbols, Some(snode.span), source, Some(type_name));
@@ -688,6 +750,8 @@ fn collect_symbols(
                 scope_span,
                 doc_comment: extract_doc_comment(source, &snode.span),
                 impl_type: None,
+                fields: Vec::new(),
+                enum_variants: Vec::new(),
             });
             for s in body {
                 recurse!(s, Some(snode.span));
@@ -757,22 +821,20 @@ pub(crate) fn infer_literal_type(snode: &SNode) -> Option<TypeExpr> {
         Node::DictLiteral(entries) => {
             // Infer shape type when all keys are string literals
             let mut fields = Vec::new();
-            let mut all_string_keys = true;
             for entry in entries {
-                if let Node::StringLiteral(key) = &entry.key.node {
-                    let val_type =
-                        infer_literal_type(&entry.value).unwrap_or(TypeExpr::Named("nil".into()));
-                    fields.push(ShapeField {
-                        name: key.clone(),
-                        type_expr: val_type,
-                        optional: false,
-                    });
-                } else {
-                    all_string_keys = false;
-                    break;
-                }
+                let key = match &entry.key.node {
+                    Node::StringLiteral(key) | Node::Identifier(key) => key.clone(),
+                    _ => return Some(TypeExpr::Named("dict".into())),
+                };
+                let val_type =
+                    infer_literal_type(&entry.value).unwrap_or(TypeExpr::Named("nil".into()));
+                fields.push(ShapeField {
+                    name: key,
+                    type_expr: val_type,
+                    optional: false,
+                });
             }
-            if all_string_keys && !fields.is_empty() {
+            if !fields.is_empty() {
                 Some(TypeExpr::Shape(fields))
             } else {
                 Some(TypeExpr::Named("dict".into()))
@@ -781,6 +843,27 @@ pub(crate) fn infer_literal_type(snode: &SNode) -> Option<TypeExpr> {
         Node::Closure { .. } => Some(TypeExpr::Named("closure".into())),
         _ => None,
     }
+}
+
+fn infer_symbol_type(snode: &SNode, symbols: &[SymbolInfo]) -> Option<TypeExpr> {
+    infer_literal_type(snode).or_else(|| match &snode.node {
+        Node::FunctionCall { name, .. } => symbols
+            .iter()
+            .find(|sym| sym.kind == HarnSymbolKind::Struct && sym.name == *name)
+            .map(|_| TypeExpr::Named(name.clone())),
+        Node::EnumConstruct { enum_name, .. } => Some(TypeExpr::Named(enum_name.clone())),
+        Node::PropertyAccess { object, .. } => {
+            if let Node::Identifier(name) = &object.node {
+                symbols
+                    .iter()
+                    .find(|sym| sym.kind == HarnSymbolKind::Enum && sym.name == *name)
+                    .map(|_| TypeExpr::Named(name.clone()))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    })
 }
 
 /// Format a shape type with one field per line for complex hover tooltips.

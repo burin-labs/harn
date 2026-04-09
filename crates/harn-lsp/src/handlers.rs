@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use harn_lexer::{Lexer, TokenKind};
-use harn_parser::format_type;
+use harn_parser::{format_type, ShapeField, TypeExpr};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 
@@ -10,14 +10,155 @@ use crate::constants::{
 };
 use crate::document::DocumentState;
 use crate::helpers::{
-    char_before_position, extract_backtick_name, find_word_in_region, infer_dot_receiver_type,
-    lsp_position_to_offset, offset_to_position, position_in_span, span_to_full_range,
-    span_to_range, word_at_position,
+    char_before_position, extract_backtick_name, find_word_in_region, infer_dot_receiver_name,
+    infer_dot_receiver_type, lsp_position_to_offset, offset_to_position, position_in_span,
+    span_to_full_range, span_to_range, word_at_position,
 };
 use crate::references::find_references;
 use crate::semantic_tokens::{build_semantic_tokens, semantic_token_legend};
-use crate::symbols::{format_shape_expanded, HarnSymbolKind, SymbolInfo};
+use crate::symbols::{format_shape_expanded, EnumVariantInfo, HarnSymbolKind, SymbolInfo};
 use crate::HarnLsp;
+
+fn push_method_items(items: &mut Vec<CompletionItem>, methods: &[&str]) {
+    for method in methods {
+        items.push(CompletionItem {
+            label: method.to_string(),
+            kind: Some(CompletionItemKind::METHOD),
+            ..Default::default()
+        });
+    }
+}
+
+fn push_field_items(items: &mut Vec<CompletionItem>, fields: &[ShapeField]) {
+    for field in fields {
+        items.push(CompletionItem {
+            label: field.name.clone(),
+            kind: Some(CompletionItemKind::FIELD),
+            detail: Some(format_type(&field.type_expr)),
+            ..Default::default()
+        });
+    }
+}
+
+fn push_enum_variant_items(items: &mut Vec<CompletionItem>, variants: &[EnumVariantInfo]) {
+    for variant in variants {
+        let detail = if variant.fields.is_empty() {
+            "enum variant".to_string()
+        } else {
+            let fields = variant
+                .fields
+                .iter()
+                .map(|field| format!("{}: {}", field.name, format_type(&field.type_expr)))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("enum variant ({fields})")
+        };
+        items.push(CompletionItem {
+            label: variant.name.clone(),
+            kind: Some(CompletionItemKind::ENUM_MEMBER),
+            detail: Some(detail),
+            ..Default::default()
+        });
+    }
+}
+
+fn push_impl_method_items(
+    items: &mut Vec<CompletionItem>,
+    symbols: &[SymbolInfo],
+    type_name: &str,
+) {
+    for sym in symbols.iter().filter(|sym| {
+        sym.kind == HarnSymbolKind::Function && sym.impl_type.as_deref() == Some(type_name)
+    }) {
+        items.push(CompletionItem {
+            label: sym.name.clone(),
+            kind: Some(CompletionItemKind::METHOD),
+            detail: sym.signature.clone(),
+            ..Default::default()
+        });
+    }
+}
+
+fn struct_fields(symbols: &[SymbolInfo], type_name: &str) -> Option<Vec<ShapeField>> {
+    symbols
+        .iter()
+        .find(|sym| {
+            sym.kind == HarnSymbolKind::Struct && sym.name == type_name && !sym.fields.is_empty()
+        })
+        .map(|sym| sym.fields.clone())
+}
+
+fn enum_variants(symbols: &[SymbolInfo], type_name: &str) -> Option<Vec<EnumVariantInfo>> {
+    symbols
+        .iter()
+        .find(|sym| {
+            sym.kind == HarnSymbolKind::Enum
+                && sym.name == type_name
+                && !sym.enum_variants.is_empty()
+        })
+        .map(|sym| sym.enum_variants.clone())
+}
+
+fn dot_completion_items(
+    source: &str,
+    position: Position,
+    symbols: &[SymbolInfo],
+) -> Vec<CompletionItem> {
+    let mut items = Vec::new();
+    let receiver_type = infer_dot_receiver_type(source, position, symbols);
+    let receiver_name = infer_dot_receiver_name(source, position);
+
+    if let Some(receiver_type) = receiver_type.as_ref() {
+        match receiver_type {
+            TypeExpr::Shape(fields) => {
+                push_field_items(&mut items, fields);
+            }
+            TypeExpr::Named(name) if name == "string" => {
+                push_method_items(&mut items, STRING_METHODS);
+            }
+            TypeExpr::Named(name) if name == "list" => {
+                push_method_items(&mut items, LIST_METHODS);
+            }
+            TypeExpr::Named(name) if name == "dict" => {
+                push_method_items(&mut items, DICT_METHODS);
+            }
+            TypeExpr::Named(name) => {
+                if let Some(fields) = struct_fields(symbols, name) {
+                    push_field_items(&mut items, &fields);
+                    push_impl_method_items(&mut items, symbols, name);
+                } else if let Some(variants) = enum_variants(symbols, name) {
+                    if receiver_name.as_deref() == Some(name) {
+                        push_enum_variant_items(&mut items, &variants);
+                    } else {
+                        items.push(CompletionItem {
+                            label: "variant".to_string(),
+                            kind: Some(CompletionItemKind::FIELD),
+                            detail: Some("string".to_string()),
+                            ..Default::default()
+                        });
+                        items.push(CompletionItem {
+                            label: "fields".to_string(),
+                            kind: Some(CompletionItemKind::FIELD),
+                            detail: Some("list<any>".to_string()),
+                            ..Default::default()
+                        });
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if items.is_empty() {
+        push_method_items(&mut items, STRING_METHODS);
+        push_method_items(&mut items, LIST_METHODS);
+        push_method_items(&mut items, DICT_METHODS);
+    }
+
+    items.sort_by(|a, b| a.label.cmp(&b.label));
+    items.dedup_by(|a, b| a.label == b.label && a.kind == b.kind);
+    items
+}
 
 // ---------------------------------------------------------------------------
 // LanguageServer trait implementation
@@ -140,38 +281,9 @@ impl tower_lsp::LanguageServer for HarnLsp {
 
         // Check if this is a dot-completion
         if char_before_position(&source, position) == Some('.') {
-            let type_name = infer_dot_receiver_type(&source, position, &symbols);
-            let methods = match type_name.as_deref() {
-                Some("string") => STRING_METHODS,
-                Some("list") => LIST_METHODS,
-                Some("dict") => DICT_METHODS,
-                _ => {
-                    // Unknown type — offer all methods
-                    for m in STRING_METHODS
-                        .iter()
-                        .chain(LIST_METHODS.iter())
-                        .chain(DICT_METHODS.iter())
-                    {
-                        items.push(CompletionItem {
-                            label: m.to_string(),
-                            kind: Some(CompletionItemKind::METHOD),
-                            ..Default::default()
-                        });
-                    }
-                    // Deduplicate by label
-                    items.sort_by(|a, b| a.label.cmp(&b.label));
-                    items.dedup_by(|a, b| a.label == b.label);
-                    return Ok(Some(CompletionResponse::Array(items)));
-                }
-            };
-            for m in methods {
-                items.push(CompletionItem {
-                    label: m.to_string(),
-                    kind: Some(CompletionItemKind::METHOD),
-                    ..Default::default()
-                });
-            }
-            return Ok(Some(CompletionResponse::Array(items)));
+            return Ok(Some(CompletionResponse::Array(dot_completion_items(
+                &source, position, &symbols,
+            ))));
         }
 
         // Scope-aware: find symbols visible at cursor position
@@ -1051,5 +1163,117 @@ impl tower_lsp::LanguageServer for HarnLsp {
             .collect();
 
         Ok(if hints.is_empty() { None } else { Some(hints) })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::dot_completion_items;
+    use crate::document::DocumentState;
+    use tower_lsp::lsp_types::Position;
+
+    fn completion_items_at(source: &str, marker: &str) -> Vec<(String, Option<String>)> {
+        let state = DocumentState::new(source.to_string());
+        let mut location = None;
+        for (line_index, line) in source.lines().enumerate() {
+            if let Some(column) = line.find(marker) {
+                location = Some(Position::new(
+                    line_index as u32,
+                    (column + marker.len()) as u32,
+                ));
+                break;
+            }
+        }
+        let position = location.expect("marker should exist in source");
+        dot_completion_items(&state.source, position, &state.symbols)
+            .into_iter()
+            .map(|item| (item.label, item.detail))
+            .collect()
+    }
+
+    #[test]
+    fn dot_completion_prefers_shape_fields() {
+        let items = completion_items_at(
+            r#"pipeline test() {
+  let data = {name: "Ada", count: 3}
+  data.name
+}"#,
+            "data.",
+        );
+        assert!(
+            items
+                .iter()
+                .any(|(label, detail)| { label == "name" && detail.as_deref() == Some("string") }),
+            "items: {items:?}"
+        );
+        assert!(
+            items
+                .iter()
+                .any(|(label, detail)| { label == "count" && detail.as_deref() == Some("int") }),
+            "items: {items:?}"
+        );
+        assert!(
+            !items.iter().any(|(label, _)| label == "merge"),
+            "items: {items:?}"
+        );
+    }
+
+    #[test]
+    fn dot_completion_includes_struct_fields_and_methods() {
+        let items = completion_items_at(
+            r#"pipeline test() {
+  struct Person { name: string, age: int }
+  impl Person {
+    fn greet(self) -> string { return self.name }
+  }
+  let person = Person({name: "Ada", age: 3})
+  person.name
+}"#,
+            "person.",
+        );
+        assert!(
+            items
+                .iter()
+                .any(|(label, detail)| { label == "name" && detail.as_deref() == Some("string") }),
+            "items: {items:?}"
+        );
+        assert!(
+            items.iter().any(|(label, detail)| {
+                label == "greet"
+                    && detail
+                        .as_deref()
+                        .is_some_and(|detail| detail.contains("fn greet"))
+            }),
+            "items: {items:?}"
+        );
+    }
+
+    #[test]
+    fn dot_completion_includes_enum_variants_with_field_details() {
+        let items = completion_items_at(
+            r#"pipeline test() {
+  enum Event {
+    Click(x: int, y: int),
+    Quit,
+  }
+  Event.Click
+}"#,
+            "Event.",
+        );
+        assert!(
+            items.iter().any(|(label, detail)| {
+                label == "Click"
+                    && detail.as_deref().is_some_and(|detail| {
+                        detail.contains("x: int") && detail.contains("y: int")
+                    })
+            }),
+            "items: {items:?}"
+        );
+        assert!(
+            items.iter().any(|(label, detail)| {
+                label == "Quit" && detail.as_deref() == Some("enum variant")
+            }),
+            "items: {items:?}"
+        );
     }
 }

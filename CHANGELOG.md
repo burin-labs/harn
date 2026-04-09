@@ -2,6 +2,39 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.53
+
+### Added
+
+- **Per-worker permission scoping on `spawn_agent(...)`** — delegated workers
+  now inherit the parent's execution ceiling by default, can narrow it with a
+  `policy` dict or `tools: ["name", ...]` shorthand, and preserve that scoped
+  policy across persisted worker snapshots and resumptions.
+- **Daemon lifecycle persistence and wake sources** — `agent_loop` daemon mode
+  now supports `persist_path`, `resume_path`, `wake_interval_ms`,
+  `watch_paths`, and `consolidate_on_idle`, so idle agents can compact state,
+  persist snapshots, resume after restart, and wake from timers or file
+  changes without requiring a bridge host.
+- **Parallel workflow map execution** — workflow map nodes now fan out branch
+  work concurrently, support join strategies `"all"`, `"first"`, and
+  `"quorum"`, and honour `max_concurrent` limits while collecting both partial
+  failures and successful branch artifacts.
+
+### Changed
+
+- **Structured worker permission denials** — when a worker-scoped policy denies
+  a tool call, the agent loop now receives a structured tool result payload
+  `{error: "permission_denied", tool, reason}` instead of an opaque rejection
+  string or worker failure.
+- **Generic constraint enforcement is now strict** — `where T: Interface`
+  violations are compile-time errors instead of warnings, generic parameters
+  must bind consistently across arguments, and container bindings such as
+  `list<T>` now propagate concrete element types through call-site checking and
+  generic return-type instantiation.
+- **LSP dot completions are type-aware** — completions after `data.` now prefer
+  inferred shape fields, struct members, enum variants, and typed enum payload
+  fields instead of falling back to generic dict methods.
+
 ## v0.5.52
 
 ### Added

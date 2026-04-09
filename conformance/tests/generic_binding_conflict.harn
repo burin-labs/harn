@@ -1,0 +1,6 @@
+pipeline test(task) {
+  fn keep<T>(a: T, b: T) -> T {
+    return a
+  }
+  keep(1, "x")
+}

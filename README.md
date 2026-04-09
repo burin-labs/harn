@@ -109,6 +109,10 @@ enforcement.
   `resume_agent(...)`, `wait_agent(...)`, `close_agent(...)`, and `list_agents()`,
   with child run lineage, persisted worker snapshots, and host-visible worker
   lifecycle events.
+- Per-worker execution scoping on `spawn_agent(...)`: delegated workers inherit
+  the current execution ceiling by default and can narrow it further with a
+  `policy` dict or `tools: ["name", ...]` shorthand, with permission denials
+  returned as structured tool results instead of opaque failures.
 - Explicit continuation policy for delegated workers: artifact carryover,
   transcript fork/reset/compaction, workflow resume control, and normalized
   `worker_result` artifacts.
@@ -181,10 +185,18 @@ enforcement.
   `transcript_auto_compact(...)`.
 - Daemon agent mode (`daemon: true`): agents stay alive waiting for
   host-injected messages instead of terminating on text-only responses, with
-  adaptive idle backoff and explicit bridge wake/resume signaling.
+  adaptive idle backoff, persisted snapshots, timer/file-watch wakes, and
+  explicit bridge wake/resume signaling.
 - Per-agent capability policies with argument-level constraints: `agent_loop`
   accepts a `policy` dict to scope tool permissions, including `tool_arg_constraints`
   for pattern-matching on tool arguments.
+- Generic call-site type checking is stricter: `where`-clause interface
+  violations are errors, repeated generic parameters must bind to one concrete
+  type, and container bindings like `list<T>` propagate their element type.
+- Workflow map stages can now execute in parallel with `"all"`, `"first"`, or
+  `"quorum"` join strategies plus `max_concurrent` throttling.
+- LSP completions now surface inferred shape fields, struct members, and enum
+  payload fields on dot access instead of defaulting to dict methods.
 - Adaptive context assembly with deduplication and microcompaction via
   `select_artifacts_adaptive(...)`, plus `estimate_tokens(...)` and
   `microcompact(...)` utility builtins.

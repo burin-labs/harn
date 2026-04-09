@@ -7,6 +7,10 @@ use crate::value::{ErrorCategory, VmClosure, VmError, VmValue};
 use crate::vm::Vm;
 
 use super::api::{vm_call_llm_full_streaming, vm_call_llm_full_streaming_offthread, DeltaSender};
+use super::daemon::{
+    detect_watch_changes, load_snapshot, parse_daemon_loop_config, persist_snapshot, watch_state,
+    DaemonLoopConfig, DaemonSnapshot,
+};
 use super::helpers::{
     extract_llm_options, opt_bool, opt_int, opt_str, transcript_event, transcript_to_vm_with_events,
 };
@@ -39,6 +43,31 @@ fn stable_hash_str(s: &str) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     s.hash(&mut hasher);
     hasher.finish()
+}
+
+fn denied_tool_result(tool_name: &str, reason: impl Into<String>) -> serde_json::Value {
+    serde_json::json!({
+        "error": "permission_denied",
+        "tool": tool_name,
+        "reason": reason.into(),
+    })
+}
+
+fn render_tool_result(value: &serde_json::Value) -> String {
+    if let Some(text) = value.as_str() {
+        text.to_string()
+    } else if value.is_null() {
+        "(no output)".to_string()
+    } else {
+        serde_json::to_string_pretty(value).unwrap_or_default()
+    }
+}
+
+fn is_denied_tool_result(value: &serde_json::Value) -> bool {
+    value
+        .get("error")
+        .and_then(|error| error.as_str())
+        .is_some_and(|error| error == "permission_denied")
 }
 
 struct ToolCallTracker {
@@ -211,10 +240,14 @@ async fn dispatch_tool_execution(
             let args_vm = crate::stdlib::json_to_vm_value(tool_args);
             match vm.call_closure_pub(&handler, &[args_vm], &[]).await {
                 Ok(val) => Ok(serde_json::Value::String(val.display())),
+                Err(VmError::CategorizedError {
+                    message,
+                    category: ErrorCategory::ToolRejected,
+                }) => Ok(denied_tool_result(tool_name, message)),
                 Err(e) => Ok(serde_json::Value::String(format!("Error: {e}"))),
             }
         } else if let Some(bridge) = bridge {
-            bridge
+            match bridge
                 .call(
                     "builtin_call",
                     serde_json::json!({
@@ -223,6 +256,13 @@ async fn dispatch_tool_execution(
                     }),
                 )
                 .await
+            {
+                Err(VmError::CategorizedError {
+                    message,
+                    category: ErrorCategory::ToolRejected,
+                }) => Ok(denied_tool_result(tool_name, message)),
+                other => other,
+            }
         } else {
             Err(VmError::CategorizedError {
                 message: format!(
@@ -302,6 +342,8 @@ pub struct AgentLoopConfig {
     /// Daemon mode: agent stays alive waiting for user messages instead of
     /// terminating after the LLM produces text without tool calls.
     pub daemon: bool,
+    /// Extended daemon lifecycle settings: persistence, timer wakes, and file watches.
+    pub daemon_config: DaemonLoopConfig,
     /// LLM call retry count for transient errors (429, 5xx, connection).
     pub llm_retries: usize,
     /// Base backoff in milliseconds between LLM retries.
@@ -601,6 +643,86 @@ fn build_agent_system_prompt(
     } else {
         Some(parts.join("\n\n"))
     }
+}
+
+async fn maybe_auto_compact_agent_messages(
+    opts: &super::api::LlmCallOptions,
+    auto_compact: &Option<crate::orchestration::AutoCompactConfig>,
+    visible_messages: &mut Vec<serde_json::Value>,
+    transcript_summary: &mut Option<String>,
+) -> Result<(), VmError> {
+    if let Some(ac) = auto_compact {
+        let approx_tokens = crate::orchestration::estimate_message_tokens(visible_messages);
+        if approx_tokens >= ac.token_threshold {
+            let mut compact_opts = opts.clone();
+            compact_opts.messages = visible_messages.clone();
+            if let Some(summary) = crate::orchestration::auto_compact_messages(
+                visible_messages,
+                ac,
+                Some(&compact_opts),
+            )
+            .await?
+            {
+                let merged = match transcript_summary.take() {
+                    Some(existing) if !existing.is_empty() => {
+                        format!("{existing}\n\n{summary}")
+                    }
+                    _ => summary,
+                };
+                *transcript_summary = Some(merged);
+            }
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn daemon_snapshot_from_state(
+    daemon_state: &str,
+    visible_messages: &[serde_json::Value],
+    recorded_messages: &[serde_json::Value],
+    transcript_summary: &Option<String>,
+    transcript_events: &[VmValue],
+    total_text: &str,
+    last_iteration_text: &str,
+    all_tools_used: &[String],
+    rejected_tools: &[String],
+    deferred_user_messages: &[String],
+    total_iterations: usize,
+    idle_backoff_ms: u64,
+    last_run_exit_code: Option<i32>,
+    watch_state_map: &std::collections::BTreeMap<String, u64>,
+) -> DaemonSnapshot {
+    DaemonSnapshot {
+        daemon_state: daemon_state.to_string(),
+        visible_messages: visible_messages.to_vec(),
+        recorded_messages: recorded_messages.to_vec(),
+        transcript_summary: transcript_summary.clone(),
+        transcript_events: transcript_events
+            .iter()
+            .map(crate::llm::helpers::vm_value_to_json)
+            .collect(),
+        total_text: total_text.to_string(),
+        last_iteration_text: last_iteration_text.to_string(),
+        all_tools_used: all_tools_used.to_vec(),
+        rejected_tools: rejected_tools.to_vec(),
+        deferred_user_messages: deferred_user_messages.to_vec(),
+        total_iterations,
+        idle_backoff_ms,
+        last_run_exit_code,
+        watch_state: watch_state_map.clone(),
+        ..Default::default()
+    }
+}
+
+fn maybe_persist_daemon_snapshot(
+    config: &DaemonLoopConfig,
+    snapshot: &DaemonSnapshot,
+) -> Result<Option<String>, VmError> {
+    let Some(path) = config.effective_persist_path() else {
+        return Ok(None);
+    };
+    persist_snapshot(path, snapshot).map(Some)
 }
 
 #[derive(Debug, Deserialize)]
@@ -1046,6 +1168,7 @@ pub async fn run_agent_loop_internal(
 
     let auto_compact = config.auto_compact.clone();
     let daemon = config.daemon;
+    let daemon_config = config.daemon_config.clone();
     let exit_when_verified = config.exit_when_verified;
     let mut last_run_exit_code: Option<i32> = None;
 
@@ -1132,9 +1255,50 @@ pub async fn run_agent_loop_internal(
     let loop_start = std::time::Instant::now();
     let mut transcript_events = Vec::new();
     let mut idle_backoff_ms = 100u64;
+    let mut daemon_state = if daemon {
+        "active".to_string()
+    } else {
+        "done".to_string()
+    };
+    let mut daemon_snapshot_path: Option<String> = None;
+    let mut daemon_watch_state = watch_state(&daemon_config.watch_paths);
+    let mut resumed_iterations = 0usize;
+
+    if daemon {
+        if let Some(path) = daemon_config.resume_path.as_deref() {
+            let snapshot = load_snapshot(path)?;
+            daemon_state = snapshot.daemon_state.clone();
+            visible_messages = snapshot.visible_messages;
+            recorded_messages = snapshot.recorded_messages;
+            transcript_summary = snapshot.transcript_summary;
+            transcript_events = snapshot
+                .transcript_events
+                .iter()
+                .map(crate::stdlib::json_to_vm_value)
+                .collect();
+            total_text = snapshot.total_text;
+            last_iteration_text = snapshot.last_iteration_text;
+            all_tools_used = snapshot.all_tools_used;
+            rejected_tools = snapshot.rejected_tools;
+            deferred_user_messages = snapshot.deferred_user_messages;
+            resumed_iterations = snapshot.total_iterations;
+            total_iterations = resumed_iterations;
+            idle_backoff_ms = snapshot.idle_backoff_ms.max(1);
+            last_run_exit_code = snapshot.last_run_exit_code;
+            daemon_watch_state = if snapshot.watch_state.is_empty() {
+                watch_state(&daemon_config.watch_paths)
+            } else {
+                snapshot.watch_state
+            };
+            daemon_snapshot_path = Some(path.to_string());
+        } else if let Some(path) = daemon_config.effective_persist_path() {
+            daemon_snapshot_path = Some(path.to_string());
+        }
+    }
 
     for iteration in 0..max_iterations {
-        total_iterations = iteration + 1;
+        total_iterations = resumed_iterations + iteration + 1;
+        daemon_state = "active".to_string();
         let immediate_messages = inject_queued_user_messages(
             bridge.as_ref(),
             &mut visible_messages,
@@ -1516,10 +1680,12 @@ pub async fn run_agent_loop_internal(
                     )
                 });
                 if let Err(error) = policy_result {
-                    let result_text = format!(
-                        "REJECTED: {}. Use one of the declared tools exactly as named and put extra fields inside that tool's arguments.",
-                        error
-                    );
+                    let result_text = render_tool_result(&denied_tool_result(
+                        tool_name,
+                        format!(
+                            "{error}. Use one of the declared tools exactly as named and put extra fields inside that tool's arguments."
+                        ),
+                    ));
                     if !rejected_tools.contains(&tool_name.to_string()) {
                         rejected_tools.push(tool_name.to_string());
                     }
@@ -1553,7 +1719,8 @@ pub async fn run_agent_loop_internal(
                 match crate::orchestration::run_pre_tool_hooks(tool_name, &tool_args) {
                     crate::orchestration::PreToolAction::Allow => {}
                     crate::orchestration::PreToolAction::Deny(reason) => {
-                        let result_text = format!("REJECTED by hook: {reason}");
+                        let result_text =
+                            render_tool_result(&denied_tool_result(tool_name, reason));
                         if !rejected_tools.contains(&tool_name.to_string()) {
                             rejected_tools.push(tool_name.to_string());
                         }
@@ -1593,7 +1760,8 @@ pub async fn run_agent_loop_internal(
                                         .get("reason")
                                         .map(|v| v.display())
                                         .unwrap_or_else(|| "denied by on_tool_call hook".into());
-                                    let result_text = format!("REJECTED by on_tool_call: {reason}");
+                                    let result_text =
+                                        render_tool_result(&denied_tool_result(tool_name, reason));
                                     if !rejected_tools.contains(&tool_name.to_string()) {
                                         rejected_tools.push(tool_name.to_string());
                                     }
@@ -1652,7 +1820,8 @@ pub async fn run_agent_loop_internal(
                                     .get("reason")
                                     .and_then(|v| v.as_str())
                                     .unwrap_or("denied by host");
-                                let result_text = format!("REJECTED by host: {reason}");
+                                let result_text =
+                                    render_tool_result(&denied_tool_result(tool_name, reason));
                                 rejection_followups.push(format!(
                                     "The previous tool call was rejected by the host. Treat this as a hard instruction and follow it exactly now.\n{reason}"
                                 ));
@@ -1873,29 +2042,23 @@ pub async fn run_agent_loop_internal(
                         .await
                     };
 
-                    let rejected = matches!(
-                        &call_result,
-                        Err(VmError::CategorizedError {
-                            category: ErrorCategory::ToolRejected,
-                            ..
-                        })
-                    );
+                    let rejected =
+                        matches!(
+                            &call_result,
+                            Err(VmError::CategorizedError {
+                                category: ErrorCategory::ToolRejected,
+                                ..
+                            })
+                        ) || call_result.as_ref().ok().is_some_and(is_denied_tool_result);
                     let text = match &call_result {
-                        Ok(val) => {
-                            if let Some(text) = val.as_str() {
-                                text.to_string()
-                            } else if val.is_null() {
-                                "(no output)".to_string()
-                            } else {
-                                serde_json::to_string_pretty(val).unwrap_or_default()
-                            }
-                        }
+                        Ok(val) => render_tool_result(val),
                         Err(VmError::CategorizedError {
                             message,
                             category: ErrorCategory::ToolRejected,
-                        }) => {
-                            format!("REJECTED: {message} Do not retry this tool.")
-                        }
+                        }) => render_tool_result(&denied_tool_result(
+                            tool_name,
+                            format!("{message} Do not retry this tool."),
+                        )),
                         Err(error) => format!("Error: {error}"),
                     };
                     (rejected, text)
@@ -2306,47 +2469,129 @@ pub async fn run_agent_loop_internal(
         // Daemon mode: if no tool calls and agent is idle, notify host and
         // wait briefly for user messages before deciding to continue/exit.
         if daemon && !persistent {
-            let Some(bridge) = bridge.as_ref() else {
+            daemon_state = "idle".to_string();
+            if daemon_config.consolidate_on_idle {
+                maybe_auto_compact_agent_messages(
+                    opts,
+                    &auto_compact,
+                    &mut visible_messages,
+                    &mut transcript_summary,
+                )
+                .await?;
+            }
+            let idle_snapshot = daemon_snapshot_from_state(
+                &daemon_state,
+                &visible_messages,
+                &recorded_messages,
+                &transcript_summary,
+                &transcript_events,
+                &total_text,
+                &last_iteration_text,
+                &all_tools_used,
+                &rejected_tools,
+                &deferred_user_messages,
+                total_iterations,
+                idle_backoff_ms,
+                last_run_exit_code,
+                &daemon_watch_state,
+            );
+            daemon_snapshot_path = maybe_persist_daemon_snapshot(&daemon_config, &idle_snapshot)?
+                .or(daemon_snapshot_path);
+            if !daemon_config.has_wake_source(bridge.is_some()) {
                 final_status = "idle";
                 break;
-            };
+            }
             loop {
-                bridge.notify(
-                    "agent/idle",
-                    serde_json::json!({
-                        "iteration": total_iterations,
-                        "backoff_ms": idle_backoff_ms,
-                    }),
-                );
-                tokio::time::sleep(tokio::time::Duration::from_millis(idle_backoff_ms)).await;
-                let resumed = bridge.take_resume_signal();
+                if let Some(bridge) = bridge.as_ref() {
+                    bridge.notify(
+                        "agent/idle",
+                        serde_json::json!({
+                            "iteration": total_iterations,
+                            "backoff_ms": idle_backoff_ms,
+                            "persist_path": daemon_snapshot_path,
+                            "watch_paths": daemon_config.watch_paths,
+                        }),
+                    );
+                }
+                tokio::time::sleep(tokio::time::Duration::from_millis(
+                    daemon_config.idle_wait_ms(idle_backoff_ms),
+                ))
+                .await;
+                let resumed = bridge
+                    .as_ref()
+                    .is_some_and(|bridge| bridge.take_resume_signal());
                 let idle_messages = inject_queued_user_messages(
-                    Some(bridge),
+                    bridge.as_ref(),
                     &mut visible_messages,
                     crate::bridge::DeliveryCheckpoint::InterruptImmediate,
                 )
                 .await?;
                 append_host_messages_to_recorded(&mut recorded_messages, &idle_messages);
-                if resumed || !idle_messages.is_empty() {
-                    for message in &idle_messages {
-                        transcript_events.push(transcript_event(
-                            "host_input",
-                            "user",
-                            "public",
-                            &message.content,
-                            Some(serde_json::json!({"delivery": format!("{:?}", message.mode)})),
-                        ));
+                let changed_paths = if daemon_config.watch_paths.is_empty() {
+                    Vec::new()
+                } else {
+                    detect_watch_changes(&daemon_config.watch_paths, &mut daemon_watch_state)
+                };
+                for message in &idle_messages {
+                    transcript_events.push(transcript_event(
+                        "host_input",
+                        "user",
+                        "public",
+                        &message.content,
+                        Some(serde_json::json!({"delivery": format!("{:?}", message.mode)})),
+                    ));
+                }
+                let wake_reason = if !idle_messages.is_empty() {
+                    Some(("message", None))
+                } else if resumed {
+                    Some(("resume", None))
+                } else if !changed_paths.is_empty() {
+                    Some((
+                        "watch",
+                        Some(format!(
+                            "Daemon wake: watched paths changed: {}. Re-check the task state and act only if something actually changed.",
+                            changed_paths.join(", ")
+                        )),
+                    ))
+                } else if daemon_config.wake_interval_ms.is_some() {
+                    Some((
+                        "timer",
+                        Some(
+                            "Daemon timer wake fired. Re-check for background work and only act when there is new information or a pending follow-up."
+                                .to_string(),
+                        ),
+                    ))
+                } else {
+                    None
+                };
+                if let Some((reason, wake_message)) = wake_reason {
+                    if let Some(message) = wake_message {
+                        append_message_to_contexts(
+                            &mut visible_messages,
+                            &mut recorded_messages,
+                            serde_json::json!({
+                                "role": "user",
+                                "content": message,
+                            }),
+                        );
                     }
+                    transcript_events.push(transcript_event(
+                        "daemon_wake",
+                        "system",
+                        "internal",
+                        reason,
+                        Some(serde_json::json!({
+                            "reason": reason,
+                            "watch_paths": changed_paths,
+                            "resumed": resumed,
+                        })),
+                    ));
+                    daemon_state = "active".to_string();
                     consecutive_text_only = 0;
                     idle_backoff_ms = 100;
                     break;
                 }
-                idle_backoff_ms = match idle_backoff_ms {
-                    0..=100 => 500,
-                    101..=500 => 1000,
-                    1001..=1999 => 2000,
-                    _ => 2000,
-                };
+                daemon_config.update_idle_backoff(&mut idle_backoff_ms);
             }
             continue;
         }
@@ -2411,8 +2656,35 @@ pub async fn run_agent_loop_internal(
         .map(|message| message.content),
     );
 
+    if daemon && final_status == "done" {
+        final_status = "idle";
+    }
+    if daemon {
+        daemon_state = final_status.to_string();
+        let final_snapshot = daemon_snapshot_from_state(
+            &daemon_state,
+            &visible_messages,
+            &recorded_messages,
+            &transcript_summary,
+            &transcript_events,
+            &total_text,
+            &last_iteration_text,
+            &all_tools_used,
+            &rejected_tools,
+            &deferred_user_messages,
+            total_iterations,
+            idle_backoff_ms,
+            last_run_exit_code,
+            &daemon_watch_state,
+        );
+        daemon_snapshot_path = maybe_persist_daemon_snapshot(&daemon_config, &final_snapshot)?
+            .or(daemon_snapshot_path);
+    }
+
     Ok(serde_json::json!({
         "status": final_status,
+        "daemon_state": daemon_state,
+        "daemon_snapshot_path": daemon_snapshot_path,
         // `text` is the full accumulated transcript of every assistant turn.
         // Use this for meta-analysis that genuinely wants end-to-end history
         // (reflectors, auditors, transcript replay).
@@ -2542,6 +2814,7 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                 serde_json::from_value::<crate::orchestration::CapabilityPolicy>(json)
                     .unwrap_or_default()
             });
+            let daemon_config = parse_daemon_loop_config(options.as_ref());
             let mut opts = extract_llm_options(&args)?;
             let result = run_agent_loop_internal(
                 &mut opts,
@@ -2559,6 +2832,7 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                     context_callback,
                     policy,
                     daemon,
+                    daemon_config,
                     llm_retries: opt_int(&options, "llm_retries").unwrap_or(4) as usize,
                     llm_backoff_ms: opt_int(&options, "llm_backoff_ms").unwrap_or(2000) as u64,
                     exit_when_verified: opt_bool(&options, "exit_when_verified"),
@@ -2677,111 +2951,5 @@ pub(crate) fn build_llm_call_result(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{
-        compact_malformed_assistant_turn, extract_retry_after_ms, is_read_only_tool,
-        loop_state_requests_phase_change,
-    };
-    use crate::value::{VmError, VmValue};
-    use std::rc::Rc;
-
-    #[test]
-    fn detects_phase_change_from_latest_loop_state_footer() {
-        let text = "First\n\n## LOOP_STATE\nphase: assess\nnext_phase: ground\n## END_LOOP_STATE\n\nSecond\n\n## LOOP_STATE\nphase: ground\nnext_phase: execute\n## END_LOOP_STATE";
-        assert!(loop_state_requests_phase_change(text, "ground"));
-        assert!(!loop_state_requests_phase_change(text, "execute"));
-    }
-
-    #[test]
-    fn compact_malformed_assistant_turn_elides_raw_text() {
-        let msg = compact_malformed_assistant_turn(1);
-        assert!(msg.contains("1 malformed tool call"));
-        assert!(msg.contains("elided"));
-        assert!(!msg.contains("```call"));
-        assert!(!msg.contains("<<'EOF'"));
-
-        let msg_plural = compact_malformed_assistant_turn(3);
-        assert!(msg_plural.contains("3 malformed tool calls"));
-    }
-
-    // ---- extract_retry_after_ms ----
-
-    #[test]
-    fn retry_after_from_runtime_error() {
-        let err = VmError::Runtime("rate limited, retry-after: 5".to_string());
-        assert_eq!(extract_retry_after_ms(&err), Some(5000));
-    }
-
-    #[test]
-    fn retry_after_from_thrown_string() {
-        let err = VmError::Thrown(VmValue::String(Rc::from(
-            "HTTP 429 Retry-After: 2.5 seconds",
-        )));
-        assert_eq!(extract_retry_after_ms(&err), Some(2500));
-    }
-
-    #[test]
-    fn retry_after_case_insensitive() {
-        let err = VmError::Runtime("RETRY-AFTER: 10".to_string());
-        assert_eq!(extract_retry_after_ms(&err), Some(10000));
-    }
-
-    #[test]
-    fn retry_after_missing() {
-        let err = VmError::Runtime("rate limited".to_string());
-        assert_eq!(extract_retry_after_ms(&err), None);
-    }
-
-    #[test]
-    fn retry_after_non_numeric() {
-        let err = VmError::Runtime("retry-after: tomorrow".to_string());
-        assert_eq!(extract_retry_after_ms(&err), None);
-    }
-
-    #[test]
-    fn retry_after_at_end_of_message() {
-        let err = VmError::Runtime("retry-after: 3".to_string());
-        assert_eq!(extract_retry_after_ms(&err), Some(3000));
-    }
-
-    #[test]
-    fn retry_after_fractional_seconds() {
-        let err = VmError::Runtime("retry-after: 0.5".to_string());
-        assert_eq!(extract_retry_after_ms(&err), Some(500));
-    }
-
-    #[test]
-    fn retry_after_non_string_error() {
-        let err = VmError::Thrown(VmValue::Int(42));
-        assert_eq!(extract_retry_after_ms(&err), None);
-    }
-
-    #[test]
-    fn retry_after_with_extra_whitespace() {
-        let err = VmError::Runtime("retry-after:   7  ".to_string());
-        assert_eq!(extract_retry_after_ms(&err), Some(7000));
-    }
-
-    // ---- is_read_only_tool ----
-
-    #[test]
-    fn read_only_tools_recognized() {
-        assert!(is_read_only_tool("read"));
-        assert!(is_read_only_tool("read_file"));
-        assert!(is_read_only_tool("lookup"));
-        assert!(is_read_only_tool("search"));
-        assert!(is_read_only_tool("outline"));
-        assert!(is_read_only_tool("list_directory"));
-        assert!(is_read_only_tool("web_search"));
-        assert!(is_read_only_tool("web_fetch"));
-    }
-
-    #[test]
-    fn write_tools_not_read_only() {
-        assert!(!is_read_only_tool("write"));
-        assert!(!is_read_only_tool("edit"));
-        assert!(!is_read_only_tool("delete"));
-        assert!(!is_read_only_tool("exec"));
-        assert!(!is_read_only_tool(""));
-    }
-}
+#[path = "agent_tests.rs"]
+mod tests;

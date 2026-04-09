@@ -1547,7 +1547,10 @@ fn process<T>(item: T) where T: Displayable {
 
 The type checker verifies at call sites that the concrete type passed
 for `T` satisfies `Displayable`. Passing a type that does not satisfy
-the constraint produces a compile-time warning.
+the constraint produces a compile-time error. Generic parameters must bind
+consistently across all arguments in the call, and container bindings such as
+`list<T>` propagate the concrete element type instead of collapsing to an
+unconstrained generic.
 
 ## Type annotations
 

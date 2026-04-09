@@ -174,7 +174,7 @@ println(result.iterations) // number of LLM round-trips
 
 | Field | Type | Description |
 |---|---|---|
-| `status` | string | `"done"` or `"stuck"` |
+| `status` | string | `"done"`, `"stuck"`, or `"idle"` for daemon loops that yielded while waiting |
 | `text` | string | Accumulated text output from all iterations |
 | `visible_text` | string | Human-visible accumulated output |
 | `iterations` | int | Number of LLM round-trips |
@@ -182,6 +182,8 @@ println(result.iterations) // number of LLM round-trips
 | `tools_used` | list | Names of tools that were called |
 | `rejected_tools` | list | Tools rejected by policy/host ceiling |
 | `deferred_user_messages` | list | Queued human messages deferred until agent yield/completion |
+| `daemon_state` | string | Final daemon lifecycle state (`"done"`, `"stuck"`, or `"idle"`) |
+| `daemon_snapshot_path` | string or nil | Persisted snapshot path when daemon persistence is enabled |
 | `transcript` | dict | Transcript of the full conversation state |
 
 ### agent_loop options
@@ -196,11 +198,23 @@ Same as `llm_call`, plus additional options:
 | `nudge` | string | see below | Custom message to send when nudging the agent |
 | `tool_retries` | int | `0` | Number of retry attempts for failed tool calls |
 | `tool_backoff_ms` | int | `1000` | Base backoff delay in ms for tool retries (doubles each attempt) |
+| `policy` | dict | nil | Capability ceiling applied to this agent loop |
+| `daemon` | bool | `false` | Idle instead of terminating after text-only turns |
+| `persist_path` | string | nil | Persist daemon snapshots to this path on idle/finalize |
+| `resume_path` | string | nil | Restore daemon state from a previously persisted snapshot |
+| `wake_interval_ms` | int | nil | Fixed timer wake interval for daemon loops |
+| `watch_paths` | list/string | nil | Files to poll for mtime changes while idle |
+| `consolidate_on_idle` | bool | `false` | Run transcript auto-compaction before persisting an idle daemon snapshot |
 | `context_callback` | closure | nil | Per-turn hook that can rewrite prompt-visible `messages` and/or the effective `system` prompt before the next LLM call |
 | `context_filter` | closure | nil | Alias for `context_callback` |
 | `loop_detect_warn` | int | `2` | Consecutive identical tool calls before appending a redirection hint |
 | `loop_detect_block` | int | `3` | Consecutive identical tool calls before replacing the result with a hard redirect |
 | `loop_detect_skip` | int | `4` | Consecutive identical tool calls before skipping execution entirely |
+
+When `daemon: true`, the loop transitions `active -> idle -> active` instead of
+terminating on a text-only turn. Idle daemons can be woken by queued human
+messages, `agent/resume` bridge notifications, `wake_interval_ms`, or watched
+file changes from `watch_paths`.
 
 Default nudge message:
 
@@ -334,6 +348,29 @@ println(done.status)
   workflow in the background, or
 - a `node` plus optional `artifacts` and `transcript`, which runs a single
   delegated stage and preserves transcript continuity across `send_input(...)`
+
+Worker configs may also include `policy` to narrow the delegated worker to a
+subset of the parent's current execution ceiling, or a top-level
+`tools: ["name", ...]` shorthand:
+
+```harn
+let worker = spawn_agent({
+  task: "Read project files only",
+  tools: ["read", "search"],
+  node: {
+    kind: "subagent",
+    mode: "llm",
+    model_policy: {provider: "mock"},
+    tools: repo_tools()
+  }
+})
+```
+
+If neither is provided, the worker inherits the current execution policy as-is.
+If either is provided, Harn intersects the requested worker scope with the
+parent ceiling before the worker starts or is resumed. Permission denials are
+returned to the agent loop as structured tool results:
+`{error: "permission_denied", tool, reason}`.
 
 Worker lifecycle builtins:
 

@@ -1,0 +1,47 @@
+pipeline main() {
+  let all_flow = workflow_graph(
+    {
+    entry: "map",
+    nodes: {
+    map: {
+    kind: "map",
+    map_policy: {items: ["a", "b", "c"], output_kind: "summary", max_concurrent: 2},
+    join_policy: {strategy: "all"},
+  },
+  },
+    edges: [],
+  },
+  )
+  let all_result = workflow_execute("map all", all_flow, [], {max_steps: 1})
+  println(len(all_result?.artifacts))
+  let first_flow = workflow_graph(
+    {
+    entry: "map",
+    nodes: {
+    map: {
+    kind: "map",
+    map_policy: {items: ["a", "b", "c"], output_kind: "summary", max_concurrent: 2},
+    join_policy: {strategy: "first"},
+  },
+  },
+    edges: [],
+  },
+  )
+  let first_result = workflow_execute("map first", first_flow, [], {max_steps: 1})
+  println(len(first_result?.artifacts))
+  let quorum_flow = workflow_graph(
+    {
+    entry: "map",
+    nodes: {
+    map: {
+    kind: "map",
+    map_policy: {items: ["a", "b", "c"], output_kind: "summary", max_concurrent: 2},
+    join_policy: {strategy: "quorum", min_completed: 2},
+  },
+  },
+    edges: [],
+  },
+  )
+  let quorum_result = workflow_execute("map quorum", quorum_flow, [], {max_steps: 1})
+  println(len(quorum_result?.artifacts))
+}

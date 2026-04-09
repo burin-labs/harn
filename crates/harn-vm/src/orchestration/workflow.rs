@@ -828,6 +828,7 @@ pub async fn execute_stage_node(
                     context_callback: None,
                     policy: None,
                     daemon: false,
+                    daemon_config: Default::default(),
                     llm_retries: 2,
                     llm_backoff_ms: 2000,
                     exit_when_verified: false,

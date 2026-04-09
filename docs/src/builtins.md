@@ -624,7 +624,7 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 |---|---|---|---|
 | `llm_call(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Single LLM request. Returns `{text, model, input_tokens, output_tokens}` |
 | `llm_completion(prefix, suffix?, system?, options?)` | prefix: string, suffix: string, system: string, options: dict | dict | Text completion / fill-in-the-middle request. Returns `{text, model, input_tokens, output_tokens}` |
-| `agent_loop(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Multi-turn agent loop with `##DONE##` sentinel and optional per-turn context filtering. Returns `{status, text, iterations, duration_ms, tools_used}` |
+| `agent_loop(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Multi-turn agent loop with `##DONE##` sentinel, daemon/idling support, and optional per-turn context filtering. Returns `{status, text, iterations, duration_ms, tools_used}` |
 | `llm_info()` | — | dict | Current LLM config: `{provider, model, api_key_set}` |
 | `llm_usage()` | — | dict | Cumulative usage: `{input_tokens, output_tokens, total_duration_ms, call_count, total_calls}` |
 | `llm_resolve_model(alias)` | alias: string | dict | Resolve model alias to `{id, provider}` via providers.toml |
@@ -1160,6 +1160,10 @@ These builtins expose Harn's typed orchestration runtime.
 
 - `{task, graph, artifacts?, options?, name?, wait?}` for typed workflow runs
 - `{task, node, artifacts?, transcript?, name?, wait?}` for delegated stage runs
+- Either shape may also include `policy: <capability_policy>` to narrow the
+  worker's inherited execution ceiling.
+- Either shape may also include `tools: ["name", ...]` as shorthand for a
+  worker policy that only allows those tool names.
 - Either shape may also include `execution: {cwd?, env?, worktree?}` where
   `worktree` accepts `{repo, path?, branch?, base_ref?, cleanup?}`.
 - Either shape may also include `audit: {session_id?, parent_session_id?, mutation_scope?, approval_mode?}`
@@ -1173,6 +1177,8 @@ Worker configs may also include `carry` to control continuation behavior:
 Workers return handle dicts with an `id`, lifecycle timestamps, `status`,
 `mode`, result/error fields, transcript presence, produced artifact count,
 snapshot/child-run paths, and `audit` mutation-session metadata when available.
+When a worker-scoped policy denies a tool call, the agent receives a structured
+tool result payload: `{error: "permission_denied", tool: "...", reason: "..."}`.
 
 ### Artifacts and context
 

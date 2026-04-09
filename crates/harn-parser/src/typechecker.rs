@@ -1480,34 +1480,143 @@ impl TypeChecker {
         None
     }
 
+    fn bind_type_param(
+        param_name: &str,
+        concrete: &TypeExpr,
+        bindings: &mut BTreeMap<String, TypeExpr>,
+    ) -> Result<(), String> {
+        if let Some(existing) = bindings.get(param_name) {
+            if existing != concrete {
+                return Err(format!(
+                    "type parameter '{}' was inferred as both {} and {}",
+                    param_name,
+                    format_type(existing),
+                    format_type(concrete)
+                ));
+            }
+            return Ok(());
+        }
+        bindings.insert(param_name.to_string(), concrete.clone());
+        Ok(())
+    }
+
     /// Recursively extract type parameter bindings from matching param/arg types.
     /// E.g., param_type=list<T> + arg_type=list<Dog> → binds T=Dog.
     fn extract_type_bindings(
         param_type: &TypeExpr,
         arg_type: &TypeExpr,
         type_params: &std::collections::BTreeSet<String>,
-        bindings: &mut BTreeMap<String, String>,
-    ) {
+        bindings: &mut BTreeMap<String, TypeExpr>,
+    ) -> Result<(), String> {
         match (param_type, arg_type) {
-            // Direct type param match: T → concrete
-            (TypeExpr::Named(param_name), TypeExpr::Named(concrete))
-                if type_params.contains(param_name) =>
-            {
-                bindings
-                    .entry(param_name.clone())
-                    .or_insert(concrete.clone());
+            (TypeExpr::Named(param_name), concrete) if type_params.contains(param_name) => {
+                Self::bind_type_param(param_name, concrete, bindings)
             }
-            // list<T> + list<Dog>
             (TypeExpr::List(p_inner), TypeExpr::List(a_inner)) => {
-                Self::extract_type_bindings(p_inner, a_inner, type_params, bindings);
+                Self::extract_type_bindings(p_inner, a_inner, type_params, bindings)
             }
-            // dict<K, V> + dict<string, int>
             (TypeExpr::DictType(pk, pv), TypeExpr::DictType(ak, av)) => {
-                Self::extract_type_bindings(pk, ak, type_params, bindings);
-                Self::extract_type_bindings(pv, av, type_params, bindings);
+                Self::extract_type_bindings(pk, ak, type_params, bindings)?;
+                Self::extract_type_bindings(pv, av, type_params, bindings)
             }
-            _ => {}
+            (TypeExpr::Shape(param_fields), TypeExpr::Shape(arg_fields)) => {
+                for param_field in param_fields {
+                    if let Some(arg_field) = arg_fields
+                        .iter()
+                        .find(|field| field.name == param_field.name)
+                    {
+                        Self::extract_type_bindings(
+                            &param_field.type_expr,
+                            &arg_field.type_expr,
+                            type_params,
+                            bindings,
+                        )?;
+                    }
+                }
+                Ok(())
+            }
+            (
+                TypeExpr::FnType {
+                    params: p_params,
+                    return_type: p_ret,
+                },
+                TypeExpr::FnType {
+                    params: a_params,
+                    return_type: a_ret,
+                },
+            ) => {
+                for (param, arg) in p_params.iter().zip(a_params.iter()) {
+                    Self::extract_type_bindings(param, arg, type_params, bindings)?;
+                }
+                Self::extract_type_bindings(p_ret, a_ret, type_params, bindings)
+            }
+            _ => Ok(()),
         }
+    }
+
+    fn apply_type_bindings(ty: &TypeExpr, bindings: &BTreeMap<String, TypeExpr>) -> TypeExpr {
+        match ty {
+            TypeExpr::Named(name) => bindings
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| TypeExpr::Named(name.clone())),
+            TypeExpr::Union(items) => TypeExpr::Union(
+                items
+                    .iter()
+                    .map(|item| Self::apply_type_bindings(item, bindings))
+                    .collect(),
+            ),
+            TypeExpr::Shape(fields) => TypeExpr::Shape(
+                fields
+                    .iter()
+                    .map(|field| ShapeField {
+                        name: field.name.clone(),
+                        type_expr: Self::apply_type_bindings(&field.type_expr, bindings),
+                        optional: field.optional,
+                    })
+                    .collect(),
+            ),
+            TypeExpr::List(inner) => {
+                TypeExpr::List(Box::new(Self::apply_type_bindings(inner, bindings)))
+            }
+            TypeExpr::DictType(key, value) => TypeExpr::DictType(
+                Box::new(Self::apply_type_bindings(key, bindings)),
+                Box::new(Self::apply_type_bindings(value, bindings)),
+            ),
+            TypeExpr::FnType {
+                params,
+                return_type,
+            } => TypeExpr::FnType {
+                params: params
+                    .iter()
+                    .map(|param| Self::apply_type_bindings(param, bindings))
+                    .collect(),
+                return_type: Box::new(Self::apply_type_bindings(return_type, bindings)),
+            },
+        }
+    }
+
+    fn infer_list_literal_type(&self, items: &[SNode], scope: &TypeScope) -> TypeExpr {
+        let mut inferred: Option<TypeExpr> = None;
+        for item in items {
+            let Some(item_type) = self.infer_type(item, scope) else {
+                return TypeExpr::Named("list".into());
+            };
+            inferred = Some(match inferred {
+                None => item_type,
+                Some(current) if current == item_type => current,
+                Some(TypeExpr::Union(mut members)) => {
+                    if !members.contains(&item_type) {
+                        members.push(item_type);
+                    }
+                    TypeExpr::Union(members)
+                }
+                Some(current) => TypeExpr::Union(vec![current, item_type]),
+            });
+        }
+        inferred
+            .map(|item_type| TypeExpr::List(Box::new(item_type)))
+            .unwrap_or_else(|| TypeExpr::Named("list".into()))
     }
 
     /// Extract bidirectional type refinements from a condition expression.
@@ -1920,19 +2029,37 @@ impl TypeChecker {
                 }
                 s
             };
+            let mut type_bindings: BTreeMap<String, TypeExpr> = BTreeMap::new();
+            let type_param_set: std::collections::BTreeSet<String> =
+                sig.type_param_names.iter().cloned().collect();
+            for (arg, (_param_name, param_type)) in args.iter().zip(sig.params.iter()) {
+                if let Some(param_ty) = param_type {
+                    if let Some(arg_ty) = self.infer_type(arg, scope) {
+                        if let Err(message) = Self::extract_type_bindings(
+                            param_ty,
+                            &arg_ty,
+                            &type_param_set,
+                            &mut type_bindings,
+                        ) {
+                            self.error_at(message, arg.span);
+                        }
+                    }
+                }
+            }
             for (i, (arg, (param_name, param_type))) in
                 args.iter().zip(sig.params.iter()).enumerate()
             {
                 if let Some(expected) = param_type {
                     let actual = self.infer_type(arg, scope);
                     if let Some(actual) = &actual {
-                        if !self.types_compatible(expected, actual, &call_scope) {
+                        let expected = Self::apply_type_bindings(expected, &type_bindings);
+                        if !self.types_compatible(&expected, actual, &call_scope) {
                             self.error_at(
                                 format!(
                                     "Argument {} ('{}'): expected {}, got {}",
                                     i + 1,
                                     param_name,
-                                    format_type(expected),
+                                    format_type(&expected),
                                     format_type(actual)
                                 ),
                                 arg.span,
@@ -1941,35 +2068,18 @@ impl TypeChecker {
                     }
                 }
             }
-            // Enforce where-clause constraints at call site
             if !sig.where_clauses.is_empty() {
-                // Build mapping: type_param → concrete type from inferred args.
-                // Recursively walks Generic types so list<T> + list<Dog> binds T=Dog.
-                let mut type_bindings: BTreeMap<String, String> = BTreeMap::new();
-                let type_param_set: std::collections::BTreeSet<String> =
-                    sig.type_param_names.iter().cloned().collect();
-                for (arg, (_param_name, param_type)) in args.iter().zip(sig.params.iter()) {
-                    if let Some(param_ty) = param_type {
-                        if let Some(arg_ty) = self.infer_type(arg, scope) {
-                            Self::extract_type_bindings(
-                                param_ty,
-                                &arg_ty,
-                                &type_param_set,
-                                &mut type_bindings,
-                            );
-                        }
-                    }
-                }
                 for (type_param, bound) in &sig.where_clauses {
                     if let Some(concrete_type) = type_bindings.get(type_param) {
+                        let concrete_name = format_type(concrete_type);
                         if let Some(reason) =
-                            self.interface_mismatch_reason(concrete_type, bound, scope)
+                            self.interface_mismatch_reason(&concrete_name, bound, scope)
                         {
-                            self.warning_at(
+                            self.error_at(
                                 format!(
                                     "Type '{}' does not satisfy interface '{}': {} \
                                      (required by constraint `where {}: {}`)",
-                                    concrete_type, bound, reason, type_param, bound
+                                    concrete_name, bound, reason, type_param, bound
                                 ),
                                 span,
                             );
@@ -1994,27 +2104,25 @@ impl TypeChecker {
             }
             Node::BoolLiteral(_) => Some(TypeExpr::Named("bool".into())),
             Node::NilLiteral => Some(TypeExpr::Named("nil".into())),
-            Node::ListLiteral(_) => Some(TypeExpr::Named("list".into())),
+            Node::ListLiteral(items) => Some(self.infer_list_literal_type(items, scope)),
             Node::DictLiteral(entries) => {
                 // Infer shape type when all keys are string literals
                 let mut fields = Vec::new();
-                let mut all_string_keys = true;
                 for entry in entries {
-                    if let Node::StringLiteral(key) = &entry.key.node {
-                        let val_type = self
-                            .infer_type(&entry.value, scope)
-                            .unwrap_or(TypeExpr::Named("nil".into()));
-                        fields.push(ShapeField {
-                            name: key.clone(),
-                            type_expr: val_type,
-                            optional: false,
-                        });
-                    } else {
-                        all_string_keys = false;
-                        break;
-                    }
+                    let key = match &entry.key.node {
+                        Node::StringLiteral(key) | Node::Identifier(key) => key.clone(),
+                        _ => return Some(TypeExpr::Named("dict".into())),
+                    };
+                    let val_type = self
+                        .infer_type(&entry.value, scope)
+                        .unwrap_or(TypeExpr::Named("nil".into()));
+                    fields.push(ShapeField {
+                        name: key,
+                        type_expr: val_type,
+                        optional: false,
+                    });
                 }
-                if all_string_keys && !fields.is_empty() {
+                if !fields.is_empty() {
                     Some(TypeExpr::Shape(fields))
                 } else {
                     Some(TypeExpr::Named("dict".into()))
@@ -2040,14 +2148,36 @@ impl TypeChecker {
 
             Node::Identifier(name) => scope.get_var(name).cloned().flatten(),
 
-            Node::FunctionCall { name, .. } => {
+            Node::FunctionCall { name, args } => {
                 // Struct constructor calls return the struct type
                 if scope.get_struct(name).is_some() {
                     return Some(TypeExpr::Named(name.clone()));
                 }
                 // Check user-defined function return types
                 if let Some(sig) = scope.get_fn(name) {
-                    return sig.return_type.clone();
+                    let mut return_type = sig.return_type.clone();
+                    if let Some(ty) = return_type.take() {
+                        if sig.type_param_names.is_empty() {
+                            return Some(ty);
+                        }
+                        let mut bindings = BTreeMap::new();
+                        let type_param_set: std::collections::BTreeSet<String> =
+                            sig.type_param_names.iter().cloned().collect();
+                        for (arg, (_param_name, param_type)) in args.iter().zip(sig.params.iter()) {
+                            if let Some(param_ty) = param_type {
+                                if let Some(arg_ty) = self.infer_type(arg, scope) {
+                                    let _ = Self::extract_type_bindings(
+                                        param_ty,
+                                        &arg_ty,
+                                        &type_param_set,
+                                        &mut bindings,
+                                    );
+                                }
+                            }
+                        }
+                        return Some(Self::apply_type_bindings(&ty, &bindings));
+                    }
+                    return None;
                 }
                 // Check builtin return types
                 builtin_return_type(name)
@@ -2805,6 +2935,54 @@ add("hello", 2) }"#,
     }
 
     #[test]
+    fn test_generic_return_type_instantiates_from_callsite() {
+        let errs = errors(
+            r#"pipeline t(task) {
+  fn identity<T>(x: T) -> T { return x }
+  fn first<T>(items: list<T>) -> T { return items[0] }
+  let n: int = identity(42)
+  let s: string = first(["a", "b"])
+}"#,
+        );
+        assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
+    }
+
+    #[test]
+    fn test_generic_type_param_must_bind_consistently() {
+        let errs = errors(
+            r#"pipeline t(task) {
+  fn keep<T>(a: T, b: T) -> T { return a }
+  keep(1, "x")
+}"#,
+        );
+        assert_eq!(errs.len(), 2, "expected 2 errors, got: {:?}", errs);
+        assert!(
+            errs.iter()
+                .any(|err| err.contains("type parameter 'T' was inferred as both int and string")),
+            "missing generic binding conflict error: {:?}",
+            errs
+        );
+        assert!(
+            errs.iter()
+                .any(|err| err.contains("Argument 2 ('b'): expected int, got string")),
+            "missing instantiated argument mismatch error: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn test_generic_list_binding_propagates_element_type() {
+        let errs = errors(
+            r#"pipeline t(task) {
+  fn first<T>(items: list<T>) -> T { return items[0] }
+  let bad: string = first([1, 2, 3])
+}"#,
+        );
+        assert_eq!(errs.len(), 1, "expected 1 error, got: {:?}", errs);
+        assert!(errs[0].contains("declared as string, but assigned int"));
+    }
+
+    #[test]
     fn test_builtin_return_type_inference() {
         let errs = errors(r#"pipeline t(task) { let x: string = to_int("42") }"#);
         assert_eq!(errs.len(), 1);
@@ -3255,16 +3433,16 @@ add("hello", 2) }"#,
 
     // --- Interface constraint type checking tests ---
 
-    fn iface_warns(source: &str) -> Vec<String> {
-        warnings(source)
+    fn iface_errors(source: &str) -> Vec<String> {
+        errors(source)
             .into_iter()
-            .filter(|w| w.contains("does not satisfy interface"))
+            .filter(|message| message.contains("does not satisfy interface"))
             .collect()
     }
 
     #[test]
     fn test_interface_constraint_return_type_mismatch() {
-        let warns = iface_warns(
+        let warns = iface_errors(
             r#"pipeline t(task) {
   interface Sizable {
     fn size(self) -> int
@@ -3287,7 +3465,7 @@ add("hello", 2) }"#,
 
     #[test]
     fn test_interface_constraint_param_type_mismatch() {
-        let warns = iface_warns(
+        let warns = iface_errors(
             r#"pipeline t(task) {
   interface Processor {
     fn process(self, x: int) -> string
@@ -3310,7 +3488,7 @@ add("hello", 2) }"#,
 
     #[test]
     fn test_interface_constraint_missing_method() {
-        let warns = iface_warns(
+        let warns = iface_errors(
             r#"pipeline t(task) {
   interface Sizable {
     fn size(self) -> int
@@ -3333,7 +3511,7 @@ add("hello", 2) }"#,
 
     #[test]
     fn test_interface_constraint_param_count_mismatch() {
-        let warns = iface_warns(
+        let warns = iface_errors(
             r#"pipeline t(task) {
   interface Doubler {
     fn double(self, x: int) -> int
@@ -3356,7 +3534,7 @@ add("hello", 2) }"#,
 
     #[test]
     fn test_interface_constraint_satisfied() {
-        let warns = iface_warns(
+        let warns = iface_errors(
             r#"pipeline t(task) {
   interface Sizable {
     fn size(self) -> int
@@ -3375,7 +3553,7 @@ add("hello", 2) }"#,
     #[test]
     fn test_interface_constraint_untyped_impl_compatible() {
         // Gradual typing: untyped impl return should not trigger warning
-        let warns = iface_warns(
+        let warns = iface_errors(
             r#"pipeline t(task) {
   interface Sizable {
     fn size(self) -> int
@@ -3394,7 +3572,7 @@ add("hello", 2) }"#,
     #[test]
     fn test_interface_constraint_int_float_covariance() {
         // int is compatible with float (covariance)
-        let warns = iface_warns(
+        let warns = iface_errors(
             r#"pipeline t(task) {
   interface Measurable {
     fn value(self) -> float

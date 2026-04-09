@@ -361,6 +361,7 @@ pub struct MapPolicy {
     pub item_artifact_kind: Option<String>,
     pub output_kind: Option<String>,
     pub max_items: Option<usize>,
+    pub max_concurrent: Option<usize>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]

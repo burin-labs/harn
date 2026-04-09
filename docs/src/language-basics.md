@@ -850,7 +850,10 @@ fn log_item<T>(item: T) where T: Displayable {
 
 The `where T: Displayable` clause tells the type checker to verify that
 whatever concrete type is passed for `T` satisfies `Displayable`. If it
-does not, a compile-time warning is produced.
+does not, a compile-time error is produced. Generic parameters must also bind
+consistently across arguments, so `fn<T>(a: T, b: T)` cannot be called with
+mixed concrete types such as `(int, string)`. Container bindings like
+`list<T>` preserve and validate their element type at call sites too.
 
 ## Spread in function calls
 

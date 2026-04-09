@@ -203,6 +203,17 @@ Persisted runs also retain explicit `parent_run_id`, `root_run_id`, and
 `child_runs` lineage, and `load_run_tree(path)` materializes that hierarchy
 recursively for inspection or host-side task views.
 
+Map nodes can now execute branch work in parallel. `node.join_policy.strategy`
+accepts:
+
+- `"all"` to wait for every branch result
+- `"first"` to return after the first completed branch
+- `"quorum"` to return after `join_policy.min_completed` branches finish
+
+`node.map_policy.max_concurrent` limits branch fan-out, and partial failures are
+retained alongside successful branch artifacts instead of aborting the whole map
+stage on the first error.
+
 Runs may also include `metadata.mutation_session`, a normalized audit record
 used to tie tool gates, workers, and artifacts back to one mutation boundary:
 

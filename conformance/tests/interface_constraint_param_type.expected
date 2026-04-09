@@ -1,2 +1,0 @@
-warning: Type 'MyProc' does not satisfy interface 'Processor': method 'process' parameter 1 has type 'string', expected 'int' (required by constraint `where T: Processor`)
-[harn] a: hello

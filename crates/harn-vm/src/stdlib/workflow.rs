@@ -1,6 +1,8 @@
 //! Workflow graph manipulation and execution builtins.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::future::Future;
+use std::pin::Pin;
 use std::rc::Rc;
 
 use crate::orchestration::{
@@ -268,6 +270,174 @@ fn llm_usage_snapshot() -> UsageSnapshot {
         total_cost,
         trace_len,
     }
+}
+
+type LocalTask<T> = Pin<Box<dyn Future<Output = T> + 'static>>;
+
+#[derive(Debug)]
+struct MapBranchResult {
+    index: usize,
+    status: String,
+    result: serde_json::Value,
+    artifacts: Vec<ArtifactRecord>,
+    usage: LlmUsageRecord,
+    error: Option<String>,
+}
+
+#[derive(Clone)]
+enum MapWorkItem {
+    Artifact {
+        index: usize,
+        artifact: Box<ArtifactRecord>,
+    },
+    Value {
+        index: usize,
+        value: serde_json::Value,
+        artifact_kind: String,
+    },
+}
+
+fn merge_usage(total: &mut LlmUsageRecord, usage: &LlmUsageRecord) {
+    total.input_tokens += usage.input_tokens;
+    total.output_tokens += usage.output_tokens;
+    total.total_duration_ms += usage.total_duration_ms;
+    total.call_count += usage.call_count;
+    total.total_cost += usage.total_cost;
+    for model in &usage.models {
+        if !total.models.iter().any(|existing| existing == model) {
+            total.models.push(model.clone());
+        }
+    }
+}
+
+fn map_completion_target(strategy: &str, total: usize, min_completed: Option<usize>) -> usize {
+    match strategy {
+        "first" => total.min(1),
+        "quorum" => min_completed.unwrap_or(1).max(1).min(total),
+        _ => total,
+    }
+}
+
+async fn execute_join_policy<T: 'static>(
+    tasks: Vec<LocalTask<T>>,
+    strategy: &str,
+    min_completed: Option<usize>,
+    max_concurrent: Option<usize>,
+) -> Vec<Result<T, String>> {
+    if tasks.is_empty() {
+        return Vec::new();
+    }
+
+    let total = tasks.len();
+    let target = map_completion_target(strategy, total, min_completed);
+    let concurrency = max_concurrent.unwrap_or(total).max(1).min(total);
+    let mut pending = VecDeque::from(tasks);
+    let mut join_set = tokio::task::JoinSet::new();
+    let mut results = Vec::new();
+
+    while join_set.len() < concurrency {
+        let Some(task) = pending.pop_front() else {
+            break;
+        };
+        join_set.spawn_local(task);
+    }
+
+    while let Some(joined) = join_set.join_next().await {
+        match joined {
+            Ok(result) => results.push(Ok(result)),
+            Err(error) => results.push(Err(format!("workflow map branch failed: {error}"))),
+        }
+        if results.len() >= target {
+            join_set.abort_all();
+            while join_set.join_next().await.is_some() {}
+            break;
+        }
+        while join_set.len() < concurrency {
+            let Some(task) = pending.pop_front() else {
+                break;
+            };
+            join_set.spawn_local(task);
+        }
+    }
+
+    results
+}
+
+fn map_branch_artifact(node_id: &str, item: &MapWorkItem, lineage: &[String]) -> ArtifactRecord {
+    match item {
+        MapWorkItem::Artifact { artifact, .. } => *artifact.clone(),
+        MapWorkItem::Value {
+            index,
+            value,
+            artifact_kind,
+        } => artifact_from_value(
+            node_id,
+            artifact_kind,
+            *index,
+            value.clone(),
+            lineage,
+            format!("map {node_id} item {}", index + 1),
+        ),
+    }
+}
+
+fn map_executes_stage(node: &crate::orchestration::WorkflowNode) -> bool {
+    node.mode.is_some()
+        || node.prompt.is_some()
+        || node.system.is_some()
+        || node.timeout_ms.is_some()
+        || !crate::orchestration::workflow_tool_names(&node.tools).is_empty()
+        || node.model_policy != crate::orchestration::ModelPolicy::default()
+}
+
+fn map_stage_node(node: &crate::orchestration::WorkflowNode) -> crate::orchestration::WorkflowNode {
+    let mut stage_node = node.clone();
+    stage_node.kind = "stage".to_string();
+    stage_node.map_policy = Default::default();
+    stage_node.join_policy = Default::default();
+    if let Some(output_kind) = &node.map_policy.output_kind {
+        stage_node.output_contract.output_kinds = vec![output_kind.clone()];
+    }
+    stage_node
+}
+
+fn map_work_items(
+    node: &crate::orchestration::WorkflowNode,
+    artifacts: &[ArtifactRecord],
+) -> Vec<MapWorkItem> {
+    let mut inputs = select_artifacts(artifacts.to_vec(), &node.context_policy);
+    if let Some(kind) = &node.map_policy.item_artifact_kind {
+        inputs.retain(|artifact| &artifact.kind == kind);
+    }
+    let mut explicit_items = node.map_policy.items.clone();
+    if let Some(max_items) = node.map_policy.max_items {
+        explicit_items.truncate(max_items);
+        inputs.truncate(max_items);
+    }
+    if !explicit_items.is_empty() {
+        let item_kind = node
+            .map_policy
+            .item_artifact_kind
+            .clone()
+            .unwrap_or_else(|| "artifact".to_string());
+        return explicit_items
+            .into_iter()
+            .enumerate()
+            .map(|(index, value)| MapWorkItem::Value {
+                index,
+                value,
+                artifact_kind: item_kind.clone(),
+            })
+            .collect();
+    }
+    inputs
+        .into_iter()
+        .enumerate()
+        .map(|(index, artifact)| MapWorkItem::Artifact {
+            index,
+            artifact: Box::new(artifact),
+        })
+        .collect()
 }
 
 fn llm_usage_delta(before: &UsageSnapshot, after: &UsageSnapshot) -> LlmUsageRecord {
@@ -764,58 +934,216 @@ async fn execute_stage_attempts(
                     ))
                 }
                 "map" => {
-                    let mut inputs = select_artifacts(artifacts.to_vec(), &node.context_policy);
-                    if let Some(kind) = &node.map_policy.item_artifact_kind {
-                        inputs.retain(|artifact| &artifact.kind == kind);
-                    }
-                    let mut items = node.map_policy.items.clone();
-                    if items.is_empty() {
-                        items = inputs
-                            .iter()
-                            .map(|artifact| {
-                                artifact
-                                    .data
-                                    .clone()
-                                    .or_else(|| {
-                                        artifact.text.clone().map(serde_json::Value::String)
-                                    })
-                                    .unwrap_or(serde_json::Value::Null)
-                            })
-                            .collect();
-                    }
-                    if let Some(max_items) = node.map_policy.max_items {
-                        items.truncate(max_items);
-                    }
-                    let lineage = inputs
+                    let items = map_work_items(node, artifacts);
+                    let total_items = items.len();
+                    let branch_policy = crate::orchestration::current_execution_policy();
+                    let runs_stage = map_executes_stage(node);
+                    let stage_template = runs_stage.then(|| map_stage_node(node));
+                    let shared_lineage = items
                         .iter()
-                        .map(|artifact| artifact.id.clone())
-                        .collect::<Vec<_>>();
-                    let output_kind = node
-                        .map_policy
-                        .output_kind
-                        .clone()
-                        .or_else(|| node.output_contract.output_kinds.first().cloned())
-                        .unwrap_or_else(|| "artifact".to_string());
-                    let produced = items
-                        .into_iter()
-                        .enumerate()
-                        .map(|(index, item)| {
-                            artifact_from_value(
-                                node_id,
-                                &output_kind,
-                                index,
-                                item,
-                                &lineage,
-                                format!("map {} item {}", node_id, index + 1),
-                            )
+                        .flat_map(|item| match item {
+                            MapWorkItem::Artifact { artifact, .. } => vec![artifact.id.clone()],
+                            MapWorkItem::Value { .. } => Vec::new(),
                         })
                         .collect::<Vec<_>>();
+                    let strategy = if node.join_policy.strategy.is_empty() {
+                        "all".to_string()
+                    } else {
+                        node.join_policy.strategy.clone()
+                    };
+                    let tasks = items
+                        .into_iter()
+                        .map(|item| {
+                            let branch_policy = branch_policy.clone();
+                            let branch_transcript = transcript.clone();
+                            let task_label = task.to_string();
+                            let stage_template = stage_template.clone();
+                            let node_id = node_id.to_string();
+                            let output_kind = node
+                                .map_policy
+                                .output_kind
+                                .clone()
+                                .or_else(|| node.output_contract.output_kinds.first().cloned())
+                                .unwrap_or_else(|| "artifact".to_string());
+                            let lineage = shared_lineage.clone();
+                            Box::pin(async move {
+                                if let Some(policy) = branch_policy.clone() {
+                                    push_execution_policy(policy);
+                                }
+                                let result = match stage_template {
+                                    Some(stage_node) => {
+                                        let index = match &item {
+                                            MapWorkItem::Artifact { index, .. }
+                                            | MapWorkItem::Value { index, .. } => *index,
+                                        };
+                                        let branch_input =
+                                            vec![map_branch_artifact(&node_id, &item, &lineage)];
+                                        let branch_task = format!(
+                                            "{task_label}\n\nMap item {} of {}",
+                                            index + 1,
+                                            total_items.max(1)
+                                        );
+                                        let executed = execute_stage_attempts(
+                                            &branch_task,
+                                            &format!("{node_id}_map_{}", index + 1),
+                                            &stage_node,
+                                            &branch_input,
+                                            branch_transcript,
+                                        )
+                                        .await?;
+                                        Ok(MapBranchResult {
+                                            index,
+                                            status: executed.status.clone(),
+                                            result: executed.result,
+                                            artifacts: executed.artifacts,
+                                            usage: executed.usage,
+                                            error: executed.error,
+                                        })
+                                    }
+                                    None => {
+                                        let index = match &item {
+                                            MapWorkItem::Artifact { index, .. }
+                                            | MapWorkItem::Value { index, .. } => *index,
+                                        };
+                                        let artifact = match &item {
+                                            MapWorkItem::Artifact { artifact, .. } => {
+                                                let value = artifact
+                                                    .data
+                                                    .clone()
+                                                    .or_else(|| {
+                                                        artifact
+                                                            .text
+                                                            .clone()
+                                                            .map(serde_json::Value::String)
+                                                    })
+                                                    .unwrap_or(serde_json::Value::Null);
+                                                artifact_from_value(
+                                                    &node_id,
+                                                    &output_kind,
+                                                    index,
+                                                    value,
+                                                    std::slice::from_ref(&artifact.id),
+                                                    format!("map {} item {}", node_id, index + 1),
+                                                )
+                                            }
+                                            MapWorkItem::Value { value, .. } => {
+                                                artifact_from_value(
+                                                    &node_id,
+                                                    &output_kind,
+                                                    index,
+                                                    value.clone(),
+                                                    &lineage,
+                                                    format!("map {} item {}", node_id, index + 1),
+                                                )
+                                            }
+                                        };
+                                        Ok(MapBranchResult {
+                                            index,
+                                            status: "completed".to_string(),
+                                            result: serde_json::json!({
+                                                "status": "completed",
+                                                "text": artifact.text,
+                                            }),
+                                            artifacts: vec![artifact],
+                                            usage: LlmUsageRecord::default(),
+                                            error: None,
+                                        })
+                                    }
+                                };
+                                if branch_policy.is_some() {
+                                    pop_execution_policy();
+                                }
+                                result
+                            })
+                                as LocalTask<Result<MapBranchResult, VmError>>
+                        })
+                        .collect::<Vec<_>>();
+
+                    let branch_results = execute_join_policy(
+                        tasks,
+                        &strategy,
+                        node.join_policy.min_completed,
+                        node.map_policy.max_concurrent,
+                    )
+                    .await;
+
+                    let mut completed = Vec::new();
+                    let mut failures = Vec::new();
+                    let mut produced = Vec::new();
+                    let mut usage = LlmUsageRecord::default();
+                    for branch_result in branch_results {
+                        match branch_result {
+                            Ok(Ok(branch)) => {
+                                merge_usage(&mut usage, &branch.usage);
+                                if branch.status == "completed" && branch.error.is_none() {
+                                    produced.extend(branch.artifacts.clone());
+                                    completed.push(serde_json::json!({
+                                        "index": branch.index,
+                                        "status": branch.status,
+                                        "result": branch.result,
+                                        "artifact_count": branch.artifacts.len(),
+                                    }));
+                                } else {
+                                    failures.push(serde_json::json!({
+                                        "index": branch.index,
+                                        "status": branch.status,
+                                        "error": branch.error,
+                                    }));
+                                }
+                            }
+                            Ok(Err(error)) => failures.push(serde_json::json!({
+                                "status": "failed",
+                                "error": error.to_string(),
+                            })),
+                            Err(error) => failures.push(serde_json::json!({
+                                "status": "failed",
+                                "error": error,
+                            })),
+                        }
+                    }
+                    produced.sort_by(|left, right| {
+                        let left_index = left
+                            .metadata
+                            .get("index")
+                            .and_then(|value| value.as_u64())
+                            .unwrap_or(u64::MAX);
+                        let right_index = right
+                            .metadata
+                            .get("index")
+                            .and_then(|value| value.as_u64())
+                            .unwrap_or(u64::MAX);
+                        left_index.cmp(&right_index)
+                    });
+                    let status = if failures.is_empty() {
+                        "completed"
+                    } else if produced.is_empty() {
+                        "failed"
+                    } else {
+                        "partial"
+                    };
+                    let text = if status == "failed" {
+                        format!("map failed after {} branch failures", failures.len())
+                    } else {
+                        format!("mapped {} of {} items", produced.len(), total_items)
+                    };
+                    let branch = if status == "failed" {
+                        Some("failed".to_string())
+                    } else {
+                        Some("mapped".to_string())
+                    };
+                    let result = serde_json::json!({
+                        "status": status,
+                        "text": text,
+                        "join_strategy": strategy,
+                        "completed": completed,
+                        "failures": failures,
+                    });
                     Ok((
-                        serde_json::json!({"status": "completed", "text": format!("mapped {} items", produced.len())}),
+                        result,
                         produced,
                         transcript.clone(),
                         "mapped".to_string(),
-                        Some("mapped".to_string()),
+                        branch,
                         None,
                     ))
                 }
@@ -1909,86 +2237,5 @@ pub(crate) fn register_workflow_builtins(vm: &mut Vm) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::orchestration::{save_run_record, RunChildRecord, RunRecord};
-    use crate::tracing::{set_tracing_enabled, span_end, span_start, SpanKind};
-
-    #[test]
-    fn classify_stage_outcome_fails_when_agent_loop_is_stuck() {
-        let (outcome, branch) = classify_stage_outcome(
-            "stage",
-            &serde_json::json!({"status": "stuck"}),
-            &serde_json::json!({"ok": true}),
-        );
-        assert_eq!(outcome, "stuck");
-        assert_eq!(branch.as_deref(), Some("failed"));
-    }
-
-    #[test]
-    fn classify_stage_outcome_accepts_done_status_for_mutating_stage() {
-        let (outcome, branch) = classify_stage_outcome(
-            "stage",
-            &serde_json::json!({"status": "done"}),
-            &serde_json::json!({"ok": true}),
-        );
-        assert_eq!(outcome, "success");
-        assert_eq!(branch.as_deref(), Some("success"));
-    }
-
-    #[test]
-    fn load_run_tree_recurses_into_child_runs() {
-        let dir = std::env::temp_dir().join(format!("harn-run-tree-{}", uuid::Uuid::now_v7()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let child_path = dir.join("child.json");
-        let parent_path = dir.join("parent.json");
-
-        let child = RunRecord {
-            id: "child".to_string(),
-            workflow_id: "wf".to_string(),
-            root_run_id: Some("root".to_string()),
-            status: "completed".to_string(),
-            ..Default::default()
-        };
-        let parent = RunRecord {
-            id: "parent".to_string(),
-            workflow_id: "wf".to_string(),
-            root_run_id: Some("root".to_string()),
-            status: "completed".to_string(),
-            child_runs: vec![RunChildRecord {
-                worker_id: "worker_1".to_string(),
-                worker_name: "worker".to_string(),
-                run_id: Some("child".to_string()),
-                run_path: Some(child_path.to_string_lossy().to_string()),
-                ..Default::default()
-            }],
-            ..Default::default()
-        };
-
-        save_run_record(&child, Some(child_path.to_str().unwrap())).unwrap();
-        save_run_record(&parent, Some(parent_path.to_str().unwrap())).unwrap();
-
-        let tree = load_run_tree(parent_path.to_str().unwrap()).unwrap();
-        assert_eq!(tree["run"]["id"], "parent");
-        assert_eq!(tree["children"][0]["run"]["id"], "child");
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn snapshot_trace_spans_returns_completed_trace_tree() {
-        set_tracing_enabled(true);
-        let parent = span_start(SpanKind::Pipeline, "workflow".to_string());
-        let child = span_start(SpanKind::ToolCall, "read".to_string());
-        span_end(child);
-        span_end(parent);
-
-        let spans = snapshot_trace_spans();
-        assert_eq!(spans.len(), 2);
-        assert_eq!(spans[0].kind, "tool_call");
-        assert_eq!(spans[0].parent_id, Some(parent));
-        assert_eq!(spans[1].kind, "pipeline");
-
-        set_tracing_enabled(false);
-    }
-}
+#[path = "workflow_tests.rs"]
+mod tests;

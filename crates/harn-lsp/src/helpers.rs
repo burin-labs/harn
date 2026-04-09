@@ -1,5 +1,5 @@
 use harn_lexer::{LexerError, Span};
-use harn_parser::{diagnostic, format_type, ParserError};
+use harn_parser::{diagnostic, ParserError, TypeExpr};
 use tower_lsp::lsp_types::*;
 
 use crate::symbols::SymbolInfo;
@@ -133,12 +133,7 @@ pub(crate) fn char_before_position(source: &str, position: Position) -> Option<c
     line.chars().nth(col - 1)
 }
 
-/// Try to figure out what type the expression before `.` is.
-pub(crate) fn infer_dot_receiver_type(
-    source: &str,
-    position: Position,
-    symbols: &[SymbolInfo],
-) -> Option<String> {
+fn dot_receiver_identifier(source: &str, position: Position) -> Option<String> {
     // Walk backwards from the dot to find the identifier
     let lines: Vec<&str> = source.lines().collect();
     let line = lines.get(position.line as usize)?;
@@ -160,19 +155,6 @@ pub(crate) fn infer_dot_receiver_type(
         end -= 1;
     }
 
-    // Check for string literal ending in "
-    if chars[end] == '"' {
-        return Some("string".to_string());
-    }
-    // Check for ] (list subscript or literal)
-    if chars[end] == ']' {
-        return Some("list".to_string());
-    }
-    // Check for } (dict literal)
-    if chars[end] == '}' {
-        return Some("dict".to_string());
-    }
-
     // Otherwise try to extract an identifier
     if !chars[end].is_alphanumeric() && chars[end] != '_' {
         return None;
@@ -182,13 +164,57 @@ pub(crate) fn infer_dot_receiver_type(
     while id_start > 0 && (chars[id_start - 1].is_alphanumeric() || chars[id_start - 1] == '_') {
         id_start -= 1;
     }
-    let name: String = chars[id_start..id_end].iter().collect();
+    Some(chars[id_start..id_end].iter().collect())
+}
 
-    // Look up the variable's type in the symbol table
+pub(crate) fn infer_dot_receiver_name(source: &str, position: Position) -> Option<String> {
+    dot_receiver_identifier(source, position)
+}
+
+/// Try to figure out what type the expression before `.` is.
+pub(crate) fn infer_dot_receiver_type(
+    source: &str,
+    position: Position,
+    symbols: &[SymbolInfo],
+) -> Option<TypeExpr> {
+    let lines: Vec<&str> = source.lines().collect();
+    let line = lines.get(position.line as usize)?;
+    let col = position.character as usize;
+    if col < 2 {
+        return None;
+    }
+
+    let chars: Vec<char> = line.chars().collect();
+    let mut end = col - 1;
+    if end == 0 {
+        return None;
+    }
+    end -= 1;
+    while end > 0 && chars[end] == ' ' {
+        end -= 1;
+    }
+
+    if chars[end] == '"' {
+        return Some(TypeExpr::Named("string".to_string()));
+    }
+    if chars[end] == ']' {
+        return Some(TypeExpr::Named("list".to_string()));
+    }
+    if chars[end] == '}' {
+        return Some(TypeExpr::Named("dict".to_string()));
+    }
+
+    let name = dot_receiver_identifier(source, position)?;
     for sym in symbols.iter().rev() {
         if sym.name == name {
             if let Some(ref ty) = sym.type_info {
-                return Some(format_type(ty));
+                return Some(ty.clone());
+            }
+            if matches!(
+                sym.kind,
+                crate::symbols::HarnSymbolKind::Struct | crate::symbols::HarnSymbolKind::Enum
+            ) {
+                return Some(TypeExpr::Named(sym.name.clone()));
             }
         }
     }

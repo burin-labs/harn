@@ -16,6 +16,7 @@ pub(crate) mod api;
 mod config_builtins;
 mod conversation;
 pub(crate) mod cost;
+pub(crate) mod daemon;
 pub(crate) mod helpers;
 pub(crate) mod mock;
 
@@ -98,6 +99,7 @@ use crate::value::{VmChannelHandle, VmValue};
 use crate::vm::Vm;
 
 use self::api::{vm_build_llm_result, vm_call_completion_full};
+use self::daemon::parse_daemon_loop_config;
 use self::helpers::{opt_bool, opt_int, opt_str};
 use self::stream::vm_stream_llm;
 use self::trace::trace_llm_call;
@@ -357,6 +359,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
         let done_sentinel = opt_str(&options, "done_sentinel");
         let break_unless_phase = opt_str(&options, "break_unless_phase");
         let exit_when_verified = opt_bool(&options, "exit_when_verified");
+        let daemon_config = parse_daemon_loop_config(options.as_ref());
         let mut opts = extract_llm_options(&args)?;
         let result = run_agent_loop_internal(
             &mut opts,
@@ -374,6 +377,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                 context_callback,
                 policy,
                 daemon,
+                daemon_config,
                 llm_retries: opt_int(&options, "llm_retries").unwrap_or(3) as usize,
                 llm_backoff_ms: opt_int(&options, "llm_backoff_ms").unwrap_or(2000) as u64,
                 exit_when_verified,
