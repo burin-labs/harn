@@ -2,6 +2,51 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.60
+
+### Added
+
+- **Machine-readable host contracts** — `harn contracts builtins`,
+  `harn contracts host-capabilities`, and `harn contracts bundle` now expose
+  builtin metadata, effective host capability manifests, bundle dependency
+  graphs, prompt/template assets, execution roots, and worker repo
+  dependencies as stable JSON for embedded hosts and release tooling.
+- **First-class prompt asset surface** — `render_prompt(...)` now formalizes
+  prompt-oriented asset rendering and bundle manifests classify `.harn.prompt`
+  and `.prompt` files explicitly.
+- **Explicit runtime path introspection** — new builtins `execution_root()`,
+  `asset_root()`, and `runtime_paths()` expose the runtime’s execution, asset,
+  state, run, and worktree roots directly to Harn programs.
+- **Runtime path conformance coverage** — new conformance coverage pins the
+  prompt-rendering and runtime-path contract so hosts can depend on it without
+  re-deriving path behavior from implementation details.
+
+### Changed
+
+- **Runtime state roots are centralized** — store, checkpoint, metadata, run,
+  and worker-worktree paths now resolve through one shared runtime-root model
+  instead of hard-coded `.harn*` string literals scattered across crates.
+- **Bundle contracts are more host-oriented** — `harn contracts bundle` now
+  emits explicit entry/import module slices, module-dependency edges,
+  prompt/template asset lists, and stable summary counts instead of forcing
+  embedded hosts to infer those views from a generic asset table.
+- **Release auditing is stricter** — the release gate now verifies
+  Cargo/changelog/release-note consistency and treats tree-sitter parse drift
+  as a blocking failure. The tree-sitter audit also bootstraps its local CLI
+  automatically when needed.
+- **Editor completion matches the runtime surface** — the LSP builtin registry
+  and hover docs now include `render_prompt(...)`, `execution_root()`,
+  `asset_root()`, and `runtime_paths()`.
+
+### Fixed
+
+- **Embedded-host bundle ambiguity** — hosts can now export and verify the
+  exact modules, prompt assets, template assets, execution directories, worker
+  repos, and required host capabilities that a Harn bundle expects.
+- **Tree-sitter grammar drift** — the executable grammar now covers `require`
+  statements, raw and multiline strings, rest params, and richer tool
+  metadata so editor parsing stays aligned with the shipped language surface.
+
 ## v0.5.59
 
 ### Added
@@ -59,17 +104,6 @@ All notable changes to Harn are documented in this file.
   helpers, richer tool declaration schemas, runtime validation of
   `list<T>`/`dict<string, T>`/union params, and compiler narrowing through
   `schema_is(...)`.
-- **Machine-readable contract export surfaces** — `harn contracts builtins`,
-  `harn contracts host-capabilities`, and `harn contracts bundle` now expose
-  the builtin registry, effective host-capability manifest, and bundle/module
-  dependency graph as stable JSON for embedded hosts and release tooling.
-- **First-class prompt asset surface** — `render_prompt(...)` now formalizes
-  prompt-template rendering on top of the existing source-relative asset model,
-  and bundle manifests classify `.harn.prompt` / `.prompt` assets explicitly.
-- **Explicit runtime path introspection** — new builtins `execution_root()`,
-  `asset_root()`, and `runtime_paths()` expose the runtime’s path model so
-  hosts and pipelines can reason about execution, asset, state, run, and
-  worktree roots without re-deriving them.
 
 ### Changed
 
@@ -84,20 +118,6 @@ All notable changes to Harn are documented in this file.
 - **`schema_is(...)` participates in static refinement** — when the compiler
   can reduce the schema argument to a literal/canonical shape, the typechecker
   narrows the guarded value accordingly.
-- **Runtime state roots are centralized** — store, checkpoint, metadata, run,
-  and worker-worktree paths now resolve through one shared runtime-root model
-  instead of hard-coded `.harn*` string literals scattered across crates.
-- **Release audit is stricter about identity drift** — the release gate now
-  verifies Cargo/changelog/release-note consistency and treats tree-sitter
-  parse drift as a blocking failure instead of an advisory warning.
-- **Bundle contracts are more host-oriented** — `harn contracts bundle` now
-  emits explicit entry/import module slices, module-dependency edges,
-  prompt/template asset lists, and stable summary counts instead of forcing
-  embedded hosts to infer those views from one generic asset table.
-- **Editor completion/docs now match the runtime path surface** — the LSP
-  builtin registry now includes `render_prompt(...)`, `execution_root()`,
-  `asset_root()`, and `runtime_paths()` so editor completion does not lag the
-  runtime contract.
 
 ### Fixed
 
@@ -111,9 +131,6 @@ All notable changes to Harn are documented in this file.
 - **Schema/docs drift** — the language spec, builtins docs, LLM docs, and
   syntax-highlighting keyword registry now reflect the shipped schema and tool
   surfaces.
-- **Embedded-host bundle ambiguity** — hosts can now export and verify the
-  exact modules, prompt assets, template assets, execution directories, worker
-  repos, and required host capabilities that a Harn bundle expects.
 
 ## v0.5.56
 
