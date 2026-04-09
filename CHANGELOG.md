@@ -2,6 +2,32 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.56
+
+### Added
+
+- **`harn test --timing`** — the conformance runner can now print per-test
+  timings, summary percentiles, and the slowest tests without enabling verbose
+  failure output.
+- **Coverage for collection/runtime hot paths** — new conformance tests cover
+  repeated list concatenation, `list.unique()`, nested set operations, and
+  string slicing edge cases.
+
+### Changed
+
+- **Lower-allocation runtime hot paths** — string and list concatenation,
+  JSON rendering, `VmValue` display and structural hashing, regex caching, set
+  builtins, and list `unique()` now avoid common repeated allocations in
+  conformance-heavy workloads.
+- **Release builds are optimized more aggressively** — the workspace release
+  profile now enables LTO and uses a single codegen unit.
+
+### Fixed
+
+- **Formatter grouping preservation** — `harn fmt` now keeps explicit
+  right-grouped expressions like `a + (b + c)` and `a ?? (b ?? c)` instead of
+  flattening them and potentially changing runtime behavior.
+
 ## v0.5.55
 
 ### Added

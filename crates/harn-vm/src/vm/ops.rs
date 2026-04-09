@@ -608,7 +608,8 @@ impl super::Vm {
                 (VmValue::Dict(map), _) => map.get(&idx.display()).cloned().unwrap_or(VmValue::Nil),
                 (VmValue::String(s), VmValue::Int(i)) => {
                     if *i < 0 {
-                        let pos = s.chars().count() as i64 + *i;
+                        let count = s.chars().count() as i64;
+                        let pos = count + *i;
                         if pos < 0 {
                             VmValue::Nil
                         } else {
@@ -681,15 +682,16 @@ impl super::Vm {
                     }
                 }
                 VmValue::String(s) => {
-                    let chars: Vec<char> = s.chars().collect();
-                    let len = chars.len() as i64;
+                    // Use char_indices to find byte offsets without
+                    // allocating a Vec<char>.
+                    let char_count = s.chars().count() as i64;
                     let start = match &start_val {
                         VmValue::Nil => 0i64,
                         VmValue::Int(i) => {
                             if *i < 0 {
-                                (len + *i).max(0)
+                                (char_count + *i).max(0)
                             } else {
-                                (*i).min(len)
+                                (*i).min(char_count)
                             }
                         }
                         _ => {
@@ -700,12 +702,12 @@ impl super::Vm {
                         }
                     };
                     let end = match &end_val {
-                        VmValue::Nil => len,
+                        VmValue::Nil => char_count,
                         VmValue::Int(i) => {
                             if *i < 0 {
-                                (len + *i).max(0)
+                                (char_count + *i).max(0)
                             } else {
-                                (*i).min(len)
+                                (*i).min(char_count)
                             }
                         }
                         _ => {
@@ -716,10 +718,22 @@ impl super::Vm {
                         }
                     };
                     if start >= end {
-                        VmValue::String(Rc::from(String::new()))
+                        VmValue::String(Rc::from(""))
                     } else {
-                        let sliced: String = chars[start as usize..end as usize].iter().collect();
-                        VmValue::String(Rc::from(sliced))
+                        // Find byte offsets for start and end char indices
+                        let start_idx = start as usize;
+                        let end_idx = end as usize;
+                        let byte_start = s
+                            .char_indices()
+                            .nth(start_idx)
+                            .map(|(b, _)| b)
+                            .unwrap_or(s.len());
+                        let byte_end = s
+                            .char_indices()
+                            .nth(end_idx)
+                            .map(|(b, _)| b)
+                            .unwrap_or(s.len());
+                        VmValue::String(Rc::from(&s[byte_start..byte_end]))
                     }
                 }
                 _ => {
@@ -1381,10 +1395,14 @@ impl super::Vm {
             (VmValue::Int(x), VmValue::Float(y)) => Ok(VmValue::Float(*x as f64 + y)),
             (VmValue::Float(x), VmValue::Int(y)) => Ok(VmValue::Float(x + *y as f64)),
             (VmValue::String(x), VmValue::String(y)) => {
-                Ok(VmValue::String(Rc::from(format!("{x}{y}"))))
+                let mut s = String::with_capacity(x.len() + y.len());
+                s.push_str(x);
+                s.push_str(y);
+                Ok(VmValue::String(Rc::from(s)))
             }
             (VmValue::List(x), VmValue::List(y)) => {
-                let mut result = (**x).clone();
+                let mut result = Vec::with_capacity(x.len() + y.len());
+                result.extend(x.iter().cloned());
                 result.extend(y.iter().cloned());
                 Ok(VmValue::List(Rc::new(result)))
             }

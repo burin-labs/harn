@@ -197,7 +197,9 @@ pub(crate) async fn run_conformance_tests(
     junit_path: Option<&str>,
     timeout_ms: u64,
     verbose: bool,
+    timing: bool,
 ) {
+    let show_timing = verbose || timing;
     let dir_path = PathBuf::from(dir);
     if !dir_path.exists() {
         eprintln!("Directory not found: {dir}");
@@ -295,7 +297,7 @@ pub(crate) async fn run_conformance_tests(
                 Ok(Ok(output)) => {
                     let actual = normalize_actual_output(output.trim_end());
                     if actual == expected {
-                        if verbose {
+                        if show_timing {
                             println!("  \x1b[32mPASS\x1b[0m  {rel_path} ({duration_ms} ms)");
                         } else {
                             println!("  \x1b[32mPASS\x1b[0m  {rel_path}");
@@ -303,7 +305,7 @@ pub(crate) async fn run_conformance_tests(
                         junit_results.push((rel_path, true, String::new(), duration_ms));
                         passed += 1;
                     } else {
-                        if verbose {
+                        if show_timing {
                             println!("  \x1b[31mFAIL\x1b[0m  {rel_path} ({duration_ms} ms)");
                         } else {
                             println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
@@ -435,20 +437,32 @@ pub(crate) async fn run_conformance_tests(
         );
     }
 
-    // Verbose timing summary
-    if verbose {
+    // Timing summary (--timing or --verbose)
+    if show_timing {
         println!();
         println!("Total time: {total_duration_ms} ms");
 
-        // Show slowest 5 tests
+        let mut durations: Vec<u64> = junit_results.iter().map(|r| r.3).collect();
+        durations.sort();
+
+        if !durations.is_empty() {
+            let n = durations.len();
+            let p50 = durations[n * 50 / 100];
+            let p95 = durations[n * 95 / 100];
+            let p99 = durations[(n * 99 / 100).min(n - 1)];
+            let avg = durations.iter().sum::<u64>() / n as u64;
+            println!("Per-test: avg={avg} ms  p50={p50} ms  p95={p95} ms  p99={p99} ms");
+        }
+
+        // Show slowest 10 tests
         let mut by_time: Vec<&(String, bool, String, u64)> = junit_results.iter().collect();
         by_time.sort_by(|a, b| b.3.cmp(&a.3));
-        let top_n = by_time.len().min(5);
+        let top_n = by_time.len().min(10);
         if top_n > 0 {
             println!();
             println!("Slowest {top_n} tests:");
             for entry in &by_time[..top_n] {
-                println!("  {} ms  {}", entry.3, entry.0);
+                println!("  {:>6} ms  {}", entry.3, entry.0);
             }
         }
     }

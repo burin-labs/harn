@@ -505,40 +505,66 @@ impl VmValue {
     }
 
     pub fn display(&self) -> String {
+        let mut out = String::new();
+        self.write_display(&mut out);
+        out
+    }
+
+    /// Writes the display representation directly into `out`,
+    /// avoiding intermediate Vec<String> allocations for collections.
+    pub fn write_display(&self, out: &mut String) {
+        use std::fmt::Write;
         match self {
-            VmValue::Int(n) => n.to_string(),
+            VmValue::Int(n) => {
+                let _ = write!(out, "{n}");
+            }
             VmValue::Float(n) => {
                 if *n == (*n as i64) as f64 && n.abs() < 1e15 {
-                    format!("{:.1}", n)
+                    let _ = write!(out, "{n:.1}");
                 } else {
-                    n.to_string()
+                    let _ = write!(out, "{n}");
                 }
             }
-            VmValue::String(s) => s.to_string(),
-            VmValue::Bool(b) => (if *b { "true" } else { "false" }).to_string(),
-            VmValue::Nil => "nil".to_string(),
+            VmValue::String(s) => out.push_str(s),
+            VmValue::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+            VmValue::Nil => out.push_str("nil"),
             VmValue::List(items) => {
-                let inner: Vec<String> = items.iter().map(|i| i.display()).collect();
-                format!("[{}]", inner.join(", "))
+                out.push('[');
+                for (i, item) in items.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(", ");
+                    }
+                    item.write_display(out);
+                }
+                out.push(']');
             }
             VmValue::Dict(map) => {
-                let inner: Vec<String> = map
-                    .iter()
-                    .map(|(k, v)| format!("{k}: {}", v.display()))
-                    .collect();
-                format!("{{{}}}", inner.join(", "))
+                out.push('{');
+                for (i, (k, v)) in map.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(", ");
+                    }
+                    out.push_str(k);
+                    out.push_str(": ");
+                    v.write_display(out);
+                }
+                out.push('}');
             }
-            VmValue::Closure(c) => format!("<fn({})>", c.func.params.join(", ")),
-            VmValue::BuiltinRef(name) => format!("<builtin {name}>"),
+            VmValue::Closure(c) => {
+                let _ = write!(out, "<fn({})>", c.func.params.join(", "));
+            }
+            VmValue::BuiltinRef(name) => {
+                let _ = write!(out, "<builtin {name}>");
+            }
             VmValue::Duration(ms) => {
                 if *ms >= 3_600_000 && ms % 3_600_000 == 0 {
-                    format!("{}h", ms / 3_600_000)
+                    let _ = write!(out, "{}h", ms / 3_600_000);
                 } else if *ms >= 60_000 && ms % 60_000 == 0 {
-                    format!("{}m", ms / 60_000)
+                    let _ = write!(out, "{}m", ms / 60_000);
                 } else if *ms >= 1000 && ms % 1000 == 0 {
-                    format!("{}s", ms / 1000)
+                    let _ = write!(out, "{}s", ms / 1000);
                 } else {
-                    format!("{}ms", ms)
+                    let _ = write!(out, "{}ms", ms);
                 }
             }
             VmValue::EnumVariant {
@@ -547,35 +573,60 @@ impl VmValue {
                 fields,
             } => {
                 if fields.is_empty() {
-                    format!("{enum_name}.{variant}")
+                    let _ = write!(out, "{enum_name}.{variant}");
                 } else {
-                    let inner: Vec<String> = fields.iter().map(|v| v.display()).collect();
-                    format!("{enum_name}.{variant}({})", inner.join(", "))
+                    let _ = write!(out, "{enum_name}.{variant}(");
+                    for (i, v) in fields.iter().enumerate() {
+                        if i > 0 {
+                            out.push_str(", ");
+                        }
+                        v.write_display(out);
+                    }
+                    out.push(')');
                 }
             }
             VmValue::StructInstance {
                 struct_name,
                 fields,
             } => {
-                let inner: Vec<String> = fields
-                    .iter()
-                    .map(|(k, v)| format!("{k}: {}", v.display()))
-                    .collect();
-                format!("{struct_name} {{{}}}", inner.join(", "))
+                let _ = write!(out, "{struct_name} {{");
+                for (i, (k, v)) in fields.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(", ");
+                    }
+                    out.push_str(k);
+                    out.push_str(": ");
+                    v.write_display(out);
+                }
+                out.push('}');
             }
-            VmValue::TaskHandle(id) => format!("<task:{id}>"),
-            VmValue::Channel(ch) => format!("<channel:{}>", ch.name),
-            VmValue::Atomic(a) => format!("<atomic:{}>", a.value.load(Ordering::SeqCst)),
-            VmValue::McpClient(c) => format!("<mcp_client:{}>", c.name),
+            VmValue::TaskHandle(id) => {
+                let _ = write!(out, "<task:{id}>");
+            }
+            VmValue::Channel(ch) => {
+                let _ = write!(out, "<channel:{}>", ch.name);
+            }
+            VmValue::Atomic(a) => {
+                let _ = write!(out, "<atomic:{}>", a.value.load(Ordering::SeqCst));
+            }
+            VmValue::McpClient(c) => {
+                let _ = write!(out, "<mcp_client:{}>", c.name);
+            }
             VmValue::Set(items) => {
-                let inner: Vec<String> = items.iter().map(|i| i.display()).collect();
-                format!("set({})", inner.join(", "))
+                out.push_str("set(");
+                for (i, item) in items.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(", ");
+                    }
+                    item.write_display(out);
+                }
+                out.push(')');
             }
             VmValue::Generator(g) => {
                 if g.done.get() {
-                    "<generator (done)>".to_string()
+                    out.push_str("<generator (done)>");
                 } else {
-                    "<generator>".to_string()
+                    out.push_str("<generator>");
                 }
             }
         }
@@ -641,30 +692,85 @@ pub fn value_identity_key(v: &VmValue) -> String {
 /// key. Not intended for cross-process stability; depends on the in-process
 /// iteration order for collections (Dict uses BTreeMap so keys are sorted).
 pub fn value_structural_hash_key(v: &VmValue) -> String {
+    let mut out = String::new();
+    write_structural_hash_key(v, &mut out);
+    out
+}
+
+/// Writes the structural hash key for a value directly into `out`,
+/// avoiding intermediate allocations. Uses length-prefixed encoding
+/// for strings and dict keys to prevent separator collisions.
+fn write_structural_hash_key(v: &VmValue, out: &mut String) {
     match v {
-        VmValue::Nil => "nil:".into(),
-        VmValue::Bool(b) => format!("bool:{b}"),
-        VmValue::Int(n) => format!("int:{n}"),
-        VmValue::Float(n) => format!("float:{}", n.to_bits()),
-        VmValue::String(s) => format!("string:{}", s),
-        VmValue::Duration(ms) => format!("duration:{ms}"),
+        VmValue::Nil => out.push('N'),
+        VmValue::Bool(b) => {
+            out.push(if *b { 'T' } else { 'F' });
+        }
+        VmValue::Int(n) => {
+            out.push('i');
+            out.push_str(&n.to_string());
+            out.push(';');
+        }
+        VmValue::Float(n) => {
+            out.push('f');
+            out.push_str(&n.to_bits().to_string());
+            out.push(';');
+        }
+        VmValue::String(s) => {
+            // Length-prefixed: s<len>:<content> — no ambiguity from content
+            out.push('s');
+            out.push_str(&s.len().to_string());
+            out.push(':');
+            out.push_str(s);
+        }
+        VmValue::Duration(ms) => {
+            out.push('d');
+            out.push_str(&ms.to_string());
+            out.push(';');
+        }
         VmValue::List(items) => {
-            let inner: Vec<String> = items.iter().map(value_structural_hash_key).collect();
-            format!("list:[{}]", inner.join(","))
+            out.push('L');
+            for item in items.iter() {
+                write_structural_hash_key(item, out);
+                out.push(',');
+            }
+            out.push(']');
         }
         VmValue::Dict(map) => {
-            let inner: Vec<String> = map
-                .iter()
-                .map(|(k, v)| format!("{k}={}", value_structural_hash_key(v)))
-                .collect();
-            format!("dict:{{{}}}", inner.join(","))
+            out.push('D');
+            for (k, v) in map.iter() {
+                // Length-prefixed key
+                out.push_str(&k.len().to_string());
+                out.push(':');
+                out.push_str(k);
+                out.push('=');
+                write_structural_hash_key(v, out);
+                out.push(',');
+            }
+            out.push('}');
         }
         VmValue::Set(items) => {
-            let mut inner: Vec<String> = items.iter().map(value_structural_hash_key).collect();
-            inner.sort();
-            format!("set:{{{}}}", inner.join(","))
+            // Sets need sorted keys for order-independence
+            let mut keys: Vec<String> = items.iter().map(value_structural_hash_key).collect();
+            keys.sort();
+            out.push('S');
+            for k in &keys {
+                out.push_str(k);
+                out.push(',');
+            }
+            out.push('}');
         }
-        other => format!("{}:{}", other.type_name(), other.display()),
+        other => {
+            let tn = other.type_name();
+            out.push('o');
+            out.push_str(&tn.len().to_string());
+            out.push(':');
+            out.push_str(tn);
+            let d = other.display();
+            out.push_str(&d.len().to_string());
+            out.push(':');
+            out.push_str(&d);
+        }
     }
 }
 
@@ -767,5 +873,106 @@ pub fn compare_values(a: &VmValue, b: &VmValue) -> i32 {
         }
         (VmValue::String(x), VmValue::String(y)) => x.cmp(y) as i32,
         _ => 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn s(val: &str) -> VmValue {
+        VmValue::String(Rc::from(val))
+    }
+    fn i(val: i64) -> VmValue {
+        VmValue::Int(val)
+    }
+    fn list(items: Vec<VmValue>) -> VmValue {
+        VmValue::List(Rc::new(items))
+    }
+    fn dict(pairs: Vec<(&str, VmValue)>) -> VmValue {
+        VmValue::Dict(Rc::new(
+            pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
+        ))
+    }
+
+    #[test]
+    fn hash_key_cross_type_distinct() {
+        // Int(1) vs String("1") vs Bool(true) must all differ
+        let k_int = value_structural_hash_key(&i(1));
+        let k_str = value_structural_hash_key(&s("1"));
+        let k_bool = value_structural_hash_key(&VmValue::Bool(true));
+        assert_ne!(k_int, k_str);
+        assert_ne!(k_int, k_bool);
+        assert_ne!(k_str, k_bool);
+    }
+
+    #[test]
+    fn hash_key_string_with_separator_chars() {
+        // ["a,string:b"] (1-element list) vs ["a", "b"] (2-element list)
+        let one_elem = list(vec![s("a,string:b")]);
+        let two_elem = list(vec![s("a"), s("b")]);
+        assert_ne!(
+            value_structural_hash_key(&one_elem),
+            value_structural_hash_key(&two_elem),
+            "length-prefixed strings must prevent separator collisions"
+        );
+    }
+
+    #[test]
+    fn hash_key_dict_key_with_equals() {
+        // Dict with key "a=b" vs dict with key "a" and value containing "b"
+        let d1 = dict(vec![("a=b", i(1))]);
+        let d2 = dict(vec![("a", i(1))]);
+        assert_ne!(
+            value_structural_hash_key(&d1),
+            value_structural_hash_key(&d2)
+        );
+    }
+
+    #[test]
+    fn hash_key_nested_list_vs_flat() {
+        // [[1]] vs [1]
+        let nested = list(vec![list(vec![i(1)])]);
+        let flat = list(vec![i(1)]);
+        assert_ne!(
+            value_structural_hash_key(&nested),
+            value_structural_hash_key(&flat)
+        );
+    }
+
+    #[test]
+    fn hash_key_nil() {
+        assert_eq!(
+            value_structural_hash_key(&VmValue::Nil),
+            value_structural_hash_key(&VmValue::Nil)
+        );
+    }
+
+    #[test]
+    fn hash_key_float_zero_vs_neg_zero() {
+        let pos = VmValue::Float(0.0);
+        let neg = VmValue::Float(-0.0);
+        // 0.0 and -0.0 have different bit representations
+        assert_ne!(
+            value_structural_hash_key(&pos),
+            value_structural_hash_key(&neg)
+        );
+    }
+
+    #[test]
+    fn hash_key_equal_values_match() {
+        let a = list(vec![s("hello"), i(42), VmValue::Bool(false)]);
+        let b = list(vec![s("hello"), i(42), VmValue::Bool(false)]);
+        assert_eq!(value_structural_hash_key(&a), value_structural_hash_key(&b));
+    }
+
+    #[test]
+    fn hash_key_dict_with_comma_key() {
+        let d1 = dict(vec![("a,b", i(1))]);
+        let d2 = dict(vec![("a", i(1))]);
+        assert_ne!(
+            value_structural_hash_key(&d1),
+            value_structural_hash_key(&d2)
+        );
     }
 }

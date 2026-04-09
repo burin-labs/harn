@@ -2140,6 +2140,8 @@ that call `llm` or `llm_stream` to run without API keys.
 | Flag | Description |
 |---|---|
 | `--filter <pattern>` | Only run tests whose names contain `<pattern>` |
+| `--verbose` / `-v` | Show per-test timing and detailed failures |
+| `--timing` | Show per-test timing and summary statistics |
 | `--timeout <ms>` | Per-test timeout in milliseconds (default 30000) |
 | `--parallel` | Run test files concurrently |
 | `--junit <path>` | Write JUnit XML report to `<path>` |

@@ -1,0 +1,8 @@
+[harn] [1, 2, 3, 4]
+[harn] [1]
+[harn] [1]
+[harn] {a: 1, b: 2}
+[harn] {a: 2}
+[harn] {a: 1, b: 3, c: 4}
+[harn] hello world
+[harn] concat ok

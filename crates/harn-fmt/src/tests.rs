@@ -459,6 +459,48 @@ fn test_no_unnecessary_parens_same_op() {
 }
 
 #[test]
+fn test_preserves_parens_right_grouped_addition() {
+    // a + (b + c) must keep its explicit rhs grouping.
+    let source = r#"pipeline default(task) {
+  let x = a + (b + c)
+}"#;
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("a + (b + c)"),
+        "Expected parens preserved for right-grouped addition, got:\n{result}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
+fn test_preserves_parens_right_grouped_multiplication() {
+    // a * (b * c) must keep its explicit rhs grouping.
+    let source = r#"pipeline default(task) {
+  let x = a * (b * c)
+}"#;
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("a * (b * c)"),
+        "Expected parens preserved for right-grouped multiplication, got:\n{result}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
+fn test_preserves_parens_right_grouped_nil_coalescing() {
+    // a ?? (b ?? c) must keep its explicit rhs grouping.
+    let source = r#"pipeline default(task) {
+  let x = a ?? (b ?? c)
+}"#;
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("a ?? (b ?? c)"),
+        "Expected parens preserved for right-grouped nil coalescing, got:\n{result}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
 fn test_no_parens_for_natural_precedence() {
     // a + b * c — * binds tighter, no parens needed
     let source = r#"pipeline default(task) {

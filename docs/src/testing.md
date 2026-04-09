@@ -28,6 +28,9 @@ harn test conformance --tag agent
 
 # Verbose output
 harn test conformance --filter my_test -v
+
+# Timing summary without verbose failure details
+harn test conformance --timing --filter my_test
 ```
 
 ### Writing a conformance test

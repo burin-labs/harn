@@ -144,6 +144,7 @@ async fn main() {
                         args.junit.as_deref(),
                         args.timeout,
                         args.verbose,
+                        args.timing,
                     )
                     .await;
                 } else if args.selection.is_some() {

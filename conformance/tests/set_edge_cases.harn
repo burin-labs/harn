@@ -1,0 +1,37 @@
+pipeline test(task) {
+  // Sets with nested lists
+  let l1 = [1, 2]
+  let l2 = [3, 4]
+  let l3 = [1, 2]
+  let s1 = set([l1, l2, l3])
+  assert_eq(len(s1), 2)
+  // Sets with dicts via list
+  let d1 = {a: 1}
+  let d2 = {b: 2}
+  let d3 = {a: 1}
+  let s2 = set([d1, d2, d3])
+  assert_eq(len(s2), 2)
+  // Mixed types remain distinct
+  let s3 = set(1, "1", true)
+  assert_eq(len(s3), 3)
+  // set_union with list values
+  let a = set([l1, l2])
+  let b = set([l2, [5, 6]])
+  let u = set_union(a, b)
+  assert_eq(len(u), 3)
+  // set_intersect with list values
+  let i = set_intersect(a, b)
+  assert_eq(len(i), 1)
+  // set_difference with list values
+  let d = set_difference(a, b)
+  assert_eq(len(d), 1)
+  // Strings containing separator-like chars (hash collision regression)
+  let s4 = set("a,b", "a", "b")
+  assert_eq(len(s4), 3)
+  assert(set_contains(s4, "a,b"))
+  assert(set_contains(s4, "a"))
+  // Nil in sets
+  let s5 = set(nil, 1, nil)
+  assert_eq(len(s5), 2)
+  log("set edge cases ok")
+}

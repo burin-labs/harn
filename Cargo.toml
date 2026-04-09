@@ -27,3 +27,7 @@ categories = ["compilers", "command-line-utilities"]
 # backtraces. A strict win for inner-loop dev/test builds.
 [profile.dev]
 debug = "line-tables-only"
+
+[profile.release]
+lto = true
+codegen-units = 1

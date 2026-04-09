@@ -1,0 +1,26 @@
+pipeline test(task) {
+  // Basic slicing
+  log("hello"[1:3])
+  // Full string
+  log("hello"[0:5])
+  // From start
+  log("hello"[:3])
+  // To end
+  log("hello"[2:])
+  // Negative indices
+  log("hello"[-2:])
+  log("hello"[:-1])
+  // Empty slice produces empty string
+  assert_eq("hello"[2:2], "")
+  // Single char index
+  log("hello"[0])
+  log("hello"[-1])
+  // Unicode slicing
+  let emoji = "ab"
+  log(emoji[0])
+  log(emoji[1])
+  log(len(emoji))
+  // Empty string slice
+  assert_eq(""[:], "")
+  log("slicing ok")
+}

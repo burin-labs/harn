@@ -69,14 +69,14 @@ pub(crate) fn child_needs_parens(parent_op: &str, child: &Node, is_right: bool) 
             return true;
         }
 
-        // Correctness: right child at same precedence level needs parens
-        // unless the operator is the same AND associative.
+        // Correctness: right child at same precedence level needs parens.
+        //
+        // Even when the operator token matches, the formatter cannot prove
+        // the operation is safely associative across all runtime types
+        // (`+`/`*` on floats, for example), and the parser does not preserve
+        // explicit grouping nodes. Preserve the user's right-grouping.
         if is_right && c == p {
-            let safe =
-                parent_op == child_op.as_str() && matches!(parent_op, "+" | "*" | "||" | "&&");
-            if !safe {
-                return true;
-            }
+            return true;
         }
 
         // Clarity: always parenthesise && inside || (and vice-versa).

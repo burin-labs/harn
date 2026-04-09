@@ -129,7 +129,7 @@ impl super::Vm {
                     "map" => {
                         if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v))
                         {
-                            let mut results = Vec::new();
+                            let mut results = Vec::with_capacity(items.len());
                             for item in items.iter() {
                                 results.push(
                                     self.call_callable_value(callable, &[item.clone()], functions)
@@ -144,7 +144,7 @@ impl super::Vm {
                     "filter" => {
                         if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v))
                         {
-                            let mut results = Vec::new();
+                            let mut results = Vec::with_capacity(items.len());
                             for item in items.iter() {
                                 let result = self
                                     .call_callable_value(callable, &[item.clone()], functions)
@@ -220,7 +220,7 @@ impl super::Vm {
                     "flat_map" => {
                         if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v))
                         {
-                            let mut results = Vec::new();
+                            let mut results = Vec::with_capacity(items.len());
                             for item in items.iter() {
                                 let result = self
                                     .call_callable_value(callable, &[item.clone()], functions)
@@ -333,11 +333,11 @@ impl super::Vm {
                         Ok(VmValue::List(Rc::new(items[start..end].to_vec())))
                     }
                     "unique" => {
-                        let mut seen: Vec<VmValue> = Vec::new();
-                        let mut result = Vec::new();
+                        let mut seen = std::collections::HashSet::with_capacity(items.len());
+                        let mut result = Vec::with_capacity(items.len());
                         for item in items.iter() {
-                            if !seen.iter().any(|s| values_equal(s, item)) {
-                                seen.push(item.clone());
+                            let key = crate::value::value_structural_hash_key(item);
+                            if seen.insert(key) {
                                 result.push(item.clone());
                             }
                         }

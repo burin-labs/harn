@@ -1,0 +1,25 @@
+pipeline test(task) {
+  // List concat correctness
+  log([1, 2] + [3, 4])
+  log([] + [1])
+  log([1] + [])
+  // Dict merge
+  log({a: 1} + {b: 2})
+  // Dict merge override
+  log({a: 1} + {a: 2})
+  // Dict merge preserves keys
+  log({a: 1, b: 2} + {b: 3, c: 4})
+  // String concat
+  log("hello" + " " + "world")
+  // Repeated concat builds correctly
+  var list = []
+  var n = 0
+  while n < 50 {
+    list = list + [n]
+    n = n + 1
+  }
+  assert_eq(len(list), 50)
+  assert_eq(list[0], 0)
+  assert_eq(list[49], 49)
+  log("concat ok")
+}

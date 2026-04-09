@@ -1,27 +1,28 @@
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 thread_local! {
-    static REGEX_CACHE: RefCell<Vec<(String, regex::Regex)>> = const { RefCell::new(Vec::new()) };
+    static REGEX_CACHE: RefCell<HashMap<String, regex::Regex>> = RefCell::new(HashMap::new());
 }
 
 fn get_cached_regex(pattern: &str) -> Result<regex::Regex, VmError> {
     REGEX_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
-        if let Some(pos) = cache.iter().position(|(p, _)| p == pattern) {
-            return Ok(cache[pos].1.clone());
+        if let Some(re) = cache.get(pattern) {
+            return Ok(re.clone());
         }
         let re = regex::Regex::new(pattern).map_err(|e| {
             VmError::Thrown(VmValue::String(Rc::from(format!("Invalid regex: {e}"))))
         })?;
-        cache.push((pattern.to_string(), re.clone()));
-        if cache.len() > 64 {
-            cache.remove(0);
+        // Evict all if cache grows too large (simple size cap)
+        if cache.len() >= 128 {
+            cache.clear();
         }
+        cache.insert(pattern.to_string(), re.clone());
         Ok(re)
     })
 }

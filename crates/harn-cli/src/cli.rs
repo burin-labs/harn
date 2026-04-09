@@ -136,6 +136,9 @@ pub(crate) struct TestArgs {
     /// Show per-test timing and detailed failures.
     #[arg(short = 'v', long = "verbose", action = ArgAction::SetTrue)]
     pub verbose: bool,
+    /// Show per-test timing and summary statistics.
+    #[arg(long, action = ArgAction::SetTrue)]
+    pub timing: bool,
     /// Record LLM fixtures to .harn-fixtures/.
     #[arg(long)]
     pub record: bool,

@@ -40,6 +40,7 @@ harn test tests/ --filter "auth*"      # filter by pattern
 harn test tests/ --parallel            # run tests concurrently
 harn test tests/ --watch               # re-run on file changes
 harn test conformance --verbose        # show per-test timing
+harn test conformance --timing         # show timing summary without verbose failures
 harn test tests/ --record              # record LLM fixtures
 harn test tests/ --replay              # replay LLM fixtures
 ```
@@ -50,6 +51,7 @@ harn test tests/ --replay              # replay LLM fixtures
 | `--parallel` | Run tests concurrently |
 | `--watch` | Re-run tests on file changes |
 | `--verbose` / `-v` | Show per-test timing and detailed failures |
+| `--timing` | Show per-test timing plus summary statistics |
 | `--junit <path>` | Write JUnit XML report |
 | `--timeout <ms>` | Per-test timeout in milliseconds (default: 30000) |
 | `--record` | Record LLM responses to `.harn-fixtures/` |

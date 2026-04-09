@@ -6,18 +6,12 @@ use crate::vm::Vm;
 
 // --- Case conversion helpers ---
 
-fn split_snake(s: &str) -> Vec<String> {
-    s.split('_')
-        .filter(|p| !p.is_empty())
-        .map(|p| p.to_string())
-        .collect()
+fn split_snake(s: &str) -> Vec<&str> {
+    s.split('_').filter(|p| !p.is_empty()).collect()
 }
 
-fn split_kebab(s: &str) -> Vec<String> {
-    s.split('-')
-        .filter(|p| !p.is_empty())
-        .map(|p| p.to_string())
-        .collect()
+fn split_kebab(s: &str) -> Vec<&str> {
+    s.split('-').filter(|p| !p.is_empty()).collect()
 }
 
 /// Splits a camelCase or PascalCase string into lowercase words.
@@ -68,10 +62,10 @@ fn lowercase_first_str(s: &str) -> String {
     }
 }
 
-fn words_to_camel(words: &[String]) -> String {
+fn words_to_camel<S: AsRef<str>>(words: &[S]) -> String {
     let mut out = String::new();
     for (i, w) in words.iter().enumerate() {
-        let lower = w.to_lowercase();
+        let lower = w.as_ref().to_lowercase();
         if i == 0 {
             out.push_str(&lower);
         } else {
@@ -81,27 +75,33 @@ fn words_to_camel(words: &[String]) -> String {
     out
 }
 
-fn words_to_pascal(words: &[String]) -> String {
+fn words_to_pascal<S: AsRef<str>>(words: &[S]) -> String {
     words
         .iter()
-        .map(|w| uppercase_first_str(&w.to_lowercase()))
+        .map(|w| uppercase_first_str(&w.as_ref().to_lowercase()))
         .collect()
 }
 
-fn words_to_snake(words: &[String]) -> String {
-    words
-        .iter()
-        .map(|w| w.to_lowercase())
-        .collect::<Vec<_>>()
-        .join("_")
+fn words_to_snake<S: AsRef<str>>(words: &[S]) -> String {
+    let mut out = String::new();
+    for (i, w) in words.iter().enumerate() {
+        if i > 0 {
+            out.push('_');
+        }
+        out.push_str(&w.as_ref().to_lowercase());
+    }
+    out
 }
 
-fn words_to_kebab(words: &[String]) -> String {
-    words
-        .iter()
-        .map(|w| w.to_lowercase())
-        .collect::<Vec<_>>()
-        .join("-")
+fn words_to_kebab<S: AsRef<str>>(words: &[S]) -> String {
+    let mut out = String::new();
+    for (i, w) in words.iter().enumerate() {
+        if i > 0 {
+            out.push('-');
+        }
+        out.push_str(&w.as_ref().to_lowercase());
+    }
+    out
 }
 
 fn template_truthy(value: &VmValue) -> bool {

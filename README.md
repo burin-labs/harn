@@ -404,6 +404,7 @@ make fmt
 make lint
 make test
 make conformance
+harn test conformance --timing
 harn test conformance tests/worktree_runtime.harn
 make all
 ```

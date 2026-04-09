@@ -1,0 +1,24 @@
+pipeline test(task) {
+  // Basic integer dedup
+  log([1, 2, 2, 3, 1].unique())
+  // String dedup
+  log(["a", "b", "a"].unique())
+  // Mixed types stay distinct
+  log([1, "1", true].unique())
+  // Nested list dedup
+  log([[1, 2], [3, 4], [1, 2]].unique())
+  // Nested dict dedup
+  log([{a: 1}, {b: 2}, {a: 1}].unique())
+  // Empty list
+  log([].unique())
+  // Single element
+  log([42].unique())
+  // Nil dedup
+  log([nil, 1, nil].unique())
+  // Bool dedup
+  log([true, false, true, false].unique())
+  // Float dedup
+  log([1.5, 2.5, 1.5].unique())
+  // Strings with special chars (hash collision regression)
+  log(["a,b", "a", "b"].unique())
+}

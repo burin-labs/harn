@@ -111,6 +111,9 @@ echo 'hello' > conformance/tests/my_test.expected
 
 # Run it
 cargo run --bin harn -- test conformance --filter my_test
+
+# Show timing without the verbose failure dump
+cargo run --bin harn -- test conformance --timing --filter my_test
 ```
 
 Tests live in `conformance/tests/` (passing) and `conformance/errors/`

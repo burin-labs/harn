@@ -178,28 +178,45 @@ pub(crate) fn escape_json_string_vm(s: &str) -> String {
 }
 
 pub(crate) fn vm_value_to_json(val: &VmValue) -> String {
+    let mut out = String::new();
+    write_vm_value_to_json(val, &mut out);
+    out
+}
+
+fn write_vm_value_to_json(val: &VmValue, out: &mut String) {
     match val {
-        VmValue::String(s) => escape_json_string_vm(s),
-        VmValue::Int(n) => n.to_string(),
-        VmValue::Float(n) => n.to_string(),
-        VmValue::Bool(b) => b.to_string(),
-        VmValue::Nil => "null".to_string(),
-        VmValue::List(items) => {
-            let inner: Vec<String> = items.iter().map(vm_value_to_json).collect();
-            format!("[{}]", inner.join(","))
+        VmValue::String(s) => {
+            let escaped = escape_json_string_vm(s);
+            out.push_str(&escaped);
+        }
+        VmValue::Int(n) => out.push_str(&n.to_string()),
+        VmValue::Float(n) => out.push_str(&n.to_string()),
+        VmValue::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+        VmValue::Nil => out.push_str("null"),
+        VmValue::List(items) | VmValue::Set(items) => {
+            out.push('[');
+            for (i, item) in items.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                write_vm_value_to_json(item, out);
+            }
+            out.push(']');
         }
         VmValue::Dict(map) => {
-            let inner: Vec<String> = map
-                .iter()
-                .map(|(k, v)| format!("{}:{}", escape_json_string_vm(k), vm_value_to_json(v)))
-                .collect();
-            format!("{{{}}}", inner.join(","))
+            out.push('{');
+            for (i, (k, v)) in map.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                let escaped_key = escape_json_string_vm(k);
+                out.push_str(&escaped_key);
+                out.push(':');
+                write_vm_value_to_json(v, out);
+            }
+            out.push('}');
         }
-        VmValue::Set(items) => {
-            let inner: Vec<String> = items.iter().map(vm_value_to_json).collect();
-            format!("[{}]", inner.join(","))
-        }
-        _ => "null".to_string(),
+        _ => out.push_str("null"),
     }
 }
 
