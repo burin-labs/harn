@@ -234,6 +234,19 @@ fn min_side_effect<'a>(a: &'a str, b: &'a str) -> &'a str {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
+pub struct TurnPolicy {
+    /// When true, text-only responses in a tool-capable stage are treated as
+    /// invalid unless they switch phase / finish the stage. This keeps action
+    /// stages moving instead of drifting into narration.
+    pub require_action_or_yield: bool,
+    /// Optional visible prose budget for a single assistant turn. When the
+    /// assistant exceeds it, the recorded transcript keeps only a shortened
+    /// version and the next corrective nudge reminds the model to stay brief.
+    pub max_prose_chars: Option<usize>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
 pub struct ModelPolicy {
     pub provider: Option<String>,
     pub model: Option<String>,
@@ -252,10 +265,18 @@ pub struct ModelPolicy {
     /// the VM has no hardcoded tool names.
     pub tool_examples: Option<String>,
     /// Optional Harn closure called after each tool-calling turn.
-    /// Receives turn metadata; returns an optional user message to inject.
+    /// Receives turn metadata; returns either a string user message to inject,
+    /// a bool stop flag, or a dict like {message, stop}.
     /// Wrapped in EqIgnored so it doesn't affect PartialEq derivation.
     #[serde(skip)]
     pub post_turn_callback: Option<EqIgnored<VmValue>>,
+    /// When set, the stage stops after any tool-calling turn whose successful
+    /// results include one of these tool names. This is useful for
+    /// workflow-owned verify loops where a productive write turn should hand
+    /// control back to verification immediately.
+    pub stop_after_successful_tools: Option<Vec<String>>,
+    /// Turn-shape constraints for action stages.
+    pub turn_policy: Option<TurnPolicy>,
 }
 
 /// Wrapper that always compares equal, allowing non-Eq types in derived PartialEq structs.

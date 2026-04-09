@@ -843,6 +843,11 @@ pub async fn execute_stage_node(
                         .and_then(|v| v.as_dict())
                         .and_then(|d| d.get("post_turn_callback"))
                         .cloned(),
+                    turn_policy: node.model_policy.turn_policy.clone(),
+                    stop_after_successful_tools: node
+                        .model_policy
+                        .stop_after_successful_tools
+                        .clone(),
                     on_tool_call: node
                         .raw_model_policy
                         .as_ref()

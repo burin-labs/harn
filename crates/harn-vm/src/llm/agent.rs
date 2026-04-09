@@ -184,6 +184,42 @@ fn next_call_id() -> String {
     uuid::Uuid::now_v7().to_string()
 }
 
+#[derive(Default)]
+struct PostTurnDirective {
+    message: Option<String>,
+    stop: bool,
+}
+
+fn parse_post_turn_directive(value: &VmValue) -> PostTurnDirective {
+    match value {
+        VmValue::String(s) => {
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                PostTurnDirective::default()
+            } else {
+                PostTurnDirective {
+                    message: Some(trimmed.to_string()),
+                    stop: false,
+                }
+            }
+        }
+        VmValue::Bool(stop) => PostTurnDirective {
+            message: None,
+            stop: *stop,
+        },
+        VmValue::Dict(map) => {
+            let message = map
+                .get("message")
+                .map(VmValue::display)
+                .map(|msg| msg.trim().to_string())
+                .filter(|msg| !msg.is_empty());
+            let stop = matches!(map.get("stop"), Some(VmValue::Bool(true)));
+            PostTurnDirective { message, stop }
+        }
+        _ => PostTurnDirective::default(),
+    }
+}
+
 /// Tools that have no side effects and can be safely dispatched concurrently
 /// within a single assistant turn. These cover exploration/research calls
 /// that weaker coding models batch heavily during their ground phase; the
@@ -370,6 +406,12 @@ pub struct AgentLoopConfig {
     /// consecutive_single_tool_turns). If it returns a non-empty string, that
     /// string is injected as a user message before the next LLM call.
     pub post_turn_callback: Option<VmValue>,
+    /// Optional turn-shape constraints for action stages.
+    pub turn_policy: Option<crate::orchestration::TurnPolicy>,
+    /// Stop after a tool-calling turn that successfully used any of these
+    /// tool names. The whole turn still completes, so multiple write calls can
+    /// be batched in one response.
+    pub stop_after_successful_tools: Option<Vec<String>>,
     /// Pre-execution hook: called with `{tool_name, args}` before each tool call.
     /// Must return a dict: `{allow: bool}` to allow/deny, optionally `{args: dict}`
     /// to modify arguments. Returning `{allow: false, reason: "..."}` denies the call.
@@ -449,6 +491,79 @@ fn loop_state_requests_phase_change(text: &str, current_phase: &str) -> bool {
     }
 
     last_next_phase.is_some_and(|phase| phase != current_phase)
+}
+
+fn should_stop_after_successful_tools(
+    tool_results: &[serde_json::Value],
+    stop_tools: &[String],
+) -> bool {
+    tool_results
+        .iter()
+        .filter(|result| result["status"].as_str() == Some("ok"))
+        .filter_map(|result| result["tool_name"].as_str())
+        .any(|tool_name| stop_tools.iter().any(|wanted| wanted == tool_name))
+}
+
+fn prose_char_len(text: &str) -> usize {
+    text.trim().chars().count()
+}
+
+fn prose_exceeds_budget(
+    prose: &str,
+    turn_policy: Option<&crate::orchestration::TurnPolicy>,
+) -> bool {
+    let Some(limit) = turn_policy.and_then(|policy| policy.max_prose_chars) else {
+        return false;
+    };
+    prose_char_len(prose) > limit
+}
+
+fn trim_prose_for_history(
+    prose: &str,
+    turn_policy: Option<&crate::orchestration::TurnPolicy>,
+) -> String {
+    let trimmed = prose.trim();
+    let Some(limit) = turn_policy.and_then(|policy| policy.max_prose_chars) else {
+        return trimmed.to_string();
+    };
+    let chars: Vec<char> = trimmed.chars().collect();
+    if chars.len() <= limit {
+        return trimmed.to_string();
+    }
+    let kept: String = chars.into_iter().take(limit).collect();
+    format!("{kept}\n\n<assistant prose truncated by turn policy; keep prose brief and act>")
+}
+
+fn action_turn_nudge(
+    turn_policy: Option<&crate::orchestration::TurnPolicy>,
+    prose_too_long: bool,
+) -> Option<String> {
+    let policy = turn_policy?;
+    if !policy.require_action_or_yield {
+        return None;
+    }
+    let prose_clause = if let Some(limit) = policy.max_prose_chars {
+        format!("Keep prose to at most {limit} visible characters, then")
+    } else {
+        "Keep prose brief, then".to_string()
+    };
+    let emphasis = if prose_too_long {
+        " Your last response spent too much budget on prose."
+    } else {
+        ""
+    };
+    Some(format!(
+        "{prose_clause} either call at least one tool, switch phase, or output the done sentinel if the task is genuinely complete.{emphasis}"
+    ))
+}
+
+fn sentinel_without_action_nudge(turn_policy: Option<&crate::orchestration::TurnPolicy>) -> String {
+    let mut message = "You emitted the done sentinel without taking any tool action. The task is not complete yet. Use an available tool now, or switch phase if the workflow allows it. Do not output the done sentinel again until you have acted.".to_string();
+    if let Some(nudge) = action_turn_nudge(turn_policy, false) {
+        message.push(' ');
+        message.push_str(&nudge);
+    }
+    message
 }
 
 /// Write the full LLM request payload to a JSONL transcript file.
@@ -1457,13 +1572,15 @@ pub async fn run_agent_loop_internal(
         } else {
             Vec::new()
         };
+        let prose_too_long = prose_exceeds_budget(&text_prose, config.turn_policy.as_ref());
+        let shaped_text_prose = trim_prose_for_history(&text_prose, config.turn_policy.as_ref());
         // Surface the prose (not the raw text) to callers that read
         // `last_iteration_text` / `visible_text`. Tool call expressions are
         // structured data in `tool_calls`, not something the user should
         // see as the agent's "answer". This also means conversation history
         // will carry the prose, so future iterations don't see their own
         // prior call syntax as narration.
-        last_iteration_text = text_prose.clone();
+        last_iteration_text = shaped_text_prose.clone();
 
         // Check done_sentinel on EVERY response, not just text-only ones.
         // If present alongside tool calls, we still process the tools (so their
@@ -1504,11 +1621,7 @@ pub async fn run_agent_loop_internal(
         // If the model emitted the sentinel without having made any tool
         // calls, it's trying to declare done without doing any work.
         if sentinel_in_text && !has_acted && persistent && has_tools {
-            let corrective = "You emitted the done sentinel without making any tool calls. \
-                 You MUST use tools to complete the task — read source files, \
-                 create test files, and run verification before finishing. \
-                 Start by using lookup() or read() to explore the codebase."
-                .to_string();
+            let corrective = sentinel_without_action_nudge(config.turn_policy.as_ref());
             visible_messages.push(serde_json::json!({
                 "role": "user",
                 "content": corrective
@@ -1541,7 +1654,7 @@ pub async fn run_agent_loop_internal(
                 // is exactly the "visible_text leaked lookup()/read() into
                 // the refined prompt" bug we saw in the rewriter.
                 let assistant_content_for_history = if tool_parse_errors.is_empty() {
-                    text_prose.clone()
+                    shaped_text_prose.clone()
                 } else {
                     format!(
                         "<assistant turn partially elided: {} tool call(s) executed successfully \
@@ -1568,6 +1681,7 @@ pub async fn run_agent_loop_internal(
 
             let mut observations = String::new();
             let mut tools_used_this_iter = Vec::new();
+            let mut tool_results_this_iter: Vec<serde_json::Value> = Vec::new();
             let mut rejection_followups: Vec<String> = Vec::new();
             let tool_schemas = collect_tool_schemas(tools_val, opts.native_tools.as_deref());
 
@@ -2235,6 +2349,18 @@ pub async fn run_agent_loop_internal(
                 } else {
                     result_text
                 };
+                let tool_status = if is_rejected {
+                    "rejected"
+                } else if result_text.starts_with("Error:") || result_text.starts_with("ERROR:") {
+                    "error"
+                } else {
+                    "ok"
+                };
+                tool_results_this_iter.push(serde_json::json!({
+                    "tool_name": tool_name,
+                    "status": tool_status,
+                    "rejected": is_rejected,
+                }));
 
                 transcript_events.push(transcript_event(
                     "tool_execution",
@@ -2315,11 +2441,18 @@ pub async fn run_agent_loop_internal(
                     .iter()
                     .filter_map(|tc| tc["name"].as_str())
                     .collect();
+                let successful_tool_names: Vec<&str> = tool_results_this_iter
+                    .iter()
+                    .filter(|result| result["status"].as_str() == Some("ok"))
+                    .filter_map(|result| result["tool_name"].as_str())
+                    .collect();
                 let session_has_edit = all_tools_used
                     .iter()
                     .any(|t| t == "edit" || t == "scaffold" || t == "create");
                 let turn_info = serde_json::json!({
                     "tool_names": tool_names,
+                    "tool_results": tool_results_this_iter,
+                    "successful_tool_names": successful_tool_names,
                     "tool_count": tool_calls.len(),
                     "iteration": iteration,
                     "consecutive_single_tool_turns": consecutive_single_tool_turns,
@@ -2330,9 +2463,8 @@ pub async fn run_agent_loop_internal(
                     .ok_or_else(|| VmError::Runtime("no VM context".into()))
                 {
                     if let Ok(val) = vm.call_closure_pub(closure, &[cb_arg], &[]).await {
-                        let msg = val.display();
-                        let msg = msg.trim();
-                        if !msg.is_empty() {
+                        let directive = parse_post_turn_directive(&val);
+                        if let Some(msg) = directive.message {
                             crate::events::log_debug(
                                 "agent.post_turn",
                                 &format!("iter={iteration} injecting nudge ({} chars)", msg.len()),
@@ -2347,7 +2479,25 @@ pub async fn run_agent_loop_internal(
                             );
                             consecutive_single_tool_turns = 0;
                         }
+                        if directive.stop {
+                            crate::events::log_debug(
+                                "agent.post_turn",
+                                &format!("iter={iteration} requested stage stop"),
+                            );
+                            break;
+                        }
                     }
+                }
+            }
+            if let Some(stop_tools) = config.stop_after_successful_tools.as_ref() {
+                if should_stop_after_successful_tools(&tool_results_this_iter, stop_tools) {
+                    crate::events::log_debug(
+                        "agent.stop_after_successful_tools",
+                        &format!(
+                            "iter={iteration} requested stage stop after successful tool turn"
+                        ),
+                    );
+                    break;
                 }
             }
 
@@ -2427,7 +2577,7 @@ pub async fn run_agent_loop_internal(
         let assistant_content_for_history = if !tool_parse_errors.is_empty() {
             compact_malformed_assistant_turn(tool_parse_errors.len())
         } else {
-            text_prose.clone()
+            shaped_text_prose.clone()
         };
         append_message_to_contexts(
             &mut visible_messages,
@@ -2632,8 +2782,8 @@ pub async fn run_agent_loop_internal(
         // context with nudge messages and the "nudge → rephrase → nudge"
         // loop seen with chatty models.
         //
-        let nudge = custom_nudge
-            .clone()
+        let nudge = action_turn_nudge(config.turn_policy.as_ref(), prose_too_long)
+            .or_else(|| custom_nudge.clone())
             .unwrap_or_else(|| "Continue — use a tool call to make progress.".to_string());
         append_message_to_contexts(
             &mut visible_messages,
@@ -2815,6 +2965,14 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                     .unwrap_or_default()
             });
             let daemon_config = parse_daemon_loop_config(options.as_ref());
+            let turn_policy = options
+                .as_ref()
+                .and_then(|o| o.get("turn_policy"))
+                .map(|v| {
+                    let json = crate::llm::helpers::vm_value_to_json(v);
+                    serde_json::from_value::<crate::orchestration::TurnPolicy>(json)
+                        .unwrap_or_default()
+                });
             let mut opts = extract_llm_options(&args)?;
             let result = run_agent_loop_internal(
                 &mut opts,
@@ -2844,6 +3002,11 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                         .as_ref()
                         .and_then(|o| o.get("post_turn_callback"))
                         .cloned(),
+                    turn_policy,
+                    stop_after_successful_tools: crate::llm::helpers::opt_str_list(
+                        &options,
+                        "stop_after_successful_tools",
+                    ),
                     on_tool_call: options
                         .as_ref()
                         .and_then(|o| o.get("on_tool_call"))

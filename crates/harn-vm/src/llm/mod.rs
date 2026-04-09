@@ -100,7 +100,7 @@ use crate::vm::Vm;
 
 use self::api::{vm_build_llm_result, vm_call_completion_full};
 use self::daemon::parse_daemon_loop_config;
-use self::helpers::{opt_bool, opt_int, opt_str};
+use self::helpers::{opt_bool, opt_int, opt_str, opt_str_list};
 use self::stream::vm_stream_llm;
 use self::trace::trace_llm_call;
 
@@ -357,6 +357,13 @@ pub fn register_llm_builtins(vm: &mut Vm) {
             serde_json::from_value::<crate::orchestration::CapabilityPolicy>(json)
                 .unwrap_or_default()
         });
+        let turn_policy = options
+            .as_ref()
+            .and_then(|o| o.get("turn_policy"))
+            .map(|v| {
+                let json = crate::llm::helpers::vm_value_to_json(v);
+                serde_json::from_value::<crate::orchestration::TurnPolicy>(json).unwrap_or_default()
+            });
         let done_sentinel = opt_str(&options, "done_sentinel");
         let break_unless_phase = opt_str(&options, "break_unless_phase");
         let exit_when_verified = opt_bool(&options, "exit_when_verified");
@@ -390,6 +397,8 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                     .as_ref()
                     .and_then(|o| o.get("post_turn_callback"))
                     .cloned(),
+                turn_policy,
+                stop_after_successful_tools: opt_str_list(&options, "stop_after_successful_tools"),
                 on_tool_call: options
                     .as_ref()
                     .and_then(|o| o.get("on_tool_call"))

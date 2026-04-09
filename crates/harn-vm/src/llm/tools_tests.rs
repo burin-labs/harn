@@ -87,6 +87,30 @@ fn sample_tool_registry() -> VmValue {
             ("description", vm_str("Replacement body for replace_body.")),
         ]),
     );
+    params.insert(
+        "function_name".to_string(),
+        vm_dict(&[
+            ("type", vm_str("string")),
+            ("required", vm_bool(false)),
+            ("description", vm_str("Existing function name.")),
+        ]),
+    );
+    params.insert(
+        "import_statement".to_string(),
+        vm_dict(&[
+            ("type", vm_str("string")),
+            ("required", vm_bool(false)),
+            ("description", vm_str("Import line for add_import.")),
+        ]),
+    );
+    params.insert(
+        "ops".to_string(),
+        vm_dict(&[
+            ("type", vm_str("list")),
+            ("required", vm_bool(false)),
+            ("description", vm_str("Atomic same-file batch edit ops.")),
+        ]),
+    );
 
     let edit_tool = vm_dict(&[
         ("name", vm_str("edit")),
@@ -209,6 +233,38 @@ fn recovers_single_fenced_tool_call_when_it_is_the_entire_response() {
     assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
     assert_eq!(result.calls.len(), 1);
     assert_eq!(result.calls[0]["arguments"]["path"], json!("wrapped.go"));
+}
+
+#[test]
+fn parses_fenced_edit_batch_ops_with_nested_heredoc() {
+    let tools = sample_tool_registry();
+    let text = r#"```tool_code
+edit({ path: "tests/test_service.py", ops: [
+  { op: "replace_body", function_name: "test_handle", new_body: <<EOF
+value = 1
+assert value == 1
+EOF
+  },
+  { op: "add_import", import_statement: "from app.types import RequestContext" }
+]})
+```"#;
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
+    assert_eq!(result.calls.len(), 1);
+    assert_eq!(
+        result.calls[0]["arguments"]["path"],
+        json!("tests/test_service.py")
+    );
+    let ops = result.calls[0]["arguments"]["ops"].as_array().unwrap();
+    assert_eq!(ops.len(), 2);
+    assert_eq!(ops[0]["op"], json!("replace_body"));
+    assert_eq!(ops[0]["function_name"], json!("test_handle"));
+    assert_eq!(ops[0]["new_body"], json!("value = 1\nassert value == 1"));
+    assert_eq!(ops[1]["op"], json!("add_import"));
+    assert_eq!(
+        ops[1]["import_statement"],
+        json!("from app.types import RequestContext")
+    );
 }
 
 #[test]

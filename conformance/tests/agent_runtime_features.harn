@@ -74,4 +74,27 @@ pipeline test(task) {
   },
   )
   println(transcript_summary(loop_compacted?.transcript).contains("loop compact"))
+  let stopped_after_tool_turn = agent_loop(
+    "Inspect the workspace",
+    "You are helpful",
+    {
+    provider: "mock",
+    tools: list_tools(),
+    tool_format: "native",
+    max_iterations: 3,
+    post_turn_callback: { info ->
+      if info?.tool_results?.count ?? 0 > 0
+        && info?.tool_results[0]?.tool_name == "list_directory"
+        && info?.tool_results[0]?.status == "ok" {
+        return {message: "handoff now", stop: true}
+      }
+      return ""
+    },
+  },
+  )
+  println(stopped_after_tool_turn?.iterations == 1)
+  println(
+    json_stringify(transcript_messages(stopped_after_tool_turn?.transcript))
+    .contains("handoff now"),
+  )
 }

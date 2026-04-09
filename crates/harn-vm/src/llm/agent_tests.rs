@@ -1,10 +1,14 @@
 use super::{
-    compact_malformed_assistant_turn, extract_retry_after_ms, is_read_only_tool,
-    loop_state_requests_phase_change, run_agent_loop_internal, AgentLoopConfig,
+    action_turn_nudge, compact_malformed_assistant_turn, extract_retry_after_ms,
+    is_read_only_tool, loop_state_requests_phase_change, prose_exceeds_budget,
+    run_agent_loop_internal, sentinel_without_action_nudge, should_stop_after_successful_tools,
+    trim_prose_for_history, AgentLoopConfig,
 };
 use crate::llm::api::LlmCallOptions;
 use crate::llm::daemon::{persist_snapshot, DaemonLoopConfig, DaemonSnapshot};
+use crate::orchestration::TurnPolicy;
 use crate::value::{VmError, VmValue};
+use serde_json::json;
 use std::rc::Rc;
 
 fn base_opts(messages: Vec<serde_json::Value>) -> LlmCallOptions {
@@ -65,6 +69,8 @@ fn base_agent_config() -> AgentLoopConfig {
         loop_detect_skip: 0,
         tool_examples: None,
         post_turn_callback: None,
+        turn_policy: None,
+        stop_after_successful_tools: None,
         on_tool_call: None,
         on_tool_result: None,
     }
@@ -164,6 +170,76 @@ fn write_tools_not_read_only() {
     assert!(!is_read_only_tool("delete"));
     assert!(!is_read_only_tool("exec"));
     assert!(!is_read_only_tool(""));
+}
+
+#[test]
+fn stop_after_successful_tools_matches_successful_turn() {
+    let stop_tools = vec!["edit".to_string(), "scaffold".to_string()];
+    let tool_results = vec![
+        json!({"tool_name": "read", "status": "ok"}),
+        json!({"tool_name": "edit", "status": "ok"}),
+    ];
+    assert!(should_stop_after_successful_tools(
+        &tool_results,
+        &stop_tools
+    ));
+}
+
+#[test]
+fn stop_after_successful_tools_ignores_failed_or_unlisted_tools() {
+    let stop_tools = vec!["edit".to_string()];
+    let failed_results = vec![json!({"tool_name": "edit", "status": "error"})];
+    assert!(!should_stop_after_successful_tools(
+        &failed_results,
+        &stop_tools
+    ));
+
+    let unrelated_results = vec![json!({"tool_name": "read", "status": "ok"})];
+    assert!(!should_stop_after_successful_tools(
+        &unrelated_results,
+        &stop_tools
+    ));
+}
+
+#[test]
+fn prose_budget_detection_and_trimming_work() {
+    let policy = TurnPolicy {
+        require_action_or_yield: true,
+        max_prose_chars: Some(12),
+    };
+    assert!(prose_exceeds_budget(
+        "This prose is definitely too long.",
+        Some(&policy)
+    ));
+    let trimmed = trim_prose_for_history("This prose is definitely too long.", Some(&policy));
+    assert!(trimmed.contains("assistant prose truncated by turn policy"));
+}
+
+#[test]
+fn action_turn_nudge_mentions_action_or_yield() {
+    let policy = TurnPolicy {
+        require_action_or_yield: true,
+        max_prose_chars: Some(120),
+    };
+    let msg = action_turn_nudge(Some(&policy), true).expect("nudge");
+    assert!(
+        msg.contains("either call at least one tool, switch phase, or output the done sentinel")
+    );
+    assert!(msg.contains("120"));
+    assert!(msg.contains("too much budget on prose"));
+}
+
+#[test]
+fn sentinel_without_action_nudge_stays_stage_agnostic() {
+    let policy = TurnPolicy {
+        require_action_or_yield: true,
+        max_prose_chars: Some(180),
+    };
+    let msg = sentinel_without_action_nudge(Some(&policy));
+    assert!(msg.contains("without taking any tool action"));
+    assert!(msg.contains("Use an available tool now, or switch phase"));
+    assert!(!msg.contains("lookup() or read()"));
+    assert!(msg.contains("Keep prose to at most 180 visible characters"));
 }
 
 #[tokio::test(flavor = "current_thread")]

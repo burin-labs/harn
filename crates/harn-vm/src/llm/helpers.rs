@@ -1058,7 +1058,10 @@ pub(crate) fn extract_llm_options(args: &[VmValue]) -> Result<super::api::LlmCal
     Ok(opts)
 }
 
-fn opt_str_list(options: &Option<BTreeMap<String, VmValue>>, key: &str) -> Option<Vec<String>> {
+pub(crate) fn opt_str_list(
+    options: &Option<BTreeMap<String, VmValue>>,
+    key: &str,
+) -> Option<Vec<String>> {
     let val = options.as_ref()?.get(key)?;
     match val {
         VmValue::List(list) => {

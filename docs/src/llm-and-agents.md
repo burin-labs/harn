@@ -207,6 +207,9 @@ Same as `llm_call`, plus additional options:
 | `consolidate_on_idle` | bool | `false` | Run transcript auto-compaction before persisting an idle daemon snapshot |
 | `context_callback` | closure | nil | Per-turn hook that can rewrite prompt-visible `messages` and/or the effective `system` prompt before the next LLM call |
 | `context_filter` | closure | nil | Alias for `context_callback` |
+| `post_turn_callback` | closure | nil | Hook called after each tool turn. Receives turn metadata and may inject a message, request an immediate stage stop, or both |
+| `turn_policy` | dict | nil | Turn-shape policy for action stages. Supports `require_action_or_yield: bool` and `max_prose_chars: int` |
+| `stop_after_successful_tools` | list<string> | nil | Stop after a tool-calling turn whose successful results include one of these tool names. Useful for workflow-owned verify loops such as `["edit", "scaffold"]` |
 | `loop_detect_warn` | int | `2` | Consecutive identical tool calls before appending a redirection hint |
 | `loop_detect_block` | int | `3` | Consecutive identical tool calls before replacing the result with a hard redirect |
 | `loop_detect_skip` | int | `4` | Consecutive identical tool calls before skipping execution entirely |
@@ -284,6 +287,50 @@ let result = agent_loop(task, "You are a coding assistant.", {
   persistent: true,
   context_callback: hide_old_assistant_turns
 })
+```
+
+### Post-turn callback
+
+`post_turn_callback` runs after a tool-calling turn completes. Use it when the
+workflow should react to the tool outcomes directly instead of waiting for the
+model to emit another message.
+
+The callback receives:
+
+```harn
+{
+  tool_names: list,
+  tool_results: list,
+  successful_tool_names: list,
+  tool_count: int,
+  iteration: int,
+  consecutive_single_tool_turns: int,
+  session_has_edit: bool,
+}
+```
+
+Each `tool_results` entry has:
+
+```harn
+{tool_name: string, status: "ok" | "error" | "rejected", rejected: bool}
+```
+
+It may return:
+
+- a `string` to inject as the next user-visible message
+- a `bool` where `true` stops the current stage immediately after the turn
+- a `dict` with optional `message` and `stop` fields
+
+Example: stop after the first successful write turn, but still allow multiple
+edits in that same turn.
+
+```harn
+fn stop_after_successful_write(turn) {
+  if turn?.successful_tool_names?.contains("edit") {
+    return {stop: true}
+  }
+  return ""
+}
 ```
 
 ### Example with retry
