@@ -2,6 +2,23 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.61
+
+### Fixed
+
+- **CLI execution context now matches test/runtime execution** — direct `harn`
+  execution now installs the same execution cwd/source-dir context that the
+  test runner uses, which fixes `metadata_runtime`/`scan_directory(...)`
+  behavior when source-relative filesystem operations are evaluated outside the
+  test harness.
+- **Source-relative scan roots no longer drift from filesystem builtins** —
+  `scan_directory(...)` now resolves through the same source-relative path
+  helper as `read_file`, `write_file`, and related builtins instead of carrying
+  a separate fallback path stack.
+- **Removed stale scan registration plumbing** — the stdlib builtin registry no
+  longer threads an unused base-path parameter through scan builtin
+  registration.
+
 ## v0.5.60
 
 ### Added
