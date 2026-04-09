@@ -2,6 +2,33 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.55
+
+### Added
+
+- **Agent turn policies** — new `turn_policy` option on `agent_loop` and
+  workflow stage model policies. `require_action_or_yield: true` nudges the
+  model to call tools or switch phase instead of narrating, and
+  `max_prose_chars` trims over-long prose from transcript history to keep
+  context lean in action stages.
+- **Post-turn stage stops** — `post_turn_callback` now accepts richer return
+  types: a string (inject a user message), a bool (`true` stops the stage
+  immediately), or a dict `{message, stop}` for both. The callback also
+  receives `tool_results` (with per-tool `status` and `tool_name`) and
+  `successful_tool_names` in its turn metadata.
+- **`stop_after_successful_tools`** — new `agent_loop` / model-policy option
+  that stops the current stage after a tool-calling turn whose successful
+  results include one of the listed tool names. Useful for workflow-owned
+  verify loops where a productive write turn should hand control back to the
+  orchestrator immediately.
+
+### Changed
+
+- **Sentinel-without-action nudge is stage-agnostic** — the corrective message
+  injected when the model emits the done sentinel without calling tools no
+  longer mentions specific tool names (`lookup()`/`read()`), making it
+  appropriate for any stage shape.
+
 ## v0.5.54
 
 ### Added

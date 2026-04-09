@@ -209,7 +209,7 @@ Same as `llm_call`, plus additional options:
 | `context_filter` | closure | nil | Alias for `context_callback` |
 | `post_turn_callback` | closure | nil | Hook called after each tool turn. Receives turn metadata and may inject a message, request an immediate stage stop, or both |
 | `turn_policy` | dict | nil | Turn-shape policy for action stages. Supports `require_action_or_yield: bool` and `max_prose_chars: int` |
-| `stop_after_successful_tools` | list<string> | nil | Stop after a tool-calling turn whose successful results include one of these tool names. Useful for workflow-owned verify loops such as `["edit", "scaffold"]` |
+| `stop_after_successful_tools` | `list<string>` | nil | Stop after a tool-calling turn whose successful results include one of these tool names. Useful for workflow-owned verify loops such as `["edit", "scaffold"]` |
 | `loop_detect_warn` | int | `2` | Consecutive identical tool calls before appending a redirection hint |
 | `loop_detect_block` | int | `3` | Consecutive identical tool calls before replacing the result with a hard redirect |
 | `loop_detect_skip` | int | `4` | Consecutive identical tool calls before skipping execution entirely |
