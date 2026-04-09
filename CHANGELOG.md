@@ -2,7 +2,7 @@
 
 All notable changes to Harn are documented in this file.
 
-## v0.5.57
+## v0.5.58
 
 ### Added
 
@@ -25,6 +25,11 @@ All notable changes to Harn are documented in this file.
   variable in the catch body, enabling type-checked error handling.
 - **Extended typeof narrowing** — `type_of(x) == "T"` now narrows single
   named types (not just unions), enabling chained exhaustiveness checks.
+
+## v0.5.57
+
+### Added
+
 - **Unified runtime schema helpers** — new builtins `schema_is`,
   `schema_expect`, `schema_from_json_schema`, `schema_from_openapi_schema`,
   and `schema_to_openapi_schema` join the existing schema validation surface so
