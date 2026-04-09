@@ -1,0 +1,5 @@
+import "std/math"
+
+pipeline test(task) {
+  kmeans([[1, 2], [3]], 1)
+}

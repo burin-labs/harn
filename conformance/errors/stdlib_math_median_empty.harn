@@ -1,0 +1,5 @@
+import "std/math"
+
+pipeline test(task) {
+  median([])
+}
