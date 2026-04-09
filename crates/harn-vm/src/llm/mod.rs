@@ -201,6 +201,7 @@ pub fn reset_llm_state() {
     trace::reset_trace_state();
     provider::register_default_providers();
     rate_limit::reset_rate_limit_state();
+    mock::reset_llm_mock_state();
 }
 
 /// Register LLM builtins on a VM.
@@ -408,6 +409,116 @@ pub fn register_llm_builtins(vm: &mut Vm) {
     conversation::register_conversation_builtins(vm);
     config_builtins::register_config_builtins(vm);
     cost::register_cost_builtins(vm);
+    register_llm_mock_builtins(vm);
+}
+
+/// Register llm_mock / llm_mock_calls / llm_mock_clear builtins.
+fn register_llm_mock_builtins(vm: &mut Vm) {
+    use mock::{get_llm_mock_calls, push_llm_mock, reset_llm_mock_state, LlmMock};
+
+    // llm_mock(response) -> nil
+    // Queues a configurable mock LLM response.
+    // response = {text?, tool_calls?, match?, input_tokens?, output_tokens?,
+    //             thinking?, stop_reason?, model?}
+    vm.register_builtin("llm_mock", |args, _out| {
+        let config = match args.first() {
+            Some(VmValue::Dict(d)) => d,
+            _ => {
+                return Err(crate::value::VmError::Runtime(
+                    "llm_mock: expected a dict argument".to_string(),
+                ))
+            }
+        };
+
+        let text = config.get("text").map(|v| v.display()).unwrap_or_default();
+
+        let tool_calls = match config.get("tool_calls") {
+            Some(VmValue::List(list)) => list
+                .iter()
+                .map(helpers::vm_value_to_json)
+                .collect::<Vec<_>>(),
+            _ => Vec::new(),
+        };
+
+        let match_pattern = config.get("match").and_then(|v| {
+            if matches!(v, VmValue::Nil) {
+                None
+            } else {
+                Some(v.display())
+            }
+        });
+
+        let input_tokens = config.get("input_tokens").and_then(|v| v.as_int());
+        let output_tokens = config.get("output_tokens").and_then(|v| v.as_int());
+        let thinking = config.get("thinking").and_then(|v| {
+            if matches!(v, VmValue::Nil) {
+                None
+            } else {
+                Some(v.display())
+            }
+        });
+        let stop_reason = config.get("stop_reason").and_then(|v| {
+            if matches!(v, VmValue::Nil) {
+                None
+            } else {
+                Some(v.display())
+            }
+        });
+        let model = config
+            .get("model")
+            .map(|v| v.display())
+            .unwrap_or_else(|| "mock".to_string());
+
+        push_llm_mock(LlmMock {
+            text,
+            tool_calls,
+            match_pattern,
+            input_tokens,
+            output_tokens,
+            thinking,
+            stop_reason,
+            model,
+        });
+        Ok(VmValue::Nil)
+    });
+
+    // llm_mock_calls() -> list of {messages, system, tools}
+    vm.register_builtin("llm_mock_calls", |_args, _out| {
+        let calls = get_llm_mock_calls();
+        let result: Vec<VmValue> = calls
+            .iter()
+            .map(|c| {
+                let mut dict = std::collections::BTreeMap::new();
+                let messages: Vec<VmValue> = c.messages.iter().map(json_to_vm_value).collect();
+                dict.insert("messages".to_string(), VmValue::List(Rc::new(messages)));
+                dict.insert(
+                    "system".to_string(),
+                    match &c.system {
+                        Some(s) => VmValue::String(Rc::from(s.as_str())),
+                        None => VmValue::Nil,
+                    },
+                );
+                dict.insert(
+                    "tools".to_string(),
+                    match &c.tools {
+                        Some(t) => {
+                            let tools: Vec<VmValue> = t.iter().map(json_to_vm_value).collect();
+                            VmValue::List(Rc::new(tools))
+                        }
+                        None => VmValue::Nil,
+                    },
+                );
+                VmValue::Dict(Rc::new(dict))
+            })
+            .collect();
+        Ok(VmValue::List(Rc::new(result)))
+    });
+
+    // llm_mock_clear() -> nil
+    vm.register_builtin("llm_mock_clear", |_args, _out| {
+        reset_llm_mock_state();
+        Ok(VmValue::Nil)
+    });
 }
 
 /// Register llm_stream builtin.

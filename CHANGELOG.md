@@ -2,6 +2,18 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.54
+
+### Added
+
+- **Configurable mock LLM responses** — `llm_mock(response)` queues specific
+  text, tool calls, or mixed responses for the `mock` provider. Supports FIFO
+  queuing (consumed in order) and reusable glob-pattern matching against prompt
+  content. `llm_mock_calls()` returns all calls made to the mock provider for
+  test assertions, and `llm_mock_clear()` resets mock state between tests.
+  Falls through to the existing deterministic mock behavior when no mocks are
+  queued.
+
 ## v0.5.53
 
 ### Added

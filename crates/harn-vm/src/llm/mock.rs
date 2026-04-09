@@ -19,12 +19,173 @@ pub enum ToolRecordingMode {
     Replay,
 }
 
+// ── Configurable LLM mock responses ─────────────────────────────────
+
+pub(crate) struct LlmMock {
+    pub text: String,
+    pub tool_calls: Vec<serde_json::Value>,
+    pub match_pattern: Option<String>, // None = FIFO (consumed), Some = glob (reusable)
+    pub input_tokens: Option<i64>,
+    pub output_tokens: Option<i64>,
+    pub thinking: Option<String>,
+    pub stop_reason: Option<String>,
+    pub model: String,
+}
+
+#[derive(Clone)]
+pub(crate) struct LlmMockCall {
+    pub messages: Vec<serde_json::Value>,
+    pub system: Option<String>,
+    pub tools: Option<Vec<serde_json::Value>>,
+}
+
 thread_local! {
     static LLM_REPLAY_MODE: RefCell<LlmReplayMode> = const { RefCell::new(LlmReplayMode::Off) };
     static LLM_FIXTURE_DIR: RefCell<String> = const { RefCell::new(String::new()) };
     static TOOL_RECORDING_MODE: RefCell<ToolRecordingMode> = const { RefCell::new(ToolRecordingMode::Off) };
     static TOOL_RECORDINGS: RefCell<Vec<ToolCallRecord>> = const { RefCell::new(Vec::new()) };
     static TOOL_REPLAY_FIXTURES: RefCell<Vec<ToolCallRecord>> = const { RefCell::new(Vec::new()) };
+    static LLM_MOCKS: RefCell<Vec<LlmMock>> = const { RefCell::new(Vec::new()) };
+    static LLM_MOCK_CALLS: RefCell<Vec<LlmMockCall>> = const { RefCell::new(Vec::new()) };
+}
+
+pub(crate) fn push_llm_mock(mock: LlmMock) {
+    LLM_MOCKS.with(|v| v.borrow_mut().push(mock));
+}
+
+pub(crate) fn get_llm_mock_calls() -> Vec<LlmMockCall> {
+    LLM_MOCK_CALLS.with(|v| v.borrow().clone())
+}
+
+pub(crate) fn reset_llm_mock_state() {
+    LLM_MOCKS.with(|v| v.borrow_mut().clear());
+    LLM_MOCK_CALLS.with(|v| v.borrow_mut().clear());
+}
+
+fn record_llm_mock_call(
+    messages: &[serde_json::Value],
+    system: Option<&str>,
+    native_tools: Option<&[serde_json::Value]>,
+) {
+    LLM_MOCK_CALLS.with(|v| {
+        v.borrow_mut().push(LlmMockCall {
+            messages: messages.to_vec(),
+            system: system.map(|s| s.to_string()),
+            tools: native_tools.map(|t| t.to_vec()),
+        });
+    });
+}
+
+/// Build an LlmResult from a matched mock.
+fn build_mock_result(mock: &LlmMock, last_msg_len: usize) -> LlmResult {
+    let mut blocks = Vec::new();
+
+    // Add text block if present
+    if !mock.text.is_empty() {
+        blocks.push(serde_json::json!({
+            "type": "output_text",
+            "text": mock.text,
+            "visibility": "public",
+        }));
+    }
+
+    // Build tool_calls with auto-generated IDs
+    let mut tool_calls = Vec::new();
+    for (i, tc) in mock.tool_calls.iter().enumerate() {
+        let id = format!("mock_call_{}", i + 1);
+        let name = tc.get("name").and_then(|n| n.as_str()).unwrap_or("unknown");
+        let arguments = tc
+            .get("arguments")
+            .cloned()
+            .unwrap_or(serde_json::json!({}));
+        tool_calls.push(serde_json::json!({
+            "id": id,
+            "type": "tool_call",
+            "name": name,
+            "arguments": arguments,
+        }));
+        blocks.push(serde_json::json!({
+            "type": "tool_call",
+            "id": id,
+            "name": name,
+            "arguments": arguments,
+            "visibility": "internal",
+        }));
+    }
+
+    LlmResult {
+        text: mock.text.clone(),
+        tool_calls,
+        input_tokens: mock.input_tokens.unwrap_or(last_msg_len as i64),
+        output_tokens: mock.output_tokens.unwrap_or(30),
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        model: mock.model.clone(),
+        provider: "mock".to_string(),
+        thinking: mock.thinking.clone(),
+        stop_reason: mock.stop_reason.clone(),
+        blocks,
+    }
+}
+
+/// Multi-segment glob match: split on `*` and check segments appear in order.
+/// Handles `*`, `prefix*`, `*suffix`, `*contains*`, `pre*mid*suf`, etc.
+fn mock_glob_match(pattern: &str, text: &str) -> bool {
+    if pattern == "*" {
+        return true;
+    }
+    if !pattern.contains('*') {
+        return pattern == text;
+    }
+    let parts: Vec<&str> = pattern.split('*').collect();
+    let mut remaining = text;
+    for (i, part) in parts.iter().enumerate() {
+        if part.is_empty() {
+            continue;
+        }
+        if i == 0 {
+            if !remaining.starts_with(part) {
+                return false;
+            }
+            remaining = &remaining[part.len()..];
+        } else if i == parts.len() - 1 {
+            if !remaining.ends_with(part) {
+                return false;
+            }
+            remaining = "";
+        } else {
+            match remaining.find(part) {
+                Some(pos) => remaining = &remaining[pos + part.len()..],
+                None => return false,
+            }
+        }
+    }
+    true
+}
+
+/// Try to find and return a matching mock response.
+/// Returns Some(LlmResult) if a mock matched, None to fall through to default.
+fn try_match_mock(last_msg: &str) -> Option<LlmResult> {
+    LLM_MOCKS.with(|mocks| {
+        let mut mocks = mocks.borrow_mut();
+
+        // 1. FIFO: first mock without a match pattern (consumed)
+        if let Some(idx) = mocks.iter().position(|m| m.match_pattern.is_none()) {
+            let mock = mocks.remove(idx);
+            return Some(build_mock_result(&mock, last_msg.len()));
+        }
+
+        // 2. Pattern match: scan in reverse (last registered wins)
+        for mock in mocks.iter().rev() {
+            if let Some(ref pattern) = mock.match_pattern {
+                if mock_glob_match(pattern, last_msg) {
+                    return Some(build_mock_result(mock, last_msg.len()));
+                }
+            }
+        }
+
+        None
+    })
 }
 
 /// Set LLM replay mode (record/replay) and fixture directory.
@@ -156,17 +317,28 @@ fn mock_required_args(tool_schema: &serde_json::Value) -> serde_json::Value {
 }
 
 /// Mock LLM provider -- deterministic responses for testing without API keys.
+/// When configurable mocks have been registered via `llm_mock()`, those are
+/// checked first (FIFO queue, then pattern matching). Falls through to the
+/// default deterministic behavior when no mocks match.
 pub(crate) fn mock_llm_response(
     messages: &[serde_json::Value],
     system: Option<&str>,
     native_tools: Option<&[serde_json::Value]>,
 ) -> LlmResult {
+    // Always record the call for inspection via llm_mock_calls().
+    record_llm_mock_call(messages, system, native_tools);
+
     // Extract the last user message for generating a deterministic response.
     let last_msg = messages
         .last()
         .and_then(|m| m.get("content"))
         .and_then(|c| c.as_str())
         .unwrap_or("");
+
+    // Check configurable mocks first.
+    if let Some(result) = try_match_mock(last_msg) {
+        return result;
+    }
 
     // If tools are provided, generate a mock tool call for the first tool.
     // Fill required parameters with placeholder values so mock calls pass

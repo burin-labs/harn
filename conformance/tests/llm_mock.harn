@@ -1,0 +1,34 @@
+pipeline default() {
+  // Text mock
+  llm_mock({text: "Paris is the capital."})
+  let r1 = llm_call("What is the capital?", nil, {provider: "mock"})
+  println(r1.text)
+  // Tool call mock
+  llm_mock({tool_calls: [{name: "read_file", arguments: {path: "main.rs"}}]})
+  let r2 = llm_call("Read the file", nil, {provider: "mock"})
+  println(len(r2.tool_calls))
+  println(r2.tool_calls[0].name)
+  // Mixed text + tool calls
+  llm_mock({text: "Checking file.", tool_calls: [{name: "search", arguments: {query: "test"}}]})
+  let r3 = llm_call("Search", nil, {provider: "mock"})
+  println(r3.text)
+  println(r3.tool_calls[0].name)
+  // FIFO ordering
+  llm_mock({text: "first"})
+  llm_mock({text: "second"})
+  println(llm_call("a", nil, {provider: "mock"}).text)
+  println(llm_call("b", nil, {provider: "mock"}).text)
+  // Fallback to default when empty
+  let fb = llm_call("hello world", nil, {provider: "mock"})
+  println(contains(fb.text, "Mock response"))
+  // Pattern matching (not consumed)
+  llm_mock({text: "matched!", match: "*hello*"})
+  println(llm_call("say hello please", nil, {provider: "mock"}).text)
+  println(llm_call("say hello again", nil, {provider: "mock"}).text)
+  // Call inspection
+  let calls = llm_mock_calls()
+  println(len(calls) > 0)
+  // Clear
+  llm_mock_clear()
+  println(len(llm_mock_calls()))
+}

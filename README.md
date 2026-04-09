@@ -141,6 +141,10 @@ enforcement.
   `import "std/testing"` adds higher-level helpers such as
   `mock_host_result(...)`, `mock_host_error(...)`, and
   `assert_host_called(...)` for ordinary Harn tests.
+- Configurable LLM mock responses via `llm_mock(...)`, `llm_mock_calls()`,
+  and `llm_mock_clear()` — queue specific text, tool calls, or mixed
+  responses for the mock provider. Supports FIFO queuing and glob-pattern
+  matching against prompts.
 - Eval suite manifests and baseline comparisons via `eval_suite_manifest(...)`,
   `eval_suite_run(...)`, and `harn eval <manifest.json>`, so grouped replay
   regression suites are first-class runtime data instead of external scripts.

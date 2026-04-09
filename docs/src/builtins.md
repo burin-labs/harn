@@ -639,6 +639,32 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `llm_session_cost()` | — | dict | Session totals: `{total_cost, input_tokens, output_tokens, call_count}` |
 | `llm_budget(max_cost)` | max_cost: float | nil | Set session budget in USD. LLM calls throw if exceeded |
 | `llm_budget_remaining()` | — | float or nil | Remaining budget (nil if no budget set) |
+| `llm_mock(response)` | response: dict | nil | Queue a mock LLM response. Dict supports `text`, `tool_calls`, `match` (glob), `input_tokens`, `output_tokens`, `thinking`, `stop_reason`, `model` |
+| `llm_mock_calls()` | — | list | Return list of `{messages, system, tools}` for all calls made to the mock provider |
+| `llm_mock_clear()` | — | nil | Clear all queued mock responses and recorded calls |
+
+FIFO mocks (no `match` field) are consumed in order. Pattern-matched mocks
+(with `match`) persist and match against the last user message content using
+glob patterns. When no mocks match, the default deterministic mock behavior
+is used.
+
+```harn
+// Queue specific responses for the mock provider
+llm_mock({text: "The answer is 42."})
+llm_mock({
+  text: "Let me check that.",
+  tool_calls: [{name: "read_file", arguments: {path: "main.rs"}}],
+})
+let r = llm_call("question", nil, {provider: "mock"})
+assert_eq(r.text, "The answer is 42.")
+
+// Pattern-matched mocks (reusable, not consumed)
+llm_mock({text: "Hello!", match: "*greeting*"})
+
+// Inspect what was sent
+let calls = llm_mock_calls()
+llm_mock_clear()
+```
 
 ### Transcript helpers
 

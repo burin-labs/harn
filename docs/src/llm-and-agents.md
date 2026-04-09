@@ -584,3 +584,36 @@ println("Remaining: $${llm_budget_remaining()}")
 - Default host: `http://localhost:8000`
 - No authentication required
 - Same message format as OpenAI
+
+## Testing with mock LLM responses
+
+The `mock` provider returns deterministic responses without API keys.
+Use `llm_mock()` to queue specific responses — text, tool calls, or both:
+
+```harn
+// Queue a text response (consumed in FIFO order)
+llm_mock({text: "The capital of France is Paris."})
+let r = llm_call("What is the capital of France?", nil, {provider: "mock"})
+assert_eq(r.text, "The capital of France is Paris.")
+
+// Queue a response with tool calls
+llm_mock({
+  text: "Let me read that file.",
+  tool_calls: [{name: "read_file", arguments: {path: "src/main.rs"}}],
+})
+
+// Pattern-matched mocks (reusable, not consumed)
+llm_mock({text: "I don't know.", match: "*unknown*"})
+
+// Inspect what was sent to the mock provider
+let calls = llm_mock_calls()
+// Each entry: {messages: [...], system: "..." or nil, tools: [...] or nil}
+
+// Clear all mocks and call log between tests
+llm_mock_clear()
+```
+
+When no `llm_mock()` responses are queued, the mock provider falls back to
+its default deterministic behavior (echoing prompt metadata). This means
+existing tests using `provider: "mock"` without `llm_mock()` continue to
+work unchanged.

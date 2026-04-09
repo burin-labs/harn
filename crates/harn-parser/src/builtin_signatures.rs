@@ -638,6 +638,18 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
+        name: "llm_mock",
+        return_type: Some(BuiltinReturn::Named("nil")),
+    },
+    BuiltinSig {
+        name: "llm_mock_calls",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
+        name: "llm_mock_clear",
+        return_type: Some(BuiltinReturn::Named("nil")),
+    },
+    BuiltinSig {
         name: "llm_model_tier",
         return_type: Some(BuiltinReturn::Named("string")),
     },
