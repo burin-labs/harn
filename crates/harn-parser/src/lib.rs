@@ -7,7 +7,8 @@ pub mod typechecker;
 pub use ast::*;
 pub use parser::*;
 pub use typechecker::{
-    format_type, DiagnosticSeverity, InlayHintInfo, TypeChecker, TypeDiagnostic,
+    block_definitely_exits, format_type, stmt_definitely_exits, DiagnosticSeverity, InlayHintInfo,
+    TypeChecker, TypeDiagnostic,
 };
 
 /// Returns `true` if `name` is a builtin recognized by the parser's static

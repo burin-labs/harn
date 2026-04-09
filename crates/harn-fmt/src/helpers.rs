@@ -201,6 +201,7 @@ pub(crate) fn format_type_expr(te: &TypeExpr) -> String {
                 .join(", ");
             format!("fn({}) -> {}", params_str, format_type_expr(return_type))
         }
+        TypeExpr::Never => "never".to_string(),
     }
 }
 

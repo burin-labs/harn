@@ -862,3 +862,14 @@ pipeline default(task) { log(1) }"#;
     );
     assert_roundtrip(source);
 }
+
+#[test]
+fn test_roundtrip_never_type_annotation() {
+    assert_roundtrip(
+        r#"pipeline default(task) {
+  fn fail() -> never {
+    throw "err"
+  }
+}"#,
+    );
+}

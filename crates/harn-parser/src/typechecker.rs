@@ -421,9 +421,22 @@ impl TypeChecker {
     }
 
     fn check_block(&mut self, stmts: &[SNode], scope: &mut TypeScope) {
+        let mut definitely_exited = false;
         for stmt in stmts {
+            if definitely_exited {
+                self.warning_at("unreachable code".to_string(), stmt.span);
+                break; // warn once per block
+            }
             self.check_node(stmt, scope);
+            if Self::stmt_definitely_exits(stmt) {
+                definitely_exited = true;
+            }
         }
+    }
+
+    /// Check whether a single statement definitely exits (delegates to the free function).
+    fn stmt_definitely_exits(stmt: &SNode) -> bool {
+        stmt_definitely_exits(stmt)
     }
 
     /// Define variables from a destructuring pattern in the given scope (as unknown type).
@@ -702,6 +715,7 @@ impl TypeChecker {
             Node::TryCatch {
                 body,
                 error_var,
+                error_type,
                 catch_body,
                 finally_body,
                 ..
@@ -710,7 +724,7 @@ impl TypeChecker {
                 self.check_block(body, &mut try_scope);
                 let mut catch_scope = scope.child();
                 if let Some(var) = error_var {
-                    catch_scope.define_var(var, None);
+                    catch_scope.define_var(var, error_type.clone());
                 }
                 self.check_block(catch_body, &mut catch_scope);
                 if let Some(fb) = finally_body {
@@ -1611,6 +1625,7 @@ impl TypeChecker {
                     .collect(),
                 return_type: Box::new(Self::apply_type_bindings(return_type, bindings)),
             },
+            TypeExpr::Never => TypeExpr::Never,
         }
     }
 
@@ -1735,18 +1750,34 @@ impl TypeChecker {
         };
 
         if let Node::Identifier(name) = &var_node.node {
-            if let Some(Some(TypeExpr::Union(members))) = scope.get_var(name) {
-                if let Some(narrowed) = remove_from_union(members, "nil") {
-                    let neq_refs = Refinements {
-                        truthy: vec![(name.clone(), Some(narrowed))],
-                        falsy: vec![(name.clone(), Some(TypeExpr::Named("nil".into())))],
+            let var_type = scope.get_var(name).cloned().flatten();
+            match var_type {
+                Some(TypeExpr::Union(ref members)) => {
+                    if let Some(narrowed) = remove_from_union(members, "nil") {
+                        let neq_refs = Refinements {
+                            truthy: vec![(name.clone(), Some(narrowed))],
+                            falsy: vec![(name.clone(), Some(TypeExpr::Named("nil".into())))],
+                        };
+                        return if op == "!=" {
+                            neq_refs
+                        } else {
+                            neq_refs.inverted()
+                        };
+                    }
+                }
+                Some(TypeExpr::Named(ref n)) if n == "nil" => {
+                    // Single nil type: == nil is always true, != nil narrows to never.
+                    let eq_refs = Refinements {
+                        truthy: vec![(name.clone(), Some(TypeExpr::Named("nil".into())))],
+                        falsy: vec![(name.clone(), Some(TypeExpr::Never))],
                     };
-                    return if op == "!=" {
-                        neq_refs
+                    return if op == "==" {
+                        eq_refs
                     } else {
-                        neq_refs.inverted()
+                        eq_refs.inverted()
                     };
                 }
+                _ => {}
             }
         }
         Refinements::empty()
@@ -1778,17 +1809,33 @@ impl TypeChecker {
             return Refinements::empty();
         }
 
-        if let Some(Some(TypeExpr::Union(members))) = scope.get_var(&var_name) {
-            let narrowed = narrow_to_single(members, &type_name);
-            let remaining = remove_from_union(members, &type_name);
-            if narrowed.is_some() || remaining.is_some() {
+        let var_type = scope.get_var(&var_name).cloned().flatten();
+        match var_type {
+            Some(TypeExpr::Union(ref members)) => {
+                let narrowed = narrow_to_single(members, &type_name);
+                let remaining = remove_from_union(members, &type_name);
+                if narrowed.is_some() || remaining.is_some() {
+                    let eq_refs = Refinements {
+                        truthy: narrowed
+                            .map(|n| vec![(var_name.clone(), Some(n))])
+                            .unwrap_or_default(),
+                        falsy: remaining
+                            .map(|r| vec![(var_name.clone(), Some(r))])
+                            .unwrap_or_default(),
+                    };
+                    return if op == "==" {
+                        eq_refs
+                    } else {
+                        eq_refs.inverted()
+                    };
+                }
+            }
+            Some(TypeExpr::Named(ref n)) if n == &type_name => {
+                // Single named type matches the typeof check:
+                // truthy = same type, falsy = never (type is fully ruled out).
                 let eq_refs = Refinements {
-                    truthy: narrowed
-                        .map(|n| vec![(var_name.clone(), Some(n))])
-                        .unwrap_or_default(),
-                    falsy: remaining
-                        .map(|r| vec![(var_name.clone(), Some(r))])
-                        .unwrap_or_default(),
+                    truthy: vec![(var_name.clone(), Some(TypeExpr::Named(type_name)))],
+                    falsy: vec![(var_name.clone(), Some(TypeExpr::Never))],
                 };
                 return if op == "==" {
                     eq_refs
@@ -1796,6 +1843,7 @@ impl TypeChecker {
                     eq_refs.inverted()
                 };
             }
+            _ => {}
         }
         Refinements::empty()
     }
@@ -1855,20 +1903,9 @@ impl TypeChecker {
         Refinements { truthy, falsy }
     }
 
-    /// Check whether a block definitely exits (return/throw/break/continue).
+    /// Check whether a block definitely exits (delegates to the free function).
     fn block_definitely_exits(stmts: &[SNode]) -> bool {
-        stmts.iter().any(|s| match &s.node {
-            Node::ReturnStmt { .. }
-            | Node::ThrowStmt { .. }
-            | Node::BreakStmt
-            | Node::ContinueStmt => true,
-            Node::IfElse {
-                then_body,
-                else_body: Some(else_body),
-                ..
-            } => Self::block_definitely_exits(then_body) && Self::block_definitely_exits(else_body),
-            _ => false,
-        })
+        block_definitely_exits(stmts)
     }
 
     fn check_match_exhaustiveness(
@@ -2040,6 +2077,31 @@ impl TypeChecker {
     }
 
     fn check_call(&mut self, name: &str, args: &[SNode], scope: &mut TypeScope, span: Span) {
+        // Special-case: unreachable(x) — when the argument is a variable,
+        // verify it has been narrowed to `never` (exhaustiveness check).
+        if name == "unreachable" {
+            if let Some(arg) = args.first() {
+                if matches!(&arg.node, Node::Identifier(_)) {
+                    let arg_type = self.infer_type(arg, scope);
+                    if let Some(ref ty) = arg_type {
+                        if !matches!(ty, TypeExpr::Never) {
+                            self.error_at(
+                                format!(
+                                    "unreachable() argument has type `{}` — not all cases are handled",
+                                    format_type(ty)
+                                ),
+                                span,
+                            );
+                        }
+                    }
+                }
+            }
+            for arg in args {
+                self.check_node(arg, scope);
+            }
+            return;
+        }
+
         // Check against known function signatures
         let has_spread = args.iter().any(|a| matches!(&a.node, Node::Spread(_)));
         if let Some(sig) = scope.get_fn(name).cloned() {
@@ -2392,8 +2454,44 @@ impl TypeChecker {
                 }
             }
 
+            // Exit expressions produce the bottom type.
+            Node::ThrowStmt { .. }
+            | Node::ReturnStmt { .. }
+            | Node::BreakStmt
+            | Node::ContinueStmt => Some(TypeExpr::Never),
+
+            // If/else as expression: merge branch types.
+            Node::IfElse {
+                then_body,
+                else_body,
+                ..
+            } => {
+                let then_type = self.infer_block_type(then_body, scope);
+                let else_type = else_body
+                    .as_ref()
+                    .and_then(|eb| self.infer_block_type(eb, scope));
+                match (then_type, else_type) {
+                    (Some(TypeExpr::Never), Some(TypeExpr::Never)) => Some(TypeExpr::Never),
+                    (Some(TypeExpr::Never), Some(other)) | (Some(other), Some(TypeExpr::Never)) => {
+                        Some(other)
+                    }
+                    (Some(t), Some(e)) if t == e => Some(t),
+                    (Some(t), Some(e)) => Some(simplify_union(vec![t, e])),
+                    (Some(t), None) => Some(t),
+                    (None, _) => None,
+                }
+            }
+
             _ => None,
         }
+    }
+
+    /// Infer the type of a block (last expression, or `never` if the block definitely exits).
+    fn infer_block_type(&self, stmts: &[SNode], scope: &TypeScope) -> InferredType {
+        if Self::block_definitely_exits(stmts) {
+            return Some(TypeExpr::Never);
+        }
+        stmts.last().and_then(|s| self.infer_type(s, scope))
     }
 
     /// Check if two types are compatible (actual can be assigned to expected).
@@ -2424,6 +2522,10 @@ impl TypeChecker {
         }
 
         match (&expected, &actual) {
+            // never is the bottom type: assignable to any type.
+            (_, TypeExpr::Never) => true,
+            // Nothing is assignable to never (except never itself, handled above).
+            (TypeExpr::Never, _) => false,
             (TypeExpr::Named(a), TypeExpr::Named(b)) => a == b || (a == "float" && b == "int"),
             // Union-to-Union: every member of actual must be compatible with
             // at least one member of expected.
@@ -2798,6 +2900,27 @@ fn is_obvious_type(value: &SNode, _ty: &TypeExpr) -> bool {
     )
 }
 
+/// Check whether a single statement definitely exits (return/throw/break/continue
+/// or an if/else where both branches exit).
+pub fn stmt_definitely_exits(stmt: &SNode) -> bool {
+    match &stmt.node {
+        Node::ReturnStmt { .. } | Node::ThrowStmt { .. } | Node::BreakStmt | Node::ContinueStmt => {
+            true
+        }
+        Node::IfElse {
+            then_body,
+            else_body: Some(else_body),
+            ..
+        } => block_definitely_exits(then_body) && block_definitely_exits(else_body),
+        _ => false,
+    }
+}
+
+/// Check whether a block definitely exits (contains a terminating statement).
+pub fn block_definitely_exits(stmts: &[SNode]) -> bool {
+    stmts.iter().any(stmt_definitely_exits)
+}
+
 pub fn format_type(ty: &TypeExpr) -> String {
     match ty {
         TypeExpr::Named(n) => n.clone(),
@@ -2829,10 +2952,25 @@ pub fn format_type(ty: &TypeExpr) -> String {
                 .join(", ");
             format!("fn({}) -> {}", params_str, format_type(return_type))
         }
+        TypeExpr::Never => "never".to_string(),
+    }
+}
+
+/// Simplify a union by removing `Never` members and collapsing.
+fn simplify_union(members: Vec<TypeExpr>) -> TypeExpr {
+    let filtered: Vec<TypeExpr> = members
+        .into_iter()
+        .filter(|m| !matches!(m, TypeExpr::Never))
+        .collect();
+    match filtered.len() {
+        0 => TypeExpr::Never,
+        1 => filtered.into_iter().next().unwrap(),
+        _ => TypeExpr::Union(filtered),
     }
 }
 
 /// Remove a named type from a union, collapsing single-element unions.
+/// Returns `Some(Never)` when all members are removed (exhausted).
 fn remove_from_union(members: &[TypeExpr], to_remove: &str) -> InferredType {
     let remaining: Vec<TypeExpr> = members
         .iter()
@@ -2840,7 +2978,7 @@ fn remove_from_union(members: &[TypeExpr], to_remove: &str) -> InferredType {
         .cloned()
         .collect();
     match remaining.len() {
-        0 => None,
+        0 => Some(TypeExpr::Never),
         1 => Some(remaining.into_iter().next().unwrap()),
         _ => Some(TypeExpr::Union(remaining)),
     }
@@ -4348,5 +4486,251 @@ add("hello", 2) }"#,
 }"#,
         );
         assert!(errs.is_empty());
+    }
+
+    // --- never type tests ---
+
+    #[test]
+    fn test_never_is_subtype_of_everything() {
+        let tc = TypeChecker::new();
+        let scope = TypeScope::new();
+        assert!(tc.types_compatible(&TypeExpr::Named("string".into()), &TypeExpr::Never, &scope));
+        assert!(tc.types_compatible(&TypeExpr::Named("int".into()), &TypeExpr::Never, &scope));
+        assert!(tc.types_compatible(
+            &TypeExpr::Union(vec![
+                TypeExpr::Named("string".into()),
+                TypeExpr::Named("nil".into()),
+            ]),
+            &TypeExpr::Never,
+            &scope,
+        ));
+    }
+
+    #[test]
+    fn test_nothing_is_subtype_of_never() {
+        let tc = TypeChecker::new();
+        let scope = TypeScope::new();
+        assert!(!tc.types_compatible(&TypeExpr::Never, &TypeExpr::Named("string".into()), &scope));
+        assert!(!tc.types_compatible(&TypeExpr::Never, &TypeExpr::Named("int".into()), &scope));
+    }
+
+    #[test]
+    fn test_never_never_compatible() {
+        let tc = TypeChecker::new();
+        let scope = TypeScope::new();
+        assert!(tc.types_compatible(&TypeExpr::Never, &TypeExpr::Never, &scope));
+    }
+
+    #[test]
+    fn test_simplify_union_removes_never() {
+        assert_eq!(
+            simplify_union(vec![TypeExpr::Never, TypeExpr::Named("string".into())]),
+            TypeExpr::Named("string".into()),
+        );
+        assert_eq!(
+            simplify_union(vec![TypeExpr::Never, TypeExpr::Never]),
+            TypeExpr::Never,
+        );
+        assert_eq!(
+            simplify_union(vec![
+                TypeExpr::Named("string".into()),
+                TypeExpr::Never,
+                TypeExpr::Named("int".into()),
+            ]),
+            TypeExpr::Union(vec![
+                TypeExpr::Named("string".into()),
+                TypeExpr::Named("int".into()),
+            ]),
+        );
+    }
+
+    #[test]
+    fn test_remove_from_union_exhausted_returns_never() {
+        let result = remove_from_union(&[TypeExpr::Named("string".into())], "string");
+        assert_eq!(result, Some(TypeExpr::Never));
+    }
+
+    #[test]
+    fn test_if_else_one_branch_throws_infers_other() {
+        // if/else where else throws — result should be int (from then-branch)
+        let errs = errors(
+            r#"pipeline t(task) {
+  fn foo(x: bool) -> int {
+    let result: int = if x { 42 } else { throw "err" }
+    return result
+  }
+}"#,
+        );
+        assert!(errs.is_empty(), "unexpected errors: {errs:?}");
+    }
+
+    #[test]
+    fn test_if_else_both_branches_throw_infers_never() {
+        // Both branches exit — should infer never, which is assignable to anything
+        let errs = errors(
+            r#"pipeline t(task) {
+  fn foo(x: bool) -> string {
+    let result: string = if x { throw "a" } else { throw "b" }
+    return result
+  }
+}"#,
+        );
+        assert!(errs.is_empty(), "unexpected errors: {errs:?}");
+    }
+
+    // --- unreachable code warning tests ---
+
+    #[test]
+    fn test_unreachable_after_return() {
+        let warns = warnings(
+            r#"pipeline t(task) {
+  fn foo() -> int {
+    return 1
+    let x = 2
+  }
+}"#,
+        );
+        assert!(
+            warns.iter().any(|w| w.contains("unreachable")),
+            "expected unreachable warning: {warns:?}"
+        );
+    }
+
+    #[test]
+    fn test_unreachable_after_throw() {
+        let warns = warnings(
+            r#"pipeline t(task) {
+  fn foo() {
+    throw "err"
+    let x = 2
+  }
+}"#,
+        );
+        assert!(
+            warns.iter().any(|w| w.contains("unreachable")),
+            "expected unreachable warning: {warns:?}"
+        );
+    }
+
+    #[test]
+    fn test_unreachable_after_composite_exit() {
+        let warns = warnings(
+            r#"pipeline t(task) {
+  fn foo(x: bool) {
+    if x { return 1 } else { throw "err" }
+    let y = 2
+  }
+}"#,
+        );
+        assert!(
+            warns.iter().any(|w| w.contains("unreachable")),
+            "expected unreachable warning: {warns:?}"
+        );
+    }
+
+    #[test]
+    fn test_no_unreachable_warning_when_reachable() {
+        let warns = warnings(
+            r#"pipeline t(task) {
+  fn foo(x: bool) {
+    if x { return 1 }
+    let y = 2
+  }
+}"#,
+        );
+        assert!(
+            !warns.iter().any(|w| w.contains("unreachable")),
+            "unexpected unreachable warning: {warns:?}"
+        );
+    }
+
+    // --- try/catch error typing tests ---
+
+    #[test]
+    fn test_catch_typed_error_variable() {
+        // When catch has a type annotation, the error var should be typed
+        let errs = errors(
+            r#"pipeline t(task) {
+  enum AppError { NotFound, Timeout }
+  try {
+    throw AppError.NotFound
+  } catch (e: AppError) {
+    let x: AppError = e
+  }
+}"#,
+        );
+        assert!(errs.is_empty(), "unexpected errors: {errs:?}");
+    }
+
+    // --- unreachable() builtin tests ---
+
+    #[test]
+    fn test_unreachable_with_never_arg_no_error() {
+        // After exhaustive narrowing, unreachable(x) should pass
+        let errs = errors(
+            r#"pipeline t(task) {
+  fn foo(x: string | int) {
+    if type_of(x) == "string" { return }
+    if type_of(x) == "int" { return }
+    unreachable(x)
+  }
+}"#,
+        );
+        assert!(
+            !errs.iter().any(|e| e.contains("unreachable")),
+            "unexpected unreachable error: {errs:?}"
+        );
+    }
+
+    #[test]
+    fn test_unreachable_with_remaining_types_errors() {
+        // Non-exhaustive narrowing — unreachable(x) should error
+        let errs = errors(
+            r#"pipeline t(task) {
+  fn foo(x: string | int | nil) {
+    if type_of(x) == "string" { return }
+    unreachable(x)
+  }
+}"#,
+        );
+        assert!(
+            errs.iter()
+                .any(|e| e.contains("unreachable") && e.contains("not all cases")),
+            "expected unreachable error about remaining types: {errs:?}"
+        );
+    }
+
+    #[test]
+    fn test_unreachable_no_args_no_compile_error() {
+        let errs = errors(
+            r#"pipeline t(task) {
+  fn foo() {
+    unreachable()
+  }
+}"#,
+        );
+        assert!(
+            !errs
+                .iter()
+                .any(|e| e.contains("unreachable") && e.contains("not all cases")),
+            "unreachable() with no args should not produce type error: {errs:?}"
+        );
+    }
+
+    #[test]
+    fn test_never_type_annotation_parses() {
+        let errs = errors(
+            r#"pipeline t(task) {
+  fn foo() -> never {
+    throw "always throws"
+  }
+}"#,
+        );
+        assert!(errs.is_empty(), "unexpected errors: {errs:?}");
+    }
+
+    #[test]
+    fn test_format_type_never() {
+        assert_eq!(format_type(&TypeExpr::Never), "never");
     }
 }

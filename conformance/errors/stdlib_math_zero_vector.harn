@@ -1,0 +1,5 @@
+import "std/math"
+
+pipeline test(task) {
+  vector_normalize([0, 0])
+}

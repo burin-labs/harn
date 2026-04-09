@@ -32,6 +32,8 @@ pub(crate) enum BuiltinReturn {
     /// Union of two or more named types (e.g. `["string", "nil"]` for
     /// `env` / `regex_match`).
     Union(&'static [&'static str]),
+    /// The bottom type (never returns normally).
+    Never,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,6 +56,7 @@ const RETURN_DICT: &[&str] = &["dict"];
 const RETURN_FLOAT: &[&str] = &["float"];
 const RETURN_INT: &[&str] = &["int"];
 const RETURN_LIST: &[&str] = &["list"];
+const RETURN_NEVER: &[&str] = &["never"];
 const RETURN_NIL: &[&str] = &["nil"];
 const RETURN_STRING: &[&str] = &["string"];
 
@@ -1488,6 +1491,10 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("string")),
     },
     BuiltinSig {
+        name: "unreachable",
+        return_type: Some(BuiltinReturn::Never),
+    },
+    BuiltinSig {
         name: "unwrap",
         return_type: None,
     },
@@ -1624,6 +1631,7 @@ pub(crate) fn iter_builtin_metadata() -> impl Iterator<Item = BuiltinMetadata> {
                 _ => EMPTY_RETURN_TYPES,
             },
             Some(BuiltinReturn::Union(names)) => names,
+            Some(BuiltinReturn::Never) => RETURN_NEVER,
             None => EMPTY_RETURN_TYPES,
         },
     })
@@ -1639,6 +1647,7 @@ pub(crate) fn builtin_return_type(name: &str) -> Option<TypeExpr> {
         BuiltinReturn::Union(tys) => Some(TypeExpr::Union(
             tys.iter().map(|ty| TypeExpr::Named((*ty).into())).collect(),
         )),
+        BuiltinReturn::Never => Some(TypeExpr::Never),
     }
 }
 

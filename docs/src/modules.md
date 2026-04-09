@@ -139,6 +139,33 @@ Extended math utilities:
 | `rad_to_deg(radians)` | Convert radians to degrees |
 | `sum(items)` | Sum a list of numbers |
 | `avg(items)` | Average of a list of numbers (returns 0 for empty lists) |
+| `mean(items)` | Arithmetic mean of a list of numbers |
+| `median(items)` | Median of a non-empty numeric list |
+| `percentile(items, p)` | R-7 percentile interpolation for `p` in `[0, 100]` |
+| `argsort(items, score_fn?)` | Indices that would sort a list ascending, optionally by score |
+| `top_k(items, k, score_fn?)` | Highest-scoring `k` items, descending |
+| `variance(items, sample?)` | Population variance, or sample variance when `sample = true` |
+| `stddev(items, sample?)` | Population standard deviation, or sample mode when `sample = true` |
+| `minmax_scale(items)` | Scale a numeric list into `[0, 1]`, or all zeros for a constant list |
+| `zscore(items, sample?)` | Standardize a numeric list, or all zeros for a constant list |
+| `weighted_mean(items, weights)` | Weighted arithmetic mean |
+| `weighted_choice(items, weights?)` | Randomly choose one item by non-negative weights |
+| `softmax(items, temperature?)` | Convert numeric scores into probabilities |
+| `normal_pdf(x, mean?, stddev?)` | Normal density with defaults `mean = 0`, `stddev = 1` |
+| `normal_cdf(x, mean?, stddev?)` | Normal cumulative distribution with defaults `mean = 0`, `stddev = 1` |
+| `normal_quantile(prob, mean?, stddev?)` | Inverse normal CDF for `0 < prob < 1` |
+| `dot(a, b)` | Dot product of two equal-length numeric vectors |
+| `vector_norm(v)` | Euclidean norm of a numeric vector |
+| `vector_normalize(v)` | Unit-length version of a non-zero numeric vector |
+| `cosine_similarity(a, b)` | Cosine similarity of two non-zero equal-length vectors |
+| `euclidean_distance(a, b)` | Euclidean distance between two equal-length vectors |
+| `manhattan_distance(a, b)` | Manhattan distance between two equal-length vectors |
+| `chebyshev_distance(a, b)` | Chebyshev distance between two equal-length vectors |
+| `covariance(xs, ys, sample?)` | Population or sample covariance between two numeric lists |
+| `correlation(xs, ys, sample?)` | Pearson correlation between two numeric lists |
+| `moving_avg(items, window)` | Sliding-window moving average |
+| `ema(items, alpha)` | Exponential moving average over a numeric list |
+| `kmeans(points, k, options?)` | Deterministic k-means over `list<list<number>>`, returns `{centroids, assignments, counts, iterations, converged, inertia}` |
 
 ```harn
 import "std/math"
@@ -148,6 +175,14 @@ println(lerp(0, 10, 0.5))           // 5
 println(map_range(50, 0, 100, 0, 1)) // 0.5
 println(sum([1, 2, 3, 4]))          // 10
 println(avg([10, 20, 30]))          // 20
+println(percentile([1, 2, 3, 4], 75)) // 3.25
+println(top_k(["a", "bbbb", "cc"], 2, { x -> len(x) })) // ["bbbb", "cc"]
+println(softmax([1, 2, 3]))         // probabilities summing to 1
+println(cosine_similarity([1, 0], [1, 1])) // ~0.707
+println(moving_avg([1, 2, 3, 4, 5], 3)) // [2.0, 3.0, 4.0]
+
+let grouped = kmeans([[0, 0], [0, 1], [10, 10], [10, 11]], 2)
+println(grouped.centroids)          // [[0.0, 0.5], [10.0, 10.5]]
 ```
 
 ### std/path

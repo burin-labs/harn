@@ -2,6 +2,45 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.59
+
+### Added
+
+- **Statistical and vector helpers in `std/math`** — the math helper module
+  now includes `mean`, `median`, `percentile`, `variance`, `stddev`,
+  `normal_pdf`, `normal_cdf`, `normal_quantile`, vector geometry helpers
+  (`dot`, `vector_norm`, `vector_normalize`, `cosine_similarity`,
+  `euclidean_distance`), ranking helpers (`argsort`, `top_k`), score
+  normalization (`minmax_scale`, `zscore`, `softmax`), weighted helpers
+  (`weighted_mean`, `weighted_choice`), time-series smoothing (`moving_avg`,
+  `ema`), relationship helpers (`covariance`, `correlation`), extra vector
+  distances (`manhattan_distance`, `chebyshev_distance`), and a deterministic
+  `kmeans(...)` helper for small orchestration-side clustering tasks.
+
+## v0.5.58
+
+### Added
+
+- **`never` bottom type** — new `TypeExpr::Never` variant represents the
+  type of expressions that never produce a value (`throw`, `return`,
+  `break`, `continue`). It is a subtype of all types, so
+  `if cond { 42 } else { throw "err" }` correctly infers `int`. Unions
+  simplify: `never | T` becomes `T`, and fully-narrowed unions become
+  `never`.
+- **`unreachable()` builtin** — static exhaustiveness assertion. When
+  called with a variable argument, the type checker verifies it has been
+  narrowed to `never`. At runtime, throws `"unreachable code was reached"`.
+- **Unreachable code warnings** — the type checker now warns about code
+  after statements that definitely exit, including composite exits where
+  both branches of an `if`/`else` return/throw.
+- **Linter composite exit detection** — the `unreachable-code` lint rule
+  now detects unreachable code after `if`/`else` blocks where both branches
+  exit (previously only caught direct `return`/`throw`/`break`/`continue`).
+- **Typed catch variables** — `catch (e: SomeType)` now types the error
+  variable in the catch body, enabling type-checked error handling.
+- **Extended typeof narrowing** — `type_of(x) == "T"` now narrows single
+  named types (not just unions), enabling chained exhaustiveness checks.
+
 ## v0.5.57
 
 ### Added
