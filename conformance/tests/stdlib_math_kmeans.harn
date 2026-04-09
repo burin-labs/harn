@@ -1,0 +1,18 @@
+import "std/math"
+
+pipeline test(task) {
+  let result = kmeans([
+    [0, 0],
+    [0, 1],
+    [10, 10],
+    [10, 11]
+  ], 2)
+
+  assert(result.converged)
+  assert_eq(result.iterations, 2)
+  assert_eq(result.assignments, [0, 0, 1, 1])
+  assert_eq(result.counts, [2, 2])
+  assert_eq(result.centroids, [[0.0, 0.5], [10.0, 10.5]])
+  assert_eq(result.inertia, 1.0)
+  log("stdlib math kmeans ok")
+}

@@ -1,0 +1,26 @@
+import "std/math"
+
+pipeline test(task) {
+  let pdf0 = normal_pdf(0)
+  assert(pdf0 > 0.3989)
+  assert(pdf0 < 0.3990)
+
+  let cdf0 = normal_cdf(0)
+  assert(cdf0 > 0.4999)
+  assert(cdf0 < 0.5001)
+
+  let q50 = normal_quantile(0.5)
+  assert(abs(q50) < 0.000001)
+
+  let q95 = normal_quantile(0.95)
+  assert(q95 > 1.64)
+  assert(q95 < 1.65)
+
+  let roundtrip = normal_cdf(normal_quantile(0.95))
+  assert(roundtrip > 0.9499)
+  assert(roundtrip < 0.9501)
+
+  let shifted = normal_quantile(0.5, 10, 2)
+  assert(abs(shifted - 10) < 0.000001)
+  log("stdlib math normal ok")
+}

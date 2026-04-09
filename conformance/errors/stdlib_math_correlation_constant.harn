@@ -1,0 +1,5 @@
+import "std/math"
+
+pipeline test(task) {
+  correlation([1, 1, 1], [1, 2, 3])
+}

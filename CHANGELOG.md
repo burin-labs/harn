@@ -30,6 +30,16 @@ All notable changes to Harn are documented in this file.
 
 ### Added
 
+- **Statistical and vector helpers in `std/math`** — the math helper module
+  now includes `mean`, `median`, `percentile`, `variance`, `stddev`,
+  `normal_pdf`, `normal_cdf`, `normal_quantile`, vector geometry helpers
+  (`dot`, `vector_norm`, `vector_normalize`, `cosine_similarity`,
+  `euclidean_distance`), ranking helpers (`argsort`, `top_k`), score
+  normalization (`minmax_scale`, `zscore`, `softmax`), weighted helpers
+  (`weighted_mean`, `weighted_choice`), time-series smoothing (`moving_avg`,
+  `ema`), relationship helpers (`covariance`, `correlation`), extra vector
+  distances (`manhattan_distance`, `chebyshev_distance`), and a deterministic
+  `kmeans(...)` helper for small orchestration-side clustering tasks.
 - **Unified runtime schema helpers** — new builtins `schema_is`,
   `schema_expect`, `schema_from_json_schema`, `schema_from_openapi_schema`,
   and `schema_to_openapi_schema` join the existing schema validation surface so
