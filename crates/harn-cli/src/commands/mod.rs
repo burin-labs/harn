@@ -1,4 +1,5 @@
 pub(crate) mod check;
+pub(crate) mod contracts;
 pub(crate) mod dump_highlight_keywords;
 pub(crate) mod init;
 pub(crate) mod mcp;

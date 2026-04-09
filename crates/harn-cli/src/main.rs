@@ -89,6 +89,9 @@ async fn main() {
                 process::exit(1);
             }
         }
+        Command::Contracts(args) => {
+            commands::contracts::handle_contracts_command(args).await;
+        }
         Command::Lint(args) => {
             let targets: Vec<&str> = args.targets.iter().map(String::as_str).collect();
             let files = commands::check::collect_harn_targets(&targets);

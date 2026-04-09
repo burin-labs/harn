@@ -791,7 +791,16 @@ fn infer_worktree_path(worker_id: &str, spec: &WorkerWorktreeSpec) -> Result<Str
         .and_then(|name| name.to_str())
         .unwrap_or("repo")
         .to_string();
-    Ok(format!(".harn/worktrees/{repo_name}/{worker_id}"))
+    let base_dir = crate::stdlib::process::current_execution_context()
+        .and_then(|context| context.cwd.map(PathBuf::from))
+        .or_else(|| crate::stdlib::process::VM_SOURCE_DIR.with(|sd| sd.borrow().clone()))
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."));
+    Ok(crate::runtime_paths::worktree_root(&base_dir)
+        .join(repo_name)
+        .join(worker_id)
+        .display()
+        .to_string())
 }
 
 fn ensure_worker_worktree(

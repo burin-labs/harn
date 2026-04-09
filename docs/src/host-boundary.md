@@ -61,3 +61,20 @@ Hosts should own the concrete UX:
 - patch previews
 - editor undo/redo semantics
 - trust UI around which worker or session produced a change
+
+## Contract surfaces
+
+Harn now ships machine-readable contract exports so hosts do not need to
+reverse-engineer runtime assumptions:
+
+- `harn contracts builtins` for the builtin registry and parser/runtime drift
+- `harn contracts host-capabilities` for the effective host manifest used by
+  preflight validation
+- `harn contracts bundle` for entry modules, imported modules, prompt/template
+  assets, explicit module-dependency edges, required host capabilities, literal
+  execution directories, worker repo dependencies, and stable summary counts
+
+Those surfaces are intended to be the generic boundary for embedded hosts such
+as editors or native apps. Product-specific packaging logic should build on top
+of them rather than re-implementing Harn’s import, asset, and host-capability
+resolution rules independently.

@@ -1972,7 +1972,8 @@ they accurately reflect the call chain at the time of failure.
 
 ## Persistent store
 
-Six builtins provide a persistent key-value store backed by `.harn/store.json`:
+Six builtins provide a persistent key-value store backed by the resolved Harn
+state root (default `.harn/store.json`):
 
 | Function | Description |
 |---|---|
@@ -1984,12 +1985,13 @@ Six builtins provide a persistent key-value store backed by `.harn/store.json`:
 | `store_clear()` | Remove all keys, auto-saves |
 
 The store file is created lazily on first mutation. In bridge mode, the
-host can override these builtins via the bridge protocol.
+host can override these builtins via the bridge protocol. The state root can
+be relocated with `HARN_STATE_DIR`.
 
 ## Checkpoint & resume
 
-Checkpoints enable resilient, resumable pipelines. State is persisted to
-`.harn/checkpoints/<pipeline>.json` and survives crashes, restarts, and
+Checkpoints enable resilient, resumable pipelines. State is persisted to the
+resolved Harn state root (default `.harn/checkpoints/<pipeline>.json`) and survives crashes, restarts, and
 migration to another machine.
 
 ### Core builtins
@@ -2158,6 +2160,9 @@ The following environment variables configure runtime behavior:
 |---|---|
 | `HARN_LLM_PROVIDER` | Override the default LLM provider. Any configured provider is accepted. Built-in names include `anthropic` (default), `openai`, `openrouter`, `huggingface`, `ollama`, `local`, and `mock`. |
 | `HARN_LLM_TIMEOUT` | LLM request timeout in seconds. Default `120`. |
+| `HARN_STATE_DIR` | Override the runtime state root used for store, checkpoint, metadata, and default worktree state. Relative values resolve from the active project/runtime root. |
+| `HARN_RUN_DIR` | Override the default persisted run directory. Relative values resolve from the active project/runtime root. |
+| `HARN_WORKTREE_DIR` | Override the default worker worktree root. Relative values resolve from the active project/runtime root. |
 | `ANTHROPIC_API_KEY` | API key for the Anthropic provider. |
 | `OPENAI_API_KEY` | API key for the OpenAI provider. |
 | `OPENROUTER_API_KEY` | API key for the OpenRouter provider. |

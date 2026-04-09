@@ -12,6 +12,7 @@ pub mod mcp;
 pub mod mcp_server;
 pub mod metadata;
 pub mod orchestration;
+pub mod runtime_paths;
 pub mod schema;
 pub mod stdlib;
 pub mod stdlib_modules;

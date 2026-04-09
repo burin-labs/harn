@@ -1,4 +1,4 @@
-//! Project metadata store for `.harn/metadata/` sharded JSON files.
+//! Project metadata store for Harn's runtime state root.
 //!
 //! Provides `metadata_get`, `metadata_set`, `metadata_save`, `metadata_stale`,
 //! and `metadata_refresh_hashes` builtins. Stores sharded JSON files by
@@ -43,7 +43,7 @@ impl MetadataState {
     }
 
     fn metadata_dir(&self) -> PathBuf {
-        self.base_dir.join(".harn").join("metadata")
+        crate::runtime_paths::metadata_dir(&self.base_dir)
     }
 
     fn ensure_loaded(&mut self) {
@@ -439,7 +439,8 @@ fn resolve_scan_root(base_dir: &Path, rel_dir: &str) -> PathBuf {
 
 /// Register metadata builtins on a VM.
 ///
-/// In standalone mode, these operate directly on `.harn/metadata/` files.
+/// In standalone mode, these operate directly on the resolved Harn metadata
+/// state root.
 /// In bridge mode, these are registered **before** bridge builtins so the
 /// host can override them if needed (but typically the VM handles this natively).
 pub fn register_metadata_builtins(vm: &mut Vm, base_dir: &Path) {

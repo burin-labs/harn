@@ -1,0 +1,11 @@
+pipeline default() {
+  let prompt = render_prompt("fixtures/greeting.prompt", {name: "Casey", place: "Harn"})
+  let paths = runtime_paths()
+  println(prompt.contains("Casey"))
+  println(paths.execution_root == execution_root())
+  println(paths.asset_root == asset_root())
+  println(paths.asset_root == source_dir())
+  println(paths.state_root.ends_with(".harn"))
+  println(paths.run_root.ends_with(".harn-runs"))
+  println(paths.worktree_root.ends_with(".harn/worktrees"))
+}

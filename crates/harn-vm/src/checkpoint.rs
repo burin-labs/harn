@@ -1,7 +1,7 @@
 //! Checkpoint system for resilient pipeline execution.
 //!
 //! Provides `checkpoint`, `checkpoint_get`, and `checkpoint_clear` builtins.
-//! Checkpoints are persisted to `<base_dir>/.harn/checkpoints/<pipeline>.json`
+//! Checkpoints are persisted to `<state-root>/checkpoints/<pipeline>.json`
 //! and survive pipeline crashes/timeouts. On resume, a pipeline can skip
 //! already-processed items by checking `checkpoint_get`.
 
@@ -23,9 +23,7 @@ impl CheckpointState {
     fn new(base_dir: &Path, pipeline_name: &str) -> Self {
         Self {
             data: BTreeMap::new(),
-            path: base_dir
-                .join(".harn")
-                .join("checkpoints")
+            path: crate::runtime_paths::checkpoint_dir(base_dir)
                 .join(format!("{pipeline_name}.json")),
             loaded: false,
         }

@@ -93,13 +93,14 @@ run_grammar_audit() {
     echo "error: missing spec/HARN_SPEC.md"
     return 1
   fi
+  ./scripts/verify_release_metadata.py
   ./scripts/sync_language_spec.sh
   ./scripts/verify_language_spec.py
   if [[ ! -d tree-sitter-harn ]]; then
     echo "warning: tree-sitter-harn not present; skipping tree-sitter grammar audit"
     return 0
   fi
-  ./scripts/verify_tree_sitter_parse.py
+  ./scripts/verify_tree_sitter_parse.py --strict
   (
     cd tree-sitter-harn
     npm test

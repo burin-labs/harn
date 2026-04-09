@@ -20,9 +20,8 @@ pub(crate) fn new_id(prefix: &str) -> String {
 }
 
 pub(crate) fn default_run_dir() -> PathBuf {
-    std::env::var("HARN_RUN_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from(".harn-runs"))
+    let base = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    crate::runtime_paths::run_root(&base)
 }
 
 mod hooks;

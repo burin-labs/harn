@@ -31,17 +31,40 @@ pub(crate) fn reset_process_state() {
     VM_EXECUTION_CONTEXT.with(|current| *current.borrow_mut() = None);
 }
 
+pub fn execution_root_path() -> PathBuf {
+    current_execution_context()
+        .and_then(|context| context.cwd.map(PathBuf::from))
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+pub fn source_root_path() -> PathBuf {
+    VM_SOURCE_DIR
+        .with(|sd| sd.borrow().clone())
+        .or_else(|| {
+            current_execution_context().and_then(|context| context.source_dir.map(PathBuf::from))
+        })
+        .or_else(|| current_execution_context().and_then(|context| context.cwd.map(PathBuf::from)))
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+pub fn asset_root_path() -> PathBuf {
+    source_root_path()
+}
+
+pub fn runtime_root_base() -> PathBuf {
+    find_project_root(&execution_root_path())
+        .or_else(|| find_project_root(&source_root_path()))
+        .unwrap_or_else(source_root_path)
+}
+
 pub fn resolve_source_relative_path(path: &str) -> PathBuf {
     let candidate = PathBuf::from(path);
     if candidate.is_absolute() {
         return candidate;
     }
-    let base = current_execution_context()
-        .and_then(|context| context.cwd.map(PathBuf::from))
-        .or_else(|| VM_SOURCE_DIR.with(|sd| sd.borrow().clone()))
-        .or_else(|| std::env::current_dir().ok())
-        .unwrap_or_else(|| PathBuf::from("."));
-    base.join(candidate)
+    execution_root_path().join(candidate)
 }
 
 pub fn resolve_source_asset_path(path: &str) -> PathBuf {
@@ -49,15 +72,7 @@ pub fn resolve_source_asset_path(path: &str) -> PathBuf {
     if candidate.is_absolute() {
         return candidate;
     }
-    let base = VM_SOURCE_DIR
-        .with(|sd| sd.borrow().clone())
-        .or_else(|| {
-            current_execution_context().and_then(|context| context.source_dir.map(PathBuf::from))
-        })
-        .or_else(|| current_execution_context().and_then(|context| context.cwd.map(PathBuf::from)))
-        .or_else(|| std::env::current_dir().ok())
-        .unwrap_or_else(|| PathBuf::from("."));
-    base.join(candidate)
+    asset_root_path().join(candidate)
 }
 
 pub(crate) fn register_process_builtins(vm: &mut Vm) {
@@ -248,6 +263,58 @@ pub(crate) fn register_process_builtins(vm: &mut Vm) {
             .unwrap_or_default();
         Ok(VmValue::String(Rc::from(dir)))
     });
+
+    vm.register_builtin("execution_root", |_args, _out| {
+        Ok(VmValue::String(Rc::from(
+            execution_root_path().to_string_lossy().to_string(),
+        )))
+    });
+
+    vm.register_builtin("asset_root", |_args, _out| {
+        Ok(VmValue::String(Rc::from(
+            asset_root_path().to_string_lossy().to_string(),
+        )))
+    });
+
+    vm.register_builtin("runtime_paths", |_args, _out| {
+        let runtime_base = runtime_root_base();
+        let mut paths = BTreeMap::new();
+        paths.insert(
+            "execution_root".to_string(),
+            VmValue::String(Rc::from(
+                execution_root_path().to_string_lossy().to_string(),
+            )),
+        );
+        paths.insert(
+            "asset_root".to_string(),
+            VmValue::String(Rc::from(asset_root_path().to_string_lossy().to_string())),
+        );
+        paths.insert(
+            "state_root".to_string(),
+            VmValue::String(Rc::from(
+                crate::runtime_paths::state_root(&runtime_base)
+                    .to_string_lossy()
+                    .to_string(),
+            )),
+        );
+        paths.insert(
+            "run_root".to_string(),
+            VmValue::String(Rc::from(
+                crate::runtime_paths::run_root(&runtime_base)
+                    .to_string_lossy()
+                    .to_string(),
+            )),
+        );
+        paths.insert(
+            "worktree_root".to_string(),
+            VmValue::String(Rc::from(
+                crate::runtime_paths::worktree_root(&runtime_base)
+                    .to_string_lossy()
+                    .to_string(),
+            )),
+        );
+        Ok(VmValue::Dict(Rc::new(paths)))
+    });
 }
 
 /// Find the project root by walking up from a base directory looking for harn.toml.
@@ -373,12 +440,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn resolve_source_relative_path_prefers_thread_source_dir() {
+    fn resolve_source_relative_path_ignores_thread_source_dir_without_execution_context() {
         let dir = std::env::temp_dir().join(format!("harn-process-{}", uuid::Uuid::now_v7()));
         std::fs::create_dir_all(&dir).unwrap();
+        let current_dir = std::env::current_dir().unwrap();
         set_thread_source_dir(&dir);
         let resolved = resolve_source_relative_path("templates/prompt.txt");
-        assert_eq!(resolved, dir.join("templates/prompt.txt"));
+        assert_eq!(resolved, current_dir.join("templates/prompt.txt"));
         reset_process_state();
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -471,5 +539,52 @@ mod tests {
         assert!(output.status.success());
         reset_process_state();
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn runtime_paths_uses_configurable_state_roots() {
+        let base =
+            std::env::temp_dir().join(format!("harn-process-runtime-{}", uuid::Uuid::now_v7()));
+        std::fs::create_dir_all(&base).unwrap();
+        std::env::set_var(crate::runtime_paths::HARN_STATE_DIR_ENV, ".custom-harn");
+        std::env::set_var(crate::runtime_paths::HARN_RUN_DIR_ENV, ".custom-runs");
+        std::env::set_var(
+            crate::runtime_paths::HARN_WORKTREE_DIR_ENV,
+            ".custom-worktrees",
+        );
+        set_thread_execution_context(Some(RunExecutionRecord {
+            cwd: Some(base.to_string_lossy().to_string()),
+            ..Default::default()
+        }));
+
+        let mut vm = crate::vm::Vm::new();
+        register_process_builtins(&mut vm);
+        let mut out = String::new();
+        let builtin = vm
+            .builtins
+            .get("runtime_paths")
+            .expect("runtime_paths builtin");
+        let paths = match builtin(&[], &mut out).unwrap() {
+            VmValue::Dict(map) => map,
+            other => panic!("expected dict, got {other:?}"),
+        };
+        assert_eq!(
+            paths.get("state_root").unwrap().display(),
+            base.join(".custom-harn").display().to_string()
+        );
+        assert_eq!(
+            paths.get("run_root").unwrap().display(),
+            base.join(".custom-runs").display().to_string()
+        );
+        assert_eq!(
+            paths.get("worktree_root").unwrap().display(),
+            base.join(".custom-worktrees").display().to_string()
+        );
+
+        reset_process_state();
+        std::env::remove_var(crate::runtime_paths::HARN_STATE_DIR_ENV);
+        std::env::remove_var(crate::runtime_paths::HARN_RUN_DIR_ENV);
+        std::env::remove_var(crate::runtime_paths::HARN_WORKTREE_DIR_ENV);
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

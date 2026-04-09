@@ -34,6 +34,12 @@ pub(crate) enum BuiltinReturn {
     Union(&'static [&'static str]),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BuiltinMetadata {
+    pub name: &'static str,
+    pub return_types: &'static [&'static str],
+}
+
 /// One entry in the builtin registry.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct BuiltinSig {
@@ -42,6 +48,14 @@ pub(crate) struct BuiltinSig {
 }
 
 const UNION_STRING_NIL: &[&str] = &["string", "nil"];
+const EMPTY_RETURN_TYPES: &[&str] = &[];
+const RETURN_BOOL: &[&str] = &["bool"];
+const RETURN_DICT: &[&str] = &["dict"];
+const RETURN_FLOAT: &[&str] = &["float"];
+const RETURN_INT: &[&str] = &["int"];
+const RETURN_LIST: &[&str] = &["list"];
+const RETURN_NIL: &[&str] = &["nil"];
+const RETURN_STRING: &[&str] = &["string"];
 
 /// Every builtin known to the parser. MUST stay alphabetically sorted by
 /// `name` — `builtin_signatures_sorted` enforces this at test time and the
@@ -192,6 +206,10 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
     BuiltinSig {
         name: "assert_ne",
         return_type: Some(BuiltinReturn::Named("nil")),
+    },
+    BuiltinSig {
+        name: "asset_root",
+        return_type: Some(BuiltinReturn::Named("string")),
     },
     BuiltinSig {
         name: "atan",
@@ -424,6 +442,10 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
     BuiltinSig {
         name: "exec_at",
         return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "execution_root",
+        return_type: Some(BuiltinReturn::Named("string")),
     },
     BuiltinSig {
         name: "exit",
@@ -994,6 +1016,10 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("string")),
     },
     BuiltinSig {
+        name: "render_prompt",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
         name: "replace",
         return_type: Some(BuiltinReturn::Named("string")),
     },
@@ -1031,6 +1057,10 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
     },
     BuiltinSig {
         name: "run_record_save",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "runtime_paths",
         return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
@@ -1577,6 +1607,26 @@ pub(crate) fn is_builtin(name: &str) -> bool {
 /// testing and future completion surfaces.
 pub(crate) fn iter_builtin_names() -> impl Iterator<Item = &'static str> {
     BUILTIN_SIGNATURES.iter().map(|sig| sig.name)
+}
+
+pub(crate) fn iter_builtin_metadata() -> impl Iterator<Item = BuiltinMetadata> {
+    BUILTIN_SIGNATURES.iter().map(|sig| BuiltinMetadata {
+        name: sig.name,
+        return_types: match sig.return_type {
+            Some(BuiltinReturn::Named(name)) => match name {
+                "bool" => RETURN_BOOL,
+                "dict" => RETURN_DICT,
+                "float" => RETURN_FLOAT,
+                "int" => RETURN_INT,
+                "list" => RETURN_LIST,
+                "nil" => RETURN_NIL,
+                "string" => RETURN_STRING,
+                _ => EMPTY_RETURN_TYPES,
+            },
+            Some(BuiltinReturn::Union(names)) => names,
+            None => EMPTY_RETURN_TYPES,
+        },
+    })
 }
 
 /// Statically-known return type for `name`, if any. Returns `None` when

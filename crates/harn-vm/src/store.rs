@@ -1,4 +1,4 @@
-//! Persistent key-value store backed by `.harn/store.json`.
+//! Persistent key-value store backed by Harn's runtime state root.
 //!
 //! Provides `store_get`, `store_set`, `store_delete`, `store_list`,
 //! `store_save`, and `store_clear` builtins. The store file is created
@@ -22,7 +22,7 @@ impl StoreState {
     fn new(base_dir: &Path) -> Self {
         Self {
             data: BTreeMap::new(),
-            path: base_dir.join(".harn").join("store.json"),
+            path: crate::runtime_paths::store_path(base_dir),
             loaded: false,
         }
     }
@@ -136,7 +136,7 @@ fn json_to_vm(jv: &serde_json::Value) -> VmValue {
 
 /// Register persistent key-value store builtins on a VM.
 ///
-/// The store is backed by `<base_dir>/.harn/store.json`, created lazily
+/// The store is backed by `<state-root>/store.json`, created lazily
 /// on first mutation. In bridge mode, register these **before** bridge
 /// builtins so the host can override them.
 pub fn register_store_builtins(vm: &mut Vm, base_dir: &Path) {

@@ -26,3 +26,7 @@ pub fn is_known_builtin(name: &str) -> bool {
 pub fn known_builtin_names() -> impl Iterator<Item = &'static str> {
     builtin_signatures::iter_builtin_names()
 }
+
+pub fn known_builtin_metadata() -> impl Iterator<Item = builtin_signatures::BuiltinMetadata> {
+    builtin_signatures::iter_builtin_metadata()
+}

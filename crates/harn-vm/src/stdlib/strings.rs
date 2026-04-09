@@ -173,6 +173,27 @@ pub(crate) fn render_template_text(
     render_template_segment(template, bindings, 0, false).0
 }
 
+fn render_asset(args: &[VmValue]) -> Result<VmValue, VmError> {
+    let path = args.first().map(|a| a.display()).unwrap_or_default();
+    let resolved = crate::stdlib::process::resolve_source_asset_path(&path);
+    let template = std::fs::read_to_string(&resolved).map_err(|e| {
+        VmError::Thrown(VmValue::String(Rc::from(format!(
+            "Failed to read template {}: {e}",
+            resolved.display()
+        ))))
+    })?;
+    if let Some(bindings) = args.get(1).and_then(|a| a.as_dict()) {
+        Ok(VmValue::String(Rc::from(render_template_text(
+            &template,
+            Some(bindings),
+        ))))
+    } else {
+        Ok(VmValue::String(Rc::from(render_template_text(
+            &template, None,
+        ))))
+    }
+}
+
 pub(crate) fn register_string_builtins(vm: &mut Vm) {
     vm.register_builtin("format", |args, _out| {
         let template = args.first().map(|a| a.display()).unwrap_or_default();
@@ -427,24 +448,6 @@ pub(crate) fn register_string_builtins(vm: &mut Vm) {
 
     // --- Template rendering ---
 
-    vm.register_builtin("render", |args, _out| {
-        let path = args.first().map(|a| a.display()).unwrap_or_default();
-        let resolved = crate::stdlib::process::resolve_source_asset_path(&path);
-        let template = std::fs::read_to_string(&resolved).map_err(|e| {
-            VmError::Thrown(VmValue::String(Rc::from(format!(
-                "Failed to read template {}: {e}",
-                resolved.display()
-            ))))
-        })?;
-        if let Some(bindings) = args.get(1).and_then(|a| a.as_dict()) {
-            Ok(VmValue::String(Rc::from(render_template_text(
-                &template,
-                Some(bindings),
-            ))))
-        } else {
-            Ok(VmValue::String(Rc::from(render_template_text(
-                &template, None,
-            ))))
-        }
-    });
+    vm.register_builtin("render", |args, _out| render_asset(args));
+    vm.register_builtin("render_prompt", |args, _out| render_asset(args));
 }

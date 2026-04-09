@@ -13,6 +13,7 @@ module.exports = grammar({
     [$.dict_literal, $.shape_type],
     [$._statement, $._expression],
     [$._primary, $.type_annotation],
+    [$._primary, $.typed_parameter],
     [$.typed_parameter, $.shape_field],
     [$.parallel_expression],
     [$.typed_parameter, $.type_annotation],
@@ -22,6 +23,7 @@ module.exports = grammar({
     [$.parallel_map_expression],
     [$.parallel_settle_expression],
     [$.struct_declaration],
+    [$.tool_declaration],
     [$.impl_block],
     [$.interface_declaration],
     [$.match_statement],
@@ -186,6 +188,7 @@ module.exports = grammar({
         $.parallel_settle_expression,
         $.deadline_block,
         $.guard_statement,
+        $.require_statement,
         $.mutex_block,
         $.select_block,
         $.break_statement,
@@ -335,6 +338,13 @@ module.exports = grammar({
     guard_statement: ($) =>
       seq("guard", field("condition", $._expression), "else", field("else_body", $.block)),
 
+    require_statement: ($) =>
+      seq(
+        "require",
+        field("condition", $._expression),
+        optional(seq(",", field("message", $._expression)))
+      ),
+
     mutex_block: ($) =>
       seq("mutex", field("body", $.block)),
 
@@ -386,7 +396,11 @@ module.exports = grammar({
         optional($.parameter_list),
         ")",
         optional(seq("->", $.type_annotation)),
-        field("body", $.block)
+        "{",
+        repeat(choice($._block_sep, $._line_sep)),
+        optional(seq("description", $.string_literal, repeat(choice($._block_sep, $._line_sep)))),
+        layoutSeparated($, $._statement),
+        "}"
       ),
 
     generic_params: ($) =>
@@ -612,6 +626,8 @@ module.exports = grammar({
     _primary: ($) =>
       choice(
         $.interpolated_string,
+        $.multiline_string_literal,
+        $.raw_string_literal,
         $.string_literal,
         $.integer_literal,
         $.float_literal,
@@ -628,6 +644,12 @@ module.exports = grammar({
 
     string_literal: (_) =>
       token(seq('"', repeat(choice(/[^"\\$\n]/, /\\[ntr\\"$]/, /\$[^{]/)), '"')),
+
+    multiline_string_literal: (_) =>
+      token(seq('"""', repeat(choice(/[^"]/, /"[^"]/, /""[^"]/)), '"""')),
+
+    raw_string_literal: (_) =>
+      token(seq('r"', repeat(/[^"\n]/), '"')),
 
     interpolated_string: ($) =>
       seq(
@@ -743,6 +765,7 @@ module.exports = grammar({
 
     typed_parameter: ($) =>
       seq(
+        optional("..."),
         field("name", $.identifier),
         optional(seq(":", field("type", $.type_annotation))),
         optional(seq("=", field("default", $._expression)))

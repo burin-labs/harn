@@ -68,6 +68,10 @@
           "named": true
         },
         {
+          "type": "multiline_string_literal",
+          "named": true
+        },
+        {
           "type": "nil",
           "named": true
         },
@@ -101,6 +105,10 @@
         },
         {
           "type": "range_expression",
+          "named": true
+        },
+        {
+          "type": "raw_string_literal",
           "named": true
         },
         {
@@ -237,6 +245,10 @@
             "named": true
           },
           {
+            "type": "multiline_string_literal",
+            "named": true
+          },
+          {
             "type": "nil",
             "named": true
           },
@@ -270,6 +282,10 @@
           },
           {
             "type": "range_expression",
+            "named": true
+          },
+          {
+            "type": "raw_string_literal",
             "named": true
           },
           {
@@ -385,6 +401,10 @@
           "named": true
         },
         {
+          "type": "multiline_string_literal",
+          "named": true
+        },
+        {
           "type": "nil",
           "named": true
         },
@@ -418,6 +438,10 @@
         },
         {
           "type": "range_expression",
+          "named": true
+        },
+        {
+          "type": "raw_string_literal",
           "named": true
         },
         {
@@ -549,6 +573,10 @@
         },
         {
           "type": "parallel_settle_expression",
+          "named": true
+        },
+        {
+          "type": "require_statement",
           "named": true
         },
         {
@@ -734,6 +762,10 @@
           "named": true
         },
         {
+          "type": "require_statement",
+          "named": true
+        },
+        {
           "type": "retry_statement",
           "named": true
         },
@@ -893,6 +925,10 @@
             "named": true
           },
           {
+            "type": "multiline_string_literal",
+            "named": true
+          },
+          {
             "type": "nil",
             "named": true
           },
@@ -926,6 +962,10 @@
           },
           {
             "type": "range_expression",
+            "named": true
+          },
+          {
+            "type": "raw_string_literal",
             "named": true
           },
           {
@@ -1056,6 +1096,10 @@
             "named": true
           },
           {
+            "type": "multiline_string_literal",
+            "named": true
+          },
+          {
             "type": "nil",
             "named": true
           },
@@ -1089,6 +1133,10 @@
           },
           {
             "type": "range_expression",
+            "named": true
+          },
+          {
+            "type": "raw_string_literal",
             "named": true
           },
           {
@@ -1216,6 +1264,10 @@
             "named": true
           },
           {
+            "type": "multiline_string_literal",
+            "named": true
+          },
+          {
             "type": "nil",
             "named": true
           },
@@ -1249,6 +1301,10 @@
           },
           {
             "type": "range_expression",
+            "named": true
+          },
+          {
+            "type": "raw_string_literal",
             "named": true
           },
           {
@@ -1358,6 +1414,10 @@
             "named": true
           },
           {
+            "type": "multiline_string_literal",
+            "named": true
+          },
+          {
             "type": "nil",
             "named": true
           },
@@ -1391,6 +1451,10 @@
           },
           {
             "type": "range_expression",
+            "named": true
+          },
+          {
+            "type": "raw_string_literal",
             "named": true
           },
           {
@@ -1540,6 +1604,10 @@
           "named": true
         },
         {
+          "type": "multiline_string_literal",
+          "named": true
+        },
+        {
           "type": "nil",
           "named": true
         },
@@ -1573,6 +1641,10 @@
         },
         {
           "type": "range_expression",
+          "named": true
+        },
+        {
+          "type": "raw_string_literal",
           "named": true
         },
         {
@@ -1739,6 +1811,10 @@
           "named": true
         },
         {
+          "type": "multiline_string_literal",
+          "named": true
+        },
+        {
           "type": "nil",
           "named": true
         },
@@ -1772,6 +1848,10 @@
         },
         {
           "type": "range_expression",
+          "named": true
+        },
+        {
+          "type": "raw_string_literal",
           "named": true
         },
         {
@@ -1990,6 +2070,10 @@
             "named": true
           },
           {
+            "type": "multiline_string_literal",
+            "named": true
+          },
+          {
             "type": "nil",
             "named": true
           },
@@ -2023,6 +2107,10 @@
           },
           {
             "type": "range_expression",
+            "named": true
+          },
+          {
+            "type": "raw_string_literal",
             "named": true
           },
           {
@@ -2171,6 +2259,10 @@
             "named": true
           },
           {
+            "type": "multiline_string_literal",
+            "named": true
+          },
+          {
             "type": "nil",
             "named": true
           },
@@ -2204,6 +2296,10 @@
           },
           {
             "type": "range_expression",
+            "named": true
+          },
+          {
+            "type": "raw_string_literal",
             "named": true
           },
           {
@@ -2329,6 +2425,10 @@
             "named": true
           },
           {
+            "type": "multiline_string_literal",
+            "named": true
+          },
+          {
             "type": "nil",
             "named": true
           },
@@ -2362,6 +2462,10 @@
           },
           {
             "type": "range_expression",
+            "named": true
+          },
+          {
+            "type": "raw_string_literal",
             "named": true
           },
           {
@@ -2633,6 +2737,10 @@
           "named": true
         },
         {
+          "type": "multiline_string_literal",
+          "named": true
+        },
+        {
           "type": "nil",
           "named": true
         },
@@ -2666,6 +2774,10 @@
         },
         {
           "type": "range_expression",
+          "named": true
+        },
+        {
+          "type": "raw_string_literal",
           "named": true
         },
         {
@@ -2813,6 +2925,10 @@
             "named": true
           },
           {
+            "type": "multiline_string_literal",
+            "named": true
+          },
+          {
             "type": "nil",
             "named": true
           },
@@ -2846,6 +2962,10 @@
           },
           {
             "type": "range_expression",
+            "named": true
+          },
+          {
+            "type": "raw_string_literal",
             "named": true
           },
           {
@@ -2961,6 +3081,10 @@
           "named": true
         },
         {
+          "type": "multiline_string_literal",
+          "named": true
+        },
+        {
           "type": "nil",
           "named": true
         },
@@ -2994,6 +3118,10 @@
         },
         {
           "type": "range_expression",
+          "named": true
+        },
+        {
+          "type": "raw_string_literal",
           "named": true
         },
         {
@@ -3127,6 +3255,10 @@
           "named": true
         },
         {
+          "type": "multiline_string_literal",
+          "named": true
+        },
+        {
           "type": "nil",
           "named": true
         },
@@ -3160,6 +3292,10 @@
         },
         {
           "type": "range_expression",
+          "named": true
+        },
+        {
+          "type": "raw_string_literal",
           "named": true
         },
         {
@@ -3284,6 +3420,10 @@
             "named": true
           },
           {
+            "type": "multiline_string_literal",
+            "named": true
+          },
+          {
             "type": "nil",
             "named": true
           },
@@ -3317,6 +3457,10 @@
           },
           {
             "type": "range_expression",
+            "named": true
+          },
+          {
+            "type": "raw_string_literal",
             "named": true
           },
           {
@@ -3432,6 +3576,10 @@
             "named": true
           },
           {
+            "type": "multiline_string_literal",
+            "named": true
+          },
+          {
             "type": "nil",
             "named": true
           },
@@ -3465,6 +3613,10 @@
           },
           {
             "type": "range_expression",
+            "named": true
+          },
+          {
+            "type": "raw_string_literal",
             "named": true
           },
           {
@@ -3604,6 +3756,10 @@
             "named": true
           },
           {
+            "type": "multiline_string_literal",
+            "named": true
+          },
+          {
             "type": "nil",
             "named": true
           },
@@ -3637,6 +3793,10 @@
           },
           {
             "type": "range_expression",
+            "named": true
+          },
+          {
+            "type": "raw_string_literal",
             "named": true
           },
           {
@@ -3783,6 +3943,10 @@
           "named": true
         },
         {
+          "type": "multiline_string_literal",
+          "named": true
+        },
+        {
           "type": "nil",
           "named": true
         },
@@ -3816,6 +3980,10 @@
         },
         {
           "type": "range_expression",
+          "named": true
+        },
+        {
+          "type": "raw_string_literal",
           "named": true
         },
         {
@@ -3966,6 +4134,10 @@
             "named": true
           },
           {
+            "type": "multiline_string_literal",
+            "named": true
+          },
+          {
             "type": "nil",
             "named": true
           },
@@ -3999,6 +4171,10 @@
           },
           {
             "type": "range_expression",
+            "named": true
+          },
+          {
+            "type": "raw_string_literal",
             "named": true
           },
           {
@@ -4139,6 +4315,10 @@
           "named": true
         },
         {
+          "type": "require_statement",
+          "named": true
+        },
+        {
           "type": "retry_statement",
           "named": true
         },
@@ -4254,6 +4434,10 @@
             "named": true
           },
           {
+            "type": "multiline_string_literal",
+            "named": true
+          },
+          {
             "type": "nil",
             "named": true
           },
@@ -4287,6 +4471,10 @@
           },
           {
             "type": "range_expression",
+            "named": true
+          },
+          {
+            "type": "raw_string_literal",
             "named": true
           },
           {
@@ -4424,6 +4612,10 @@
         },
         {
           "type": "parallel_settle_expression",
+          "named": true
+        },
+        {
+          "type": "require_statement",
           "named": true
         },
         {
@@ -4542,6 +4734,10 @@
             "named": true
           },
           {
+            "type": "multiline_string_literal",
+            "named": true
+          },
+          {
             "type": "nil",
             "named": true
           },
@@ -4575,6 +4771,10 @@
           },
           {
             "type": "range_expression",
+            "named": true
+          },
+          {
+            "type": "raw_string_literal",
             "named": true
           },
           {
@@ -4712,6 +4912,10 @@
         },
         {
           "type": "parallel_settle_expression",
+          "named": true
+        },
+        {
+          "type": "require_statement",
           "named": true
         },
         {
@@ -4845,6 +5049,10 @@
           "named": true
         },
         {
+          "type": "multiline_string_literal",
+          "named": true
+        },
+        {
           "type": "nil",
           "named": true
         },
@@ -4878,6 +5086,10 @@
         },
         {
           "type": "range_expression",
+          "named": true
+        },
+        {
+          "type": "raw_string_literal",
           "named": true
         },
         {
@@ -4992,6 +5204,10 @@
           "named": true
         },
         {
+          "type": "multiline_string_literal",
+          "named": true
+        },
+        {
           "type": "nil",
           "named": true
         },
@@ -5025,6 +5241,10 @@
         },
         {
           "type": "range_expression",
+          "named": true
+        },
+        {
+          "type": "raw_string_literal",
           "named": true
         },
         {
@@ -5179,6 +5399,10 @@
             "named": true
           },
           {
+            "type": "multiline_string_literal",
+            "named": true
+          },
+          {
             "type": "nil",
             "named": true
           },
@@ -5212,6 +5436,10 @@
           },
           {
             "type": "range_expression",
+            "named": true
+          },
+          {
+            "type": "raw_string_literal",
             "named": true
           },
           {
@@ -5341,6 +5569,10 @@
           "named": true
         },
         {
+          "type": "multiline_string_literal",
+          "named": true
+        },
+        {
           "type": "nil",
           "named": true
         },
@@ -5374,6 +5606,10 @@
         },
         {
           "type": "range_expression",
+          "named": true
+        },
+        {
+          "type": "raw_string_literal",
           "named": true
         },
         {
@@ -5417,6 +5653,312 @@
           "named": true
         }
       ]
+    }
+  },
+  {
+    "type": "require_statement",
+    "named": true,
+    "fields": {
+      "condition": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "binary_expression",
+            "named": true
+          },
+          {
+            "type": "call_expression",
+            "named": true
+          },
+          {
+            "type": "closure",
+            "named": true
+          },
+          {
+            "type": "deadline_block",
+            "named": true
+          },
+          {
+            "type": "dict_literal",
+            "named": true
+          },
+          {
+            "type": "duration_literal",
+            "named": true
+          },
+          {
+            "type": "false",
+            "named": true
+          },
+          {
+            "type": "float_literal",
+            "named": true
+          },
+          {
+            "type": "fn_expression",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "if_statement",
+            "named": true
+          },
+          {
+            "type": "integer_literal",
+            "named": true
+          },
+          {
+            "type": "interpolated_string",
+            "named": true
+          },
+          {
+            "type": "list_literal",
+            "named": true
+          },
+          {
+            "type": "method_call",
+            "named": true
+          },
+          {
+            "type": "multiline_string_literal",
+            "named": true
+          },
+          {
+            "type": "nil",
+            "named": true
+          },
+          {
+            "type": "nil_coalescing_expression",
+            "named": true
+          },
+          {
+            "type": "parallel_expression",
+            "named": true
+          },
+          {
+            "type": "parallel_map_expression",
+            "named": true
+          },
+          {
+            "type": "parallel_settle_expression",
+            "named": true
+          },
+          {
+            "type": "parenthesized_expression",
+            "named": true
+          },
+          {
+            "type": "pipe_expression",
+            "named": true
+          },
+          {
+            "type": "property_access",
+            "named": true
+          },
+          {
+            "type": "range_expression",
+            "named": true
+          },
+          {
+            "type": "raw_string_literal",
+            "named": true
+          },
+          {
+            "type": "retry_statement",
+            "named": true
+          },
+          {
+            "type": "slice_expression",
+            "named": true
+          },
+          {
+            "type": "spawn_expression",
+            "named": true
+          },
+          {
+            "type": "string_literal",
+            "named": true
+          },
+          {
+            "type": "subscript_expression",
+            "named": true
+          },
+          {
+            "type": "ternary_expression",
+            "named": true
+          },
+          {
+            "type": "true",
+            "named": true
+          },
+          {
+            "type": "try_expression",
+            "named": true
+          },
+          {
+            "type": "try_unwrap_expression",
+            "named": true
+          },
+          {
+            "type": "unary_expression",
+            "named": true
+          }
+        ]
+      },
+      "message": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "binary_expression",
+            "named": true
+          },
+          {
+            "type": "call_expression",
+            "named": true
+          },
+          {
+            "type": "closure",
+            "named": true
+          },
+          {
+            "type": "deadline_block",
+            "named": true
+          },
+          {
+            "type": "dict_literal",
+            "named": true
+          },
+          {
+            "type": "duration_literal",
+            "named": true
+          },
+          {
+            "type": "false",
+            "named": true
+          },
+          {
+            "type": "float_literal",
+            "named": true
+          },
+          {
+            "type": "fn_expression",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "if_statement",
+            "named": true
+          },
+          {
+            "type": "integer_literal",
+            "named": true
+          },
+          {
+            "type": "interpolated_string",
+            "named": true
+          },
+          {
+            "type": "list_literal",
+            "named": true
+          },
+          {
+            "type": "method_call",
+            "named": true
+          },
+          {
+            "type": "multiline_string_literal",
+            "named": true
+          },
+          {
+            "type": "nil",
+            "named": true
+          },
+          {
+            "type": "nil_coalescing_expression",
+            "named": true
+          },
+          {
+            "type": "parallel_expression",
+            "named": true
+          },
+          {
+            "type": "parallel_map_expression",
+            "named": true
+          },
+          {
+            "type": "parallel_settle_expression",
+            "named": true
+          },
+          {
+            "type": "parenthesized_expression",
+            "named": true
+          },
+          {
+            "type": "pipe_expression",
+            "named": true
+          },
+          {
+            "type": "property_access",
+            "named": true
+          },
+          {
+            "type": "range_expression",
+            "named": true
+          },
+          {
+            "type": "raw_string_literal",
+            "named": true
+          },
+          {
+            "type": "retry_statement",
+            "named": true
+          },
+          {
+            "type": "slice_expression",
+            "named": true
+          },
+          {
+            "type": "spawn_expression",
+            "named": true
+          },
+          {
+            "type": "string_literal",
+            "named": true
+          },
+          {
+            "type": "subscript_expression",
+            "named": true
+          },
+          {
+            "type": "ternary_expression",
+            "named": true
+          },
+          {
+            "type": "true",
+            "named": true
+          },
+          {
+            "type": "try_expression",
+            "named": true
+          },
+          {
+            "type": "try_unwrap_expression",
+            "named": true
+          },
+          {
+            "type": "unary_expression",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {
@@ -5498,6 +6040,10 @@
             "named": true
           },
           {
+            "type": "multiline_string_literal",
+            "named": true
+          },
+          {
             "type": "nil",
             "named": true
           },
@@ -5531,6 +6077,10 @@
           },
           {
             "type": "range_expression",
+            "named": true
+          },
+          {
+            "type": "raw_string_literal",
             "named": true
           },
           {
@@ -5646,6 +6196,10 @@
           "named": true
         },
         {
+          "type": "multiline_string_literal",
+          "named": true
+        },
+        {
           "type": "nil",
           "named": true
         },
@@ -5679,6 +6233,10 @@
         },
         {
           "type": "range_expression",
+          "named": true
+        },
+        {
+          "type": "raw_string_literal",
           "named": true
         },
         {
@@ -5826,6 +6384,10 @@
             "named": true
           },
           {
+            "type": "multiline_string_literal",
+            "named": true
+          },
+          {
             "type": "nil",
             "named": true
           },
@@ -5859,6 +6421,10 @@
           },
           {
             "type": "range_expression",
+            "named": true
+          },
+          {
+            "type": "raw_string_literal",
             "named": true
           },
           {
@@ -6010,6 +6576,10 @@
             "named": true
           },
           {
+            "type": "multiline_string_literal",
+            "named": true
+          },
+          {
             "type": "nil",
             "named": true
           },
@@ -6043,6 +6613,10 @@
           },
           {
             "type": "range_expression",
+            "named": true
+          },
+          {
+            "type": "raw_string_literal",
             "named": true
           },
           {
@@ -6199,6 +6773,10 @@
             "named": true
           },
           {
+            "type": "multiline_string_literal",
+            "named": true
+          },
+          {
             "type": "nil",
             "named": true
           },
@@ -6232,6 +6810,10 @@
           },
           {
             "type": "range_expression",
+            "named": true
+          },
+          {
+            "type": "raw_string_literal",
             "named": true
           },
           {
@@ -6341,6 +6923,10 @@
             "named": true
           },
           {
+            "type": "multiline_string_literal",
+            "named": true
+          },
+          {
             "type": "nil",
             "named": true
           },
@@ -6374,6 +6960,10 @@
           },
           {
             "type": "range_expression",
+            "named": true
+          },
+          {
+            "type": "raw_string_literal",
             "named": true
           },
           {
@@ -6483,6 +7073,10 @@
             "named": true
           },
           {
+            "type": "multiline_string_literal",
+            "named": true
+          },
+          {
             "type": "nil",
             "named": true
           },
@@ -6516,6 +7110,10 @@
           },
           {
             "type": "range_expression",
+            "named": true
+          },
+          {
+            "type": "raw_string_literal",
             "named": true
           },
           {
@@ -6660,6 +7258,10 @@
           "named": true
         },
         {
+          "type": "require_statement",
+          "named": true
+        },
+        {
           "type": "retry_statement",
           "named": true
         },
@@ -6790,6 +7392,10 @@
           "named": true
         },
         {
+          "type": "multiline_string_literal",
+          "named": true
+        },
+        {
           "type": "nil",
           "named": true
         },
@@ -6823,6 +7429,10 @@
         },
         {
           "type": "range_expression",
+          "named": true
+        },
+        {
+          "type": "raw_string_literal",
           "named": true
         },
         {
@@ -6989,6 +7599,10 @@
             "named": true
           },
           {
+            "type": "multiline_string_literal",
+            "named": true
+          },
+          {
             "type": "nil",
             "named": true
           },
@@ -7022,6 +7636,10 @@
           },
           {
             "type": "range_expression",
+            "named": true
+          },
+          {
+            "type": "raw_string_literal",
             "named": true
           },
           {
@@ -7132,6 +7750,10 @@
           "named": true
         },
         {
+          "type": "multiline_string_literal",
+          "named": true
+        },
+        {
           "type": "nil",
           "named": true
         },
@@ -7165,6 +7787,10 @@
         },
         {
           "type": "range_expression",
+          "named": true
+        },
+        {
+          "type": "raw_string_literal",
           "named": true
         },
         {
@@ -7279,6 +7905,10 @@
           "named": true
         },
         {
+          "type": "multiline_string_literal",
+          "named": true
+        },
+        {
           "type": "nil",
           "named": true
         },
@@ -7312,6 +7942,10 @@
         },
         {
           "type": "range_expression",
+          "named": true
+        },
+        {
+          "type": "raw_string_literal",
           "named": true
         },
         {
@@ -7426,6 +8060,10 @@
           "named": true
         },
         {
+          "type": "multiline_string_literal",
+          "named": true
+        },
+        {
           "type": "nil",
           "named": true
         },
@@ -7459,6 +8097,10 @@
         },
         {
           "type": "range_expression",
+          "named": true
+        },
+        {
+          "type": "raw_string_literal",
           "named": true
         },
         {
@@ -7508,16 +8150,6 @@
     "type": "tool_declaration",
     "named": true,
     "fields": {
-      "body": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "block",
-            "named": true
-          }
-        ]
-      },
       "name": {
         "multiple": false,
         "required": true,
@@ -7534,11 +8166,143 @@
       "required": false,
       "types": [
         {
+          "type": "assignment",
+          "named": true
+        },
+        {
+          "type": "break_statement",
+          "named": true
+        },
+        {
+          "type": "compound_assignment",
+          "named": true
+        },
+        {
+          "type": "continue_statement",
+          "named": true
+        },
+        {
+          "type": "deadline_block",
+          "named": true
+        },
+        {
+          "type": "enum_declaration",
+          "named": true
+        },
+        {
+          "type": "expression_statement",
+          "named": true
+        },
+        {
+          "type": "fn_declaration",
+          "named": true
+        },
+        {
+          "type": "for_statement",
+          "named": true
+        },
+        {
+          "type": "guard_statement",
+          "named": true
+        },
+        {
+          "type": "if_statement",
+          "named": true
+        },
+        {
+          "type": "impl_block",
+          "named": true
+        },
+        {
+          "type": "interface_declaration",
+          "named": true
+        },
+        {
+          "type": "let_binding",
+          "named": true
+        },
+        {
+          "type": "match_statement",
+          "named": true
+        },
+        {
+          "type": "mutex_block",
+          "named": true
+        },
+        {
+          "type": "override_declaration",
+          "named": true
+        },
+        {
+          "type": "parallel_expression",
+          "named": true
+        },
+        {
+          "type": "parallel_map_expression",
+          "named": true
+        },
+        {
+          "type": "parallel_settle_expression",
+          "named": true
+        },
+        {
           "type": "parameter_list",
           "named": true
         },
         {
+          "type": "require_statement",
+          "named": true
+        },
+        {
+          "type": "retry_statement",
+          "named": true
+        },
+        {
+          "type": "return_statement",
+          "named": true
+        },
+        {
+          "type": "select_block",
+          "named": true
+        },
+        {
+          "type": "string_literal",
+          "named": true
+        },
+        {
+          "type": "struct_declaration",
+          "named": true
+        },
+        {
+          "type": "throw_statement",
+          "named": true
+        },
+        {
+          "type": "tool_declaration",
+          "named": true
+        },
+        {
+          "type": "try_catch_statement",
+          "named": true
+        },
+        {
           "type": "type_annotation",
+          "named": true
+        },
+        {
+          "type": "type_declaration",
+          "named": true
+        },
+        {
+          "type": "var_binding",
+          "named": true
+        },
+        {
+          "type": "while_statement",
+          "named": true
+        },
+        {
+          "type": "yield_expression",
           "named": true
         }
       ]
@@ -7689,6 +8453,10 @@
           "named": true
         },
         {
+          "type": "multiline_string_literal",
+          "named": true
+        },
+        {
           "type": "nil",
           "named": true
         },
@@ -7722,6 +8490,10 @@
         },
         {
           "type": "range_expression",
+          "named": true
+        },
+        {
+          "type": "raw_string_literal",
           "named": true
         },
         {
@@ -7889,6 +8661,10 @@
             "named": true
           },
           {
+            "type": "multiline_string_literal",
+            "named": true
+          },
+          {
             "type": "nil",
             "named": true
           },
@@ -7922,6 +8698,10 @@
           },
           {
             "type": "range_expression",
+            "named": true
+          },
+          {
+            "type": "raw_string_literal",
             "named": true
           },
           {
@@ -8057,6 +8837,10 @@
           "named": true
         },
         {
+          "type": "multiline_string_literal",
+          "named": true
+        },
+        {
           "type": "nil",
           "named": true
         },
@@ -8090,6 +8874,10 @@
         },
         {
           "type": "range_expression",
+          "named": true
+        },
+        {
+          "type": "raw_string_literal",
           "named": true
         },
         {
@@ -8232,6 +9020,10 @@
             "named": true
           },
           {
+            "type": "multiline_string_literal",
+            "named": true
+          },
+          {
             "type": "nil",
             "named": true
           },
@@ -8265,6 +9057,10 @@
           },
           {
             "type": "range_expression",
+            "named": true
+          },
+          {
+            "type": "raw_string_literal",
             "named": true
           },
           {
@@ -8405,6 +9201,10 @@
             "named": true
           },
           {
+            "type": "multiline_string_literal",
+            "named": true
+          },
+          {
             "type": "nil",
             "named": true
           },
@@ -8438,6 +9238,10 @@
           },
           {
             "type": "range_expression",
+            "named": true
+          },
+          {
+            "type": "raw_string_literal",
             "named": true
           },
           {
@@ -8553,6 +9357,10 @@
           "named": true
         },
         {
+          "type": "multiline_string_literal",
+          "named": true
+        },
+        {
           "type": "nil",
           "named": true
         },
@@ -8586,6 +9394,10 @@
         },
         {
           "type": "range_expression",
+          "named": true
+        },
+        {
+          "type": "raw_string_literal",
           "named": true
         },
         {
@@ -8797,6 +9609,10 @@
     "named": false
   },
   {
+    "type": "description",
+    "named": false
+  },
+  {
     "type": "duration_literal",
     "named": true
   },
@@ -8877,6 +9693,10 @@
     "named": false
   },
   {
+    "type": "multiline_string_literal",
+    "named": true
+  },
+  {
     "type": "mutex",
     "named": false
   },
@@ -8911,6 +9731,10 @@
   {
     "type": "pub",
     "named": false
+  },
+  {
+    "type": "raw_string_literal",
+    "named": true
   },
   {
     "type": "require",

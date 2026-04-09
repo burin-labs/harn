@@ -392,7 +392,8 @@ These are called on string values with dot notation: `"hello".uppercase()`.
 | `mkdir(path)` | path: string | nil | Create directory and all parent directories. Throws on failure |
 | `stat(path)` | path: string | dict | File metadata: `{size, is_file, is_dir, readonly, modified}`. Throws on failure |
 | `temp_dir()` | none | string | System temporary directory path |
-| `render(path, bindings?)` | path: string, bindings: dict | string | Read a template file relative to the current module's source directory and replace `{{key}}` placeholders with values from bindings dict. Templates also support conditional sections via `{{if key}}...{{end}}`, where empty strings, `nil`, `false`, `0`, and empty lists/dicts are falsey. When called from an imported module, resolves relative to that module's directory, not the entry pipeline. Without bindings, just reads the file |
+| `render(path, bindings?)` | path: string, bindings: dict | string | Read a template file relative to the current module's asset root and replace `{{key}}` placeholders with values from bindings dict. Templates also support conditional sections via `{{if key}}...{{end}}`, where empty strings, `nil`, `false`, `0`, and empty lists/dicts are falsey. When called from an imported module, resolves relative to that module's directory, not the entry pipeline. Without bindings, just reads the file |
+| `render_prompt(path, bindings?)` | path: string, bindings: dict | string | Prompt-oriented alias of `render(...)`. Use this for `.harn.prompt` / `.prompt` assets when you want the asset to be surfaced explicitly in bundle manifests and preflight output |
 
 ## Environment and system
 
@@ -413,8 +414,11 @@ These are called on string values with dot notation: `"hello".uppercase()`.
 | `home_dir()` | none | string | User's home directory path |
 | `pid()` | none | int | Current process ID |
 | `cwd()` | none | string | Current working directory |
+| `execution_root()` | none | string | Directory used for source-relative execution helpers such as `exec_at(...)` / `shell_at(...)` |
+| `asset_root()` | none | string | Directory used for source-relative asset helpers such as `render(...)` / `render_prompt(...)` |
 | `source_dir()` | none | string | Directory of the currently-executing `.harn` file (falls back to cwd) |
 | `project_root()` | none | string or nil | Nearest ancestor directory containing `harn.toml` |
+| `runtime_paths()` | none | dict | Resolved runtime path model: `{execution_root, asset_root, state_root, run_root, worktree_root}` |
 | `date_iso()` | none | string | Current UTC time in ISO 8601 format (e.g., `"2026-03-29T14:30:00.123Z"`) |
 
 ## Regular expressions

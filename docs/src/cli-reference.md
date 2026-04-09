@@ -127,7 +127,7 @@ harn lint --fix main.harn
 
 Type-check one or more `.harn` files or directories and run preflight
 validation without executing them. The preflight pass resolves imports, checks
-literal `render(...)` targets, detects import symbol collisions across
+literal `render(...)` / `render_prompt(...)` targets, detects import symbol collisions across
 modules, validates `host_call("capability.operation", ...)` capability
 contracts, and flags missing template resources, execution directories, and worker repos that would
 otherwise fail only at runtime. Source-aware lint rules run as part of
@@ -144,7 +144,44 @@ harn check --bundle-root .bundle main.harn
 | Flag | Description |
 |---|---|
 | `--host-capabilities <file>` | Load a host capability manifest for preflight validation. Supports plain `{capability: [ops...]}` objects, nested `{capabilities: ...}` wrappers, and per-op metadata dictionaries. |
-| `--bundle-root <dir>` | Validate `render(...)` and template paths against an alternate bundled layout root |
+| `--bundle-root <dir>` | Validate `render(...)`, `render_prompt(...)`, and template paths against an alternate bundled layout root |
+
+## harn contracts
+
+Export machine-readable contracts for hosts, release tooling, and embedded
+bundles.
+
+```bash
+harn contracts builtins
+harn contracts host-capabilities --host-capabilities host-capabilities.json
+harn contracts bundle main.harn --verify
+harn contracts bundle src/ --bundle-root .bundle --host-capabilities host-capabilities.json
+```
+
+### harn contracts builtins
+
+Print the parser/runtime builtin registry as JSON, including return-type hints
+and alignment status.
+
+### harn contracts host-capabilities
+
+Print the effective host-capability manifest used by preflight validation after
+merging the built-in defaults with any external manifest file.
+
+### harn contracts bundle
+
+Print a bundle manifest for one or more `.harn` targets. The manifest includes:
+
+- explicit `entry_modules`, `import_modules`, and `module_dependencies` edges
+- explicit `prompt_assets` and `template_assets` slices, plus a full `assets`
+  table resolved through the same source-relative rules as `render(...)`
+- required host capabilities discovered from literal `host_call(...)` sites
+- literal execution directories and worker worktree repos
+- a `summary` block with stable counts for packagers and release tooling
+
+Use `--verify` to run normal Harn preflight validation before emitting the
+bundle manifest and return a non-zero exit code if the selected targets are not
+bundle-safe.
 
 ## harn init
 
