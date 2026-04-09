@@ -32,6 +32,8 @@ pub(crate) enum BuiltinReturn {
     /// Union of two or more named types (e.g. `["string", "nil"]` for
     /// `env` / `regex_match`).
     Union(&'static [&'static str]),
+    /// The bottom type (never returns normally).
+    Never,
 }
 
 /// One entry in the builtin registry.
@@ -1458,6 +1460,10 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("string")),
     },
     BuiltinSig {
+        name: "unreachable",
+        return_type: Some(BuiltinReturn::Never),
+    },
+    BuiltinSig {
         name: "unwrap",
         return_type: None,
     },
@@ -1589,6 +1595,7 @@ pub(crate) fn builtin_return_type(name: &str) -> Option<TypeExpr> {
         BuiltinReturn::Union(tys) => Some(TypeExpr::Union(
             tys.iter().map(|ty| TypeExpr::Named((*ty).into())).collect(),
         )),
+        BuiltinReturn::Never => Some(TypeExpr::Never),
     }
 }
 

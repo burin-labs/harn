@@ -116,6 +116,14 @@ pub(crate) fn register_type_builtins(vm: &mut Vm) {
         }
     });
 
+    vm.register_builtin("unreachable", |args, _out| {
+        let msg = match args.first() {
+            Some(val) => format!("unreachable code was reached: {}", val.display()),
+            None => "unreachable code was reached".to_string(),
+        };
+        Err(VmError::Runtime(msg))
+    });
+
     // --- Collection/type conversion ---
     vm.register_builtin("to_list", |args, _out| {
         match args.first().unwrap_or(&VmValue::Nil) {

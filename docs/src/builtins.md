@@ -18,6 +18,7 @@ Complete reference for all built-in functions available in Harn.
 | `to_string(value)` | value: any | string | Convert to string representation |
 | `to_int(value)` | value: any | int or nil | Parse/convert to integer. Floats truncate, bools become 0/1 |
 | `to_float(value)` | value: any | float or nil | Parse/convert to float |
+| `unreachable(value?)` | value: any (optional) | never | Throws "unreachable code was reached" at runtime. When the argument is a variable, the type checker verifies it has been narrowed to `never` (exhaustiveness check) |
 
 ## Runtime shape validation
 

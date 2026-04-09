@@ -353,6 +353,7 @@ impl Compiler {
                     VmValue::String(Rc::from("closure")),
                 )]))))
             }
+            harn_parser::TypeExpr::Never => None,
         }
     }
 

@@ -1568,6 +1568,30 @@ let ok: bool = true
 let nothing: nil = nil
 ```
 
+### The `never` type
+
+`never` is the bottom type — the type of expressions that never produce a
+value. It is a subtype of all other types.
+
+Expressions that infer to `never`:
+
+- `throw expr`
+- `return expr`
+- `break` and `continue`
+- A block where every control path exits
+- An `if`/`else` where both branches infer to `never`
+- Calls to `unreachable()`
+
+`never` is removed from union types: `never | string` simplifies to
+`string`. An empty union (all members removed by narrowing) becomes
+`never`.
+
+```harn
+fn always_throws() -> never {
+  throw "this function never returns normally"
+}
+```
+
 ### Union types
 
 ```harn
@@ -1763,6 +1787,39 @@ fn check(x: {name?: string, age: int}) {
   if x.has("name") {
     log(x)  // x.name is now required (non-optional)
   }
+}
+```
+
+#### Exhaustiveness checking with `unreachable()`
+
+The `unreachable()` builtin acts as a static exhaustiveness assertion.
+When called with a variable argument, the type checker verifies that the
+variable has been narrowed to `never` — meaning all possible types have
+been handled. If not, a compile-time error reports the remaining types.
+
+```harn
+fn process(x: string | int | nil) -> string {
+  if type_of(x) == "string" { return "string: ${x}" }
+  if type_of(x) == "int" { return "int: ${x}" }
+  if x == nil { return "nil" }
+  unreachable(x)  // compile-time verified: x is `never` here
+}
+```
+
+At runtime, `unreachable()` throws `"unreachable code was reached"` as a
+safety net. When called without arguments or with a non-variable argument,
+no compile-time check is performed.
+
+#### Unreachable code warnings
+
+The type checker warns about code after statements that definitely exit
+(via `return`, `throw`, `break`, or `continue`), including composite
+exits where both branches of an `if`/`else` exit:
+
+```harn
+fn foo(x: bool) {
+  if x { return 1 } else { throw "err" }
+  log("never reached")  // warning: unreachable code
 }
 ```
 

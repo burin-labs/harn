@@ -1,0 +1,45 @@
+// Test the never type and unreachable() builtin
+pipeline test(task) {
+  // unreachable() throws at runtime
+  fn test_unreachable_throws() -> string {
+    try {
+      unreachable()
+    } catch (e) {
+      return "caught: unreachable"
+    }
+    return "should not reach"
+  }
+  // unreachable(value) includes the value in the error
+  fn test_unreachable_with_value() -> string {
+    try {
+      unreachable("bad state")
+    } catch (e) {
+      return "caught"
+    }
+    return "should not reach"
+  }
+  // if/else where one branch throws — the other branch's value is used
+  fn branch_type(x: bool) -> int {
+    let result = if x {
+      42
+    } else {
+      throw "nope"
+    }
+    return result
+  }
+  // Exhaustive narrowing with unreachable()
+  fn exhaustive_check(x: string | int) -> string {
+    if type_of(x) == "string" {
+      return "string: ${x}"
+    }
+    if type_of(x) == "int" {
+      return "int: ${x}"
+    }
+    unreachable(x)
+  }
+  log(test_unreachable_throws())
+  log(test_unreachable_with_value())
+  log(branch_type(true))
+  log(exhaustive_check("hello"))
+  log(exhaustive_check(42))
+}

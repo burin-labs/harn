@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use harn_lexer::{FixEdit, Span, StringSegment};
 use harn_parser::diagnostic::find_closest_match;
-use harn_parser::{BindingPattern, Node, SNode};
+use harn_parser::{stmt_definitely_exits, BindingPattern, Node, SNode};
 
 /// A lint diagnostic reported by the linter.
 #[derive(Debug, Clone)]
@@ -1009,13 +1009,7 @@ impl<'a> Linter<'a> {
 
             self.lint_node(node);
 
-            if matches!(
-                node.node,
-                Node::ReturnStmt { .. }
-                    | Node::ThrowStmt { .. }
-                    | Node::BreakStmt
-                    | Node::ContinueStmt
-            ) {
+            if stmt_definitely_exits(node) {
                 found_terminator = true;
             }
         }
@@ -1854,6 +1848,44 @@ pipeline default(task) {
         assert!(
             has_rule(&diags, "unreachable-code"),
             "expected unreachable-code after break, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_unreachable_after_composite_exit() {
+        let diags = lint_source(
+            r#"
+pipeline default(task) {
+    fn foo(x: bool) {
+        if x { return 1 } else { throw "err" }
+        log("unreachable")
+    }
+    foo(true)
+}
+"#,
+        );
+        assert!(
+            has_rule(&diags, "unreachable-code"),
+            "expected unreachable-code after composite exit, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_no_unreachable_without_both_branches_exiting() {
+        let diags = lint_source(
+            r#"
+pipeline default(task) {
+    fn foo(x: bool) {
+        if x { return 1 }
+        log("reachable")
+    }
+    foo(true)
+}
+"#,
+        );
+        assert!(
+            !has_rule(&diags, "unreachable-code"),
+            "should not flag reachable code: {diags:?}"
         );
     }
 

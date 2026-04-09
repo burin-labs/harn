@@ -368,6 +368,9 @@ pub enum TypeExpr {
         params: Vec<TypeExpr>,
         return_type: Box<TypeExpr>,
     },
+    /// The bottom type: the type of expressions that never produce a value
+    /// (return, throw, break, continue).
+    Never,
 }
 
 /// A field in a dict shape type.

@@ -2321,6 +2321,10 @@ impl Parser {
             });
         }
         let name = self.consume_identifier("type name")?;
+        // Bottom type
+        if name == "never" {
+            return Ok(TypeExpr::Never);
+        }
         // Check for generic type parameters: list<int>, dict<string, int>
         if self.check(&TokenKind::Lt) {
             self.advance(); // skip <
