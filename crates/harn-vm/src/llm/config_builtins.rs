@@ -6,7 +6,7 @@ use crate::value::VmValue;
 use crate::vm::Vm;
 
 use super::api::apply_auth_headers;
-use super::helpers::vm_resolve_api_key;
+use super::helpers::resolve_api_key;
 
 /// Register config-based LLM builtins (llm_infer_provider, llm_resolve_model, etc.).
 pub(crate) fn register_config_builtins(vm: &mut Vm) {
@@ -157,7 +157,7 @@ pub(crate) fn register_config_builtins(vm: &mut Vm) {
             .map(|a| a.display())
             .unwrap_or_else(|| "anthropic".to_string());
 
-        let api_key = vm_resolve_api_key(&provider_name).unwrap_or_default();
+        let api_key = resolve_api_key(&provider_name).unwrap_or_default();
 
         let pdef = match llm_config::provider_config(&provider_name) {
             Some(p) => p,

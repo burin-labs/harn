@@ -23,7 +23,7 @@ pub(crate) fn provider_key_available(provider: &str) -> bool {
         return available;
     }
     // Probe: try resolving the key — if it succeeds the provider is usable.
-    let available = vm_resolve_api_key(provider).is_ok();
+    let available = resolve_api_key(provider).is_ok();
     map.insert(provider.to_string(), available);
     available
 }
@@ -132,7 +132,7 @@ pub(crate) fn vm_resolve_provider(options: &Option<BTreeMap<String, VmValue>>) -
         }
     }
     // No provider has a key — return the default so the caller gets the
-    // usual descriptive error from vm_resolve_api_key.
+    // usual descriptive error from resolve_api_key.
     default.to_string()
 }
 
@@ -185,7 +185,7 @@ pub(crate) fn vm_resolve_model(
     }
 }
 
-pub(crate) fn vm_resolve_api_key(provider: &str) -> Result<String, VmError> {
+pub fn resolve_api_key(provider: &str) -> Result<String, VmError> {
     use crate::llm_config;
     if provider == "mock" {
         return Ok(String::new());
@@ -902,7 +902,7 @@ pub(crate) fn extract_llm_options(args: &[VmValue]) -> Result<super::api::LlmCal
 
     let provider = vm_resolve_provider(&options);
     let model = vm_resolve_model(&options, &provider);
-    let api_key = vm_resolve_api_key(&provider)?;
+    let api_key = resolve_api_key(&provider)?;
 
     // Default output ceiling. A value of 0 means "omit from request" (let
     // provider decide). 8192 prevents degenerate repetition loops while
@@ -1185,7 +1185,7 @@ mod tests {
 
         assert_eq!(vm_resolve_provider(&None), "local");
         assert_eq!(vm_resolve_model(&None, "local"), "qwen2.5-coder-32b");
-        assert!(vm_resolve_api_key("local").is_ok());
+        assert!(resolve_api_key("local").is_ok());
 
         unsafe {
             match prev_base {

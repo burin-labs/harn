@@ -61,6 +61,8 @@ pub(crate) enum Command {
     Install,
     /// Add a dependency to harn.toml.
     Add(AddArgs),
+    /// Print resolved metadata for a model alias or model id as JSON.
+    ModelInfo(ModelInfoArgs),
     /// Print the decorated version banner.
     Version,
     /// Regenerate docs/theme/harn-keywords.js from the live lexer + stdlib sets.
@@ -419,6 +421,12 @@ pub(crate) struct AddArgs {
     pub path: Option<String>,
 }
 
+#[derive(Debug, Args)]
+pub(crate) struct ModelInfoArgs {
+    /// Model alias or provider-native model id.
+    pub model: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Cli, Command, McpCommand, ProjectTemplate, RunsCommand};
@@ -561,5 +569,15 @@ mod tests {
         };
         assert_eq!(args.file, "main.harn");
         assert_eq!(args.iterations, 25);
+    }
+
+    #[test]
+    fn test_parses_model_info_args() {
+        let cli = Cli::parse_from(["harn", "model-info", "tog-gemma4-31b"]);
+
+        let Command::ModelInfo(args) = cli.command.unwrap() else {
+            panic!("expected model-info command");
+        };
+        assert_eq!(args.model, "tog-gemma4-31b");
     }
 }

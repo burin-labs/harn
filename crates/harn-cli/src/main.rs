@@ -234,6 +234,7 @@ async fn main() {
             args.tag.as_deref(),
             args.path.as_deref(),
         ),
+        Command::ModelInfo(args) => print_model_info(&args.model).await,
         Command::DumpHighlightKeywords(args) => {
             commands::dump_highlight_keywords::run(&args.output, args.check);
         }
@@ -251,6 +252,30 @@ fn print_version() {
    ╱╱
 "#,
         env!("CARGO_PKG_VERSION")
+    );
+}
+
+async fn print_model_info(model: &str) {
+    let (resolved_id, resolved_provider) = harn_vm::llm_config::resolve_model(model);
+    let provider =
+        resolved_provider.unwrap_or_else(|| harn_vm::llm_config::infer_provider(&resolved_id));
+    let api_key_result = harn_vm::llm::resolve_api_key(&provider);
+    let api_key_set = api_key_result.is_ok();
+    let api_key = api_key_result.unwrap_or_default();
+    let context_window =
+        harn_vm::llm::fetch_provider_max_context(&provider, &resolved_id, &api_key).await;
+    let payload = serde_json::json!({
+        "alias": model,
+        "id": resolved_id,
+        "provider": provider,
+        "api_key_set": api_key_set,
+        "context_window": context_window,
+    });
+    println!(
+        "{}",
+        serde_json::to_string(&payload).unwrap_or_else(|error| {
+            command_error(&format!("failed to serialize model info: {error}"))
+        })
     );
 }
 

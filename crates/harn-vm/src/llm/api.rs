@@ -456,7 +456,7 @@ async fn try_fallback_provider(
         return Err(primary_message);
     };
 
-    let fb_key = super::helpers::vm_resolve_api_key(fallback_provider).unwrap_or_default();
+    let fb_key = super::helpers::resolve_api_key(fallback_provider).unwrap_or_default();
     if fb_key.is_empty() {
         return Err(primary_message);
     }
@@ -1689,7 +1689,7 @@ fn context_window_cache() -> &'static ContextWindowCache {
 /// Returns `None` when the provider doesn't expose `/v1/models`, when the
 /// model isn't found in the response, or when the request fails for any
 /// reason — callers should fall back to their default threshold.
-pub(crate) async fn fetch_provider_max_context(
+pub async fn fetch_provider_max_context(
     provider: &str,
     model: &str,
     api_key: &str,
