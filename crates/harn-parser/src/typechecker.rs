@@ -925,6 +925,9 @@ impl TypeChecker {
                             }
                         }
                     }
+                    if let Some(ref guard) = arm.guard {
+                        self.check_node(guard, &mut arm_scope);
+                    }
                     self.check_block(&arm.body, &mut arm_scope);
                 }
                 self.check_match_exhaustiveness(value, arms, scope, span);
@@ -1119,35 +1122,25 @@ impl TypeChecker {
             }
 
             Node::Parallel {
-                count,
+                mode,
+                expr,
                 variable,
                 body,
             } => {
-                self.check_node(count, scope);
+                self.check_node(expr, scope);
                 let mut par_scope = scope.child();
                 if let Some(var) = variable {
-                    par_scope.define_var(var, Some(TypeExpr::Named("int".into())));
+                    let var_type = match mode {
+                        ParallelMode::Count => Some(TypeExpr::Named("int".into())),
+                        ParallelMode::Each | ParallelMode::Settle => {
+                            match self.infer_type(expr, scope) {
+                                Some(TypeExpr::List(inner)) => Some(*inner),
+                                _ => None,
+                            }
+                        }
+                    };
+                    par_scope.define_var(var, var_type);
                 }
-                self.check_block(body, &mut par_scope);
-            }
-
-            Node::ParallelMap {
-                list,
-                variable,
-                body,
-            }
-            | Node::ParallelSettle {
-                list,
-                variable,
-                body,
-            } => {
-                self.check_node(list, scope);
-                let mut par_scope = scope.child();
-                let elem_type = match self.infer_type(list, scope) {
-                    Some(TypeExpr::List(inner)) => Some(*inner),
-                    _ => None,
-                };
-                par_scope.define_var(variable, elem_type);
                 self.check_block(body, &mut par_scope);
             }
 
@@ -1179,7 +1172,7 @@ impl TypeChecker {
                 self.check_block(body, &mut block_scope);
             }
 
-            Node::MutexBlock { body } => {
+            Node::MutexBlock { body } | Node::DeferStmt { body } => {
                 let mut block_scope = scope.child();
                 self.check_block(body, &mut block_scope);
             }
@@ -1204,7 +1197,7 @@ impl TypeChecker {
                 }
             }
 
-            Node::DictLiteral(entries) | Node::AskExpr { fields: entries } => {
+            Node::DictLiteral(entries) => {
                 for entry in entries {
                     self.check_node(&entry.key, scope);
                     self.check_node(&entry.value, scope);

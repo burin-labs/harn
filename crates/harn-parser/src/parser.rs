@@ -135,8 +135,6 @@ impl Parser {
                     | TokenKind::Pipeline
                     | TokenKind::Import
                     | TokenKind::Parallel
-                    | TokenKind::ParallelMap
-                    | TokenKind::ParallelSettle
                     | TokenKind::Enum
                     | TokenKind::Struct
                     | TokenKind::Interface
@@ -287,8 +285,6 @@ impl Parser {
             TokenKind::Retry => self.parse_retry(),
             TokenKind::While => self.parse_while_loop(),
             TokenKind::Parallel => self.parse_parallel(),
-            TokenKind::ParallelMap => self.parse_parallel_map(),
-            TokenKind::ParallelSettle => self.parse_parallel_settle(),
             TokenKind::Return => self.parse_return(),
             TokenKind::Throw => self.parse_throw(),
             TokenKind::Override => self.parse_override(),
@@ -321,6 +317,7 @@ impl Parser {
             TokenKind::Deadline => self.parse_deadline(),
             TokenKind::Yield => self.parse_yield(),
             TokenKind::Mutex => self.parse_mutex(),
+            TokenKind::Defer => self.parse_defer(),
             TokenKind::Break => {
                 let span = self.current_span();
                 self.advance();
@@ -533,11 +530,22 @@ impl Parser {
         let mut arms = Vec::new();
         while !self.is_at_end() && !self.check(&TokenKind::RBrace) {
             let pattern = self.parse_expression()?;
+            // Optional guard: `pattern if condition -> { body }`
+            let guard = if self.check(&TokenKind::If) {
+                self.advance();
+                Some(Box::new(self.parse_expression()?))
+            } else {
+                None
+            };
             self.consume(&TokenKind::Arrow, "->")?;
             self.consume(&TokenKind::LBrace, "{")?;
             let body = self.parse_block()?;
             self.consume(&TokenKind::RBrace, "}")?;
-            arms.push(MatchArm { pattern, body });
+            arms.push(MatchArm {
+                pattern,
+                guard,
+                body,
+            });
             self.skip_newlines();
         }
 
@@ -600,12 +608,23 @@ impl Parser {
     fn parse_parallel(&mut self) -> Result<SNode, ParserError> {
         let start = self.current_span();
         self.consume(&TokenKind::Parallel, "parallel")?;
-        self.consume(&TokenKind::LParen, "(")?;
-        let count = self.parse_expression()?;
-        self.consume(&TokenKind::RParen, ")")?;
+
+        // Determine mode: `parallel each EXPR { ... }`, `parallel settle EXPR { ... }`,
+        // or `parallel EXPR { ... }` (count mode).
+        let mode = if self.check_identifier("each") {
+            self.advance();
+            ParallelMode::Each
+        } else if self.check_identifier("settle") {
+            self.advance();
+            ParallelMode::Settle
+        } else {
+            ParallelMode::Count
+        };
+
+        let expr = self.parse_expression()?;
         self.consume(&TokenKind::LBrace, "{")?;
 
-        // Optional closure parameter: { i ->
+        // Optional closure parameter: { item ->
         let mut variable = None;
         self.skip_newlines();
         if let Some(tok) = self.current() {
@@ -623,55 +642,8 @@ impl Parser {
         self.consume(&TokenKind::RBrace, "}")?;
         Ok(spanned(
             Node::Parallel {
-                count: Box::new(count),
-                variable,
-                body,
-            },
-            Span::merge(start, self.prev_span()),
-        ))
-    }
-
-    fn parse_parallel_map(&mut self) -> Result<SNode, ParserError> {
-        let start = self.current_span();
-        self.consume(&TokenKind::ParallelMap, "parallel_map")?;
-        self.consume(&TokenKind::LParen, "(")?;
-        let list = self.parse_expression()?;
-        self.consume(&TokenKind::RParen, ")")?;
-        self.consume(&TokenKind::LBrace, "{")?;
-
-        self.skip_newlines();
-        let variable = self.consume_identifier("map variable")?;
-        self.consume(&TokenKind::Arrow, "->")?;
-
-        let body = self.parse_block()?;
-        self.consume(&TokenKind::RBrace, "}")?;
-        Ok(spanned(
-            Node::ParallelMap {
-                list: Box::new(list),
-                variable,
-                body,
-            },
-            Span::merge(start, self.prev_span()),
-        ))
-    }
-
-    fn parse_parallel_settle(&mut self) -> Result<SNode, ParserError> {
-        let start = self.current_span();
-        self.consume(&TokenKind::ParallelSettle, "parallel_settle")?;
-        self.consume(&TokenKind::LParen, "(")?;
-        let list = self.parse_expression()?;
-        self.consume(&TokenKind::RParen, ")")?;
-        self.consume(&TokenKind::LBrace, "{")?;
-
-        self.skip_newlines();
-        let variable = self.consume_identifier("settle variable")?;
-        self.consume(&TokenKind::Arrow, "->")?;
-
-        let body = self.parse_block()?;
-        self.consume(&TokenKind::RBrace, "}")?;
-        Ok(spanned(
-            Node::ParallelSettle {
-                list: Box::new(list),
+                mode,
+                expr: Box::new(expr),
                 variable,
                 body,
             },
@@ -1224,29 +1196,14 @@ impl Parser {
         ))
     }
 
-    fn parse_ask_expr(&mut self) -> Result<SNode, ParserError> {
+    fn parse_defer(&mut self) -> Result<SNode, ParserError> {
         let start = self.current_span();
-        self.consume(&TokenKind::Ask, "ask")?;
+        self.consume(&TokenKind::Defer, "defer")?;
         self.consume(&TokenKind::LBrace, "{")?;
-        // Parse as dict entries
-        let mut entries = Vec::new();
-        self.skip_newlines();
-        while !self.is_at_end() && !self.check(&TokenKind::RBrace) {
-            let key_span = self.current_span();
-            let name = self.consume_identifier("ask field")?;
-            let key = spanned(Node::StringLiteral(name), key_span);
-            self.consume(&TokenKind::Colon, ":")?;
-            let value = self.parse_expression()?;
-            entries.push(DictEntry { key, value });
-            self.skip_newlines();
-            if self.check(&TokenKind::Comma) {
-                self.advance();
-                self.skip_newlines();
-            }
-        }
+        let body = self.parse_block()?;
         self.consume(&TokenKind::RBrace, "}")?;
         Ok(spanned(
-            Node::AskExpr { fields: entries },
+            Node::DeferStmt { body },
             Span::merge(start, self.prev_span()),
         ))
     }
@@ -1853,8 +1810,6 @@ impl Parser {
             TokenKind::LBracket => self.parse_list_literal(),
             TokenKind::LBrace => self.parse_dict_or_closure(),
             TokenKind::Parallel => self.parse_parallel(),
-            TokenKind::ParallelMap => self.parse_parallel_map(),
-            TokenKind::ParallelSettle => self.parse_parallel_settle(),
             TokenKind::Retry => self.parse_retry(),
             TokenKind::If => self.parse_if_else(),
             TokenKind::Spawn => self.parse_spawn_expr(),
@@ -1866,7 +1821,6 @@ impl Parser {
                     Span::merge(start, self.prev_span()),
                 ))
             }
-            TokenKind::Ask => self.parse_ask_expr(),
             TokenKind::Deadline => self.parse_deadline(),
             TokenKind::Try => self.parse_try_catch(),
             TokenKind::Match => self.parse_match(),
@@ -2518,8 +2472,6 @@ impl Parser {
             TokenKind::Match => "match",
             TokenKind::Retry => "retry",
             TokenKind::Parallel => "parallel",
-            TokenKind::ParallelMap => "parallel_map",
-            TokenKind::ParallelSettle => "parallel_settle",
             TokenKind::Return => "return",
             TokenKind::Import => "import",
             TokenKind::True => "true",
@@ -2541,8 +2493,8 @@ impl Parser {
             TokenKind::Tool => "tool",
             TokenKind::Upto => "upto",
             TokenKind::Guard => "guard",
-            TokenKind::Ask => "ask",
             TokenKind::Deadline => "deadline",
+            TokenKind::Defer => "defer",
             TokenKind::Yield => "yield",
             TokenKind::Mutex => "mutex",
             TokenKind::Break => "break",

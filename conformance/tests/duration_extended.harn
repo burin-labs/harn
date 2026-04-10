@@ -1,0 +1,12 @@
+pipeline test(task) {
+  // Existing duration suffixes
+  log(500ms)
+  log(5s)
+  log(30m)
+  log(2h)
+  // New: days and weeks
+  log(24h)
+  log(48h)
+  log(168h)
+  log(336h)
+}

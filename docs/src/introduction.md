@@ -19,7 +19,7 @@ or organize logic into named pipelines for larger programs:
 pipeline default(task) {
   let files = ["src/main.rs", "src/lib.rs"]
 
-  let reviews = parallel_map(files) { file ->
+  let reviews = parallel each files { file ->
     let content = read_file(file)
     llm_call("Review this code:\n${content}", "You are a code reviewer.")
   }

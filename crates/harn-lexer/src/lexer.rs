@@ -575,7 +575,7 @@ impl Lexer {
         }
     }
 
-    /// Try to parse a duration suffix (ms, s, m, h) after a number.
+    /// Try to parse a duration suffix (ms, s, m, h, d, w) after a number.
     /// Returns the duration in milliseconds if a suffix is found.
     fn try_duration_suffix(&mut self, num_str: &str) -> Option<u64> {
         let n: u64 = num_str.parse().ok()?;
@@ -613,6 +613,24 @@ impl Lexer {
                 self.advance(); // h
                 return Some(n * 60 * 60 * 1000);
             }
+            if ch == 'd'
+                && self
+                    .source
+                    .get(self.pos + 1)
+                    .is_none_or(|c| !c.is_alphanumeric())
+            {
+                self.advance(); // d
+                return Some(n * 24 * 60 * 60 * 1000);
+            }
+            if ch == 'w'
+                && self
+                    .source
+                    .get(self.pos + 1)
+                    .is_none_or(|c| !c.is_alphanumeric())
+            {
+                self.advance(); // w
+                return Some(n * 7 * 24 * 60 * 60 * 1000);
+            }
         }
         None
     }
@@ -645,8 +663,6 @@ impl Lexer {
             "match" => TokenKind::Match,
             "retry" => TokenKind::Retry,
             "parallel" => TokenKind::Parallel,
-            "parallel_map" => TokenKind::ParallelMap,
-            "parallel_settle" => TokenKind::ParallelSettle,
             "return" => TokenKind::Return,
             "import" => TokenKind::Import,
             "true" => TokenKind::True,
@@ -670,8 +686,8 @@ impl Lexer {
             "upto" => TokenKind::Upto,
             "guard" => TokenKind::Guard,
             "require" => TokenKind::Require,
-            "ask" => TokenKind::Ask,
             "deadline" => TokenKind::Deadline,
+            "defer" => TokenKind::Defer,
             "yield" => TokenKind::Yield,
             "mutex" => TokenKind::Mutex,
             "break" => TokenKind::Break,
@@ -860,11 +876,11 @@ mod tests {
     }
 
     #[test]
-    fn test_parallel_map_keyword() {
-        let mut lexer = Lexer::new("parallel_map parallel");
+    fn test_parallel_keyword() {
+        let mut lexer = Lexer::new("parallel defer");
         let tokens = lexer.tokenize().unwrap();
-        assert_eq!(tokens[0].kind, TokenKind::ParallelMap);
-        assert_eq!(tokens[1].kind, TokenKind::Parallel);
+        assert_eq!(tokens[0].kind, TokenKind::Parallel);
+        assert_eq!(tokens[1].kind, TokenKind::Defer);
     }
 
     #[test]

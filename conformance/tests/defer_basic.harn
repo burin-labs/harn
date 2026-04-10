@@ -1,0 +1,47 @@
+pipeline test(task) {
+  // Defer runs on explicit return
+  fn with_cleanup() {
+    defer {
+      log("cleanup done")
+    }
+    log("doing work")
+    return "result"
+  }
+  let r = with_cleanup()
+  log(r)
+  // Multiple defers run in LIFO order
+  fn lifo_order() {
+    defer {
+      log("first registered")
+    }
+    defer {
+      log("second registered")
+    }
+    defer {
+      log("third registered")
+    }
+    log("body")
+  }
+  lifo_order()
+  // Defer runs on implicit return (no explicit return statement)
+  fn implicit_return() {
+    defer {
+      log("implicit cleanup")
+    }
+    log("implicit body")
+  }
+  implicit_return()
+  // Defer runs on throw
+  fn throws_with_defer() {
+    defer {
+      log("throw cleanup")
+    }
+    log("before throw")
+    throw "boom"
+  }
+  let err = try {
+    throws_with_defer()
+  }
+  log(is_err(err))
+  log(unwrap_err(err))
+}

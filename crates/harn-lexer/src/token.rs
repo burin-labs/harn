@@ -90,11 +90,11 @@ pub struct FixEdit {
 /// Tooling that needs the keyword set (syntax highlighters, the LSP, etc.)
 /// should read `KEYWORDS` rather than hard-coding a duplicate list.
 pub const KEYWORDS: &[&str] = &[
-    "ask",
     "break",
     "catch",
     "continue",
     "deadline",
+    "defer",
     "else",
     "enum",
     "extends",
@@ -115,8 +115,6 @@ pub const KEYWORDS: &[&str] = &[
     "nil",
     "override",
     "parallel",
-    "parallel_map",
-    "parallel_settle",
     "pipeline",
     "pub",
     "require",
@@ -153,8 +151,6 @@ pub enum TokenKind {
     Match,
     Retry,
     Parallel,
-    ParallelMap,
-    ParallelSettle,
     Return,
     Import,
     True,
@@ -178,8 +174,8 @@ pub enum TokenKind {
     Upto,
     Guard,
     Require,
-    Ask,
     Deadline,
+    Defer,
     Yield,
     Mutex,
     Break,
@@ -195,7 +191,7 @@ pub enum TokenKind {
     RawStringLiteral(String),
     IntLiteral(i64),
     FloatLiteral(f64),
-    /// Duration literal in milliseconds: 500ms, 5s, 30m, 2h
+    /// Duration literal in milliseconds: 500ms, 5s, 30m, 2h, 1d, 1w
     DurationLiteral(u64),
 
     // Two-character operators
@@ -264,8 +260,6 @@ impl fmt::Display for TokenKind {
             TokenKind::Match => write!(f, "match"),
             TokenKind::Retry => write!(f, "retry"),
             TokenKind::Parallel => write!(f, "parallel"),
-            TokenKind::ParallelMap => write!(f, "parallel_map"),
-            TokenKind::ParallelSettle => write!(f, "parallel_settle"),
             TokenKind::Return => write!(f, "return"),
             TokenKind::Import => write!(f, "import"),
             TokenKind::True => write!(f, "true"),
@@ -289,8 +283,8 @@ impl fmt::Display for TokenKind {
             TokenKind::Upto => write!(f, "upto"),
             TokenKind::Guard => write!(f, "guard"),
             TokenKind::Require => write!(f, "require"),
-            TokenKind::Ask => write!(f, "ask"),
             TokenKind::Deadline => write!(f, "deadline"),
+            TokenKind::Defer => write!(f, "defer"),
             TokenKind::Yield => write!(f, "yield"),
             TokenKind::Mutex => write!(f, "mutex"),
             TokenKind::Break => write!(f, "break"),

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use harn_lexer::StringSegment;
-use harn_parser::{BindingPattern, Node, SNode, TypedParam};
+use harn_parser::{BindingPattern, Node, ParallelMode, SNode, TypedParam};
 
 use crate::chunk::{Chunk, CompiledFunction, Constant, Op};
 use crate::schema;
@@ -134,6 +134,13 @@ impl Compiler {
             }
         }
 
+        // Run pending defers before implicit return
+        if !self.finally_bodies.is_empty() {
+            let finallys: Vec<_> = self.finally_bodies.iter().rev().cloned().collect();
+            for fb in &finallys {
+                self.compile_finally_inline(fb)?;
+            }
+        }
         self.chunk.emit(Op::Nil, self.line);
         self.chunk.emit(Op::Return, self.line);
         Ok(self.chunk)
@@ -170,6 +177,13 @@ impl Compiler {
             }
         }
 
+        // Run pending defers before implicit return
+        if !self.finally_bodies.is_empty() {
+            let finallys: Vec<_> = self.finally_bodies.iter().rev().cloned().collect();
+            for fb in &finallys {
+                self.compile_finally_inline(fb)?;
+            }
+        }
         self.chunk.emit(Op::Nil, self.line);
         self.chunk.emit(Op::Return, self.line);
         Ok(self.chunk)
@@ -1286,6 +1300,14 @@ impl Compiler {
                 fn_compiler.emit_type_checks(params);
                 let is_gen = body_contains_yield(body);
                 fn_compiler.compile_block(body)?;
+                // Run pending defers before implicit return
+                if !fn_compiler.finally_bodies.is_empty() {
+                    let finallys: Vec<_> =
+                        fn_compiler.finally_bodies.iter().rev().cloned().collect();
+                    for fb in &finallys {
+                        fn_compiler.compile_finally_inline(fb)?;
+                    }
+                }
                 fn_compiler.chunk.emit(Op::Nil, self.line);
                 fn_compiler.chunk.emit(Op::Return, self.line);
 
@@ -1319,6 +1341,14 @@ impl Compiler {
                 fn_compiler.emit_default_preamble(params)?;
                 fn_compiler.emit_type_checks(params);
                 fn_compiler.compile_block(body)?;
+                // Run pending defers before implicit return
+                if !fn_compiler.finally_bodies.is_empty() {
+                    let finallys: Vec<_> =
+                        fn_compiler.finally_bodies.iter().rev().cloned().collect();
+                    for fb in &finallys {
+                        fn_compiler.compile_finally_inline(fb)?;
+                    }
+                }
                 // Use closure-like return: the last expression value is the return value
                 fn_compiler.chunk.emit(Op::Return, self.line);
 
@@ -1458,6 +1488,14 @@ impl Compiler {
                 fn_compiler.emit_type_checks(params);
                 let is_gen = body_contains_yield(body);
                 fn_compiler.compile_block(body)?;
+                // Run pending defers before implicit return
+                if !fn_compiler.finally_bodies.is_empty() {
+                    let finallys: Vec<_> =
+                        fn_compiler.finally_bodies.iter().rev().cloned().collect();
+                    for fb in &finallys {
+                        fn_compiler.compile_finally_inline(fb)?;
+                    }
+                }
                 // If block didn't end with return, the last value is on the stack
                 fn_compiler.chunk.emit(Op::Return, self.line);
 
@@ -1476,8 +1514,24 @@ impl Compiler {
             }
 
             Node::ThrowStmt { value } => {
-                self.compile_node(value)?;
-                self.chunk.emit(Op::Throw, self.line);
+                if !self.finally_bodies.is_empty() {
+                    // Run pending defers/finallys before throwing (innermost first).
+                    self.compile_node(value)?;
+                    self.temp_counter += 1;
+                    let temp_name = format!("__throw_val_{}__", self.temp_counter);
+                    let save_idx = self.chunk.add_constant(Constant::String(temp_name.clone()));
+                    self.chunk.emit_u16(Op::DefVar, save_idx, self.line);
+                    let finallys: Vec<_> = self.finally_bodies.iter().rev().cloned().collect();
+                    for fb in &finallys {
+                        self.compile_finally_inline(fb)?;
+                    }
+                    let restore_idx = self.chunk.add_constant(Constant::String(temp_name));
+                    self.chunk.emit_u16(Op::GetVar, restore_idx, self.line);
+                    self.chunk.emit(Op::Throw, self.line);
+                } else {
+                    self.compile_node(value)?;
+                    self.chunk.emit(Op::Throw, self.line);
+                }
             }
 
             Node::MatchExpr { value, arms } => {
@@ -1485,13 +1539,26 @@ impl Compiler {
                 let mut end_jumps = Vec::new();
                 for arm in arms {
                     match &arm.pattern.node {
-                        // Wildcard `_` — always matches
+                        // Wildcard `_` — always matches (unless guarded)
                         Node::Identifier(name) if name == "_" => {
-                            self.begin_scope();
-                            self.chunk.emit(Op::Pop, self.line); // pop match value
-                            self.compile_match_body(&arm.body)?;
-                            self.end_scope();
-                            end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
+                            if let Some(ref guard) = arm.guard {
+                                self.compile_node(guard)?;
+                                let guard_skip = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
+                                self.chunk.emit(Op::Pop, self.line); // pop guard bool
+                                self.begin_scope();
+                                self.chunk.emit(Op::Pop, self.line); // pop match value
+                                self.compile_match_body(&arm.body)?;
+                                self.end_scope();
+                                end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
+                                self.chunk.patch_jump(guard_skip);
+                                self.chunk.emit(Op::Pop, self.line); // pop guard bool
+                            } else {
+                                self.begin_scope();
+                                self.chunk.emit(Op::Pop, self.line); // pop match value
+                                self.compile_match_body(&arm.body)?;
+                                self.end_scope();
+                                end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
+                            }
                         }
                         // Enum destructuring: EnumConstruct pattern
                         Node::EnumConstruct {
@@ -1539,10 +1606,24 @@ impl Compiler {
                                 }
                             }
 
-                            self.chunk.emit(Op::Pop, self.line); // pop match value
-                            self.compile_match_body(&arm.body)?;
-                            self.end_scope();
-                            end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
+                            // Optional guard
+                            if let Some(ref guard) = arm.guard {
+                                self.compile_node(guard)?;
+                                let guard_skip = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
+                                self.chunk.emit(Op::Pop, self.line); // pop guard bool
+                                self.chunk.emit(Op::Pop, self.line); // pop match value
+                                self.compile_match_body(&arm.body)?;
+                                self.end_scope();
+                                end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
+                                self.chunk.patch_jump(guard_skip);
+                                self.chunk.emit(Op::Pop, self.line); // pop guard bool
+                                self.end_scope();
+                            } else {
+                                self.chunk.emit(Op::Pop, self.line); // pop match value
+                                self.compile_match_body(&arm.body)?;
+                                self.end_scope();
+                                end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
+                            }
                             self.chunk.patch_jump(skip);
                             self.chunk.emit(Op::Pop, self.line); // pop bool
                         }
@@ -1569,11 +1650,25 @@ impl Compiler {
                             self.chunk.columns.push(self.column);
                             let skip = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
                             self.chunk.emit(Op::Pop, self.line); // pop bool
-                            self.begin_scope();
-                            self.chunk.emit(Op::Pop, self.line); // pop match value
-                            self.compile_match_body(&arm.body)?;
-                            self.end_scope();
-                            end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
+                                                                 // Optional guard
+                            if let Some(ref guard) = arm.guard {
+                                self.compile_node(guard)?;
+                                let guard_skip = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
+                                self.chunk.emit(Op::Pop, self.line); // pop guard bool
+                                self.begin_scope();
+                                self.chunk.emit(Op::Pop, self.line); // pop match value
+                                self.compile_match_body(&arm.body)?;
+                                self.end_scope();
+                                end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
+                                self.chunk.patch_jump(guard_skip);
+                                self.chunk.emit(Op::Pop, self.line); // pop guard bool
+                            } else {
+                                self.begin_scope();
+                                self.chunk.emit(Op::Pop, self.line); // pop match value
+                                self.compile_match_body(&arm.body)?;
+                                self.end_scope();
+                                end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
+                            }
                             self.chunk.patch_jump(skip);
                             self.chunk.emit(Op::Pop, self.line); // pop bool
                         }
@@ -1626,10 +1721,24 @@ impl Compiler {
                                 }
                             }
 
-                            self.chunk.emit(Op::Pop, self.line); // pop match value
-                            self.compile_match_body(&arm.body)?;
-                            self.end_scope();
-                            end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
+                            // Optional guard
+                            if let Some(ref guard) = arm.guard {
+                                self.compile_node(guard)?;
+                                let guard_skip = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
+                                self.chunk.emit(Op::Pop, self.line); // pop guard bool
+                                self.chunk.emit(Op::Pop, self.line); // pop match value
+                                self.compile_match_body(&arm.body)?;
+                                self.end_scope();
+                                end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
+                                self.chunk.patch_jump(guard_skip);
+                                self.chunk.emit(Op::Pop, self.line); // pop guard bool
+                                self.end_scope();
+                            } else {
+                                self.chunk.emit(Op::Pop, self.line); // pop match value
+                                self.compile_match_body(&arm.body)?;
+                                self.end_scope();
+                                end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
+                            }
                             self.chunk.patch_jump(skip);
                             self.chunk.emit(Op::Pop, self.line); // pop bool
                         }
@@ -1640,10 +1749,24 @@ impl Compiler {
                             self.chunk.emit(Op::Dup, self.line); // dup for binding
                             let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
                             self.chunk.emit_u16(Op::DefLet, name_idx, self.line);
-                            self.chunk.emit(Op::Pop, self.line); // pop match value
-                            self.compile_match_body(&arm.body)?;
-                            self.end_scope();
-                            end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
+                            // Optional guard
+                            if let Some(ref guard) = arm.guard {
+                                self.compile_node(guard)?;
+                                let guard_skip = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
+                                self.chunk.emit(Op::Pop, self.line); // pop guard bool
+                                self.chunk.emit(Op::Pop, self.line); // pop match value
+                                self.compile_match_body(&arm.body)?;
+                                self.end_scope();
+                                end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
+                                self.chunk.patch_jump(guard_skip);
+                                self.chunk.emit(Op::Pop, self.line); // pop guard bool
+                                self.end_scope();
+                            } else {
+                                self.chunk.emit(Op::Pop, self.line); // pop match value
+                                self.compile_match_body(&arm.body)?;
+                                self.end_scope();
+                                end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
+                            }
                         }
                         // Dict pattern: {key: literal, key: binding, ...}
                         Node::DictLiteral(entries)
@@ -1725,10 +1848,25 @@ impl Compiler {
                                 self.chunk.emit_u16(Op::DefLet, name_idx, self.line);
                             }
 
-                            self.chunk.emit(Op::Pop, self.line); // pop match value
-                            self.compile_match_body(&arm.body)?;
-                            self.end_scope();
-                            end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
+                            // Optional guard
+                            if let Some(ref guard) = arm.guard {
+                                self.compile_node(guard)?;
+                                let guard_skip = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
+                                self.chunk.emit(Op::Pop, self.line); // pop guard bool
+                                self.chunk.emit(Op::Pop, self.line); // pop match value
+                                self.compile_match_body(&arm.body)?;
+                                self.end_scope();
+                                end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
+                                self.chunk.patch_jump(guard_skip);
+                                // Guard failed — need to pop guard bool, exit scope, continue to next arm
+                                self.chunk.emit(Op::Pop, self.line); // pop guard bool
+                                                                     // Fall through to scope cleanup below
+                            } else {
+                                self.chunk.emit(Op::Pop, self.line); // pop match value
+                                self.compile_match_body(&arm.body)?;
+                                self.end_scope();
+                                end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
+                            }
 
                             let type_fail_target = self.chunk.code.len();
                             self.chunk.emit(Op::Pop, self.line); // pop bool
@@ -1810,10 +1948,23 @@ impl Compiler {
                                 self.chunk.emit_u16(Op::DefLet, name_idx, self.line);
                             }
 
-                            self.chunk.emit(Op::Pop, self.line); // pop match value
-                            self.compile_match_body(&arm.body)?;
-                            self.end_scope();
-                            end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
+                            // Optional guard
+                            if let Some(ref guard) = arm.guard {
+                                self.compile_node(guard)?;
+                                let guard_skip = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
+                                self.chunk.emit(Op::Pop, self.line); // pop guard bool
+                                self.chunk.emit(Op::Pop, self.line); // pop match value
+                                self.compile_match_body(&arm.body)?;
+                                self.end_scope();
+                                end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
+                                self.chunk.patch_jump(guard_skip);
+                                self.chunk.emit(Op::Pop, self.line); // pop guard bool
+                            } else {
+                                self.chunk.emit(Op::Pop, self.line); // pop match value
+                                self.compile_match_body(&arm.body)?;
+                                self.end_scope();
+                                end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
+                            }
 
                             let pre_scope_fail_target = self.chunk.code.len();
                             self.chunk.emit(Op::Pop, self.line); // pop bool
@@ -1836,19 +1987,37 @@ impl Compiler {
                             self.chunk.emit(Op::Equal, self.line);
                             let skip = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
                             self.chunk.emit(Op::Pop, self.line); // pop bool
-                            self.begin_scope();
-                            self.chunk.emit(Op::Pop, self.line); // pop match value
-                            self.compile_match_body(&arm.body)?;
-                            self.end_scope();
-                            end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
+                                                                 // Optional guard
+                            if let Some(ref guard) = arm.guard {
+                                self.compile_node(guard)?;
+                                let guard_skip = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
+                                self.chunk.emit(Op::Pop, self.line); // pop guard bool
+                                self.begin_scope();
+                                self.chunk.emit(Op::Pop, self.line); // pop match value
+                                self.compile_match_body(&arm.body)?;
+                                self.end_scope();
+                                end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
+                                self.chunk.patch_jump(guard_skip);
+                                self.chunk.emit(Op::Pop, self.line); // pop guard bool
+                            } else {
+                                self.begin_scope();
+                                self.chunk.emit(Op::Pop, self.line); // pop match value
+                                self.compile_match_body(&arm.body)?;
+                                self.end_scope();
+                                end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
+                            }
                             self.chunk.patch_jump(skip);
                             self.chunk.emit(Op::Pop, self.line); // pop bool
                         }
                     }
                 }
-                // No match — pop value, push nil
+                // No match — throw runtime error
+                let msg_idx = self.chunk.add_constant(Constant::String(
+                    "No match arm matched the value".to_string(),
+                ));
                 self.chunk.emit(Op::Pop, self.line);
-                self.chunk.emit(Op::Nil, self.line);
+                self.chunk.emit_u16(Op::Constant, msg_idx, self.line);
+                self.chunk.emit(Op::Throw, self.line);
                 for j in end_jumps {
                     self.chunk.patch_jump(j);
                 }
@@ -1937,6 +2106,12 @@ impl Compiler {
                 self.end_scope();
             }
 
+            Node::DeferStmt { body } => {
+                // Push onto the finally stack so it runs on return/throw/scope-exit.
+                self.finally_bodies.push(body.clone());
+                self.chunk.emit(Op::Nil, self.line);
+            }
+
             Node::YieldExpr { value } => {
                 if let Some(val) = value {
                     self.compile_node(val)?;
@@ -1944,17 +2119,6 @@ impl Compiler {
                     self.chunk.emit(Op::Nil, self.line);
                 }
                 self.chunk.emit(Op::Yield, self.line);
-            }
-
-            Node::AskExpr { fields } => {
-                // Compile as a dict literal and call llm_call builtin
-                // For v1, just build the dict (llm_call requires async)
-                for entry in fields {
-                    self.compile_node(&entry.key)?;
-                    self.compile_node(&entry.value)?;
-                }
-                self.chunk
-                    .emit_u16(Op::BuildDict, fields.len() as u16, self.line);
             }
 
             Node::EnumConstruct {
@@ -2383,18 +2547,32 @@ impl Compiler {
             }
 
             Node::Parallel {
-                count,
+                mode,
+                expr,
                 variable,
                 body,
             } => {
-                self.compile_node(count)?;
+                self.compile_node(expr)?;
                 let mut fn_compiler = Compiler::new();
                 fn_compiler.enum_names = self.enum_names.clone();
                 fn_compiler.compile_block(body)?;
                 fn_compiler.chunk.emit(Op::Return, self.line);
-                let params = vec![variable.clone().unwrap_or_else(|| "__i__".to_string())];
+                let (fn_name, params) = match mode {
+                    ParallelMode::Count => (
+                        "<parallel>",
+                        vec![variable.clone().unwrap_or_else(|| "__i__".to_string())],
+                    ),
+                    ParallelMode::Each => (
+                        "<parallel_each>",
+                        vec![variable.clone().unwrap_or_else(|| "__item__".to_string())],
+                    ),
+                    ParallelMode::Settle => (
+                        "<parallel_settle>",
+                        vec![variable.clone().unwrap_or_else(|| "__item__".to_string())],
+                    ),
+                };
                 let func = CompiledFunction {
-                    name: "<parallel>".to_string(),
+                    name: fn_name.to_string(),
                     params,
                     default_start: None,
                     chunk: fn_compiler.chunk,
@@ -2404,55 +2582,12 @@ impl Compiler {
                 let fn_idx = self.chunk.functions.len();
                 self.chunk.functions.push(func);
                 self.chunk.emit_u16(Op::Closure, fn_idx as u16, self.line);
-                self.chunk.emit(Op::Parallel, self.line);
-            }
-
-            Node::ParallelMap {
-                list,
-                variable,
-                body,
-            } => {
-                self.compile_node(list)?;
-                let mut fn_compiler = Compiler::new();
-                fn_compiler.enum_names = self.enum_names.clone();
-                fn_compiler.compile_block(body)?;
-                fn_compiler.chunk.emit(Op::Return, self.line);
-                let func = CompiledFunction {
-                    name: "<parallel_map>".to_string(),
-                    params: vec![variable.clone()],
-                    default_start: None,
-                    chunk: fn_compiler.chunk,
-                    is_generator: false,
-                    has_rest_param: false,
+                let op = match mode {
+                    ParallelMode::Count => Op::Parallel,
+                    ParallelMode::Each => Op::ParallelMap,
+                    ParallelMode::Settle => Op::ParallelSettle,
                 };
-                let fn_idx = self.chunk.functions.len();
-                self.chunk.functions.push(func);
-                self.chunk.emit_u16(Op::Closure, fn_idx as u16, self.line);
-                self.chunk.emit(Op::ParallelMap, self.line);
-            }
-
-            Node::ParallelSettle {
-                list,
-                variable,
-                body,
-            } => {
-                self.compile_node(list)?;
-                let mut fn_compiler = Compiler::new();
-                fn_compiler.enum_names = self.enum_names.clone();
-                fn_compiler.compile_block(body)?;
-                fn_compiler.chunk.emit(Op::Return, self.line);
-                let func = CompiledFunction {
-                    name: "<parallel_settle>".to_string(),
-                    params: vec![variable.clone()],
-                    default_start: None,
-                    chunk: fn_compiler.chunk,
-                    is_generator: false,
-                    has_rest_param: false,
-                };
-                let fn_idx = self.chunk.functions.len();
-                self.chunk.functions.push(func);
-                self.chunk.emit_u16(Op::Closure, fn_idx as u16, self.line);
-                self.chunk.emit(Op::ParallelSettle, self.line);
+                self.chunk.emit(op, self.line);
             }
 
             Node::SpawnExpr { body } => {
@@ -2742,7 +2877,8 @@ impl Compiler {
             | Node::ThrowStmt { .. }
             | Node::BreakStmt
             | Node::ContinueStmt
-            | Node::RequireStmt { .. } => false,
+            | Node::RequireStmt { .. }
+            | Node::DeferStmt { .. } => false,
             // These compound nodes explicitly produce a value
             Node::TryCatch { .. }
             | Node::TryExpr { .. }

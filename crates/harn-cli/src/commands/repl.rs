@@ -154,7 +154,7 @@ pub(crate) async fn run_repl() {
         "throw",
         "spawn",
         "parallel",
-        "parallel_map",
+        "defer",
         "retry",
         "guard",
         "deadline",
@@ -307,7 +307,7 @@ pub(crate) async fn run_repl() {
                             | "deadline"
                             | "retry"
                             | "parallel"
-                            | "parallel_map"
+                            | "defer"
                             | "mutex"
                     ),
                 );

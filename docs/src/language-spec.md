@@ -67,8 +67,7 @@ The following identifiers are reserved:
 | `match` | `.matchKw` |
 | `retry` | `.retry` |
 | `parallel` | `.parallel` |
-| `parallel_map` | `.parallelMap` |
-| `parallel_settle` | `.parallelSettle` |
+| `defer` | `.defer` |
 | `return` | `.returnKw` |
 | `import` | `.importKw` |
 | `true` | `.trueKw` |
@@ -92,7 +91,8 @@ The following identifiers are reserved:
 | `upto` | `.upto` |
 | `guard` | `.guard` |
 | `require` | `.require` |
-| `ask` | `.ask` |
+| `each` | `.each` |
+| `settle` | `.settle` |
 | `deadline` | `.deadline` |
 | `yield` | `.yield` |
 | `mutex` | `.mutex` |
@@ -109,8 +109,6 @@ An identifier starts with a letter or underscore, followed by zero or more lette
 identifier ::= [a-zA-Z_][a-zA-Z0-9_]*
 ```
 
-Note: `parallel_map` is lexed as a single keyword, not an identifier followed by `_map`.
-
 ### Number literals
 
 ```javascript
@@ -120,6 +118,34 @@ float_literal ::= digit+ '.' digit+
 
 A number followed by `.` where the next character is not a digit is lexed as an integer
 followed by the `.` operator (enabling `42.method`).
+
+### Duration literals
+
+A duration literal is an integer followed immediately (no whitespace) by a time-unit
+suffix:
+
+```javascript
+duration_literal ::= digit+ ('ms' | 's' | 'm' | 'h' | 'd' | 'w')
+```
+
+| Suffix | Unit | Equivalent |
+|---|---|---|
+| `ms` | milliseconds | -- |
+| `s` | seconds | 1000 ms |
+| `m` | minutes | 60 s |
+| `h` | hours | 60 m |
+| `d` | days | 24 h |
+| `w` | weeks | 7 d |
+
+Duration literals evaluate to an integer number of milliseconds. They can be used
+anywhere an expression is expected:
+
+```harn
+sleep(500ms)
+deadline 30s { /* ... */ }
+let one_day = 1d       // 86400000
+let two_weeks = 2w     // 1209600000
+```
 
 ### String literals
 
@@ -313,8 +339,9 @@ statement          ::= let_binding
                      | while_loop
                      | retry_block
                      | parallel_block
-                     | parallel_map
+                     | parallel_each
                      | parallel_settle
+                     | defer_block
                      | return_stmt
                      | throw_stmt
                      | override_decl
@@ -339,12 +366,14 @@ var_binding        ::= 'var' binding_pattern [':' type_expr] '=' expression
 if_else            ::= 'if' expression '{' block '}'
                        ['else' (if_else | '{' block '}')]
 for_in             ::= 'for' binding_pattern 'in' expression '{' block '}'
-match_expr         ::= 'match' expression '{' (expression '->' '{' block '}')* '}'
+match_expr         ::= 'match' expression '{' match_arm* '}'
+match_arm          ::= expression ['if' expression] '->' '{' block '}'
 while_loop         ::= 'while' expression '{' block '}'
 retry_block        ::= 'retry' ['(' expression ')'] expression? '{' block '}'
 parallel_block     ::= 'parallel' '(' expression ')' '{' [IDENTIFIER '->'] block '}'
-parallel_map       ::= 'parallel_map' '(' expression ')' '{' IDENTIFIER '->' block '}'
-parallel_settle    ::= 'parallel_settle' '(' expression ')' '{' IDENTIFIER '->' block '}'
+parallel_each      ::= 'parallel' 'each' expression '{' IDENTIFIER '->' block '}'
+parallel_settle    ::= 'parallel' 'settle' expression '{' IDENTIFIER '->' block '}'
+defer_block        ::= 'defer' '{' block '}'
 return_stmt        ::= 'return' [expression]
 throw_stmt         ::= 'throw' expression
 override_decl      ::= 'override' IDENTIFIER '(' param_list ')' '{' block '}'
@@ -465,32 +494,15 @@ primary            ::= STRING_LITERAL
                      | list_literal
                      | dict_or_closure
                      | parallel_block
-                     | parallel_map
+                     | parallel_each
                      | parallel_settle
                      | retry_block
                      | if_else
                      | match_expr
-                     | ask_expr
                      | deadline_block
                      | 'spawn' '{' block '}'
                      | 'fn' '(' fn_param_list ')' '{' block '}'
                      | 'try' '{' block '}'
-
-ask_expr           ::= 'ask' '{' (IDENTIFIER ':' expression
-                       (',' IDENTIFIER ':' expression)*)? '}'
-
-The `ask` expression is syntactic sugar for an LLM call. It builds a dict from
-its key-value fields and passes it to the LLM runtime. Common fields include
-`system` (system prompt), `user` (user message), `model`, `max_tokens`, and
-`provider`. The expression evaluates to the LLM response string.
-
-```harn
-let answer = ask {
-  system: "You are a helpful assistant.",
-  user: "What is 2 + 2?"
-}
-println(answer)
-```
 
 ```text
 list_literal       ::= '[' (list_element (',' list_element)*)? ']'
@@ -605,7 +617,7 @@ New child scopes are created for:
 - Pipeline bodies
 - `for` loop bodies (loop variable is mutable)
 - `while` loop iterations
-- `parallel` and `parallel_map` task bodies (isolated interpreter per task)
+- `parallel`, `parallel each`, and `parallel settle` task bodies (isolated interpreter per task)
 - `try`/`catch` blocks (catch body gets its own child scope with optional error variable)
 - Closure invocations (child of the *captured* environment, not the call site)
 - `block` nodes
@@ -911,12 +923,27 @@ Maximum 10,000 iterations (safety limit). Condition is re-evaluated each iterati
 ```harn
 match value {
   pattern1 -> { body1 }
-  pattern2 -> { body2 }
+  pattern2 if condition -> { body2 }
 }
 ```
 
 Patterns are expressions. Each pattern is evaluated and compared to the match value
-using `valuesEqual`. The first matching arm executes. If no arm matches, the result is `nil`.
+using `valuesEqual`. An arm may include an `if` guard after the pattern; when
+present, the arm only matches if the pattern matches **and** the guard expression
+evaluates to a truthy value. The first matching arm executes.
+
+If no arm matches, a runtime error is thrown (`no matching arm in match expression`).
+This makes non-exhaustive matches a hard failure rather than a silent `nil`.
+
+```harn
+let x = 5
+match x {
+  1 -> { "one" }
+  n if n > 3 -> { "big: ${n}" }
+  _ -> { "other" }
+}
+// -> "big: 5"
+```
 
 ### retry
 
@@ -945,10 +972,10 @@ Creates `count` concurrent tasks. Each task gets an isolated interpreter with a 
 environment. The optional variable `i` is bound to the task index (0-based).
 Returns a list of results in index order.
 
-### parallel_map
+### parallel each
 
 ```harn
-parallel_map(list) { item ->
+parallel each list { item ->
   // body for each item
 }
 ```
@@ -956,6 +983,44 @@ parallel_map(list) { item ->
 Maps over a list concurrently. Each task gets an isolated interpreter.
 The variable is bound to the current list element.
 Returns a list of results in the original order.
+
+### parallel settle
+
+```harn
+parallel settle list { item ->
+  // body for each item
+}
+```
+
+Like `parallel each`, but never throws. Instead, it collects both
+successes and failures into a result object with fields:
+
+| Field | Type | Description |
+|---|---|---|
+| `results` | list | List of `Result` values (one per item), in order |
+| `succeeded` | int | Number of `Ok` results |
+| `failed` | int | Number of `Err` results |
+
+### defer
+
+```harn
+defer {
+  // cleanup body
+}
+```
+
+Registers a block to run when the enclosing scope exits, whether by
+normal return or by a thrown error. Multiple `defer` blocks in the same
+scope execute in LIFO (last-registered, first-executed) order, similar
+to Go's `defer`. The deferred block runs in the scope where it was
+declared.
+
+```harn
+let f = open("data.txt")
+defer { close(f) }
+// ... use f ...
+// close(f) runs automatically on scope exit
+```
 
 ### spawn/await/cancel
 
@@ -2150,7 +2215,7 @@ The following builtins are always allowed, even when using `--allow`:
 ### Propagation
 
 Sandbox restrictions propagate to child VMs created by `spawn`,
-`parallel`, and `parallel_map`. A child VM inherits the same set of
+`parallel`, and `parallel each`. A child VM inherits the same set of
 denied builtins as its parent.
 
 ## Test framework

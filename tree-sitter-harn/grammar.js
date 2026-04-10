@@ -20,7 +20,7 @@ module.exports = grammar({
     [$.block],
     [$.closure],
     [$.select_block],
-    [$.parallel_map_expression],
+    [$.parallel_each_expression],
     [$.parallel_settle_expression],
     [$.struct_declaration],
     [$.tool_declaration],
@@ -184,8 +184,9 @@ module.exports = grammar({
         $.interface_declaration,
         $.type_declaration,
         $.parallel_expression,
-        $.parallel_map_expression,
+        $.parallel_each_expression,
         $.parallel_settle_expression,
+        $.defer_statement,
         $.deadline_block,
         $.guard_statement,
         $.require_statement,
@@ -296,7 +297,12 @@ module.exports = grammar({
       ),
 
     match_arm: ($) =>
-      seq(field("pattern", $._expression), "->", field("body", $.block)),
+      seq(
+        field("pattern", $._expression),
+        optional(seq("if", field("guard", $._expression))),
+        "->",
+        field("body", $.block)
+      ),
 
     retry_statement: ($) =>
       seq("retry", field("count", $._expression), field("body", $.block)),
@@ -467,7 +473,7 @@ module.exports = grammar({
         $.try_expression,
         $.deadline_block,
         $.parallel_expression,
-        $.parallel_map_expression,
+        $.parallel_each_expression,
         $.parallel_settle_expression,
         $.if_statement,
         $.retry_statement,
@@ -577,9 +583,7 @@ module.exports = grammar({
     parallel_expression: ($) =>
       seq(
         "parallel",
-        "(",
         field("count", $._expression),
-        ")",
         "{",
         optional(seq(
           repeat(choice($._block_sep, $._line_sep)),
@@ -591,35 +595,39 @@ module.exports = grammar({
         "}"
       ),
 
-    parallel_map_expression: ($) =>
+    parallel_each_expression: ($) =>
       seq(
-        "parallel_map",
-        "(",
+        "parallel",
+        "each",
         field("list", $._expression),
-        ")",
         "{",
         repeat(choice($._block_sep, $._line_sep)),
-        field("variable", $.identifier),
-        "->",
-        repeat(choice($._block_sep, $._line_sep)),
+        optional(seq(
+          field("variable", $.identifier),
+          "->",
+          repeat(choice($._block_sep, $._line_sep))
+        )),
         layoutSeparated($, $._statement),
         "}"
       ),
 
     parallel_settle_expression: ($) =>
       seq(
-        "parallel_settle",
-        "(",
+        "parallel",
+        "settle",
         field("list", $._expression),
-        ")",
         "{",
         repeat(choice($._block_sep, $._line_sep)),
-        field("variable", $.identifier),
-        "->",
-        repeat(choice($._block_sep, $._line_sep)),
+        optional(seq(
+          field("variable", $.identifier),
+          "->",
+          repeat(choice($._block_sep, $._line_sep))
+        )),
         layoutSeparated($, $._statement),
         "}"
       ),
+
+    defer_statement: ($) => seq("defer", $.block),
 
     // --- Primary expressions ---
 

@@ -2,6 +2,40 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.62
+
+### Added
+
+- **Unified `parallel` syntax** — `parallel_map` and `parallel_settle` keywords
+  are replaced by `parallel each` and `parallel settle` modes on the unified
+  `parallel` keyword. Count mode no longer requires parentheses:
+  `parallel 3 { i -> ... }`.
+- **`defer` statement** — `defer { body }` runs the body at scope exit (on
+  return, throw, or implicit fall-through) in LIFO order, similar to Go's
+  `defer`. Replaces the removed `ask` keyword.
+- **Match guards** — match arms now support optional `if` guards:
+  `pattern if condition -> { body }`. Guards work with all pattern types
+  including wildcards, identifiers, enums, dicts, and lists.
+- **Match exhaustion errors** — non-exhaustive `match` expressions now throw a
+  runtime error instead of silently returning `nil`.
+- **Duration literal extensions** — `d` (days) and `w` (weeks) suffixes for
+  duration literals: `1d` = 86 400 000 ms, `1w` = 604 800 000 ms.
+
+### Removed
+
+- **`ask` keyword** — replaced by `defer`.
+- **`parallel_map` / `parallel_settle` keywords** — replaced by
+  `parallel each` / `parallel settle`.
+
+### Fixed
+
+- **Defer executes on throw** — deferred bodies now correctly run before a
+  `throw` propagates, not just on explicit `return`.
+- **Defer executes on implicit return** — deferred bodies now run when a
+  function falls through without an explicit `return`.
+- **Match guards on all pattern types** — guards are now supported on enum,
+  dict, and list patterns, not just identifier and literal patterns.
+
 ## v0.5.61
 
 ### Fixed

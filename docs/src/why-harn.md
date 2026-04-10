@@ -55,7 +55,7 @@ pipeline analyze(task) {
   let plan = llm_call("${task}\n\nContext:\n${context}", "Break this into steps.")
   let steps = json_parse(plan)
 
-  let results = parallel_map(steps) { step ->
+  let results = parallel each steps { step ->
     agent_loop(step, "You are a coding assistant.", {persistent: true})
   }
 
@@ -86,12 +86,12 @@ mcp_disconnect(client)
 
 ### Concurrency without async/await
 
-`parallel_map`, `parallel`, `spawn`/`await`, and channels are keywords,
+`parallel each`, `parallel`, `spawn`/`await`, and channels are keywords,
 not library functions. No callback chains, no promise combinators, no
 `async def` annotations:
 
 ```harn
-let results = parallel_map(files) { file ->
+let results = parallel each files { file ->
   llm_call(read_file(file), "Review this file for security issues")
 }
 ```
@@ -174,7 +174,7 @@ asyncio.run(main())
 pipeline default(task) {
   let urls = ["https://a.com", "https://b.com", "https://c.com"]
 
-  let results = parallel_map(urls) { url ->
+  let results = parallel each urls { url ->
     retry 3 {
       let page = http_get(url)
       llm_call("Summarize:\n${page}", "Be concise.")

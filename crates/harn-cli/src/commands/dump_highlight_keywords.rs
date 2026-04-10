@@ -131,7 +131,8 @@ mod tests {
     fn generated_file_contains_core_keywords() {
         let out = generate_file();
         assert!(out.contains("pipeline"));
-        assert!(out.contains("parallel_map"));
+        assert!(out.contains("parallel"));
+        assert!(out.contains("defer"));
         assert!(out.contains("window.__HARN_KEYWORDS"));
     }
 

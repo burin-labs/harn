@@ -551,46 +551,32 @@ fn collect_symbols(
                 recurse!(s, scope_span);
             }
         }
-        Node::Parallel { count, body, .. } => {
-            recurse!(count, scope_span);
-            for s in body {
-                recurse!(s, scope_span);
-            }
-        }
-        Node::ParallelMap {
-            list,
+        Node::Parallel {
+            expr,
             variable,
             body,
+            ..
         } => {
-            recurse!(list, scope_span);
-            symbols.push(simple_sym!(
-                variable.clone(),
-                HarnSymbolKind::Variable,
-                snode.span,
-                None,
-                None,
-                Some(snode.span)
-            ));
-            for s in body {
-                recurse!(s, Some(snode.span));
+            recurse!(expr, scope_span);
+            if let Some(var) = variable {
+                symbols.push(simple_sym!(
+                    var.clone(),
+                    HarnSymbolKind::Variable,
+                    snode.span,
+                    None,
+                    None,
+                    Some(snode.span)
+                ));
             }
-        }
-        Node::ParallelSettle {
-            list,
-            variable,
-            body,
-        } => {
-            recurse!(list, scope_span);
-            symbols.push(simple_sym!(
-                variable.clone(),
-                HarnSymbolKind::Variable,
-                snode.span,
-                None,
-                None,
-                Some(snode.span)
-            ));
             for s in body {
-                recurse!(s, Some(snode.span));
+                recurse!(
+                    s,
+                    if variable.is_some() {
+                        Some(snode.span)
+                    } else {
+                        scope_span
+                    }
+                );
             }
         }
         Node::MatchExpr { value, arms } => {
@@ -663,7 +649,7 @@ fn collect_symbols(
             recurse!(true_expr, scope_span);
             recurse!(false_expr, scope_span);
         }
-        Node::SpawnExpr { body } | Node::MutexBlock { body } => {
+        Node::SpawnExpr { body } | Node::MutexBlock { body } | Node::DeferStmt { body } => {
             for s in body {
                 recurse!(s, scope_span);
             }
@@ -692,7 +678,7 @@ fn collect_symbols(
                 recurse!(item, scope_span);
             }
         }
-        Node::DictLiteral(entries) | Node::AskExpr { fields: entries } => {
+        Node::DictLiteral(entries) => {
             collect_dict_entries(entries, symbols, scope_span, source);
         }
         Node::StructConstruct { fields, .. } => {

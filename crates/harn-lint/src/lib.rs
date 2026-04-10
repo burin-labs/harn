@@ -693,7 +693,7 @@ impl<'a> Linter<'a> {
                 // Rule: duplicate-match-arm (uses PartialEq on Node)
                 for (i, arm) in arms.iter().enumerate() {
                     for earlier in &arms[..i] {
-                        if arm.pattern.node == earlier.pattern.node {
+                        if arm.pattern.node == earlier.pattern.node && arm.guard == earlier.guard {
                             self.diagnostics.push(LintDiagnostic {
                                 rule: "duplicate-match-arm",
                                 message: "duplicate match arm pattern".to_string(),
@@ -706,6 +706,9 @@ impl<'a> Linter<'a> {
                         }
                     }
                     self.lint_node(&arm.pattern);
+                    if let Some(ref guard) = arm.guard {
+                        self.lint_node(guard);
+                    }
                     self.push_scope();
                     self.lint_block(&arm.body);
                     self.pop_scope();
@@ -784,12 +787,12 @@ impl<'a> Linter<'a> {
             }
 
             Node::Parallel {
-                count,
+                expr,
                 body,
                 variable,
                 ..
             } => {
-                self.lint_node(count);
+                self.lint_node(expr);
                 self.push_scope();
                 if let Some(v) = variable {
                     if let Some(scope) = self.scopes.last_mut() {
@@ -797,36 +800,6 @@ impl<'a> Linter<'a> {
                     }
                     self.references.insert(v.clone());
                 }
-                self.lint_block(body);
-                self.pop_scope();
-            }
-
-            Node::ParallelMap {
-                list,
-                variable,
-                body,
-            } => {
-                self.lint_node(list);
-                self.push_scope();
-                if let Some(scope) = self.scopes.last_mut() {
-                    scope.insert(variable.clone());
-                }
-                self.references.insert(variable.clone());
-                self.lint_block(body);
-                self.pop_scope();
-            }
-
-            Node::ParallelSettle {
-                list,
-                variable,
-                body,
-            } => {
-                self.lint_node(list);
-                self.push_scope();
-                if let Some(scope) = self.scopes.last_mut() {
-                    scope.insert(variable.clone());
-                }
-                self.references.insert(variable.clone());
                 self.lint_block(body);
                 self.pop_scope();
             }
@@ -871,11 +844,8 @@ impl<'a> Linter<'a> {
                 self.lint_node(end);
             }
 
-            Node::AskExpr { fields } => {
-                for entry in fields {
-                    self.lint_node(&entry.key);
-                    self.lint_node(&entry.value);
-                }
+            Node::DeferStmt { body } => {
+                self.lint_block(body);
             }
 
             Node::YieldExpr { value } => {

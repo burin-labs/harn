@@ -663,7 +663,8 @@ fn node_children_bundle(node: &SNode) -> Vec<&SNode> {
         | Node::Block(body)
         | Node::Closure { body, .. }
         | Node::TryExpr { body }
-        | Node::MutexBlock { body } => body.iter().collect(),
+        | Node::MutexBlock { body }
+        | Node::DeferStmt { body } => body.iter().collect(),
         Node::DeadlineBlock { duration, body } => {
             let mut children = vec![duration.as_ref()];
             children.extend(body.iter());
@@ -740,9 +741,7 @@ fn node_children_bundle(node: &SNode) -> Vec<&SNode> {
             }
             children
         }
-        Node::AskExpr { fields }
-        | Node::DictLiteral(fields)
-        | Node::StructConstruct { fields, .. } => {
+        Node::DictLiteral(fields) | Node::StructConstruct { fields, .. } => {
             let mut children = Vec::new();
             for field in fields {
                 children.push(&field.key);
@@ -750,13 +749,8 @@ fn node_children_bundle(node: &SNode) -> Vec<&SNode> {
             }
             children
         }
-        Node::Parallel { count, body, .. } => {
-            let mut children = vec![count.as_ref()];
-            children.extend(body.iter());
-            children
-        }
-        Node::ParallelMap { list, body, .. } | Node::ParallelSettle { list, body, .. } => {
-            let mut children = vec![list.as_ref()];
+        Node::Parallel { expr, body, .. } => {
+            let mut children = vec![expr.as_ref()];
             children.extend(body.iter());
             children
         }
@@ -932,6 +926,7 @@ fn collect_mock_host_capabilities_from_node(
         | Node::SpawnExpr { body }
         | Node::TryExpr { body }
         | Node::MutexBlock { body }
+        | Node::DeferStmt { body }
         | Node::Block(body)
         | Node::Closure { body, .. } => {
             for child in body {
@@ -1120,7 +1115,7 @@ fn collect_mock_host_capabilities_from_node(
                 );
             }
         }
-        Node::AskExpr { fields } | Node::DictLiteral(fields) => {
+        Node::DictLiteral(fields) => {
             for field in fields {
                 collect_mock_host_capabilities_from_node(
                     &field.value,
@@ -1149,27 +1144,9 @@ fn collect_mock_host_capabilities_from_node(
                 );
             }
         }
-        Node::Parallel { count, body, .. } => {
+        Node::Parallel { expr, body, .. } => {
             collect_mock_host_capabilities_from_node(
-                count,
-                file_path,
-                source,
-                visited,
-                capabilities,
-            );
-            for child in body {
-                collect_mock_host_capabilities_from_node(
-                    child,
-                    file_path,
-                    source,
-                    visited,
-                    capabilities,
-                );
-            }
-        }
-        Node::ParallelMap { list, body, .. } | Node::ParallelSettle { list, body, .. } => {
-            collect_mock_host_capabilities_from_node(
-                list,
+                expr,
                 file_path,
                 source,
                 visited,
@@ -1959,7 +1936,10 @@ fn scan_node_preflight(
                 );
             }
         }
-        Node::TryExpr { body } | Node::SpawnExpr { body } | Node::MutexBlock { body } => {
+        Node::TryExpr { body }
+        | Node::SpawnExpr { body }
+        | Node::MutexBlock { body }
+        | Node::DeferStmt { body } => {
             scan_children(
                 body,
                 file_path,
@@ -1993,7 +1973,7 @@ fn scan_node_preflight(
                 diagnostics,
             );
         }
-        Node::AskExpr { fields } | Node::DictLiteral(fields) => {
+        Node::DictLiteral(fields) => {
             for field in fields {
                 scan_node_preflight(
                     &field.value,
@@ -2039,29 +2019,9 @@ fn scan_node_preflight(
                 );
             }
         }
-        Node::Parallel { count, body, .. } => {
+        Node::Parallel { expr, body, .. } => {
             scan_node_preflight(
-                count,
-                file_path,
-                source,
-                config,
-                host_capabilities,
-                visited,
-                diagnostics,
-            );
-            scan_children(
-                body,
-                file_path,
-                source,
-                config,
-                host_capabilities,
-                visited,
-                diagnostics,
-            );
-        }
-        Node::ParallelMap { list, body, .. } | Node::ParallelSettle { list, body, .. } => {
-            scan_node_preflight(
-                list,
+                expr,
                 file_path,
                 source,
                 config,

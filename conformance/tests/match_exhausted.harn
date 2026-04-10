@@ -1,0 +1,11 @@
+pipeline test(task) {
+  // Match with no matching arm should throw
+  let result = try {
+    match "unexpected" {
+    "a" -> { "got a" }
+    "b" -> { "got b" }
+  }
+  }
+  log(is_err(result))
+  log(unwrap_err(result))
+}

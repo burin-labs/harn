@@ -1788,9 +1788,9 @@ try {
     }
 
     #[test]
-    fn test_parallel_map_basic() {
+    fn test_parallel_each_basic() {
         let out = run_output(
-            "pipeline t(task) { let results = parallel_map([1, 2, 3]) { x -> x * x }\nlog(results) }",
+            "pipeline t(task) { let results = parallel each [1, 2, 3] { x -> x * x }\nlog(results) }",
         );
         assert_eq!(out, "[harn] [1, 4, 9]");
     }

@@ -1,0 +1,25 @@
+pipeline test(task) {
+  // Basic guard on literal pattern
+  fn classify(n) {
+    return match n {
+      0 -> { "zero" }
+      x if x > 0 -> { "positive" }
+      x if x < 0 -> { "negative" }
+      _ -> { "unknown" }
+    }
+  }
+  log(classify(0))
+  log(classify(5))
+  log(classify(-3))
+  // Guard with string pattern
+  fn greet(name) {
+    return match name {
+      "admin" -> { "Welcome back, admin!" }
+      n if len(n) > 10 -> { "Hello, ${n} (long name)!" }
+      n -> { "Hello, ${n}!" }
+    }
+  }
+  log(greet("admin"))
+  log(greet("Bob"))
+  log(greet("Bartholomew"))
+}

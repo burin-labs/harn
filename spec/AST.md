@@ -375,45 +375,19 @@ let handle = spawn {
 ### `Parallel`
 
 ```rust
-Parallel { count: Box<SNode>, variable: Option<String>, body: Vec<SNode> }
+Parallel { mode: ParallelMode, expr: Box<SNode>, variable: Option<String>, body: Vec<SNode> }
 ```
 
-Executes `body` concurrently `count` times. The optional `variable` is
-bound to the iteration index (0-based).
+Unified parallel execution node. The `mode` determines behavior:
+
+- `ParallelMode::Count` — executes `body` concurrently `expr` times. Variable is bound to iteration index (0-based).
+- `ParallelMode::Each` — maps over `expr` list concurrently. Variable is bound to each element.
+- `ParallelMode::Settle` — like Each, but collects all results (including errors) instead of failing fast.
 
 ```harn
-parallel(3) { i ->
-  compute(i)
-}
-```
-
-### `ParallelMap`
-
-```rust
-ParallelMap { list: Box<SNode>, variable: String, body: Vec<SNode> }
-```
-
-Maps over a list concurrently. Each element is bound to `variable`.
-
-```harn
-parallel_map(items) { item ->
-  transform(item)
-}
-```
-
-### `ParallelSettle`
-
-```rust
-ParallelSettle { list: Box<SNode>, variable: String, body: Vec<SNode> }
-```
-
-Like `ParallelMap`, but collects all results (including errors) instead of
-failing fast.
-
-```harn
-parallel_settle(urls) { url ->
-  fetch(url)
-}
+parallel 3 { i -> compute(i) }
+parallel each items { item -> transform(item) }
+parallel settle urls { url -> fetch(url) }
 ```
 
 ### `SelectExpr`
@@ -605,16 +579,16 @@ Range expression. `inclusive: false` uses `upto`, `inclusive: true` uses `thru`.
 0 thru 9    // inclusive
 ```
 
-### `AskExpr`
+### `DeferStmt`
 
 ```rust
-AskExpr { fields: Vec<DictEntry> }
+DeferStmt { body: Vec<SNode> }
 ```
 
-Ask expression for LLM interaction.
+Defer statement — body runs at scope exit (on return or throw).
 
 ```harn
-ask { system: "You are a helper", user: "Explain this code" }
+defer { cleanup() }
 ```
 
 ### `EnumConstruct`

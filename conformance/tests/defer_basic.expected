@@ -1,0 +1,13 @@
+[harn] doing work
+[harn] cleanup done
+[harn] result
+[harn] body
+[harn] third registered
+[harn] second registered
+[harn] first registered
+[harn] implicit body
+[harn] implicit cleanup
+[harn] before throw
+[harn] throw cleanup
+[harn] true
+[harn] boom

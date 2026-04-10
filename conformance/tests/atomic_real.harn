@@ -18,7 +18,7 @@ pipeline default() {
   println(atomic_get(counter))
   // Concurrent atomic increments
   let a = atomic(0)
-  parallel(10) { i ->
+  parallel 10 { i ->
     atomic_add(a, 1)
   }
   println(atomic_get(a))

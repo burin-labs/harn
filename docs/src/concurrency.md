@@ -39,28 +39,28 @@ let results = parallel(5) { i ->
 The variable `i` is the zero-based task index. Results are always returned
 in index order regardless of completion order.
 
-## parallel_map
+## parallel each
 
 Map over a collection concurrently:
 
 ```harn
 let files = ["a.txt", "b.txt", "c.txt"]
 
-let contents = parallel_map(files) { file ->
+let contents = parallel each files { file ->
   read_file(file)
 }
 ```
 
 Results preserve the original list order.
 
-## parallel_settle
+## parallel settle
 
-Like `parallel_map`, but never throws. Instead, it collects both
+Like `parallel each`, but never throws. Instead, it collects both
 successes and failures into a result object:
 
 ```harn
 let items = [1, 2, 3]
-let outcome = parallel_settle(items) { item ->
+let outcome = parallel settle items { item ->
   if item == 2 {
     throw "boom"
   }
@@ -187,3 +187,18 @@ deadline 30s {
   agent_loop(task, system, {persistent: true})
 }
 ```
+
+## Defer
+
+Register cleanup code that runs when the enclosing scope exits, whether
+by normal return or by a thrown error:
+
+```harn
+let f = open("data.txt")
+defer { close(f) }
+// ... use f ...
+// close(f) runs automatically on scope exit
+```
+
+Multiple `defer` blocks execute in LIFO (last-registered, first-executed)
+order, similar to Go's `defer`.

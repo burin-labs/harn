@@ -1,5 +1,5 @@
 use harn_lexer::StringSegment;
-use harn_parser::{Node, SNode, TypedParam};
+use harn_parser::{Node, ParallelMode, SNode, TypedParam};
 
 use crate::helpers::*;
 use crate::Formatter;
@@ -428,40 +428,36 @@ impl Formatter {
                 self.writeln("}");
             }
             Node::Parallel {
-                count,
+                mode,
+                expr,
                 variable,
                 body,
             } => {
-                let cnt = self.format_expr(count);
-                if let Some(var) = variable {
-                    self.writeln(&format!("parallel({cnt}) {{ {var} ->"));
-                } else {
-                    self.writeln(&format!("parallel({cnt}) {{"));
-                }
-                self.indent();
-                self.format_body(body, node_line);
-                self.dedent();
-                self.writeln("}");
-            }
-            Node::ParallelMap {
-                list,
-                variable,
-                body,
-            } => {
-                let lst = self.format_expr(list);
-                self.writeln(&format!("parallel_map({lst}) {{ {variable} ->"));
-                self.indent();
-                self.format_body(body, node_line);
-                self.dedent();
-                self.writeln("}");
-            }
-            Node::ParallelSettle {
-                list,
-                variable,
-                body,
-            } => {
-                let lst = self.format_expr(list);
-                self.writeln(&format!("parallel_settle({lst}) {{ {variable} ->"));
+                let e = self.format_expr(expr);
+                let header = match mode {
+                    ParallelMode::Count => {
+                        if let Some(var) = variable {
+                            format!("parallel {e} {{ {var} ->")
+                        } else {
+                            format!("parallel {e} {{")
+                        }
+                    }
+                    ParallelMode::Each => {
+                        if let Some(var) = variable {
+                            format!("parallel each {e} {{ {var} ->")
+                        } else {
+                            format!("parallel each {e} {{")
+                        }
+                    }
+                    ParallelMode::Settle => {
+                        if let Some(var) = variable {
+                            format!("parallel settle {e} {{ {var} ->")
+                        } else {
+                            format!("parallel settle {e} {{")
+                        }
+                    }
+                };
+                self.writeln(&header);
                 self.indent();
                 self.format_body(body, node_line);
                 self.dedent();
@@ -818,10 +814,7 @@ impl Formatter {
                 let items = self.format_dict_entry_list(fields, struct_name.len() + 2);
                 format!("{struct_name} {{{items}}}")
             }
-            Node::AskExpr { fields } => {
-                let items = self.format_dict_entry_list(fields, 5);
-                format!("ask {{{items}}}")
-            }
+            Node::DeferStmt { body } => self.format_block_expr("defer {", body),
             Node::SpawnExpr { body } => self.format_block_expr("spawn {", body),
             Node::YieldExpr { value } => {
                 if let Some(val) = value {
@@ -848,13 +841,18 @@ impl Formatter {
                 for arm in arms {
                     let indent_str = "  ".repeat(arm_indent);
                     let pattern = self.format_expr(&arm.pattern);
+                    let guard_str = if let Some(ref guard) = arm.guard {
+                        format!(" if {}", self.format_expr(guard))
+                    } else {
+                        String::new()
+                    };
                     if arm.body.len() == 1 && is_simple_expr(&arm.body[0]) {
                         let expr = self.format_expr(&arm.body[0]);
                         result.push_str(&indent_str);
-                        result.push_str(&format!("{pattern} -> {{ {expr} }}\n"));
+                        result.push_str(&format!("{pattern}{guard_str} -> {{ {expr} }}\n"));
                     } else {
                         result.push_str(&indent_str);
-                        result.push_str(&format!("{pattern} -> {{\n"));
+                        result.push_str(&format!("{pattern}{guard_str} -> {{\n"));
                         result.push_str(&self.format_body_string(&arm.body, arm_indent + 1));
                         result.push_str(&indent_str);
                         result.push_str("}\n");
@@ -952,33 +950,23 @@ impl Formatter {
             }
             Node::TryExpr { body } => self.format_block_expr("try {", body),
             Node::Parallel {
-                count,
+                mode,
+                expr,
                 variable,
                 body,
             } => {
-                let cnt = self.format_expr(count);
+                let e = self.format_expr(expr);
+                let keyword = match mode {
+                    ParallelMode::Count => "parallel",
+                    ParallelMode::Each => "parallel each",
+                    ParallelMode::Settle => "parallel settle",
+                };
                 let opening = if let Some(var) = variable {
-                    format!("parallel({cnt}) {{ {var} ->")
+                    format!("{keyword} {e} {{ {var} ->")
                 } else {
-                    format!("parallel({cnt}) {{")
+                    format!("{keyword} {e} {{")
                 };
                 self.format_block_expr(&opening, body)
-            }
-            Node::ParallelMap {
-                list,
-                variable,
-                body,
-            } => {
-                let lst = self.format_expr(list);
-                self.format_block_expr(&format!("parallel_map({lst}) {{ {variable} ->"), body)
-            }
-            Node::ParallelSettle {
-                list,
-                variable,
-                body,
-            } => {
-                let lst = self.format_expr(list);
-                self.format_block_expr(&format!("parallel_settle({lst}) {{ {variable} ->"), body)
             }
             // Declaration nodes rendered as placeholders in expr context
             Node::Pipeline { name, .. } => format!("/* pipeline {name} */"),

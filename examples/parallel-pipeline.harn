@@ -1,6 +1,6 @@
 // Parallel Pipeline Example
 //
-// Demonstrates using parallel_map to process a batch of inputs
+// Demonstrates using parallel each to process a batch of inputs
 // concurrently, then formatting and displaying the collected results.
 //
 // Run with: cargo run --bin harn -- run examples/parallel-pipeline.harn
@@ -16,8 +16,8 @@ pipeline main(task) {
 
   log("Processing ${len(prompts)} prompts in parallel...")
 
-  // parallel_map runs the closure concurrently for each item
-  let results = parallel_map(prompts) { prompt ->
+  // parallel each runs the closure concurrently for each item
+  let results = parallel each prompts { prompt ->
     // In production, replace with: llm_call(prompt, "Answer in one word.")
     // Using string transform here so the example runs without an API key.
     "Answer to: ${prompt}"

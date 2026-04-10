@@ -198,38 +198,25 @@ fn collect_references(snode: &SNode, target_name: &str, refs: &mut Vec<Span>) {
             collect_references(true_expr, target_name, refs);
             collect_references(false_expr, target_name, refs);
         }
-        Node::Block(stmts) | Node::SpawnExpr { body: stmts } | Node::MutexBlock { body: stmts } => {
+        Node::Block(stmts)
+        | Node::SpawnExpr { body: stmts }
+        | Node::MutexBlock { body: stmts }
+        | Node::DeferStmt { body: stmts } => {
             for s in stmts {
                 collect_references(s, target_name, refs);
             }
         }
-        Node::Parallel { count, body, .. } => {
-            collect_references(count, target_name, refs);
-            for s in body {
-                collect_references(s, target_name, refs);
-            }
-        }
-        Node::ParallelMap {
-            list,
-            body,
+        Node::Parallel {
+            expr,
             variable,
-        } => {
-            collect_references(list, target_name, refs);
-            if variable == target_name {
-                refs.push(snode.span);
-            }
-            for s in body {
-                collect_references(s, target_name, refs);
-            }
-        }
-        Node::ParallelSettle {
-            list,
             body,
-            variable,
+            ..
         } => {
-            collect_references(list, target_name, refs);
-            if variable == target_name {
-                refs.push(snode.span);
+            collect_references(expr, target_name, refs);
+            if let Some(var) = variable {
+                if var == target_name {
+                    refs.push(snode.span);
+                }
             }
             for s in body {
                 collect_references(s, target_name, refs);
@@ -269,7 +256,7 @@ fn collect_references(snode: &SNode, target_name: &str, refs: &mut Vec<Span>) {
                 collect_references(item, target_name, refs);
             }
         }
-        Node::DictLiteral(entries) | Node::AskExpr { fields: entries } => {
+        Node::DictLiteral(entries) => {
             for entry in entries {
                 collect_references(&entry.key, target_name, refs);
                 collect_references(&entry.value, target_name, refs);

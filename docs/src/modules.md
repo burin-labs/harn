@@ -72,7 +72,7 @@ pipeline default(task) {
 ## What needs an import
 
 Most Harn builtins — `println`, `log`, `read_file`, `write_file`, `llm_call`,
-`agent_loop`, `http_get`, `parallel_map`, `workflow_*`, `transcript_*`,
+`agent_loop`, `http_get`, `parallel`, `workflow_*`, `transcript_*`,
 `mcp_*`, and the rest of the runtime surface — are registered globally and
 require **no import statement**. You can call them directly from top-level
 code or inside any pipeline.

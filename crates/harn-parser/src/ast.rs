@@ -144,7 +144,7 @@ pub enum Node {
     SpawnExpr {
         body: Vec<SNode>,
     },
-    /// Duration literal: 500ms, 5s, 30m, 2h
+    /// Duration literal: 500ms, 5s, 30m, 2h, 1d, 1w
     DurationLiteral(u64),
     /// Range expression: start upto end (exclusive) or start thru end (inclusive)
     RangeExpr {
@@ -161,9 +161,9 @@ pub enum Node {
         condition: Box<SNode>,
         message: Option<Box<SNode>>,
     },
-    /// Ask expression: ask { system: "...", user: "...", ... }
-    AskExpr {
-        fields: Vec<DictEntry>,
+    /// Defer statement: defer { body } — runs body at scope exit.
+    DeferStmt {
+        body: Vec<SNode>,
     },
     /// Deadline block: deadline DURATION { body }
     DeadlineBlock {
@@ -185,18 +185,10 @@ pub enum Node {
 
     // Concurrency
     Parallel {
-        count: Box<SNode>,
+        mode: ParallelMode,
+        /// For Count mode: the count expression. For Each/Settle: the list expression.
+        expr: Box<SNode>,
         variable: Option<String>,
-        body: Vec<SNode>,
-    },
-    ParallelMap {
-        list: Box<SNode>,
-        variable: String,
-        body: Vec<SNode>,
-    },
-    ParallelSettle {
-        list: Box<SNode>,
-        variable: String,
         body: Vec<SNode>,
     },
 
@@ -306,9 +298,22 @@ pub enum Node {
     },
 }
 
+/// Parallel execution mode.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ParallelMode {
+    /// `parallel N { i -> ... }` — run N concurrent tasks.
+    Count,
+    /// `parallel each list { item -> ... }` — map over list concurrently.
+    Each,
+    /// `parallel settle list { item -> ... }` — map with error collection.
+    Settle,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct MatchArm {
     pub pattern: SNode,
+    /// Optional guard: `pattern if condition -> { body }`.
+    pub guard: Option<Box<SNode>>,
     pub body: Vec<SNode>,
 }
 

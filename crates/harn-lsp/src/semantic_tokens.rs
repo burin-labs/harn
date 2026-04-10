@@ -60,8 +60,6 @@ fn token_kind_to_semantic(kind: &TokenKind) -> Option<u32> {
         | TokenKind::Match
         | TokenKind::Retry
         | TokenKind::Parallel
-        | TokenKind::ParallelMap
-        | TokenKind::ParallelSettle
         | TokenKind::Return
         | TokenKind::Import
         | TokenKind::True
@@ -87,10 +85,10 @@ fn token_kind_to_semantic(kind: &TokenKind) -> Option<u32> {
         | TokenKind::Upto
         | TokenKind::Guard
         | TokenKind::Require
-        | TokenKind::Ask
         | TokenKind::Deadline
         | TokenKind::Yield
         | TokenKind::Mutex
+        | TokenKind::Defer
         | TokenKind::Break
         | TokenKind::Continue => Some(sem::KEYWORD),
 

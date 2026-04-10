@@ -20,8 +20,7 @@
 "fn" @keyword.function
 "spawn" @keyword
 "parallel" @keyword
-"parallel_map" @keyword
-"parallel_settle" @keyword
+"defer" @keyword
 "type" @keyword
 "pub" @keyword
 "enum" @keyword

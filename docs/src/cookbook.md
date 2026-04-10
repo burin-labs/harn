@@ -85,14 +85,14 @@ pipeline default(task) {
 
 ## 3. Parallel tool execution
 
-Run multiple independent operations concurrently with `parallel_map`.
+Run multiple independent operations concurrently with `parallel each`.
 Results preserve the original list order.
 
 ```harn
 pipeline default(task) {
   let files = ["src/main.rs", "src/lib.rs", "src/utils.rs"]
 
-  let reviews = parallel_map(files) { file ->
+  let reviews = parallel each files { file ->
     let content = read_file(file)
     llm_call(
       "Review this code for bugs and suggest fixes:\n\n${content}",
@@ -366,7 +366,7 @@ pipeline default(task) {
   // Gather context from multiple sources in parallel
   let sources = ["README.md", "CHANGELOG.md", "docs/architecture.md"]
 
-  let contents = parallel_map(sources) { path ->
+  let contents = parallel each sources { path ->
     {path: path, content: read_or_empty(path)}
   }
 
@@ -612,7 +612,7 @@ parallel.
 ```harn
 // Spawn workers and collect results
 let agents = ["research", "analyze", "summarize"]
-let results = parallel_map(agents) { role ->
+let results = parallel each agents { role ->
   let agent = spawn_agent({name: role, system: "You are a ${role} agent."})
   send_input(agent, task)
   wait_agent(agent)
@@ -621,12 +621,12 @@ let results = parallel_map(agents) { role ->
 
 ## 16. Parallel LLM evaluation
 
-Evaluate multiple prompts concurrently using `parallel_map`.
+Evaluate multiple prompts concurrently using `parallel each`.
 
 ```harn
 // Evaluate multiple prompts in parallel
 let prompts = ["Explain X", "Explain Y", "Explain Z"]
-let responses = parallel_map(prompts) { p ->
+let responses = parallel each prompts { p ->
   llm_call({prompt: p})
 }
 ```
