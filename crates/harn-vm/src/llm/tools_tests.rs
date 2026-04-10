@@ -444,6 +444,7 @@ fn contract_prompt_help_block_has_ts_call_example() {
     // real TS call example, not the old Python/heredoc syntax.
     assert!(TS_CALL_CONTRACT_HELP.contains("edit({"));
     assert!(TS_CALL_CONTRACT_HELP.contains("heredoc"));
+    assert!(TS_CALL_CONTRACT_HELP.contains("closing punctuation like `},`"));
     assert!(!TS_CALL_CONTRACT_HELP.contains("```call"));
     assert!(!TS_CALL_CONTRACT_HELP.contains("<<'EOF'"));
 }
@@ -729,6 +730,99 @@ NEW
     assert!(
         args["new_string"].as_str().unwrap().contains("fixed"),
         "new_string should contain fixed"
+    );
+}
+
+#[test]
+fn heredoc_close_with_brace_and_comma_on_same_line() {
+    // Cheap models (e.g. Together Gemma 3n) frequently collapse the closing
+    // dict/array tail onto the heredoc's closing line: `EOF },`. The parser
+    // must accept that — anything after the tag on the close line is handed
+    // back to the outer parser verbatim.
+    let tools = sample_tool_registry();
+    let text = r#"edit({ path: "internal/manifest/parser_extra_test.go", ops: [
+  { op: "replace_body", function_name: "TestInvalidYaml", new_body: <<EOF
+func TestInvalidYaml(t *testing.T) {
+	assertParseError(t, "invalid yaml")
+}
+EOF },
+  { op: "replace_body", function_name: "TestMissingRequiredFields", new_body: <<EOF
+func TestMissingRequiredFields(t *testing.T) {
+	assertParseError(t, "version: 1")
+}
+EOF }
+] })"#;
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert!(
+        result.errors.is_empty(),
+        "same-line close tail should parse cleanly, errors: {:?}",
+        result.errors
+    );
+    assert_eq!(result.calls.len(), 1);
+    let ops = result.calls[0]["arguments"]["ops"].as_array().unwrap();
+    assert_eq!(ops.len(), 2);
+    assert_eq!(ops[0]["op"], json!("replace_body"));
+    assert_eq!(ops[0]["function_name"], json!("TestInvalidYaml"));
+    assert!(
+        ops[0]["new_body"]
+            .as_str()
+            .unwrap()
+            .contains("assertParseError(t, \"invalid yaml\")"),
+        "first body should preserve the invalid yaml assertion"
+    );
+    assert_eq!(ops[1]["function_name"], json!("TestMissingRequiredFields"));
+}
+
+#[test]
+fn heredoc_close_with_multiple_closers_on_same_line() {
+    // Tightly-collapsed tool calls sometimes end with `EOF } ] })` all on
+    // one line. The word-boundary closing rule should absorb any punctuation
+    // after the tag and hand control back to the outer parser.
+    let tools = sample_tool_registry();
+    let text = r#"edit({ path: "a.go", ops: [ { op: "replace_body", function_name: "F", new_body: <<EOF
+body
+EOF } ] })"#;
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert!(
+        result.errors.is_empty(),
+        "close tail with multiple closers on same line should parse cleanly, errors: {:?}",
+        result.errors
+    );
+    assert_eq!(result.calls.len(), 1);
+    let ops = result.calls[0]["arguments"]["ops"].as_array().unwrap();
+    assert_eq!(ops.len(), 1);
+    assert_eq!(ops[0]["new_body"], json!("body"));
+}
+
+#[test]
+fn heredoc_word_boundary_rejects_tag_prefix_of_identifier() {
+    // The close line must hit a word boundary after the tag. `EOFunction`
+    // should NOT terminate the heredoc — otherwise any identifier that
+    // happens to begin with the tag would corrupt content parsing.
+    let tools = sample_tool_registry();
+    let text = r#"edit({
+    action: "create",
+    path: "a.rs",
+    content: <<EOF
+let EOFunction = 1;
+let x = 2;
+EOF
+})"#;
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert!(
+        result.errors.is_empty(),
+        "tag-prefixed identifier inside content should not terminate the heredoc, errors: {:?}",
+        result.errors
+    );
+    assert_eq!(result.calls.len(), 1);
+    let content = result.calls[0]["arguments"]["content"].as_str().unwrap();
+    assert!(
+        content.contains("let EOFunction = 1;"),
+        "content should still include the EOFunction line: {content}"
+    );
+    assert!(
+        content.contains("let x = 2;"),
+        "content should include the line after the identifier"
     );
 }
 

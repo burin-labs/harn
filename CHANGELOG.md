@@ -2,6 +2,18 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.65
+
+### Fixed
+
+- **Text tool-call heredocs now tolerate same-line closing tails** — the
+  fenceless TypeScript tool-call parser now accepts heredoc closing lines such
+  as `EOF },` and `EOF } ] })`, which fixes malformed-call failures from weaker
+  models that collapse trailing punctuation onto the closing tag line. The
+  closing-tag check also now requires a word boundary so content lines like
+  `EOFunction` do not terminate heredocs early, and the built-in tool-calling
+  help text now documents the accepted same-line closing punctuation.
+
 ## v0.5.64
 
 ### Added

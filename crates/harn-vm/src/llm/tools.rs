@@ -1323,7 +1323,7 @@ func Test() {}
 EOF
 })
 
-- Heredoc `<<TAG` ... `TAG`: raw content, no escaping needed. TAG alone on closing line.
+- Heredoc `<<TAG` ... `TAG`: raw content, no escaping needed. Put TAG at the start of the closing line; closing punctuation like `},` may follow on that same line.
 - Double quotes for single-line strings. Trailing commas optional.
 - Tool calls work with or without Markdown fences.
 - Prefer tool calls over prose.
@@ -2141,10 +2141,12 @@ impl<'a> TsValueParser<'a> {
     /// Parse a heredoc string: `<<TAG\n...\nTAG`
     ///
     /// The tag is any sequence of uppercase letters/digits/underscore (e.g. EOF,
-    /// END, CONTENT). Content between the opening tag line and a line containing
-    /// only the tag is returned raw — no escaping of any kind is needed inside.
-    /// This makes heredocs ideal for multiline code that contains backticks,
-    /// quotes, or backslashes (Go raw strings, shell scripts, YAML, etc.).
+    /// END, CONTENT). Content between the opening tag line and a closing line
+    /// that starts with the tag is returned raw — no escaping of any kind is
+    /// needed inside. Closing punctuation may follow the tag on that same line,
+    /// so tightly-collapsed tails like `EOF },` still parse correctly. This
+    /// makes heredocs ideal for multiline code that contains backticks, quotes,
+    /// or backslashes (Go raw strings, shell scripts, YAML, etc.).
     fn parse_heredoc(&mut self) -> Result<serde_json::Value, String> {
         // Consume "<<"
         self.advance();
@@ -2195,23 +2197,29 @@ impl<'a> TsValueParser<'a> {
                 self.advance();
             }
             let line = &self.text[line_start..self.pos];
-            let trimmed = line.trim();
-            // Match the closing tag: the line must start with the tag, and
-            // anything after it must be only commas/whitespace/closing parens
-            // (to tolerate `OLD,` or `EOF  )` on the same line).
-            if trimmed == tag
-                || trimmed.starts_with(tag)
-                    && trimmed[tag.len()..]
-                        .chars()
-                        .all(|c| c == ',' || c == ')' || c.is_whitespace())
-            {
-                let content = &self.text[content_start..line_start];
-                let content = content.strip_suffix('\n').unwrap_or(content);
-                let content = content.strip_suffix('\r').unwrap_or(content);
-                // Rewind position to right after the tag so the outer parser
-                // can see the trailing comma/paren.
-                self.pos = line_start + line.find(tag).unwrap_or(0) + tag.len();
-                return Ok(serde_json::Value::String(content.to_string()));
+            // Match the closing tag: after leading whitespace, the line must
+            // start with the tag followed by a word boundary (end of line or
+            // any non-identifier character). Anything after the tag is handed
+            // back to the outer parser verbatim, which naturally absorbs
+            // trailing commas, closing brackets, parens, braces, etc. without
+            // the heredoc lexer maintaining a brittle allowlist of accepted
+            // punctuation.
+            let leading_ws_len = line.len() - line.trim_start().len();
+            let after_ws = &line[leading_ws_len..];
+            if let Some(rest) = after_ws.strip_prefix(tag) {
+                let at_word_boundary = rest
+                    .chars()
+                    .next()
+                    .is_none_or(|c| !(c.is_ascii_alphanumeric() || c == '_'));
+                if at_word_boundary {
+                    let content = &self.text[content_start..line_start];
+                    let content = content.strip_suffix('\n').unwrap_or(content);
+                    let content = content.strip_suffix('\r').unwrap_or(content);
+                    // Rewind position to right after the tag so the outer
+                    // parser sees whatever followed it on the same line.
+                    self.pos = line_start + leading_ws_len + tag.len();
+                    return Ok(serde_json::Value::String(content.to_string()));
+                }
             }
             // Consume the newline
             if self.peek() == Some(b'\n') {
@@ -2219,7 +2227,7 @@ impl<'a> TsValueParser<'a> {
             } else {
                 // End of input without finding closing tag
                 return Err(format!(
-                    "unterminated heredoc: expected closing {tag} on its own line"
+                    "unterminated heredoc: expected closing {tag} at the start of a line"
                 ));
             }
         }
