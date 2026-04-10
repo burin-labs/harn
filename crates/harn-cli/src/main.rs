@@ -262,12 +262,14 @@ async fn print_model_info(model: &str) {
     let api_key_result = harn_vm::llm::resolve_api_key(&provider);
     let api_key_set = api_key_result.is_ok();
     let api_key = api_key_result.unwrap_or_default();
+    let tool_format = harn_vm::llm_config::default_tool_format(&resolved_id, &provider);
     let context_window =
         harn_vm::llm::fetch_provider_max_context(&provider, &resolved_id, &api_key).await;
     let payload = serde_json::json!({
         "alias": model,
         "id": resolved_id,
         "provider": provider,
+        "tool_format": tool_format,
         "api_key_set": api_key_set,
         "context_window": context_window,
     });
