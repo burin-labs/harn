@@ -477,6 +477,7 @@ module.exports = grammar({
         $.parallel_settle_expression,
         $.if_statement,
         $.retry_statement,
+        $.match_statement,
         $._primary
       ),
 
