@@ -1140,6 +1140,8 @@ pub(crate) async fn observed_llm_call(
         // Bridge: call_start notification
         let mut call_start_meta =
             serde_json::json!({"model": opts.model, "prompt_chars": prompt_chars});
+        call_start_meta["stream_publicly"] =
+            serde_json::json!(opts.response_format.as_deref() != Some("json"));
         if let Some(iter) = iteration {
             call_start_meta["iteration"] = serde_json::json!(iter);
             call_start_meta["llm_attempt"] = serde_json::json!(attempt);

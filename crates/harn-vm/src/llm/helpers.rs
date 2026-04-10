@@ -141,20 +141,11 @@ pub(crate) fn vm_resolve_model(
     provider: &str,
 ) -> String {
     use crate::llm_config;
-    let raw = options
+    if let Some(raw) = options
         .as_ref()
         .and_then(|o| o.get("model"))
         .map(|v| v.display())
-        .or_else(|| std::env::var("HARN_LLM_MODEL").ok())
-        .or_else(|| {
-            if provider == "local" {
-                std::env::var("LOCAL_LLM_MODEL").ok()
-            } else {
-                None
-            }
-        });
-
-    if let Some(raw) = raw {
+    {
         let (resolved, _) = llm_config::resolve_model(&raw);
         return resolved;
     }
@@ -164,6 +155,21 @@ pub(crate) fn vm_resolve_model(
         .map(|v| v.display())
     {
         if let Some((resolved, _)) = llm_config::resolve_tier_model(&tier, Some(provider)) {
+            return resolved;
+        }
+    }
+    if let Ok(raw) = std::env::var("HARN_LLM_MODEL") {
+        let (resolved, resolved_provider) = llm_config::resolve_model(&raw);
+        let env_provider = std::env::var("HARN_LLM_PROVIDER").ok();
+        if resolved_provider.as_deref() == Some(provider)
+            || (resolved_provider.is_none() && env_provider.as_deref() == Some(provider))
+        {
+            return resolved;
+        }
+    }
+    if provider == "local" {
+        if let Ok(raw) = std::env::var("LOCAL_LLM_MODEL") {
+            let (resolved, _) = llm_config::resolve_model(&raw);
             return resolved;
         }
     }
@@ -1221,6 +1227,14 @@ mod tests {
 
     #[test]
     fn extract_llm_options_preserves_transcript_tool_fields() {
+        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let prev_harn_provider = std::env::var("HARN_LLM_PROVIDER").ok();
+        let prev_harn_model = std::env::var("HARN_LLM_MODEL").ok();
+        unsafe {
+            std::env::set_var("HARN_LLM_PROVIDER", "mock");
+            std::env::remove_var("HARN_LLM_MODEL");
+        }
+
         let transcript = new_transcript_with(
             None,
             vec![
@@ -1261,5 +1275,73 @@ mod tests {
             "need to inspect the file first"
         );
         assert_eq!(opts.messages[1]["tool_call_id"], "call_123");
+
+        unsafe {
+            match prev_harn_provider {
+                Some(value) => std::env::set_var("HARN_LLM_PROVIDER", value),
+                None => std::env::remove_var("HARN_LLM_PROVIDER"),
+            }
+            match prev_harn_model {
+                Some(value) => std::env::set_var("HARN_LLM_MODEL", value),
+                None => std::env::remove_var("HARN_LLM_MODEL"),
+            }
+        }
+    }
+
+    #[test]
+    fn model_tier_beats_selected_env_model_with_same_provider() {
+        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let prev_harn_model = std::env::var("HARN_LLM_MODEL").ok();
+        let prev_harn_provider = std::env::var("HARN_LLM_PROVIDER").ok();
+
+        unsafe {
+            std::env::set_var("HARN_LLM_MODEL", "tog-gemma4-31b");
+            std::env::set_var("HARN_LLM_PROVIDER", "together");
+        }
+
+        let options = Some(BTreeMap::from([(
+            "model_tier".to_string(),
+            VmValue::String(Rc::from("small")),
+        )]));
+        let resolved = vm_resolve_model(&options, "together");
+
+        unsafe {
+            match prev_harn_model {
+                Some(value) => std::env::set_var("HARN_LLM_MODEL", value),
+                None => std::env::remove_var("HARN_LLM_MODEL"),
+            }
+            match prev_harn_provider {
+                Some(value) => std::env::set_var("HARN_LLM_PROVIDER", value),
+                None => std::env::remove_var("HARN_LLM_PROVIDER"),
+            }
+        }
+        assert_ne!(resolved, "google/gemma-4-31B-it");
+    }
+
+    #[test]
+    fn raw_env_model_is_accepted_when_env_provider_matches() {
+        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let prev_harn_model = std::env::var("HARN_LLM_MODEL").ok();
+        let prev_harn_provider = std::env::var("HARN_LLM_PROVIDER").ok();
+
+        unsafe {
+            std::env::set_var("HARN_LLM_MODEL", "google/gemma-4-31B-it");
+            std::env::set_var("HARN_LLM_PROVIDER", "together");
+        }
+
+        let resolved = vm_resolve_model(&None, "together");
+
+        unsafe {
+            match prev_harn_model {
+                Some(value) => std::env::set_var("HARN_LLM_MODEL", value),
+                None => std::env::remove_var("HARN_LLM_MODEL"),
+            }
+            match prev_harn_provider {
+                Some(value) => std::env::set_var("HARN_LLM_PROVIDER", value),
+                None => std::env::remove_var("HARN_LLM_PROVIDER"),
+            }
+        }
+
+        assert_eq!(resolved, "google/gemma-4-31B-it");
     }
 }

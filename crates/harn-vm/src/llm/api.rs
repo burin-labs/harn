@@ -789,6 +789,55 @@ fn render_openai_message_content_as_text(content: &serde_json::Value) -> String 
     }
 }
 
+fn extract_openai_message_field_as_text(
+    message: &serde_json::Value,
+    field_names: &[&str],
+) -> String {
+    let mut combined = String::new();
+    for field_name in field_names {
+        let field_text = message
+            .get(*field_name)
+            .map(render_openai_message_content_as_text)
+            .unwrap_or_default();
+        if field_text.trim().is_empty() {
+            continue;
+        }
+        if !combined.is_empty() {
+            combined.push('\n');
+        }
+        combined.push_str(field_text.trim());
+    }
+    combined
+}
+
+fn append_paragraph(target: &mut String, text: &str) {
+    if text.trim().is_empty() {
+        return;
+    }
+    if !target.is_empty() {
+        target.push('\n');
+    }
+    target.push_str(text.trim());
+}
+
+fn normalize_openai_message_text(message: &serde_json::Value) -> (String, String) {
+    let raw_text = extract_openai_message_field_as_text(message, &["content"]);
+    let reasoning_text =
+        extract_openai_message_field_as_text(message, &["reasoning", "reasoning_content"]);
+    // Split `<think>...</think>` blocks out of the content so the agent
+    // loop doesn't interpret reasoning tokens as its own output or try to
+    // parse tool calls inside them. Qwen3/Qwen3.5 emit these inline when
+    // `chat_template_kwargs.enable_thinking` is set.
+    let (mut text, inline_thinking) = split_openai_thinking_blocks(&raw_text);
+    let mut extracted_thinking = String::new();
+    append_paragraph(&mut extracted_thinking, &reasoning_text);
+    append_paragraph(&mut extracted_thinking, &inline_thinking);
+    if text.is_empty() && !extracted_thinking.is_empty() {
+        text = extracted_thinking.clone();
+    }
+    (text, extracted_thinking)
+}
+
 pub(crate) fn normalize_openai_style_messages(
     messages: Vec<serde_json::Value>,
     force_string_content: bool,
@@ -1212,15 +1261,8 @@ fn parse_llm_response(
             )))));
         }
 
-        let raw_text = json["choices"][0]["message"]["content"]
-            .as_str()
-            .unwrap_or("")
-            .to_string();
-        // Split `<think>...</think>` blocks out of the content so the agent
-        // loop doesn't interpret reasoning tokens as its own output or try to
-        // parse tool calls inside them. Qwen3/Qwen3.5 emit these inline when
-        // `chat_template_kwargs.enable_thinking` is set.
-        let (text, extracted_thinking) = split_openai_thinking_blocks(&raw_text);
+        let message = &json["choices"][0]["message"];
+        let (text, extracted_thinking) = normalize_openai_message_text(message);
         let mut blocks = if text.is_empty() {
             Vec::new()
         } else {
@@ -1238,7 +1280,7 @@ fn parse_llm_response(
         }
 
         let mut tool_calls = Vec::new();
-        if let Some(calls) = json["choices"][0]["message"]["tool_calls"].as_array() {
+        if let Some(calls) = message["tool_calls"].as_array() {
             for call in calls {
                 let name = call["function"]["name"].as_str().unwrap_or("").to_string();
                 let args_str = call["function"]["arguments"].as_str().unwrap_or("{}");
@@ -1277,6 +1319,16 @@ fn parse_llm_response(
         let stop_reason = json["choices"][0]["finish_reason"]
             .as_str()
             .map(|s| s.to_string());
+
+        if text.is_empty()
+            && extracted_thinking.is_empty()
+            && output_tokens > 0
+            && tool_calls.is_empty()
+        {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                "openai-compatible model {model} reported completion_tokens={output_tokens} but delivered no content, reasoning, or tool calls"
+            )))));
+        }
 
         Ok(LlmResult {
             text,
@@ -1498,6 +1550,12 @@ async fn vm_call_llm_api_sse_from_response(
                     blocks.push(serde_json::json!({"type": "output_text", "text": visible, "visibility": "public"}));
                 }
             }
+            let reasoning_delta =
+                extract_openai_message_field_as_text(delta, &["reasoning", "reasoning_content"]);
+            if !reasoning_delta.is_empty() {
+                append_paragraph(&mut thinking_text, &reasoning_delta);
+                blocks.push(serde_json::json!({"type": "reasoning", "text": reasoning_delta, "visibility": "private"}));
+            }
 
             // Capture finish_reason — only on first occurrence. OpenRouter
             // can send duplicate finish_reason chunks (upstream bug
@@ -1563,13 +1621,21 @@ async fn vm_call_llm_api_sse_from_response(
         blocks.push(serde_json::json!({"type": "output_text", "text": final_visible, "visibility": "public"}));
     }
     if !oai_thinking_splitter.thinking.is_empty() {
-        if !thinking_text.is_empty() {
-            thinking_text.push('\n');
-        }
-        thinking_text.push_str(&oai_thinking_splitter.thinking);
+        append_paragraph(&mut thinking_text, &oai_thinking_splitter.thinking);
     }
 
     let _ = in_thinking_block; // suppress unused warning
+
+    if text.is_empty() && !thinking_text.is_empty() {
+        text = thinking_text.clone();
+        blocks
+            .push(serde_json::json!({"type": "output_text", "text": text, "visibility": "public"}));
+    }
+    if text.is_empty() && thinking_text.is_empty() && output_tokens > 0 && tool_calls.is_empty() {
+        return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+            "openai-compatible model {model} reported completion_tokens={output_tokens} but delivered no content, reasoning, or tool calls"
+        )))));
+    }
 
     Ok(LlmResult {
         text,
@@ -2197,9 +2263,10 @@ pub(crate) fn ollama_keep_alive_override() -> Option<serde_json::Value> {
 #[cfg(test)]
 mod tests {
     use super::{
-        classify_http_error, ollama_keep_alive_override, ollama_num_ctx_override,
-        split_openai_thinking_blocks, vm_call_llm_full_streaming_offthread, LlmCallOptions,
-        LlmRequestPayload, ThinkingStreamSplitter,
+        classify_http_error, normalize_openai_message_text, ollama_keep_alive_override,
+        ollama_num_ctx_override, split_openai_thinking_blocks,
+        vm_call_llm_full_streaming_offthread, LlmCallOptions, LlmRequestPayload,
+        ThinkingStreamSplitter,
     };
     use crate::value::VmValue;
     use std::rc::Rc;
@@ -2282,6 +2349,27 @@ mod tests {
         let combined = format!("{}{}{}", v1, v2, tail);
         assert_eq!(combined, "hello world");
         assert_eq!(s.thinking, "");
+    }
+
+    #[test]
+    fn normalize_openai_message_text_uses_reasoning_when_content_missing() {
+        let message = serde_json::json!({
+            "reasoning": "hello from reasoning"
+        });
+        let (visible, thinking) = normalize_openai_message_text(&message);
+        assert_eq!(visible, "hello from reasoning");
+        assert_eq!(thinking, "hello from reasoning");
+    }
+
+    #[test]
+    fn normalize_openai_message_text_merges_reasoning_and_inline_think_blocks() {
+        let message = serde_json::json!({
+            "content": "<think>inline reasoning</think>visible answer",
+            "reasoning": "separate reasoning"
+        });
+        let (visible, thinking) = normalize_openai_message_text(&message);
+        assert_eq!(visible, "visible answer");
+        assert_eq!(thinking, "separate reasoning\ninline reasoning");
     }
 
     use crate::llm::env_lock;

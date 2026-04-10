@@ -2,6 +2,36 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.64
+
+### Added
+
+- **Sanitized visible assistant text on the bridge protocol** — `call_progress`
+  and ACP `agent_message_chunk` notifications now carry `visible_text` and
+  `visible_delta` fields alongside the raw stream. Internal artifacts such as
+  `<think>` blocks, `<|tool_call|>` payloads, `[result of …]` fences, planner
+  JSON, and `##DONE##` markers are filtered out so host UIs can render a clean
+  assistant transcript without re-implementing the sanitizer. Calls made with
+  `response_format: "json"` are flagged `stream_publicly: false`, suppressing
+  visible streaming for structured planner outputs.
+- **Reasoning content support for OpenAI-compatible providers** — the LLM
+  client now reads `reasoning` and `reasoning_content` message fields in both
+  buffered and streaming responses, surfaces them as private reasoning blocks,
+  and falls back to reasoning text when a model returns no visible content.
+
+### Fixed
+
+- **Model resolution honors `model_tier` over stale environment defaults** —
+  `vm_resolve_model` now prefers an explicit `model_tier` selection before
+  falling back to `HARN_LLM_MODEL`, and only uses the env model when its
+  resolved provider matches the call's provider. This fixes a regression where
+  setting `HARN_LLM_MODEL` for one provider would override tiered model
+  selection for another.
+- **Detect silent OpenAI-compatible completions** — both buffered and streaming
+  paths now raise a clear error when a model reports `completion_tokens > 0`
+  but delivers no content, reasoning, or tool calls, instead of returning an
+  empty response that confuses agent loops downstream.
+
 ## v0.5.63
 
 ### Added

@@ -19,6 +19,7 @@ pub mod stdlib_modules;
 pub mod store;
 pub mod tracing;
 pub mod value;
+pub mod visible_text;
 mod vm;
 
 pub use checkpoint::register_checkpoint_builtins;

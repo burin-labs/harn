@@ -13,6 +13,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
+use harn_vm::visible_text::{sanitize_visible_assistant_text, VisibleTextState};
 use tokio::io::AsyncBufReadExt;
 use tokio::sync::{oneshot, Mutex};
 
@@ -113,6 +114,7 @@ impl AcpServer {
     /// Send a `session/update` notification with an agent message chunk.
     #[allow(dead_code)]
     fn send_update(&self, session_id: &str, text: &str) {
+        let visible_text = sanitize_visible_assistant_text(text, true);
         self.send_notification(
             "session/update",
             serde_json::json!({
@@ -122,6 +124,8 @@ impl AcpServer {
                     "content": {
                         "type": "text",
                         "text": text,
+                        "visible_text": visible_text.clone(),
+                        "visible_delta": visible_text,
                     },
                 },
             }),
@@ -280,6 +284,7 @@ impl AcpServer {
             next_id_counter: AtomicU64::new(next_id.fetch_add(1000, Ordering::SeqCst)),
             cancelled: cancelled.clone(),
             script_name: std::sync::Mutex::new(String::new()),
+            assistant_state: std::sync::Mutex::new(VisibleTextState::default()),
         });
         let host_bridge = Rc::new(harn_vm::bridge::HostBridge::from_parts(
             bridge.pending.clone(),
@@ -329,8 +334,9 @@ impl AcpServer {
         match result {
             Ok(output) => {
                 if !output.is_empty() {
-                    // Send output as an update notification.
-                    send_update_raw(&send_lock, &sid, &output);
+                    // Send output as an update notification with cumulative
+                    // visible assistant text for host UIs.
+                    bridge.send_update(&output);
                 }
                 send_json_response(
                     &send_lock,
@@ -427,6 +433,7 @@ struct AcpBridge {
     cancelled: Arc<AtomicBool>,
     /// Name of the currently executing Harn script (without .harn suffix).
     script_name: std::sync::Mutex<String>,
+    assistant_state: std::sync::Mutex<VisibleTextState>,
 }
 
 impl AcpBridge {
@@ -453,6 +460,11 @@ impl AcpBridge {
 
     /// Send a `session/update` with agent_message_chunk.
     fn send_update(&self, text: &str) {
+        let (visible_text, visible_delta) = self
+            .assistant_state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(text, true);
         self.send_notification(
             "session/update",
             serde_json::json!({
@@ -462,6 +474,8 @@ impl AcpBridge {
                     "content": {
                         "type": "text",
                         "text": text,
+                        "visible_text": visible_text,
+                        "visible_delta": visible_delta,
                     },
                 },
             }),
@@ -1232,6 +1246,7 @@ async fn acp_terminal_exec(
 
 /// Write a `session/update` notification directly through a stdout lock.
 fn send_update_raw(stdout_lock: &Arc<std::sync::Mutex<()>>, session_id: &str, text: &str) {
+    let visible_text = sanitize_visible_assistant_text(text, true);
     let notification = serde_json::json!({
         "jsonrpc": "2.0",
         "method": "session/update",
@@ -1242,6 +1257,8 @@ fn send_update_raw(stdout_lock: &Arc<std::sync::Mutex<()>>, session_id: &str, te
                 "content": {
                     "type": "text",
                     "text": text,
+                    "visible_text": visible_text.clone(),
+                    "visible_delta": visible_text,
                 },
             },
         },
@@ -1420,7 +1437,7 @@ pub async fn run_acp_server(pipeline: Option<&str>) {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_host_capability_manifest;
+    use super::{normalize_host_capability_manifest, sanitize_visible_assistant_text};
     use harn_vm::VmValue;
     use std::collections::BTreeMap;
     use std::rc::Rc;
@@ -1452,5 +1469,44 @@ mod tests {
         assert!(ops
             .iter()
             .any(|value| value.display() == "scope_test_command"));
+    }
+
+    #[test]
+    fn sanitize_visible_assistant_text_strips_internal_markers() {
+        let raw = "hello\n##DONE##\nDONE\n[result of read]\nsecret\n[end of read result]\nworld";
+        assert_eq!(
+            sanitize_visible_assistant_text(raw, false),
+            "hello\n\nworld"
+        );
+    }
+
+    #[test]
+    fn sanitize_visible_assistant_text_keeps_normal_code_fences() {
+        let raw = "```ts\nconst x = 1\n```";
+        assert_eq!(sanitize_visible_assistant_text(raw, false), raw);
+    }
+
+    #[test]
+    fn sanitize_visible_assistant_text_drops_internal_json_fences() {
+        let raw = "```json\n{\"plan\":[{\"tool_name\":\"read\"}]}\n```\n\nVisible";
+        assert_eq!(sanitize_visible_assistant_text(raw, false), "Visible");
+    }
+
+    #[test]
+    fn sanitize_visible_assistant_text_drops_inline_planner_json() {
+        let raw = "{\"mode\":\"ask_user\",\"direction\":\"Need one decision\",\"targets\":[\"src\"],\"tasks\":[\"Clarify scope\"],\"unknowns\":[\"Which one?\"]}\n\nVisible";
+        assert_eq!(sanitize_visible_assistant_text(raw, false), "Visible");
+    }
+
+    #[test]
+    fn sanitize_visible_assistant_text_drops_partial_inline_planner_json() {
+        let raw = "Visible\n{\"mode\":\"plan_then_execute\",\"direction\":\"Patch the file\"";
+        assert_eq!(sanitize_visible_assistant_text(raw, true), "Visible");
+    }
+
+    #[test]
+    fn sanitize_visible_assistant_text_keeps_normal_json() {
+        let raw = "{\"status\":\"ok\",\"message\":\"Visible\"}";
+        assert_eq!(sanitize_visible_assistant_text(raw, false), raw);
     }
 }

@@ -15,6 +15,7 @@ use tokio::sync::{oneshot, Mutex};
 
 use crate::orchestration::MutationSessionRecord;
 use crate::value::{ErrorCategory, VmError, VmValue};
+use crate::visible_text::VisibleTextState;
 
 /// Default timeout for bridge calls (5 minutes).
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(300);
@@ -41,6 +42,10 @@ pub struct HostBridge {
     queued_user_messages: Arc<Mutex<VecDeque<QueuedUserMessage>>>,
     /// Host-triggered resume signal for daemon agents.
     resume_requested: Arc<AtomicBool>,
+    /// Per-call visible assistant text state for call_progress notifications.
+    visible_call_states: std::sync::Mutex<HashMap<String, VisibleTextState>>,
+    /// Whether an LLM call's deltas should be exposed to end users while streaming.
+    visible_call_streams: std::sync::Mutex<HashMap<String, bool>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -166,6 +171,8 @@ impl HostBridge {
             script_name: std::sync::Mutex::new(String::new()),
             queued_user_messages,
             resume_requested,
+            visible_call_states: std::sync::Mutex::new(HashMap::new()),
+            visible_call_streams: std::sync::Mutex::new(HashMap::new()),
         }
     }
 
@@ -189,6 +196,8 @@ impl HostBridge {
             script_name: std::sync::Mutex::new(String::new()),
             queued_user_messages: Arc::new(Mutex::new(VecDeque::new())),
             resume_requested: Arc::new(AtomicBool::new(false)),
+            visible_call_states: std::sync::Mutex::new(HashMap::new()),
+            visible_call_streams: std::sync::Mutex::new(HashMap::new()),
         }
     }
 
@@ -433,6 +442,14 @@ impl HostBridge {
     ) {
         let session_id = self.get_session_id();
         let script = self.get_script_name();
+        let stream_publicly = metadata
+            .get("stream_publicly")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(true);
+        self.visible_call_streams
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(call_id.to_string(), stream_publicly);
         self.notify(
             "session/update",
             serde_json::json!({
@@ -455,6 +472,21 @@ impl HostBridge {
     /// from an in-flight LLM call.
     pub fn send_call_progress(&self, call_id: &str, delta: &str, accumulated_tokens: u64) {
         let session_id = self.get_session_id();
+        let (visible_text, visible_delta) = {
+            let stream_publicly = self
+                .visible_call_streams
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(call_id)
+                .copied()
+                .unwrap_or(true);
+            let mut states = self
+                .visible_call_states
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            let state = states.entry(call_id.to_string()).or_default();
+            state.push(delta, stream_publicly)
+        };
         self.notify(
             "session/update",
             serde_json::json!({
@@ -465,6 +497,8 @@ impl HostBridge {
                         "call_id": call_id,
                         "delta": delta,
                         "accumulated_tokens": accumulated_tokens,
+                        "visible_text": visible_text,
+                        "visible_delta": visible_delta,
                     },
                 },
             }),
@@ -483,6 +517,14 @@ impl HostBridge {
     ) {
         let session_id = self.get_session_id();
         let script = self.get_script_name();
+        self.visible_call_states
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(call_id);
+        self.visible_call_streams
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(call_id);
         self.notify(
             "session/update",
             serde_json::json!({
