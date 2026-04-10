@@ -1,4 +1,7 @@
+use std::io::IsTerminal;
+
 use harn_lexer::Span;
+use yansi::{Color, Paint};
 
 use crate::ParserError;
 
@@ -52,9 +55,14 @@ pub fn render_diagnostic(
     help: Option<&str>,
 ) -> String {
     let mut out = String::new();
+    let severity_color = severity_color(severity);
+    let gutter = style_fragment("|", Color::Blue, false);
+    let arrow = style_fragment("-->", Color::Blue, true);
+    let help_prefix = style_fragment("help", Color::Cyan, true);
+    let note_prefix = style_fragment("note", Color::Magenta, true);
 
     // Header: severity + message
-    out.push_str(severity);
+    out.push_str(&style_fragment(severity, severity_color, true));
     out.push_str(": ");
     out.push_str(message);
     out.push('\n');
@@ -66,19 +74,23 @@ pub fn render_diagnostic(
     let gutter_width = line_num.to_string().len();
 
     out.push_str(&format!(
-        "{:>width$}--> {filename}:{line_num}:{col_num}\n",
+        "{:>width$}{arrow} {filename}:{line_num}:{col_num}\n",
         " ",
         width = gutter_width + 1,
     ));
 
     // Blank gutter
-    out.push_str(&format!("{:>width$} |\n", " ", width = gutter_width + 1));
+    out.push_str(&format!(
+        "{:>width$} {gutter}\n",
+        " ",
+        width = gutter_width + 1,
+    ));
 
     // Source line
     let source_line_opt = source.lines().nth(line_num.wrapping_sub(1));
     if let Some(source_line) = source_line_opt.filter(|_| line_num > 0) {
         out.push_str(&format!(
-            "{:>width$} | {source_line}\n",
+            "{:>width$} {gutter} {source_line}\n",
             line_num,
             width = gutter_width + 1,
         ));
@@ -94,9 +106,9 @@ pub fn render_diagnostic(
             };
             let col_num = col_num.max(1); // ensure at least 1
             let padding = " ".repeat(col_num - 1);
-            let carets = "^".repeat(span_len);
+            let carets = style_fragment(&"^".repeat(span_len), severity_color, true);
             out.push_str(&format!(
-                "{:>width$} | {padding}{carets} {label_text}\n",
+                "{:>width$} {gutter} {padding}{carets} {label_text}\n",
                 " ",
                 width = gutter_width + 1,
             ));
@@ -106,13 +118,58 @@ pub fn render_diagnostic(
     // Help line
     if let Some(help_text) = help {
         out.push_str(&format!(
-            "{:>width$} = help: {help_text}\n",
+            "{:>width$} = {help_prefix}: {help_text}\n",
+            " ",
+            width = gutter_width + 1,
+        ));
+    }
+
+    if let Some(note_text) = fun_note(severity) {
+        out.push_str(&format!(
+            "{:>width$} = {note_prefix}: {note_text}\n",
             " ",
             width = gutter_width + 1,
         ));
     }
 
     out
+}
+
+fn severity_color(severity: &str) -> Color {
+    match severity {
+        "error" => Color::Red,
+        "warning" => Color::Yellow,
+        "note" => Color::Magenta,
+        _ => Color::Cyan,
+    }
+}
+
+fn style_fragment(text: &str, color: Color, bold: bool) -> String {
+    if !colors_enabled() {
+        return text.to_string();
+    }
+
+    let mut paint = Paint::new(text).fg(color);
+    if bold {
+        paint = paint.bold();
+    }
+    paint.to_string()
+}
+
+fn colors_enabled() -> bool {
+    std::env::var_os("NO_COLOR").is_none() && std::io::stderr().is_terminal()
+}
+
+fn fun_note(severity: &str) -> Option<&'static str> {
+    if std::env::var("HARN_FUN").ok().as_deref() != Some("1") {
+        return None;
+    }
+
+    Some(match severity {
+        "error" => "the compiler stepped on a rake here.",
+        "warning" => "this still runs, but it has strong 'double-check me' energy.",
+        _ => "a tiny gremlin has left a note in the margins.",
+    })
 }
 
 pub fn parser_error_message(err: &ParserError) -> String {

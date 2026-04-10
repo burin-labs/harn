@@ -1,0 +1,17 @@
+pipeline test(task) {
+  interface IntCollection {
+    type Item = int
+    fn get(self, index: int) -> Item
+  }
+  struct Labels {
+  }
+  impl Labels {
+    fn get(self, index: int) -> string {
+      return "oops"
+    }
+  }
+  fn first<C>(collection: C) where C: IntCollection {
+    log(collection.get(0))
+  }
+  first(Labels {})
+}

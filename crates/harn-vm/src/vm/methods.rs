@@ -587,7 +587,7 @@ impl super::Vm {
                             .collect();
                         Ok(VmValue::List(Rc::new(result)))
                     }
-                    "each_cons" | "sliding_window" => {
+                    "window" | "each_cons" | "sliding_window" => {
                         let size =
                             args.first().and_then(|a| a.as_int()).unwrap_or(2).max(1) as usize;
                         if size > items.len() {

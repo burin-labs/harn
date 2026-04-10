@@ -327,16 +327,18 @@ fn collect_symbols(
         }
         Node::EnumDecl {
             name,
+            type_params,
             variants,
             is_pub,
         } => {
             let pub_prefix = if *is_pub { "pub " } else { "" };
+            let generics = format_type_params(type_params);
             symbols.push(SymbolInfo {
                 name: name.clone(),
                 kind: HarnSymbolKind::Enum,
                 def_span: snode.span,
                 type_info: Some(TypeExpr::Named(name.clone())),
-                signature: Some(format!("{pub_prefix}enum {name}")),
+                signature: Some(format!("{pub_prefix}enum {name}{generics}")),
                 scope_span,
                 doc_comment: extract_doc_comment(source, &snode.span),
                 impl_type: None,
@@ -363,10 +365,12 @@ fn collect_symbols(
         }
         Node::StructDecl {
             name,
+            type_params,
             fields,
             is_pub,
         } => {
             let pub_prefix = if *is_pub { "pub " } else { "" };
+            let generics = format_type_params(type_params);
             let shape_fields = fields
                 .iter()
                 .map(|field| ShapeField {
@@ -394,7 +398,9 @@ fn collect_symbols(
                 kind: HarnSymbolKind::Struct,
                 def_span: snode.span,
                 type_info: Some(TypeExpr::Shape(shape_fields.clone())),
-                signature: Some(format!("{pub_prefix}struct {name} {{ {fields_str} }}")),
+                signature: Some(format!(
+                    "{pub_prefix}struct {name}{generics} {{ {fields_str} }}"
+                )),
                 scope_span,
                 doc_comment: extract_doc_comment(source, &snode.span),
                 impl_type: None,
@@ -405,9 +411,17 @@ fn collect_symbols(
         Node::InterfaceDecl {
             name,
             type_params,
+            associated_types,
             methods,
         } => {
             let generics = format_type_params(type_params);
+            let associated_types_str = associated_types
+                .iter()
+                .map(|(assoc_name, assoc_type)| match assoc_type {
+                    Some(assoc_type) => format!("type {assoc_name} = {}", format_type(assoc_type)),
+                    None => format!("type {assoc_name}"),
+                })
+                .collect::<Vec<_>>();
             let methods_str = methods
                 .iter()
                 .map(|m| {
@@ -422,12 +436,17 @@ fn collect_symbols(
                 })
                 .collect::<Vec<_>>()
                 .join("; ");
+            let body_parts = associated_types_str
+                .into_iter()
+                .chain((!methods_str.is_empty()).then_some(methods_str))
+                .collect::<Vec<_>>()
+                .join("; ");
             symbols.push(SymbolInfo {
                 name: name.clone(),
                 kind: HarnSymbolKind::Interface,
                 def_span: snode.span,
                 type_info: None,
-                signature: Some(format!("interface {name}{generics} {{ {methods_str} }}")),
+                signature: Some(format!("interface {name}{generics} {{ {body_parts} }}")),
                 scope_span,
                 doc_comment: extract_doc_comment(source, &snode.span),
                 impl_type: None,

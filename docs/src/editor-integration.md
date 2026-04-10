@@ -51,8 +51,8 @@ over stdin/stdout using the Language Server Protocol.
 
 Most editors auto-detect the LSP binary. For manual configuration, point
 your editor's LSP client at the `harn-lsp` binary with no arguments. The
-server uses `TextDocumentSyncKind::FULL` (re-parses the full document on
-each change).
+server uses `TextDocumentSyncKind::FULL` and debounces full-document reparses
+so diagnostics stay responsive while you are typing.
 
 ## Debug adapter (DAP)
 
@@ -73,14 +73,20 @@ Protocol. It supports:
 
 ### VS Code launch configuration
 
+The VS Code extension now contributes a `harn` debugger type and an initial
+`Debug Current Harn File` launch configuration. You can also add it manually:
+
 ```json
 {
   "type": "harn",
   "request": "launch",
   "name": "Debug Harn",
-  "program": "${file}"
+  "program": "${file}",
+  "cwd": "${workspaceFolder}"
 }
 ```
+
+Set `harn.dapPath` if `harn-dap` is not on your `PATH`.
 
 ## Tree-sitter grammar
 
@@ -115,7 +121,9 @@ harn lint file.harn
 harn lint --fix file.harn   # automatically apply safe fixes
 ```
 
-The linter checks for: shadow variables, unused variables, unreachable code,
-missing harndoc comments, and other code quality issues. With `--fix`, the
-linter automatically rewrites fixable issues (e.g., `var` → `let`,
-boolean comparison simplification, unused import removal).
+The linter checks for: shadow variables, unused variables, unused types,
+undefined functions, unreachable code, missing harndoc comments, naming
+convention drift, branch-heavy functions, and prompt-injection risks such as
+interpolated `llm_call` system prompts. With `--fix`, the linter automatically
+rewrites fixable issues (e.g., `var` → `let`, boolean comparison
+simplification, unused import removal).

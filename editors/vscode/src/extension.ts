@@ -7,6 +7,50 @@ import {
 
 let client: LanguageClient | undefined;
 
+class HarnDebugConfigurationProvider
+  implements vscode.DebugConfigurationProvider
+{
+  resolveDebugConfiguration(
+    _folder: vscode.WorkspaceFolder | undefined,
+    config: vscode.DebugConfiguration
+  ): vscode.DebugConfiguration | null {
+    if (!config.type && !config.request && !config.name) {
+      config.type = "harn";
+      config.request = "launch";
+      config.name = "Debug Current Harn File";
+      config.program = "${file}";
+      config.cwd = "${workspaceFolder}";
+    }
+
+    if (!config.program) {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || editor.document.languageId !== "harn") {
+        vscode.window.showErrorMessage("Open a .harn file to debug");
+        return null;
+      }
+      config.program = editor.document.fileName;
+    }
+
+    if (!config.cwd) {
+      config.cwd = "${workspaceFolder}";
+    }
+
+    return config;
+  }
+}
+
+class HarnDebugAdapterFactory
+  implements vscode.DebugAdapterDescriptorFactory
+{
+  createDebugAdapterDescriptor(
+    _session: vscode.DebugSession
+  ): vscode.ProviderResult<vscode.DebugAdapterDescriptor> {
+    const config = vscode.workspace.getConfiguration("harn");
+    const dapPath = config.get<string>("dapPath", "harn-dap");
+    return new vscode.DebugAdapterExecutable(dapPath);
+  }
+}
+
 export function activate(context: vscode.ExtensionContext) {
   const config = vscode.workspace.getConfiguration("harn");
   const harnPath = config.get<string>("path", "harn");
@@ -73,7 +117,21 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
-  context.subscriptions.push(runCommand, fmtCommand);
+  const debugConfigProvider = vscode.debug.registerDebugConfigurationProvider(
+    "harn",
+    new HarnDebugConfigurationProvider()
+  );
+  const debugAdapterFactory = vscode.debug.registerDebugAdapterDescriptorFactory(
+    "harn",
+    new HarnDebugAdapterFactory()
+  );
+
+  context.subscriptions.push(
+    runCommand,
+    fmtCommand,
+    debugConfigProvider,
+    debugAdapterFactory
+  );
 }
 
 export function deactivate(): Thenable<void> | undefined {

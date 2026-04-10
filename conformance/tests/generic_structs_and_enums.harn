@@ -1,0 +1,18 @@
+pipeline test(task) {
+  struct Pair<A, B> {
+    first: A
+    second: B
+  }
+  enum Option<T> {
+    Some(value: T)
+    None
+  }
+  let pair: Pair<int, string> = Pair {first: 1, second: "two"}
+  let maybe: Option<int> = Option.Some(pair.first)
+  log(pair.first)
+  log(pair.second)
+  match maybe {
+    Option.Some(value) -> { log(value) }
+    Option.None -> { log("none") }
+  }
+}

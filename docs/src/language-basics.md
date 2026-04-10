@@ -710,11 +710,23 @@ println(p.x)
 ```
 
 Structs can also be constructed with the struct name as a constructor,
-which tags the value with the struct type:
+using named fields directly:
 
 ```harn
-let p = Point({x: 10, y: 20})
+let p = Point { x: 10, y: 20 }
 println(p.x)  // 10
+```
+
+Structs can declare type parameters when fields should stay connected:
+
+```harn
+struct Pair<A, B> {
+  first: A
+  second: B
+}
+
+let pair: Pair<int, string> = Pair { first: 1, second: "two" }
+println(pair.second)  // two
 ```
 
 ### Impl blocks
@@ -732,11 +744,11 @@ impl Point {
     return sqrt(self.x * self.x + self.y * self.y)
   }
   fn translate(self, dx, dy) {
-    return Point({x: self.x + dx, y: self.y + dy})
+    return Point { x: self.x + dx, y: self.y + dy }
   }
 }
 
-let p = Point({x: 3, y: 4})
+let p = Point { x: 3, y: 4 }
 println(p.distance())       // 5.0
 println(p.translate(10, 20)) // Point({x: 13, y: 24})
 ```
@@ -772,6 +784,16 @@ their own type parameters when the contract needs them:
 interface Repository<T> {
   fn get(id: string) -> T
   fn map<U>(value: T, f: fn(T) -> U) -> U
+}
+```
+
+Interfaces may also declare associated types when the contract needs to name
+an implementation-defined type without making the whole interface generic:
+
+```harn
+interface Collection {
+  type Item
+  fn get(self, index: int) -> Item
 }
 ```
 
@@ -834,6 +856,24 @@ interface Serializable {
   fn serialize(self) -> string
   fn byte_size(self) -> int
 }
+```
+
+### `guard`, `require`, and `assert`
+
+These three forms serve different jobs:
+
+- `guard condition else { ... }` handles expected control flow and narrows types after the guard.
+- `require condition, "message"` enforces runtime invariants in normal code and throws on failure.
+- `assert`, `assert_eq`, and `assert_ne` are for test pipelines. The linter
+  warns when you use them in non-test code, and it nudges test pipelines away
+  from `require`.
+
+```harn
+guard user != nil else {
+  return "missing user"
+}
+
+require len(user.name) > 0, "user name cannot be empty"
 ```
 
 A struct must implement all listed methods to satisfy the interface.

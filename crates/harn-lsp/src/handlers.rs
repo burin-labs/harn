@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::Duration;
 
 use harn_lexer::{Lexer, TokenKind};
 use harn_parser::{format_type, ShapeField, TypeExpr};
@@ -244,7 +245,31 @@ impl tower_lsp::LanguageServer for HarnLsp {
                 let entry = docs
                     .entry(uri.clone())
                     .or_insert_with(|| DocumentState::new(String::new()));
-                entry.update(source);
+                entry.update_source(source);
+            }
+
+            let version = {
+                let mut versions = self.pending_reparse_versions.lock().unwrap();
+                let next = versions.get(&uri).copied().unwrap_or(0) + 1;
+                versions.insert(uri.clone(), next);
+                next
+            };
+
+            tokio::time::sleep(Duration::from_millis(100)).await;
+
+            {
+                let versions = self.pending_reparse_versions.lock().unwrap();
+                if versions.get(&uri).copied() != Some(version) {
+                    return;
+                }
+            }
+
+            {
+                let mut docs = self.documents.lock().unwrap();
+                let Some(entry) = docs.get_mut(&uri) else {
+                    return;
+                };
+                entry.reparse_if_dirty();
                 diagnostics = entry.diagnostics.clone();
             }
             self.client
@@ -399,7 +424,7 @@ impl tower_lsp::LanguageServer for HarnLsp {
             None => return Ok(None),
         };
         let source = state.source.clone();
-        let ast = state.ast.clone();
+        let ast = state.cached_ast.clone();
         drop(docs);
 
         let word = match word_at_position(&source, position) {
@@ -1011,7 +1036,7 @@ impl tower_lsp::LanguageServer for HarnLsp {
             None => return Ok(None),
         };
         let source = state.source.clone();
-        let ast = state.ast.clone();
+        let ast = state.cached_ast.clone();
         let symbols = state.symbols.clone();
         drop(docs);
 

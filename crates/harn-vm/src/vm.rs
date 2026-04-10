@@ -88,6 +88,8 @@ pub struct DebugState {
     pub frame_depth: usize,
 }
 
+type DebugHook = dyn FnMut(&DebugState) -> DebugAction;
+
 /// Iterator state for for-in loops: either a pre-collected vec, an async channel, or a generator.
 pub(crate) enum IterState {
     Vec {
@@ -165,6 +167,8 @@ pub struct Vm {
     /// Global constants (e.g. `pi`, `e`). Checked as a fallback in `GetVar`
     /// after the environment, so user-defined variables can shadow them.
     pub(crate) globals: BTreeMap<String, VmValue>,
+    /// Optional debugger hook invoked when execution advances to a new source line.
+    pub(crate) debug_hook: Option<Box<DebugHook>>,
 }
 
 impl Vm {
@@ -198,6 +202,7 @@ impl Vm {
             yield_sender: None,
             project_root: None,
             globals: BTreeMap::new(),
+            debug_hook: None,
         }
     }
 
@@ -233,6 +238,19 @@ impl Vm {
     pub fn set_step_over(&mut self) {
         self.step_mode = true;
         self.step_frame_depth = self.frames.len();
+    }
+
+    /// Register a debug hook invoked whenever execution advances to a new source line.
+    pub fn set_debug_hook<F>(&mut self, hook: F)
+    where
+        F: FnMut(&DebugState) -> DebugAction + 'static,
+    {
+        self.debug_hook = Some(Box::new(hook));
+    }
+
+    /// Clear the current debug hook.
+    pub fn clear_debug_hook(&mut self) {
+        self.debug_hook = None;
     }
 
     /// Enable step-out mode (stop when returning from current frame).
@@ -306,6 +324,14 @@ impl Vm {
 
         if line_changed {
             self.last_line = current_line;
+
+            let state = self.debug_state();
+            if let Some(hook) = self.debug_hook.as_mut() {
+                if matches!(hook(&state), DebugAction::Stop) {
+                    self.stopped = true;
+                    return Ok(Some((VmValue::Nil, true)));
+                }
+            }
 
             // Check breakpoints
             if self.breakpoints.contains(&current_line) {
@@ -478,6 +504,7 @@ impl Vm {
             yield_sender: None,
             project_root: self.project_root.clone(),
             globals: self.globals.clone(),
+            debug_hook: None,
         }
     }
 

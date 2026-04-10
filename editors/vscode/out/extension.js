@@ -38,6 +38,36 @@ exports.deactivate = deactivate;
 const vscode = __importStar(require("vscode"));
 const node_1 = require("vscode-languageclient/node");
 let client;
+class HarnDebugConfigurationProvider {
+    resolveDebugConfiguration(_folder, config) {
+        if (!config.type && !config.request && !config.name) {
+            config.type = "harn";
+            config.request = "launch";
+            config.name = "Debug Current Harn File";
+            config.program = "${file}";
+            config.cwd = "${workspaceFolder}";
+        }
+        if (!config.program) {
+            const editor = vscode.window.activeTextEditor;
+            if (!editor || editor.document.languageId !== "harn") {
+                vscode.window.showErrorMessage("Open a .harn file to debug");
+                return null;
+            }
+            config.program = editor.document.fileName;
+        }
+        if (!config.cwd) {
+            config.cwd = "${workspaceFolder}";
+        }
+        return config;
+    }
+}
+class HarnDebugAdapterFactory {
+    createDebugAdapterDescriptor(_session) {
+        const config = vscode.workspace.getConfiguration("harn");
+        const dapPath = config.get("dapPath", "harn-dap");
+        return new vscode.DebugAdapterExecutable(dapPath);
+    }
+}
 function activate(context) {
     const config = vscode.workspace.getConfiguration("harn");
     const harnPath = config.get("path", "harn");
@@ -78,7 +108,9 @@ function activate(context) {
             vscode.window.createTerminal("Harn");
         terminal.sendText(`${harnPath} fmt "${editor.document.fileName}"`);
     });
-    context.subscriptions.push(runCommand, fmtCommand);
+    const debugConfigProvider = vscode.debug.registerDebugConfigurationProvider("harn", new HarnDebugConfigurationProvider());
+    const debugAdapterFactory = vscode.debug.registerDebugAdapterDescriptorFactory("harn", new HarnDebugAdapterFactory());
+    context.subscriptions.push(runCommand, fmtCommand, debugConfigProvider, debugAdapterFactory);
 }
 function deactivate() {
     return client?.stop();

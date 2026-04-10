@@ -1,0 +1,36 @@
+// Data Pipeline Example
+//
+// Run with:
+//   cargo run --bin harn -- run examples/data-pipeline.harn
+//
+// Demonstrates a small data transformation pipeline with parallel fan-out
+// and a machine-readable summary report.
+pipeline default(task) {
+  log("Starting data pipeline")
+  let raw = """
+[
+  {"id": "a1", "name": "Alpha", "score": 91, "team": "red"},
+  {"id": "b2", "name": "Beta", "score": 78, "team": "blue"},
+  {"id": "c3", "name": "Gamma", "score": 88, "team": "red"}
+]
+"""
+  let rows = json_parse(raw)
+  let normalized = parallel each rows { row ->
+    {id: row.id, name: row.name, team: row.team, score: row.score, passed: row.score >= 80}
+  }
+  var passed = 0
+  for row in normalized {
+    if row.passed {
+      passed = passed + 1
+    }
+  }
+  let report = {
+    run_id: uuid(),
+    generated_at: timestamp(),
+    input_rows: rows.count,
+    passed_rows: passed,
+    failed_rows: rows.count - passed,
+    rows: normalized,
+  }
+  println(json_stringify(report))
+}

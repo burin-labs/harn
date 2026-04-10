@@ -64,11 +64,42 @@ the full suite when a requested target is missing.
 
 ## harn repl
 
-Start an interactive REPL with syntax highlighting.
+Start an interactive REPL with syntax highlighting, multiline editing, live
+builtin completion, and persistent history in `~/.harn/repl_history`.
 
 ```bash
 harn repl
 ```
+
+The REPL keeps incomplete blocks open until braces, brackets, parentheses, and
+quoted strings are balanced, so you can paste or type multi-line pipelines and
+control-flow blocks directly.
+
+## harn bench
+
+Benchmark a `.harn` file over repeated runs.
+
+```bash
+harn bench main.harn
+harn bench main.harn --iterations 25
+```
+
+`harn bench` parses and compiles the file once, executes it with a fresh VM for
+each iteration, and reports wall time plus aggregated LLM token, call, and cost
+metrics.
+
+## harn viz
+
+Render a `.harn` file as a Mermaid flowchart.
+
+```bash
+harn viz main.harn
+harn viz main.harn --output docs/graph.mmd
+```
+
+`harn viz` parses the file, walks the AST, and emits a Mermaid `flowchart TD`
+graph showing pipelines, functions, branches, loops, and other workflow-shaped
+control-flow nodes.
 
 ## harn fmt
 
@@ -190,6 +221,31 @@ Scaffold a new project with `harn.toml` and `main.harn`.
 ```bash
 harn init              # create in current directory
 harn init my-project   # create in a new directory
+harn init --template eval
+```
+
+## harn new
+
+Scaffold a new project from a starter template. Supported templates are
+`basic`, `agent`, `mcp-server`, and `eval`.
+
+```bash
+harn new my-agent --template agent
+harn new local-mcp --template mcp-server
+harn new eval-suite --template eval
+```
+
+`harn init` and `harn new` share the same scaffolding engine. Use `init` for
+the default quick-start flow and `new` when you want the template choice to be
+explicit.
+
+## harn doctor
+
+Inspect the local environment and report the current Harn setup.
+
+```bash
+harn doctor
+harn doctor --no-network
 ```
 
 ## harn watch

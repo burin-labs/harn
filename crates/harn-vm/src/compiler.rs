@@ -367,6 +367,7 @@ impl Compiler {
                     VmValue::String(Rc::from("closure")),
                 )]))))
             }
+            harn_parser::TypeExpr::Applied { .. } => None,
             harn_parser::TypeExpr::Never => None,
         }
     }
@@ -2157,22 +2158,24 @@ impl Compiler {
                 struct_name,
                 fields,
             } => {
-                // Build as a dict with a __struct__ key for metadata
-                let struct_key = self
+                // Reuse the canonical struct runtime path so impl dispatch sees a StructInstance.
+                let make_idx = self
                     .chunk
-                    .add_constant(Constant::String("__struct__".to_string()));
-                let struct_val = self
+                    .add_constant(Constant::String("__make_struct".to_string()));
+                let struct_name_idx = self
                     .chunk
                     .add_constant(Constant::String(struct_name.clone()));
-                self.chunk.emit_u16(Op::Constant, struct_key, self.line);
-                self.chunk.emit_u16(Op::Constant, struct_val, self.line);
+                self.chunk.emit_u16(Op::Constant, make_idx, self.line);
+                self.chunk
+                    .emit_u16(Op::Constant, struct_name_idx, self.line);
 
                 for entry in fields {
                     self.compile_node(&entry.key)?;
                     self.compile_node(&entry.value)?;
                 }
                 self.chunk
-                    .emit_u16(Op::BuildDict, (fields.len() + 1) as u16, self.line);
+                    .emit_u16(Op::BuildDict, fields.len() as u16, self.line);
+                self.chunk.emit_u8(Op::Call, 2, self.line);
             }
 
             Node::ImportDecl { path } => {

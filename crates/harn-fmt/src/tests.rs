@@ -857,10 +857,39 @@ fn test_short_import_stays_inline() {
 pipeline default(task) { log(1) }"#;
     let result = format_source(source).unwrap();
     assert!(
-        result.contains("import { foo, bar, baz } from \"module\""),
+        result.contains("import { bar, baz, foo } from \"module\""),
         "Short import should stay inline, got:\n{result}"
     );
     assert_roundtrip(source);
+}
+
+#[test]
+fn test_import_block_sorts_std_first_then_alphabetically() {
+    let source = r#"import "zeta"
+import "std/http"
+import "alpha"
+pipeline default(task) { log(1) }"#;
+    let result = format_source(source).unwrap();
+
+    let std_index = result.find("import \"std/http\"").unwrap();
+    let alpha_index = result.find("import \"alpha\"").unwrap();
+    let zeta_index = result.find("import \"zeta\"").unwrap();
+
+    assert!(
+        std_index < alpha_index && alpha_index < zeta_index,
+        "imports should sort with std/ first, got:\n{result}"
+    );
+}
+
+#[test]
+fn test_selective_import_names_sort_alphabetically() {
+    let source = r#"import { zebra, alpha, middle } from "module"
+pipeline default(task) { log(1) }"#;
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("import { alpha, middle, zebra } from \"module\""),
+        "selective import names should sort, got:\n{result}"
+    );
 }
 
 #[test]

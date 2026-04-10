@@ -1,0 +1,4 @@
+pipeline test(task) {
+  log([1, 2, 3, 4].window(2))
+  log(["a", "b", "c"].window(4))
+}

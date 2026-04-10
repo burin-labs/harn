@@ -1,10 +1,12 @@
+use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::rc::Rc;
 
 use harn_lexer::Lexer;
 use harn_parser::Parser;
 use harn_vm::{
-    register_http_builtins, register_llm_builtins, register_vm_stdlib, Compiler, Vm, VmError,
-    VmValue,
+    register_http_builtins, register_llm_builtins, register_vm_stdlib, Compiler, DebugAction,
+    DebugState, Vm, VmError, VmValue,
 };
 use serde_json::json;
 
@@ -69,6 +71,8 @@ pub struct Debugger {
     next_var_ref: i64,
     /// Whether to break on thrown exceptions.
     break_on_exceptions: bool,
+    /// Latest VM debug snapshot captured through the VM debug hook.
+    latest_debug_state: Rc<RefCell<Option<DebugState>>>,
 }
 
 impl Debugger {
@@ -93,6 +97,7 @@ impl Debugger {
                 .build()
                 .unwrap(),
             break_on_exceptions: false,
+            latest_debug_state: Rc::new(RefCell::new(None)),
         }
     }
 
@@ -214,9 +219,16 @@ impl Debugger {
         // Set breakpoints on the VM
         let bp_lines: Vec<usize> = self.breakpoints.iter().map(|bp| bp.line as usize).collect();
         vm.set_breakpoints(bp_lines);
+        *self.latest_debug_state.borrow_mut() = None;
+        let latest_debug_state = Rc::clone(&self.latest_debug_state);
+        vm.set_debug_hook(move |state| {
+            *latest_debug_state.borrow_mut() = Some(state.clone());
+            DebugAction::Continue
+        });
 
         // Initialize execution (push frame) but don't run yet
         vm.start(&chunk);
+        *self.latest_debug_state.borrow_mut() = Some(vm.debug_state());
         self.vm = Some(vm);
         Ok(())
     }
@@ -277,13 +289,13 @@ impl Debugger {
         ));
 
         // Run until first breakpoint or end
-        responses.extend(self.run_until_stop());
+        responses.extend(self.run_to_breakpoint());
 
         responses
     }
 
     /// Run the VM until it hits a breakpoint, step completes, or terminates.
-    fn run_until_stop(&mut self) -> Vec<DapResponse> {
+    fn run_to_breakpoint(&mut self) -> Vec<DapResponse> {
         let mut responses = Vec::new();
 
         if self.vm.is_none() {
@@ -311,7 +323,7 @@ impl Debugger {
             match step_result {
                 Ok(Some((val, stopped))) => {
                     if stopped {
-                        let state = self.vm.as_ref().unwrap().debug_state();
+                        let state = self.current_debug_state();
                         let current_line = state.line as i64;
                         let vars = state.variables;
 
@@ -392,7 +404,7 @@ impl Debugger {
                     // exception, pause instead of terminating.
                     if self.break_on_exceptions && matches!(&e, VmError::Thrown(_)) {
                         let error_msg = e.to_string();
-                        let state = self.vm.as_ref().unwrap().debug_state();
+                        let state = self.current_debug_state();
                         self.stopped = true;
                         self.current_line = state.line as i64;
                         self.variables = state.variables;
@@ -453,7 +465,7 @@ impl Debugger {
         )];
 
         // Resume execution
-        responses.extend(self.run_until_stop());
+        responses.extend(self.run_to_breakpoint());
         responses
     }
 
@@ -468,7 +480,7 @@ impl Debugger {
         let mut responses = vec![DapResponse::success(seq, msg.seq, "next", None)];
 
         // Resume and stop at next line
-        responses.extend(self.run_until_stop());
+        responses.extend(self.run_to_breakpoint());
         responses
     }
 
@@ -482,7 +494,7 @@ impl Debugger {
         let seq = self.next_seq();
         let mut responses = vec![DapResponse::success(seq, msg.seq, "stepIn", None)];
 
-        responses.extend(self.run_until_stop());
+        responses.extend(self.run_to_breakpoint());
         responses
     }
 
@@ -496,7 +508,7 @@ impl Debugger {
         let seq = self.next_seq();
         let mut responses = vec![DapResponse::success(seq, msg.seq, "stepOut", None)];
 
-        responses.extend(self.run_until_stop());
+        responses.extend(self.run_to_breakpoint());
         responses
     }
 
@@ -575,6 +587,19 @@ impl Debugger {
             "scopes",
             Some(json!({ "scopes": scopes })),
         )]
+    }
+
+    fn current_debug_state(&self) -> DebugState {
+        self.latest_debug_state
+            .borrow()
+            .clone()
+            .or_else(|| self.vm.as_ref().map(|vm| vm.debug_state()))
+            .unwrap_or(DebugState {
+                line: self.current_line.max(0) as usize,
+                variables: self.variables.clone(),
+                frame_name: "pipeline".to_string(),
+                frame_depth: 0,
+            })
     }
 
     fn alloc_var_ref(&mut self, children: Vec<(String, VmValue)>) -> i64 {

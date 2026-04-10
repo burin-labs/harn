@@ -1,0 +1,3 @@
+[harn] Result.Ok(2)
+[harn] Result.Err(division by zero)
+[harn] ok: 2

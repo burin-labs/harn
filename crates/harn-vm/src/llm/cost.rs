@@ -20,7 +20,7 @@ pub(crate) fn reset_cost_state() {
     LLM_ACCUMULATED_COST.with(|a| *a.borrow_mut() = 0.0);
 }
 
-pub(crate) fn peek_total_cost() -> f64 {
+pub fn peek_total_cost() -> f64 {
     LLM_ACCUMULATED_COST.with(|acc| *acc.borrow())
 }
 

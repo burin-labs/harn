@@ -20,6 +20,7 @@ use tower_lsp::{Client, LspService, Server};
 struct HarnLsp {
     client: Client,
     documents: Mutex<HashMap<Url, DocumentState>>,
+    pending_reparse_versions: Mutex<HashMap<Url, u64>>,
 }
 
 impl HarnLsp {
@@ -27,6 +28,7 @@ impl HarnLsp {
         Self {
             client,
             documents: Mutex::new(HashMap::new()),
+            pending_reparse_versions: Mutex::new(HashMap::new()),
         }
     }
 }

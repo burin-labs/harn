@@ -1,0 +1,16 @@
+// Chatbot Example
+//
+// Run with:
+//   cargo run --bin harn -- run examples/chatbot.harn
+//
+// A tiny conversational assistant with a narrow prompt and a simple response
+// path. Useful as a baseline before wiring in tools or memory.
+pipeline default(task) {
+  let system = """
+You are a helpful, concise chatbot for Harn users.
+Answer directly, ask one clarifying question if the request is ambiguous,
+and do not invent APIs or commands.
+"""
+  let response = llm_call(task, system, {temperature: 0.4, max_tokens: 800})
+  println(response.text)
+}

@@ -94,6 +94,9 @@
 (struct_declaration
   name: (identifier) @type)
 
+(struct_construct
+  type_name: (identifier) @type)
+
 (struct_field
   name: (identifier) @property)
 
@@ -115,6 +118,9 @@
 (interface_method
   (generic_params
     (identifier) @type))
+
+(associated_type_declaration
+  name: (identifier) @type)
 
 ; Generic params
 (generic_params

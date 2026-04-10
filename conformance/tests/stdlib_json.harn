@@ -1,5 +1,5 @@
 // Test std/json module functions
-import { safe_parse, merge, pick, omit } from "std/json"
+import { merge, omit, pick, safe_parse } from "std/json"
 
 pipeline default(task) {
   // safe_parse: valid JSON

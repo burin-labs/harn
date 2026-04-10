@@ -70,21 +70,47 @@ pub(crate) async fn run_file(path: &str, trace: bool, denied_builtins: HashSet<S
     let (source, program) = parse_source_file(path);
 
     // Static type checking
+    let mut had_type_error = false;
     let type_diagnostics = harn_parser::TypeChecker::new().check(&program);
     for diag in &type_diagnostics {
         match diag.severity {
             DiagnosticSeverity::Error => {
-                eprintln!("error: {}", diag.message);
-                process::exit(1);
+                had_type_error = true;
+                if let Some(span) = &diag.span {
+                    let rendered = harn_parser::diagnostic::render_diagnostic(
+                        &source,
+                        path,
+                        span,
+                        "error",
+                        &diag.message,
+                        None,
+                        diag.help.as_deref(),
+                    );
+                    eprint!("{rendered}");
+                } else {
+                    eprintln!("error: {}", diag.message);
+                }
             }
             DiagnosticSeverity::Warning => {
                 if let Some(span) = &diag.span {
-                    eprintln!("warning: {} (line {})", diag.message, span.line);
+                    let rendered = harn_parser::diagnostic::render_diagnostic(
+                        &source,
+                        path,
+                        span,
+                        "warning",
+                        &diag.message,
+                        None,
+                        diag.help.as_deref(),
+                    );
+                    eprint!("{rendered}");
                 } else {
                     eprintln!("warning: {}", diag.message);
                 }
             }
         }
+    }
+    if had_type_error {
+        process::exit(1);
     }
 
     let chunk = match harn_vm::Compiler::new().compile(&program) {
@@ -194,7 +220,10 @@ pub(crate) async fn run_file(path: &str, trace: bool, denied_builtins: HashSet<S
 /// Connect to MCP servers declared in `harn.toml` and register them as
 /// `mcp.<name>` globals on the VM. Connection failures are warned but do
 /// not abort execution.
-async fn connect_mcp_servers(servers: &[package::McpServerConfig], vm: &mut harn_vm::Vm) {
+pub(crate) async fn connect_mcp_servers(
+    servers: &[package::McpServerConfig],
+    vm: &mut harn_vm::Vm,
+) {
     use std::collections::BTreeMap;
     use std::rc::Rc;
 

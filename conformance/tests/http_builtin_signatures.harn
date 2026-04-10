@@ -1,0 +1,10 @@
+pipeline test(task) {
+  http_mock("GET", "https://api.example.com/users", {status: 200, body: "alice", headers: {}})
+  http_mock("POST", "https://api.example.com/users", {status: 201, body: "created", headers: {}})
+  let get_resp: dict = http_get("https://api.example.com/users")
+  let post_resp: dict = http_post("https://api.example.com/users", "{}")
+  log(get_resp.status)
+  log(get_resp.body)
+  log(post_resp.status)
+  log(post_resp.body)
+}

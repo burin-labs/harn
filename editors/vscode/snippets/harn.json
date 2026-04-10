@@ -1,0 +1,94 @@
+{
+  "Pipeline": {
+    "prefix": "pipeline",
+    "body": [
+      "pipeline ${1:default}(task) {",
+      "  ${0}",
+      "}"
+    ],
+    "description": "Create a pipeline definition"
+  },
+  "Function": {
+    "prefix": "fn",
+    "body": [
+      "fn ${1:name}(${2})${3: -> ${4:any}} {",
+      "  ${0}",
+      "}"
+    ],
+    "description": "Create a function definition"
+  },
+  "Tool": {
+    "prefix": "tool",
+    "body": [
+      "tool ${1:name}(${2})${3: -> ${4:string}} {",
+      "  description \"${5:Describe the tool}\"",
+      "  ${0}",
+      "}"
+    ],
+    "description": "Create a tool definition"
+  },
+  "Parallel Each": {
+    "prefix": "parallel-each",
+    "body": [
+      "parallel each ${1:items} { ${2:item} ->",
+      "  ${0}",
+      "}"
+    ],
+    "description": "Create a parallel each block"
+  },
+  "Agent Loop": {
+    "prefix": "agent_loop",
+    "body": [
+      "let ${1:result} = agent_loop(",
+      "  ${2:task},",
+      "  \"${3:You are a helpful assistant}.\",",
+      "  {",
+      "    persistent: true,",
+      "    max_nudges: ${4:3}",
+      "  }",
+      ")",
+      "${0}"
+    ],
+    "description": "Insert an agent_loop call"
+  },
+  "Retry": {
+    "prefix": "retry",
+    "body": [
+      "retry ${1:3} {",
+      "  ${0}",
+      "}"
+    ],
+    "description": "Create a retry block"
+  },
+  "Match": {
+    "prefix": "match",
+    "body": [
+      "match ${1:value} {",
+      "  ${2:pattern} -> {",
+      "    ${0}",
+      "  }",
+      "}"
+    ],
+    "description": "Create a match expression"
+  },
+  "Try Catch": {
+    "prefix": "try-catch",
+    "body": [
+      "try {",
+      "  ${1}",
+      "} catch ${2:err} {",
+      "  ${0}",
+      "}"
+    ],
+    "description": "Create a try/catch block"
+  },
+  "Defer": {
+    "prefix": "defer",
+    "body": [
+      "defer {",
+      "  ${0}",
+      "}"
+    ],
+    "description": "Create a defer block"
+  }
+}

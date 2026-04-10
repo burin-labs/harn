@@ -71,14 +71,16 @@ impl Formatter {
     /// Wrapped imports follow the same trailing-comma convention as other
     /// multiline comma-separated forms.
     fn format_selective_import_names(&self, names: &[String], path: &str) -> String {
-        let inline = names.join(", ");
+        let mut sorted_names = names.to_vec();
+        sorted_names.sort();
+        let inline = sorted_names.join(", ");
         let prefix_len = self.indent * 2 + 9; // "import { "
         let total = prefix_len + inline.len() + " } ".len() + 6 + path.len() + 1;
         if total > self.line_width {
             let item_indent = "  ".repeat(self.indent + 1);
             let close_indent = "  ".repeat(self.indent);
             let mut inner = String::from("\n");
-            for name in names {
+            for name in &sorted_names {
                 inner.push_str(&item_indent);
                 inner.push_str(name);
                 inner.push_str(",\n");
@@ -87,6 +89,59 @@ impl Formatter {
             format!("import {{{inner}}} from \"{path}\"")
         } else {
             format!("import {{ {inline} }} from \"{path}\"")
+        }
+    }
+
+    fn is_import_node(node: &SNode) -> bool {
+        matches!(
+            node.node,
+            Node::ImportDecl { .. } | Node::SelectiveImport { .. }
+        )
+    }
+
+    fn import_sort_key(node: &SNode) -> (u8, String, u8, String) {
+        match &node.node {
+            Node::ImportDecl { path } => (
+                u8::from(!path.starts_with("std/")),
+                path.clone(),
+                0,
+                String::new(),
+            ),
+            Node::SelectiveImport { names, path } => {
+                let mut sorted_names = names.clone();
+                sorted_names.sort();
+                (
+                    u8::from(!path.starts_with("std/")),
+                    path.clone(),
+                    1,
+                    sorted_names.join(","),
+                )
+            }
+            _ => (2, String::new(), 2, String::new()),
+        }
+    }
+
+    fn format_sorted_import_block(&mut self, nodes: &[SNode]) {
+        let mut imports: Vec<(usize, &SNode)> = nodes
+            .iter()
+            .enumerate()
+            .take_while(|(_, node)| Self::is_import_node(node))
+            .collect();
+        imports.sort_by(|(_, left), (_, right)| {
+            Self::import_sort_key(left).cmp(&Self::import_sort_key(right))
+        });
+
+        for (position, (original_index, node)) in imports.into_iter().enumerate() {
+            if position > 0 {
+                self.output.push('\n');
+            }
+            let comment_from = if original_index == 0 {
+                1
+            } else {
+                nodes[original_index - 1].span.line + 1
+            };
+            self.emit_comments_in_range(comment_from, node.span.line);
+            self.format_node(node);
         }
     }
 
@@ -118,13 +173,23 @@ impl Formatter {
     // ------------------------------------------------------------------
 
     pub(crate) fn format_program(&mut self, nodes: &[SNode]) {
-        if let Some(first) = nodes.first() {
+        let import_count = nodes
+            .iter()
+            .take_while(|node| Self::is_import_node(node))
+            .count();
+        if import_count > 0 {
+            self.format_sorted_import_block(nodes);
+        } else if let Some(first) = nodes.first() {
             self.emit_comments_in_range(1, first.span.line);
         }
-        for (i, node) in nodes.iter().enumerate() {
+        for (i, node) in nodes.iter().enumerate().skip(import_count) {
             if i > 0 {
                 self.output.push('\n');
-                let prev_end = nodes[i - 1].span.line + 1;
+                let prev_end = if i == import_count && import_count > 0 {
+                    nodes[import_count - 1].span.line + 1
+                } else {
+                    nodes[i - 1].span.line + 1
+                };
                 self.emit_comments_in_range(prev_end, node.span.line);
             }
             self.format_node(node);
@@ -367,11 +432,13 @@ impl Formatter {
             }
             Node::EnumDecl {
                 name,
+                type_params,
                 variants,
                 is_pub,
             } => {
                 let pub_prefix = if *is_pub { "pub " } else { "" };
-                self.writeln(&format!("{pub_prefix}enum {name} {{"));
+                let generics = format_type_params(type_params);
+                self.writeln(&format!("{pub_prefix}enum {name}{generics} {{"));
                 self.indent();
                 for v in variants {
                     self.format_enum_variant(v);
@@ -381,11 +448,13 @@ impl Formatter {
             }
             Node::StructDecl {
                 name,
+                type_params,
                 fields,
                 is_pub,
             } => {
                 let pub_prefix = if *is_pub { "pub " } else { "" };
-                self.writeln(&format!("{pub_prefix}struct {name} {{"));
+                let generics = format_type_params(type_params);
+                self.writeln(&format!("{pub_prefix}struct {name}{generics} {{"));
                 self.indent();
                 for f in fields {
                     self.format_struct_field(f);
@@ -396,11 +465,22 @@ impl Formatter {
             Node::InterfaceDecl {
                 name,
                 type_params,
+                associated_types,
                 methods,
             } => {
                 let generics = format_type_params(type_params);
                 self.writeln(&format!("interface {name}{generics} {{"));
                 self.indent();
+                for (assoc_name, assoc_type) in associated_types {
+                    if let Some(assoc_type) = assoc_type {
+                        self.writeln(&format!(
+                            "type {assoc_name} = {}",
+                            format_type_expr(assoc_type)
+                        ));
+                    } else {
+                        self.writeln(&format!("type {assoc_name}"));
+                    }
+                }
                 for m in methods {
                     let method_generics = format_type_params(&m.type_params);
                     let prefix_len = self.indent * 2 + 3 + m.name.len() + method_generics.len() + 1;

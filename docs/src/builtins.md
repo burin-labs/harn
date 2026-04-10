@@ -9,6 +9,10 @@ Complete reference for all built-in functions available in Harn.
 | `log(msg)` | msg: any | nil | Print with `[harn]` prefix and newline |
 | `print(msg)` | msg: any | nil | Print without prefix or newline |
 | `println(msg)` | msg: any | nil | Print with newline, no prefix |
+| `progress(phase, message, progress?, total?)` | phase: string, message: string, optional numeric progress | nil | Emit standalone progress output. Dict options support `mode: "spinner"` with `step`, or `mode: "bar"` with `current`, `total`, and optional `width` |
+| `color(text, name)` | text: any, name: string | string | Wrap text with an ANSI foreground color code |
+| `bold(text)` | text: any | string | Wrap text with ANSI bold styling |
+| `dim(text)` | text: any | string | Wrap text with ANSI dim styling |
 
 ## Type conversion
 
@@ -76,6 +80,10 @@ println(unwrap_err(bad))         // something went wrong
 |---|---|---|---|
 | `json_parse(str)` | str: string | value | Parse JSON string into Harn values. Throws on invalid JSON |
 | `json_stringify(value)` | value: any | string | Serialize Harn value to JSON. Closures and handles become `null` |
+| `yaml_parse(str)` | str: string | value | Parse YAML string into Harn values. Throws on invalid YAML |
+| `yaml_stringify(value)` | value: any | string | Serialize Harn value to YAML |
+| `toml_parse(str)` | str: string | value | Parse TOML string into Harn values. Throws on invalid TOML |
+| `toml_stringify(value)` | value: any | string | Serialize Harn value to TOML |
 | `json_validate(data, schema)` | data: any, schema: dict | bool | Validate data against a schema. Returns `true` if valid, throws with details if not |
 | `schema_check(data, schema)` | data: any, schema: dict | Result | Validate data against an extended schema and return `Result.Ok(data)` or `Result.Err({message, errors, value?})` |
 | `schema_parse(data, schema)` | data: any, schema: dict | Result | Same as `schema_check`, but applies `default` values recursively |
@@ -353,6 +361,7 @@ These are called on string values with dot notation: `"hello".uppercase()`.
 | `.min()` / `.max()` | none | any | Minimum/maximum value |
 | `.min_by(fn)` / `.max_by(fn)` | fn: closure | any | Min/max by key function |
 | `.chunk(size)` | size: int | list | Split into chunks of size |
+| `.window(size)` | size: int | list | Sliding windows of size |
 | `.each_cons(size)` | size: int | list | Sliding windows of size |
 | `.compact()` | none | list | Remove nil values |
 | `.unique()` | none | list | Remove duplicates |
@@ -412,6 +421,7 @@ These are called on string values with dot notation: `"hello".uppercase()`.
 | `hostname()` | none | string | Machine hostname |
 | `platform()` | none | string | OS name: `"darwin"`, `"linux"`, or `"windows"` |
 | `arch()` | none | string | CPU architecture (e.g., `"aarch64"`, `"x86_64"`) |
+| `uuid()` | none | string | Generate a random v4 UUID |
 | `home_dir()` | none | string | User's home directory path |
 | `pid()` | none | int | Current process ID |
 | `cwd()` | none | string | Current working directory |

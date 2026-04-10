@@ -1,5 +1,6 @@
 use crate::ast::*;
 use harn_lexer::{Span, Token, TokenKind};
+use std::collections::HashSet;
 use std::fmt;
 
 /// Parser errors.
@@ -42,6 +43,7 @@ pub struct Parser {
     tokens: Vec<Token>,
     pos: usize,
     errors: Vec<ParserError>,
+    struct_names: HashSet<String>,
 }
 
 impl Parser {
@@ -50,6 +52,7 @@ impl Parser {
             tokens,
             pos: 0,
             errors: Vec::new(),
+            struct_names: HashSet::new(),
         }
     }
 
@@ -951,6 +954,12 @@ impl Parser {
         let start = self.current_span();
         self.consume(&TokenKind::Enum, "enum")?;
         let name = self.consume_identifier("enum name")?;
+        let type_params = if self.check(&TokenKind::Lt) {
+            self.advance();
+            self.parse_type_param_list()?
+        } else {
+            Vec::new()
+        };
         self.consume(&TokenKind::LBrace, "{")?;
         self.skip_newlines();
 
@@ -980,6 +989,7 @@ impl Parser {
         Ok(spanned(
             Node::EnumDecl {
                 name,
+                type_params,
                 variants,
                 is_pub,
             },
@@ -995,6 +1005,13 @@ impl Parser {
         let start = self.current_span();
         self.consume(&TokenKind::Struct, "struct")?;
         let name = self.consume_identifier("struct name")?;
+        self.struct_names.insert(name.clone());
+        let type_params = if self.check(&TokenKind::Lt) {
+            self.advance();
+            self.parse_type_param_list()?
+        } else {
+            Vec::new()
+        };
         self.consume(&TokenKind::LBrace, "{")?;
         self.skip_newlines();
 
@@ -1024,6 +1041,7 @@ impl Parser {
         Ok(spanned(
             Node::StructDecl {
                 name,
+                type_params,
                 fields,
                 is_pub,
             },
@@ -1048,32 +1066,44 @@ impl Parser {
         self.consume(&TokenKind::LBrace, "{")?;
         self.skip_newlines();
 
+        let mut associated_types = Vec::new();
         let mut methods = Vec::new();
         while !self.is_at_end() && !self.check(&TokenKind::RBrace) {
-            self.consume(&TokenKind::Fn, "fn")?;
-            let method_name = self.consume_identifier("method name")?;
-            let method_type_params = if self.check(&TokenKind::Lt) {
+            if self.check(&TokenKind::TypeKw) {
                 self.advance();
-                self.parse_type_param_list()?
+                let assoc_name = self.consume_identifier("associated type name")?;
+                let assoc_type = if self.check(&TokenKind::Assign) {
+                    self.advance();
+                    Some(self.parse_type_expr()?)
+                } else {
+                    None
+                };
+                associated_types.push((assoc_name, assoc_type));
             } else {
-                Vec::new()
-            };
-            self.consume(&TokenKind::LParen, "(")?;
-            let params = self.parse_typed_param_list()?;
-            self.consume(&TokenKind::RParen, ")")?;
-            // Optional return type: -> type
-            let return_type = if self.check(&TokenKind::Arrow) {
-                self.advance();
-                Some(self.parse_type_expr()?)
-            } else {
-                None
-            };
-            methods.push(InterfaceMethod {
-                name: method_name,
-                type_params: method_type_params,
-                params,
-                return_type,
-            });
+                self.consume(&TokenKind::Fn, "fn")?;
+                let method_name = self.consume_identifier("method name")?;
+                let method_type_params = if self.check(&TokenKind::Lt) {
+                    self.advance();
+                    self.parse_type_param_list()?
+                } else {
+                    Vec::new()
+                };
+                self.consume(&TokenKind::LParen, "(")?;
+                let params = self.parse_typed_param_list()?;
+                self.consume(&TokenKind::RParen, ")")?;
+                let return_type = if self.check(&TokenKind::Arrow) {
+                    self.advance();
+                    Some(self.parse_type_expr()?)
+                } else {
+                    None
+                };
+                methods.push(InterfaceMethod {
+                    name: method_name,
+                    type_params: method_type_params,
+                    params,
+                    return_type,
+                });
+            }
             self.skip_newlines();
         }
 
@@ -1082,6 +1112,7 @@ impl Parser {
             Node::InterfaceDecl {
                 name,
                 type_params,
+                associated_types,
                 methods,
             },
             Span::merge(start, self.prev_span()),
@@ -1671,6 +1702,27 @@ impl Parser {
                         );
                     }
                 }
+            } else if self.check(&TokenKind::LBrace)
+                && matches!(&expr.node, Node::Identifier(name) if self.struct_names.contains(name))
+            {
+                let start = expr.span;
+                let struct_name = match expr.node {
+                    Node::Identifier(name) => name,
+                    _ => unreachable!("checked above"),
+                };
+                self.advance();
+                let dict = self.parse_dict_literal(start)?;
+                let fields = match dict.node {
+                    Node::DictLiteral(fields) => fields,
+                    _ => unreachable!("dict parser must return a dict literal"),
+                };
+                expr = spanned(
+                    Node::StructConstruct {
+                        struct_name,
+                        fields,
+                    },
+                    dict.span,
+                );
             } else if self.check(&TokenKind::LParen) && matches!(expr.node, Node::Identifier(_)) {
                 let start = expr.span;
                 self.advance();
@@ -1977,6 +2029,14 @@ impl Parser {
     }
 
     fn parse_dict_literal(&mut self, start: Span) -> Result<SNode, ParserError> {
+        let entries = self.parse_dict_entries()?;
+        Ok(spanned(
+            Node::DictLiteral(entries),
+            Span::merge(start, self.prev_span()),
+        ))
+    }
+
+    fn parse_dict_entries(&mut self) -> Result<Vec<DictEntry>, ParserError> {
         let mut entries = Vec::new();
         self.skip_newlines();
 
@@ -2048,10 +2108,7 @@ impl Parser {
         }
 
         self.consume(&TokenKind::RBrace, "}")?;
-        Ok(spanned(
-            Node::DictLiteral(entries),
-            Span::merge(start, self.prev_span()),
-        ))
+        Ok(entries)
     }
 
     // --- Helpers ---
@@ -2279,24 +2336,27 @@ impl Parser {
         if name == "never" {
             return Ok(TypeExpr::Never);
         }
-        // Check for generic type parameters: list<int>, dict<string, int>
+        // Check for generic type parameters: list<int>, dict<string, int>, Result<T, E>
         if self.check(&TokenKind::Lt) {
             self.advance(); // skip <
-            let first_param = self.parse_type_expr()?;
-            if name == "list" {
-                self.consume(&TokenKind::Gt, ">")?;
-                return Ok(TypeExpr::List(Box::new(first_param)));
-            } else if name == "dict" {
-                self.consume(&TokenKind::Comma, ",")?;
-                let second_param = self.parse_type_expr()?;
-                self.consume(&TokenKind::Gt, ">")?;
+            let mut type_args = vec![self.parse_type_expr()?];
+            while self.check(&TokenKind::Comma) {
+                self.advance();
+                type_args.push(self.parse_type_expr()?);
+            }
+            self.consume(&TokenKind::Gt, ">")?;
+            if name == "list" && type_args.len() == 1 {
+                return Ok(TypeExpr::List(Box::new(type_args.remove(0))));
+            } else if name == "dict" && type_args.len() == 2 {
                 return Ok(TypeExpr::DictType(
-                    Box::new(first_param),
-                    Box::new(second_param),
+                    Box::new(type_args.remove(0)),
+                    Box::new(type_args.remove(0)),
                 ));
             }
-            // Unknown generic — just consume > and treat as Named
-            self.consume(&TokenKind::Gt, ">")?;
+            return Ok(TypeExpr::Applied {
+                name,
+                args: type_args,
+            });
         }
         Ok(TypeExpr::Named(name))
     }
@@ -2586,6 +2646,7 @@ pub struct Config {
 }
 
 interface Repository<T> {
+  type Item
   fn get(id: string) -> T
   fn map<U>(value: T, f: fn(T) -> U) -> U
 }
@@ -2602,18 +2663,90 @@ interface Repository<T> {
         ));
         assert!(matches!(
             &program[1].node,
-            Node::EnumDecl { is_pub: true, .. }
+            Node::EnumDecl {
+                is_pub: true,
+                type_params,
+                ..
+            } if type_params.is_empty()
         ));
         assert!(matches!(
             &program[2].node,
-            Node::StructDecl { is_pub: true, .. }
+            Node::StructDecl {
+                is_pub: true,
+                type_params,
+                ..
+            } if type_params.is_empty()
         ));
         assert!(matches!(
             &program[3].node,
-            Node::InterfaceDecl { type_params, methods, .. }
+            Node::InterfaceDecl {
+                type_params,
+                associated_types,
+                methods,
+                ..
+            }
                 if type_params.len() == 1
+                    && associated_types.len() == 1
                     && methods.len() == 2
                     && methods[1].type_params.len() == 1
+        ));
+    }
+
+    #[test]
+    fn parses_generic_structs_and_enums() {
+        let source = r#"
+struct Pair<A, B> {
+  first: A
+  second: B
+}
+
+enum Option<T> {
+  Some(value: T)
+  None
+}
+"#;
+
+        let program = parse_source(source).expect("should parse");
+        assert!(matches!(
+            &program[0].node,
+            Node::StructDecl { type_params, .. } if type_params.len() == 2
+        ));
+        assert!(matches!(
+            &program[1].node,
+            Node::EnumDecl { type_params, .. } if type_params.len() == 1
+        ));
+    }
+
+    #[test]
+    fn parses_struct_literal_syntax_for_known_structs() {
+        let source = r#"
+struct Point {
+  x: int
+  y: int
+}
+
+pipeline test(task) {
+  let point = Point { x: 3, y: 4 }
+}
+"#;
+
+        let program = parse_source(source).expect("should parse");
+        let pipeline = program
+            .iter()
+            .find(|node| matches!(node.node, Node::Pipeline { .. }))
+            .expect("pipeline node");
+        let body = match &pipeline.node {
+            Node::Pipeline { body, .. } => body,
+            _ => unreachable!(),
+        };
+        assert!(matches!(
+            &body[0].node,
+            Node::LetBinding { value, .. }
+                if matches!(
+                    value.node,
+                    Node::StructConstruct { ref struct_name, ref fields }
+                        if struct_name == "Point" && fields.len() == 2
+                )
         ));
     }
 }

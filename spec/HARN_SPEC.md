@@ -300,14 +300,16 @@ fn_decl            ::= ['pub'] 'fn' IDENTIFIER [generic_params]
                        '(' fn_param_list ')' ['->' type_expr]
                        [where_clause] '{' block '}'
 type_decl          ::= 'type' IDENTIFIER '=' type_expr
-enum_decl          ::= ['pub'] 'enum' IDENTIFIER '{'
+enum_decl          ::= ['pub'] 'enum' IDENTIFIER [generic_params] '{'
                        (enum_variant | ',' | NEWLINE)* '}'
 enum_variant       ::= IDENTIFIER ['(' fn_param_list ')']
-struct_decl        ::= ['pub'] 'struct' IDENTIFIER '{' struct_field* '}'
+struct_decl        ::= ['pub'] 'struct' IDENTIFIER [generic_params]
+                       '{' struct_field* '}'
 struct_field       ::= IDENTIFIER ['?'] ':' type_expr
 impl_block         ::= 'impl' IDENTIFIER '{' (fn_decl | NEWLINE)* '}'
 interface_decl     ::= 'interface' IDENTIFIER [generic_params] '{'
-                       interface_method* '}'
+                       (interface_assoc_type | interface_method)* '}'
+interface_assoc_type ::= 'type' IDENTIFIER ['=' type_expr]
 interface_method   ::= 'fn' IDENTIFIER [generic_params]
                        '(' fn_param_list ')' ['->' type_expr]
 ```
@@ -1346,7 +1348,7 @@ does not cover all variants).
 
 ### Built-in Result enum
 
-Harn provides a built-in `Result` enum with two variants:
+Harn provides a built-in generic `Result<T, E>` enum with two variants:
 
 - `Result.Ok(value)` -- represents a successful result
 - `Result.Err(error)` -- represents an error
@@ -1357,6 +1359,7 @@ as builtins, equivalent to `Result.Ok(value)` and `Result.Err(value)`.
 ```harn
 let ok = Ok(42)
 let err = Err("something failed")
+let typed_ok: Result<int, string> = ok
 
 // Equivalent long form:
 let ok2 = Result.Ok(42)
@@ -1458,7 +1461,8 @@ fn fetch_and_parse(url) {
 
 ## Structs
 
-Structs define named record types with typed fields.
+Structs define named record types with typed fields. Structs may also be
+generic.
 
 ### Struct declaration
 
@@ -1472,18 +1476,24 @@ struct User {
   name: string
   age: int
 }
+
+struct Pair<A, B> {
+  first: A
+  second: B
+}
 ```
 
 Fields are declared with `name: type` syntax, one per line.
 
 ### Struct construction
 
-Declaring a struct produces a constructor function with the same name as
-the struct. The constructor takes a dict argument with the field values:
+Struct instances can be constructed with the struct name followed by
+a named-field body:
 
 ```harn
-let p = Point({x: 3, y: 4})
-let u = User({name: "Alice", age: 30})
+let p = Point { x: 3, y: 4 }
+let u = User { name: "Alice", age: 30 }
+let pair: Pair<int, string> = Pair { first: 1, second: "two" }
 ```
 
 ### Field access
@@ -1528,11 +1538,11 @@ impl Point {
     return sqrt(self.x * self.x + self.y * self.y)
   }
   fn translate(self, dx, dy) {
-    return Point({x: self.x + dx, y: self.y + dy})
+    return Point { x: self.x + dx, y: self.y + dy }
   }
 }
 
-let p = Point({x: 3, y: 4})
+let p = Point { x: 3, y: 4 }
 log(p.distance())           // 5.0
 let p2 = p.translate(10, 20)
 log(p2.x)                   // 13
@@ -1547,7 +1557,8 @@ automatically passed as the `self` argument.
 Interfaces define a set of method signatures that a struct type must
 implement. Harn uses Go-style implicit satisfaction: a struct satisfies
 an interface if its impl block contains all the required methods with
-compatible signatures. There is no `implements` keyword.
+compatible signatures. There is no `implements` keyword. Interfaces may
+also declare associated types.
 
 ### Interface declaration
 
@@ -1560,11 +1571,17 @@ interface Serializable {
   fn serialize(self) -> string
   fn byte_size(self) -> int
 }
+
+interface Collection {
+  type Item
+  fn get(self, index: int) -> Item
+}
 ```
 
 Each method signature lists parameters (the first must be `self`) and an
-optional return type. The body is omitted -- interfaces only declare the
-shape of the methods.
+optional return type. Associated types name implementation-defined types
+that methods can refer to. The body is omitted -- interfaces only declare
+the shape of the methods.
 
 ### Implicit satisfaction
 
@@ -2246,7 +2263,8 @@ pipeline test_string_concat() {
 
 ### Assertions
 
-Three assertion builtins are available (they work outside of tests too):
+Three assertion builtins are available. They can be called anywhere, but
+they are intended for test pipelines and the linter warns on non-test use:
 
 | Function | Description |
 |---|---|

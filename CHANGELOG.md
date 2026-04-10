@@ -2,6 +2,59 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.63
+
+### Added
+
+- **Project templates and environment diagnostics** — `harn new` now scaffolds
+  `basic`, `agent`, `mcp-server`, and `eval` starters, `harn init` accepts the
+  same template selection, and `harn doctor` reports local Harn/provider setup
+  with an optional `--no-network` mode for offline checks.
+- **Workflow-oriented CLI tools** — new `harn bench` and `harn viz` commands
+  benchmark `.harn` programs over repeated runs and render Mermaid workflow
+  graphs from the AST.
+- **Generic structs, generic enums, and interface associated types** — the
+  language now supports type parameters on `struct`/`enum` declarations,
+  associated types in interfaces, generic `Result<T, E>` usage, and named-field
+  struct construction syntax like `Point { x: 1, y: 2 }`.
+- **New runtime/data builtins** — added `yaml_parse`, `yaml_stringify`,
+  `toml_parse`, `toml_stringify`, `uuid()`, ANSI styling helpers
+  (`color`, `bold`, `dim`), richer `progress(...)` display modes, and
+  `list.window(size)`.
+- **VS Code debugger/snippet support** — the extension now contributes a Harn
+  debug configuration, launches `harn-dap`, and ships starter snippets for
+  common Harn patterns.
+- **New docs and examples** — added best-practices guidance plus tutorials for
+  code-review agents, MCP servers, and eval pipelines, along with new starter
+  example programs.
+
+### Changed
+
+- **REPL ergonomics are much better** — `harn repl` now keeps persistent
+  history, supports multiline input until delimiters are balanced, and exposes
+  live builtin completion.
+- **LSP/editor feedback is more complete** — the language server now debounces
+  reparses, surfaces richer builtin/type information, and stays aligned with
+  the expanded generic/interface/runtime surface.
+- **Release grammar verification now covers the shipped syntax** — the
+  executable tree-sitter grammar, parser artifacts, and highlighting queries now
+  recognize generic declarations, associated types, and struct construction, so
+  release audits no longer drift from the parser/typechecker.
+
+### Fixed
+
+- **Typechecker support for generic constructions** — generic struct literals,
+  generic enum variants, and `Result<T, E>` values now unify and report type
+  mismatches correctly instead of collapsing to partially inferred placeholder
+  types.
+- **Interface constraint checking with associated types** — associated-type
+  defaults and inferred method return types now produce stable compatibility
+  diagnostics instead of silently accepting mismatches.
+- **Lint/runtime contract drift** — the linter, builtin docs, syntax
+  highlighting, and editor integration now reflect the current runtime and host
+  surface, including assertion guidance, unused-type detection, naming checks,
+  complexity warnings, and prompt-injection linting.
+
 ## v0.5.62
 
 ### Added

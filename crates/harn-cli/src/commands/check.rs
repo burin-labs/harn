@@ -21,7 +21,11 @@ impl CommandOutcome {
     }
 }
 
-fn print_lint_diagnostics(path: &str, diagnostics: &[harn_lint::LintDiagnostic]) -> bool {
+fn print_lint_diagnostics(
+    path: &str,
+    source: &str,
+    diagnostics: &[harn_lint::LintDiagnostic],
+) -> bool {
     let mut has_error = false;
     for diag in diagnostics {
         let severity = match diag.severity {
@@ -31,13 +35,16 @@ fn print_lint_diagnostics(path: &str, diagnostics: &[harn_lint::LintDiagnostic])
                 "error"
             }
         };
-        println!(
-            "{path}:{}:{}: {severity}[{}]: {}",
-            diag.span.line, diag.span.column, diag.rule, diag.message
+        let rendered = harn_parser::diagnostic::render_diagnostic(
+            source,
+            path,
+            &diag.span,
+            severity,
+            &diag.message,
+            Some(&format!("lint[{}]", diag.rule)),
+            diag.suggestion.as_deref(),
         );
-        if let Some(ref suggestion) = diag.suggestion {
-            println!("  suggestion: {suggestion}");
-        }
+        eprint!("{rendered}");
     }
     has_error
 }
@@ -98,7 +105,7 @@ pub(crate) fn check_file_inner(
     {
         has_warning = true;
     }
-    if print_lint_diagnostics(&path_str, &lint_diagnostics) {
+    if print_lint_diagnostics(&path_str, &source, &lint_diagnostics) {
         has_error = true;
     }
 
@@ -151,7 +158,7 @@ pub(crate) fn lint_file_inner(
     let has_warning = diagnostics
         .iter()
         .any(|d| d.severity == LintSeverity::Warning);
-    let has_error = print_lint_diagnostics(&path_str, &diagnostics);
+    let has_error = print_lint_diagnostics(&path_str, &source, &diagnostics);
 
     CommandOutcome {
         has_error,
@@ -231,7 +238,7 @@ pub(crate) fn lint_fix_file(
         externally_imported_names,
     );
     if !remaining.is_empty() {
-        print_lint_diagnostics(&path_str, &remaining);
+        print_lint_diagnostics(&path_str, &source, &remaining);
     }
 
     applied

@@ -1,4 +1,4 @@
-use clap::{ArgAction, Args, Parser, Subcommand};
+use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -29,6 +29,10 @@ pub(crate) enum Command {
     Test(TestArgs),
     /// Scaffold a new project with harn.toml.
     Init(InitArgs),
+    /// Scaffold a new project from a starter template.
+    New(InitArgs),
+    /// Diagnose the local Harn environment and provider setup.
+    Doctor(DoctorArgs),
     /// Serve a .harn agent over HTTP using A2A.
     Serve(ServeArgs),
     /// Start the ACP server on stdio.
@@ -49,6 +53,10 @@ pub(crate) enum Command {
     Eval(EvalArgs),
     /// Start the interactive REPL.
     Repl,
+    /// Benchmark a .harn pipeline over repeated runs.
+    Bench(BenchArgs),
+    /// Render a .harn file as a Mermaid workflow graph.
+    Viz(VizArgs),
     /// Install dependencies declared in harn.toml.
     Install,
     /// Add a dependency to harn.toml.
@@ -209,6 +217,43 @@ pub(crate) struct TestArgs {
 pub(crate) struct InitArgs {
     /// Optional project name to scaffold.
     pub name: Option<String>,
+    /// Starter template to scaffold.
+    #[arg(long, value_enum, default_value_t = ProjectTemplate::Basic)]
+    pub template: ProjectTemplate,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum ProjectTemplate {
+    Basic,
+    Agent,
+    #[value(name = "mcp-server")]
+    McpServer,
+    Eval,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct DoctorArgs {
+    /// Skip provider connectivity checks.
+    #[arg(long)]
+    pub no_network: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct VizArgs {
+    /// Path to the .harn file to visualize.
+    pub file: String,
+    /// Optional output path. Defaults to stdout.
+    #[arg(short, long)]
+    pub output: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct BenchArgs {
+    /// Path to the .harn file to benchmark.
+    pub file: String,
+    /// Number of benchmark iterations to run.
+    #[arg(short = 'n', long, default_value_t = 10)]
+    pub iterations: usize,
 }
 
 #[derive(Debug, Args)]
@@ -376,7 +421,7 @@ pub(crate) struct AddArgs {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, Command, McpCommand, RunsCommand};
+    use super::{Cli, Command, McpCommand, ProjectTemplate, RunsCommand};
     use clap::Parser;
 
     #[test]
@@ -473,5 +518,48 @@ mod tests {
         assert_eq!(args.host, "0.0.0.0");
         assert_eq!(args.port, 4900);
         assert!(!args.open);
+    }
+
+    #[test]
+    fn test_parses_new_template() {
+        let cli = Cli::parse_from(["harn", "new", "review-bot", "--template", "agent"]);
+
+        let Command::New(args) = cli.command.unwrap() else {
+            panic!("expected new command");
+        };
+        assert_eq!(args.name.as_deref(), Some("review-bot"));
+        assert_eq!(args.template, ProjectTemplate::Agent);
+    }
+
+    #[test]
+    fn test_parses_doctor_flags() {
+        let cli = Cli::parse_from(["harn", "doctor", "--no-network"]);
+
+        let Command::Doctor(args) = cli.command.unwrap() else {
+            panic!("expected doctor command");
+        };
+        assert!(args.no_network);
+    }
+
+    #[test]
+    fn test_parses_viz_args() {
+        let cli = Cli::parse_from(["harn", "viz", "main.harn", "--output", "graph.mmd"]);
+
+        let Command::Viz(args) = cli.command.unwrap() else {
+            panic!("expected viz command");
+        };
+        assert_eq!(args.file, "main.harn");
+        assert_eq!(args.output.as_deref(), Some("graph.mmd"));
+    }
+
+    #[test]
+    fn test_parses_bench_args() {
+        let cli = Cli::parse_from(["harn", "bench", "main.harn", "--iterations", "25"]);
+
+        let Command::Bench(args) = cli.command.unwrap() else {
+            panic!("expected bench command");
+        };
+        assert_eq!(args.file, "main.harn");
+        assert_eq!(args.iterations, 25);
     }
 }

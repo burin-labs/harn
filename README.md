@@ -34,8 +34,9 @@ cargo install --path crates/harn-cli
 ## Quick Start
 
 ```bash
-harn init my-project
+harn new my-project --template agent
 cd my-project
+harn doctor --no-network
 harn run main.harn
 harn test tests/
 harn portal

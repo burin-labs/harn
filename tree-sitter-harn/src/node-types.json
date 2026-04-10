@@ -136,6 +136,10 @@
           "named": true
         },
         {
+          "type": "struct_construct",
+          "named": true
+        },
+        {
           "type": "subscript_expression",
           "named": true
         },
@@ -334,6 +338,32 @@
           },
           {
             "type": "unary_expression",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "associated_type_declaration",
+    "named": true,
+    "fields": {
+      "default": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "type_annotation",
+            "named": true
+          }
+        ]
+      },
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
             "named": true
           }
         ]
@@ -1767,6 +1797,10 @@
         {
           "type": "enum_variant",
           "named": true
+        },
+        {
+          "type": "generic_params",
+          "named": true
         }
       ]
     }
@@ -2672,6 +2706,10 @@
       "required": false,
       "types": [
         {
+          "type": "associated_type_declaration",
+          "named": true
+        },
+        {
           "type": "generic_params",
           "named": true
         },
@@ -3061,6 +3099,10 @@
           },
           {
             "type": "string_literal",
+            "named": true
+          },
+          {
+            "type": "struct_construct",
             "named": true
           },
           {
@@ -7820,6 +7862,32 @@
     }
   },
   {
+    "type": "struct_construct",
+    "named": true,
+    "fields": {
+      "fields": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "dict_literal",
+            "named": true
+          }
+        ]
+      },
+      "type_name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "struct_declaration",
     "named": true,
     "fields": {
@@ -7838,6 +7906,10 @@
       "multiple": true,
       "required": false,
       "types": [
+        {
+          "type": "generic_params",
+          "named": true
+        },
         {
           "type": "struct_field",
           "named": true
@@ -9454,6 +9526,10 @@
           },
           {
             "type": "string_literal",
+            "named": true
+          },
+          {
+            "type": "struct_construct",
             "named": true
           },
           {

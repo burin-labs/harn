@@ -202,11 +202,15 @@ wrong.
 
 The built-in `Result` enum provides an alternative to try/catch for
 representing success and failure as values. A `Result` is either
-`Ok(value)` or `Err(error)`.
+`Ok(value)` or `Err(error)`. Statically, `Result` is generic:
+`Result<T, E>`.
 
 ```harn
 let ok = Ok(42)
 let err = Err("something failed")
+
+let typed_ok: Result<int, string> = ok
+let typed_err: Result<int, string> = err
 
 println(ok)   // Result.Ok(42)
 println(err)  // Result.Err(something failed)

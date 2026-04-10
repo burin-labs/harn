@@ -11,41 +11,47 @@ use crate::symbols::{build_symbol_table, SymbolInfo};
 
 pub(crate) struct DocumentState {
     pub(crate) source: String,
-    pub(crate) ast: Option<Vec<SNode>>,
+    pub(crate) cached_ast: Option<Vec<SNode>>,
     pub(crate) symbols: Vec<SymbolInfo>,
     pub(crate) diagnostics: Vec<Diagnostic>,
     pub(crate) lint_diagnostics: Vec<harn_lint::LintDiagnostic>,
     pub(crate) type_diagnostics: Vec<harn_parser::TypeDiagnostic>,
     pub(crate) inlay_hints: Vec<harn_parser::InlayHintInfo>,
+    pub(crate) dirty: bool,
 }
 
 impl DocumentState {
     pub(crate) fn new(source: String) -> Self {
         let mut state = Self {
             source,
-            ast: None,
+            cached_ast: None,
             symbols: Vec::new(),
             diagnostics: Vec::new(),
             lint_diagnostics: Vec::new(),
             type_diagnostics: Vec::new(),
             inlay_hints: Vec::new(),
+            dirty: true,
         };
-        state.reparse();
+        state.reparse_if_dirty();
         state
     }
 
-    pub(crate) fn update(&mut self, source: String) {
+    pub(crate) fn update_source(&mut self, source: String) {
         self.source = source;
-        self.reparse();
+        self.dirty = true;
     }
 
-    fn reparse(&mut self) {
+    pub(crate) fn reparse_if_dirty(&mut self) {
+        if !self.dirty {
+            return;
+        }
+
         self.diagnostics.clear();
         self.lint_diagnostics.clear();
         self.type_diagnostics.clear();
         self.inlay_hints.clear();
         self.symbols.clear();
-        self.ast = None;
+        self.cached_ast = None;
 
         // Lex
         let mut lexer = Lexer::new(&self.source);
@@ -53,6 +59,7 @@ impl DocumentState {
             Ok(t) => t,
             Err(e) => {
                 self.diagnostics.push(lexer_error_to_diagnostic(&e));
+                self.dirty = false;
                 return;
             }
         };
@@ -65,6 +72,7 @@ impl DocumentState {
                 for e in parser.all_errors() {
                     self.diagnostics.push(parser_error_to_diagnostic(e));
                 }
+                self.dirty = false;
                 return;
             }
         };
@@ -115,6 +123,36 @@ impl DocumentState {
 
         // Build symbol table
         self.symbols = build_symbol_table(&program, &self.source);
-        self.ast = Some(program);
+        self.cached_ast = Some(program);
+        self.dirty = false;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DocumentState;
+
+    #[test]
+    fn update_source_marks_document_dirty_until_reparse() {
+        let mut state = DocumentState::new("pipeline default(task) { log(1) }\n".to_string());
+        assert!(!state.dirty, "fresh parse should clear dirty flag");
+        assert!(
+            state.cached_ast.is_some(),
+            "fresh parse should cache the AST"
+        );
+
+        state.update_source("pipeline default(task) { let = }\n".to_string());
+        assert!(state.dirty, "source update should mark the document dirty");
+        assert!(
+            state.cached_ast.is_some(),
+            "cached AST should remain available until debounce reparses"
+        );
+
+        state.reparse_if_dirty();
+        assert!(!state.dirty, "reparse should clear dirty flag");
+        assert!(
+            !state.diagnostics.is_empty(),
+            "invalid source should produce diagnostics after reparse"
+        );
     }
 }

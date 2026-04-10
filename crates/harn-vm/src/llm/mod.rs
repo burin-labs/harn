@@ -162,6 +162,7 @@ pub use self::agent::{register_agent_loop_with_bridge, register_llm_call_with_br
 // observed_llm_call, LlmRetryConfig, build_llm_call_result are used by
 // register_llm_builtins above but accessed via the agent module path.
 pub(crate) use self::api::vm_call_llm_full;
+pub use self::cost::peek_total_cost;
 pub(crate) use self::helpers::extract_llm_options;
 pub use self::helpers::vm_value_to_json;
 pub use self::mock::{set_replay_mode, LlmReplayMode};

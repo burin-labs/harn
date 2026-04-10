@@ -64,17 +64,20 @@ pub enum Node {
     },
     EnumDecl {
         name: String,
+        type_params: Vec<TypeParam>,
         variants: Vec<EnumVariant>,
         is_pub: bool,
     },
     StructDecl {
         name: String,
+        type_params: Vec<TypeParam>,
         fields: Vec<StructField>,
         is_pub: bool,
     },
     InterfaceDecl {
         name: String,
         type_params: Vec<TypeParam>,
+        associated_types: Vec<(String, Option<TypeExpr>)>,
         methods: Vec<InterfaceMethod>,
     },
     /// Impl block: impl TypeName { fn method(self, ...) { ... } ... }
@@ -368,6 +371,8 @@ pub enum TypeExpr {
     List(Box<TypeExpr>),
     /// A dict type with key and value types: `dict<string, int>`.
     DictType(Box<TypeExpr>, Box<TypeExpr>),
+    /// A generic type application: `Option<int>`, `Result<string, int>`.
+    Applied { name: String, args: Vec<TypeExpr> },
     /// A function type: `fn(int, string) -> bool`.
     FnType {
         params: Vec<TypeExpr>,

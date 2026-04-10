@@ -92,19 +92,22 @@ harn repl
 ```
 
 The REPL evaluates expressions as you type and displays results
-immediately. Useful for experimenting with builtins and small snippets.
+immediately. It keeps a persistent history in `~/.harn/repl_history` and
+supports multi-line blocks until delimiters are balanced, which makes it useful
+for experimenting with builtins and small snippets.
 
 ## Project setup
 
-Scaffold a new project with `harn init`:
+Scaffold a new project with `harn init` or pick a starter with `harn new`:
 
 ```bash
-harn init my-agent
+harn new my-agent --template agent
 cd my-agent
+harn doctor --no-network
 ```
 
-This creates a directory with `harn.toml` (project config) and
-`main.harn` (entry point). Run it with:
+This creates a directory with `harn.toml` (project config) and starter files
+for the selected template. Run it with:
 
 ```bash
 harn run main.harn

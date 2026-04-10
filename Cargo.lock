@@ -751,7 +751,7 @@ dependencies = [
 
 [[package]]
 name = "harn-cli"
-version = "0.5.62"
+version = "0.5.63"
 dependencies = [
  "axum 0.8.8",
  "base64",
@@ -783,7 +783,7 @@ dependencies = [
 
 [[package]]
 name = "harn-dap"
-version = "0.5.62"
+version = "0.5.63"
 dependencies = [
  "harn-lexer",
  "harn-parser",
@@ -795,7 +795,7 @@ dependencies = [
 
 [[package]]
 name = "harn-fmt"
-version = "0.5.62"
+version = "0.5.63"
 dependencies = [
  "harn-lexer",
  "harn-parser",
@@ -803,11 +803,11 @@ dependencies = [
 
 [[package]]
 name = "harn-lexer"
-version = "0.5.62"
+version = "0.5.63"
 
 [[package]]
 name = "harn-lint"
-version = "0.5.62"
+version = "0.5.63"
 dependencies = [
  "harn-lexer",
  "harn-parser",
@@ -816,7 +816,7 @@ dependencies = [
 
 [[package]]
 name = "harn-lsp"
-version = "0.5.62"
+version = "0.5.63"
 dependencies = [
  "harn-fmt",
  "harn-lexer",
@@ -829,14 +829,15 @@ dependencies = [
 
 [[package]]
 name = "harn-parser"
-version = "0.5.62"
+version = "0.5.63"
 dependencies = [
  "harn-lexer",
+ "yansi",
 ]
 
 [[package]]
 name = "harn-vm"
-version = "0.5.62"
+version = "0.5.63"
 dependencies = [
  "base64",
  "futures",
@@ -853,6 +854,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_path_to_error",
+ "serde_yaml",
  "sha2",
  "tokio",
  "tokio-stream",
@@ -2290,6 +2292,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_yaml"
+version = "0.9.34+deprecated"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a8b1a1a2ebf674015cc02edccce75287f1a0130d394307b36743c2f5d504b47"
+dependencies = [
+ "indexmap 2.13.1",
+ "itoa",
+ "ryu",
+ "serde",
+ "unsafe-libyaml",
+]
+
+[[package]]
 name = "sha2"
 version = "0.10.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2870,6 +2885,12 @@ name = "unicode-xid"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
+
+[[package]]
+name = "unsafe-libyaml"
+version = "0.2.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861"
 
 [[package]]
 name = "untrusted"
@@ -3475,6 +3496,12 @@ name = "writeable"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
+
+[[package]]
+name = "yansi"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cfe53a6657fd280eaa890a3bc59152892ffa3e30101319d168b781ed6529b049"
 
 [[package]]
 name = "yoke"

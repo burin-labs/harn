@@ -1,0 +1,8 @@
+pipeline test(task) {
+  let id = uuid()
+  log(id.count())
+  log(id.contains("-"))
+  log(json_stringify(color("hi", "red")))
+  log(json_stringify(bold("hi")))
+  log(json_stringify(dim("hi")))
+}

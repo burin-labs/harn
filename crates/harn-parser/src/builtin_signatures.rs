@@ -259,6 +259,10 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("string")),
     },
     BuiltinSig {
+        name: "bold",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
         name: "camel_to_kebab",
         return_type: Some(BuiltinReturn::Named("string")),
     },
@@ -343,6 +347,10 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("nil")),
     },
     BuiltinSig {
+        name: "color",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
         name: "compute_content_hash",
         return_type: Some(BuiltinReturn::Named("string")),
     },
@@ -385,6 +393,10 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
     BuiltinSig {
         name: "delete_file",
         return_type: Some(BuiltinReturn::Named("nil")),
+    },
+    BuiltinSig {
+        name: "dim",
+        return_type: Some(BuiltinReturn::Named("string")),
     },
     BuiltinSig {
         name: "dirname",
@@ -512,11 +524,11 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
     },
     BuiltinSig {
         name: "http_delete",
-        return_type: None,
+        return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
         name: "http_get",
-        return_type: Some(BuiltinReturn::Named("string")),
+        return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
         name: "http_mock",
@@ -532,19 +544,19 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
     },
     BuiltinSig {
         name: "http_patch",
-        return_type: None,
+        return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
         name: "http_post",
-        return_type: Some(BuiltinReturn::Named("string")),
+        return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
         name: "http_put",
-        return_type: None,
+        return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
         name: "http_request",
-        return_type: None,
+        return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
         name: "invalidate_facts",
@@ -1331,6 +1343,14 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("string")),
     },
     BuiltinSig {
+        name: "toml_parse",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "toml_stringify",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
         name: "tool_count",
         return_type: Some(BuiltinReturn::Named("int")),
     },
@@ -1527,6 +1547,10 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("string")),
     },
     BuiltinSig {
+        name: "uuid",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
         name: "values",
         return_type: Some(BuiltinReturn::Named("list")),
     },
@@ -1593,6 +1617,14 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
     BuiltinSig {
         name: "write_file",
         return_type: Some(BuiltinReturn::Named("nil")),
+    },
+    BuiltinSig {
+        name: "yaml_parse",
+        return_type: None,
+    },
+    BuiltinSig {
+        name: "yaml_stringify",
+        return_type: Some(BuiltinReturn::Named("string")),
     },
 ];
 

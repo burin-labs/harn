@@ -21,6 +21,10 @@
 - [Transcript architecture](./transcript-architecture.md)
 - [Workflow runtime](./workflow-runtime.md)
 - [Cookbook](./cookbook.md)
+- [Tutorial: code review agent](./tutorial-code-review-agent.md)
+- [Tutorial: MCP server](./tutorial-mcp-server.md)
+- [Tutorial: eval pipeline](./tutorial-eval-pipeline.md)
+- [Best practices](./best-practices.md)
 
 # Hosts and integration
 

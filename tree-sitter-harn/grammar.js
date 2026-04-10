@@ -22,6 +22,7 @@ module.exports = grammar({
     [$.select_block],
     [$.parallel_each_expression],
     [$.parallel_settle_expression],
+    [$._primary, $.struct_construct],
     [$.struct_declaration],
     [$.tool_declaration],
     [$.impl_block],
@@ -123,6 +124,7 @@ module.exports = grammar({
         optional("pub"),
         "enum",
         field("name", $.identifier),
+        optional($.generic_params),
         "{",
         repeat(choice($.enum_variant, ",", $._newline)),
         "}"
@@ -139,6 +141,7 @@ module.exports = grammar({
         optional("pub"),
         "struct",
         field("name", $.identifier),
+        optional($.generic_params),
         "{",
         layoutSeparated($, $.struct_field),
         "}"
@@ -208,7 +211,7 @@ module.exports = grammar({
         field("name", $._binding_pattern),
         optional(seq(":", field("type", $.type_annotation))),
         "=",
-        field("value", $._expression)
+        field("value", choice($.struct_construct, $._expression))
       ),
 
     var_binding: ($) =>
@@ -217,7 +220,7 @@ module.exports = grammar({
         field("name", $._binding_pattern),
         optional(seq(":", field("type", $.type_annotation))),
         "=",
-        field("value", $._expression)
+        field("value", choice($.struct_construct, $._expression))
       ),
 
     _binding_pattern: ($) =>
@@ -424,8 +427,15 @@ module.exports = grammar({
         field("name", $.identifier),
         optional($.generic_params),
         "{",
-        layoutSeparated($, $.interface_method),
+        layoutSeparated($, choice($.associated_type_declaration, $.interface_method)),
         "}"
+      ),
+
+    associated_type_declaration: ($) =>
+      seq(
+        "type",
+        field("name", $.identifier),
+        optional(seq("=", field("default", $.type_annotation)))
       ),
 
     type_declaration: ($) =>
@@ -793,7 +803,14 @@ module.exports = grammar({
     _argument_element: ($) =>
       choice(
         $.spread_expression,
+        $.struct_construct,
         $._expression
+      ),
+
+    struct_construct: ($) =>
+      seq(
+        field("type_name", $.identifier),
+        field("fields", $.dict_literal)
       ),
 
     type_annotation: ($) =>

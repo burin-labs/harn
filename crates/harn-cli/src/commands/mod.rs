@@ -1,5 +1,7 @@
+pub(crate) mod bench;
 pub(crate) mod check;
 pub(crate) mod contracts;
+pub(crate) mod doctor;
 pub(crate) mod dump_highlight_keywords;
 pub(crate) mod init;
 pub(crate) mod mcp;
@@ -7,6 +9,7 @@ pub(crate) mod portal;
 pub(crate) mod repl;
 pub(crate) mod run;
 pub(crate) mod test;
+pub(crate) mod viz;
 
 use std::path::{Path, PathBuf};
 

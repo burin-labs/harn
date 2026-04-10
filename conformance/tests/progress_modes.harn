@@ -1,0 +1,4 @@
+pipeline default(task) {
+  progress("download", "Fetching artifacts", {mode: "spinner", step: 1})
+  progress("index", "Indexing files", {mode: "bar", current: 3, total: 5, width: 10})
+}

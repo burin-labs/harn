@@ -1,4 +1,4 @@
-import { greet, add } from "selective_import_lib"
+import { add, greet } from "selective_import_lib"
 
 pipeline default() {
   println(greet("World"))

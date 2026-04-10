@@ -3,6 +3,30 @@
 Harn provides several tools for inspecting, replaying, and evaluating agent
 runs. This page walks through the debugging workflow.
 
+## Source-level debugging
+
+For step-through debugging, start the Debug Adapter Protocol server:
+
+```bash
+cargo run --bin harn-dap
+```
+
+In VS Code, the Harn extension contributes a `harn` debug configuration
+automatically. The equivalent `launch.json` entry is:
+
+```json
+{
+  "type": "harn",
+  "request": "launch",
+  "name": "Debug Current Harn File",
+  "program": "${file}",
+  "cwd": "${workspaceFolder}"
+}
+```
+
+This supports line breakpoints, variable inspection, stack traces, and step
+in / over / out against `.harn` files.
+
 ## Run records
 
 Every `agent_loop()` or `workflow_execute()` call can produce a run record —
@@ -41,6 +65,19 @@ harn replay .harn-runs/<run-id>.json
 
 Replay shows each stage transition and lets you verify that your pipeline
 produces the same results given the same LLM responses.
+
+## Visualizing a pipeline
+
+When you want a quick structural view instead of a live debug session, render a
+Mermaid graph from the AST:
+
+```bash
+harn viz main.harn
+harn viz main.harn --output docs/main.mmd
+```
+
+The generated graph is useful for reviewing branch-heavy pipelines, match arms,
+parallel blocks, and nested retries before you start stepping through them.
 
 ## Evaluation
 

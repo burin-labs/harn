@@ -59,6 +59,65 @@ pub(crate) fn register_json_builtins(vm: &mut Vm) {
         }
     });
 
+    vm.register_builtin("yaml_parse", |args, _out| {
+        let text = args.first().map(|a| a.display()).unwrap_or_default();
+        match serde_yaml::from_str::<serde_yaml::Value>(&text) {
+            Ok(value) => match serde_json::to_value(value) {
+                Ok(json_value) => Ok(schema::json_to_vm_value(&json_value)),
+                Err(error) => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                    "yaml_parse: {error}"
+                ))))),
+            },
+            Err(error) => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                "YAML parse error: {error}"
+            ))))),
+        }
+    });
+
+    vm.register_builtin("yaml_stringify", |args, _out| {
+        let value = args.first().unwrap_or(&VmValue::Nil);
+        let data_value = vm_value_to_data_value(value);
+        serde_yaml::to_string(&data_value)
+            .map(|text| VmValue::String(Rc::from(text)))
+            .map_err(|error| {
+                VmError::Thrown(VmValue::String(Rc::from(format!(
+                    "yaml_stringify: {error}"
+                ))))
+            })
+    });
+
+    vm.register_builtin("toml_parse", |args, _out| {
+        let text = args.first().map(|a| a.display()).unwrap_or_default();
+        match text.parse::<toml::Value>() {
+            Ok(value) => match serde_json::to_value(value) {
+                Ok(json_value) => Ok(schema::json_to_vm_value(&json_value)),
+                Err(error) => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                    "toml_parse: {error}"
+                ))))),
+            },
+            Err(error) => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                "TOML parse error: {error}"
+            ))))),
+        }
+    });
+
+    vm.register_builtin("toml_stringify", |args, _out| {
+        let value = args.first().unwrap_or(&VmValue::Nil);
+        let data_value = vm_value_to_data_value(value);
+        let toml_value = toml::Value::try_from(data_value).map_err(|error| {
+            VmError::Thrown(VmValue::String(Rc::from(format!(
+                "toml_stringify: {error}"
+            ))))
+        })?;
+        toml::to_string(&toml_value)
+            .map(|text| VmValue::String(Rc::from(text)))
+            .map_err(|error| {
+                VmError::Thrown(VmValue::String(Rc::from(format!(
+                    "toml_stringify: {error}"
+                ))))
+            })
+    });
+
     vm.register_builtin("json_validate", |args, _out| {
         require_args(args, 2, "json_validate")?;
         let result = schema::schema_expect_value(&args[0], &args[1], false);
@@ -191,6 +250,31 @@ pub(crate) fn escape_json_string_vm(s: &str) -> String {
     }
     out.push('"');
     out
+}
+
+fn vm_value_to_data_value(value: &VmValue) -> serde_json::Value {
+    match value {
+        VmValue::Int(i) => serde_json::json!(i),
+        VmValue::Float(f) => serde_json::json!(f),
+        VmValue::String(s) => serde_json::json!(s.as_ref()),
+        VmValue::Bool(b) => serde_json::json!(b),
+        VmValue::Nil => serde_json::Value::Null,
+        VmValue::List(items) | VmValue::Set(items) => {
+            serde_json::Value::Array(items.iter().map(vm_value_to_data_value).collect())
+        }
+        VmValue::Dict(map) => serde_json::Value::Object(
+            map.iter()
+                .map(|(key, value)| (key.clone(), vm_value_to_data_value(value)))
+                .collect(),
+        ),
+        VmValue::StructInstance { fields, .. } => serde_json::Value::Object(
+            fields
+                .iter()
+                .map(|(key, value)| (key.clone(), vm_value_to_data_value(value)))
+                .collect(),
+        ),
+        _ => serde_json::json!(value.display()),
+    }
 }
 
 pub(crate) fn vm_value_to_json(val: &VmValue) -> String {

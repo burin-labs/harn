@@ -1,7 +1,46 @@
+use std::collections::BTreeSet;
 use std::io::{self, Write};
 use std::path::PathBuf;
 
 use crate::execute;
+
+const REPL_KEYWORDS: &[&str] = &[
+    "pipeline",
+    "fn",
+    "let",
+    "var",
+    "if",
+    "else",
+    "for",
+    "in",
+    "while",
+    "match",
+    "return",
+    "break",
+    "continue",
+    "import",
+    "from",
+    "try",
+    "catch",
+    "throw",
+    "spawn",
+    "parallel",
+    "defer",
+    "retry",
+    "guard",
+    "deadline",
+    "mutex",
+    "enum",
+    "struct",
+    "interface",
+    "type",
+    "pub",
+    "extends",
+    "override",
+    "true",
+    "false",
+    "nil",
+];
 
 /// Harn REPL keyword completer.
 struct HarnCompleter {
@@ -109,22 +148,116 @@ struct HarnValidator;
 
 impl reedline::Validator for HarnValidator {
     fn validate(&self, line: &str) -> reedline::ValidationResult {
-        let open_braces = line.chars().filter(|c| *c == '{').count();
-        let close_braces = line.chars().filter(|c| *c == '}').count();
-        let open_parens = line.chars().filter(|c| *c == '(').count();
-        let close_parens = line.chars().filter(|c| *c == ')').count();
-        let open_brackets = line.chars().filter(|c| *c == '[').count();
-        let close_brackets = line.chars().filter(|c| *c == ']').count();
-
-        if open_braces > close_braces
-            || open_parens > close_parens
-            || open_brackets > close_brackets
-        {
+        if scan_input_state(line).is_incomplete() {
             reedline::ValidationResult::Incomplete
         } else {
             reedline::ValidationResult::Complete
         }
     }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct InputScanState {
+    brace_depth: usize,
+    paren_depth: usize,
+    bracket_depth: usize,
+    in_string: bool,
+    raw_string: bool,
+    escaping: bool,
+    in_line_comment: bool,
+}
+
+impl InputScanState {
+    fn is_incomplete(self) -> bool {
+        self.in_string || self.brace_depth > 0 || self.paren_depth > 0 || self.bracket_depth > 0
+    }
+}
+
+fn scan_input_state(input: &str) -> InputScanState {
+    let mut state = InputScanState::default();
+    let mut chars = input.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if state.in_line_comment {
+            if ch == '\n' {
+                state.in_line_comment = false;
+            }
+            continue;
+        }
+
+        if state.in_string {
+            if state.raw_string {
+                if ch == '"' {
+                    state.in_string = false;
+                    state.raw_string = false;
+                }
+                continue;
+            }
+
+            if state.escaping {
+                state.escaping = false;
+                continue;
+            }
+
+            match ch {
+                '\\' => state.escaping = true,
+                '"' => state.in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+
+        match ch {
+            '/' if chars.peek() == Some(&'/') => {
+                chars.next();
+                state.in_line_comment = true;
+            }
+            'r' if chars.peek() == Some(&'"') => {
+                chars.next();
+                state.in_string = true;
+                state.raw_string = true;
+            }
+            '"' => state.in_string = true,
+            '{' => state.brace_depth += 1,
+            '}' => state.brace_depth = state.brace_depth.saturating_sub(1),
+            '(' => state.paren_depth += 1,
+            ')' => state.paren_depth = state.paren_depth.saturating_sub(1),
+            '[' => state.bracket_depth += 1,
+            ']' => state.bracket_depth = state.bracket_depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+
+    state
+}
+
+fn repl_completion_entries() -> Vec<String> {
+    let mut entries = BTreeSet::new();
+    for keyword in REPL_KEYWORDS {
+        entries.insert((*keyword).to_string());
+    }
+    for builtin in repl_builtin_names() {
+        entries.insert(builtin);
+    }
+    entries.into_iter().collect()
+}
+
+fn repl_builtin_names() -> Vec<String> {
+    let mut vm = harn_vm::Vm::new();
+    harn_vm::register_vm_stdlib(&mut vm);
+    let base_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    harn_vm::register_store_builtins(&mut vm, &base_dir);
+    harn_vm::register_metadata_builtins(&mut vm, &base_dir);
+    harn_vm::register_checkpoint_builtins(&mut vm, &base_dir, "repl");
+    let mut names = vm.builtin_names();
+    names.sort();
+    names
+}
+
+fn repl_history_path() -> PathBuf {
+    std::env::var_os("HOME")
+        .map(|home| PathBuf::from(home).join(".harn").join("repl_history"))
+        .unwrap_or_else(|| PathBuf::from(".harn").join("repl_history"))
 }
 
 pub(crate) async fn run_repl() {
@@ -133,95 +266,20 @@ pub(crate) async fn run_repl() {
     println!("Harn REPL v{}", env!("CARGO_PKG_VERSION"));
     println!("Type expressions or statements. Ctrl+D to exit.");
 
-    let harn_keywords: Vec<String> = [
-        "pipeline",
-        "fn",
-        "let",
-        "var",
-        "if",
-        "else",
-        "for",
-        "in",
-        "while",
-        "match",
-        "return",
-        "break",
-        "continue",
-        "import",
-        "from",
-        "try",
-        "catch",
-        "throw",
-        "spawn",
-        "parallel",
-        "defer",
-        "retry",
-        "guard",
-        "deadline",
-        "mutex",
-        "enum",
-        "struct",
-        "type",
-        "pub",
-        "extends",
-        "override",
-        "true",
-        "false",
-        "nil",
-        "log",
-        "print",
-        "println",
-        "assert",
-        "assert_eq",
-        "assert_ne",
-        "type_of",
-        "to_string",
-        "to_int",
-        "to_float",
-        "json_stringify",
-        "json_parse",
-        "read_file",
-        "write_file",
-        "file_exists",
-        "exec",
-        "env",
-        "timestamp",
-        "abs",
-        "min",
-        "max",
-        "floor",
-        "ceil",
-        "round",
-        "sqrt",
-        "pow",
-        "random",
-        "regex_match",
-        "regex_replace",
-        "http_get",
-        "http_post",
-        "llm_call",
-        "llm_stream",
-        "channel",
-        "send",
-        "receive",
-        "close",
-        "sleep",
-    ]
-    .iter()
-    .map(|s| s.to_string())
-    .collect();
+    let completion_entries = repl_completion_entries();
 
     let completer = Box::new(HarnCompleter {
-        keywords: harn_keywords.clone(),
+        keywords: completion_entries.clone(),
     });
     let highlighter = Box::new(HarnHighlighter {
-        keywords: harn_keywords,
+        keywords: completion_entries,
     });
     let validator = Box::new(HarnValidator);
 
-    let history_path = std::env::var_os("HOME")
-        .map(|h| PathBuf::from(h).join(".harn_history"))
-        .unwrap_or_else(|| PathBuf::from(".harn_history"));
+    let history_path = repl_history_path();
+    if let Some(parent) = history_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
 
     let history = Box::new(
         FileBackedHistory::with_file(1000, history_path)
@@ -390,5 +448,41 @@ pub(crate) async fn run_repl() {
                 break;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{repl_builtin_names, scan_input_state, HarnValidator};
+
+    #[test]
+    fn validator_marks_unclosed_delimiters_incomplete() {
+        let state = scan_input_state("if ready {\n  println(\"ok\")");
+        assert!(state.is_incomplete());
+    }
+
+    #[test]
+    fn validator_ignores_delimiters_inside_strings_and_comments() {
+        let state = scan_input_state("println(\"{\") // }\nlet xs = [1, 2]");
+        assert!(!state.is_incomplete());
+    }
+
+    #[test]
+    fn validator_tracks_unclosed_strings() {
+        let state = scan_input_state("println(\"hello");
+        assert!(state.is_incomplete());
+    }
+
+    #[test]
+    fn repl_builtin_names_include_live_stdlib_entries() {
+        let builtins = repl_builtin_names();
+        assert!(builtins.iter().any(|name| name == "http_get"));
+        assert!(builtins.iter().any(|name| name == "uuid"));
+        assert!(builtins.iter().any(|name| name == "workflow_execute"));
+    }
+
+    #[test]
+    fn validator_type_exists_for_reedline_integration() {
+        let _validator = HarnValidator;
     }
 }

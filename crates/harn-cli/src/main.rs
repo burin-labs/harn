@@ -201,7 +201,10 @@ async fn main() {
                 }
             }
         }
-        Command::Init(args) => commands::init::init_project(args.name.as_deref()),
+        Command::Init(args) | Command::New(args) => {
+            commands::init::init_project(args.name.as_deref(), args.template)
+        }
+        Command::Doctor(args) => commands::doctor::run_doctor(!args.no_network).await,
         Command::Serve(args) => a2a::run_a2a_server(&args.file, args.port).await,
         Command::Acp(args) => acp::run_acp_server(args.pipeline.as_deref()).await,
         Command::McpServe(args) => commands::run::run_file_mcp_serve(&args.file).await,
@@ -222,6 +225,8 @@ async fn main() {
         Command::Replay(args) => replay_run_record(&args.path),
         Command::Eval(args) => eval_run_record(&args.path, args.compare.as_deref()),
         Command::Repl => commands::repl::run_repl().await,
+        Command::Bench(args) => commands::bench::run_bench(&args.file, args.iterations).await,
+        Command::Viz(args) => commands::viz::run_viz(&args.file, args.output.as_deref()),
         Command::Install => package::install_packages(),
         Command::Add(args) => package::add_package(
             &args.name,

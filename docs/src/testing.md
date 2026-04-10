@@ -101,12 +101,14 @@ pipeline default(task) {
 
 ## LLM mocking
 
-For testing agent loops without real LLM calls, use `mock_llm_response`:
+For testing agent loops without real LLM calls, use `llm_mock()`:
 
 ```harn
-mock_llm_response("The answer is 42")
+llm_mock({text: "The answer is 42"})
 
-let result = ask { user: "What is the answer?" }
+let result = llm_call([
+  {role: "user", content: "What is the answer?"}
+])
 log(result)
 ```
 
@@ -114,13 +116,18 @@ This queues a canned response that the next LLM call consumes.
 
 ## Built-in assertions
 
-Harn provides `assert` and `assert_eq` builtins:
+Harn provides `assert`, `assert_eq`, and `assert_ne` builtins for test pipelines:
 
 ```harn
 assert(x > 0, "x must be positive")
 assert_eq(actual, expected)
+assert_ne(actual, unexpected)
 assert_eq(len(items), 3)
 ```
 
 Failed assertions throw an error with a descriptive message including
 the expected and actual values.
+
+Use `require` for runtime invariants in normal pipelines. The linter warns if
+you use `assert*` outside test pipelines, and it suggests `assert*` instead of
+`require` inside test pipelines.

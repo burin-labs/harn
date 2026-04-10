@@ -190,6 +190,14 @@ pub(crate) fn format_type_expr(te: &TypeExpr) -> String {
         TypeExpr::DictType(k, v) => {
             format!("dict<{}, {}>", format_type_expr(k), format_type_expr(v))
         }
+        TypeExpr::Applied { name, args } => {
+            let args = args
+                .iter()
+                .map(format_type_expr)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{name}<{args}>")
+        }
         TypeExpr::FnType {
             params,
             return_type,

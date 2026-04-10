@@ -8,3 +8,4 @@ description = "Parser, AST, and type checker for the Harn programming language"
 
 [dependencies]
 harn-lexer = { path = "../harn-lexer", version = "0.5" }
+yansi = "1"

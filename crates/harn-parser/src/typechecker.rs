@@ -34,6 +34,25 @@ pub enum DiagnosticSeverity {
 /// Inferred type of an expression. None means unknown/untyped (gradual typing).
 type InferredType = Option<TypeExpr>;
 
+#[derive(Debug, Clone)]
+struct EnumDeclInfo {
+    type_params: Vec<String>,
+    variants: Vec<EnumVariant>,
+}
+
+#[derive(Debug, Clone)]
+struct StructDeclInfo {
+    type_params: Vec<String>,
+    fields: Vec<StructField>,
+}
+
+#[derive(Debug, Clone)]
+struct InterfaceDeclInfo {
+    type_params: Vec<String>,
+    associated_types: Vec<(String, Option<TypeExpr>)>,
+    methods: Vec<InterfaceMethod>,
+}
+
 /// Scope for tracking variable types.
 #[derive(Debug, Clone)]
 struct TypeScope {
@@ -43,12 +62,12 @@ struct TypeScope {
     functions: BTreeMap<String, FnSignature>,
     /// Named type aliases.
     type_aliases: BTreeMap<String, TypeExpr>,
-    /// Enum declarations: name → variant names.
-    enums: BTreeMap<String, Vec<String>>,
-    /// Interface declarations: name → method signatures.
-    interfaces: BTreeMap<String, Vec<InterfaceMethod>>,
-    /// Struct declarations: name → field types.
-    structs: BTreeMap<String, Vec<(String, InferredType)>>,
+    /// Enum declarations with generic and variant metadata.
+    enums: BTreeMap<String, EnumDeclInfo>,
+    /// Interface declarations with associated types and methods.
+    interfaces: BTreeMap<String, InterfaceDeclInfo>,
+    /// Struct declarations with generic and field metadata.
+    structs: BTreeMap<String, StructDeclInfo>,
     /// Impl block methods: type_name → method signatures.
     impl_methods: BTreeMap<String, Vec<ImplMethodSig>>,
     /// Generic type parameter names in scope (treated as compatible with any type).
@@ -96,7 +115,7 @@ struct FnSignature {
 
 impl TypeScope {
     fn new() -> Self {
-        Self {
+        let mut scope = Self {
             vars: BTreeMap::new(),
             functions: BTreeMap::new(),
             type_aliases: BTreeMap::new(),
@@ -110,7 +129,34 @@ impl TypeScope {
             narrowed_vars: BTreeMap::new(),
             schema_bindings: BTreeMap::new(),
             parent: None,
-        }
+        };
+        scope.enums.insert(
+            "Result".into(),
+            EnumDeclInfo {
+                type_params: vec!["T".into(), "E".into()],
+                variants: vec![
+                    EnumVariant {
+                        name: "Ok".into(),
+                        fields: vec![TypedParam {
+                            name: "value".into(),
+                            type_expr: Some(TypeExpr::Named("T".into())),
+                            default_value: None,
+                            rest: false,
+                        }],
+                    },
+                    EnumVariant {
+                        name: "Err".into(),
+                        fields: vec![TypedParam {
+                            name: "error".into(),
+                            type_expr: Some(TypeExpr::Named("E".into())),
+                            default_value: None,
+                            rest: false,
+                        }],
+                    },
+                ],
+            },
+        );
+        scope
     }
 
     fn child(&self) -> Self {
@@ -174,19 +220,19 @@ impl TypeScope {
             })
     }
 
-    fn get_enum(&self, name: &str) -> Option<&Vec<String>> {
+    fn get_enum(&self, name: &str) -> Option<&EnumDeclInfo> {
         self.enums
             .get(name)
             .or_else(|| self.parent.as_ref()?.get_enum(name))
     }
 
-    fn get_interface(&self, name: &str) -> Option<&Vec<InterfaceMethod>> {
+    fn get_interface(&self, name: &str) -> Option<&InterfaceDeclInfo> {
         self.interfaces
             .get(name)
             .or_else(|| self.parent.as_ref()?.get_interface(name))
     }
 
-    fn get_struct(&self, name: &str) -> Option<&Vec<(String, InferredType)>> {
+    fn get_struct(&self, name: &str) -> Option<&StructDeclInfo> {
         self.structs
             .get(name)
             .or_else(|| self.parent.as_ref()?.get_struct(name))
@@ -266,6 +312,22 @@ pub struct TypeChecker {
 }
 
 impl TypeChecker {
+    fn wildcard_type() -> TypeExpr {
+        TypeExpr::Named("_".into())
+    }
+
+    fn is_wildcard_type(ty: &TypeExpr) -> bool {
+        matches!(ty, TypeExpr::Named(name) if name == "_")
+    }
+
+    fn base_type_name(ty: &TypeExpr) -> Option<&str> {
+        match ty {
+            TypeExpr::Named(name) => Some(name.as_str()),
+            TypeExpr::Applied { name, .. } => Some(name.as_str()),
+            _ => None,
+        }
+    }
+
     pub fn new() -> Self {
         Self {
             diagnostics: Vec::new(),
@@ -369,20 +431,48 @@ impl TypeChecker {
                 Node::TypeDecl { name, type_expr } => {
                     scope.type_aliases.insert(name.clone(), type_expr.clone());
                 }
-                Node::EnumDecl { name, variants, .. } => {
-                    let variant_names: Vec<String> =
-                        variants.iter().map(|v| v.name.clone()).collect();
-                    scope.enums.insert(name.clone(), variant_names);
+                Node::EnumDecl {
+                    name,
+                    type_params,
+                    variants,
+                    ..
+                } => {
+                    scope.enums.insert(
+                        name.clone(),
+                        EnumDeclInfo {
+                            type_params: type_params.iter().map(|tp| tp.name.clone()).collect(),
+                            variants: variants.clone(),
+                        },
+                    );
                 }
-                Node::InterfaceDecl { name, methods, .. } => {
-                    scope.interfaces.insert(name.clone(), methods.clone());
+                Node::InterfaceDecl {
+                    name,
+                    type_params,
+                    associated_types,
+                    methods,
+                } => {
+                    scope.interfaces.insert(
+                        name.clone(),
+                        InterfaceDeclInfo {
+                            type_params: type_params.iter().map(|tp| tp.name.clone()).collect(),
+                            associated_types: associated_types.clone(),
+                            methods: methods.clone(),
+                        },
+                    );
                 }
-                Node::StructDecl { name, fields, .. } => {
-                    let field_types: Vec<(String, InferredType)> = fields
-                        .iter()
-                        .map(|f| (f.name.clone(), f.type_expr.clone()))
-                        .collect();
-                    scope.structs.insert(name.clone(), field_types);
+                Node::StructDecl {
+                    name,
+                    type_params,
+                    fields,
+                    ..
+                } => {
+                    scope.structs.insert(
+                        name.clone(),
+                        StructDeclInfo {
+                            type_params: type_params.iter().map(|tp| tp.name.clone()).collect(),
+                            fields: fields.clone(),
+                        },
+                    );
                 }
                 Node::ImplBlock {
                     type_name, methods, ..
@@ -801,21 +891,50 @@ impl TypeChecker {
                 scope.type_aliases.insert(name.clone(), type_expr.clone());
             }
 
-            Node::EnumDecl { name, variants, .. } => {
-                let variant_names: Vec<String> = variants.iter().map(|v| v.name.clone()).collect();
-                scope.enums.insert(name.clone(), variant_names);
+            Node::EnumDecl {
+                name,
+                type_params,
+                variants,
+                ..
+            } => {
+                scope.enums.insert(
+                    name.clone(),
+                    EnumDeclInfo {
+                        type_params: type_params.iter().map(|tp| tp.name.clone()).collect(),
+                        variants: variants.clone(),
+                    },
+                );
             }
 
-            Node::StructDecl { name, fields, .. } => {
-                let field_types: Vec<(String, InferredType)> = fields
-                    .iter()
-                    .map(|f| (f.name.clone(), f.type_expr.clone()))
-                    .collect();
-                scope.structs.insert(name.clone(), field_types);
+            Node::StructDecl {
+                name,
+                type_params,
+                fields,
+                ..
+            } => {
+                scope.structs.insert(
+                    name.clone(),
+                    StructDeclInfo {
+                        type_params: type_params.iter().map(|tp| tp.name.clone()).collect(),
+                        fields: fields.clone(),
+                    },
+                );
             }
 
-            Node::InterfaceDecl { name, methods, .. } => {
-                scope.interfaces.insert(name.clone(), methods.clone());
+            Node::InterfaceDecl {
+                name,
+                type_params,
+                associated_types,
+                methods,
+            } => {
+                scope.interfaces.insert(
+                    name.clone(),
+                    InterfaceDeclInfo {
+                        type_params: type_params.iter().map(|tp| tp.name.clone()).collect(),
+                        associated_types: associated_types.clone(),
+                        methods: methods.clone(),
+                    },
+                );
             }
 
             Node::ImplBlock {
@@ -1046,7 +1165,8 @@ impl TypeChecker {
                     if scope.is_generic_type_param(&type_name) {
                         if let Some(iface_name) = scope.get_where_constraint(&type_name) {
                             if let Some(iface_methods) = scope.get_interface(iface_name) {
-                                let has_method = iface_methods.iter().any(|m| m.name == *method);
+                                let has_method =
+                                    iface_methods.methods.iter().any(|m| m.name == *method);
                                 if !has_method {
                                     self.warning_at(
                                         format!(
@@ -1233,11 +1353,12 @@ impl TypeChecker {
                     self.check_node(&entry.key, scope);
                     self.check_node(&entry.value, scope);
                 }
-                if let Some(declared_fields) = scope.get_struct(struct_name).cloned() {
+                if let Some(struct_info) = scope.get_struct(struct_name).cloned() {
+                    let type_bindings = self.infer_struct_bindings(&struct_info, fields, scope);
                     // Warn on unknown fields
                     for entry in fields {
                         if let Node::StringLiteral(key) | Node::Identifier(key) = &entry.key.node {
-                            if !declared_fields.iter().any(|(name, _)| name == key) {
+                            if !struct_info.fields.iter().any(|field| field.name == *key) {
                                 self.warning_at(
                                     format!("Unknown field '{}' in struct '{}'", key, struct_name),
                                     entry.key.span,
@@ -1253,14 +1374,40 @@ impl TypeChecker {
                             _ => None,
                         })
                         .collect();
-                    for (name, _) in &declared_fields {
-                        if !provided.contains(name) {
+                    for field in &struct_info.fields {
+                        if !field.optional && !provided.contains(&field.name) {
                             self.warning_at(
                                 format!(
                                     "Missing field '{}' in struct '{}' construction",
-                                    name, struct_name
+                                    field.name, struct_name
                                 ),
                                 span,
+                            );
+                        }
+                    }
+                    for field in &struct_info.fields {
+                        let Some(expected_type) = &field.type_expr else {
+                            continue;
+                        };
+                        let Some(entry) = fields.iter().find(|entry| {
+                            matches!(&entry.key.node, Node::StringLiteral(key) | Node::Identifier(key) if key == &field.name)
+                        }) else {
+                            continue;
+                        };
+                        let Some(actual_type) = self.infer_type(&entry.value, scope) else {
+                            continue;
+                        };
+                        let expected = Self::apply_type_bindings(expected_type, &type_bindings);
+                        if !self.types_compatible(&expected, &actual_type, scope) {
+                            self.error_at(
+                                format!(
+                                    "Field '{}' in struct '{}' expects {}, got {}",
+                                    field.name,
+                                    struct_name,
+                                    format_type(&expected),
+                                    format_type(&actual_type)
+                                ),
+                                entry.value.span,
                             );
                         }
                     }
@@ -1276,12 +1423,73 @@ impl TypeChecker {
                 for arg in args {
                     self.check_node(arg, scope);
                 }
-                if let Some(variants) = scope.get_enum(enum_name) {
-                    if !variants.contains(variant) {
+                if let Some(enum_info) = scope.get_enum(enum_name).cloned() {
+                    let Some(enum_variant) = enum_info
+                        .variants
+                        .iter()
+                        .find(|enum_variant| enum_variant.name == *variant)
+                    else {
                         self.warning_at(
                             format!("Unknown variant '{}' in enum '{}'", variant, enum_name),
                             span,
                         );
+                        return;
+                    };
+                    if args.len() != enum_variant.fields.len() {
+                        self.warning_at(
+                            format!(
+                                "Variant '{}.{}' expects {} argument(s), got {}",
+                                enum_name,
+                                variant,
+                                enum_variant.fields.len(),
+                                args.len()
+                            ),
+                            span,
+                        );
+                    }
+                    let type_param_set: std::collections::BTreeSet<String> =
+                        enum_info.type_params.iter().cloned().collect();
+                    let mut type_bindings = BTreeMap::new();
+                    for (field, arg) in enum_variant.fields.iter().zip(args.iter()) {
+                        let Some(expected_type) = &field.type_expr else {
+                            continue;
+                        };
+                        let Some(actual_type) = self.infer_type(arg, scope) else {
+                            continue;
+                        };
+                        if let Err(message) = Self::extract_type_bindings(
+                            expected_type,
+                            &actual_type,
+                            &type_param_set,
+                            &mut type_bindings,
+                        ) {
+                            self.error_at(message, arg.span);
+                        }
+                    }
+                    for (index, (field, arg)) in
+                        enum_variant.fields.iter().zip(args.iter()).enumerate()
+                    {
+                        let Some(expected_type) = &field.type_expr else {
+                            continue;
+                        };
+                        let Some(actual_type) = self.infer_type(arg, scope) else {
+                            continue;
+                        };
+                        let expected = Self::apply_type_bindings(expected_type, &type_bindings);
+                        if !self.types_compatible(&expected, &actual_type, scope) {
+                            self.error_at(
+                                format!(
+                                    "Variant '{}.{}' argument {} ('{}') expects {}, got {}",
+                                    enum_name,
+                                    variant,
+                                    index + 1,
+                                    field.name,
+                                    format_type(&expected),
+                                    format_type(&actual_type)
+                                ),
+                                arg.span,
+                            );
+                        }
                     }
                 }
             }
@@ -1423,9 +1631,10 @@ impl TypeChecker {
         &self,
         type_name: &str,
         interface_name: &str,
+        interface_bindings: &BTreeMap<String, TypeExpr>,
         scope: &TypeScope,
     ) -> bool {
-        self.interface_mismatch_reason(type_name, interface_name, scope)
+        self.interface_mismatch_reason(type_name, interface_name, interface_bindings, scope)
             .is_none()
     }
 
@@ -1435,23 +1644,34 @@ impl TypeChecker {
         &self,
         type_name: &str,
         interface_name: &str,
+        interface_bindings: &BTreeMap<String, TypeExpr>,
         scope: &TypeScope,
     ) -> Option<String> {
-        let interface_methods = match scope.get_interface(interface_name) {
-            Some(methods) => methods,
+        let interface_info = match scope.get_interface(interface_name) {
+            Some(info) => info,
             None => return Some(format!("interface '{}' not found", interface_name)),
         };
         let impl_methods = match scope.get_impl_methods(type_name) {
             Some(methods) => methods,
             None => {
-                if interface_methods.is_empty() {
+                if interface_info.methods.is_empty() {
                     return None;
                 }
-                let names: Vec<_> = interface_methods.iter().map(|m| m.name.as_str()).collect();
+                let names: Vec<_> = interface_info
+                    .methods
+                    .iter()
+                    .map(|m| m.name.as_str())
+                    .collect();
                 return Some(format!("missing method(s): {}", names.join(", ")));
             }
         };
-        for iface_method in interface_methods {
+        let mut bindings = interface_bindings.clone();
+        let associated_type_names: std::collections::BTreeSet<String> = interface_info
+            .associated_types
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect();
+        for iface_method in &interface_info.methods {
             let iface_params: Vec<_> = iface_method
                 .params
                 .iter()
@@ -1477,13 +1697,22 @@ impl TypeChecker {
                     &iface_param.type_expr,
                     impl_method.param_types.get(i).and_then(|t| t.as_ref()),
                 ) {
-                    if !self.types_compatible(expected, actual, scope) {
+                    if let Err(message) = Self::extract_type_bindings(
+                        expected,
+                        actual,
+                        &associated_type_names,
+                        &mut bindings,
+                    ) {
+                        return Some(message);
+                    }
+                    let expected = Self::apply_type_bindings(expected, &bindings);
+                    if !self.types_compatible(&expected, actual, scope) {
                         return Some(format!(
                             "method '{}' parameter {} has type '{}', expected '{}'",
                             iface_method.name,
                             i + 1,
                             format_type(actual),
-                            format_type(expected),
+                            format_type(&expected),
                         ));
                     }
                 }
@@ -1492,12 +1721,34 @@ impl TypeChecker {
             if let (Some(expected_ret), Some(actual_ret)) =
                 (&iface_method.return_type, &impl_method.return_type)
             {
-                if !self.types_compatible(expected_ret, actual_ret, scope) {
+                if let Err(message) = Self::extract_type_bindings(
+                    expected_ret,
+                    actual_ret,
+                    &associated_type_names,
+                    &mut bindings,
+                ) {
+                    return Some(message);
+                }
+                let expected_ret = Self::apply_type_bindings(expected_ret, &bindings);
+                if !self.types_compatible(&expected_ret, actual_ret, scope) {
                     return Some(format!(
                         "method '{}' returns '{}', expected '{}'",
                         iface_method.name,
                         format_type(actual_ret),
-                        format_type(expected_ret),
+                        format_type(&expected_ret),
+                    ));
+                }
+            }
+        }
+        for (assoc_name, default_type) in &interface_info.associated_types {
+            if let (Some(default_type), Some(actual)) = (default_type, bindings.get(assoc_name)) {
+                let expected = Self::apply_type_bindings(default_type, &bindings);
+                if !self.types_compatible(&expected, actual, scope) {
+                    return Some(format!(
+                        "associated type '{}' resolves to '{}', expected '{}'",
+                        assoc_name,
+                        format_type(actual),
+                        format_type(&expected),
                     ));
                 }
             }
@@ -1543,6 +1794,21 @@ impl TypeChecker {
             (TypeExpr::DictType(pk, pv), TypeExpr::DictType(ak, av)) => {
                 Self::extract_type_bindings(pk, ak, type_params, bindings)?;
                 Self::extract_type_bindings(pv, av, type_params, bindings)
+            }
+            (
+                TypeExpr::Applied {
+                    name: p_name,
+                    args: p_args,
+                },
+                TypeExpr::Applied {
+                    name: a_name,
+                    args: a_args,
+                },
+            ) if p_name == a_name && p_args.len() == a_args.len() => {
+                for (param, arg) in p_args.iter().zip(a_args.iter()) {
+                    Self::extract_type_bindings(param, arg, type_params, bindings)?;
+                }
+                Ok(())
             }
             (TypeExpr::Shape(param_fields), TypeExpr::Shape(arg_fields)) => {
                 for param_field in param_fields {
@@ -1608,6 +1874,13 @@ impl TypeChecker {
                 Box::new(Self::apply_type_bindings(key, bindings)),
                 Box::new(Self::apply_type_bindings(value, bindings)),
             ),
+            TypeExpr::Applied { name, args } => TypeExpr::Applied {
+                name: name.clone(),
+                args: args
+                    .iter()
+                    .map(|arg| Self::apply_type_bindings(arg, bindings))
+                    .collect(),
+            },
             TypeExpr::FnType {
                 params,
                 return_type,
@@ -1619,6 +1892,168 @@ impl TypeChecker {
                 return_type: Box::new(Self::apply_type_bindings(return_type, bindings)),
             },
             TypeExpr::Never => TypeExpr::Never,
+        }
+    }
+
+    fn applied_type_or_name(name: &str, args: Vec<TypeExpr>) -> TypeExpr {
+        if args.is_empty() {
+            TypeExpr::Named(name.to_string())
+        } else {
+            TypeExpr::Applied {
+                name: name.to_string(),
+                args,
+            }
+        }
+    }
+
+    fn infer_struct_bindings(
+        &self,
+        struct_info: &StructDeclInfo,
+        fields: &[DictEntry],
+        scope: &TypeScope,
+    ) -> BTreeMap<String, TypeExpr> {
+        let type_param_set: std::collections::BTreeSet<String> =
+            struct_info.type_params.iter().cloned().collect();
+        let mut bindings = BTreeMap::new();
+        for field in &struct_info.fields {
+            let Some(expected_type) = &field.type_expr else {
+                continue;
+            };
+            let Some(entry) = fields.iter().find(|entry| {
+                matches!(&entry.key.node, Node::StringLiteral(key) | Node::Identifier(key) if key == &field.name)
+            }) else {
+                continue;
+            };
+            let Some(actual_type) = self.infer_type(&entry.value, scope) else {
+                continue;
+            };
+            let _ = Self::extract_type_bindings(
+                expected_type,
+                &actual_type,
+                &type_param_set,
+                &mut bindings,
+            );
+        }
+        bindings
+    }
+
+    fn infer_struct_type(
+        &self,
+        struct_name: &str,
+        struct_info: &StructDeclInfo,
+        fields: &[DictEntry],
+        scope: &TypeScope,
+    ) -> TypeExpr {
+        let bindings = self.infer_struct_bindings(struct_info, fields, scope);
+        let args = struct_info
+            .type_params
+            .iter()
+            .map(|name| {
+                bindings
+                    .get(name)
+                    .cloned()
+                    .unwrap_or_else(Self::wildcard_type)
+            })
+            .collect();
+        Self::applied_type_or_name(struct_name, args)
+    }
+
+    fn infer_enum_type(
+        &self,
+        enum_name: &str,
+        enum_info: &EnumDeclInfo,
+        variant_name: &str,
+        args: &[SNode],
+        scope: &TypeScope,
+    ) -> TypeExpr {
+        let type_param_set: std::collections::BTreeSet<String> =
+            enum_info.type_params.iter().cloned().collect();
+        let mut bindings = BTreeMap::new();
+        if let Some(variant) = enum_info
+            .variants
+            .iter()
+            .find(|variant| variant.name == variant_name)
+        {
+            for (field, arg) in variant.fields.iter().zip(args.iter()) {
+                let Some(expected_type) = &field.type_expr else {
+                    continue;
+                };
+                let Some(actual_type) = self.infer_type(arg, scope) else {
+                    continue;
+                };
+                let _ = Self::extract_type_bindings(
+                    expected_type,
+                    &actual_type,
+                    &type_param_set,
+                    &mut bindings,
+                );
+            }
+        }
+        let args = enum_info
+            .type_params
+            .iter()
+            .map(|name| {
+                bindings
+                    .get(name)
+                    .cloned()
+                    .unwrap_or_else(Self::wildcard_type)
+            })
+            .collect();
+        Self::applied_type_or_name(enum_name, args)
+    }
+
+    fn infer_try_error_type(&self, stmts: &[SNode], scope: &TypeScope) -> InferredType {
+        let mut inferred: Vec<TypeExpr> = Vec::new();
+        for stmt in stmts {
+            match &stmt.node {
+                Node::ThrowStmt { value } => {
+                    if let Some(ty) = self.infer_type(value, scope) {
+                        inferred.push(ty);
+                    }
+                }
+                Node::TryOperator { operand } => {
+                    if let Some(TypeExpr::Applied { name, args }) = self.infer_type(operand, scope)
+                    {
+                        if name == "Result" && args.len() == 2 {
+                            inferred.push(args[1].clone());
+                        }
+                    }
+                }
+                Node::IfElse {
+                    then_body,
+                    else_body,
+                    ..
+                } => {
+                    if let Some(ty) = self.infer_try_error_type(then_body, scope) {
+                        inferred.push(ty);
+                    }
+                    if let Some(else_body) = else_body {
+                        if let Some(ty) = self.infer_try_error_type(else_body, scope) {
+                            inferred.push(ty);
+                        }
+                    }
+                }
+                Node::Block(body)
+                | Node::TryExpr { body }
+                | Node::SpawnExpr { body }
+                | Node::Retry { body, .. }
+                | Node::WhileLoop { body, .. }
+                | Node::DeferStmt { body }
+                | Node::MutexBlock { body }
+                | Node::DeadlineBlock { body, .. }
+                | Node::Pipeline { body, .. }
+                | Node::OverrideDecl { body, .. } => {
+                    if let Some(ty) = self.infer_try_error_type(body, scope) {
+                        inferred.push(ty);
+                    }
+                }
+                _ => {}
+            }
+        }
+        if inferred.is_empty() {
+            None
+        } else {
+            Some(simplify_union(inferred))
         }
     }
 
@@ -1950,7 +2385,13 @@ impl TypeChecker {
                 // String literal pattern (matching on .variant): "VariantA"
                 Node::StringLiteral(s) => covered.push(s.clone()),
                 // Identifier pattern acts as a wildcard/catch-all
-                Node::Identifier(name) if name == "_" || !variants.contains(name) => {
+                Node::Identifier(name)
+                    if name == "_"
+                        || !variants
+                            .variants
+                            .iter()
+                            .any(|variant| variant.name == *name) =>
+                {
                     has_wildcard = true;
                 }
                 // Direct enum construct pattern: EnumName.Variant
@@ -1968,7 +2409,12 @@ impl TypeChecker {
             return;
         }
 
-        let missing: Vec<&String> = variants.iter().filter(|v| !covered.contains(v)).collect();
+        let missing: Vec<&String> = variants
+            .variants
+            .iter()
+            .map(|variant| &variant.name)
+            .filter(|variant| !covered.contains(variant))
+            .collect();
         if !missing.is_empty() {
             let missing_str = missing
                 .iter()
@@ -2172,9 +2618,22 @@ impl TypeChecker {
                 for (type_param, bound) in &sig.where_clauses {
                     if let Some(concrete_type) = type_bindings.get(type_param) {
                         let concrete_name = format_type(concrete_type);
-                        if let Some(reason) =
-                            self.interface_mismatch_reason(&concrete_name, bound, scope)
-                        {
+                        let Some(base_type_name) = Self::base_type_name(concrete_type) else {
+                            self.error_at(
+                                format!(
+                                    "Type '{}' does not satisfy interface '{}': only named types can satisfy interfaces (required by constraint `where {}: {}`)",
+                                    concrete_name, bound, type_param, bound
+                                ),
+                                span,
+                            );
+                            continue;
+                        };
+                        if let Some(reason) = self.interface_mismatch_reason(
+                            base_type_name,
+                            bound,
+                            &BTreeMap::new(),
+                            scope,
+                        ) {
                             self.error_at(
                                 format!(
                                     "Type '{}' does not satisfy interface '{}': {} \
@@ -2250,8 +2709,35 @@ impl TypeChecker {
 
             Node::FunctionCall { name, args } => {
                 // Struct constructor calls return the struct type
-                if scope.get_struct(name).is_some() {
-                    return Some(TypeExpr::Named(name.clone()));
+                if let Some(struct_info) = scope.get_struct(name) {
+                    return Some(Self::applied_type_or_name(
+                        name,
+                        struct_info
+                            .type_params
+                            .iter()
+                            .map(|_| Self::wildcard_type())
+                            .collect(),
+                    ));
+                }
+                if name == "Ok" {
+                    let ok_type = args
+                        .first()
+                        .and_then(|arg| self.infer_type(arg, scope))
+                        .unwrap_or_else(Self::wildcard_type);
+                    return Some(TypeExpr::Applied {
+                        name: "Result".into(),
+                        args: vec![ok_type, Self::wildcard_type()],
+                    });
+                }
+                if name == "Err" {
+                    let err_type = args
+                        .first()
+                        .and_then(|arg| self.infer_type(arg, scope))
+                        .unwrap_or_else(Self::wildcard_type);
+                    return Some(TypeExpr::Applied {
+                        name: "Result".into(),
+                        args: vec![Self::wildcard_type(), err_type],
+                    });
                 }
                 // Check user-defined function return types
                 if let Some(sig) = scope.get_fn(name) {
@@ -2322,19 +2808,29 @@ impl TypeChecker {
                 }
             }
 
-            Node::EnumConstruct { enum_name, .. } => Some(TypeExpr::Named(enum_name.clone())),
+            Node::EnumConstruct {
+                enum_name,
+                variant,
+                args,
+            } => {
+                if let Some(enum_info) = scope.get_enum(enum_name) {
+                    Some(self.infer_enum_type(enum_name, enum_info, variant, args, scope))
+                } else {
+                    Some(TypeExpr::Named(enum_name.clone()))
+                }
+            }
 
             Node::PropertyAccess { object, property } => {
                 // EnumName.Variant → infer as the enum type
                 if let Node::Identifier(name) = &object.node {
-                    if scope.get_enum(name).is_some() {
-                        return Some(TypeExpr::Named(name.clone()));
+                    if let Some(enum_info) = scope.get_enum(name) {
+                        return Some(self.infer_enum_type(name, enum_info, property, &[], scope));
                     }
                 }
                 // .variant on an enum value → string
                 if property == "variant" {
                     let obj_type = self.infer_type(object, scope);
-                    if let Some(TypeExpr::Named(name)) = &obj_type {
+                    if let Some(name) = obj_type.as_ref().and_then(Self::base_type_name) {
                         if scope.get_enum(name).is_some() {
                             return Some(TypeExpr::Named("string".into()));
                         }
@@ -2386,8 +2882,41 @@ impl TypeChecker {
                     _ => None,
                 }
             }
-            Node::MethodCall { object, method, .. }
-            | Node::OptionalMethodCall { object, method, .. } => {
+            Node::MethodCall {
+                object,
+                method,
+                args,
+            }
+            | Node::OptionalMethodCall {
+                object,
+                method,
+                args,
+            } => {
+                if let Node::Identifier(name) = &object.node {
+                    if let Some(enum_info) = scope.get_enum(name) {
+                        return Some(self.infer_enum_type(name, enum_info, method, args, scope));
+                    }
+                    if name == "Result" && (method == "Ok" || method == "Err") {
+                        let ok_type = if method == "Ok" {
+                            args.first()
+                                .and_then(|arg| self.infer_type(arg, scope))
+                                .unwrap_or_else(Self::wildcard_type)
+                        } else {
+                            Self::wildcard_type()
+                        };
+                        let err_type = if method == "Err" {
+                            args.first()
+                                .and_then(|arg| self.infer_type(arg, scope))
+                                .unwrap_or_else(Self::wildcard_type)
+                        } else {
+                            Self::wildcard_type()
+                        };
+                        return Some(TypeExpr::Applied {
+                            name: "Result".into(),
+                            args: vec![ok_type, err_type],
+                        });
+                    }
+                }
                 let obj_type = self.infer_type(object, scope);
                 let is_dict = matches!(&obj_type, Some(TypeExpr::Named(n)) if n == "dict")
                     || matches!(&obj_type, Some(TypeExpr::DictType(..)))
@@ -2415,6 +2944,12 @@ impl TypeChecker {
                     }
                     // List methods
                     "map" | "flat_map" | "sort" => Some(TypeExpr::Named("list".into())),
+                    "window" | "each_cons" | "sliding_window" => match &obj_type {
+                        Some(TypeExpr::List(inner)) => Some(TypeExpr::List(Box::new(
+                            TypeExpr::List(Box::new((**inner).clone())),
+                        ))),
+                        _ => Some(TypeExpr::Named("list".into())),
+                    },
                     "reduce" | "find" | "first" | "last" => None,
                     // Dict methods
                     "keys" | "values" | "entries" => Some(TypeExpr::Named("list".into())),
@@ -2440,12 +2975,13 @@ impl TypeChecker {
             }
 
             // TryOperator on Result<T, E> produces T
-            Node::TryOperator { operand } => {
-                match self.infer_type(operand, scope) {
-                    Some(TypeExpr::Named(name)) if name == "Result" => None, // unknown inner type
-                    _ => None,
+            Node::TryOperator { operand } => match self.infer_type(operand, scope) {
+                Some(TypeExpr::Applied { name, args }) if name == "Result" && args.len() == 2 => {
+                    Some(args[0].clone())
                 }
-            }
+                Some(TypeExpr::Named(name)) if name == "Result" => None,
+                _ => None,
+            },
 
             // Exit expressions produce the bottom type.
             Node::ThrowStmt { .. }
@@ -2475,6 +3011,27 @@ impl TypeChecker {
                 }
             }
 
+            Node::TryExpr { body } => {
+                let ok_type = self
+                    .infer_block_type(body, scope)
+                    .unwrap_or_else(Self::wildcard_type);
+                let err_type = self
+                    .infer_try_error_type(body, scope)
+                    .unwrap_or_else(Self::wildcard_type);
+                Some(TypeExpr::Applied {
+                    name: "Result".into(),
+                    args: vec![ok_type, err_type],
+                })
+            }
+
+            Node::StructConstruct {
+                struct_name,
+                fields,
+            } => scope
+                .get_struct(struct_name)
+                .map(|struct_info| self.infer_struct_type(struct_name, struct_info, fields, scope))
+                .or_else(|| Some(TypeExpr::Named(struct_name.clone()))),
+
             _ => None,
         }
     }
@@ -2489,6 +3046,9 @@ impl TypeChecker {
 
     /// Check if two types are compatible (actual can be assigned to expected).
     fn types_compatible(&self, expected: &TypeExpr, actual: &TypeExpr, scope: &TypeScope) -> bool {
+        if Self::is_wildcard_type(expected) || Self::is_wildcard_type(actual) {
+            return true;
+        }
         // Generic type parameters match anything.
         if let TypeExpr::Named(name) = expected {
             if scope.is_generic_type_param(name) {
@@ -2503,12 +3063,22 @@ impl TypeChecker {
         let expected = self.resolve_alias(expected, scope);
         let actual = self.resolve_alias(actual, scope);
 
-        // Interface satisfaction: if expected is an interface name, check if actual type
-        // has all required methods (Go-style implicit satisfaction).
-        if let TypeExpr::Named(iface_name) = &expected {
-            if scope.get_interface(iface_name).is_some() {
-                if let TypeExpr::Named(type_name) = &actual {
-                    return self.satisfies_interface(type_name, iface_name, scope);
+        // Interface satisfaction: if expected names an interface, check method compatibility.
+        if let Some(iface_name) = Self::base_type_name(&expected) {
+            if let Some(interface_info) = scope.get_interface(iface_name) {
+                let mut interface_bindings = BTreeMap::new();
+                if let TypeExpr::Applied { args, .. } = &expected {
+                    for (type_param, arg) in interface_info.type_params.iter().zip(args.iter()) {
+                        interface_bindings.insert(type_param.clone(), arg.clone());
+                    }
+                }
+                if let Some(type_name) = Self::base_type_name(&actual) {
+                    return self.satisfies_interface(
+                        type_name,
+                        iface_name,
+                        &interface_bindings,
+                        scope,
+                    );
                 }
                 return false;
             }
@@ -2520,6 +3090,26 @@ impl TypeChecker {
             // Nothing is assignable to never (except never itself, handled above).
             (TypeExpr::Never, _) => false,
             (TypeExpr::Named(a), TypeExpr::Named(b)) => a == b || (a == "float" && b == "int"),
+            (TypeExpr::Named(a), TypeExpr::Applied { name: b, .. })
+            | (TypeExpr::Applied { name: a, .. }, TypeExpr::Named(b)) => a == b,
+            (
+                TypeExpr::Applied {
+                    name: expected_name,
+                    args: expected_args,
+                },
+                TypeExpr::Applied {
+                    name: actual_name,
+                    args: actual_args,
+                },
+            ) => {
+                expected_name == actual_name
+                    && expected_args.len() == actual_args.len()
+                    && expected_args.iter().zip(actual_args.iter()).all(
+                        |(expected_arg, actual_arg)| {
+                            self.types_compatible(expected_arg, actual_arg, scope)
+                        },
+                    )
+            }
             // Union-to-Union: every member of actual must be compatible with
             // at least one member of expected.
             (TypeExpr::Union(exp_members), TypeExpr::Union(act_members)) => {
@@ -2596,12 +3186,53 @@ impl TypeChecker {
     }
 
     fn resolve_alias<'a>(&self, ty: &'a TypeExpr, scope: &'a TypeScope) -> TypeExpr {
-        if let TypeExpr::Named(name) = ty {
-            if let Some(resolved) = scope.resolve_type(name) {
-                return resolved.clone();
+        match ty {
+            TypeExpr::Named(name) => {
+                if let Some(resolved) = scope.resolve_type(name) {
+                    return self.resolve_alias(resolved, scope);
+                }
+                ty.clone()
             }
+            TypeExpr::Union(types) => TypeExpr::Union(
+                types
+                    .iter()
+                    .map(|ty| self.resolve_alias(ty, scope))
+                    .collect(),
+            ),
+            TypeExpr::Shape(fields) => TypeExpr::Shape(
+                fields
+                    .iter()
+                    .map(|field| ShapeField {
+                        name: field.name.clone(),
+                        type_expr: self.resolve_alias(&field.type_expr, scope),
+                        optional: field.optional,
+                    })
+                    .collect(),
+            ),
+            TypeExpr::List(inner) => TypeExpr::List(Box::new(self.resolve_alias(inner, scope))),
+            TypeExpr::DictType(key, value) => TypeExpr::DictType(
+                Box::new(self.resolve_alias(key, scope)),
+                Box::new(self.resolve_alias(value, scope)),
+            ),
+            TypeExpr::FnType {
+                params,
+                return_type,
+            } => TypeExpr::FnType {
+                params: params
+                    .iter()
+                    .map(|param| self.resolve_alias(param, scope))
+                    .collect(),
+                return_type: Box::new(self.resolve_alias(return_type, scope)),
+            },
+            TypeExpr::Applied { name, args } => TypeExpr::Applied {
+                name: name.clone(),
+                args: args
+                    .iter()
+                    .map(|arg| self.resolve_alias(arg, scope))
+                    .collect(),
+            },
+            TypeExpr::Never => TypeExpr::Never,
         }
-        ty.clone()
     }
 
     fn error_at(&mut self, message: String, span: Span) {
@@ -2934,6 +3565,10 @@ pub fn format_type(ty: &TypeExpr) -> String {
         }
         TypeExpr::List(inner) => format!("list<{}>", format_type(inner)),
         TypeExpr::DictType(k, v) => format!("dict<{}, {}>", format_type(k), format_type(v)),
+        TypeExpr::Applied { name, args } => {
+            let args_str = args.iter().map(format_type).collect::<Vec<_>>().join(", ");
+            format!("{name}<{args_str}>")
+        }
         TypeExpr::FnType {
             params,
             return_type,
@@ -3408,6 +4043,57 @@ add("hello", 2) }"#,
         );
         assert_eq!(errs.len(), 1, "expected 1 error, got: {:?}", errs);
         assert!(errs[0].contains("declared as string, but assigned int"));
+    }
+
+    #[test]
+    fn test_generic_struct_literal_instantiates_type_arguments() {
+        let errs = errors(
+            r#"pipeline t(task) {
+  struct Pair<A, B> {
+    first: A
+    second: B
+  }
+  let pair: Pair<int, string> = Pair { first: 1, second: "two" }
+}"#,
+        );
+        assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
+    }
+
+    #[test]
+    fn test_generic_enum_construct_instantiates_type_arguments() {
+        let errs = errors(
+            r#"pipeline t(task) {
+  enum Option<T> {
+    Some(value: T),
+    None
+  }
+  let value: Option<int> = Option.Some(42)
+}"#,
+        );
+        assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
+    }
+
+    #[test]
+    fn test_result_generic_type_compatibility() {
+        let errs = errors(
+            r#"pipeline t(task) {
+  let ok: Result<int, string> = Result.Ok(42)
+  let err: Result<int, string> = Result.Err("oops")
+}"#,
+        );
+        assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
+    }
+
+    #[test]
+    fn test_result_generic_type_mismatch_reports_error() {
+        let errs = errors(
+            r#"pipeline t(task) {
+  let bad: Result<int, string> = Result.Err(42)
+}"#,
+        );
+        assert_eq!(errs.len(), 1, "expected 1 error, got: {errs:?}");
+        assert!(errs[0].contains("Result<int, string>"));
+        assert!(errs[0].contains("Result<_, int>"));
     }
 
     #[test]
@@ -4014,6 +4700,53 @@ add("hello", 2) }"#,
 }"#,
         );
         assert!(warns.is_empty(), "expected no warnings, got: {:?}", warns);
+    }
+
+    #[test]
+    fn test_interface_associated_type_constraint_satisfied() {
+        let warns = iface_errors(
+            r#"pipeline t(task) {
+  interface Collection {
+    type Item
+    fn get(self, index: int) -> Item
+  }
+  struct Names {}
+  impl Names {
+    fn get(self, index: int) -> string { return "ada" }
+  }
+  fn first<C>(collection: C) where C: Collection {
+    log(collection.get(0))
+  }
+  first(Names {})
+}"#,
+        );
+        assert!(warns.is_empty(), "expected no warnings, got: {:?}", warns);
+    }
+
+    #[test]
+    fn test_interface_associated_type_default_mismatch() {
+        let warns = iface_errors(
+            r#"pipeline t(task) {
+  interface IntCollection {
+    type Item = int
+    fn get(self, index: int) -> Item
+  }
+  struct Labels {}
+  impl Labels {
+    fn get(self, index: int) -> string { return "oops" }
+  }
+  fn first<C>(collection: C) where C: IntCollection {
+    log(collection.get(0))
+  }
+  first(Labels {})
+}"#,
+        );
+        assert_eq!(warns.len(), 1, "expected 1 warning, got: {:?}", warns);
+        assert!(
+            warns[0].contains("associated type 'Item' resolves to 'string', expected 'int'"),
+            "unexpected message: {}",
+            warns[0]
+        );
     }
 
     // --- Flow-sensitive type refinement tests ---

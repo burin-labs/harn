@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use harn_lexer::{FixEdit, Span, StringSegment};
 use harn_parser::diagnostic::find_closest_match;
-use harn_parser::{stmt_definitely_exits, BindingPattern, Node, SNode};
+use harn_parser::{stmt_definitely_exits, BindingPattern, Node, SNode, TypeExpr, TypedParam};
 
 /// A lint diagnostic reported by the linter.
 #[derive(Debug, Clone)]
@@ -50,6 +50,13 @@ struct FnDeclaration {
     is_method: bool,
 }
 
+/// A type declaration tracked for unused-type detection.
+struct TypeDeclaration {
+    name: String,
+    span: Span,
+    kind: &'static str,
+}
+
 /// The linter walks the AST and collects diagnostics.
 struct Linter<'a> {
     diagnostics: Vec<LintDiagnostic>,
@@ -80,6 +87,12 @@ struct Linter<'a> {
     /// Functions in this set are not flagged as unused even if they have
     /// no local references, because another file explicitly imports them.
     externally_imported_names: HashSet<String>,
+    /// Track whether the current traversal is inside a test pipeline body.
+    test_pipeline_depth: usize,
+    /// Track type declarations for the `unused-type` lint rule.
+    type_declarations: Vec<TypeDeclaration>,
+    /// Track type names referenced anywhere in the file.
+    type_references: HashSet<String>,
 }
 
 impl<'a> Linter<'a> {
@@ -101,6 +114,9 @@ impl<'a> Linter<'a> {
             in_impl_block: false,
             source,
             externally_imported_names: HashSet::new(),
+            test_pipeline_depth: 0,
+            type_declarations: Vec::new(),
+            type_references: HashSet::new(),
         }
     }
 
@@ -118,6 +134,126 @@ impl<'a> Linter<'a> {
 
     fn pop_scope(&mut self) {
         self.scopes.pop();
+    }
+
+    fn in_test_pipeline(&self) -> bool {
+        self.test_pipeline_depth > 0
+    }
+
+    fn is_test_pipeline_name(name: &str) -> bool {
+        name == "test" || name.starts_with("test_")
+    }
+
+    fn is_assert_builtin(name: &str) -> bool {
+        matches!(name, "assert" | "assert_eq" | "assert_ne")
+    }
+
+    fn is_snake_case(name: &str) -> bool {
+        let mut chars = name.chars();
+        let Some(first) = chars.next() else {
+            return false;
+        };
+        if !(first.is_ascii_lowercase() || first == '_') {
+            return false;
+        }
+        name.chars()
+            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_')
+    }
+
+    fn is_pascal_case(name: &str) -> bool {
+        let mut chars = name.chars();
+        let Some(first) = chars.next() else {
+            return false;
+        };
+        if !first.is_ascii_uppercase() {
+            return false;
+        }
+        name.chars().all(|ch| ch.is_ascii_alphanumeric())
+    }
+
+    fn lint_function_name(&mut self, name: &str, span: Span) {
+        if Self::is_snake_case(name) {
+            return;
+        }
+        self.diagnostics.push(LintDiagnostic {
+            rule: "naming-convention",
+            message: format!("function `{name}` should use snake_case"),
+            span,
+            severity: LintSeverity::Warning,
+            suggestion: Some(format!(
+                "rename `{name}` to snake_case (for example `{}`)",
+                to_snake_case(name)
+            )),
+            fix: None,
+        });
+    }
+
+    fn lint_type_name(&mut self, kind: &'static str, name: &str, span: Span) {
+        if Self::is_pascal_case(name) {
+            return;
+        }
+        self.diagnostics.push(LintDiagnostic {
+            rule: "naming-convention",
+            message: format!("{kind} `{name}` should use PascalCase"),
+            span,
+            severity: LintSeverity::Warning,
+            suggestion: Some(format!(
+                "rename `{name}` to PascalCase (for example `{}`)",
+                to_pascal_case(name)
+            )),
+            fix: None,
+        });
+    }
+
+    fn record_type_expr_references(&mut self, type_expr: &TypeExpr) {
+        match type_expr {
+            TypeExpr::Named(name) => {
+                self.type_references.insert(name.clone());
+            }
+            TypeExpr::Union(types) => {
+                for inner in types {
+                    self.record_type_expr_references(inner);
+                }
+            }
+            TypeExpr::Shape(fields) => {
+                for field in fields {
+                    self.record_type_expr_references(&field.type_expr);
+                }
+            }
+            TypeExpr::List(inner) => self.record_type_expr_references(inner),
+            TypeExpr::DictType(key, value) => {
+                self.record_type_expr_references(key);
+                self.record_type_expr_references(value);
+            }
+            TypeExpr::Applied { name, args } => {
+                self.type_references.insert(name.clone());
+                for arg in args {
+                    self.record_type_expr_references(arg);
+                }
+            }
+            TypeExpr::FnType {
+                params,
+                return_type,
+            } => {
+                for param in params {
+                    self.record_type_expr_references(param);
+                }
+                self.record_type_expr_references(return_type);
+            }
+            TypeExpr::Never => {}
+        }
+    }
+
+    fn record_param_type_references(&mut self, params: &[TypedParam]) {
+        for param in params {
+            if let Some(type_expr) = &param.type_expr {
+                self.record_type_expr_references(type_expr);
+            }
+        }
+    }
+
+    fn has_interpolation(node: &SNode) -> bool {
+        matches!(&node.node, Node::InterpolatedString(segments) if segments.iter().any(|segment| matches!(segment, StringSegment::Expression(_, _, _))))
     }
 
     /// Extract the root variable name from an assignment target.
@@ -261,17 +397,26 @@ impl<'a> Linter<'a> {
                     self.references.insert(p.clone());
                 }
                 self.references.insert(name.clone());
+                if Self::is_test_pipeline_name(name) {
+                    self.test_pipeline_depth += 1;
+                }
                 self.lint_block(body);
+                if Self::is_test_pipeline_name(name) {
+                    self.test_pipeline_depth -= 1;
+                }
                 self.pop_scope();
             }
 
             Node::FnDecl {
                 name,
                 params,
+                return_type,
+                where_clauses,
                 body,
                 is_pub,
                 ..
             } => {
+                self.lint_function_name(name, snode.span);
                 self.known_functions.insert(name.clone());
                 self.fn_declarations.push(FnDeclaration {
                     name: name.clone(),
@@ -296,6 +441,29 @@ impl<'a> Linter<'a> {
                         fix: None,
                     });
                 }
+                self.record_param_type_references(params);
+                if let Some(type_expr) = return_type {
+                    self.record_type_expr_references(type_expr);
+                }
+                for clause in where_clauses {
+                    self.type_references.insert(clause.bound.clone());
+                }
+                let complexity = cyclomatic_complexity(body);
+                if complexity > 10 {
+                    self.diagnostics.push(LintDiagnostic {
+                        rule: "cyclomatic-complexity",
+                        message: format!(
+                            "function `{name}` has cyclomatic complexity {complexity} (> 10)"
+                        ),
+                        span: snode.span,
+                        severity: LintSeverity::Warning,
+                        suggestion: Some(
+                            "split the function into smaller helpers or simplify branching"
+                                .to_string(),
+                        ),
+                        fix: None,
+                    });
+                }
                 self.push_scope();
                 let saved_loop_depth = self.loop_depth;
                 self.loop_depth = 0; // Functions are a new scope
@@ -310,10 +478,12 @@ impl<'a> Linter<'a> {
             Node::ToolDecl {
                 name,
                 params,
+                return_type,
                 body,
                 is_pub,
                 ..
             } => {
+                self.lint_function_name(name, snode.span);
                 self.known_functions.insert(name.clone());
                 self.fn_declarations.push(FnDeclaration {
                     name: name.clone(),
@@ -321,6 +491,26 @@ impl<'a> Linter<'a> {
                     is_pub: *is_pub,
                     is_method: false,
                 });
+                self.record_param_type_references(params);
+                if let Some(type_expr) = return_type {
+                    self.record_type_expr_references(type_expr);
+                }
+                let complexity = cyclomatic_complexity(body);
+                if complexity > 10 {
+                    self.diagnostics.push(LintDiagnostic {
+                        rule: "cyclomatic-complexity",
+                        message: format!(
+                            "function `{name}` has cyclomatic complexity {complexity} (> 10)"
+                        ),
+                        span: snode.span,
+                        severity: LintSeverity::Warning,
+                        suggestion: Some(
+                            "split the function into smaller helpers or simplify branching"
+                                .to_string(),
+                        ),
+                        fix: None,
+                    });
+                }
                 self.push_scope();
                 let saved_loop_depth = self.loop_depth;
                 self.loop_depth = 0;
@@ -332,7 +522,8 @@ impl<'a> Linter<'a> {
                 self.pop_scope();
             }
 
-            Node::ImplBlock { methods, .. } => {
+            Node::ImplBlock { type_name, methods } => {
+                self.type_references.insert(type_name.clone());
                 let saved = self.in_impl_block;
                 self.in_impl_block = true;
                 for method in methods {
@@ -368,6 +559,35 @@ impl<'a> Linter<'a> {
                 self.references.insert(name.clone());
                 self.function_references.insert(name.clone());
                 self.function_calls.push((name.clone(), snode.span));
+                if Self::is_assert_builtin(name) && !self.in_test_pipeline() {
+                    self.diagnostics.push(LintDiagnostic {
+                        rule: "assert-outside-test",
+                        message: format!(
+                            "`{name}` is intended for test pipelines, not production control flow"
+                        ),
+                        span: snode.span,
+                        severity: LintSeverity::Warning,
+                        suggestion: Some(
+                            "use `require` for invariants in non-test code".to_string(),
+                        ),
+                        fix: None,
+                    });
+                }
+                if name == "llm_call" && args.get(1).is_some_and(Self::has_interpolation) {
+                    self.diagnostics.push(LintDiagnostic {
+                        rule: "prompt-injection-risk",
+                        message:
+                            "interpolated data in the `llm_call` system prompt can smuggle untrusted instructions"
+                                .to_string(),
+                        span: snode.span,
+                        severity: LintSeverity::Warning,
+                        suggestion: Some(
+                            "keep the system prompt static and pass dynamic data in the user prompt or options"
+                                .to_string(),
+                        ),
+                        fix: None,
+                    });
+                }
                 for arg in args {
                     self.lint_node(arg);
                 }
@@ -767,6 +987,20 @@ impl<'a> Linter<'a> {
             }
 
             Node::RequireStmt { condition, message } => {
+                if self.in_test_pipeline() {
+                    self.diagnostics.push(LintDiagnostic {
+                        rule: "require-in-test",
+                        message: "`require` in a test pipeline should usually be an assertion"
+                            .to_string(),
+                        span: snode.span,
+                        severity: LintSeverity::Warning,
+                        suggestion: Some(
+                            "prefer `assert(...)` or `assert_eq(...)` in test pipelines"
+                                .to_string(),
+                        ),
+                        fix: None,
+                    });
+                }
                 self.lint_node(condition);
                 if let Some(message) = message {
                     self.lint_node(message);
@@ -854,13 +1088,20 @@ impl<'a> Linter<'a> {
                 }
             }
 
-            Node::EnumConstruct { args, .. } => {
+            Node::EnumConstruct {
+                enum_name, args, ..
+            } => {
+                self.type_references.insert(enum_name.clone());
                 for arg in args {
                     self.lint_node(arg);
                 }
             }
 
-            Node::StructConstruct { fields, .. } => {
+            Node::StructConstruct {
+                struct_name,
+                fields,
+            } => {
+                self.type_references.insert(struct_name.clone());
                 for entry in fields {
                     self.lint_node(&entry.key);
                     self.lint_node(&entry.value);
@@ -902,11 +1143,31 @@ impl<'a> Linter<'a> {
                 self.lint_node(operand);
             }
 
-            Node::StructDecl { name, .. } => {
+            Node::StructDecl { name, fields, .. } => {
+                self.lint_type_name("struct", name, snode.span);
                 self.known_functions.insert(name.clone());
+                self.type_declarations.push(TypeDeclaration {
+                    name: name.clone(),
+                    span: snode.span,
+                    kind: "struct",
+                });
+                for field in fields {
+                    if let Some(type_expr) = &field.type_expr {
+                        self.record_type_expr_references(type_expr);
+                    }
+                }
             }
-            Node::EnumDecl { name, .. } => {
+            Node::EnumDecl { name, variants, .. } => {
+                self.lint_type_name("enum", name, snode.span);
                 self.known_functions.insert(name.clone());
+                self.type_declarations.push(TypeDeclaration {
+                    name: name.clone(),
+                    span: snode.span,
+                    kind: "enum",
+                });
+                for variant in variants {
+                    self.record_param_type_references(&variant.fields);
+                }
             }
             Node::SelectiveImport { names, .. } => {
                 for name in names {
@@ -922,6 +1183,36 @@ impl<'a> Linter<'a> {
                 self.has_wildcard_import = true;
             }
 
+            Node::InterfaceDecl {
+                name,
+                associated_types,
+                methods,
+                ..
+            } => {
+                self.lint_type_name("interface", name, snode.span);
+                self.type_declarations.push(TypeDeclaration {
+                    name: name.clone(),
+                    span: snode.span,
+                    kind: "interface",
+                });
+                for (_, default_type) in associated_types {
+                    if let Some(type_expr) = default_type {
+                        self.record_type_expr_references(type_expr);
+                    }
+                }
+                for method in methods {
+                    self.record_param_type_references(&method.params);
+                    if let Some(type_expr) = &method.return_type {
+                        self.record_type_expr_references(type_expr);
+                    }
+                }
+            }
+
+            Node::TypeDecl { name, type_expr } => {
+                self.lint_type_name("type", name, snode.span);
+                self.record_type_expr_references(type_expr);
+            }
+
             // Leaf nodes and declarations that don't need recursion.
             Node::StringLiteral(_)
             | Node::RawStringLiteral(_)
@@ -930,9 +1221,7 @@ impl<'a> Linter<'a> {
             | Node::BoolLiteral(_)
             | Node::NilLiteral
             | Node::DurationLiteral(_)
-            | Node::InterfaceDecl { .. }
             | Node::OverrideDecl { .. }
-            | Node::TypeDecl { .. }
             | Node::BreakStmt
             | Node::ContinueStmt => {
                 // Rule: break/continue outside loop
@@ -1148,6 +1437,29 @@ impl<'a> Linter<'a> {
             }
         }
 
+        // Rule: unused-type
+        for decl in &self.type_declarations {
+            if decl.name.starts_with('_') {
+                continue;
+            }
+            if !self.type_references.contains(&decl.name) {
+                self.diagnostics.push(LintDiagnostic {
+                    rule: "unused-type",
+                    message: format!(
+                        "{} `{}` is declared but never referenced",
+                        decl.kind, decl.name
+                    ),
+                    span: decl.span,
+                    severity: LintSeverity::Warning,
+                    suggestion: Some(format!(
+                        "remove the unused {} or reference `{}` from a signature or constructor",
+                        decl.kind, decl.name
+                    )),
+                    fix: None,
+                });
+            }
+        }
+
         // Variables and parameters that could hold closures
         let all_vars: HashSet<String> = self
             .declarations
@@ -1219,6 +1531,218 @@ fn extract_harndoc(source: &str, span: &Span) -> Option<String> {
         comment_lines.reverse();
         Some(comment_lines.join("\n"))
     }
+}
+
+fn to_snake_case(name: &str) -> String {
+    let mut out = String::new();
+    for (index, ch) in name.chars().enumerate() {
+        if ch.is_ascii_uppercase() {
+            if index > 0 {
+                out.push('_');
+            }
+            out.push(ch.to_ascii_lowercase());
+        } else if ch.is_ascii_alphanumeric() || ch == '_' {
+            out.push(ch.to_ascii_lowercase());
+        }
+    }
+    out
+}
+
+fn to_pascal_case(name: &str) -> String {
+    let mut out = String::new();
+    let mut uppercase_next = true;
+    for ch in name.chars() {
+        if !ch.is_ascii_alphanumeric() {
+            uppercase_next = true;
+            continue;
+        }
+        if uppercase_next {
+            out.push(ch.to_ascii_uppercase());
+            uppercase_next = false;
+        } else {
+            out.push(ch.to_ascii_lowercase());
+        }
+    }
+    out
+}
+
+fn cyclomatic_complexity(nodes: &[SNode]) -> usize {
+    fn node_complexity(node: &SNode) -> usize {
+        match &node.node {
+            Node::IfElse {
+                condition,
+                then_body,
+                else_body,
+            } => {
+                1 + node_complexity(condition)
+                    + body_complexity(then_body)
+                    + else_body
+                        .as_ref()
+                        .map(|body| body_complexity(body))
+                        .unwrap_or(0)
+            }
+            Node::ForIn { iterable, body, .. } => {
+                1 + node_complexity(iterable) + body_complexity(body)
+            }
+            Node::WhileLoop { condition, body } => {
+                1 + node_complexity(condition) + body_complexity(body)
+            }
+            Node::Retry { count, body } => 1 + node_complexity(count) + body_complexity(body),
+            Node::MatchExpr { value, arms } => {
+                1 + node_complexity(value)
+                    + arms
+                        .iter()
+                        .map(|arm| {
+                            arm.guard
+                                .as_ref()
+                                .map(|guard| node_complexity(guard))
+                                .unwrap_or(0)
+                                + body_complexity(&arm.body)
+                        })
+                        .sum::<usize>()
+            }
+            Node::SelectExpr {
+                cases,
+                timeout,
+                default_body,
+            } => {
+                cases.len()
+                    + cases
+                        .iter()
+                        .map(|case| node_complexity(&case.channel) + body_complexity(&case.body))
+                        .sum::<usize>()
+                    + timeout
+                        .as_ref()
+                        .map(|(duration, body)| node_complexity(duration) + body_complexity(body))
+                        .unwrap_or(0)
+                    + default_body
+                        .as_ref()
+                        .map(|body| body_complexity(body))
+                        .unwrap_or(0)
+            }
+            Node::GuardStmt {
+                condition,
+                else_body,
+            } => 1 + node_complexity(condition) + body_complexity(else_body),
+            Node::RequireStmt { condition, message } => {
+                node_complexity(condition)
+                    + message
+                        .as_ref()
+                        .map(|expr| node_complexity(expr))
+                        .unwrap_or(0)
+            }
+            Node::TryCatch {
+                body,
+                catch_body,
+                finally_body,
+                ..
+            } => {
+                1 + body_complexity(body)
+                    + body_complexity(catch_body)
+                    + finally_body
+                        .as_ref()
+                        .map(|body| body_complexity(body))
+                        .unwrap_or(0)
+            }
+            Node::Ternary {
+                condition,
+                true_expr,
+                false_expr,
+            } => {
+                1 + node_complexity(condition)
+                    + node_complexity(true_expr)
+                    + node_complexity(false_expr)
+            }
+            Node::BinaryOp { op, left, right } => {
+                usize::from(op == "&&" || op == "||")
+                    + node_complexity(left)
+                    + node_complexity(right)
+            }
+            Node::Parallel { expr, body, .. }
+            | Node::DeadlineBlock {
+                duration: expr,
+                body,
+            } => node_complexity(expr) + body_complexity(body),
+            Node::MutexBlock { body }
+            | Node::TryExpr { body }
+            | Node::DeferStmt { body }
+            | Node::Block(body)
+            | Node::SpawnExpr { body } => body_complexity(body),
+            Node::FunctionCall { args, .. } => args.iter().map(node_complexity).sum(),
+            Node::MethodCall { object, args, .. }
+            | Node::OptionalMethodCall { object, args, .. } => {
+                node_complexity(object) + args.iter().map(node_complexity).sum::<usize>()
+            }
+            Node::StructConstruct { fields, .. } | Node::DictLiteral(fields) => fields
+                .iter()
+                .map(|entry| node_complexity(&entry.key) + node_complexity(&entry.value))
+                .sum(),
+            Node::ListLiteral(items) => items.iter().map(node_complexity).sum(),
+            Node::Assignment { target, value, .. } => {
+                node_complexity(target) + node_complexity(value)
+            }
+            Node::PropertyAccess { object, .. }
+            | Node::OptionalPropertyAccess { object, .. }
+            | Node::UnaryOp {
+                operand: object, ..
+            }
+            | Node::TryOperator { operand: object }
+            | Node::Spread(object) => node_complexity(object),
+            Node::SubscriptAccess { object, index } => {
+                node_complexity(object) + node_complexity(index)
+            }
+            Node::SliceAccess { object, start, end } => {
+                node_complexity(object)
+                    + start
+                        .as_ref()
+                        .map(|expr| node_complexity(expr))
+                        .unwrap_or(0)
+                    + end.as_ref().map(|expr| node_complexity(expr)).unwrap_or(0)
+            }
+            Node::RangeExpr { start, end, .. } => node_complexity(start) + node_complexity(end),
+            Node::ThrowStmt { value } | Node::ReturnStmt { value: Some(value) } => {
+                node_complexity(value)
+            }
+            Node::YieldExpr { value } => value
+                .as_ref()
+                .map(|expr| node_complexity(expr))
+                .unwrap_or(0),
+            Node::LetBinding { value, .. } | Node::VarBinding { value, .. } => {
+                node_complexity(value)
+            }
+            Node::EnumConstruct { args, .. } => args.iter().map(node_complexity).sum(),
+            Node::Closure { body, .. } => body_complexity(body),
+            Node::ReturnStmt { value: None }
+            | Node::BreakStmt
+            | Node::ContinueStmt
+            | Node::StringLiteral(_)
+            | Node::RawStringLiteral(_)
+            | Node::InterpolatedString(_)
+            | Node::IntLiteral(_)
+            | Node::FloatLiteral(_)
+            | Node::BoolLiteral(_)
+            | Node::NilLiteral
+            | Node::DurationLiteral(_)
+            | Node::Identifier(_)
+            | Node::ImportDecl { .. }
+            | Node::SelectiveImport { .. }
+            | Node::OverrideDecl { .. }
+            | Node::EnumDecl { .. }
+            | Node::StructDecl { .. }
+            | Node::InterfaceDecl { .. }
+            | Node::FnDecl { .. }
+            | Node::ToolDecl { .. }
+            | Node::TypeDecl { .. }
+            | Node::Pipeline { .. }
+            | Node::ImplBlock { .. } => 0,
+        }
+    }
+
+    fn body_complexity(nodes: &[SNode]) -> usize {
+        nodes.iter().map(node_complexity).sum()
+    }
+
+    1 + body_complexity(nodes)
 }
 
 /// Lint an AST program and return all diagnostics.
@@ -1371,6 +1895,66 @@ pub fn exposed() -> string {
 "#,
         );
         assert!(has_rule(&diags, "missing-harndoc"));
+    }
+
+    #[test]
+    fn test_assert_outside_test_pipeline_warns() {
+        let diags = lint_source(
+            r#"
+pipeline default(task) {
+    assert(true)
+}
+"#,
+        );
+        assert!(
+            has_rule(&diags, "assert-outside-test"),
+            "expected assert-outside-test warning, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_assert_inside_test_pipeline_is_allowed() {
+        let diags = lint_source(
+            r#"
+pipeline test(task) {
+    assert_eq(1 + 1, 2)
+}
+"#,
+        );
+        assert!(
+            !has_rule(&diags, "assert-outside-test"),
+            "asserts inside test pipelines should be allowed: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_require_inside_test_pipeline_warns() {
+        let diags = lint_source(
+            r#"
+pipeline test_example(task) {
+    require 1 + 1 == 2, "math still works"
+}
+"#,
+        );
+        assert!(
+            has_rule(&diags, "require-in-test"),
+            "expected require-in-test warning, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_require_outside_test_pipeline_is_allowed() {
+        let diags = lint_source(
+            r#"
+pipeline default(task) {
+    require task != nil, "task is required"
+}
+"#,
+        );
+        assert!(
+            !has_rule(&diags, "require-in-test"),
+            "require outside tests should be allowed: {diags:?}"
+        );
     }
 
     #[test]
@@ -2419,6 +3003,123 @@ fn local() { return foo() + bar() + baz() }
         assert!(
             result.contains("let y = x"),
             "comparison should be simplified, got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_naming_convention_flags_non_snake_case_function() {
+        let diags = lint_source(
+            r#"
+fn BadName() {
+  return nil
+}
+"#,
+        );
+        assert!(
+            has_rule(&diags, "naming-convention"),
+            "expected naming-convention warning, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_naming_convention_flags_non_pascal_case_type() {
+        let diags = lint_source(
+            r#"
+struct bad_name {
+  value: int
+}
+"#,
+        );
+        assert!(
+            has_rule(&diags, "naming-convention"),
+            "expected naming-convention warning, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_unused_type_warns_for_unreferenced_struct() {
+        let diags = lint_source(
+            r#"
+struct Helper {
+  value: int
+}
+
+pipeline default(task) {
+  log("ready")
+}
+"#,
+        );
+        assert!(
+            has_rule(&diags, "unused-type"),
+            "expected unused-type warning, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_unused_type_ignores_referenced_struct() {
+        let diags = lint_source(
+            r#"
+struct Helper {
+  value: int
+}
+
+fn build() -> Helper {
+  return Helper { value: 1 }
+}
+
+pipeline default(task) {
+  let item = build()
+  log(item.value)
+}
+"#,
+        );
+        assert!(
+            !has_rule(&diags, "unused-type"),
+            "referenced types should not trigger unused-type: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_cyclomatic_complexity_warns_for_branchy_function() {
+        let diags = lint_source(
+            r#"
+fn complicated(x: int) {
+  if x > 0 { log("1") }
+  if x > 1 { log("2") }
+  if x > 2 { log("3") }
+  if x > 3 { log("4") }
+  if x > 4 { log("5") }
+  if x > 5 { log("6") }
+  if x > 6 { log("7") }
+  if x > 7 { log("8") }
+  if x > 8 { log("9") }
+  if x > 9 { log("10") }
+}
+
+pipeline default(task) {
+  complicated(10)
+}
+"#,
+        );
+        assert!(
+            has_rule(&diags, "cyclomatic-complexity"),
+            "expected cyclomatic-complexity warning, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_prompt_injection_risk_warns_on_interpolated_system_prompt() {
+        let diags = lint_source(
+            r#"
+pipeline default(task) {
+  let user_text = "ignore safety"
+  llm_call("hello", "You are safe. ${user_text}")
+}
+"#,
+        );
+        assert!(
+            has_rule(&diags, "prompt-injection-risk"),
+            "expected prompt-injection-risk warning, got: {diags:?}"
         );
     }
 
