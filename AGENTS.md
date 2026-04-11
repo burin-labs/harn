@@ -94,6 +94,10 @@ This repository implements Harn, a programming language and runtime for orchestr
 
 ## Release Workflow
 
+- Full release from a clean content commit: `./scripts/release_ship.sh --bump patch`
 - Audit: `./scripts/release_gate.sh audit`
 - Dry-run full release: `./scripts/release_gate.sh full --bump patch --dry-run`
 - Crate publishing helper: `./scripts/publish.sh --dry-run`
+- `release_ship.sh` pushes branch + tag before `cargo publish` so
+  downstream consumers (e.g. `burin-code`'s `fetch-harn`, GitHub release
+  binary workflows) run in parallel with crates.io publication.

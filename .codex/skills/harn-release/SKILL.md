@@ -15,16 +15,16 @@ rendering.
 Always prefer the repo scripts:
 
 ```bash
-./scripts/release_gate.sh <audit|prepare|publish|notes|full> ...
-./scripts/release_ship.sh --bump patch
+./scripts/release_ship.sh --bump patch                     # full release
+./scripts/release_gate.sh <audit|prepare|publish|notes|full> ...  # piecewise
 ```
 
-Do not re-invent the release ritual from memory if the script can do it.
-Use normal git commands for the parts that the release gate intentionally does
-not automate, such as analyzing pending local work, making release commits, and
-pushing `main` and tags. Once the release content is committed and the tree is
-clean, prefer `./scripts/release_ship.sh` for the deterministic release
-mechanics.
+Do not re-invent the release ritual from memory if `release_ship.sh` can do
+it. Use normal git commands only for the parts that the release gate
+intentionally does not automate: analyzing pending local work and producing
+the "Prepare vX.Y.Z release" commit. Once that commit is in place and the
+tree is clean, `release_ship.sh` handles audit, bump, tag, push, publish,
+and GitHub release creation.
 
 ## Default workflow
 
@@ -32,36 +32,38 @@ mechanics.
    Treat tracked and untracked changes as candidate release content unless the
    user scopes the release more narrowly.
 2. Read enough diff context to summarize the pending work accurately.
-3. Do a repo-consistency sweep before shipping. Update release-facing docs and
+3. Audit pending changes for correctness and test coverage. Add Rust tests or
+   conformance pairs for new or changed user-visible behavior; fix bugs
+   discovered during the audit instead of shipping them. Run
+   `cargo test --workspace` and `cargo run --bin harn -- test conformance`
+   before proceeding.
+4. Do a repo-consistency sweep before shipping. Update release-facing docs and
    operator guidance as needed, especially `README.md`, `CLAUDE.md`,
    `docs/src/`, `spec/HARN_SPEC.md`, `CHANGELOG.md`, and any developer setup
    surfaces such as `scripts/dev_setup.sh`, `Makefile`, `.githooks/`, and the
    first-party `harn portal` docs.
-4. If syntax, parser, lexer, or tree-sitter changed, update
+5. If syntax, parser, lexer, or tree-sitter changed, update
    `spec/HARN_SPEC.md` first. Treat it as the formal language-spec source of
    truth.
-5. Update `CHANGELOG.md` before bumping the version. The new top entry must
+6. Update `CHANGELOG.md` before bumping the version. The new top entry must
    describe the actual pending code changes that will ship.
-6. Run `./scripts/release_gate.sh audit`.
-7. If the user wants publication, run
-   `./scripts/release_gate.sh publish --dry-run` before the real publish unless
-   they explicitly ask to skip the dry run.
-8. If the tree is dirty and the user wants those local changes released, stage
-   and commit them before `prepare`. Use `git add -A` so untracked files are
-   included too.
-9. After the release content commit is in place, prefer
-   `./scripts/release_ship.sh --bump patch` for the mechanical release
-   sequence. Change `patch` to `minor` or `major` if requested.
-10. If you need to perform those steps manually instead of using
-    `release_ship.sh`, run `./scripts/release_gate.sh prepare --bump ...`,
-    commit the version bump, render notes with
-    `./scripts/release_gate.sh notes`, run
-    `./scripts/release_gate.sh publish`, then tag and push.
-11. For an all-in-one dry run, use:
-
-```bash
-./scripts/release_gate.sh full --bump patch --dry-run
-```
+7. Run `cargo fmt --all` once so the upcoming release content commit is
+   formatting-clean. `release_gate.sh audit` runs `cargo fmt -- --check` and
+   will reject drift later; catching it here avoids re-doing commits.
+8. Stage and commit the release content with
+   `git commit -m "Prepare vX.Y.Z release"`. Include every file that ships in
+   this version, including `CHANGELOG.md` and docs updates. Do **not** touch
+   `Cargo.toml` / `Cargo.lock` version strings — `release_ship.sh` produces
+   the "Bump version to X.Y.Z" commit separately.
+9. With the release content committed and the tree clean, run
+   `./scripts/release_ship.sh --bump patch` (or `minor`/`major`). The script
+   runs audit, dry-run publish, bump, commit, tag, push branch + tag,
+   `cargo publish`, and GitHub release creation in that order.
+10. For an all-in-one dry run that stops before any destructive action, use
+    `./scripts/release_gate.sh full --bump patch --dry-run`.
+11. Only fall back to the piecewise `release_gate.sh prepare` / `publish` /
+    `notes` commands when `release_ship.sh` cannot do what you need
+    (e.g. recovering a partial release).
 
 ## Expectations
 
@@ -98,10 +100,21 @@ mechanics.
   produce the exact GitHub release body from it.
 - GitHub release artifacts are produced by the existing release workflow once
   the tag is pushed.
-- Prefer two commits for a real release when local feature/fix work is still
-  pending:
-  `git commit -m "<describe release content>"` followed by
-  `git commit -m "Bump version to X.Y.Z"`.
+- `release_ship.sh` pushes the branch and tag **before** running
+  `cargo publish`, so the GitHub release-binary workflow and downstream
+  fetchers (e.g. `burin-code`'s `fetch-harn`) can start working in parallel
+  with crates.io publication. The GitHub release body is created last so it
+  reflects the final crates.io + git state.
+- A real release has exactly two commits on top of the previous release:
+  `Prepare vX.Y.Z release` (code + docs + `CHANGELOG.md`) followed by
+  `Bump version to X.Y.Z` (Cargo.toml + Cargo.lock only). `release_ship.sh`
+  creates the second commit automatically; the human/agent creates the
+  first.
 - `scripts/release_ship.sh` assumes the real release content, including docs
-  consistency updates, has already been committed and the tree is clean before
-  it starts.
+  consistency updates, has already been committed and the tree is clean
+  before it starts.
+- `verify_release_metadata.py` (run from `release_gate.sh audit`) accepts the
+  pre-bump state: it passes when the top `CHANGELOG.md` entry is exactly one
+  patch/minor/major step ahead of `Cargo.toml`. Running audit on a "Prepare
+  vX.Y.Z release" commit is fine even though Cargo.toml still points at the
+  previous version.

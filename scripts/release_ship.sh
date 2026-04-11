@@ -22,11 +22,14 @@ This script then:
   2. Optionally runs ./scripts/release_gate.sh publish --dry-run
   3. Runs ./scripts/release_gate.sh prepare --bump ...
   4. Commits the version bump
-  5. Renders changelog-backed release notes
-  6. Runs ./scripts/release_gate.sh publish
-  7. Creates tag vX.Y.Z
-  8. Pushes the current branch and tag unless --no-push was passed
-  9. Creates/updates a GitHub release with the rendered notes (requires gh CLI)
+  5. Creates tag vX.Y.Z
+  6. Pushes the current branch and tag first (unless --no-push) so GitHub
+     release-binary workflows and downstream fetchers (e.g. burin-code's
+     fetch-harn) can start working in parallel with crates.io publication.
+  7. Runs ./scripts/release_gate.sh publish to upload crates to crates.io.
+  8. Renders changelog-backed release notes.
+  9. Creates/updates a GitHub release with the rendered notes (requires gh
+     CLI) as the final step, so the release body reflects crates.io state.
 EOF
 }
 
@@ -122,6 +125,22 @@ git commit -m "Bump version to $NEXT_VERSION"
 TAG="v$NEXT_VERSION"
 BRANCH="$(git branch --show-current)"
 
+echo "=== Tag ==="
+git tag "$TAG"
+
+# Push branch + tag before cargo publish so downstream consumers (e.g.
+# burin-code's fetch-harn script, GitHub release-binary workflows) can start
+# working in parallel with crates.io publication. crates.io is slower than
+# GitHub, and this ordering overlaps the two latencies.
+if [[ "$NO_PUSH" -eq 0 ]]; then
+  echo "=== Push branch + tag ==="
+  git push origin "$BRANCH"
+  git push origin "$TAG"
+fi
+
+echo "=== Publish ==="
+./scripts/release_gate.sh publish
+
 if [[ -z "$NOTES_OUTPUT" ]]; then
   NOTES_OUTPUT="$(mktemp)"
   CLEANUP_NOTES=1
@@ -133,19 +152,10 @@ echo "=== Release notes ==="
 ./scripts/release_gate.sh notes --version "$TAG" --output "$NOTES_OUTPUT"
 cat "$NOTES_OUTPUT"
 
-echo "=== Publish ==="
-./scripts/release_gate.sh publish
-
-echo "=== Tag ==="
-git tag "$TAG"
-
-if [[ "$NO_PUSH" -eq 0 ]]; then
-  echo "=== Push ==="
-  git push origin "$BRANCH"
-  git push origin "$TAG"
-fi
-
-# Create or update GitHub release with rendered notes
+# Create or update GitHub release with rendered notes as the LAST step, so
+# the release body reflects the final crates.io + git state. If crates.io
+# was slow, the upstream tag is already live — downstream CI will have
+# kicked off minutes ago.
 GH_RELEASE_URL=""
 if [[ "$NO_PUSH" -eq 0 ]] && command -v gh &>/dev/null; then
   echo "=== GitHub release ==="

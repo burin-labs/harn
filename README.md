@@ -230,8 +230,20 @@ execution plus explicit host approval for destructive operations.
 
 ## Release Workflow
 
-Maintainers can run the comprehensive docs audit, verification gate, version
-bump flow, and publish ritual through:
+Once the release content (code + docs + `CHANGELOG.md` entry for the next
+version) is committed and the tree is clean, maintainers run the full
+release ritual through:
+
+```bash
+./scripts/release_ship.sh --bump patch
+```
+
+This runs audit → dry-run publish → bump → commit → tag → push branch and
+tag → `cargo publish` → GitHub release creation in that order. The push
+happens **before** `cargo publish` so downstream consumers and GitHub
+release-binary workflows can start working in parallel with crates.io.
+
+For piecewise work (or a dry run that stops before destructive actions):
 
 ```bash
 ./scripts/release_gate.sh audit

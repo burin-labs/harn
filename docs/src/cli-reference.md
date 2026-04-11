@@ -377,8 +377,19 @@ Security guidance:
 
 ## Release gate
 
-For repo maintainers, the comprehensive docs audit, verification gate, version
-bump flow, and publish sequence are orchestrated by:
+For repo maintainers, the deterministic full-release path is:
+
+```bash
+./scripts/release_ship.sh --bump patch
+```
+
+This runs audit → dry-run publish → bump → commit → tag → push → `cargo publish`
+→ GitHub release in that order. Pushing happens before `cargo publish` so
+downstream consumers (GitHub release binary workflows, `burin-code`'s
+`fetch-harn`) start in parallel with crates.io.
+
+For piecewise work, the docs audit, verification gate, bump flow, and publish
+sequence are exposed individually:
 
 ```bash
 ./scripts/release_gate.sh audit

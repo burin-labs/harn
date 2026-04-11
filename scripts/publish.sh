@@ -1,21 +1,47 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Publish all harn crates to crates.io in dependency order.
-# Handles rate limiting with automatic retries.
-# Skips crates that are already published at the current version.
+# Publish all harn crates to crates.io in a single `cargo publish --workspace`
+# invocation. Dependency ordering, the per-crate index wait, and already-
+# published skips are all handled by cargo itself (stable since Rust 1.90;
+# see https://doc.rust-lang.org/cargo/commands/cargo-publish.html).
+#
+# Why not publish each crate in a bash loop anymore:
+#   - `cargo publish --workspace` orders crates by their intra-workspace
+#     dependency graph automatically.
+#   - Cargo already blocks each per-crate upload on the crates.io index
+#     catching up before moving on, so an artificial `sleep 15` between
+#     crates just made releases slower without preventing anything.
+#   - crates.io's publish rate limit for new versions of existing crates
+#     is a burst of 30 followed by 1/min sustained; with 8 crates we are
+#     nowhere near the burst ceiling, so no pre-emptive delay is needed.
+#
+# Verification:
+#   - Dry run (`--dry-run`) passes `--no-verify` because cargo cannot run the
+#     staged-build verification for unpublished workspace dependencies.
+#   - Real publish also passes `--no-verify` by default: the release gate
+#     (`release_gate.sh audit`) already builds the full workspace with
+#     clippy + tests, so the staged rebuild inside `cargo publish` is pure
+#     latency. Set `HARN_PUBLISH_VERIFY=1` to force verification (slower,
+#     but useful when publishing from a machine that has not already run
+#     the audit).
 #
 # Usage:
-#   ./scripts/publish.sh          # publish all crates
-#   ./scripts/publish.sh --dry-run  # verify without uploading
+#   ./scripts/publish.sh             # publish all crates (fast path)
+#   ./scripts/publish.sh --dry-run   # verify without uploading
+#   HARN_PUBLISH_VERIFY=1 ./scripts/publish.sh   # re-enable cargo's staged
+#                                                # build verification
 
 DRY_RUN=""
-VERIFY_FLAGS=""
 if [[ "${1:-}" == "--dry-run" ]]; then
   DRY_RUN="--dry-run"
-  VERIFY_FLAGS="--no-verify"
   echo "=== DRY RUN (no uploads) ==="
-  echo "=== Dry run skips cargo publish verification for unpublished workspace dependencies ==="
+fi
+
+VERIFY_FLAGS="--no-verify"
+if [[ -z "$DRY_RUN" && "${HARN_PUBLISH_VERIFY:-0}" == "1" ]]; then
+  VERIFY_FLAGS=""
+  echo "=== HARN_PUBLISH_VERIFY=1 set; cargo will run staged-build verification ==="
 fi
 
 ALLOW_DIRTY=""
@@ -24,73 +50,47 @@ if ! git diff --quiet --ignore-submodules HEAD --; then
   echo "=== Dirty tree detected; publishing with --allow-dirty ==="
 fi
 
-# Dependency order: leaves first, CLI last
-CRATES=(
-  harn-lexer
-  harn-parser
-  harn-vm
-  harn-fmt
-  harn-lint
-  harn-lsp
-  harn-dap
-  harn-cli
-)
-
 RETRY_DELAY=120  # seconds to wait on rate limit
+MAX_ATTEMPTS=3
 
-publish_crate() {
-  local crate="$1"
+attempt_workspace_publish() {
   local attempt=1
-  local max_attempts=3
-
-  while [[ $attempt -le $max_attempts ]]; do
+  while [[ $attempt -le $MAX_ATTEMPTS ]]; do
     echo ""
-    echo "=== Publishing $crate (attempt $attempt/$max_attempts) ==="
-
+    echo "=== Publishing workspace (attempt $attempt/$MAX_ATTEMPTS) ==="
     local output
-    output=$(cargo publish -p "$crate" $DRY_RUN $VERIFY_FLAGS $ALLOW_DIRTY 2>&1) && {
+    if output=$(cargo publish --workspace $DRY_RUN $VERIFY_FLAGS $ALLOW_DIRTY 2>&1); then
       echo "$output"
-      echo "  Published $crate"
-      local last_crate="${CRATES[${#CRATES[@]}-1]}"
-      if [[ -z "$DRY_RUN" && "$crate" != "$last_crate" ]]; then
-        echo "  Waiting 15s before next crate..."
-        sleep 15
-      fi
-      return 0
-    }
-
-    # Check if already published (not an error)
-    if echo "$output" | grep -q "already exists"; then
-      echo "  $crate already published, skipping"
       return 0
     fi
 
-    # Check if rate limited
+    echo "$output"
+
+    # Rate-limit retry. `cargo publish --workspace` is non-atomic, so if we
+    # get a 429 partway through, subsequent retries will skip the already-
+    # published crates via cargo's "already exists" handling.
     if echo "$output" | grep -q "429\|Too Many Requests"; then
-      if [[ $attempt -lt $max_attempts ]]; then
+      if [[ $attempt -lt $MAX_ATTEMPTS ]]; then
         echo "  Rate limited. Waiting ${RETRY_DELAY}s before retry..."
         sleep "$RETRY_DELAY"
-      else
-        echo "  FAILED: still rate limited after $max_attempts attempts"
-        return 1
+        attempt=$((attempt + 1))
+        continue
       fi
-    else
-      echo "$output"
-      echo "  FAILED to publish $crate"
+      echo "  FAILED: still rate limited after $MAX_ATTEMPTS attempts"
       return 1
     fi
 
-    attempt=$((attempt + 1))
+    echo "  FAILED to publish workspace"
+    return 1
   done
 }
 
-echo "Publishing $(cargo metadata --format-version 1 --no-deps 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin)['packages'][0]['version'])" 2>/dev/null || echo "?")"
-echo "Crate order: ${CRATES[*]}"
+CURRENT_VERSION="$(cargo metadata --format-version 1 --no-deps 2>/dev/null \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['packages'][0]['version'])" 2>/dev/null || echo "?")"
+echo "Publishing workspace at version $CURRENT_VERSION"
 echo ""
 
-for crate in "${CRATES[@]}"; do
-  publish_crate "$crate"
-done
+attempt_workspace_publish
 
 echo ""
-echo "=== All crates published ==="
+echo "=== Workspace publish complete ==="

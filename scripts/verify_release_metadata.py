@@ -74,23 +74,56 @@ def verify_tag_state(version: str) -> None:
         )
 
 
+def is_bump_ahead(cargo_version: str, changelog_version: str) -> bool:
+    """True when the top CHANGELOG entry is exactly one patch/minor/major
+    step ahead of the current Cargo.toml version. This is the intermediate
+    "release content committed, version bump not yet applied" state that the
+    release workflow intentionally produces, and the audit must pass in that
+    state so release_ship.sh can run end-to-end without a manual bump first.
+    """
+    cur = parse_semver(cargo_version)
+    nxt = parse_semver(changelog_version)
+    if nxt <= cur:
+        return False
+    patch_bump = (cur[0], cur[1], cur[2] + 1)
+    minor_bump = (cur[0], cur[1] + 1, 0)
+    major_bump = (cur[0] + 1, 0, 0)
+    return nxt in (patch_bump, minor_bump, major_bump)
+
+
 def main() -> int:
     version = current_version()
     versions = changelog_versions()
     if not versions:
         raise SystemExit("error: CHANGELOG.md does not contain any version headings")
-    if versions[0] != version:
-        raise SystemExit(
-            f"error: Cargo.toml version {version} does not match top changelog entry {versions[0]}"
-        )
+    top = versions[0]
+    effective_version = version
+    if top != version:
+        if is_bump_ahead(version, top):
+            # Pre-bump state: CHANGELOG already describes the next release.
+            # Verify release notes + tag state against the CHANGELOG version so
+            # the rest of the audit sees the same version the upcoming bump
+            # will produce.
+            effective_version = top
+        else:
+            raise SystemExit(
+                f"error: Cargo.toml version {version} does not match top changelog entry {top} "
+                "(and the delta is not a single patch/minor/major bump)"
+            )
     if len(versions) != len(set(versions)):
         raise SystemExit("error: CHANGELOG.md contains duplicate version headings")
     sorted_versions = sorted(versions, key=parse_semver, reverse=True)
     if versions != sorted_versions:
         raise SystemExit("error: CHANGELOG.md versions are not in descending semver order")
-    verify_release_notes(version)
-    verify_tag_state(version)
-    print(f"verified release metadata for v{version}")
+    verify_release_notes(effective_version)
+    verify_tag_state(effective_version)
+    if effective_version == version:
+        print(f"verified release metadata for v{version}")
+    else:
+        print(
+            f"verified release metadata for v{effective_version} "
+            f"(Cargo.toml still at v{version}; bump pending)"
+        )
     return 0
 
 
