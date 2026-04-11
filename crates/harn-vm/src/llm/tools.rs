@@ -953,27 +953,7 @@ pub(crate) struct ToolParamSchema {
     pub(crate) examples: Vec<serde_json::Value>,
 }
 
-impl ToolParamSchema {
-    fn rendered_default_suffix(&self) -> String {
-        self.default
-            .as_ref()
-            .map(|value| format!("default {}", render_default_value(value)))
-            .unwrap_or_default()
-    }
-
-    fn rendered_examples_suffix(&self) -> String {
-        if self.examples.is_empty() {
-            return String::new();
-        }
-        let rendered = self
-            .examples
-            .iter()
-            .map(render_default_value)
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!(" (examples: {rendered})")
-    }
-}
+impl ToolParamSchema {}
 
 fn render_default_value(value: &serde_json::Value) -> String {
     match value {
@@ -1294,96 +1274,130 @@ pub(crate) fn build_tool_calling_contract_prompt(
 
     if mode == "native" {
         for schema in &expanded {
-            prompt.push_str(&format!("### `{}`\n", schema.name));
-            if !schema.description.trim().is_empty() {
-                for line in schema.description.lines() {
-                    prompt.push_str(line);
-                    prompt.push('\n');
-                }
-            }
-            if !schema.params.is_empty() {
-                prompt.push_str("Parameters:\n");
-                for p in &schema.params {
-                    let tag = if p.required { "required" } else { "optional" };
-                    let default_suffix = p.rendered_default_suffix();
-                    let examples_suffix = p.rendered_examples_suffix();
-                    prompt.push_str(&format!(
-                        "- `{}` ({tag}){}{}",
-                        p.name,
-                        if default_suffix.is_empty() { "" } else { " " },
-                        default_suffix,
-                    ));
-                    if !p.description.is_empty() {
-                        prompt.push_str(&format!(" — {}", p.description.trim()));
-                    }
-                    if !examples_suffix.is_empty() {
-                        prompt.push_str(&examples_suffix);
-                    }
-                    prompt.push('\n');
-                }
-            }
-            prompt.push('\n');
+            prompt.push_str(&render_native_tool_schema(schema));
         }
 
         if !compact.is_empty() {
             prompt.push_str("## Other tools\n\n");
             for schema in &compact {
-                let summary = schema
-                    .description
-                    .split(&['.', '\n'][..])
-                    .next()
-                    .unwrap_or("")
-                    .trim();
-                prompt.push_str(&format!("- `{}` — {}\n", schema.name, summary));
+                prompt.push_str(&render_compact_native_tool_schema(schema));
             }
             prompt.push('\n');
         }
     } else {
         for schema in &expanded {
-            // Required params come first, then optional. Each tool is presented
-            // as a single-arg TypeScript function declaration so the model sees
-            // optionality, enums, nested objects, and array item types directly
-            // in the type.
-            let args_type = build_tool_args_type(&schema.params);
-            prompt.push_str(&format!(
-                "declare function {}(args: {}): string;\n",
-                schema.name,
-                args_type.render()
-            ));
-            if !schema.description.trim().is_empty() {
-                prompt.push_str("/**\n");
-                for line in schema.description.lines() {
-                    prompt.push_str(&format!(" * {line}\n"));
-                }
-                prompt.push_str(" */\n");
-            }
-            prompt.push('\n');
+            prompt.push_str(&render_text_tool_schema(schema));
         }
 
         // Render compact tools as a brief summary section.
         if !compact.is_empty() {
             prompt.push_str("## Other tools (call directly — parameters are intuitive, or call tool_schema for details)\n\n");
             for schema in &compact {
-                let args_type = build_tool_args_type(&schema.params);
-                // Take first sentence of description as summary
-                let summary = schema
-                    .description
-                    .split(&['.', '\n'][..])
-                    .next()
-                    .unwrap_or("")
-                    .trim();
-                prompt.push_str(&format!(
-                    "- `{}({})` — {}\n",
-                    schema.name,
-                    args_type.render(),
-                    summary,
-                ));
+                prompt.push_str(&render_compact_text_tool_schema(schema));
             }
             prompt.push('\n');
         }
     }
 
     prompt
+}
+
+fn render_text_tool_schema(schema: &ToolSchema) -> String {
+    let mut rendered = String::new();
+    let args_type = build_tool_args_type(&schema.params);
+    rendered.push_str(&format!(
+        "declare function {}(args: {}): string;\n",
+        schema.name,
+        args_type.render()
+    ));
+    if !schema.description.trim().is_empty() {
+        rendered.push_str("/**\n");
+        for line in schema.description.lines() {
+            rendered.push_str(&format!(" * {line}\n"));
+        }
+        rendered.push_str(" */\n");
+    }
+    rendered.push('\n');
+    rendered
+}
+
+fn render_native_tool_schema(schema: &ToolSchema) -> String {
+    let mut rendered = String::new();
+    rendered.push_str(&format!("### `{}`\n", schema.name));
+    if !schema.description.trim().is_empty() {
+        for line in schema.description.lines() {
+            rendered.push_str(line);
+            rendered.push('\n');
+        }
+    }
+    if !schema.params.is_empty() {
+        rendered.push_str("Parameters:\n");
+        for param in &schema.params {
+            rendered.push_str(&format!("- `{}` ({})", param.name, native_param_tag(param)));
+            let metadata = render_native_param_metadata(param);
+            if !metadata.is_empty() {
+                rendered.push(' ');
+                rendered.push_str(&metadata);
+            }
+            rendered.push('\n');
+        }
+    }
+    rendered.push('\n');
+    rendered
+}
+
+fn render_compact_text_tool_schema(schema: &ToolSchema) -> String {
+    let args_type = build_tool_args_type(&schema.params);
+    let summary = schema
+        .description
+        .split(&['.', '\n'][..])
+        .next()
+        .unwrap_or("")
+        .trim();
+    format!(
+        "- `{}({})` — {}\n",
+        schema.name,
+        args_type.render(),
+        summary,
+    )
+}
+
+fn render_compact_native_tool_schema(schema: &ToolSchema) -> String {
+    let summary = schema
+        .description
+        .split(&['.', '\n'][..])
+        .next()
+        .unwrap_or("")
+        .trim();
+    format!("- `{}` — {}\n", schema.name, summary)
+}
+
+fn native_param_tag(param: &ToolParamSchema) -> &'static str {
+    if param.required {
+        "required"
+    } else {
+        "optional"
+    }
+}
+
+fn render_native_param_metadata(param: &ToolParamSchema) -> String {
+    let mut parts = Vec::new();
+    if let Some(default) = param.default.as_ref() {
+        parts.push(format!("default {}", render_default_value(default)));
+    }
+    if !param.description.is_empty() {
+        parts.push(format!("— {}", param.description.trim()));
+    }
+    if !param.examples.is_empty() {
+        let rendered = param
+            .examples
+            .iter()
+            .map(render_default_value)
+            .collect::<Vec<_>>()
+            .join(", ");
+        parts.push(format!("(examples: {rendered})"));
+    }
+    parts.join(" ")
 }
 
 /// Build the single-arg TypeScript object type that a tool takes. Each
