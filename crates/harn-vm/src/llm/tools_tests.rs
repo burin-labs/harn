@@ -504,10 +504,12 @@ fn contract_prompt_native_mode_omits_text_help() {
     let prompt = build_tool_calling_contract_prompt(Some(&tools), None, "native", true, None);
     assert!(prompt.contains("native tool-calling channel"));
     assert!(prompt.contains("Do not emit handwritten tool-call text or JSON"));
+    assert!(prompt.contains("authoritative tool names and argument schemas"));
     assert!(prompt.contains("This turn is action-gated"));
     assert!(!prompt.contains("How to call tools"));
     assert!(!prompt.contains("declare function edit(args:"));
-    assert!(prompt.contains("### `edit`"));
+    assert!(!prompt.contains("## Available tools"));
+    assert!(!prompt.contains("### `edit`"));
 }
 
 #[test]

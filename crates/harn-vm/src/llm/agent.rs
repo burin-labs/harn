@@ -170,7 +170,7 @@ fn loop_intervention_message(
         LoopIntervention::Block { count } => Some(format!(
             "BLOCKED: {tool_name}() has failed {count} times identically. \
                  You MUST use a different approach. \
-                 Read the Available tools section and pick a different strategy."
+                 Pick a different available tool or change your parameters."
         )),
         LoopIntervention::Skip { count } => Some(format!(
             "BLOCKED: {tool_name}() was NOT executed (repeated {count} times identically). \
