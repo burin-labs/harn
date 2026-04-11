@@ -2,6 +2,59 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.68
+
+### Added
+
+- **Explicit tool-format plumbing through agent loops** — `observed_llm_call`
+  now takes an explicit `tool_format` argument instead of reading
+  `HARN_AGENT_TOOL_FORMAT` from the environment at call time. Native-mode
+  stages automatically drop the text tool-calling contract, inject a
+  provider-specific `tool_choice` (`"required"` / `{"type": "any"}`) on
+  action-gated turns, strip text-format tool examples, and emit a
+  protocol-violation nudge when a model replies with handwritten tool-call
+  text. The tool contract prompt now renders native-mode schemas as markdown
+  sections instead of TypeScript declarations so weaker models see the
+  channel expectations up front.
+- **`allow_done_sentinel` turn policy field** — workflow-owned action
+  stages can now set `turn_policy: { allow_done_sentinel: false }` so the
+  persistent system prompt, corrective nudges, and sentinel-without-action
+  recovery language stop advertising the done sentinel pathway. The default
+  (including for deserialized dicts that omit the field) stays `true`, so
+  existing workflows that only set `require_action_or_yield` keep the old
+  completion signal.
+- **Richer LLM transcript dumps** — when `HARN_LLM_TRANSCRIPT_DIR` is set,
+  requests now include the effective `tool_format`, `tool_choice`, and
+  `native_tool_count`, and each agent-loop iteration emits a new
+  `interpreted_response` entry with the sanitized prose, parsed tool calls,
+  and parse errors. This makes native-mode vs. text-mode replays easier to
+  diff.
+
+### Changed
+
+- **Workflow stages now compose their effective capability policy** — agent
+  stages intersect `workflow_tool_policy_from_tools(node.tools)` with
+  `node.capability_policy` and pass the result to `run_agent_loop_internal`
+  instead of handing down `policy: None`. Tool-argument constraints also
+  consult declared `tool_metadata.path_params` first when matching, so a
+  constraint like `edit → tests/*` checks the `path` field even when the
+  model happens to put `action` first in the argument object.
+- **Parse recovery for malformed tool calls** — the TypeScript-flavoured
+  tool-call parser now salvages `"content": "<<EOF ... EOF"` values where
+  the model forgot to drop the opening quote (and often the closing quote
+  too). String-valued integer fields such as `range_start`, `range_end`,
+  `offset`, `limit`, `timeout`, `line`, `start_line`, `end_line`, and
+  `count` are also coerced into numeric JSON after the parser normalizes
+  each tool call, matching what the runtime actually expects.
+- **Quieter ACP bridge + provider config logging by default** — routine
+  info-level session/update log lines (`ACP_BOOT:`, `WORKFLOW_POLICY:`,
+  `HINTS:`, `AGENT_CONTEXT:`, `SIBLING_OUTLINES:`, `PROVIDERS: count=`,
+  `span_end`, `AUTO: base context …`) are suppressed unless a caller sets
+  `HARN_ACP_VERBOSE=1` or `BURIN_TRACE_HARN_CALLS=1`. `load_config()` no
+  longer prints provider/alias counts on every VM boot unless the same
+  opt-in env vars are set. This keeps host terminals clean during routine
+  use without losing diagnostics when they are actually needed.
+
 ## v0.5.67
 
 ### Added

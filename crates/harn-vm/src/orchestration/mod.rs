@@ -1068,6 +1068,36 @@ mod tests {
     }
 
     #[test]
+    fn arg_constraint_prefers_declared_path_param_metadata() {
+        let mut tool_metadata = std::collections::BTreeMap::new();
+        tool_metadata.insert(
+            "edit".to_string(),
+            ToolRuntimePolicyMetadata {
+                path_params: vec!["path".to_string()],
+                ..Default::default()
+            },
+        );
+        let policy = CapabilityPolicy {
+            tool_arg_constraints: vec![ToolArgConstraint {
+                tool: "edit".to_string(),
+                arg_patterns: vec!["tests/*".to_string()],
+            }],
+            tool_metadata,
+            ..Default::default()
+        };
+        let result = enforce_tool_arg_constraints(
+            &policy,
+            "edit",
+            &serde_json::json!({
+                "action": "replace_range",
+                "path": "tests/unit/test_experiment_service.py",
+                "content": "..."
+            }),
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
     fn microcompact_handles_multibyte_utf8() {
         // Emoji are 4 bytes each — slicing at arbitrary byte offsets would panic
         let emoji_output = "🔥".repeat(500); // 2000 bytes, 500 chars

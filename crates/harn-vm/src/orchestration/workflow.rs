@@ -759,6 +759,10 @@ pub async fn execute_stage_node(
         let mut opts = extract_llm_options(&args)?;
 
         if node.mode.as_deref() == Some("agent") || !tool_names.is_empty() {
+            let tool_policy = workflow_tool_policy_from_tools(&node.tools);
+            let effective_policy = tool_policy
+                .intersect(&node.capability_policy)
+                .map_err(VmError::Runtime)?;
             // Build auto-compact config from transcript_policy fields
             let auto_compact = if node.transcript_policy.auto_compact {
                 let mut ac = crate::orchestration::AutoCompactConfig::default();
@@ -826,7 +830,7 @@ pub async fn execute_stage_node(
                     tool_format: tool_format.clone(),
                     auto_compact,
                     context_callback: None,
-                    policy: None,
+                    policy: Some(effective_policy),
                     daemon: false,
                     daemon_config: Default::default(),
                     llm_retries: 2,

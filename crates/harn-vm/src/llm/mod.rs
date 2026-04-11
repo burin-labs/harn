@@ -195,6 +195,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
 
         let result = agent::observed_llm_call(
             &opts,
+            helpers::opt_str(&options, "tool_format").as_deref(),
             None, // no bridge
             &retry_config,
             None,

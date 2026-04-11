@@ -17,6 +17,35 @@ use harn_vm::visible_text::{sanitize_visible_assistant_text, VisibleTextState};
 use tokio::io::AsyncBufReadExt;
 use tokio::sync::{oneshot, Mutex};
 
+fn verbose_bridge_logs_enabled() -> bool {
+    matches!(
+        std::env::var("HARN_ACP_VERBOSE").ok().as_deref(),
+        Some("1" | "true" | "TRUE" | "yes" | "YES")
+    ) || matches!(
+        std::env::var("BURIN_TRACE_HARN_CALLS").ok().as_deref(),
+        Some("1")
+    )
+}
+
+fn suppress_default_info_log(message: &str) -> bool {
+    if verbose_bridge_logs_enabled() {
+        return false;
+    }
+    [
+        "ACP_BOOT:",
+        "span_end ",
+        "WORKFLOW_POLICY:",
+        "HINTS:",
+        "AGENT_CONTEXT:",
+        "SIBLING_OUTLINES:",
+        "PROVIDERS: count=",
+        "AUTO: base context start",
+        "AUTO: base context done",
+    ]
+    .iter()
+    .any(|prefix| message.starts_with(prefix))
+}
+
 // ---------------------------------------------------------------------------
 // Session state
 // ---------------------------------------------------------------------------
@@ -516,6 +545,9 @@ impl AcpBridge {
 
     /// Send a structured `session/update` with log level, message, and fields.
     fn send_log(&self, level: &str, message: &str, fields: Option<serde_json::Value>) {
+        if level == "info" && suppress_default_info_log(message) {
+            return;
+        }
         let mut update = serde_json::json!({
             "sessionUpdate": "log",
             "level": level,

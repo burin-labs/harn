@@ -268,6 +268,38 @@ EOF
 }
 
 #[test]
+fn recovers_malformed_quoted_heredoc_value_without_closing_quote() {
+    let tools = sample_tool_registry();
+    let text = r#"edit({
+  path: "tests/unit/test_experiment_service.py",
+  action: "replace_range",
+  range_start: 1,
+  range_end: 4,
+  content: "<<EOF
+import pytest
+
+def test_create_experiment():
+    assert "ok" == "ok"
+EOF
+})"#;
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert!(
+        result.errors.is_empty(),
+        "quoted heredoc should be salvaged: {:?}",
+        result.errors
+    );
+    assert_eq!(result.calls.len(), 1);
+    assert_eq!(
+        result.calls[0]["arguments"]["action"],
+        json!("replace_range")
+    );
+    assert_eq!(
+        result.calls[0]["arguments"]["content"],
+        json!("import pytest\n\ndef test_create_experiment():\n    assert \"ok\" == \"ok\"")
+    );
+}
+
+#[test]
 fn reports_unknown_tool_names() {
     let tools = sample_tool_registry();
     // `fictitious_tool(...)` looks like a call but the name is not in the
@@ -445,6 +477,8 @@ fn contract_prompt_help_block_has_ts_call_example() {
     assert!(TS_CALL_CONTRACT_HELP.contains("edit({"));
     assert!(TS_CALL_CONTRACT_HELP.contains("heredoc"));
     assert!(TS_CALL_CONTRACT_HELP.contains("closing punctuation like `},`"));
+    assert!(TS_CALL_CONTRACT_HELP.contains("Do not wrap tool calls in Markdown fences"));
+    assert!(TS_CALL_CONTRACT_HELP.contains("contains no tool calls"));
     assert!(!TS_CALL_CONTRACT_HELP.contains("```call"));
     assert!(!TS_CALL_CONTRACT_HELP.contains("<<'EOF'"));
 }
@@ -454,7 +488,11 @@ fn contract_prompt_native_mode_omits_text_help() {
     let tools = sample_tool_registry();
     let prompt = build_tool_calling_contract_prompt(Some(&tools), None, "native", true, None);
     assert!(prompt.contains("native tool-calling channel"));
+    assert!(prompt.contains("Do not emit handwritten tool-call text or JSON"));
+    assert!(prompt.contains("This turn is action-gated"));
     assert!(!prompt.contains("How to call tools"));
+    assert!(!prompt.contains("declare function edit(args:"));
+    assert!(prompt.contains("### `edit`"));
 }
 
 #[test]
@@ -1090,6 +1128,26 @@ fn native_json_fallback_parses_openai_array_format() {
     assert_eq!(calls[0]["arguments"]["action"], json!("create"));
     assert_eq!(calls[0]["arguments"]["path"], json!("test.go"));
     assert_eq!(calls[0]["arguments"]["content"], json!("package main"));
+}
+
+#[test]
+fn normalize_tool_args_coerces_integer_like_string_fields() {
+    let normalized = normalize_tool_args(
+        "edit",
+        &json!({
+            "action": "replace_range",
+            "path": "tests/unit/test_example.py",
+            "range_start": "1",
+            "range_end": "19",
+            "ops": [
+                {"op": "replace_range", "range_start": "3", "range_end": "5"}
+            ]
+        }),
+    );
+    assert_eq!(normalized["range_start"], json!(1));
+    assert_eq!(normalized["range_end"], json!(19));
+    assert_eq!(normalized["ops"][0]["range_start"], json!(3));
+    assert_eq!(normalized["ops"][0]["range_end"], json!(5));
 }
 
 #[test]

@@ -40,11 +40,17 @@ pub fn enforce_tool_arg_constraints(
         if constraint.arg_patterns.is_empty() {
             continue;
         }
-        // Extract the first string-like argument for pattern matching
         let first_arg = args
             .as_object()
-            .and_then(|o| o.values().next())
-            .and_then(|v| v.as_str())
+            .and_then(|o| {
+                policy
+                    .tool_metadata
+                    .get(tool_name)
+                    .into_iter()
+                    .flat_map(|metadata| metadata.path_params.iter())
+                    .find_map(|param| o.get(param).and_then(|v| v.as_str()))
+                    .or_else(|| o.values().find_map(|v| v.as_str()))
+            })
             .or_else(|| args.as_str())
             .unwrap_or("");
         let matches = constraint
@@ -232,17 +238,36 @@ fn min_side_effect<'a>(a: &'a str, b: &'a str) -> &'a str {
     }
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct TurnPolicy {
     /// When true, text-only responses in a tool-capable stage are treated as
     /// invalid unless they switch phase / finish the stage. This keeps action
     /// stages moving instead of drifting into narration.
     pub require_action_or_yield: bool,
+    /// When false, workflow-owned action stages should hand control back via
+    /// successful tool calls instead of advertising an additional done
+    /// sentinel pathway in corrective nudges.
+    #[serde(default = "default_true")]
+    pub allow_done_sentinel: bool,
     /// Optional visible prose budget for a single assistant turn. When the
     /// assistant exceeds it, the recorded transcript keeps only a shortened
     /// version and the next corrective nudge reminds the model to stay brief.
     pub max_prose_chars: Option<usize>,
+}
+
+impl Default for TurnPolicy {
+    fn default() -> Self {
+        Self {
+            require_action_or_yield: false,
+            allow_done_sentinel: true,
+            max_prose_chars: None,
+        }
+    }
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
@@ -824,5 +849,42 @@ pub fn builtin_ceiling() -> CapabilityPolicy {
         recursion_limit: Some(8),
         tool_arg_constraints: Vec::new(),
         tool_metadata: BTreeMap::new(),
+    }
+}
+
+#[cfg(test)]
+mod turn_policy_tests {
+    use super::TurnPolicy;
+
+    #[test]
+    fn default_allows_done_sentinel() {
+        let policy = TurnPolicy::default();
+        assert!(policy.allow_done_sentinel);
+        assert!(!policy.require_action_or_yield);
+        assert!(policy.max_prose_chars.is_none());
+    }
+
+    #[test]
+    fn deserializing_partial_dict_preserves_done_sentinel_pathway() {
+        // Pre-existing workflows passed `turn_policy: { require_action_or_yield: true }`
+        // without knowing about `allow_done_sentinel`. Deserializing such a dict
+        // must keep the done-sentinel pathway enabled so persistent agent loops
+        // don't lose their completion signal in this release.
+        let policy: TurnPolicy =
+            serde_json::from_value(serde_json::json!({ "require_action_or_yield": true }))
+                .expect("deserialize");
+        assert!(policy.require_action_or_yield);
+        assert!(policy.allow_done_sentinel);
+    }
+
+    #[test]
+    fn deserializing_explicit_false_disables_done_sentinel() {
+        let policy: TurnPolicy = serde_json::from_value(serde_json::json!({
+            "require_action_or_yield": true,
+            "allow_done_sentinel": false,
+        }))
+        .expect("deserialize");
+        assert!(policy.require_action_or_yield);
+        assert!(!policy.allow_done_sentinel);
     }
 }

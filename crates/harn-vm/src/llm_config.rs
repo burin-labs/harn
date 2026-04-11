@@ -166,17 +166,26 @@ fn default_mid() -> String {
 /// Load and cache the providers config. Called once at VM startup.
 pub fn load_config() -> &'static ProvidersConfig {
     CONFIG.get_or_init(|| {
+        let verbose_config_logging = matches!(
+            std::env::var("HARN_VERBOSE_CONFIG").ok().as_deref(),
+            Some("1" | "true" | "TRUE" | "yes" | "YES")
+        ) || matches!(
+            std::env::var("HARN_ACP_VERBOSE").ok().as_deref(),
+            Some("1" | "true" | "TRUE" | "yes" | "YES")
+        );
         // Try explicit env var path first
         if let Ok(path) = std::env::var("HARN_PROVIDERS_CONFIG") {
             match std::fs::read_to_string(&path) {
                 Ok(content) => match toml::from_str::<ProvidersConfig>(&content) {
                     Ok(config) => {
-                        eprintln!(
-                            "[llm_config] Loaded {} providers, {} aliases from {}",
-                            config.providers.len(),
-                            config.aliases.len(),
-                            path
-                        );
+                        if verbose_config_logging {
+                            eprintln!(
+                                "[llm_config] Loaded {} providers, {} aliases from {}",
+                                config.providers.len(),
+                                config.aliases.len(),
+                                path
+                            );
+                        }
                         let _ = CONFIG_PATH.set(path);
                         return config;
                     }

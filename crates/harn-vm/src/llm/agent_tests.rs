@@ -1,11 +1,14 @@
 use super::{
     action_turn_nudge, compact_malformed_assistant_turn, extract_retry_after_ms,
     has_successful_tools, is_read_only_tool, loop_state_requests_phase_change,
-    prose_exceeds_budget, run_agent_loop_internal, sentinel_without_action_nudge,
-    should_stop_after_successful_tools, trim_prose_for_history, AgentLoopConfig,
+    normalize_native_tools_for_format, normalize_tool_choice_for_format,
+    normalize_tool_examples_for_format, observed_llm_call, prose_exceeds_budget,
+    required_tool_choice_for_provider, run_agent_loop_internal, sentinel_without_action_nudge,
+    should_stop_after_successful_tools, trim_prose_for_history, AgentLoopConfig, LlmRetryConfig,
 };
 use crate::llm::api::LlmCallOptions;
 use crate::llm::daemon::{persist_snapshot, DaemonLoopConfig, DaemonSnapshot};
+use crate::llm::mock::{get_llm_mock_calls, reset_llm_mock_state};
 use crate::orchestration::TurnPolicy;
 use crate::value::{VmError, VmValue};
 use serde_json::json;
@@ -220,9 +223,94 @@ fn has_successful_tools_ignores_failed_turns() {
 }
 
 #[test]
+fn text_tool_format_drops_native_tool_channel() {
+    let native_tools = vec![json!({
+        "type": "function",
+        "function": {
+            "name": "edit",
+            "description": "Edit a file",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"}
+                },
+                "required": ["path"]
+            }
+        }
+    })];
+    assert!(normalize_native_tools_for_format("text", Some(native_tools.clone())).is_none());
+    assert!(normalize_native_tools_for_format("json", Some(native_tools)).is_none());
+}
+
+#[test]
+fn native_tool_format_preserves_native_tool_channel() {
+    let native_tools = vec![json!({
+        "type": "function",
+        "function": {
+            "name": "edit",
+            "description": "Edit a file",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"}
+                },
+                "required": ["path"]
+            }
+        }
+    })];
+    let preserved = normalize_native_tools_for_format("native", Some(native_tools.clone()));
+    assert_eq!(preserved, Some(native_tools));
+}
+
+#[test]
+fn native_format_drops_text_tool_examples() {
+    assert_eq!(
+        normalize_tool_examples_for_format("native", Some("edit({ path: \"a\" })".to_string())),
+        None
+    );
+    assert_eq!(
+        normalize_tool_examples_for_format("text", Some(" edit({ path: \"a\" }) ".to_string())),
+        Some("edit({ path: \"a\" })".to_string())
+    );
+}
+
+#[test]
+fn native_action_stage_requires_tool_choice_when_missing() {
+    let policy = TurnPolicy {
+        require_action_or_yield: true,
+        allow_done_sentinel: false,
+        max_prose_chars: Some(120),
+    };
+    let native_tools = vec![json!({
+        "type": "function",
+        "function": {
+            "name": "edit",
+            "parameters": {"type": "object"}
+        }
+    })];
+    let choice = normalize_tool_choice_for_format(
+        "openrouter",
+        "native",
+        Some(&native_tools),
+        None,
+        Some(&policy),
+    );
+    assert_eq!(choice, Some(serde_json::json!("required")));
+}
+
+#[test]
+fn native_action_stage_uses_provider_specific_tool_choice() {
+    assert_eq!(
+        required_tool_choice_for_provider("anthropic"),
+        serde_json::json!({"type": "any"})
+    );
+}
+
+#[test]
 fn prose_budget_detection_and_trimming_work() {
     let policy = TurnPolicy {
         require_action_or_yield: true,
+        allow_done_sentinel: true,
         max_prose_chars: Some(12),
     };
     assert!(prose_exceeds_budget(
@@ -237,9 +325,10 @@ fn prose_budget_detection_and_trimming_work() {
 fn action_turn_nudge_mentions_action_or_yield() {
     let policy = TurnPolicy {
         require_action_or_yield: true,
+        allow_done_sentinel: true,
         max_prose_chars: Some(120),
     };
-    let msg = action_turn_nudge(Some(&policy), true).expect("nudge");
+    let msg = action_turn_nudge("text", Some(&policy), true).expect("nudge");
     assert!(
         msg.contains("either call at least one tool, switch phase, or output the done sentinel")
     );
@@ -251,13 +340,112 @@ fn action_turn_nudge_mentions_action_or_yield() {
 fn sentinel_without_action_nudge_stays_stage_agnostic() {
     let policy = TurnPolicy {
         require_action_or_yield: true,
+        allow_done_sentinel: true,
         max_prose_chars: Some(180),
     };
-    let msg = sentinel_without_action_nudge(Some(&policy));
+    let msg = sentinel_without_action_nudge("text", Some(&policy));
     assert!(msg.contains("without taking any tool action"));
     assert!(msg.contains("Use an available tool now, or switch phase"));
     assert!(!msg.contains("lookup() or read()"));
     assert!(msg.contains("Keep prose to at most 180 visible characters"));
+}
+
+#[test]
+fn action_turn_nudge_omits_done_sentinel_when_stage_disallows_it() {
+    let policy = TurnPolicy {
+        require_action_or_yield: true,
+        allow_done_sentinel: false,
+        max_prose_chars: Some(90),
+    };
+    let msg = action_turn_nudge("text", Some(&policy), false).expect("nudge");
+    assert!(!msg.contains("done sentinel"));
+    assert!(msg.contains("either call at least one tool or switch phase"));
+}
+
+#[test]
+fn sentinel_without_action_nudge_explains_workflow_owned_stage_rule() {
+    let policy = TurnPolicy {
+        require_action_or_yield: true,
+        allow_done_sentinel: false,
+        max_prose_chars: Some(90),
+    };
+    let msg = sentinel_without_action_nudge("text", Some(&policy));
+    assert!(msg.contains("workflow-owned action stage"));
+    assert!(msg.contains("Do not output a done sentinel in this stage"));
+}
+
+#[test]
+fn native_action_turn_nudge_mentions_native_channel() {
+    let policy = TurnPolicy {
+        require_action_or_yield: true,
+        allow_done_sentinel: false,
+        max_prose_chars: Some(90),
+    };
+    let msg = action_turn_nudge("native", Some(&policy), false).expect("nudge");
+    assert!(msg.contains("provider tool channel only"));
+    assert!(msg.contains("handwritten tool-call text is invalid"));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn persistent_prompt_omits_done_sentinel_when_stage_disallows_it() {
+    reset_llm_mock_state();
+    let mut opts = base_opts(vec![serde_json::json!({
+        "role": "user",
+        "content": "repair the attached file",
+    })]);
+    let mut config = base_agent_config();
+    config.persistent = true;
+    config.turn_policy = Some(TurnPolicy {
+        require_action_or_yield: false,
+        allow_done_sentinel: false,
+        max_prose_chars: None,
+    });
+
+    let _ = run_agent_loop_internal(&mut opts, config).await.unwrap();
+    let calls = get_llm_mock_calls();
+    let system = calls
+        .last()
+        .and_then(|call| call.system.as_ref())
+        .expect("mock call system prompt");
+    assert!(system.contains("take action with tools"));
+    assert!(!system.contains("##DONE##"));
+    reset_llm_mock_state();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn observed_llm_call_transcript_uses_explicit_tool_format() {
+    reset_llm_mock_state();
+    let dir = std::env::temp_dir().join(format!("harn-llm-transcript-{}", uuid::Uuid::now_v7()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let old_dir = std::env::var("HARN_LLM_TRANSCRIPT_DIR").ok();
+    std::env::set_var("HARN_LLM_TRANSCRIPT_DIR", dir.to_string_lossy().to_string());
+
+    let opts = base_opts(vec![serde_json::json!({
+        "role": "user",
+        "content": "perform one grounded edit",
+    })]);
+    let _ = observed_llm_call(
+        &opts,
+        Some("native"),
+        None,
+        &LlmRetryConfig::default(),
+        Some(0),
+        false,
+    )
+    .await
+    .unwrap();
+
+    let transcript =
+        std::fs::read_to_string(dir.join("llm_transcript.jsonl")).expect("transcript file");
+    assert!(transcript.contains("\"tool_format\":\"native\""));
+
+    if let Some(previous) = old_dir {
+        std::env::set_var("HARN_LLM_TRANSCRIPT_DIR", previous);
+    } else {
+        std::env::remove_var("HARN_LLM_TRANSCRIPT_DIR");
+    }
+    let _ = std::fs::remove_dir_all(dir);
+    reset_llm_mock_state();
 }
 
 #[tokio::test(flavor = "current_thread")]

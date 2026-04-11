@@ -170,7 +170,45 @@ pub(crate) fn normalize_tool_args(name: &str, args: &serde_json::Value) -> serde
         obj.remove("argv");
     }
 
-    serde_json::Value::Object(obj)
+    let mut normalized = serde_json::Value::Object(obj);
+    coerce_integer_like_tool_args(&mut normalized);
+    normalized
+}
+
+fn coerce_integer_like_tool_args(value: &mut serde_json::Value) {
+    const INTEGER_KEYS: &[&str] = &[
+        "range_start",
+        "range_end",
+        "offset",
+        "limit",
+        "timeout",
+        "line",
+        "start_line",
+        "end_line",
+        "count",
+    ];
+
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, child) in map.iter_mut() {
+                if INTEGER_KEYS.contains(&key.as_str()) {
+                    if let Some(raw) = child.as_str() {
+                        if let Ok(parsed) = raw.trim().parse::<i64>() {
+                            *child = serde_json::json!(parsed);
+                            continue;
+                        }
+                    }
+                }
+                coerce_integer_like_tool_args(child);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                coerce_integer_like_tool_args(item);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn normalize_run_command(
@@ -1158,7 +1196,7 @@ pub(crate) fn build_tool_calling_contract_prompt(
     tools_val: Option<&VmValue>,
     native_tools: Option<&[serde_json::Value]>,
     mode: &str,
-    include_format: bool,
+    require_action: bool,
     tool_examples: Option<&str>,
 ) -> String {
     let mut prompt = String::from("\n\n## Tool Calling Contract\n");
@@ -1170,8 +1208,16 @@ pub(crate) fn build_tool_calling_contract_prompt(
     // weaker models encounter the calling convention early, while attention
     // is strongest.
     if mode == "native" {
-        prompt.push_str("Use the provider's native tool-calling channel for tool invocations.\n\n");
-    } else if include_format {
+        prompt.push_str(
+            "Use the provider's native tool-calling channel for tool invocations. \
+             Do not emit handwritten tool-call text or JSON in the assistant message.\n\n",
+        );
+        if require_action {
+            prompt.push_str(
+                "This turn is action-gated. If tools are available, respond with a native tool call instead of prose.\n\n",
+            );
+        }
+    } else {
         prompt.push_str(TS_CALL_CONTRACT_HELP);
         if let Some(examples) = tool_examples {
             let trimmed = examples.trim();
@@ -1197,86 +1243,134 @@ pub(crate) fn build_tool_calling_contract_prompt(
 
     prompt.push_str("## Available tools\n\n");
 
-    for schema in &expanded {
-        // Required params come first, then optional. Each tool is presented
-        // as a single-arg TypeScript function declaration so the model sees
-        // optionality, enums, nested objects, and array item types directly
-        // in the type.
-        let args_type = build_tool_args_type(&schema.params);
-        prompt.push_str(&format!(
-            "declare function {}(args: {}): string;\n",
-            schema.name,
-            args_type.render()
-        ));
-        if !schema.description.trim().is_empty() {
-            prompt.push_str("/**\n");
-            for line in schema.description.lines() {
-                prompt.push_str(&format!(" * {line}\n"));
-            }
-            for p in schema.params.iter() {
-                let tag = if p.required { "required" } else { "optional" };
-                let default_suffix = p.rendered_default_suffix();
-                let examples_suffix = p.rendered_examples_suffix();
-                if p.description.is_empty()
-                    && default_suffix.is_empty()
-                    && examples_suffix.is_empty()
-                {
-                    continue;
+    if mode == "native" {
+        for schema in &expanded {
+            prompt.push_str(&format!("### `{}`\n", schema.name));
+            if !schema.description.trim().is_empty() {
+                for line in schema.description.lines() {
+                    prompt.push_str(line);
+                    prompt.push('\n');
                 }
-                prompt.push_str(&format!(
-                    " * @param {} ({tag}){}{} {}{}\n",
-                    p.name,
-                    if default_suffix.is_empty() { "" } else { " " },
-                    default_suffix,
-                    if p.description.is_empty() {
-                        "".to_string()
-                    } else {
-                        format!("— {}", p.description.trim())
-                    },
-                    examples_suffix,
-                ));
             }
-            prompt.push_str(" */\n");
-        } else if schema.params.iter().any(|p| !p.description.is_empty()) {
-            prompt.push_str("/**\n");
-            for p in schema.params.iter() {
-                if p.description.is_empty() {
-                    continue;
+            if !schema.params.is_empty() {
+                prompt.push_str("Parameters:\n");
+                for p in schema.params.iter() {
+                    let tag = if p.required { "required" } else { "optional" };
+                    let default_suffix = p.rendered_default_suffix();
+                    let examples_suffix = p.rendered_examples_suffix();
+                    prompt.push_str(&format!(
+                        "- `{}` ({tag}){}{}",
+                        p.name,
+                        if default_suffix.is_empty() { "" } else { " " },
+                        default_suffix,
+                    ));
+                    if !p.description.is_empty() {
+                        prompt.push_str(&format!(" — {}", p.description.trim()));
+                    }
+                    if !examples_suffix.is_empty() {
+                        prompt.push_str(&examples_suffix);
+                    }
+                    prompt.push('\n');
                 }
-                let tag = if p.required { "required" } else { "optional" };
-                let examples_suffix = p.rendered_examples_suffix();
-                prompt.push_str(&format!(
-                    " * @param {} ({tag}) — {}{}\n",
-                    p.name,
-                    p.description.trim(),
-                    examples_suffix,
-                ));
             }
-            prompt.push_str(" */\n");
+            prompt.push('\n');
         }
-        prompt.push('\n');
-    }
 
-    // Render compact tools as a brief summary section.
-    if !compact.is_empty() {
-        prompt.push_str("## Other tools (call directly — parameters are intuitive, or call tool_schema for details)\n\n");
-        for schema in &compact {
-            let args_type = build_tool_args_type(&schema.params);
-            // Take first sentence of description as summary
-            let summary = schema
-                .description
-                .split(&['.', '\n'][..])
-                .next()
-                .unwrap_or("")
-                .trim();
-            prompt.push_str(&format!(
-                "- `{}({})` — {}\n",
-                schema.name,
-                args_type.render(),
-                summary,
-            ));
+        if !compact.is_empty() {
+            prompt.push_str("## Other tools\n\n");
+            for schema in &compact {
+                let summary = schema
+                    .description
+                    .split(&['.', '\n'][..])
+                    .next()
+                    .unwrap_or("")
+                    .trim();
+                prompt.push_str(&format!("- `{}` — {}\n", schema.name, summary));
+            }
+            prompt.push('\n');
         }
-        prompt.push('\n');
+    } else {
+        for schema in &expanded {
+            // Required params come first, then optional. Each tool is presented
+            // as a single-arg TypeScript function declaration so the model sees
+            // optionality, enums, nested objects, and array item types directly
+            // in the type.
+            let args_type = build_tool_args_type(&schema.params);
+            prompt.push_str(&format!(
+                "declare function {}(args: {}): string;\n",
+                schema.name,
+                args_type.render()
+            ));
+            if !schema.description.trim().is_empty() {
+                prompt.push_str("/**\n");
+                for line in schema.description.lines() {
+                    prompt.push_str(&format!(" * {line}\n"));
+                }
+                for p in schema.params.iter() {
+                    let tag = if p.required { "required" } else { "optional" };
+                    let default_suffix = p.rendered_default_suffix();
+                    let examples_suffix = p.rendered_examples_suffix();
+                    if p.description.is_empty()
+                        && default_suffix.is_empty()
+                        && examples_suffix.is_empty()
+                    {
+                        continue;
+                    }
+                    prompt.push_str(&format!(
+                        " * @param {} ({tag}){}{} {}{}\n",
+                        p.name,
+                        if default_suffix.is_empty() { "" } else { " " },
+                        default_suffix,
+                        if p.description.is_empty() {
+                            "".to_string()
+                        } else {
+                            format!("— {}", p.description.trim())
+                        },
+                        examples_suffix,
+                    ));
+                }
+                prompt.push_str(" */\n");
+            } else if schema.params.iter().any(|p| !p.description.is_empty()) {
+                prompt.push_str("/**\n");
+                for p in schema.params.iter() {
+                    if p.description.is_empty() {
+                        continue;
+                    }
+                    let tag = if p.required { "required" } else { "optional" };
+                    let examples_suffix = p.rendered_examples_suffix();
+                    prompt.push_str(&format!(
+                        " * @param {} ({tag}) — {}{}\n",
+                        p.name,
+                        p.description.trim(),
+                        examples_suffix,
+                    ));
+                }
+                prompt.push_str(" */\n");
+            }
+            prompt.push('\n');
+        }
+
+        // Render compact tools as a brief summary section.
+        if !compact.is_empty() {
+            prompt.push_str("## Other tools (call directly — parameters are intuitive, or call tool_schema for details)\n\n");
+            for schema in &compact {
+                let args_type = build_tool_args_type(&schema.params);
+                // Take first sentence of description as summary
+                let summary = schema
+                    .description
+                    .split(&['.', '\n'][..])
+                    .next()
+                    .unwrap_or("")
+                    .trim();
+                prompt.push_str(&format!(
+                    "- `{}({})` — {}\n",
+                    schema.name,
+                    args_type.render(),
+                    summary,
+                ));
+            }
+            prompt.push('\n');
+        }
     }
 
     prompt
@@ -1317,7 +1411,7 @@ pub(crate) const TS_CALL_CONTRACT_HELP: &str = "
 ## How to call tools
 
 Write `name({ key: value })` on its own line. Use heredoc for multiline strings:
-edit({ action: \"create\", path: \"test.go\", content: <<EOF
+edit({ action: \"create\", path: \"TARGET_PATH\", content: <<EOF
 package main
 func Test() {}
 EOF
@@ -1325,7 +1419,8 @@ EOF
 
 - Heredoc `<<TAG` ... `TAG`: raw content, no escaping needed. Put TAG at the start of the closing line; closing punctuation like `},` may follow on that same line.
 - Double quotes for single-line strings. Trailing commas optional.
-- Tool calls work with or without Markdown fences.
+- Do not wrap tool calls in Markdown fences unless the host explicitly asks for them.
+- If the workflow uses a done sentinel such as `##DONE##`, emit it on its own line in a response that contains no tool calls.
 - Prefer tool calls over prose.
 ";
 
@@ -2024,6 +2119,9 @@ impl<'a> TsValueParser<'a> {
 
     fn parse_string_literal(&mut self, quote: u8) -> Result<serde_json::Value, String> {
         self.advance(); // opening quote
+        if self.peek() == Some(b'<') && self.bytes.get(self.pos + 1) == Some(&b'<') {
+            return self.parse_quoted_heredoc_literal(quote);
+        }
         let mut out = String::new();
         loop {
             match self.advance() {
@@ -2077,6 +2175,18 @@ impl<'a> TsValueParser<'a> {
                 }
             }
         }
+    }
+
+    /// Recover malformed `"content": "<<EOF ... EOF` values by treating the
+    /// quoted heredoc opener as intent to write a heredoc string rather than a
+    /// normal string literal. Models commonly forget to drop the opening quote
+    /// before `<<EOF`, and often omit the closing quote entirely.
+    fn parse_quoted_heredoc_literal(&mut self, quote: u8) -> Result<serde_json::Value, String> {
+        let value = self.parse_heredoc()?;
+        if self.peek() == Some(quote) {
+            self.advance();
+        }
+        Ok(value)
     }
 
     fn parse_template_literal(&mut self) -> Result<serde_json::Value, String> {

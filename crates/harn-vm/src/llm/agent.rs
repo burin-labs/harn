@@ -184,6 +184,81 @@ fn next_call_id() -> String {
     uuid::Uuid::now_v7().to_string()
 }
 
+fn normalize_native_tools_for_format(
+    tool_format: &str,
+    native_tools: Option<Vec<serde_json::Value>>,
+) -> Option<Vec<serde_json::Value>> {
+    if tool_format == "native" {
+        native_tools
+    } else {
+        None
+    }
+}
+
+fn normalize_tool_examples_for_format(
+    tool_format: &str,
+    tool_examples: Option<String>,
+) -> Option<String> {
+    if tool_format == "text" {
+        tool_examples.and_then(|examples| {
+            let trimmed = examples.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        })
+    } else {
+        None
+    }
+}
+
+fn required_tool_choice_for_provider(provider: &str) -> serde_json::Value {
+    if provider == "anthropic" {
+        serde_json::json!({"type": "any"})
+    } else {
+        serde_json::json!("required")
+    }
+}
+
+fn normalize_tool_choice_for_format(
+    provider: &str,
+    tool_format: &str,
+    native_tools: Option<&[serde_json::Value]>,
+    tool_choice: Option<serde_json::Value>,
+    turn_policy: Option<&crate::orchestration::TurnPolicy>,
+) -> Option<serde_json::Value> {
+    if tool_format != "native" {
+        return None;
+    }
+    if native_tools.is_none_or(|tools| tools.is_empty()) {
+        return None;
+    }
+    if let Some(choice) = tool_choice {
+        return Some(choice);
+    }
+    if turn_policy.is_some_and(|policy| policy.require_action_or_yield) {
+        return Some(required_tool_choice_for_provider(provider));
+    }
+    None
+}
+
+fn native_protocol_violation_nudge(
+    turn_policy: Option<&crate::orchestration::TurnPolicy>,
+    saw_text_tool_calls: bool,
+) -> String {
+    let mut message = if saw_text_tool_calls {
+        "This transcript is native-tool-only. Your previous response used handwritten tool-call text, which was not executed. Call an available tool through the provider tool channel instead of writing tool syntax in the assistant message.".to_string()
+    } else {
+        "This transcript is native-tool-only. Call an available tool through the provider tool channel now instead of replying with prose or bare code.".to_string()
+    };
+    if let Some(nudge) = action_turn_nudge("native", turn_policy, false) {
+        message.push(' ');
+        message.push_str(&nudge);
+    }
+    message
+}
+
 #[derive(Default)]
 struct PostTurnDirective {
     message: Option<String>,
@@ -545,6 +620,7 @@ fn trim_prose_for_history(
 }
 
 fn action_turn_nudge(
+    tool_format: &str,
     turn_policy: Option<&crate::orchestration::TurnPolicy>,
     prose_too_long: bool,
 ) -> Option<String> {
@@ -562,14 +638,31 @@ fn action_turn_nudge(
     } else {
         ""
     };
+    let completion_clause = if policy.allow_done_sentinel {
+        "either call at least one tool, switch phase, or output the done sentinel if the task is genuinely complete."
+    } else {
+        "either call at least one tool or switch phase if the workflow allows it."
+    };
+    let mode_clause = if tool_format == "native" {
+        " Use the provider tool channel only; handwritten tool-call text is invalid in this transcript."
+    } else {
+        ""
+    };
     Some(format!(
-        "{prose_clause} either call at least one tool, switch phase, or output the done sentinel if the task is genuinely complete.{emphasis}"
+        "{prose_clause} {completion_clause}{emphasis}{mode_clause}"
     ))
 }
 
-fn sentinel_without_action_nudge(turn_policy: Option<&crate::orchestration::TurnPolicy>) -> String {
-    let mut message = "You emitted the done sentinel without taking any tool action. The task is not complete yet. Use an available tool now, or switch phase if the workflow allows it. Do not output the done sentinel again until you have acted.".to_string();
-    if let Some(nudge) = action_turn_nudge(turn_policy, false) {
+fn sentinel_without_action_nudge(
+    tool_format: &str,
+    turn_policy: Option<&crate::orchestration::TurnPolicy>,
+) -> String {
+    let mut message = if turn_policy.is_some_and(|policy| !policy.allow_done_sentinel) {
+        "You emitted a done sentinel in a workflow-owned action stage. The task is not complete yet. Use an available tool now, or switch phase if the workflow allows it. Do not output a done sentinel in this stage.".to_string()
+    } else {
+        "You emitted the done sentinel without taking any tool action. The task is not complete yet. Use an available tool now, or switch phase if the workflow allows it. Do not output the done sentinel again until you have acted.".to_string()
+    };
+    if let Some(nudge) = action_turn_nudge(tool_format, turn_policy, false) {
         message.push(' ');
         message.push_str(&nudge);
     }
@@ -578,30 +671,13 @@ fn sentinel_without_action_nudge(turn_policy: Option<&crate::orchestration::Turn
 
 /// Write the full LLM request payload to a JSONL transcript file.
 /// Enabled by setting HARN_LLM_TRANSCRIPT_DIR to a directory path.
-fn dump_llm_request(iteration: usize, call_id: &str, opts: &super::api::LlmCallOptions) {
+fn append_llm_transcript_entry(entry: &serde_json::Value) {
     let dir = match std::env::var("HARN_LLM_TRANSCRIPT_DIR") {
         Ok(d) if !d.is_empty() => d,
         _ => return,
     };
     let _ = std::fs::create_dir_all(&dir);
     let path = format!("{dir}/llm_transcript.jsonl");
-    let tool_schemas =
-        crate::llm::tools::collect_tool_schemas(opts.tools.as_ref(), opts.native_tools.as_deref());
-    let entry = serde_json::json!({
-        "type": "request",
-        "iteration": iteration,
-        "call_id": call_id,
-        "span_id": crate::tracing::current_span_id(),
-        "timestamp": chrono_now(),
-        "model": opts.model,
-        "provider": opts.provider,
-        "system": opts.system,
-        "messages": opts.messages,
-        "max_tokens": opts.max_tokens,
-        "temperature": opts.temperature,
-        "tool_schemas": tool_schemas,
-        "tool_format": std::env::var("HARN_AGENT_TOOL_FORMAT").unwrap_or_else(|_| "text".to_string()),
-    });
     if let Ok(line) = serde_json::to_string(&entry) {
         use std::io::Write;
         if let Ok(mut f) = std::fs::OpenOptions::new()
@@ -614,18 +690,40 @@ fn dump_llm_request(iteration: usize, call_id: &str, opts: &super::api::LlmCallO
     }
 }
 
+fn dump_llm_request(
+    iteration: usize,
+    call_id: &str,
+    tool_format: &str,
+    opts: &super::api::LlmCallOptions,
+) {
+    let tool_schemas =
+        crate::llm::tools::collect_tool_schemas(opts.tools.as_ref(), opts.native_tools.as_deref());
+    append_llm_transcript_entry(&serde_json::json!({
+        "type": "request",
+        "iteration": iteration,
+        "call_id": call_id,
+        "span_id": crate::tracing::current_span_id(),
+        "timestamp": chrono_now(),
+        "model": opts.model,
+        "provider": opts.provider,
+        "system": opts.system,
+        "messages": opts.messages,
+        "max_tokens": opts.max_tokens,
+        "temperature": opts.temperature,
+        "tool_choice": opts.tool_choice,
+        "tool_schemas": tool_schemas,
+        "tool_format": tool_format,
+        "native_tool_count": opts.native_tools.as_ref().map(|tools| tools.len()).unwrap_or(0),
+    }));
+}
+
 fn dump_llm_response(
     iteration: usize,
     call_id: &str,
     result: &super::api::LlmResult,
     response_ms: u64,
 ) {
-    let dir = match std::env::var("HARN_LLM_TRANSCRIPT_DIR") {
-        Ok(d) if !d.is_empty() => d,
-        _ => return,
-    };
-    let path = format!("{dir}/llm_transcript.jsonl");
-    let entry = serde_json::json!({
+    append_llm_transcript_entry(&serde_json::json!({
         "type": "response",
         "iteration": iteration,
         "call_id": call_id,
@@ -640,17 +738,28 @@ fn dump_llm_response(
         "cache_write_tokens": result.cache_write_tokens,
         "thinking": result.thinking,
         "response_ms": response_ms,
-    });
-    if let Ok(line) = serde_json::to_string(&entry) {
-        use std::io::Write;
-        if let Ok(mut f) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)
-        {
-            let _ = writeln!(f, "{line}");
-        }
-    }
+    }));
+}
+
+fn dump_llm_interpreted_response(
+    iteration: usize,
+    call_id: &str,
+    tool_format: &str,
+    prose: &str,
+    tool_calls: &[serde_json::Value],
+    tool_parse_errors: &[String],
+) {
+    append_llm_transcript_entry(&serde_json::json!({
+        "type": "interpreted_response",
+        "iteration": iteration,
+        "call_id": call_id,
+        "span_id": crate::tracing::current_span_id(),
+        "timestamp": chrono_now(),
+        "tool_format": tool_format,
+        "prose": prose,
+        "tool_calls": tool_calls,
+        "tool_parse_errors": tool_parse_errors,
+    }));
 }
 
 fn annotate_current_span(metadata: &[(&str, serde_json::Value)]) {
@@ -1116,11 +1225,20 @@ impl Default for LlmRetryConfig {
 ///   standalone calls that must not block the VM's LocalSet.
 pub(crate) async fn observed_llm_call(
     opts: &super::api::LlmCallOptions,
+    tool_format: Option<&str>,
     bridge: Option<&Rc<crate::bridge::HostBridge>>,
     retry_config: &LlmRetryConfig,
     iteration: Option<usize>,
     offthread: bool,
 ) -> Result<super::api::LlmResult, VmError> {
+    let effective_tool_format = tool_format
+        .map(str::to_string)
+        .or_else(|| {
+            std::env::var("HARN_AGENT_TOOL_FORMAT")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+        })
+        .unwrap_or_else(|| crate::llm_config::default_tool_format(&opts.model, &opts.provider));
     let mut attempt = 0usize;
     loop {
         // Rate limit: yield until the provider's RPM window has capacity.
@@ -1161,7 +1279,12 @@ pub(crate) async fn observed_llm_call(
         }
 
         // Transcript dump (enabled by HARN_LLM_TRANSCRIPT_DIR)
-        dump_llm_request(iteration.unwrap_or(0), &call_id, opts);
+        dump_llm_request(
+            iteration.unwrap_or(0),
+            &call_id,
+            &effective_tool_format,
+            opts,
+        );
 
         // Execute the LLM call
         let start = std::time::Instant::now();
@@ -1318,43 +1441,72 @@ pub async fn run_agent_loop_internal(
 
     let tools_owned = opts.tools.clone();
     let tools_val = tools_owned.as_ref();
+    opts.native_tools = normalize_native_tools_for_format(&tool_format, opts.native_tools.clone());
+    opts.tool_choice = normalize_tool_choice_for_format(
+        &opts.provider,
+        &tool_format,
+        opts.native_tools.as_deref(),
+        opts.tool_choice.clone(),
+        config.turn_policy.as_ref(),
+    );
     let native_tools_for_prompt = opts.native_tools.clone();
     let rendered_schemas =
         crate::llm::tools::collect_tool_schemas(tools_val, native_tools_for_prompt.as_deref());
     let has_tools = !rendered_schemas.is_empty();
     let base_system = opts.system.clone();
-
-    if has_tools && tool_format != "native" {
-        opts.native_tools = None;
-    }
-    let tool_examples = config.tool_examples.clone();
+    let tool_examples =
+        normalize_tool_examples_for_format(&tool_format, config.tool_examples.clone());
     let tool_contract_prompt = if has_tools {
         Some(build_tool_calling_contract_prompt(
             tools_val,
             native_tools_for_prompt.as_deref(),
             &tool_format,
-            tool_format == "text",
+            config
+                .turn_policy
+                .as_ref()
+                .is_some_and(|policy| policy.require_action_or_yield),
             tool_examples.as_deref(),
         ))
     } else {
         None
     };
 
+    let allow_done_sentinel = config
+        .turn_policy
+        .as_ref()
+        .map(|policy| policy.allow_done_sentinel)
+        .unwrap_or(true);
     let persistent_system_prompt = if persistent {
         if exit_when_verified {
             // When exit_when_verified is set, the harness enforces that the
             // done sentinel is only honoured after a passing run(). The
             // system prompt only needs a brief reminder, not a long rule.
-            Some(format!(
-                "\n\nKeep working until the task is complete. Take action with tools — \
-                 do not stop to explain. Output {done_sentinel} when done."
-            ))
+            if allow_done_sentinel {
+                Some(format!(
+                    "\n\nKeep working until the task is complete. Take action with tools — \
+                     do not stop to explain. Output {done_sentinel} when done."
+                ))
+            } else {
+                Some(
+                    "\n\nKeep working until the task is complete. Take action with tools — \
+                     do not stop to explain."
+                        .to_string(),
+                )
+            }
         } else {
-            Some(format!(
-                "\n\nIMPORTANT: You MUST keep working until the task is complete. \
-                 Do NOT stop to explain or summarize — take action with tools. \
-                 When the requested work is complete, output {done_sentinel} on its own line."
-            ))
+            if allow_done_sentinel {
+                Some(format!(
+                    "\n\nIMPORTANT: You MUST keep working until the task is complete. \
+                     Do NOT stop to explain or summarize — take action with tools. \
+                     When the requested work is complete, output {done_sentinel} on its own line."
+                ))
+            } else {
+                Some(
+                    "\n\nIMPORTANT: You MUST keep working until the task is complete. \
+                     Do NOT stop to explain or summarize — take action with tools."
+                        .to_string(),
+                )
+            }
         }
     } else {
         None
@@ -1472,6 +1624,7 @@ pub async fn run_agent_loop_internal(
         opts.system = call_system;
         let result = observed_llm_call(
             opts,
+            Some(&tool_format),
             bridge.as_ref(),
             &LlmRetryConfig {
                 retries: config.llm_retries,
@@ -1521,72 +1674,82 @@ pub async fn run_agent_loop_internal(
         let tool_calls = if !result.tool_calls.is_empty() {
             result.tool_calls.clone()
         } else if has_tools {
-            // Prefer provider-native tool calls when available, but keep text-call
-            // parsing as a compatibility fallback. This lets workflows use
-            // tool_format="native" without breaking providers or models that still
-            // emit ```call blocks.
             let parse_result = parse_text_tool_calls_with_tools(&text, tools_val);
-            if !parse_result.calls.is_empty() && tool_format == "native" {
-                crate::events::log_info(
-                    "llm.tool",
-                    &format!(
-                        "text_fallback_triggered: model emitted {} text call(s) in native mode",
-                        parse_result.calls.len()
-                    ),
-                );
-            }
             tool_parse_errors = parse_result.errors;
             text_prose = parse_result.prose;
-            let calls = parse_result.calls;
+            if tool_format == "native" {
+                if !parse_result.calls.is_empty() || !tool_parse_errors.is_empty() {
+                    let feedback = native_protocol_violation_nudge(
+                        config.turn_policy.as_ref(),
+                        !parse_result.calls.is_empty(),
+                    );
+                    append_message_to_contexts(
+                        &mut visible_messages,
+                        &mut recorded_messages,
+                        serde_json::json!({"role": "user", "content": feedback}),
+                    );
+                }
+                Vec::new()
+            } else {
+                let calls = parse_result.calls;
 
-            // When the parser found tool-call-looking text but couldn't
-            // parse it, inject the specific parse error into the conversation
-            // so the model knows what to fix (e.g. unescaped backtick inside
-            // a template literal).  Without this, the generic nudge message
-            // gives the model no signal about *what* was wrong, causing it to
-            // retry the same broken format 5-7 times.
-            if calls.is_empty() && !tool_parse_errors.is_empty() {
-                let error_summary = tool_parse_errors
-                    .iter()
-                    .take(2)
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .join("; ");
-                crate::events::log_warn(
-                    "llm.tool",
-                    &format!(
-                        "{} tool-call parse error(s): {}",
-                        tool_parse_errors.len(),
-                        &error_summary[..error_summary.len().min(200)]
-                    ),
-                );
-                let feedback = format!(
-                    "Your tool call could not be parsed: {error_summary}\n\n\
-                     Use heredoc syntax for multiline content — it requires NO escaping:\n\
-                     edit({{\n\
-                         action: \"create\",\n\
-                         path: \"...\",\n\
-                         content: <<EOF\n\
-                     package main\n\
-                     // backticks, quotes, backslashes — all fine inside heredoc\n\
-                     EOF\n\
-                     }})\n\n\
-                     Do NOT use backtick template literals for code that contains \
-                     backtick characters (Go raw strings, Rust raw strings, shell). \
-                     Heredoc avoids all escaping issues."
-                );
-                append_message_to_contexts(
-                    &mut visible_messages,
-                    &mut recorded_messages,
-                    serde_json::json!({"role": "user", "content": feedback}),
-                );
+                // When the parser found tool-call-looking text but couldn't
+                // parse it, inject the specific parse error into the conversation
+                // so the model knows what to fix (e.g. unescaped backtick inside
+                // a template literal). Without this, the generic nudge gives the
+                // model no signal about what was wrong.
+                if calls.is_empty() && !tool_parse_errors.is_empty() {
+                    let error_summary = tool_parse_errors
+                        .iter()
+                        .take(2)
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join("; ");
+                    crate::events::log_warn(
+                        "llm.tool",
+                        &format!(
+                            "{} tool-call parse error(s): {}",
+                            tool_parse_errors.len(),
+                            &error_summary[..error_summary.len().min(200)]
+                        ),
+                    );
+                    let feedback = format!(
+                        "Your tool call could not be parsed: {error_summary}\n\n\
+                         Use heredoc syntax for multiline content — it requires NO escaping:\n\
+                         edit({{\n\
+                             action: \"create\",\n\
+                             path: \"...\",\n\
+                             content: <<EOF\n\
+                         package main\n\
+                         // backticks, quotes, backslashes — all fine inside heredoc\n\
+                         EOF\n\
+                         }})\n\n\
+                         Do NOT use backtick template literals for code that contains \
+                         backtick characters (Go raw strings, Rust raw strings, shell). \
+                         Heredoc avoids all escaping issues."
+                    );
+                    append_message_to_contexts(
+                        &mut visible_messages,
+                        &mut recorded_messages,
+                        serde_json::json!({"role": "user", "content": feedback}),
+                    );
+                }
+                calls
             }
-            calls
         } else {
             Vec::new()
         };
         let prose_too_long = prose_exceeds_budget(&text_prose, config.turn_policy.as_ref());
         let shaped_text_prose = trim_prose_for_history(&text_prose, config.turn_policy.as_ref());
+        let interpreted_call_id = format!("iteration-{iteration}");
+        dump_llm_interpreted_response(
+            iteration,
+            &interpreted_call_id,
+            &tool_format,
+            &shaped_text_prose,
+            &tool_calls,
+            &tool_parse_errors,
+        );
         // Surface the prose (not the raw text) to callers that read
         // `last_iteration_text` / `visible_text`. Tool call expressions are
         // structured data in `tool_calls`, not something the user should
@@ -1634,7 +1797,8 @@ pub async fn run_agent_loop_internal(
         // If the model emitted the sentinel without having made any tool
         // calls, it's trying to declare done without doing any work.
         if sentinel_in_text && !has_acted && persistent && has_tools {
-            let corrective = sentinel_without_action_nudge(config.turn_policy.as_ref());
+            let corrective =
+                sentinel_without_action_nudge(&tool_format, config.turn_policy.as_ref());
             visible_messages.push(serde_json::json!({
                 "role": "user",
                 "content": corrective
@@ -2801,7 +2965,7 @@ pub async fn run_agent_loop_internal(
         // context with nudge messages and the "nudge → rephrase → nudge"
         // loop seen with chatty models.
         //
-        let nudge = action_turn_nudge(config.turn_policy.as_ref(), prose_too_long)
+        let nudge = action_turn_nudge(&tool_format, config.turn_policy.as_ref(), prose_too_long)
             .or_else(|| custom_nudge.clone())
             .unwrap_or_else(|| "Continue — use a tool call to make progress.".to_string());
         append_message_to_contexts(
@@ -3074,6 +3238,7 @@ pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Host
 
             let result = observed_llm_call(
                 &opts,
+                opt_str(&options, "tool_format").as_deref(),
                 Some(&bridge),
                 &retry_config,
                 None,
