@@ -975,6 +975,13 @@ impl ToolParamSchema {
     }
 }
 
+fn render_default_value(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(text) => format!("{text:?}"),
+        _ => value.to_string(),
+    }
+}
+
 /// Pull examples from a JSON-schema-ish fragment, accepting both plural
 /// `examples: [...]` (OAS 3.1 preferred) and the legacy singular `example: v`.
 fn extract_examples(obj: &serde_json::Map<String, serde_json::Value>) -> Vec<serde_json::Value> {
