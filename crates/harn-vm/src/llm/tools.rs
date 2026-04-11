@@ -466,6 +466,7 @@ pub(crate) struct ObjectField {
     pub(crate) required: bool,
     pub(crate) description: Option<String>,
     pub(crate) default: Option<serde_json::Value>,
+    pub(crate) examples: Vec<serde_json::Value>,
 }
 
 /// Registry of reusable named types discovered during schema extraction.
@@ -591,10 +592,7 @@ impl TypeExpr {
                 } else {
                     let rendered = fields
                         .iter()
-                        .map(|f| {
-                            let marker = if f.required { "" } else { "?" };
-                            format!("{}{}: {}", f.name, marker, f.ty.render())
-                        })
+                        .map(render_object_field)
                         .collect::<Vec<_>>()
                         .join("; ");
                     format!("{{ {rendered} }}")
@@ -604,6 +602,52 @@ impl TypeExpr {
             TypeExpr::Unknown => "unknown".to_string(),
         }
     }
+}
+
+fn render_object_field(field: &ObjectField) -> String {
+    let marker = if field.required { "" } else { "?" };
+    let mut rendered = format!("{}{}: {}", field.name, marker, field.ty.render());
+    if let Some(comment) = field_inline_comment(field) {
+        rendered.push_str(" /* ");
+        rendered.push_str(&comment.replace("*/", "* /"));
+        rendered.push_str(" */");
+    }
+    rendered
+}
+
+fn field_inline_comment(field: &ObjectField) -> Option<String> {
+    let mut parts = Vec::new();
+    parts.push(if field.required {
+        "required".to_string()
+    } else {
+        "optional".to_string()
+    });
+    if let Some(description) = field
+        .description
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        parts.push(description.to_string());
+    }
+    if let Some(default) = &field.default {
+        parts.push(format!("default {}", render_literal(default)));
+    }
+    if !field.examples.is_empty() {
+        let rendered = field
+            .examples
+            .iter()
+            .map(render_literal)
+            .collect::<Vec<_>>()
+            .join(", ");
+        let label = if field.examples.len() == 1 {
+            "example"
+        } else {
+            "examples"
+        };
+        parts.push(format!("{label} {rendered}"));
+    }
+    (!parts.is_empty()).then(|| parts.join(" — "))
 }
 
 fn normalize_primitive_name(raw: &str) -> &str {
@@ -770,6 +814,10 @@ fn json_schema_to_type_expr(
                                 .and_then(|v| v.as_str())
                                 .map(str::to_string),
                             default: sub_schema.get("default").cloned(),
+                            examples: sub_schema
+                                .as_object()
+                                .map(extract_examples)
+                                .unwrap_or_default(),
                         })
                         .collect();
                     // Required first, then optional, stable within each group.
@@ -907,10 +955,10 @@ pub(crate) struct ToolParamSchema {
 
 impl ToolParamSchema {
     fn rendered_default_suffix(&self) -> String {
-        match &self.default {
-            Some(v) => format!(" = {}", render_literal(v)),
-            None => String::new(),
-        }
+        self.default
+            .as_ref()
+            .map(|value| format!("default {}", render_default_value(value)))
+            .unwrap_or_default()
     }
 
     fn rendered_examples_suffix(&self) -> String {
@@ -920,14 +968,10 @@ impl ToolParamSchema {
         let rendered = self
             .examples
             .iter()
-            .map(render_literal)
+            .map(render_default_value)
             .collect::<Vec<_>>()
             .join(", ");
-        if self.examples.len() == 1 {
-            format!(" Example: {rendered}.")
-        } else {
-            format!(" Examples: {rendered}.")
-        }
+        format!(" (examples: {rendered})")
     }
 }
 
@@ -1185,10 +1229,8 @@ pub(crate) fn validate_tool_args(
 ///   type Foo = ...;
 ///
 ///   ## Available tools
-///   declare function edit(args: { ... }): string;
-///   /** @param path (required) - Relative path. Example: "a.go". */
-///   /** @param action (required) - Which edit. */
-///   ...
+///   declare function edit(args: { path: string /* required — Relative path */; ... }): string;
+///   /** Tool description only. */
 ///
 ///   ## How to call tools      (only in text mode when include_format = true)
 ///   Call a tool as a plain TypeScript function call at the start of a line ...
@@ -1254,7 +1296,7 @@ pub(crate) fn build_tool_calling_contract_prompt(
             }
             if !schema.params.is_empty() {
                 prompt.push_str("Parameters:\n");
-                for p in schema.params.iter() {
+                for p in &schema.params {
                     let tag = if p.required { "required" } else { "optional" };
                     let default_suffix = p.rendered_default_suffix();
                     let examples_suffix = p.rendered_examples_suffix();
@@ -1306,45 +1348,6 @@ pub(crate) fn build_tool_calling_contract_prompt(
                 for line in schema.description.lines() {
                     prompt.push_str(&format!(" * {line}\n"));
                 }
-                for p in schema.params.iter() {
-                    let tag = if p.required { "required" } else { "optional" };
-                    let default_suffix = p.rendered_default_suffix();
-                    let examples_suffix = p.rendered_examples_suffix();
-                    if p.description.is_empty()
-                        && default_suffix.is_empty()
-                        && examples_suffix.is_empty()
-                    {
-                        continue;
-                    }
-                    prompt.push_str(&format!(
-                        " * @param {} ({tag}){}{} {}{}\n",
-                        p.name,
-                        if default_suffix.is_empty() { "" } else { " " },
-                        default_suffix,
-                        if p.description.is_empty() {
-                            "".to_string()
-                        } else {
-                            format!("— {}", p.description.trim())
-                        },
-                        examples_suffix,
-                    ));
-                }
-                prompt.push_str(" */\n");
-            } else if schema.params.iter().any(|p| !p.description.is_empty()) {
-                prompt.push_str("/**\n");
-                for p in schema.params.iter() {
-                    if p.description.is_empty() {
-                        continue;
-                    }
-                    let tag = if p.required { "required" } else { "optional" };
-                    let examples_suffix = p.rendered_examples_suffix();
-                    prompt.push_str(&format!(
-                        " * @param {} ({tag}) — {}{}\n",
-                        p.name,
-                        p.description.trim(),
-                        examples_suffix,
-                    ));
-                }
                 prompt.push_str(" */\n");
             }
             prompt.push('\n');
@@ -1393,6 +1396,7 @@ fn build_tool_args_type(params: &[ToolParamSchema]) -> TypeExpr {
                 Some(p.description.clone())
             },
             default: p.default.clone(),
+            examples: p.examples.clone(),
         })
         .collect();
     TypeExpr::Object(fields)
@@ -1410,10 +1414,10 @@ fn build_tool_args_type(params: &[ToolParamSchema]) -> TypeExpr {
 pub(crate) const TS_CALL_CONTRACT_HELP: &str = "
 ## How to call tools
 
-Write `name({ key: value })` on its own line. Use heredoc for multiline strings:
-edit({ action: \"create\", path: \"TARGET_PATH\", content: <<EOF
-package main
-func Test() {}
+Write `tool_name({ key: value })` on its own line.
+Use heredoc for multiline string fields:
+tool_name({ content: <<EOF
+multi-line text
 EOF
 })
 
@@ -1570,7 +1574,17 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                 if let Some(name_len) = ident_length(&bytes[k..]) {
                     if bytes.get(k + name_len) == Some(&b'(') {
                         let name_str = std::str::from_utf8(&bytes[k..k + name_len]).unwrap_or("");
+                        let object_arg_start = has_object_literal_arg_start(text, k + name_len + 1);
                         if known.contains(name_str) {
+                            if !object_arg_start {
+                                errors.push(format!(
+                                    "Tool '{}' must be called with an object literal argument like {}({{ ... }}).",
+                                    name_str, name_str
+                                ));
+                                i = k + name_len + 1;
+                                at_line_start = false;
+                                continue;
+                            }
                             let name = name_str.to_string();
                             match parse_ts_call_from(&text[k..], name.clone()) {
                                 Ok((arguments, consumed)) => {
@@ -1608,7 +1622,7 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                                     continue;
                                 }
                             }
-                        } else {
+                        } else if object_arg_start {
                             let available: Vec<_> = known.iter().take(20).cloned().collect();
                             errors.push(format!(
                                 "Unknown tool '{}'. Available tools: [{}]",
@@ -1722,6 +1736,15 @@ pub(crate) fn parse_text_tool_calls_with_tools(
         errors,
         prose,
     }
+}
+
+fn has_object_literal_arg_start(text: &str, open_paren_idx: usize) -> bool {
+    let bytes = text.as_bytes();
+    let mut idx = open_paren_idx;
+    while idx < bytes.len() && (bytes[idx] == b' ' || bytes[idx] == b'\t') {
+        idx += 1;
+    }
+    bytes.get(idx) == Some(&b'{')
 }
 
 /// Detect and parse OpenAI-style native function calling JSON that a model

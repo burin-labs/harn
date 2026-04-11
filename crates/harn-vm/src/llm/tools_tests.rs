@@ -433,6 +433,20 @@ fn rejects_legacy_named_argument_call_form() {
     );
 }
 
+#[test]
+fn ignores_non_tool_function_calls_inside_code_examples() {
+    let tools = sample_tool_registry();
+    let text =
+        "Here is the target test body:\n\n    assert divide(10, 2) == 5.0\n    multiply(2, 3)\n";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert!(result.calls.is_empty());
+    assert!(
+        result.errors.is_empty(),
+        "unexpected parse errors: {:?}",
+        result.errors
+    );
+}
+
 // ─── Tool-calling contract prompt ───────────────────────────────────────────
 
 #[test]
@@ -462,19 +476,20 @@ fn contract_prompt_renders_edit_signature_with_enum_and_required_markers() {
     // Optional fields carry a trailing `?` in the declaration.
     assert!(obj_body.contains("content?: string"));
     assert!(obj_body.contains("new_body?: string"));
-    // JSDoc @param lines with required/optional markers + example.
-    assert!(prompt.contains("@param path (required)"));
-    assert!(prompt.contains("@param content (optional)"));
+    // Field comments carry required/optional markers and examples inline.
+    assert!(prompt.contains("path: string /* required"));
+    assert!(prompt.contains("content?: string /* optional"));
     assert!(prompt.contains("\"internal/manifest/parser.go\""));
+    assert!(!prompt.contains("@param path"));
     // TS call contract help is included in text mode.
     assert!(prompt.contains("declare function") || prompt.contains("How to call tools"));
 }
 
 #[test]
 fn contract_prompt_help_block_has_ts_call_example() {
-    // The help constant is included verbatim in text mode and must show a
-    // real TS call example, not the old Python/heredoc syntax.
-    assert!(TS_CALL_CONTRACT_HELP.contains("edit({"));
+    // The help constant is included verbatim in text mode and stays generic,
+    // while still documenting the heredoc form the parser accepts.
+    assert!(TS_CALL_CONTRACT_HELP.contains("tool_name({ key: value })"));
     assert!(TS_CALL_CONTRACT_HELP.contains("heredoc"));
     assert!(TS_CALL_CONTRACT_HELP.contains("closing punctuation like `},`"));
     assert!(TS_CALL_CONTRACT_HELP.contains("Do not wrap tool calls in Markdown fences"));
