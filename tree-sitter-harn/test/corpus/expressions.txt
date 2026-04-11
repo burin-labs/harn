@@ -1,0 +1,33 @@
+==================
+Exponentiation Precedence
+==================
+
+pipeline test(task) {
+  let x = a * b ** c
+  let y = (a ** b) ** c
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (parameter_list
+      (typed_parameter
+        name: (identifier)))
+    (block
+      (let_binding
+        name: (identifier)
+        value: (binary_expression
+          (identifier)
+          (binary_expression
+            (identifier)
+            (identifier))))
+      (let_binding
+        name: (identifier)
+        value: (binary_expression
+          (parenthesized_expression
+            (binary_expression
+              (identifier)
+              (identifier)))
+          (identifier))))))

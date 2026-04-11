@@ -14,8 +14,8 @@ fn format_default_expr(node: &SNode) -> String {
 /// Return a numeric precedence for binary operators (higher = tighter binding).
 ///
 /// `??` sits between additive and multiplicative — tighter than
-/// `+ - < > == != && || ?:` but looser than `* / %`. This matches the parser's
-/// placement (harn-parser: parse_additive → parse_nil_coalescing →
+/// `+ - < > == != && || ?:` but looser than `* / % **`. This matches the
+/// parser's placement (harn-parser: parse_additive → parse_nil_coalescing →
 /// parse_multiplicative) and the intuition `xs?.count ?? 0 > 0` →
 /// `(xs?.count ?? 0) > 0`.
 pub(crate) fn op_precedence(op: &str) -> u8 {
@@ -28,7 +28,8 @@ pub(crate) fn op_precedence(op: &str) -> u8 {
         "+" | "-" => 7,
         "??" => 8,
         "*" | "/" | "%" => 9,
-        _ => 10,
+        "**" => 10,
+        _ => 11,
     }
 }
 
@@ -69,6 +70,13 @@ pub(crate) fn child_needs_parens(parent_op: &str, child: &Node, is_right: bool) 
             return true;
         }
 
+        // Correctness: exponentiation is right-associative, so `(a ** b) ** c`
+        // must keep its left grouping while `a ** b ** c` does not need
+        // extra parens on the right.
+        if parent_op == "**" && child_op == "**" {
+            return !is_right;
+        }
+
         // Correctness: right child at same precedence level needs parens.
         //
         // Even when the operator token matches, the formatter cannot prove
@@ -90,7 +98,7 @@ pub(crate) fn child_needs_parens(parent_op: &str, child: &Node, is_right: bool) 
 /// Operators for which the Harn lexer/parser uses `check_skip_newlines`;
 /// a line break before them is safe without a backslash continuation.
 pub(crate) fn op_safe_after_newline(op: &str) -> bool {
-    matches!(op, "|>" | "||" | "&&" | "+" | "*" | "/" | "%")
+    matches!(op, "|>" | "||" | "&&" | "+" | "*" | "/" | "%" | "**")
 }
 
 /// Format a binding pattern to a string.

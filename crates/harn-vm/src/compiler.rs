@@ -703,6 +703,7 @@ impl Compiler {
                     "*" => self.chunk.emit(Op::Mul, self.line),
                     "/" => self.chunk.emit(Op::Div, self.line),
                     "%" => self.chunk.emit(Op::Mod, self.line),
+                    "**" => self.chunk.emit(Op::Pow, self.line),
                     "==" => self.chunk.emit(Op::Equal, self.line),
                     "!=" => self.chunk.emit(Op::NotEqual, self.line),
                     "<" => self.chunk.emit(Op::Less, self.line),

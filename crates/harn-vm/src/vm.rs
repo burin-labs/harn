@@ -1284,6 +1284,14 @@ mod tests {
     }
 
     #[test]
+    fn test_exponentiation() {
+        let out = run_output(
+            "pipeline t(task) { log(2 ** 8)\nlog(2 * 3 ** 2)\nlog(2 ** 3 ** 2)\nlog(2 ** -1) }",
+        );
+        assert_eq!(out, "[harn] 256\n[harn] 18\n[harn] 512\n[harn] 0.5");
+    }
+
+    #[test]
     fn test_comparisons() {
         let out =
             run_output("pipeline t(task) { log(1 < 2)\nlog(2 > 3)\nlog(1 == 1)\nlog(1 != 2) }");

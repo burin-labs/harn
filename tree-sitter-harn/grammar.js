@@ -512,7 +512,8 @@ module.exports = grammar({
         prec.left(8, seq($._expression, "-", $._expression)),
         prec.left(9, seq($._expression, repeat($._newline), "*", repeat($._newline), $._expression)),
         prec.left(9, seq($._expression, repeat($._newline), "/", repeat($._newline), $._expression)),
-        prec.left(9, seq($._expression, repeat($._newline), "%", repeat($._newline), $._expression))
+        prec.left(9, seq($._expression, repeat($._newline), "%", repeat($._newline), $._expression)),
+        prec.right(10, seq($._expression, repeat($._newline), "**", repeat($._newline), $._expression))
       ),
 
     range_expression: ($) =>

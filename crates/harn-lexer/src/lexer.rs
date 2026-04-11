@@ -717,6 +717,7 @@ impl Lexer {
             ('|', '|') => TokenKind::Or,
             ('|', '>') => TokenKind::Pipe,
             ('?', '?') => TokenKind::NilCoal,
+            ('*', '*') => TokenKind::Pow,
             ('?', '.') => TokenKind::QuestionDot,
             ('-', '>') => TokenKind::Arrow,
             ('-', '=') => TokenKind::MinusAssign,
@@ -919,7 +920,7 @@ mod tests {
 
     #[test]
     fn test_two_char_operators() {
-        let mut lexer = Lexer::new("== != && || |> ?? -> <= >=");
+        let mut lexer = Lexer::new("== != && || |> ?? ** -> <= >=");
         let tokens = lexer.tokenize().unwrap();
         assert_eq!(tokens[0].kind, TokenKind::Eq);
         assert_eq!(tokens[1].kind, TokenKind::Neq);
@@ -927,9 +928,10 @@ mod tests {
         assert_eq!(tokens[3].kind, TokenKind::Or);
         assert_eq!(tokens[4].kind, TokenKind::Pipe);
         assert_eq!(tokens[5].kind, TokenKind::NilCoal);
-        assert_eq!(tokens[6].kind, TokenKind::Arrow);
-        assert_eq!(tokens[7].kind, TokenKind::Lte);
-        assert_eq!(tokens[8].kind, TokenKind::Gte);
+        assert_eq!(tokens[6].kind, TokenKind::Pow);
+        assert_eq!(tokens[7].kind, TokenKind::Arrow);
+        assert_eq!(tokens[8].kind, TokenKind::Lte);
+        assert_eq!(tokens[9].kind, TokenKind::Gte);
     }
 
     #[test]

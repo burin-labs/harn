@@ -2,6 +2,26 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.67
+
+### Added
+
+- **First-class exponentiation operator** — Harn now supports `**`
+  expressions end-to-end, including right-associative parsing, numeric
+  typechecking, runtime execution, formatter precedence, conformance
+  coverage, executable tree-sitter grammar updates, and editor/LSP operator
+  highlighting.
+
+### Changed
+
+- **REPL exits on `Ctrl+C`** — `harn repl` now terminates cleanly on either
+  `Ctrl+C` or `Ctrl+D` instead of ignoring `Ctrl+C`, which makes the
+  interactive shell match normal terminal expectations.
+- **Language spec and grammar artifacts stay aligned with exponentiation** —
+  the formal language spec, generated docs language-spec page, tree-sitter
+  parser artifacts, and syntax-highlighting queries all ship with the same
+  `**` precedence and associativity rules as the live parser/compiler.
+
 ## v0.5.66
 
 ### Added

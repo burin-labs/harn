@@ -201,6 +201,7 @@ pub enum TokenKind {
     Or,            // ||
     Pipe,          // |>
     NilCoal,       // ??
+    Pow,           // **
     QuestionDot,   // ?.
     Arrow,         // ->
     Lte,           // <=
@@ -304,6 +305,7 @@ impl fmt::Display for TokenKind {
             TokenKind::Or => write!(f, "||"),
             TokenKind::Pipe => write!(f, "|>"),
             TokenKind::NilCoal => write!(f, "??"),
+            TokenKind::Pow => write!(f, "**"),
             TokenKind::QuestionDot => write!(f, "?."),
             TokenKind::Arrow => write!(f, "->"),
             TokenKind::Lte => write!(f, "<="),

@@ -1369,7 +1369,7 @@ impl Parser {
     }
 
     // Nil-coalescing `??` binds tighter than arithmetic and comparison
-    // operators but looser than `* / %`. This matches the intuition users
+    // operators but looser than `* / % **`. This matches the intuition users
     // reach for when writing `xs?.count ?? 0 > 0` or `xs[xs?.count ?? 0 - 1]`
     // — both parse as `(xs?.count ?? 0) <op> rhs`. The previous placement
     // above `parse_logical_or` caused `?? 0 > 0` to parse as `?? (0 > 0)`
@@ -1541,7 +1541,7 @@ impl Parser {
     }
 
     fn parse_multiplicative(&mut self) -> Result<SNode, ParserError> {
-        let mut left = self.parse_unary()?;
+        let mut left = self.parse_exponent()?;
         while self.check_skip_newlines(&TokenKind::Star)
             || self.check_skip_newlines(&TokenKind::Slash)
             || self.check_skip_newlines(&TokenKind::Percent)
@@ -1555,7 +1555,7 @@ impl Parser {
                 "%"
             };
             self.advance();
-            let right = self.parse_unary()?;
+            let right = self.parse_exponent()?;
             left = spanned(
                 Node::BinaryOp {
                     op: op.into(),
@@ -1566,6 +1566,25 @@ impl Parser {
             );
         }
         Ok(left)
+    }
+
+    fn parse_exponent(&mut self) -> Result<SNode, ParserError> {
+        let left = self.parse_unary()?;
+        if !self.check_skip_newlines(&TokenKind::Pow) {
+            return Ok(left);
+        }
+
+        let start = left.span;
+        self.advance();
+        let right = self.parse_exponent()?;
+        Ok(spanned(
+            Node::BinaryOp {
+                op: "**".into(),
+                left: Box::new(left),
+                right: Box::new(right),
+            },
+            Span::merge(start, self.prev_span()),
+        ))
     }
 
     fn parse_unary(&mut self) -> Result<SNode, ParserError> {
@@ -2747,6 +2766,50 @@ pipeline test(task) {
                     Node::StructConstruct { ref struct_name, ref fields }
                         if struct_name == "Point" && fields.len() == 2
                 )
+        ));
+    }
+
+    #[test]
+    fn parses_exponentiation_as_right_associative() {
+        let mut lexer = Lexer::new("a ** b ** c");
+        let tokens = lexer.tokenize().expect("tokens");
+        let mut parser = Parser::new(tokens);
+        let expr = parser.parse_single_expression().expect("expression");
+
+        assert!(matches!(
+            expr.node,
+            Node::BinaryOp { ref op, ref left, ref right }
+                if op == "**"
+                    && matches!(left.node, Node::Identifier(ref name) if name == "a")
+                    && matches!(
+                        right.node,
+                        Node::BinaryOp { ref op, ref left, ref right }
+                            if op == "**"
+                                && matches!(left.node, Node::Identifier(ref name) if name == "b")
+                                && matches!(right.node, Node::Identifier(ref name) if name == "c")
+                    )
+        ));
+    }
+
+    #[test]
+    fn parses_exponentiation_tighter_than_multiplication() {
+        let mut lexer = Lexer::new("a * b ** c");
+        let tokens = lexer.tokenize().expect("tokens");
+        let mut parser = Parser::new(tokens);
+        let expr = parser.parse_single_expression().expect("expression");
+
+        assert!(matches!(
+            expr.node,
+            Node::BinaryOp { ref op, ref left, ref right }
+                if op == "*"
+                    && matches!(left.node, Node::Identifier(ref name) if name == "a")
+                    && matches!(
+                        right.node,
+                        Node::BinaryOp { ref op, ref left, ref right }
+                            if op == "**"
+                                && matches!(left.node, Node::Identifier(ref name) if name == "b")
+                                && matches!(right.node, Node::Identifier(ref name) if name == "c")
+                    )
         ));
     }
 }

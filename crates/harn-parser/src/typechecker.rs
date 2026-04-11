@@ -1061,7 +1061,7 @@ impl TypeChecker {
                 let rt = self.infer_type(right, scope);
                 if let (Some(TypeExpr::Named(l)), Some(TypeExpr::Named(r))) = (&lt, &rt) {
                     match op.as_str() {
-                        "-" | "/" | "%" => {
+                        "-" | "/" | "%" | "**" => {
                             let numeric = ["int", "float"];
                             if !numeric.contains(&l.as_str()) || !numeric.contains(&r.as_str()) {
                                 self.error_at(
@@ -3323,7 +3323,7 @@ impl TypeChecker {
                                 }
                             }
                         }
-                        "-" | "/" | "%" => {
+                        "-" | "/" | "%" | "**" => {
                             let numeric = ["int", "float"];
                             if !numeric.contains(&l.as_str()) || !numeric.contains(&r.as_str()) {
                                 self.error_at(
@@ -3421,6 +3421,16 @@ fn infer_binary_op_type(op: &str, left: &InferredType, right: &InferredType) -> 
             _ => None,
         },
         "-" | "/" | "%" => match (left, right) {
+            (Some(TypeExpr::Named(l)), Some(TypeExpr::Named(r))) => {
+                match (l.as_str(), r.as_str()) {
+                    ("int", "int") => Some(TypeExpr::Named("int".into())),
+                    ("float", _) | (_, "float") => Some(TypeExpr::Named("float".into())),
+                    _ => None,
+                }
+            }
+            _ => None,
+        },
+        "**" => match (left, right) {
             (Some(TypeExpr::Named(l)), Some(TypeExpr::Named(r))) => {
                 match (l.as_str(), r.as_str()) {
                     ("int", "int") => Some(TypeExpr::Named("int".into())),
@@ -4167,6 +4177,16 @@ add("hello", 2) }"#,
     fn test_binary_op_type_inference() {
         let errs = errors("pipeline t(task) { let x: string = 1 + 2 }");
         assert_eq!(errs.len(), 1);
+    }
+
+    #[test]
+    fn test_exponentiation_requires_numeric_operands() {
+        let errs = errors(r#"pipeline t(task) { let x = "nope" ** 2 }"#);
+        assert!(
+            errs.iter()
+                .any(|err| err.contains("Operator '**' requires numeric operands")),
+            "missing exponentiation type error: {errs:?}"
+        );
     }
 
     #[test]

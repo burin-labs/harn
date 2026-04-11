@@ -434,6 +434,45 @@ fn test_division_right_associativity_preserved() {
 }
 
 #[test]
+fn test_exponentiation_formats_with_natural_right_associativity() {
+    let source = r#"pipeline default(task) {
+  let x = a ** b ** c
+}"#;
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("a ** b ** c"),
+        "Expected natural right-associative exponentiation, got:\n{result}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
+fn test_exponentiation_preserves_left_grouping_when_forced() {
+    let source = r#"pipeline default(task) {
+  let x = (a ** b) ** c
+}"#;
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("(a ** b) ** c"),
+        "Expected parens preserved for left-grouped exponentiation, got:\n{result}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
+fn test_exponentiation_binds_tighter_than_multiplication() {
+    let source = r#"pipeline default(task) {
+  let x = a * b ** c
+}"#;
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("a * b ** c"),
+        "Expected exponentiation to bind tighter than multiplication, got:\n{result}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
 fn test_multiplication_of_addition() {
     // a * (b + c) must not lose parens
     let source = r#"pipeline default(task) {

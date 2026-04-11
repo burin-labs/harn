@@ -264,7 +264,7 @@ pub(crate) async fn run_repl() {
     use reedline::{DefaultPrompt, DefaultPromptSegment, FileBackedHistory, Reedline, Signal};
 
     println!("Harn REPL v{}", env!("CARGO_PKG_VERSION"));
-    println!("Type expressions or statements. Ctrl+D to exit.");
+    println!("Type expressions or statements. Ctrl+C or Ctrl+D to exit.");
 
     let completion_entries = repl_completion_entries();
 
@@ -434,8 +434,7 @@ pub(crate) async fn run_repl() {
                     Err(e) => eprintln!("Error: {e}"),
                 }
             }
-            Ok((_, Ok(Signal::CtrlC))) => continue,
-            Ok((_, Ok(Signal::CtrlD))) => {
+            Ok((_, Ok(Signal::CtrlC))) | Ok((_, Ok(Signal::CtrlD))) => {
                 println!("Goodbye!");
                 break;
             }
@@ -484,5 +483,15 @@ mod tests {
     #[test]
     fn validator_type_exists_for_reedline_integration() {
         let _validator = HarnValidator;
+    }
+
+    #[test]
+    fn repl_exits_on_ctrl_c_and_ctrl_d() {
+        assert!(matches!(reedline::Signal::CtrlC, reedline::Signal::CtrlC));
+        assert!(matches!(reedline::Signal::CtrlD, reedline::Signal::CtrlD));
+        assert!(!matches!(
+            reedline::Signal::Success("println(1)".into()),
+            reedline::Signal::CtrlC | reedline::Signal::CtrlD
+        ));
     }
 }

@@ -1,0 +1,8 @@
+pipeline test(task) {
+  assert_eq(2 ** 8, 256, "int exponentiation")
+  assert_eq(2 * 3 ** 2, 18, "exponentiation binds tighter than multiplication")
+  assert_eq(2 ** 3 ** 2, 512, "exponentiation is right-associative")
+  assert_eq(2 ** -1, 0.5, "negative exponent promotes to float")
+  assert_eq(9.0 ** 0.5, 3.0, "float exponentiation")
+  log("exponentiation: all tests passed")
+}

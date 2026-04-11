@@ -151,6 +151,10 @@ impl super::Vm {
             let b = self.pop()?;
             let a = self.pop()?;
             self.stack.push(self.modulo(a, b)?);
+        } else if op == Op::Pow as u8 {
+            let b = self.pop()?;
+            let a = self.pop()?;
+            self.stack.push(self.pow(a, b)?);
         } else if op == Op::Negate as u8 {
             let v = self.pop()?;
             self.stack.push(match v {
@@ -1478,6 +1482,34 @@ impl super::Vm {
             (VmValue::Float(x), VmValue::Int(y)) => Ok(VmValue::Float(x % *y as f64)),
             _ => Err(VmError::Runtime(format!(
                 "Cannot modulo {} by {}",
+                a.type_name(),
+                b.type_name()
+            ))),
+        }
+    }
+
+    fn pow(&self, a: VmValue, b: VmValue) -> Result<VmValue, VmError> {
+        match (&a, &b) {
+            (VmValue::Int(base), VmValue::Int(exp)) => {
+                if *exp >= 0 && *exp <= u32::MAX as i64 {
+                    Ok(VmValue::Int(base.wrapping_pow(*exp as u32)))
+                } else {
+                    Ok(VmValue::Float((*base as f64).powf(*exp as f64)))
+                }
+            }
+            (VmValue::Float(base), VmValue::Int(exp)) => {
+                if *exp >= i32::MIN as i64 && *exp <= i32::MAX as i64 {
+                    Ok(VmValue::Float(base.powi(*exp as i32)))
+                } else {
+                    Ok(VmValue::Float(base.powf(*exp as f64)))
+                }
+            }
+            (VmValue::Int(base), VmValue::Float(exp)) => {
+                Ok(VmValue::Float((*base as f64).powf(*exp)))
+            }
+            (VmValue::Float(base), VmValue::Float(exp)) => Ok(VmValue::Float(base.powf(*exp))),
+            _ => Err(VmError::TypeError(format!(
+                "Cannot exponentiate {} by {}",
                 a.type_name(),
                 b.type_name()
             ))),

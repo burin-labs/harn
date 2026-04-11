@@ -217,6 +217,7 @@ let doc = """
 | `\|\|` | `.or` | Logical OR |
 | `\|>` | `.pipe` | Pipe |
 | `??` | `.nilCoal` | Nil coalescing |
+| `**` | `.pow` | Exponentiation |
 | `?.` | `.questionDot` | Optional property/method chaining |
 | `->` | `.arrow` | Arrow |
 | `<=` | `.lte` | Less than or equal |
@@ -463,7 +464,8 @@ comparison         ::= additive
                        (('<' | '>' | '<=' | '>=' | 'in' | 'not in') additive)*
 additive           ::= nil_coal_expr (('+' | '-') nil_coal_expr)*
 nil_coal_expr      ::= multiplicative ('??' multiplicative)*
-multiplicative     ::= unary (('*' | '/' | '%') unary)*
+multiplicative     ::= power_expr (('*' | '/' | '%') power_expr)*
+power_expr         ::= unary ['**' power_expr]
 unary              ::= ('!' | '-') unary | postfix
 postfix            ::= primary (member_access
                                | optional_member_access
@@ -539,13 +541,15 @@ From lowest to highest binding:
 | 6 | `<` `>` `<=` `>=` `in` `not in` | Left | Comparison / membership |
 | 7 | `+` `-` | Left | Additive |
 | 8 | `??` | Left | Nil coalescing |
-| 9 | `*` `/` | Left | Multiplicative |
-| 10 | `!` `-` (unary) | Right (prefix) | Unary |
-| 11 | `.` `?.` `[]` `[:]` `()` `?` | Left | Postfix |
+| 9 | `*` `/` `%` | Left | Multiplicative |
+| 10 | `**` | Right | Exponentiation |
+| 11 | `!` `-` (unary) | Right (prefix) | Unary |
+| 12 | `.` `?.` `[]` `[:]` `()` `?` | Left | Postfix |
 
 ### Multiline expressions
 
-Binary operators `||`, `&&`, `+`, `*`, `/`, `%`, `|>` and the `.` member
+Binary operators `||`, `&&`, `+`, `*`, `/`, `%`, `**`, `|>` and the `.`
+member
 access operator can span multiple lines. The operator at the start of a
 continuation line causes the parser to treat it as a continuation of the
 previous expression rather than a new statement.
@@ -851,6 +855,23 @@ Type mismatches that are not listed as valid combinations above produce a
 `TypeError` at runtime. The type checker reports these as compile-time errors
 when operand types are statically known. Use `to_string()` or string
 interpolation (`"${expr}"`) for explicit type conversion.
+
+### Modulo (`%`)
+
+`%` is numeric-only. `int % int` returns `int`; any case involving a `float`
+returns `float`. Modulo by zero follows the same runtime error path as
+division by zero.
+
+### Exponentiation (`**`)
+
+`**` is numeric-only and right-associative, so `2 ** 3 ** 2` evaluates as
+`2 ** (3 ** 2)`.
+
+- `int ** int` returns `int` for non-negative exponents that fit in `u32`,
+  using wrapping integer exponentiation.
+- Negative or very large integer exponents promote to `float`.
+- Any case involving a `float` returns `float`.
+- Non-numeric operands raise `TypeError`.
 
 ### Logical (`&&`, `||`)
 

@@ -109,6 +109,7 @@ fn token_kind_to_semantic(kind: &TokenKind) -> Option<u32> {
         | TokenKind::Or
         | TokenKind::Pipe
         | TokenKind::NilCoal
+        | TokenKind::Pow
         | TokenKind::QuestionDot
         | TokenKind::Arrow
         | TokenKind::Lte
