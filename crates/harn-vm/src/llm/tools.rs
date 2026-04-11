@@ -1060,12 +1060,12 @@ fn schema_description_from_json(value: &serde_json::Value) -> String {
         .unwrap_or_default()
 }
 
-fn extract_params_from_native_schema(
-    input_schema: &serde_json::Value,
+fn extract_params_from_provider_input_schema(
+    provider_input_schema: &serde_json::Value,
     root: &serde_json::Value,
     registry: &mut ComponentRegistry,
 ) -> Vec<ToolParamSchema> {
-    let required_set: BTreeSet<String> = input_schema
+    let required_set: BTreeSet<String> = provider_input_schema
         .get("required")
         .and_then(|v| v.as_array())
         .map(|arr| {
@@ -1074,7 +1074,7 @@ fn extract_params_from_native_schema(
                 .collect()
         })
         .unwrap_or_default();
-    input_schema
+    provider_input_schema
         .get("properties")
         .and_then(|value| value.as_object())
         .map(|properties| {
@@ -1104,11 +1104,11 @@ fn extract_params_from_native_schema(
         .unwrap_or_default()
 }
 
-fn collect_native_tool_schemas(
-    native_tools: Option<&[serde_json::Value]>,
+fn collect_provider_declared_tool_schemas(
+    provider_tools: Option<&[serde_json::Value]>,
     registry: &mut ComponentRegistry,
 ) -> Vec<ToolSchema> {
-    native_tools
+    provider_tools
         .unwrap_or(&[])
         .iter()
         .filter_map(|tool| {
@@ -1123,19 +1123,23 @@ fn collect_native_tool_schemas(
                 .and_then(|value| value.as_str())
                 .unwrap_or_default()
                 .to_string();
-            let input_schema = function
+            let provider_input_schema = function
                 .and_then(|value| value.get("parameters"))
                 .or_else(|| tool.get("input_schema"))
                 .cloned()
                 .unwrap_or_else(|| serde_json::json!({"type": "object"}));
-            // For native schemas the root is the tool wrapper itself (or the
-            // function object), so `$ref` can resolve against sibling
-            // `components.schemas` entries if the provider included them.
+            // Provider-declared JSON schemas hang off the tool wrapper itself
+            // (or the nested `function` object), so `$ref` must resolve
+            // against siblings such as `components.schemas` on that wrapper.
             let root = tool.clone();
             Some(ToolSchema {
                 name: name.to_string(),
                 description,
-                params: extract_params_from_native_schema(&input_schema, &root, registry),
+                params: extract_params_from_provider_input_schema(
+                    &provider_input_schema,
+                    &root,
+                    registry,
+                ),
                 compact: false,
             })
         })
@@ -1156,7 +1160,7 @@ pub(crate) fn collect_tool_schemas_with_registry(
         .map(|schema| schema.name.clone())
         .collect::<BTreeSet<_>>();
 
-    for schema in collect_native_tool_schemas(native_tools, &mut registry) {
+    for schema in collect_provider_declared_tool_schemas(native_tools, &mut registry) {
         if seen.insert(schema.name.clone()) {
             merged.push(schema);
         }
@@ -1274,13 +1278,13 @@ pub(crate) fn build_tool_calling_contract_prompt(
 
     if mode == "native" {
         for schema in &expanded {
-            prompt.push_str(&render_native_tool_schema(schema));
+            prompt.push_str(&render_native_tool_overview(schema));
         }
 
         if !compact.is_empty() {
             prompt.push_str("## Other tools\n\n");
             for schema in &compact {
-                prompt.push_str(&render_compact_native_tool_schema(schema));
+                prompt.push_str(&render_compact_native_tool_overview(schema));
             }
             prompt.push('\n');
         }
@@ -1321,7 +1325,7 @@ fn render_text_tool_schema(schema: &ToolSchema) -> String {
     rendered
 }
 
-fn render_native_tool_schema(schema: &ToolSchema) -> String {
+fn render_native_tool_overview(schema: &ToolSchema) -> String {
     let mut rendered = String::new();
     rendered.push_str(&format!("### `{}`\n", schema.name));
     if !schema.description.trim().is_empty() {
@@ -1333,8 +1337,12 @@ fn render_native_tool_schema(schema: &ToolSchema) -> String {
     if !schema.params.is_empty() {
         rendered.push_str("Parameters:\n");
         for param in &schema.params {
-            rendered.push_str(&format!("- `{}` ({})", param.name, native_param_tag(param)));
-            let metadata = render_native_param_metadata(param);
+            rendered.push_str(&format!(
+                "- `{}` ({})",
+                param.name,
+                tool_overview_param_tag(param)
+            ));
+            let metadata = render_tool_overview_param_metadata(param);
             if !metadata.is_empty() {
                 rendered.push(' ');
                 rendered.push_str(&metadata);
@@ -1362,7 +1370,7 @@ fn render_compact_text_tool_schema(schema: &ToolSchema) -> String {
     )
 }
 
-fn render_compact_native_tool_schema(schema: &ToolSchema) -> String {
+fn render_compact_native_tool_overview(schema: &ToolSchema) -> String {
     let summary = schema
         .description
         .split(&['.', '\n'][..])
@@ -1372,7 +1380,7 @@ fn render_compact_native_tool_schema(schema: &ToolSchema) -> String {
     format!("- `{}` — {}\n", schema.name, summary)
 }
 
-fn native_param_tag(param: &ToolParamSchema) -> &'static str {
+fn tool_overview_param_tag(param: &ToolParamSchema) -> &'static str {
     if param.required {
         "required"
     } else {
@@ -1380,7 +1388,7 @@ fn native_param_tag(param: &ToolParamSchema) -> &'static str {
     }
 }
 
-fn render_native_param_metadata(param: &ToolParamSchema) -> String {
+fn render_tool_overview_param_metadata(param: &ToolParamSchema) -> String {
     let mut parts = Vec::new();
     if let Some(default) = param.default.as_ref() {
         parts.push(format!("default {}", render_default_value(default)));
