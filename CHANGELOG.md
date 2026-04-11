@@ -2,6 +2,28 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.69
+
+### Changed
+
+- **`harn-lint` crate split into submodules** — the monolithic `lib.rs` was
+  refactored into three focused modules: `complexity` (cyclomatic-complexity
+  scoring), `fixes` (rule-agnostic autofix helpers over AST + source text),
+  and `tests` (unit tests). The public API (`lint`, `lint_with_source`,
+  `lint_with_config`, `lint_with_config_and_source`, `lint_with_cross_file_imports`,
+  `collect_selective_import_names`, `simplify_bool_comparison`, `LintDiagnostic`,
+  `LintSeverity`) is unchanged. Thirteen new unit tests were added for the
+  autofix helpers now that they are easy to target in isolation, covering
+  word-boundary-safe `unused-variable` renames, `redundant-nil-ternary`
+  shape matching, empty-block removal guards against side-effecting
+  conditions/iterables, and dict-destructuring bail-outs.
+
+### Internal
+
+- `.gitignore` now ignores `__pycache__/` and `*.pyc` so the
+  `scripts/verify_release_metadata.py` bytecode cache no longer shows up
+  as untracked after running the release gate.
+
 ## v0.5.68
 
 ### Added

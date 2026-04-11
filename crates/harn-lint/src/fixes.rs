@@ -1,0 +1,238 @@
+//! Autofix helper functions used by the linter.
+//!
+//! These are deliberately free-standing functions over AST nodes and raw
+//! source text so they can be unit-tested in isolation and reused across
+//! multiple lint rules. None of them depend on `Linter` state.
+
+use harn_lexer::{FixEdit, Span};
+use harn_parser::{Node, SNode};
+
+/// Compute a single-edit rename that prefixes a simple `let`/`var` binding
+/// identifier with an underscore. Used by the `unused-variable` autofix.
+///
+/// Returns `None` when the source is unavailable, the declaration does not
+/// start with the expected keyword, or the next token after the keyword is
+/// not a bare identifier matching `name`. All of these cases indicate either
+/// a destructuring pattern, an unusual formatting, or a name collision we
+/// do not want to touch automatically.
+pub(crate) fn simple_ident_rename_fix(
+    source: Option<&str>,
+    span: Span,
+    name: &str,
+) -> Option<Vec<FixEdit>> {
+    let src = source?;
+    let region = src.get(span.start..span.end)?;
+
+    // Locate the `let`/`var` keyword at the start of the declaration. Some
+    // contexts (e.g. a `for`-loop head) do not use a keyword at all, in which
+    // case we bail — those bindings are tracked as destructuring-style by
+    // callers and should not reach this helper anyway.
+    let (keyword_len, after_keyword_is_boundary) = if region.starts_with("let") {
+        (
+            3,
+            region.as_bytes().get(3).is_some_and(|b| !is_ident_byte(*b)),
+        )
+    } else if region.starts_with("var") {
+        (
+            3,
+            region.as_bytes().get(3).is_some_and(|b| !is_ident_byte(*b)),
+        )
+    } else {
+        return None;
+    };
+    if !after_keyword_is_boundary {
+        return None;
+    }
+
+    // Skip whitespace between the keyword and the identifier.
+    let mut cursor = keyword_len;
+    let bytes = region.as_bytes();
+    while cursor < bytes.len() && matches!(bytes[cursor], b' ' | b'\t') {
+        cursor += 1;
+    }
+
+    // The identifier must start with a valid identifier byte and must match
+    // `name` exactly with a word boundary on the trailing side.
+    let name_bytes = name.as_bytes();
+    if region.get(cursor..cursor + name_bytes.len())?.as_bytes() != name_bytes {
+        return None;
+    }
+    let trailing_ok = bytes
+        .get(cursor + name_bytes.len())
+        .is_none_or(|b| !is_ident_byte(*b));
+    if !trailing_ok {
+        return None;
+    }
+
+    let ident_start = span.start + cursor;
+    let ident_end = ident_start + name_bytes.len();
+    let replacement = format!("_{name}");
+    Some(vec![FixEdit {
+        span: Span::with_offsets(ident_start, ident_end, span.line, span.column + cursor),
+        replacement,
+    }])
+}
+
+pub(crate) fn is_ident_byte(b: u8) -> bool {
+    matches!(b, b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_')
+}
+
+/// Match a ternary of the form `x == nil ? fallback : x` or
+/// `x != nil ? x : fallback` and return `(identifier, fallback_node)` when
+/// the shape matches. `x` must be a bare identifier and must appear
+/// identically on both the nil-comparison side and the non-fallback arm.
+///
+/// Used by the `redundant-nil-ternary` lint rule to suggest rewriting the
+/// ternary into `x ?? fallback`, which is both shorter and safer against
+/// double-evaluation when `x` is replaced with a more complex expression
+/// in the future.
+pub(crate) fn nil_fallback_ternary_parts<'a>(
+    condition: &'a SNode,
+    true_expr: &'a SNode,
+    false_expr: &'a SNode,
+) -> Option<(String, &'a SNode)> {
+    let Node::BinaryOp { op, left, right } = &condition.node else {
+        return None;
+    };
+    let is_nil = |n: &Node| matches!(n, Node::NilLiteral);
+    let identifier = |n: &Node| match n {
+        Node::Identifier(name) => Some(name.clone()),
+        _ => None,
+    };
+
+    let (ident_name, expected_non_nil_arm): (String, Which) = match op.as_str() {
+        "==" => {
+            // x == nil ? fallback : x
+            if is_nil(&right.node) {
+                (identifier(&left.node)?, Which::False)
+            } else if is_nil(&left.node) {
+                (identifier(&right.node)?, Which::False)
+            } else {
+                return None;
+            }
+        }
+        "!=" => {
+            // x != nil ? x : fallback
+            if is_nil(&right.node) {
+                (identifier(&left.node)?, Which::True)
+            } else if is_nil(&left.node) {
+                (identifier(&right.node)?, Which::True)
+            } else {
+                return None;
+            }
+        }
+        _ => return None,
+    };
+
+    let (non_nil_arm, fallback_arm) = match expected_non_nil_arm {
+        Which::True => (true_expr, false_expr),
+        Which::False => (false_expr, true_expr),
+    };
+    match &non_nil_arm.node {
+        Node::Identifier(name) if name == &ident_name => Some((ident_name, fallback_arm)),
+        _ => None,
+    }
+}
+
+pub(crate) enum Which {
+    True,
+    False,
+}
+
+/// Conservative side-effect analysis for lint autofixes. Returns true when
+/// the expression has no observable effect: literals, variable reads, field
+/// access, subscript, and pure operators over pure operands. Calls, awaits,
+/// spawns, assignments, and anything we cannot prove pure fall into the
+/// `false` bucket so the autofix never silently drops a side effect.
+pub(crate) fn is_pure_expression(node: &Node) -> bool {
+    match node {
+        Node::IntLiteral(_)
+        | Node::FloatLiteral(_)
+        | Node::BoolLiteral(_)
+        | Node::StringLiteral(_)
+        | Node::RawStringLiteral(_)
+        | Node::NilLiteral
+        | Node::DurationLiteral(_)
+        | Node::Identifier(_)
+        | Node::BreakStmt
+        | Node::ContinueStmt => true,
+        Node::ListLiteral(items) => items.iter().all(|n| is_pure_expression(&n.node)),
+        Node::DictLiteral(entries) => entries
+            .iter()
+            .all(|e| is_pure_expression(&e.key.node) && is_pure_expression(&e.value.node)),
+        Node::UnaryOp { operand, .. } => is_pure_expression(&operand.node),
+        Node::BinaryOp { left, right, .. } => {
+            is_pure_expression(&left.node) && is_pure_expression(&right.node)
+        }
+        Node::Ternary {
+            condition,
+            true_expr,
+            false_expr,
+        } => {
+            is_pure_expression(&condition.node)
+                && is_pure_expression(&true_expr.node)
+                && is_pure_expression(&false_expr.node)
+        }
+        Node::PropertyAccess { object, .. } | Node::OptionalPropertyAccess { object, .. } => {
+            is_pure_expression(&object.node)
+        }
+        Node::SubscriptAccess { object, index } => {
+            is_pure_expression(&object.node) && is_pure_expression(&index.node)
+        }
+        Node::SliceAccess { object, start, end } => {
+            is_pure_expression(&object.node)
+                && start.as_deref().is_none_or(|n| is_pure_expression(&n.node))
+                && end.as_deref().is_none_or(|n| is_pure_expression(&n.node))
+        }
+        Node::RangeExpr { start, end, .. } => {
+            is_pure_expression(&start.node) && is_pure_expression(&end.node)
+        }
+        _ => false,
+    }
+}
+
+/// Build a FixEdit that removes an entire statement from the source, along
+/// with its leading indentation and trailing newline. Used by the
+/// `empty-block` autofix for effect-free empty `if` / `for` bodies.
+///
+/// Returns `None` when the source is unavailable, when the statement span
+/// is at a weird position, or when leading/trailing context cannot be
+/// located safely. In any of those cases the lint still fires; only the
+/// automatic rewrite is suppressed.
+pub(crate) fn empty_statement_removal_fix(
+    source: Option<&str>,
+    span: Span,
+) -> Option<Vec<FixEdit>> {
+    let src = source?;
+    if span.start > src.len() || span.end > src.len() {
+        return None;
+    }
+
+    // Extend start backward through preceding spaces/tabs so leading indent
+    // is removed along with the statement.
+    let mut start = span.start;
+    let bytes = src.as_bytes();
+    while start > 0 {
+        let prev = bytes[start - 1];
+        if prev == b' ' || prev == b'\t' {
+            start -= 1;
+            continue;
+        }
+        break;
+    }
+
+    // Extend end forward through a trailing newline so the line disappears
+    // entirely. We only swallow ONE newline to avoid chewing through blank
+    // lines that follow the removed statement.
+    let mut end = span.end;
+    if bytes.get(end) == Some(&b'\n') {
+        end += 1;
+    } else if bytes.get(end) == Some(&b'\r') && bytes.get(end + 1) == Some(&b'\n') {
+        end += 2;
+    }
+
+    Some(vec![FixEdit {
+        span: Span::with_offsets(start, end, span.line, 1),
+        replacement: String::new(),
+    }])
+}

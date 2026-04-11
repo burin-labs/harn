@@ -1,5 +1,7 @@
 /target
 node_modules/
+__pycache__/
+*.pyc
 *.DS_Store
 .burin/
 .harn-runs/
