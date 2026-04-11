@@ -848,6 +848,7 @@ pub async fn execute_stage_node(
                         .model_policy
                         .stop_after_successful_tools
                         .clone(),
+                    require_successful_tools: node.model_policy.require_successful_tools.clone(),
                     on_tool_call: node
                         .raw_model_policy
                         .as_ref()

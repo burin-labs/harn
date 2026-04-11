@@ -1,8 +1,8 @@
 use super::{
-    action_turn_nudge, compact_malformed_assistant_turn, extract_retry_after_ms, is_read_only_tool,
-    loop_state_requests_phase_change, prose_exceeds_budget, run_agent_loop_internal,
-    sentinel_without_action_nudge, should_stop_after_successful_tools, trim_prose_for_history,
-    AgentLoopConfig,
+    action_turn_nudge, compact_malformed_assistant_turn, extract_retry_after_ms,
+    has_successful_tools, is_read_only_tool, loop_state_requests_phase_change,
+    prose_exceeds_budget, run_agent_loop_internal, sentinel_without_action_nudge,
+    should_stop_after_successful_tools, trim_prose_for_history, AgentLoopConfig,
 };
 use crate::llm::api::LlmCallOptions;
 use crate::llm::daemon::{persist_snapshot, DaemonLoopConfig, DaemonSnapshot};
@@ -71,6 +71,7 @@ fn base_agent_config() -> AgentLoopConfig {
         post_turn_callback: None,
         turn_policy: None,
         stop_after_successful_tools: None,
+        require_successful_tools: None,
         on_tool_call: None,
         on_tool_result: None,
     }
@@ -202,6 +203,23 @@ fn stop_after_successful_tools_ignores_failed_or_unlisted_tools() {
 }
 
 #[test]
+fn has_successful_tools_matches_any_required_tool() {
+    let required_tools = vec!["edit".to_string(), "create".to_string()];
+    let tool_results = vec![
+        json!({"tool_name": "lookup", "status": "ok"}),
+        json!({"tool_name": "edit", "status": "ok"}),
+    ];
+    assert!(has_successful_tools(&tool_results, &required_tools));
+}
+
+#[test]
+fn has_successful_tools_ignores_failed_turns() {
+    let required_tools = vec!["edit".to_string()];
+    let tool_results = vec![json!({"tool_name": "edit", "status": "error"})];
+    assert!(!has_successful_tools(&tool_results, &required_tools));
+}
+
+#[test]
 fn prose_budget_detection_and_trimming_work() {
     let policy = TurnPolicy {
         require_action_or_yield: true,
@@ -281,6 +299,20 @@ async fn daemon_timer_wake_persists_snapshot_and_compacts_on_idle() {
     assert!(snapshot.transcript_summary.is_some());
 
     let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn require_successful_tools_marks_loop_failed_when_no_write_succeeds() {
+    let mut opts = base_opts(vec![serde_json::json!({
+        "role": "user",
+        "content": "make a deterministic write",
+    })]);
+    let mut config = base_agent_config();
+    config.require_successful_tools = Some(vec!["edit".to_string()]);
+
+    let result = run_agent_loop_internal(&mut opts, config).await.unwrap();
+    assert_eq!(result["status"], "failed");
+    assert_eq!(result["successful_tools"], json!([]));
 }
 
 #[tokio::test(flavor = "current_thread")]

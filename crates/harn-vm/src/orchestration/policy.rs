@@ -275,6 +275,10 @@ pub struct ModelPolicy {
     /// workflow-owned verify loops where a productive write turn should hand
     /// control back to verification immediately.
     pub stop_after_successful_tools: Option<Vec<String>>,
+    /// When set, the stage is reported as failed unless at least one of these
+    /// tool names succeeds during the interaction. Pipelines use this to
+    /// assert a stage cannot quietly finish without running a specific tool.
+    pub require_successful_tools: Option<Vec<String>>,
     /// Turn-shape constraints for action stages.
     pub turn_policy: Option<TurnPolicy>,
 }

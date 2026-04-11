@@ -27,6 +27,17 @@ fn classify_stage_outcome_accepts_done_status_for_mutating_stage() {
 }
 
 #[test]
+fn classify_stage_outcome_fails_when_required_write_never_succeeds() {
+    let (outcome, branch) = classify_stage_outcome(
+        "stage",
+        &serde_json::json!({"status": "failed"}),
+        &serde_json::json!({"ok": true}),
+    );
+    assert_eq!(outcome, "failed");
+    assert_eq!(branch.as_deref(), Some("failed"));
+}
+
+#[test]
 fn load_run_tree_recurses_into_child_runs() {
     let dir = std::env::temp_dir().join(format!("harn-run-tree-{}", uuid::Uuid::now_v7()));
     std::fs::create_dir_all(&dir).unwrap();

@@ -412,6 +412,12 @@ pub struct AgentLoopConfig {
     /// tool names. The whole turn still completes, so multiple write calls can
     /// be batched in one response.
     pub stop_after_successful_tools: Option<Vec<String>>,
+    /// If set, the loop returns `status = "failed"` unless at least one of
+    /// these tool names completed successfully during the interaction. Lets
+    /// pipelines declare "this stage has not done its job unless tool X
+    /// actually ran" without having to inspect the returned `tools_used`
+    /// list themselves.
+    pub require_successful_tools: Option<Vec<String>>,
     /// Pre-execution hook: called with `{tool_name, args}` before each tool call.
     /// Must return a dict: `{allow: bool}` to allow/deny, optionally `{args: dict}`
     /// to modify arguments. Returning `{allow: false, reason: "..."}` denies the call.
@@ -497,11 +503,15 @@ fn should_stop_after_successful_tools(
     tool_results: &[serde_json::Value],
     stop_tools: &[String],
 ) -> bool {
+    has_successful_tools(tool_results, stop_tools)
+}
+
+fn has_successful_tools(tool_results: &[serde_json::Value], tool_names: &[String]) -> bool {
     tool_results
         .iter()
         .filter(|result| result["status"].as_str() == Some("ok"))
         .filter_map(|result| result["tool_name"].as_str())
-        .any(|tool_name| stop_tools.iter().any(|wanted| wanted == tool_name))
+        .any(|tool_name| tool_names.iter().any(|wanted| wanted == tool_name))
 }
 
 fn prose_char_len(text: &str) -> usize {
@@ -1364,6 +1374,7 @@ pub async fn run_agent_loop_internal(
     let mut consecutive_text_only = 0usize;
     let mut consecutive_single_tool_turns = 0usize;
     let mut all_tools_used: Vec<String> = Vec::new();
+    let mut successful_tools_used: Vec<String> = Vec::new();
     let mut rejected_tools: Vec<String> = Vec::new();
     let mut deferred_user_messages: Vec<String> = Vec::new();
     let mut total_iterations = 0usize;
@@ -2438,19 +2449,24 @@ pub async fn run_agent_loop_internal(
             } else {
                 consecutive_single_tool_turns = 0;
             }
+            let successful_tool_names: Vec<&str> = tool_results_this_iter
+                .iter()
+                .filter(|result| result["status"].as_str() == Some("ok"))
+                .filter_map(|result| result["tool_name"].as_str())
+                .collect();
+            for tool_name in &successful_tool_names {
+                if !successful_tools_used
+                    .iter()
+                    .any(|existing| existing == tool_name)
+                {
+                    successful_tools_used.push((*tool_name).to_string());
+                }
+            }
             if let Some(VmValue::Closure(ref closure)) = config.post_turn_callback {
                 let tool_names: Vec<&str> = tool_calls
                     .iter()
                     .filter_map(|tc| tc["name"].as_str())
                     .collect();
-                let successful_tool_names: Vec<&str> = tool_results_this_iter
-                    .iter()
-                    .filter(|result| result["status"].as_str() == Some("ok"))
-                    .filter_map(|result| result["tool_name"].as_str())
-                    .collect();
-                let session_has_edit = all_tools_used
-                    .iter()
-                    .any(|t| t == "edit" || t == "scaffold" || t == "create");
                 let turn_info = serde_json::json!({
                     "tool_names": tool_names,
                     "tool_results": tool_results_this_iter,
@@ -2458,7 +2474,8 @@ pub async fn run_agent_loop_internal(
                     "tool_count": tool_calls.len(),
                     "iteration": iteration,
                     "consecutive_single_tool_turns": consecutive_single_tool_turns,
-                    "session_has_edit": session_has_edit,
+                    "session_tools_used": all_tools_used,
+                    "session_successful_tools": successful_tools_used,
                 });
                 let cb_arg = crate::stdlib::json_to_vm_value(&turn_info);
                 if let Ok(mut vm) = crate::vm::clone_async_builtin_child_vm()
@@ -2811,6 +2828,17 @@ pub async fn run_agent_loop_internal(
     if daemon && final_status == "done" {
         final_status = "idle";
     }
+    if final_status == "done" {
+        if let Some(required_tools) = config.require_successful_tools.as_ref() {
+            if !required_tools.is_empty()
+                && !successful_tools_used
+                    .iter()
+                    .any(|tool_name| required_tools.iter().any(|wanted| wanted == tool_name))
+            {
+                final_status = "failed";
+            }
+        }
+    }
     if daemon {
         daemon_state = final_status.to_string();
         let final_snapshot = daemon_snapshot_from_state(
@@ -2850,6 +2878,7 @@ pub async fn run_agent_loop_internal(
         "iterations": total_iterations,
         "duration_ms": loop_start.elapsed().as_millis() as i64,
         "tools_used": all_tools_used,
+        "successful_tools": successful_tools_used,
         "rejected_tools": rejected_tools,
         "tool_calling_mode": tool_format,
         "deferred_user_messages": deferred_user_messages,
@@ -3008,6 +3037,10 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                     stop_after_successful_tools: crate::llm::helpers::opt_str_list(
                         &options,
                         "stop_after_successful_tools",
+                    ),
+                    require_successful_tools: crate::llm::helpers::opt_str_list(
+                        &options,
+                        "require_successful_tools",
                     ),
                     on_tool_call: options
                         .as_ref()

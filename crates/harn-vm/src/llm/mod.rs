@@ -374,6 +374,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                     .cloned(),
                 turn_policy,
                 stop_after_successful_tools: opt_str_list(&options, "stop_after_successful_tools"),
+                require_successful_tools: opt_str_list(&options, "require_successful_tools"),
                 on_tool_call: options
                     .as_ref()
                     .and_then(|o| o.get("on_tool_call"))

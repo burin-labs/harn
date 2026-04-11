@@ -37,6 +37,7 @@ pub fn workflow_options(config) {
     nudge: config?.nudge,
     turn_policy: config?.turn_policy,
     stop_after_successful_tools: config?.stop_after_successful_tools,
+    require_successful_tools: config?.require_successful_tools,
     tool_retries: config?.tool_retries,
     tool_backoff_ms: config?.tool_backoff_ms,
     tool_format: config?.tool_format,

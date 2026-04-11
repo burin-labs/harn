@@ -2,6 +2,28 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.66
+
+### Added
+
+- **`require_successful_tools` agent-loop policy** — agent loops and stage
+  model policies accept a new `require_successful_tools: list<string>`
+  option. When set, the loop returns `status = "failed"` unless at least one
+  of the named tools completed successfully during the interaction, and the
+  classifying verify branch in workflow runs treats the stage as failed
+  instead of quietly succeeding. The loop result dict gains a
+  `successful_tools` list alongside `tools_used`.
+
+### Changed
+
+- **Post-turn callback payload is host-neutral** — the `post_turn_callback`
+  dict no longer hard-codes an `"edit" | "scaffold" | "create"` flag. It now
+  exposes `session_tools_used` and `session_successful_tools` lists instead
+  of `session_has_edit`, letting pipelines decide which tool names count as
+  progress without baking host-specific names into the runtime. Pipelines
+  that relied on `session_has_edit` should switch to
+  `session_successful_tools.contains(name)`.
+
 ## v0.5.65
 
 ### Fixed
