@@ -2129,19 +2129,21 @@ pub async fn run_agent_loop_internal(
             .or(daemon_snapshot_path);
     }
 
+    // Emit structured trace event for loop completion.
+    super::trace::emit_agent_event(super::trace::AgentTraceEvent::LoopComplete {
+        status: final_status.to_string(),
+        iterations: total_iterations,
+        total_duration_ms: loop_start.elapsed().as_millis() as u64,
+        tools_used: all_tools_used.clone(),
+        successful_tools: successful_tools_used.clone(),
+    });
+    let trace_summary = super::trace::agent_trace_summary();
+
     Ok(serde_json::json!({
         "status": final_status,
         "daemon_state": daemon_state,
         "daemon_snapshot_path": daemon_snapshot_path,
-        // `text` is the full accumulated transcript of every assistant turn.
-        // Use this for meta-analysis that genuinely wants end-to-end history
-        // (reflectors, auditors, transcript replay).
         "text": total_text,
-        // `visible_text` is what an end user should see as the agent's answer:
-        // the LAST iteration's assistant text, unwrapped of any exploration
-        // turns or tool-call expressions from earlier iterations. This is
-        // what rewriters, chat bubbles, subagent consumers, and phase-routing
-        // logic should key off. It is intentionally different from `text`.
         "visible_text": last_iteration_text,
         "iterations": total_iterations,
         "duration_ms": loop_start.elapsed().as_millis() as i64,
@@ -2150,6 +2152,7 @@ pub async fn run_agent_loop_internal(
         "rejected_tools": rejected_tools,
         "tool_calling_mode": tool_format,
         "deferred_user_messages": deferred_user_messages,
+        "trace": trace_summary,
         "transcript": super::helpers::vm_value_to_json(&transcript_to_vm_with_events(
             opts.transcript_id.clone(),
             transcript_summary,

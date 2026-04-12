@@ -337,6 +337,15 @@ pub(crate) async fn observed_llm_call(
                     output_tokens: result.output_tokens,
                     duration_ms,
                 });
+                super::trace::emit_agent_event(super::trace::AgentTraceEvent::LlmCall {
+                    call_id: call_id.clone(),
+                    model: result.model.clone(),
+                    input_tokens: result.input_tokens,
+                    output_tokens: result.output_tokens,
+                    cache_tokens: result.cache_read_tokens,
+                    duration_ms,
+                    iteration: iteration.unwrap_or(0),
+                });
                 return Ok(result);
             }
             Err(error) => {

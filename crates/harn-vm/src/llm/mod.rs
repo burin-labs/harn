@@ -170,12 +170,16 @@ pub(crate) use self::helpers::extract_llm_options;
 pub use self::helpers::resolve_api_key;
 pub use self::helpers::vm_value_to_json;
 pub use self::mock::{set_replay_mode, LlmReplayMode};
-pub use self::trace::{enable_tracing, peek_trace, peek_trace_summary, take_trace, LlmTraceEntry};
+pub use self::trace::{
+    agent_trace_summary, enable_tracing, peek_agent_trace, peek_trace, peek_trace_summary,
+    take_agent_trace, take_trace, AgentTraceEvent, LlmTraceEntry,
+};
 
 /// Reset all thread-local LLM state (cost, trace, mock, rate limits). Call between test runs.
 pub fn reset_llm_state() {
     cost::reset_cost_state();
     trace::reset_trace_state();
+    trace::reset_agent_trace_state();
     provider::register_default_providers();
     rate_limit::reset_rate_limit_state();
     mock::reset_llm_mock_state();
@@ -393,12 +397,27 @@ pub fn register_llm_builtins(vm: &mut Vm) {
         Ok(json_to_vm_value(&result))
     });
 
-    // Remaining builtins (llm_stream, conversation management, config, cost)
+    // Remaining builtins (llm_stream, conversation management, config, cost, trace)
     register_llm_stream(vm);
     conversation::register_conversation_builtins(vm);
     config_builtins::register_config_builtins(vm);
     cost::register_cost_builtins(vm);
     register_llm_mock_builtins(vm);
+
+    vm.register_builtin("agent_trace", |_args, _out| {
+        let events = trace::peek_agent_trace();
+        let list: Vec<VmValue> = events
+            .iter()
+            .filter_map(|e| serde_json::to_value(e).ok())
+            .map(|v| json_to_vm_value(&v))
+            .collect();
+        Ok(VmValue::List(Rc::new(list)))
+    });
+
+    vm.register_builtin("agent_trace_summary", |_args, _out| {
+        let summary = trace::agent_trace_summary();
+        Ok(json_to_vm_value(&summary))
+    });
 }
 
 /// Register llm_mock / llm_mock_calls / llm_mock_clear builtins.
