@@ -32,4 +32,4 @@ tokio-util = { version = "0.7", features = ["io"] }
 futures = "0.3.32"
 opentelemetry = { version = "0.31", optional = true }
 opentelemetry_sdk = { version = "0.31", optional = true, features = ["rt-tokio"] }
-opentelemetry-otlp = { version = "0.17", optional = true }
+opentelemetry-otlp = { version = "0.31", optional = true }
