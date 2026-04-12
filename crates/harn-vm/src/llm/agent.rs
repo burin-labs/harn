@@ -1186,6 +1186,7 @@ pub(crate) fn agent_loop_result_from_llm(
 fn spawn_progress_forwarder(
     bridge: &Rc<crate::bridge::HostBridge>,
     call_id: String,
+    user_visible: bool,
 ) -> DeltaSender {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     let bridge = bridge.clone();
@@ -1193,7 +1194,7 @@ fn spawn_progress_forwarder(
         let mut token_count: u64 = 0;
         while let Some(delta) = rx.recv().await {
             token_count += 1;
-            bridge.send_call_progress(&call_id, &delta, token_count);
+            bridge.send_call_progress(&call_id, &delta, token_count, user_visible);
         }
     });
     tx
@@ -1242,6 +1243,7 @@ pub(crate) async fn observed_llm_call(
     bridge: Option<&Rc<crate::bridge::HostBridge>>,
     retry_config: &LlmRetryConfig,
     iteration: Option<usize>,
+    user_visible: bool,
     offthread: bool,
 ) -> Result<super::api::LlmResult, VmError> {
     let effective_tool_format = tool_format
@@ -1283,6 +1285,7 @@ pub(crate) async fn observed_llm_call(
             serde_json::json!({"model": opts.model, "prompt_chars": prompt_chars});
         call_start_meta["stream_publicly"] =
             serde_json::json!(opts.response_format.as_deref() != Some("json"));
+        call_start_meta["user_visible"] = serde_json::json!(user_visible);
         if let Some(iter) = iteration {
             call_start_meta["iteration"] = serde_json::json!(iter);
             call_start_meta["llm_attempt"] = serde_json::json!(attempt);
@@ -1302,7 +1305,7 @@ pub(crate) async fn observed_llm_call(
         // Execute the LLM call
         let start = std::time::Instant::now();
         let llm_result = if let Some(b) = bridge {
-            let delta_tx = spawn_progress_forwarder(b, call_id.clone());
+            let delta_tx = spawn_progress_forwarder(b, call_id.clone(), user_visible);
             if offthread {
                 vm_call_llm_full_streaming_offthread(opts, delta_tx).await
             } else {
@@ -1338,6 +1341,7 @@ pub(crate) async fn observed_llm_call(
                             "model": result.model,
                             "input_tokens": result.input_tokens,
                             "output_tokens": result.output_tokens,
+                            "user_visible": user_visible,
                         }),
                     );
                 }
@@ -1376,6 +1380,7 @@ pub(crate) async fn observed_llm_call(
                             "error": error.to_string(),
                             "retryable": retryable,
                             "attempt": attempt,
+                            "user_visible": user_visible,
                         }),
                     );
                 }
@@ -1647,6 +1652,7 @@ pub async fn run_agent_loop_internal(
                 backoff_ms: config.llm_backoff_ms,
             },
             Some(iteration),
+            true,
             false, // agent_loop runs on the local set, not offthread
         )
         .await?;
@@ -3247,6 +3253,7 @@ pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Host
         async move {
             let opts = extract_llm_options(&args)?;
             let options = args.get(2).and_then(|a| a.as_dict()).cloned();
+            let user_visible = opt_bool(&options, "user_visible");
             let retry_config = LlmRetryConfig {
                 retries: opt_int(&options, "llm_retries").unwrap_or(0) as usize,
                 backoff_ms: opt_int(&options, "llm_backoff_ms").unwrap_or(2000) as u64,
@@ -3258,6 +3265,7 @@ pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Host
                 Some(&bridge),
                 &retry_config,
                 None,
+                user_visible,
                 true, // offthread: standalone call, avoid blocking the VM LocalSet
             )
             .await?;

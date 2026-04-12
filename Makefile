@@ -1,4 +1,4 @@
-.PHONY: setup install-hooks check fmt fmt-harn lint lint-md lint-harn test test-fast conformance all release-gate portal portal-demo gen-highlight check-highlight check-docs-snippets
+.PHONY: setup install-hooks check fmt fmt-harn lint lint-md lint-harn test test-cargo test-fast conformance all release-gate portal portal-demo gen-highlight check-highlight check-docs-snippets
 
 # Full quality check: format first, then lint/test in parallel.
 # Usage: make all -j       (parallel checks after formatting)
@@ -22,20 +22,25 @@ fmt:
 lint:
 	cargo clippy --workspace --all-targets -- -D warnings
 
-# Run Rust unit tests
+# Run Rust unit tests via cargo-nextest when available for better whole-workspace
+# parallelism and bounded timeouts (see .config/nextest.toml). Falls back to
+# `cargo test --workspace` when nextest is not installed.
 test:
-	cargo test --workspace
-
-# Run Rust unit tests via cargo-nextest when available for parallelism and
-# bounded timeouts (see .config/nextest.toml). Falls back to `cargo test`
-# if nextest is not installed.
-test-fast:
 	@if command -v cargo-nextest >/dev/null 2>&1; then \
 		cargo nextest run --workspace; \
 	else \
-		echo "cargo-nextest not installed; install with 'cargo install cargo-nextest --locked' for bounded timeouts"; \
+		echo "cargo-nextest not installed; falling back to cargo test --workspace"; \
+		echo "hint: run 'make setup' or 'cargo install cargo-nextest --locked'"; \
 		cargo test --workspace; \
 	fi
+
+# Run the baseline Cargo workspace test command explicitly.
+test-cargo:
+	cargo test --workspace
+
+# Compatibility alias for the smarter default `make test`.
+test-fast:
+	@$(MAKE) test
 
 # Run Harn conformance test suite
 conformance:

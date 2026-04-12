@@ -34,9 +34,12 @@ and GitHub release creation.
 2. Read enough diff context to summarize the pending work accurately.
 3. Audit pending changes for correctness and test coverage. Add Rust tests or
    conformance pairs for new or changed user-visible behavior; fix bugs
-   discovered during the audit instead of shipping them. Run
-   `cargo test --workspace` and `cargo run --bin harn -- test conformance`
-   before proceeding.
+   discovered during the audit instead of shipping them.
+   - Run targeted crate tests during the inner loop (`cargo nextest run -p harn-vm`
+     or `cargo test -p harn-vm`) so iteration stays fast.
+   - Run `make test` and `cargo run --bin harn -- test conformance` before
+     proceeding with the release mechanics. `make test` uses `cargo-nextest`
+     when available and falls back to `cargo test --workspace`.
 4. Do a repo-consistency sweep before shipping. Update release-facing docs and
    operator guidance as needed, especially `README.md`, `CLAUDE.md`,
    `docs/src/`, `spec/HARN_SPEC.md`, `CHANGELOG.md`, and any developer setup

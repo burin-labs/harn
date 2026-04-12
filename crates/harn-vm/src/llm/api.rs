@@ -359,11 +359,17 @@ async fn vm_call_llm_full_inner_request(
 ) -> Result<LlmResult, VmError> {
     // Mock provider: return deterministic response without API call.
     if request.provider == "mock" {
-        return Ok(mock_llm_response(
+        let result = mock_llm_response(
             &request.messages,
             request.system.as_deref(),
             request.native_tools.as_deref(),
-        ));
+        );
+        if let Some(tx) = delta_tx {
+            if !result.text.is_empty() {
+                let _ = tx.send(result.text.clone());
+            }
+        }
+        return Ok(result);
     }
 
     let replay_mode = get_replay_mode();

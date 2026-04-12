@@ -6,6 +6,10 @@ Default assumptions:
 
 - Analyze the current worktree first with `git status --short`,
   `git diff --stat`, and targeted `git diff` reads.
+- Use targeted crate tests during the audit loop, then run `make test` plus
+  `cargo run --bin harn -- test conformance` as the final Rust/conformance
+  gate before release. `make test` uses `cargo-nextest` when available and
+  falls back to `cargo test --workspace`.
 - Include all tracked and untracked local work in the release unless the user
   scopes it differently.
 - Before any release mechanics, do a repo-consistency sweep and update

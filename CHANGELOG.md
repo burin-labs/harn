@@ -2,6 +2,38 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.72
+
+### Added
+
+- **`user_visible` flag on LLM bridge notifications** — `call_start`,
+  `call_progress`, and `call_end` session updates now include a
+  `user_visible` boolean so hosts can distinguish user-facing agent
+  responses from internal/background LLM calls.  Agent-loop calls default
+  to `true`; standalone `llm_call` reads the flag from the options dict
+  (defaults to `false`).
+
+### Changed
+
+- **`make test` is now the smart default** — `make test` uses
+  `cargo-nextest` when available for better parallelism and bounded
+  timeouts, falling back to `cargo test --workspace`.  `make test-fast`
+  is now a compatibility alias.  New `make test-cargo` target forces
+  baseline Cargo behavior explicitly.
+
+- **`release_gate.sh audit` uses `make test`** — the release audit now
+  benefits from nextest acceleration automatically.
+
+### Internal
+
+- **Mock LLM provider sends deltas** — the mock provider now forwards
+  response text through the delta channel, enabling test-time observation
+  of streaming progress notifications.
+
+- **`HostBridge` test harness** — `#[cfg(test)]` `recorded_notifications`
+  collector allows unit tests to assert on emitted bridge notifications
+  without I/O.
+
 ## v0.5.71
 
 ### Fixed

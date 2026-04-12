@@ -199,6 +199,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
             None, // no bridge
             &retry_config,
             None,
+            false,
             false, // non-bridge path runs on the local set
         )
         .await?;

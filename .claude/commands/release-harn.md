@@ -31,8 +31,8 @@ unless the script cannot do what you need.
      audit loop (e.g. `cargo nextest run -p harn-vm` or
      `cargo test -p harn-vm`). This keeps the edit-test cycle fast.
    - **Full gate last**: once the audit is complete and all targeted tests
-     pass, run `make test-fast` (nextest, or `cargo test --workspace` as
-     fallback) and `cargo run --bin harn -- test conformance` as the final
+     pass, run `make test` (nextest when available, `cargo test --workspace`
+     as fallback) and `cargo run --bin harn -- test conformance` as the final
      gate before committing.
    Do not skip this step — shipping untested or buggy code is worse than
    delaying a release.

@@ -46,6 +46,8 @@ pub struct HostBridge {
     visible_call_states: std::sync::Mutex<HashMap<String, VisibleTextState>>,
     /// Whether an LLM call's deltas should be exposed to end users while streaming.
     visible_call_streams: std::sync::Mutex<HashMap<String, bool>>,
+    #[cfg(test)]
+    recorded_notifications: Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -173,6 +175,8 @@ impl HostBridge {
             resume_requested,
             visible_call_states: std::sync::Mutex::new(HashMap::new()),
             visible_call_streams: std::sync::Mutex::new(HashMap::new()),
+            #[cfg(test)]
+            recorded_notifications: Arc::new(std::sync::Mutex::new(Vec::new())),
         }
     }
 
@@ -198,6 +202,8 @@ impl HostBridge {
             resume_requested: Arc::new(AtomicBool::new(false)),
             visible_call_states: std::sync::Mutex::new(HashMap::new()),
             visible_call_streams: std::sync::Mutex::new(HashMap::new()),
+            #[cfg(test)]
+            recorded_notifications: Arc::new(std::sync::Mutex::new(Vec::new())),
         }
     }
 
@@ -325,9 +331,22 @@ impl HostBridge {
             "method": method,
             "params": params,
         });
+        #[cfg(test)]
+        self.recorded_notifications
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(notification.clone());
         if let Ok(line) = serde_json::to_string(&notification) {
             let _ = self.write_line(&line);
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn recorded_notifications(&self) -> Vec<serde_json::Value> {
+        self.recorded_notifications
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     /// Check if the host has sent a cancel notification.
@@ -470,7 +489,13 @@ impl HostBridge {
 
     /// Send a `session/update` with `call_progress` — a streaming token delta
     /// from an in-flight LLM call.
-    pub fn send_call_progress(&self, call_id: &str, delta: &str, accumulated_tokens: u64) {
+    pub fn send_call_progress(
+        &self,
+        call_id: &str,
+        delta: &str,
+        accumulated_tokens: u64,
+        user_visible: bool,
+    ) {
         let session_id = self.get_session_id();
         let (visible_text, visible_delta) = {
             let stream_publicly = self
@@ -499,6 +524,7 @@ impl HostBridge {
                         "accumulated_tokens": accumulated_tokens,
                         "visible_text": visible_text,
                         "visible_delta": visible_delta,
+                        "user_visible": user_visible,
                     },
                 },
             }),

@@ -418,8 +418,9 @@ notifications:
 ```bash
 make fmt
 make lint
-make test           # cargo test --workspace
-make test-fast      # cargo nextest (faster, bounded timeouts)
+make test           # default Rust test path; uses cargo-nextest when available
+make test-cargo     # force plain cargo test --workspace
+make test-fast      # compatibility alias for make test
 make conformance
 harn test conformance --timing
 harn test conformance tests/worktree_runtime.harn
