@@ -1975,63 +1975,41 @@ fn discover_transcript_steps(
 }
 
 fn parse_transcript_steps(path: &Path) -> Result<Vec<PortalTranscriptStep>, String> {
+    // The transcript is an append-only event stream (agent_observe.rs
+    // writes one event per JSONL row). Reconstruct per-call steps by
+    // replaying events: system_prompt / tool_schemas / message update
+    // rolling state, and provider_call_request / provider_call_response
+    // crystallize a PortalTranscriptStep.
     let content = fs::read_to_string(path)
         .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
     let mut steps = Vec::<PortalTranscriptStep>::new();
     let mut by_call = HashMap::<String, usize>::new();
-    let mut previous_messages: Vec<PortalTranscriptMessage> = Vec::new();
     let mut call_index = 0usize;
+    let mut current_system_prompt: Option<String> = None;
+    let mut current_schema_names: Vec<String> = Vec::new();
+    let mut accumulated_messages: Vec<PortalTranscriptMessage> = Vec::new();
+    let mut previous_total: usize = 0;
 
     for line in content.lines().filter(|line| !line.trim().is_empty()) {
         let raw: serde_json::Value = match serde_json::from_str(line) {
             Ok(value) => value,
             Err(_) => continue,
         };
-        let call_id = raw
-            .get("call_id")
-            .and_then(|value| value.as_str())
-            .unwrap_or("")
-            .to_string();
-        if call_id.is_empty() {
-            continue;
-        }
-        match raw
+        let event_type = raw
             .get("type")
             .and_then(|value| value.as_str())
-            .unwrap_or("")
-        {
-            "request" => {
-                call_index += 1;
-                let messages = raw
-                    .get("messages")
-                    .and_then(|value| value.as_array())
-                    .map(|items| {
-                        items
-                            .iter()
-                            .map(|item| PortalTranscriptMessage {
-                                role: item
-                                    .get("role")
-                                    .and_then(|value| value.as_str())
-                                    .unwrap_or("user")
-                                    .to_string(),
-                                content: item
-                                    .get("content")
-                                    .and_then(|value| value.as_str())
-                                    .unwrap_or("")
-                                    .to_string(),
-                            })
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default();
-                let kept_messages = shared_prefix_count(&previous_messages, &messages);
-                let added_context = messages
-                    .iter()
-                    .skip(kept_messages)
-                    .cloned()
-                    .collect::<Vec<_>>();
-                previous_messages = messages.clone();
-                let tool_calls = raw
-                    .get("tool_schemas")
+            .unwrap_or("");
+
+        match event_type {
+            "system_prompt" => {
+                current_system_prompt = raw
+                    .get("content")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string);
+            }
+            "tool_schemas" => {
+                current_schema_names = raw
+                    .get("schemas")
                     .and_then(|value| value.as_array())
                     .map(|items| {
                         items
@@ -2044,6 +2022,39 @@ fn parse_transcript_steps(path: &Path) -> Result<Vec<PortalTranscriptStep>, Stri
                             .collect::<Vec<_>>()
                     })
                     .unwrap_or_default();
+            }
+            "message" => {
+                accumulated_messages.push(PortalTranscriptMessage {
+                    role: raw
+                        .get("role")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or("user")
+                        .to_string(),
+                    content: raw
+                        .get("content")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                });
+            }
+            "provider_call_request" => {
+                let call_id = raw
+                    .get("call_id")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                if call_id.is_empty() {
+                    continue;
+                }
+                call_index += 1;
+                let total_messages = accumulated_messages.len();
+                let kept_messages = previous_total.min(total_messages);
+                let added_context = accumulated_messages
+                    .iter()
+                    .skip(kept_messages)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                previous_total = total_messages;
                 let step = PortalTranscriptStep {
                     call_id: call_id.clone(),
                     span_id: raw.get("span_id").and_then(|value| value.as_u64()),
@@ -2063,23 +2074,25 @@ fn parse_transcript_steps(path: &Path) -> Result<Vec<PortalTranscriptStep>, Stri
                         .map(str::to_string),
                     kept_messages,
                     added_messages: added_context.len(),
-                    total_messages: messages.len(),
+                    total_messages,
                     input_tokens: None,
                     output_tokens: None,
-                    system_prompt: raw
-                        .get("system")
-                        .and_then(|value| value.as_str())
-                        .map(str::to_string),
+                    system_prompt: current_system_prompt.clone(),
                     added_context,
                     response_text: None,
                     thinking: None,
-                    tool_calls,
+                    tool_calls: current_schema_names.clone(),
                     summary: "Waiting for model response".to_string(),
                 };
                 by_call.insert(call_id, steps.len());
                 steps.push(step);
             }
-            "response" => {
+            "provider_call_response" => {
+                let call_id = raw
+                    .get("call_id")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 if let Some(index) = by_call.get(&call_id).copied() {
                     let step = &mut steps[index];
                     step.span_id = step
@@ -2120,23 +2133,6 @@ fn parse_transcript_steps(path: &Path) -> Result<Vec<PortalTranscriptStep>, Stri
     }
 
     Ok(steps)
-}
-
-fn shared_prefix_count(
-    previous: &[PortalTranscriptMessage],
-    current: &[PortalTranscriptMessage],
-) -> usize {
-    let max = previous.len().min(current.len());
-    let mut count = 0usize;
-    while count < max {
-        if previous[count].role != current[count].role
-            || previous[count].content != current[count].content
-        {
-            break;
-        }
-        count += 1;
-    }
-    count
 }
 
 fn summarize_transcript_step(step: &PortalTranscriptStep) -> String {
@@ -2981,11 +2977,17 @@ mod tests {
         fs::write(&run_path, "{}").unwrap();
         let llm_dir = temp.path().join("run-llm");
         fs::create_dir_all(&llm_dir).unwrap();
+        // Event-stream shape: system_prompt + tool_schemas once, then a
+        // user message, then provider_call_request / response. Parser
+        // reconstructs a PortalTranscriptStep by replaying events.
         fs::write(
             llm_dir.join("llm_transcript.jsonl"),
             concat!(
-                "{\"type\":\"request\",\"call_id\":\"call-1\",\"iteration\":0,\"model\":\"mock\",\"messages\":[{\"role\":\"user\",\"content\":\"Do X\"}],\"system\":\"Be helpful\"}\n",
-                "{\"type\":\"response\",\"call_id\":\"call-1\",\"iteration\":0,\"model\":\"mock\",\"text\":\"Done\",\"input_tokens\":10,\"output_tokens\":4,\"tool_calls\":[{\"name\":\"read\"}]}\n"
+                "{\"type\":\"system_prompt\",\"content\":\"Be helpful\",\"hash\":1}\n",
+                "{\"type\":\"tool_schemas\",\"schemas\":[{\"name\":\"read\"}],\"hash\":2}\n",
+                "{\"type\":\"message\",\"role\":\"user\",\"content\":\"Do X\",\"iteration\":1}\n",
+                "{\"type\":\"provider_call_request\",\"call_id\":\"call-1\",\"iteration\":1,\"model\":\"mock\"}\n",
+                "{\"type\":\"provider_call_response\",\"call_id\":\"call-1\",\"iteration\":1,\"model\":\"mock\",\"text\":\"Done\",\"input_tokens\":10,\"output_tokens\":4,\"tool_calls\":[{\"name\":\"read\"}]}\n"
             ),
         )
         .unwrap();
@@ -2995,6 +2997,7 @@ mod tests {
         assert_eq!(steps[0].tool_calls, vec!["read".to_string()]);
         assert_eq!(steps[0].added_messages, 1);
         assert_eq!(steps[0].response_text.as_deref(), Some("Done"));
+        assert_eq!(steps[0].system_prompt.as_deref(), Some("Be helpful"));
     }
 
     #[test]

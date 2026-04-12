@@ -1,11 +1,10 @@
 use super::{
-    action_turn_nudge, build_llm_call_result, compact_malformed_assistant_turn,
-    extract_retry_after_ms, has_successful_tools, is_read_only_tool,
-    loop_state_requests_phase_change, merge_agent_loop_policy, normalize_native_tools_for_format,
-    normalize_tool_choice_for_format, normalize_tool_examples_for_format, observed_llm_call,
-    prose_exceeds_budget, required_tool_choice_for_provider, run_agent_loop_internal,
-    sentinel_without_action_nudge, should_stop_after_successful_tools, trim_prose_for_history,
-    AgentLoopConfig, LlmRetryConfig,
+    action_turn_nudge, assistant_history_text, build_llm_call_result, extract_retry_after_ms,
+    has_successful_tools, is_read_only_tool, loop_state_requests_phase_change,
+    merge_agent_loop_policy, normalize_native_tools_for_format, normalize_tool_choice_for_format,
+    normalize_tool_examples_for_format, observed_llm_call, prose_exceeds_budget,
+    required_tool_choice_for_provider, run_agent_loop_internal, sentinel_without_action_nudge,
+    should_stop_after_successful_tools, trim_prose_for_history, AgentLoopConfig, LlmRetryConfig,
 };
 use crate::bridge::HostBridge;
 use crate::llm::api::{LlmCallOptions, LlmResult};
@@ -93,15 +92,59 @@ fn detects_phase_change_from_latest_loop_state_footer() {
 }
 
 #[test]
-fn compact_malformed_assistant_turn_elides_raw_text() {
-    let msg = compact_malformed_assistant_turn(1);
-    assert!(msg.contains("1 malformed tool call"));
-    assert!(msg.contains("elided"));
-    assert!(!msg.contains("```call"));
-    assert!(!msg.contains("<<'EOF'"));
+fn assistant_history_preserves_tool_call_syntax_in_text_mode() {
+    // The model's own tool-call expressions must survive into replayed
+    // history. Stripping them causes the next turn to see an empty
+    // assistant message and lose track of what it invoked.
+    let raw_text = "I'll read the file first.\n\
+                    read({ path: \"src/lib.rs\" })\n\
+                    run({ command: \"cargo test\" })";
+    let tool_calls = vec![
+        json!({"name": "read", "arguments": {"path": "src/lib.rs"}}),
+        json!({"name": "run", "arguments": {"command": "cargo test"}}),
+    ];
 
-    let msg_plural = compact_malformed_assistant_turn(3);
-    assert!(msg_plural.contains("3 malformed tool calls"));
+    let replayed = assistant_history_text(raw_text, 0, &tool_calls);
+    assert!(
+        replayed.contains("read({ path: \"src/lib.rs\" })"),
+        "replayed history must carry the tool-call expression verbatim, got: {replayed}",
+    );
+    assert!(
+        replayed.contains("run({ command: \"cargo test\" })"),
+        "replayed history must carry every tool-call expression, got: {replayed}",
+    );
+    assert!(
+        replayed.contains("I'll read the file first."),
+        "prose preceding tool calls must be preserved so the model's chain of thought \
+         is stable across turns",
+    );
+}
+
+#[test]
+fn assistant_history_is_never_empty_for_successful_tool_calls() {
+    // Regression: a pure-tool-call response ("run({...})") previously
+    // replayed as an empty string because the prose parser stripped the
+    // entire response. Next turn then saw amnesia about what it invoked.
+    let raw_text = "run({ command: \"ls\" })";
+    let tool_calls = vec![json!({"name": "run", "arguments": {"command": "ls"}})];
+
+    let replayed = assistant_history_text(raw_text, 0, &tool_calls);
+    assert!(
+        !replayed.trim().is_empty(),
+        "assistant history for a successful tool-call turn must not collapse to empty",
+    );
+    assert!(replayed.contains("run("));
+}
+
+#[test]
+fn assistant_history_elides_malformed_turns() {
+    // When parsing failed we still want a compact placeholder so the next
+    // iteration doesn't see (and mutate) its own broken syntax.
+    let raw_text = "```call\nread({ path: 'broken }\n```";
+    let tool_calls = vec![json!({"name": "read"})];
+    let replayed = assistant_history_text(raw_text, 2, &tool_calls);
+    assert!(replayed.contains("malformed tool call"));
+    assert!(!replayed.contains("'broken"));
 }
 
 #[test]
@@ -581,7 +624,104 @@ async fn persistent_prompt_omits_done_sentinel_when_stage_disallows_it() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+#[allow(clippy::await_holding_lock)]
+async fn observed_llm_call_transcript_deduplicates_system_and_tool_schemas() {
+    // Two back-to-back calls with identical system prompt and tool schema
+    // list should emit `system_prompt` and `tool_schemas` events exactly
+    // once each, while `provider_call_request` fires on every call. The
+    // dedup state is per-agent-loop; for standalone `observed_llm_call`
+    // tests we rely on the thread-local seeded in the first dump.
+    //
+    // Guard against parallel tests racing on the shared HARN_LLM_TRANSCRIPT_DIR
+    // env var — other tests in this module set/unset the same variable.
+    let _guard = transcript_env_lock();
+    reset_llm_mock_state();
+    let dir = std::env::temp_dir().join(format!(
+        "harn-llm-transcript-dedup-{}",
+        uuid::Uuid::now_v7()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let old_dir = std::env::var("HARN_LLM_TRANSCRIPT_DIR").ok();
+    std::env::set_var("HARN_LLM_TRANSCRIPT_DIR", dir.to_string_lossy().to_string());
+    super::super::agent_observe::reset_transcript_dedup();
+
+    let mut opts = base_opts(vec![serde_json::json!({"role": "user", "content": "ping"})]);
+    opts.system = Some("static system prompt".to_string());
+
+    for iteration in 0..3 {
+        let _ = observed_llm_call(
+            &opts,
+            Some("text"),
+            None,
+            &LlmRetryConfig::default(),
+            Some(iteration),
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+    }
+
+    // Other parallel tests in this binary may briefly point
+    // HARN_LLM_TRANSCRIPT_DIR at the same temp dir via the shared env var,
+    // so our file can pick up stray events. Filter on our marker system
+    // prompt before asserting counts.
+    let transcript =
+        std::fs::read_to_string(dir.join("llm_transcript.jsonl")).expect("transcript file");
+    let system_events_for_us = transcript
+        .lines()
+        .filter(|l| {
+            l.contains("\"type\":\"system_prompt\"") && l.contains("\"static system prompt\"")
+        })
+        .count();
+    let schema_events_for_us = transcript
+        .lines()
+        .filter(|l| l.contains("\"type\":\"tool_schemas\"") && l.contains("\"schemas\":[]"))
+        .count();
+    let request_events = transcript
+        .lines()
+        .filter(|l| l.contains("\"type\":\"provider_call_request\""))
+        .count();
+    assert_eq!(
+        system_events_for_us, 1,
+        "our system prompt should be emitted once; transcript:\n{transcript}"
+    );
+    assert!(
+        schema_events_for_us >= 1,
+        "empty tool schemas should be emitted at least once; transcript:\n{transcript}"
+    );
+    assert!(
+        request_events >= 3,
+        "provider_call_request fires per call; transcript:\n{transcript}"
+    );
+    assert!(
+        !transcript.contains("\"messages\":[{"),
+        "provider_call_request must not embed the message list; messages are emitted as their own events: {transcript}",
+    );
+
+    if let Some(previous) = old_dir {
+        std::env::set_var("HARN_LLM_TRANSCRIPT_DIR", previous);
+    } else {
+        std::env::remove_var("HARN_LLM_TRANSCRIPT_DIR");
+    }
+    let _ = std::fs::remove_dir_all(dir);
+    reset_llm_mock_state();
+}
+
+/// Mutex protecting the HARN_LLM_TRANSCRIPT_DIR env var so transcript
+/// tests in this module don't race each other and end up writing to a
+/// neighbour's temp dir.
+fn transcript_env_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[allow(clippy::await_holding_lock)]
 async fn observed_llm_call_transcript_uses_explicit_tool_format() {
+    let _guard = transcript_env_lock();
     reset_llm_mock_state();
     let dir = std::env::temp_dir().join(format!("harn-llm-transcript-{}", uuid::Uuid::now_v7()));
     std::fs::create_dir_all(&dir).unwrap();

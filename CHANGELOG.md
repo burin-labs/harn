@@ -2,6 +2,50 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.79
+
+### Changed
+
+- **LLM transcript log reshaped into an append-only event stream.** Writes to
+  `$HARN_LLM_TRANSCRIPT_DIR/llm_transcript.jsonl` used to duplicate the full
+  `system`, `messages`, and `tool_schemas` blobs on every `request` row, which
+  meant multi-iteration agent loops produced transcripts that grew quadratically
+  and re-encoded the same system prompt dozens of times. The log now emits
+  dedicated `system_prompt`, `tool_schemas`, `message`,
+  `provider_call_request`, `provider_call_response`, and
+  `interpreted_response` events. `system_prompt` and `tool_schemas` are
+  hash-dedup'd within a stage so the first call emits them and subsequent
+  calls reuse them; `provider_call_request` is now slim metadata
+  (`call_id`, `iteration`, `model`, `provider`, `tool_format`, token caps,
+  `tool_choice`, `message_count`). To reconstruct the exact prompt for any
+  `call_id`, replay events in order and keep the last `system_prompt`, last
+  `tool_schemas`, and every `message` up to the matching
+  `provider_call_request`. Portal's transcript parser
+  (`parse_transcript_steps`) was rewritten to consume the new shape;
+  `RunDetail.tsx` is unchanged because the portal HTTP surface still
+  returns reconstructed `PortalTranscriptStep` rows. External consumers
+  that read `llm_transcript.jsonl` directly must migrate.
+
+### Fixed
+
+- **Assistant history no longer strips the model's own tool-call syntax in
+  text-mode loops.** When `tool_format = text`, the prior code replayed only
+  the prose portion of each assistant turn (tool-call expressions stripped)
+  so the next iteration saw an empty-ish assistant reply and repeatedly
+  re-read the same files or narrated "I will now run X" without memory of
+  having just run X. History now preserves the raw assistant text verbatim
+  (capped at 131 072 chars to keep prompt-cache prefixes stable), which
+  restores chain-of-thought continuity across turns. Malformed-tool-call
+  turns still replay as the compact placeholder so the model cannot
+  mutate its own broken syntax into a self-poison loop.
+- **Initial user messages and mid-loop nudges now appear in the transcript
+  event stream.** Previously the `messages` blob in each `request` row was
+  the only record; with the new per-message events, the initial payload is
+  emitted before the first call and corrective nudges
+  (`sentinel_without_action`, `exit_when_verified` repair prompts) are
+  routed through `append_message_to_contexts` so they land in the log
+  instead of being appended silently to the in-memory context.
+
 ## v0.5.78
 
 ### Fixed

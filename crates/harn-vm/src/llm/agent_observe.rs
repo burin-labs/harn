@@ -1,6 +1,39 @@
 //! LLM call observability: retry logic, transcript dumps, span annotation,
 //! and the `observed_llm_call` wrapper extracted from `agent.rs`.
+//!
+//! # Transcript log shape
+//!
+//! Writes go to `$HARN_LLM_TRANSCRIPT_DIR/llm_transcript.jsonl`, one JSON
+//! object per line, append-only. Consumers replay the events in order to
+//! reconstruct the model's context at any iteration.
+//!
+//! Event types:
+//!
+//! - `system_prompt` `{content, hash}` — emitted once when a new system
+//!   prompt takes effect. Dedup'd via a rolling hash so consecutive
+//!   identical prompts are not re-emitted.
+//! - `tool_schemas` `{schemas, hash}` — same shape for the tool schema
+//!   list; each request re-uses the last-emitted set.
+//! - `message` `{role, content, iteration?}` — single message appended to
+//!   the visible conversation. Emitted every time a message lands in the
+//!   transcript (user task, nudge, assistant reply, tool result, host
+//!   push).
+//! - `provider_call_request` `{call_id, iteration, model, provider,
+//!   tool_format, max_tokens, temperature, tool_choice}` — slim metadata
+//!   for a single model call. No `messages`, `system`, or `tool_schemas`
+//!   fields; those are reconstructable from prior events.
+//! - `provider_call_response` `{call_id, iteration, model, text,
+//!   tool_calls, input_tokens, output_tokens, cache_*, thinking,
+//!   response_ms}` — slim response metadata.
+//! - `interpreted_response` `{call_id, iteration, tool_format, prose,
+//!   tool_calls, tool_parse_errors}` — post-parse view of the last
+//!   assistant turn.
+//!
+//! To reconstruct the prompt sent at `call_id=X`, replay events in order
+//! and track the last `system_prompt`, the last `tool_schemas`, and every
+//! `message` up to (but not including) the matching `provider_call_request`.
 
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::value::VmError;
@@ -9,6 +42,54 @@ use super::api::{vm_call_llm_full_streaming, vm_call_llm_full_streaming_offthrea
 use super::trace::{trace_llm_call, LlmTraceEntry};
 
 use super::agent_tools::next_call_id;
+
+thread_local! {
+    /// Last-emitted hash for the current transcript's system prompt and
+    /// tool schemas. Used to dedup identical payloads across turns so we
+    /// write them once per stage instead of once per request. Cleared on
+    /// stage boundaries via `reset_transcript_dedup()`.
+    static LAST_SYSTEM_PROMPT_HASH: RefCell<Option<u64>> = const { RefCell::new(None) };
+    static LAST_TOOL_SCHEMAS_HASH: RefCell<Option<u64>> = const { RefCell::new(None) };
+    /// Current iteration index for any `message` events emitted outside
+    /// the main LLM request path (e.g. nudges appended before the first
+    /// call, tool results between iterations). Set at the top of each
+    /// iteration and cleared on loop exit.
+    static CURRENT_ITERATION: RefCell<Option<usize>> = const { RefCell::new(None) };
+}
+
+fn hash_str(value: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    value.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn hash_json(value: &serde_json::Value) -> u64 {
+    // Canonicalize via serde_json::to_string which uses map-key insertion
+    // order. For dedup we only need stability within one process run, not
+    // across builds, so the built-in ordering is sufficient.
+    let encoded = serde_json::to_string(value).unwrap_or_default();
+    hash_str(&encoded)
+}
+
+/// Clear the dedup state. Call at the start of a new stage so the first
+/// turn always emits system_prompt and tool_schemas events.
+pub(crate) fn reset_transcript_dedup() {
+    LAST_SYSTEM_PROMPT_HASH.with(|cell| *cell.borrow_mut() = None);
+    LAST_TOOL_SCHEMAS_HASH.with(|cell| *cell.borrow_mut() = None);
+    CURRENT_ITERATION.with(|cell| *cell.borrow_mut() = None);
+}
+
+/// Record the iteration index that applies to any `message` events
+/// emitted until the next call. Message events emitted before any
+/// iteration has started carry `iteration: null`.
+pub(crate) fn set_current_iteration(iteration: Option<usize>) {
+    CURRENT_ITERATION.with(|cell| *cell.borrow_mut() = iteration);
+}
+
+fn current_iteration() -> Option<usize> {
+    CURRENT_ITERATION.with(|cell| *cell.borrow())
+}
 
 // ---------------------------------------------------------------------------
 // Retryable error classification
@@ -87,30 +168,114 @@ pub(super) fn append_llm_transcript_entry(entry: &serde_json::Value) {
     }
 }
 
+/// Emit a `message` event for an assistant/user/tool message that was just
+/// appended to the visible transcript. One row per message keeps the log
+/// append-only: reconstructing the prompt at turn N is a replay, not a
+/// snapshot diff.
+pub(crate) fn emit_message_event_with_iteration(
+    message: &serde_json::Value,
+    iteration: Option<usize>,
+) {
+    let role = message
+        .get("role")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    append_llm_transcript_entry(&serde_json::json!({
+        "type": "message",
+        "timestamp": chrono_now(),
+        "span_id": crate::tracing::current_span_id(),
+        "iteration": iteration,
+        "role": role,
+        "content": message.get("content").cloned().unwrap_or(serde_json::Value::Null),
+        "tool_calls": message.get("tool_calls").cloned(),
+        "tool_call_id": message.get("tool_call_id").cloned(),
+        "name": message.get("name").cloned(),
+    }));
+}
+
+/// Emit a `message` event using the thread-local current iteration.
+/// Preferred entry point for the agent loop; for tests or other callers
+/// that need an explicit iteration, use `emit_message_event_with_iteration`.
+pub(crate) fn emit_message_event(message: &serde_json::Value) {
+    emit_message_event_with_iteration(message, current_iteration());
+}
+
+fn emit_system_prompt_if_changed(system: Option<&str>) {
+    let content = system.unwrap_or("");
+    let current = hash_str(content);
+    let changed = LAST_SYSTEM_PROMPT_HASH.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        if slot.as_ref() == Some(&current) {
+            false
+        } else {
+            *slot = Some(current);
+            true
+        }
+    });
+    if !changed {
+        return;
+    }
+    append_llm_transcript_entry(&serde_json::json!({
+        "type": "system_prompt",
+        "timestamp": chrono_now(),
+        "span_id": crate::tracing::current_span_id(),
+        "hash": current,
+        "content": content,
+    }));
+}
+
+fn emit_tool_schemas_if_changed(schemas: &[crate::llm::tools::ToolSchema]) {
+    let value = serde_json::to_value(schemas).unwrap_or(serde_json::Value::Null);
+    let current = hash_json(&value);
+    let changed = LAST_TOOL_SCHEMAS_HASH.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        if slot.as_ref() == Some(&current) {
+            false
+        } else {
+            *slot = Some(current);
+            true
+        }
+    });
+    if !changed {
+        return;
+    }
+    append_llm_transcript_entry(&serde_json::json!({
+        "type": "tool_schemas",
+        "timestamp": chrono_now(),
+        "span_id": crate::tracing::current_span_id(),
+        "hash": current,
+        "schemas": value,
+    }));
+}
+
 pub(super) fn dump_llm_request(
     iteration: usize,
     call_id: &str,
     tool_format: &str,
     opts: &super::api::LlmCallOptions,
 ) {
+    // System prompt and tool schemas are high-entropy blobs that change
+    // rarely within a single stage. Emit them as their own events with
+    // hash-based dedup so subsequent requests don't repeat them.
+    emit_system_prompt_if_changed(opts.system.as_deref());
     let tool_schemas =
         crate::llm::tools::collect_tool_schemas(opts.tools.as_ref(), opts.native_tools.as_deref());
+    emit_tool_schemas_if_changed(&tool_schemas);
+
     append_llm_transcript_entry(&serde_json::json!({
-        "type": "request",
+        "type": "provider_call_request",
         "iteration": iteration,
         "call_id": call_id,
         "span_id": crate::tracing::current_span_id(),
         "timestamp": chrono_now(),
         "model": opts.model,
         "provider": opts.provider,
-        "system": opts.system,
-        "messages": opts.messages,
         "max_tokens": opts.max_tokens,
         "temperature": opts.temperature,
         "tool_choice": opts.tool_choice,
-        "tool_schemas": tool_schemas,
         "tool_format": tool_format,
         "native_tool_count": opts.native_tools.as_ref().map(|tools| tools.len()).unwrap_or(0),
+        "message_count": opts.messages.len(),
     }));
 }
 
@@ -121,7 +286,7 @@ pub(super) fn dump_llm_response(
     response_ms: u64,
 ) {
     append_llm_transcript_entry(&serde_json::json!({
-        "type": "response",
+        "type": "provider_call_response",
         "iteration": iteration,
         "call_id": call_id,
         "span_id": crate::tracing::current_span_id(),

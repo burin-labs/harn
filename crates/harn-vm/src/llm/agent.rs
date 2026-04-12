@@ -104,6 +104,65 @@ fn trim_prose_for_history(
     format!("{kept}\n\n<assistant prose truncated by turn policy; keep prose brief and act>")
 }
 
+/// Hard cap on a single assistant turn replayed in history, measured in
+/// characters. Large enough that typical edit heredocs, long reasoning, and
+/// bundled tool calls all fit verbatim. Only truly pathological runaway
+/// responses exceed this. A LOW cap would thrash provider prompt caches as
+/// different turns land on different sides of the threshold; keep it high
+/// so the cap is effectively dormant under normal operation.
+const ASSISTANT_HISTORY_HARD_CAP_CHARS: usize = 131_072;
+
+/// Content to replay for an assistant turn in conversation history.
+///
+/// In text-mode tool calling, the model's own tool-call expressions are
+/// part of its output and must be preserved in history so the next turn
+/// can see what it invoked. Stripping them leaves the model with amnesia
+/// about its own actions and triggers degenerate re-read / narration loops.
+/// The provider never re-parses historical assistant turns — only the most
+/// recent response runs through `parse_text_tool_calls_with_tools` — so
+/// replaying tool-call syntax carries no re-execution risk.
+///
+/// When tool parsing failed, replay a compact placeholder instead of the
+/// raw malformed text. Otherwise the next iteration sees its own broken
+/// syntax and mutates it further (observed self-poison loop).
+///
+/// Truncation is deterministic and bounded only by
+/// `ASSISTANT_HISTORY_HARD_CAP_CHARS`, keeping prompt-cache prefixes stable
+/// across turns. Prose-budget discipline is enforced via the post-turn
+/// nudge, not by trimming replayed history.
+fn assistant_history_text(
+    text: &str,
+    tool_parse_errors: usize,
+    tool_calls: &[serde_json::Value],
+) -> String {
+    if tool_parse_errors > 0 {
+        let names: Vec<&str> = tool_calls
+            .iter()
+            .filter_map(|c| c.get("name").and_then(|n| n.as_str()))
+            .collect();
+        return format!(
+            "<assistant turn partially elided: {} tool call(s) executed successfully ({}), \
+             {} malformed tool call(s) rejected. See tool results and parse errors that follow.>",
+            tool_calls.len(),
+            names.join(", "),
+            tool_parse_errors,
+        );
+    }
+    let trimmed = text.trim();
+    let chars: Vec<char> = trimmed.chars().collect();
+    let total = chars.len();
+    if total <= ASSISTANT_HISTORY_HARD_CAP_CHARS {
+        return trimmed.to_string();
+    }
+    let kept: String = chars
+        .into_iter()
+        .take(ASSISTANT_HISTORY_HARD_CAP_CHARS)
+        .collect();
+    format!(
+        "{kept}\n\n<assistant turn truncated: raw length {total} chars exceeded history cap ({ASSISTANT_HISTORY_HARD_CAP_CHARS})>"
+    )
+}
+
 pub(super) fn action_turn_nudge(
     tool_format: &str,
     turn_policy: Option<&crate::orchestration::TurnPolicy>,
@@ -187,21 +246,9 @@ fn append_message_to_contexts(
     recorded_messages: &mut Vec<serde_json::Value>,
     message: serde_json::Value,
 ) {
+    super::agent_observe::emit_message_event(&message);
     visible_messages.push(message.clone());
     recorded_messages.push(message);
-}
-
-/// Replacement text for an assistant turn whose ```call blocks all failed to
-/// parse. Feeding the raw malformed text back into the next request causes the
-/// model to mutate its own broken syntax (observed self-poison loop in
-/// local-gemma4 eval 2026-04-05). We keep the parse-error diagnostic as the
-/// user-role reply, but elide the broken assistant content from history.
-fn compact_malformed_assistant_turn(error_count: usize) -> String {
-    let plural = if error_count == 1 { "" } else { "s" };
-    format!(
-        "<assistant turn elided: produced {error_count} malformed tool call{plural} \
-         (see parse error below). Emit a corrected call in the next turn.>"
-    )
 }
 
 fn append_host_messages_to_recorded(
@@ -484,6 +531,19 @@ pub async fn run_agent_loop_internal(
     opts: &mut super::api::LlmCallOptions,
     config: AgentLoopConfig,
 ) -> Result<serde_json::Value, VmError> {
+    // Each top-level agent loop starts a fresh transcript segment. Reset
+    // the dedup state so the first call emits system_prompt + tool_schemas
+    // events and `message` events carry meaningful iteration indices.
+    super::agent_observe::reset_transcript_dedup();
+
+    struct TranscriptIterationGuard;
+    impl Drop for TranscriptIterationGuard {
+        fn drop(&mut self) {
+            super::agent_observe::set_current_iteration(None);
+        }
+    }
+    let _iteration_guard = TranscriptIterationGuard;
+
     struct ExecutionPolicyGuard {
         active: bool,
     }
@@ -632,6 +692,12 @@ pub async fn run_agent_loop_internal(
     };
     let mut visible_messages = opts.messages.clone();
     let mut recorded_messages = opts.messages.clone();
+    // Emit `message` events for the initial payload so event-stream
+    // consumers (transcript replayers, LoRA corpus extractors) see the
+    // full opening context, not just messages accumulated during the loop.
+    for message in &opts.messages {
+        super::agent_observe::emit_message_event(message);
+    }
 
     // `total_text` is the concatenation of every iteration's assistant text.
     // It is the raw transcript the reflector/meta-analysis callers want to
@@ -697,6 +763,7 @@ pub async fn run_agent_loop_internal(
 
     for iteration in 0..max_iterations {
         total_iterations = resumed_iterations + iteration + 1;
+        super::agent_observe::set_current_iteration(Some(total_iterations));
         daemon_state = "active".to_string();
         let immediate_messages = inject_queued_user_messages(
             bridge.as_ref(),
@@ -921,28 +988,28 @@ pub async fn run_agent_loop_internal(
                  (last run exit code: {code_str}). The loop will continue. \
                  Run the verification command and fix any failures before finishing."
             );
-            visible_messages.push(serde_json::json!({
-                "role": "user",
-                "content": corrective
-            }));
-            recorded_messages.push(serde_json::json!({
-                "role": "user",
-                "content": corrective
-            }));
+            append_message_to_contexts(
+                &mut visible_messages,
+                &mut recorded_messages,
+                serde_json::json!({
+                    "role": "user",
+                    "content": corrective
+                }),
+            );
         }
         // If the model emitted the sentinel without having made any tool
         // calls, it's trying to declare done without doing any work.
         if sentinel_in_text && !has_acted && persistent && has_tools {
             let corrective =
                 sentinel_without_action_nudge(&tool_format, config.turn_policy.as_ref());
-            visible_messages.push(serde_json::json!({
-                "role": "user",
-                "content": corrective
-            }));
-            recorded_messages.push(serde_json::json!({
-                "role": "user",
-                "content": corrective
-            }));
+            append_message_to_contexts(
+                &mut visible_messages,
+                &mut recorded_messages,
+                serde_json::json!({
+                    "role": "user",
+                    "content": corrective
+                }),
+            );
         }
 
         if !tool_calls.is_empty() {
@@ -955,33 +1022,8 @@ pub async fn run_agent_loop_internal(
                     build_assistant_tool_message(&text, &tool_calls, &opts.provider),
                 );
             } else {
-                // When some calls parsed but others didn't, replace the raw
-                // assistant text with a compact summary so the next iteration
-                // cannot see (and mutate) the malformed call blocks. Tool
-                // results for the successful calls are appended below, so the
-                // model still has their outcomes.
-                // In the clean case we append the model's PROSE (tool-call
-                // expressions stripped). Tool calls are structured data —
-                // replaying them as narration would make the next turn see
-                // them as both invocations AND narration commentary, which
-                // is exactly the "visible_text leaked lookup()/read() into
-                // the refined prompt" bug we saw in the rewriter.
-                let assistant_content_for_history = if tool_parse_errors.is_empty() {
-                    shaped_text_prose.clone()
-                } else {
-                    format!(
-                        "<assistant turn partially elided: {} tool call(s) executed successfully \
-                         ({}), {} malformed tool call(s) rejected. \
-                         See tool results and parse errors that follow.>",
-                        tool_calls.len(),
-                        tool_calls
-                            .iter()
-                            .filter_map(|c| c.get("name").and_then(|n| n.as_str()))
-                            .collect::<Vec<_>>()
-                            .join(", "),
-                        tool_parse_errors.len(),
-                    )
-                };
+                let assistant_content_for_history =
+                    assistant_history_text(&text, tool_parse_errors.len(), &tool_calls);
                 append_message_to_contexts(
                     &mut visible_messages,
                     &mut recorded_messages,
@@ -2001,21 +2043,8 @@ pub async fn run_agent_loop_internal(
             continue;
         }
 
-        // If the model attempted tool calls but parsing failed, replace the
-        // raw malformed assistant text with a compact placeholder before
-        // replaying history. Otherwise the next iteration sees its own
-        // broken syntax and mutates it further (observed self-poison loop).
-        //
-        // In the clean text-only case we still use `text_prose` (not `text`)
-        // so that IF the model wrote prose AND a non-malformed call that
-        // simply happened to have no downstream effect (e.g. a call whose
-        // tool was later filtered), history carries only the prose — not
-        // the call expression as accidental narration.
-        let assistant_content_for_history = if !tool_parse_errors.is_empty() {
-            compact_malformed_assistant_turn(tool_parse_errors.len())
-        } else {
-            shaped_text_prose.clone()
-        };
+        let assistant_content_for_history =
+            assistant_history_text(&text, tool_parse_errors.len(), &tool_calls);
         append_message_to_contexts(
             &mut visible_messages,
             &mut recorded_messages,
