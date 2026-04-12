@@ -2,6 +2,28 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.71
+
+### Fixed
+
+- **Workflow retry stages preserve last attempt data** — when all retry
+  attempts fail, the stage result now carries the last attempt's output,
+  artifacts, transcript, verification, usage, and outcome instead of
+  returning empty defaults.  This fixes downstream classify/routing logic
+  that relies on actual attempt data even when a stage ultimately fails.
+
+- **Nested agent loops respect outer permission ceiling** — `agent_loop`
+  now intersects the requested capability policy with any active outer
+  workflow/worker policy before pushing it, so nested loops never silently
+  widen permissions.
+
+### Changed
+
+- **Configurable ACP host-call timeout** — the `host/call` method now
+  defaults to a 300 s timeout (up from 60 s) to accommodate long-running
+  host operations.  All host call timeouts are overridable via the
+  `HARN_HOST_CALL_TIMEOUT_SECS` environment variable.
+
 ## v0.5.70
 
 ### Added

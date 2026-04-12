@@ -145,3 +145,46 @@ async fn execute_join_policy_honors_quorum_and_concurrency_limit() {
         })
         .await;
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn failed_verify_stage_preserves_verification_artifact_and_result() {
+    let node = crate::orchestration::WorkflowNode {
+        id: Some("verify".to_string()),
+        kind: "verify".to_string(),
+        retry_policy: crate::orchestration::RetryPolicy {
+            max_attempts: 1,
+            ..Default::default()
+        },
+        verify: Some(serde_json::json!({
+            "command": "printf nope; exit 1",
+            "expect_status": 0,
+        })),
+        output_contract: crate::orchestration::StageContract {
+            output_kinds: vec!["verification_result".to_string()],
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let executed = execute_stage_attempts("run verification", "verify", &node, &[], None)
+        .await
+        .expect("stage executes");
+
+    assert_eq!(executed.status, "failed");
+    assert_eq!(executed.outcome, "verification_failed");
+    assert_eq!(executed.branch.as_deref(), Some("failed"));
+    assert_eq!(executed.artifacts.len(), 1);
+    assert_eq!(executed.artifacts[0].kind, "verification_result");
+    assert!(executed.result["visible_text"]
+        .as_str()
+        .unwrap_or("")
+        .contains("nope"));
+    assert_eq!(
+        executed
+            .verification
+            .as_ref()
+            .and_then(|value| value.get("ok"))
+            .and_then(|value| value.as_bool()),
+        Some(false)
+    );
+}

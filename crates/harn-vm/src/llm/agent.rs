@@ -70,6 +70,19 @@ fn is_denied_tool_result(value: &serde_json::Value) -> bool {
         .is_some_and(|error| error == "permission_denied")
 }
 
+pub(crate) fn merge_agent_loop_policy(
+    requested: Option<crate::orchestration::CapabilityPolicy>,
+) -> Result<Option<crate::orchestration::CapabilityPolicy>, VmError> {
+    match (crate::orchestration::current_execution_policy(), requested) {
+        (Some(current), Some(requested)) => current
+            .intersect(&requested)
+            .map(Some)
+            .map_err(VmError::Runtime),
+        (None, Some(requested)) => Ok(Some(requested)),
+        (_, None) => Ok(None),
+    }
+}
+
 struct ToolCallTracker {
     /// (tool_name, args_hash) -> (consecutive_count, last_result_hash)
     entries: HashMap<(String, u64), (usize, u64)>,
@@ -1431,12 +1444,15 @@ pub async fn run_agent_loop_internal(
         config.loop_detect_skip,
     );
 
-    // Push per-agent policy if configured
-    if let Some(ref policy) = config.policy {
+    let effective_policy = merge_agent_loop_policy(config.policy.clone())?;
+
+    // Push the loop-local policy only after intersecting it with any active
+    // outer workflow/worker ceiling so nested loops never widen permissions.
+    if let Some(ref policy) = effective_policy {
         crate::orchestration::push_execution_policy(policy.clone());
     }
     let _policy_guard = ExecutionPolicyGuard {
-        active: config.policy.is_some(),
+        active: effective_policy.is_some(),
     };
 
     let tools_owned = opts.tools.clone();

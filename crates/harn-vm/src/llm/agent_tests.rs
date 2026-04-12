@@ -1,7 +1,7 @@
 use super::{
     action_turn_nudge, build_llm_call_result, compact_malformed_assistant_turn,
     extract_retry_after_ms, has_successful_tools, is_read_only_tool,
-    loop_state_requests_phase_change, normalize_native_tools_for_format,
+    loop_state_requests_phase_change, merge_agent_loop_policy, normalize_native_tools_for_format,
     normalize_tool_choice_for_format, normalize_tool_examples_for_format, observed_llm_call,
     prose_exceeds_budget, required_tool_choice_for_provider, run_agent_loop_internal,
     sentinel_without_action_nudge, should_stop_after_successful_tools, trim_prose_for_history,
@@ -10,7 +10,7 @@ use super::{
 use crate::llm::api::{LlmCallOptions, LlmResult};
 use crate::llm::daemon::{persist_snapshot, DaemonLoopConfig, DaemonSnapshot};
 use crate::llm::mock::{get_llm_mock_calls, reset_llm_mock_state};
-use crate::orchestration::TurnPolicy;
+use crate::orchestration::{pop_execution_policy, push_execution_policy, TurnPolicy};
 use crate::value::{VmError, VmValue};
 use serde_json::json;
 use std::rc::Rc;
@@ -118,6 +118,64 @@ fn retry_after_from_thrown_string() {
 fn retry_after_case_insensitive() {
     let err = VmError::Runtime("RETRY-AFTER: 10".to_string());
     assert_eq!(extract_retry_after_ms(&err), Some(10000));
+}
+
+#[test]
+fn merge_agent_loop_policy_narrows_to_ceiling() {
+    push_execution_policy(crate::orchestration::CapabilityPolicy {
+        side_effect_level: Some("workspace_write".to_string()),
+        capabilities: std::collections::BTreeMap::from([(
+            "workspace".to_string(),
+            vec!["write_text".to_string(), "read_text".to_string()],
+        )]),
+        ..Default::default()
+    });
+    // Request a higher side-effect level but only a subset of capabilities.
+    let merged = merge_agent_loop_policy(Some(crate::orchestration::CapabilityPolicy {
+        side_effect_level: Some("process_exec".to_string()),
+        capabilities: std::collections::BTreeMap::from([(
+            "workspace".to_string(),
+            vec!["write_text".to_string()],
+        )]),
+        ..Default::default()
+    }))
+    .expect("merged policy")
+    .expect("policy present");
+    pop_execution_policy();
+
+    // Side-effect level narrowed to the ceiling's lower level.
+    assert_eq!(merged.side_effect_level.as_deref(), Some("workspace_write"));
+    // Capabilities narrowed to the requested subset within the ceiling.
+    assert_eq!(
+        merged.capabilities.get("workspace"),
+        Some(&vec!["write_text".to_string()])
+    );
+}
+
+#[test]
+fn merge_agent_loop_policy_rejects_exceeding_capabilities() {
+    push_execution_policy(crate::orchestration::CapabilityPolicy {
+        side_effect_level: Some("workspace_write".to_string()),
+        capabilities: std::collections::BTreeMap::from([(
+            "workspace".to_string(),
+            vec!["write_text".to_string()],
+        )]),
+        ..Default::default()
+    });
+    let result = merge_agent_loop_policy(Some(crate::orchestration::CapabilityPolicy {
+        side_effect_level: Some("process_exec".to_string()),
+        capabilities: std::collections::BTreeMap::from([(
+            "process".to_string(),
+            vec!["exec".to_string()],
+        )]),
+        ..Default::default()
+    }));
+    pop_execution_policy();
+
+    assert!(
+        result.is_err(),
+        "should reject capabilities outside ceiling"
+    );
 }
 
 #[test]

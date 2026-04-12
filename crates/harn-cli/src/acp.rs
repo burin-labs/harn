@@ -27,6 +27,20 @@ fn verbose_bridge_logs_enabled() -> bool {
     )
 }
 
+fn host_call_timeout(method: &str) -> std::time::Duration {
+    let configured = std::env::var("HARN_HOST_CALL_TIMEOUT_SECS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|seconds| *seconds > 0);
+    if let Some(seconds) = configured {
+        return std::time::Duration::from_secs(seconds);
+    }
+    if method == "host/call" {
+        return std::time::Duration::from_secs(300);
+    }
+    std::time::Duration::from_secs(60)
+}
+
 fn suppress_default_info_log(message: &str) -> bool {
     if verbose_bridge_logs_enabled() {
         return false;
@@ -669,7 +683,7 @@ impl AcpBridge {
             self.write_line(&line);
         }
 
-        let timeout = std::time::Duration::from_secs(60);
+        let timeout = host_call_timeout(method);
         match tokio::time::timeout(timeout, rx).await {
             Ok(Ok(msg)) => {
                 if let Some(error) = msg.get("error") {
