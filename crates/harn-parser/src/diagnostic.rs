@@ -211,8 +211,15 @@ pub fn parser_error_help(err: &ParserError) -> Option<&'static str> {
 mod tests {
     use super::*;
 
+    /// Ensure ANSI colors are off so plain-text assertions work regardless
+    /// of whether the test runner's stderr is a TTY.
+    fn disable_colors() {
+        std::env::set_var("NO_COLOR", "1");
+    }
+
     #[test]
     fn test_basic_diagnostic() {
+        disable_colors();
         let source = "pipeline default(task) {\n    let y = x + 1\n}";
         let span = Span {
             start: 28,
@@ -238,6 +245,7 @@ mod tests {
 
     #[test]
     fn test_diagnostic_with_help() {
+        disable_colors();
         let source = "let y = xx + 1";
         let span = Span {
             start: 8,
@@ -260,6 +268,7 @@ mod tests {
 
     #[test]
     fn test_multiline_source() {
+        disable_colors();
         let source = "line1\nline2\nline3";
         let span = Span::with_offsets(6, 11, 2, 1); // "line2"
         let result = render_diagnostic(
@@ -277,6 +286,7 @@ mod tests {
 
     #[test]
     fn test_single_char_span() {
+        disable_colors();
         let source = "let x = 42";
         let span = Span::with_offsets(4, 5, 1, 5); // "x"
         let result = render_diagnostic(
@@ -294,6 +304,7 @@ mod tests {
 
     #[test]
     fn test_with_help() {
+        disable_colors();
         let source = "let y = reponse";
         let span = Span::with_offsets(8, 15, 1, 9);
         let result = render_diagnostic(
@@ -311,6 +322,7 @@ mod tests {
 
     #[test]
     fn test_parser_error_helpers_for_eof() {
+        disable_colors();
         let err = ParserError::UnexpectedEof {
             expected: "}".into(),
             span: Span::with_offsets(10, 10, 3, 1),
