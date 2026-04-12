@@ -39,6 +39,12 @@ pub struct WorkflowNode {
     pub reduce_policy: ReducePolicy,
     pub escalation_policy: EscalationPolicy,
     pub verify: Option<serde_json::Value>,
+    /// When true, the stage's agent loop gates the done sentinel on the most
+    /// recent `run()` tool call exiting cleanly (`exit_code == 0`). Use for
+    /// persistent execute stages that fold verification into the loop via a
+    /// shell-exec tool the model invokes explicitly.
+    #[serde(default)]
+    pub exit_when_verified: bool,
     /// Optional per-stage timeout in milliseconds.  When set, stage execution
     /// is wrapped in `tokio::time::timeout` and will fail with a timeout error
     /// if it exceeds the given duration.
@@ -838,7 +844,7 @@ pub async fn execute_stage_node(
                     daemon_config: Default::default(),
                     llm_retries: 2,
                     llm_backoff_ms: 2000,
-                    exit_when_verified: false,
+                    exit_when_verified: node.exit_when_verified,
                     loop_detect_warn: 2,
                     loop_detect_block: 3,
                     loop_detect_skip: 4,

@@ -1118,4 +1118,40 @@ mod tests {
         let result3 = microcompact_tool_output(&cjk, 400);
         assert!(result3.contains("snipped"));
     }
+
+    #[test]
+    fn workflow_node_defaults_exit_when_verified_to_false() {
+        let node = WorkflowNode::default();
+        assert!(!node.exit_when_verified);
+    }
+
+    #[test]
+    fn workflow_node_exit_when_verified_round_trips_through_serde() {
+        let node = WorkflowNode {
+            id: Some("execute".to_string()),
+            kind: "stage".to_string(),
+            exit_when_verified: true,
+            ..Default::default()
+        };
+        let encoded = serde_json::to_value(&node).expect("serialize");
+        assert_eq!(
+            encoded.get("exit_when_verified"),
+            Some(&serde_json::json!(true))
+        );
+        let decoded: WorkflowNode = serde_json::from_value(encoded).expect("deserialize");
+        assert!(decoded.exit_when_verified);
+    }
+
+    #[test]
+    fn workflow_node_exit_when_verified_accepts_missing_field_for_backcompat() {
+        let encoded = serde_json::json!({
+            "id": "legacy_stage",
+            "kind": "stage",
+        });
+        let decoded: WorkflowNode = serde_json::from_value(encoded).expect("deserialize");
+        assert!(
+            !decoded.exit_when_verified,
+            "nodes serialized before this field was added must deserialize with the default"
+        );
+    }
 }

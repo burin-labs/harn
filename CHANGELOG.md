@@ -2,6 +2,17 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.76
+
+### Added
+
+- **`WorkflowNode.exit_when_verified`** — new optional boolean on workflow
+  stage nodes, plumbed through to `AgentLoopConfig.exit_when_verified`. When
+  true, the stage's agent loop gates the done sentinel on the most recent
+  `run()` tool call exiting cleanly. Use for persistent execute stages that
+  fold verification into the loop via a shell-exec tool the model invokes
+  explicitly, replacing separate verify/repair stage graphs.
+
 ## v0.5.75
 
 ### Added
