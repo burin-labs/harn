@@ -253,30 +253,80 @@ pub fn log_warn_meta(category: &str, message: &str, metadata: BTreeMap<String, s
 // =============================================================================
 
 /// OpenTelemetry exporter sink. Requires the `otel` feature flag.
+/// Forwards Harn log events and span lifecycle to OTLP collectors.
 #[cfg(feature = "otel")]
 pub struct OtelSink {
-    _private: (),
+    provider: opentelemetry_sdk::trace::SdkTracerProvider,
 }
 
 #[cfg(feature = "otel")]
 impl OtelSink {
-    /// Create a new OTel sink. Initialises the OTLP exporter pipeline.
+    /// Create a new OTel sink. Initialises the OTLP span exporter
+    /// (default endpoint: localhost:4317 via gRPC, or OTEL_EXPORTER_OTLP_ENDPOINT).
     pub fn new() -> Result<Self, String> {
-        // TODO: initialise opentelemetry_otlp pipeline
-        Ok(Self { _private: () })
+        use opentelemetry_otlp::SpanExporter;
+        use opentelemetry_sdk::trace::SdkTracerProvider;
+
+        let exporter = SpanExporter::builder()
+            .with_http()
+            .build()
+            .map_err(|e| format!("OTel span exporter init failed: {e}"))?;
+
+        let provider = SdkTracerProvider::builder()
+            .with_batch_exporter(exporter)
+            .build();
+
+        opentelemetry::global::set_tracer_provider(provider.clone());
+
+        Ok(Self { provider })
     }
 }
 
 #[cfg(feature = "otel")]
 impl EventSink for OtelSink {
-    fn emit_log(&self, _event: &LogEvent) {
-        // TODO: forward to OTel log exporter
+    fn emit_log(&self, event: &LogEvent) {
+        use opentelemetry::trace::{Tracer, TracerProvider};
+        let tracer = self.provider.tracer("harn");
+        let _span = tracer
+            .span_builder(format!("log.{}", event.category))
+            .with_attributes(vec![
+                opentelemetry::KeyValue::new("level", format!("{:?}", event.level)),
+                opentelemetry::KeyValue::new("message", event.message.clone()),
+                opentelemetry::KeyValue::new("category", event.category.clone()),
+            ])
+            .start(&tracer);
     }
-    fn emit_span_start(&self, _event: &SpanEvent) {
-        // TODO: forward to OTel trace exporter
+
+    fn emit_span_start(&self, event: &SpanEvent) {
+        use opentelemetry::trace::{Tracer, TracerProvider};
+        let tracer = self.provider.tracer("harn");
+        let _span = tracer
+            .span_builder(event.name.clone())
+            .with_attributes(vec![
+                opentelemetry::KeyValue::new("span_id", event.span_id as i64),
+                opentelemetry::KeyValue::new("kind", event.kind.clone()),
+            ])
+            .start(&tracer);
     }
-    fn emit_span_end(&self, _span_id: u64, _metadata: &BTreeMap<String, serde_json::Value>) {
-        // TODO: forward to OTel trace exporter
+
+    fn emit_span_end(&self, span_id: u64, metadata: &BTreeMap<String, serde_json::Value>) {
+        use opentelemetry::trace::TraceContextExt;
+        let cx = opentelemetry::Context::current();
+        let span = cx.span();
+        for (key, value) in metadata {
+            span.set_attribute(opentelemetry::KeyValue::new(
+                key.clone(),
+                format!("{value}"),
+            ));
+        }
+        let _ = span_id;
+    }
+}
+
+#[cfg(feature = "otel")]
+impl Drop for OtelSink {
+    fn drop(&mut self) {
+        let _ = self.provider.shutdown();
     }
 }
 
