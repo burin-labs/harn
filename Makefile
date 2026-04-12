@@ -1,10 +1,10 @@
-.PHONY: setup install-hooks check fmt fmt-harn lint lint-md lint-harn test test-cargo test-fast conformance all release-gate portal portal-demo gen-highlight check-highlight check-docs-snippets
+.PHONY: setup install-hooks check fmt fmt-harn lint lint-md lint-harn test test-cargo test-fast conformance all release-gate portal portal-check portal-demo gen-highlight check-highlight check-docs-snippets
 
 # Full quality check: format first, then lint/test in parallel.
 # Usage: make all -j       (parallel checks after formatting)
 #        make all           (sequential, also works)
 all: fmt
-	$(MAKE) lint lint-md lint-harn fmt-harn test conformance check-highlight check-docs-snippets
+	$(MAKE) lint lint-md lint-harn fmt-harn test conformance check-highlight check-docs-snippets portal-check
 
 check: all
 
@@ -93,6 +93,17 @@ fmt-check:
 
 release-gate:
 	./scripts/release_gate.sh audit
+
+# Build-verify the portal frontend (TypeScript type check + Vite bundle).
+# Requires npm dependencies to be installed (make setup handles this).
+portal-check:
+	@if [ -d crates/harn-cli/portal/node_modules ]; then \
+		echo "=== Checking portal frontend build ==="; \
+		cd crates/harn-cli/portal && npm run lint && npm run build; \
+		echo "    Portal build OK."; \
+	else \
+		echo "=== Skipping portal check (node_modules not installed) ==="; \
+	fi
 
 portal:
 	cargo run --bin harn -- portal
