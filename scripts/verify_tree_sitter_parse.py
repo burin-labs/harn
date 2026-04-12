@@ -10,7 +10,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 GRAMMAR_DIR = ROOT / "tree-sitter-harn"
-LIB_PATH = GRAMMAR_DIR / "harn.dylib"
+# Support both macOS (.dylib) and Linux (.so) compiled libraries.
+_LIB_CANDIDATES = [GRAMMAR_DIR / "harn.dylib", GRAMMAR_DIR / "harn.so"]
+LIB_PATH = next((p for p in _LIB_CANDIDATES if p.exists()), _LIB_CANDIDATES[0])
 CLI = GRAMMAR_DIR / "scripts" / "tree-sitter-cli.sh"
 GRAMMAR_SOURCES = [
     GRAMMAR_DIR / "grammar.js",
