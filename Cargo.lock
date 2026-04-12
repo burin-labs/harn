@@ -702,6 +702,7 @@ dependencies = [
  "toml",
  "tower 0.5.3",
  "url",
+ "uuid",
  "webbrowser",
 ]
 

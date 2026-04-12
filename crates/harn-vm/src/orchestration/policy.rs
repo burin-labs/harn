@@ -938,25 +938,42 @@ impl ToolApprovalPolicy {
     }
 
     /// Merge two approval policies, taking the most restrictive combination.
+    /// - auto_approve: only tools approved by BOTH policies stay approved
+    ///   (if either policy has no patterns, the other's patterns are used)
+    /// - auto_deny / require_approval: union (either policy can deny/gate)
+    /// - write_path_allowlist: intersection (both must allow the path)
     pub fn intersect(&self, other: &ToolApprovalPolicy) -> ToolApprovalPolicy {
-        let mut auto_approve = self.auto_approve.clone();
-        auto_approve.extend(other.auto_approve.iter().cloned());
+        // auto_approve: intersection semantics — a tool should only be
+        // auto-approved if both policies agree. If one side has no patterns,
+        // defer to the other.
+        let auto_approve = if self.auto_approve.is_empty() {
+            other.auto_approve.clone()
+        } else if other.auto_approve.is_empty() {
+            self.auto_approve.clone()
+        } else {
+            // Keep only patterns that appear in both lists.
+            self.auto_approve
+                .iter()
+                .filter(|p| other.auto_approve.contains(p))
+                .cloned()
+                .collect()
+        };
+        // auto_deny / require_approval: union (more restrictive).
         let mut auto_deny = self.auto_deny.clone();
         auto_deny.extend(other.auto_deny.iter().cloned());
         let mut require_approval = self.require_approval.clone();
         require_approval.extend(other.require_approval.iter().cloned());
-        // Write-path allowlist: intersection (both must allow).
+        // write_path_allowlist: intersection (both must allow the path).
         let write_path_allowlist = if self.write_path_allowlist.is_empty() {
             other.write_path_allowlist.clone()
         } else if other.write_path_allowlist.is_empty() {
             self.write_path_allowlist.clone()
         } else {
-            // Keep patterns from both sides — actual path checking
-            // requires all patterns to match, but we merge the lists
-            // so the evaluation can check against both sets.
-            let mut merged = self.write_path_allowlist.clone();
-            merged.extend(other.write_path_allowlist.iter().cloned());
-            merged
+            self.write_path_allowlist
+                .iter()
+                .filter(|p| other.write_path_allowlist.contains(p))
+                .cloned()
+                .collect()
         };
         ToolApprovalPolicy {
             auto_approve,
@@ -1040,6 +1057,32 @@ mod approval_policy_tests {
         };
         let merged = a.intersect(&b);
         assert_eq!(merged.auto_deny.len(), 2);
+    }
+
+    #[test]
+    fn intersect_restricts_auto_approve_to_common_patterns() {
+        let a = ToolApprovalPolicy {
+            auto_approve: vec!["read*".to_string(), "search*".to_string()],
+            ..Default::default()
+        };
+        let b = ToolApprovalPolicy {
+            auto_approve: vec!["read*".to_string(), "write*".to_string()],
+            ..Default::default()
+        };
+        let merged = a.intersect(&b);
+        // Only "read*" is in both — "search*" and "write*" dropped.
+        assert_eq!(merged.auto_approve, vec!["read*".to_string()]);
+    }
+
+    #[test]
+    fn intersect_defers_auto_approve_when_one_side_empty() {
+        let a = ToolApprovalPolicy {
+            auto_approve: vec!["read*".to_string()],
+            ..Default::default()
+        };
+        let b = ToolApprovalPolicy::default();
+        let merged = a.intersect(&b);
+        assert_eq!(merged.auto_approve, vec!["read*".to_string()]);
     }
 }
 

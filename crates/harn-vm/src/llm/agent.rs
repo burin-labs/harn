@@ -26,8 +26,11 @@ use super::agent_tools::{
 use super::daemon::DaemonLoopConfig;
 
 // Re-export items that moved to submodules so agent_tests.rs can use `super::`.
+#[cfg(test)]
 pub(super) use super::agent_config::build_llm_call_result;
+#[cfg(test)]
 pub(super) use super::agent_observe::extract_retry_after_ms;
+#[cfg(test)]
 pub(super) use super::agent_tools::required_tool_choice_for_provider;
 
 thread_local! {
@@ -148,9 +151,6 @@ fn sentinel_without_action_nudge(
     }
     message
 }
-
-/// Write the full LLM request payload to a JSONL transcript file.
-/// Enabled by setting HARN_LLM_TRANSCRIPT_DIR to a directory path.
 
 pub(crate) fn install_current_host_bridge(bridge: Rc<crate::bridge::HostBridge>) {
     CURRENT_HOST_BRIDGE.with(|slot| {
@@ -479,10 +479,6 @@ async fn apply_agent_context_callback(
     }
 }
 
-
-/// Create an unbounded channel and spawn a local task that forwards text
-/// deltas to `bridge.send_call_progress()`.  Returns the sender half —
-/// drop it when the LLM call is done to terminate the forwarding task.
 
 pub async fn run_agent_loop_internal(
     opts: &mut super::api::LlmCallOptions,
@@ -869,6 +865,21 @@ pub async fn run_agent_loop_internal(
         let phase_change = break_unless_phase
             .as_deref()
             .is_some_and(|phase| loop_state_requests_phase_change(&text, phase));
+        if phase_change {
+            if let Some(ref phase) = break_unless_phase {
+                super::trace::emit_agent_event(super::trace::AgentTraceEvent::PhaseChange {
+                    from_phase: phase.clone(),
+                    to_phase: text
+                        .lines()
+                        .rev()
+                        .find_map(|l| l.trim().strip_prefix("next_phase:"))
+                        .unwrap_or("")
+                        .trim()
+                        .to_string(),
+                    iteration,
+                });
+            }
+        }
         // When exit_when_verified is set, the sentinel is only honoured if the
         // last run() tool call returned exit code 0.  This prevents premature
         // exit when the model claims it's done but verification hasn't passed.
@@ -1418,6 +1429,7 @@ pub async fn run_agent_loop_internal(
                     None
                 };
 
+                let tool_start = std::time::Instant::now();
                 let (is_rejected, result_text) = if let Some(fixture) = replay_hit {
                     (fixture.is_rejected, fixture.result.clone())
                 } else {
@@ -1613,6 +1625,20 @@ pub async fn run_agent_loop_internal(
                     if let Some(msg) =
                         loop_intervention_message(tool_name, &result_text, &intervention)
                     {
+                        let (kind, count) = match &intervention {
+                            LoopIntervention::Warn { count } => ("warn", *count),
+                            LoopIntervention::Block { count } => ("block", *count),
+                            LoopIntervention::Skip { count } => ("skip", *count),
+                            LoopIntervention::Proceed => ("proceed", 0),
+                        };
+                        super::trace::emit_agent_event(
+                            super::trace::AgentTraceEvent::LoopIntervention {
+                                tool_name: tool_name.to_string(),
+                                kind: kind.to_string(),
+                                count,
+                                iteration,
+                            },
+                        );
                         match intervention {
                             LoopIntervention::Warn { .. } => {
                                 // Append hint after the real result
@@ -1654,6 +1680,23 @@ pub async fn run_agent_loop_internal(
                         "rejected": is_rejected,
                     })),
                 ));
+
+                if is_rejected {
+                    super::trace::emit_agent_event(super::trace::AgentTraceEvent::ToolRejected {
+                        tool_name: tool_name.to_string(),
+                        reason: result_text.clone(),
+                        iteration,
+                    });
+                } else {
+                    super::trace::emit_agent_event(super::trace::AgentTraceEvent::ToolExecution {
+                        tool_name: tool_name.to_string(),
+                        tool_use_id: tool_id.to_string(),
+                        duration_ms: tool_start.elapsed().as_millis() as u64,
+                        status: tool_status.to_string(),
+                        classification: classify_tool_mutation(tool_name),
+                        iteration,
+                    });
+                }
 
                 if tool_format == "native" {
                     append_message_to_contexts(
@@ -1806,6 +1849,17 @@ pub async fn run_agent_loop_internal(
                     )
                     .await?
                     {
+                        super::trace::emit_agent_event(
+                            super::trace::AgentTraceEvent::ContextCompaction {
+                                archived_messages: est.saturating_sub(
+                                    crate::orchestration::estimate_message_tokens(
+                                        &visible_messages,
+                                    ),
+                                ),
+                                new_summary_len: summary.len(),
+                                iteration,
+                            },
+                        );
                         let merged = match transcript_summary.take() {
                             Some(existing)
                                 if !existing.trim().is_empty()

@@ -95,15 +95,11 @@ release-gate:
 	./scripts/release_gate.sh audit
 
 # Build-verify the portal frontend (TypeScript type check + Vite bundle).
-# Requires npm dependencies to be installed (make setup handles this).
+# Requires npm dependencies: run `make setup` or `cd crates/harn-cli/portal && npm install`.
 portal-check:
-	@if [ -d crates/harn-cli/portal/node_modules ]; then \
-		echo "=== Checking portal frontend build ==="; \
-		cd crates/harn-cli/portal && npm run lint && npm run build; \
-		echo "    Portal build OK."; \
-	else \
-		echo "=== Skipping portal check (node_modules not installed) ==="; \
-	fi
+	@echo "=== Checking portal frontend build ==="
+	cd crates/harn-cli/portal && npm run lint && npm run build
+	@echo "    Portal build OK."
 
 portal:
 	cargo run --bin harn -- portal
