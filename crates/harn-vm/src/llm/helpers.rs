@@ -849,36 +849,14 @@ fn render_assetish_label(kind: &str, dict: &BTreeMap<String, VmValue>) -> String
 // Utility helpers
 // =============================================================================
 
-/// Extract JSON from a string that may contain markdown fences.
-/// Looks for opening/closing fence pairs on their own lines to avoid matching
-/// embedded backticks within JSON content.
-pub(crate) fn extract_json(text: &str) -> &str {
-    let trimmed = text.trim();
+pub(crate) fn extract_json(text: &str) -> String {
+    crate::stdlib::json::extract_json_from_text(text)
+}
 
-    // Find ```json\n or ```\n at the start of a line, then the closing ``` on its own line
-    for fence_start in ["```json", "```"] {
-        if let Some(start) = trimmed.find(fence_start) {
-            let after_fence = &trimmed[start + fence_start.len()..];
-            // Skip to the next newline (end of opening fence line)
-            let content_start = after_fence.find('\n').map(|i| i + 1).unwrap_or(0);
-            let content = &after_fence[content_start..];
-            // Find closing ``` that appears at the start of a line
-            for (i, line) in content.lines().enumerate() {
-                if line.trim_start().starts_with("```") {
-                    // Return everything before this line
-                    let byte_offset: usize = content
-                        .lines()
-                        .take(i)
-                        .map(|l| l.len() + 1) // +1 for \n
-                        .sum();
-                    return content[..byte_offset].trim();
-                }
-            }
-        }
-    }
-
-    // No fences found -- try to find a JSON object/array directly
-    trimmed
+pub(crate) fn expects_structured_output(opts: &super::api::LlmCallOptions) -> bool {
+    opts.response_format.as_deref() == Some("json")
+        || opts.json_schema.is_some()
+        || opts.output_schema.is_some()
 }
 
 // =============================================================================

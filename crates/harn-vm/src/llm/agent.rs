@@ -3258,7 +3258,7 @@ pub(crate) fn build_llm_call_result(
     opts: &super::api::LlmCallOptions,
 ) -> VmValue {
     use super::api::vm_build_llm_result;
-    use super::helpers::extract_json;
+    use super::helpers::{expects_structured_output, extract_json};
     use crate::stdlib::json_to_vm_value;
 
     let mut transcript_messages = opts.messages.clone();
@@ -3302,9 +3302,9 @@ pub(crate) fn build_llm_call_result(
         Some("active"),
     );
 
-    if opts.response_format.as_deref() == Some("json") {
+    if expects_structured_output(opts) {
         let json_str = extract_json(&result.text);
-        let parsed = serde_json::from_str::<serde_json::Value>(json_str)
+        let parsed = serde_json::from_str::<serde_json::Value>(&json_str)
             .ok()
             .map(|jv| json_to_vm_value(&jv));
         return vm_build_llm_result(result, parsed, Some(transcript), opts.tools.as_ref());

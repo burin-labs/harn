@@ -207,7 +207,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
         // to the same build_llm_call_result which skips validation — the
         // host is expected to handle schema enforcement).
         let mut vm_result = agent::build_llm_call_result(&result, &opts);
-        if opts.response_format.as_deref() == Some("json") {
+        if helpers::expects_structured_output(&opts) {
             if let VmValue::Dict(ref dict) = vm_result {
                 if let Some(data) = dict.get("data") {
                     match validated_output_data(data, &opts) {

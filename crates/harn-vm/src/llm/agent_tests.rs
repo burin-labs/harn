@@ -5,8 +5,9 @@ use super::{
     normalize_tool_examples_for_format, observed_llm_call, prose_exceeds_budget,
     required_tool_choice_for_provider, run_agent_loop_internal, sentinel_without_action_nudge,
     should_stop_after_successful_tools, trim_prose_for_history, AgentLoopConfig, LlmRetryConfig,
+    build_llm_call_result,
 };
-use crate::llm::api::LlmCallOptions;
+use crate::llm::api::{LlmCallOptions, LlmResult};
 use crate::llm::daemon::{persist_snapshot, DaemonLoopConfig, DaemonSnapshot};
 use crate::llm::mock::{get_llm_mock_calls, reset_llm_mock_state};
 use crate::orchestration::TurnPolicy;
@@ -240,6 +241,73 @@ fn text_tool_format_drops_native_tool_channel() {
     })];
     assert!(normalize_native_tools_for_format("text", Some(native_tools.clone())).is_none());
     assert!(normalize_native_tools_for_format("json", Some(native_tools)).is_none());
+}
+
+#[test]
+fn build_llm_call_result_extracts_balanced_json_payloads() {
+    let mut opts = base_opts(vec![json!({"role": "user", "content": "Summarize"})]);
+    opts.response_format = Some("json".to_string());
+    opts.output_schema = Some(json!({
+        "type": "object",
+        "properties": {
+            "purpose": {"type": "string"}
+        }
+    }));
+
+    let result = LlmResult {
+        text: "Here is the result:\n{\"purpose\":\"cli\"}\nThanks.".to_string(),
+        tool_calls: Vec::new(),
+        input_tokens: 10,
+        output_tokens: 5,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        model: "mock".to_string(),
+        provider: "mock".to_string(),
+        thinking: None,
+        stop_reason: None,
+        blocks: Vec::new(),
+    };
+
+    let vm_result = build_llm_call_result(&result, &opts);
+    let dict = vm_result.as_dict().expect("dict");
+    let data = dict.get("data").expect("parsed data");
+    let data_dict = data.as_dict().expect("object data");
+    assert_eq!(
+        data_dict.get("purpose").map(VmValue::display).as_deref(),
+        Some("cli")
+    );
+}
+
+#[test]
+fn build_llm_call_result_uses_output_schema_without_response_format_flag() {
+    let mut opts = base_opts(vec![json!({"role": "user", "content": "Summarize"})]);
+    opts.output_schema = Some(json!({
+        "type": "object",
+        "properties": {
+            "frameworks": {
+                "type": "array",
+                "items": {"type": "string"}
+            }
+        }
+    }));
+
+    let result = LlmResult {
+        text: "{\"frameworks\":[\"go test\"]}".to_string(),
+        tool_calls: Vec::new(),
+        input_tokens: 10,
+        output_tokens: 5,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        model: "mock".to_string(),
+        provider: "mock".to_string(),
+        thinking: None,
+        stop_reason: None,
+        blocks: Vec::new(),
+    };
+
+    let vm_result = build_llm_call_result(&result, &opts);
+    let dict = vm_result.as_dict().expect("dict");
+    assert!(dict.get("data").is_some(), "structured output should populate data");
 }
 
 #[test]

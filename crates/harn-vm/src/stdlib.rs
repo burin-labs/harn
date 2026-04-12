@@ -9,7 +9,7 @@ mod datetime;
 mod fs;
 mod host;
 mod io;
-mod json;
+pub(crate) mod json;
 mod logging;
 mod math;
 mod path;
