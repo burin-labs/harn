@@ -2,6 +2,29 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.73
+
+### Changed
+
+- **Dependency upgrades** — bumped `opentelemetry`, `opentelemetry_sdk`, and
+  `opentelemetry-otlp` from 0.24/0.17 to 0.31, `notify` from 7 to 8,
+  `md-5` from 0.10 to 0.11, and portal frontend packages (`react`,
+  `react-dom`, `react-intl`, `@eslint/js`, `@vitejs/plugin-react`).
+
+### Fixed
+
+- **`md5` builtin compatibility with md-5 0.11** — the md5 hasher is now
+  registered with its own `digest 0.11` trait instead of going through the
+  `sha2::Digest` macro, which uses `digest 0.10`.
+- **Diagnostic test flakiness** — parser diagnostic tests now explicitly
+  disable ANSI colors so assertions pass regardless of TTY state.
+
+### Internal
+
+- **Dependabot configuration** — added `.github/dependabot.yml` for
+  automated weekly dependency update PRs across Cargo, npm, and GitHub
+  Actions ecosystems.
+
 ## v0.5.72
 
 ### Added
