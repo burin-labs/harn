@@ -23,7 +23,7 @@ reedline = "0.38"
 nu-ansi-term = "0.50"
 toml = "0.8"
 serde = { version = "1", features = ["derive"] }
-notify = "7"
+notify = "8"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 sha2 = "0.10"
 base64 = "0.22"
