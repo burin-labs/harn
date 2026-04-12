@@ -48,28 +48,38 @@ What triggers a cold rebuild:
 On macOS, Spotlight may index freshly-linked test binaries on first run,
 adding ~30–60 s of stat traffic unrelated to cargo.
 
-### Optional: nextest
+### Preferred Rust test path
 
-For bounded test timeouts (nothing can wedge the suite indefinitely) and
-better parallelism, install `cargo-nextest`:
+`make test` is the default Rust workspace test entry point. When
+`cargo-nextest` is installed, it runs `cargo nextest run --workspace` for
+better cross-binary parallelism and bounded timeouts. When nextest is not
+installed, it falls back to `cargo test --workspace`.
+
+`make setup` already installs `cargo-nextest`; if you need to add it
+manually:
 
 ```bash
 cargo install cargo-nextest --locked
-make test-fast
+make test
 ```
 
-`make test-fast` invokes `cargo nextest run --workspace` when nextest is
-available and falls back to `cargo test --workspace` otherwise. The
-workspace `.config/nextest.toml` applies a 15 s slow-test threshold by
-default and a 60 s hard termination cap — tests that legitimately need
-more time (the LLM transport tests) have targeted overrides.
+The workspace `.config/nextest.toml` applies a 15 s slow-test threshold by
+default and a 60 s hard termination cap. Tests that legitimately need more
+time (the LLM transport tests) have targeted overrides.
+
+If you need the baseline Cargo behavior explicitly, use:
+
+```bash
+make test-cargo
+```
 
 Useful shortcuts:
 
 ```bash
-make check     # alias for make all
-make portal    # launch the local Harn observability portal
-make setup     # rerun repo bootstrap
+make check       # alias for make all
+make portal      # launch the local Harn observability portal
+make setup       # rerun repo bootstrap
+make test-cargo  # force plain cargo test --workspace
 ```
 
 This runs:
@@ -79,7 +89,7 @@ This runs:
 - `cargo clippy -- -D warnings` -- Lint (warnings are errors)
 - `markdownlint-cli2` -- Markdown lint
 - `harn lint` -- Harn linter on conformance tests
-- `cargo test` -- Rust unit tests
+- `make test` -- Rust workspace tests (`cargo nextest` when available)
 - `harn test conformance` -- Conformance test suite
 
 Pre-commit hooks (`.githooks/pre-commit`) run fmt + clippy + markdown lint

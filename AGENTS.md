@@ -4,8 +4,12 @@ This repository implements Harn, a programming language and runtime for orchestr
 
 ## Dev Environment Tips
 
-- Run `make setup` on a fresh clone. It configures `.githooks/`, installs repo-local Node tooling when
-  `npm` is available, and runs `cargo check --workspace`.
+- Run `make setup` on a fresh clone. It configures `.githooks/`, installs `cargo-nextest` and
+  `sccache`, installs repo-local Node tooling when `npm` is available, enables the sccache rustc
+  wrapper, and runs `cargo check --workspace`.
+- Use `make test` for workspace Rust tests. It runs `cargo nextest` when available and falls back
+  to `cargo test --workspace`. Use `make test-cargo` when you explicitly need baseline Cargo
+  behavior.
 - Run `make install-hooks` if the git hooks path is not already set.
 - Use `cargo run --quiet --bin harn -- --help` to inspect the current CLI surface.
 - The root `package.json` is only for repo tooling. The portal UI, tree-sitter grammar, and VS Code
@@ -42,8 +46,8 @@ This repository implements Harn, a programming language and runtime for orchestr
 - Lint: `cargo run --bin harn -- lint <path>`
 - Auto-fix lint where supported: `cargo run --bin harn -- lint --fix <path>`
 - Check formatting: `cargo run --bin harn -- fmt --check <path>`
-- Workspace tests: `cargo test --workspace`
-- Faster Rust test loop when available: `make test-fast`
+- Workspace tests: `make test`
+- Explicit Cargo fallback: `make test-cargo`
 - Conformance suite: `cargo run --bin harn -- test conformance`
 - Targeted conformance case: `cargo run --bin harn -- test conformance --filter <name>`
 - Full repo gate: `make all`
@@ -95,7 +99,7 @@ This repository implements Harn, a programming language and runtime for orchestr
 ## Release Workflow
 
 - Full release from a clean content commit: `./scripts/release_ship.sh --bump patch`
-- Audit: `./scripts/release_gate.sh audit`
+- Audit: `./scripts/release_gate.sh audit` (uses `make test`, so `cargo-nextest` accelerates Rust tests when installed)
 - Dry-run full release: `./scripts/release_gate.sh full --bump patch --dry-run`
 - Crate publishing helper: `./scripts/publish.sh --dry-run`
 - `release_ship.sh` pushes branch + tag before `cargo publish` so

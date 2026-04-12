@@ -7,6 +7,7 @@ use super::{
     sentinel_without_action_nudge, should_stop_after_successful_tools, trim_prose_for_history,
     AgentLoopConfig, LlmRetryConfig,
 };
+use crate::bridge::HostBridge;
 use crate::llm::api::{LlmCallOptions, LlmResult};
 use crate::llm::daemon::{persist_snapshot, DaemonLoopConfig, DaemonSnapshot};
 use crate::llm::mock::{get_llm_mock_calls, reset_llm_mock_state};
@@ -14,6 +15,8 @@ use crate::orchestration::{pop_execution_policy, push_execution_policy, TurnPoli
 use crate::value::{VmError, VmValue};
 use serde_json::json;
 use std::rc::Rc;
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex};
 
 fn base_opts(messages: Vec<serde_json::Value>) -> LlmCallOptions {
     LlmCallOptions {
@@ -560,6 +563,7 @@ async fn observed_llm_call_transcript_uses_explicit_tool_format() {
         &LlmRetryConfig::default(),
         Some(0),
         false,
+        false,
     )
     .await
     .unwrap();
@@ -575,6 +579,95 @@ async fn observed_llm_call_transcript_uses_explicit_tool_format() {
     }
     let _ = std::fs::remove_dir_all(dir);
     reset_llm_mock_state();
+}
+
+async fn assert_observed_llm_call_bridge_user_visible(user_visible: bool) {
+    reset_llm_mock_state();
+
+    let bridge = Rc::new(HostBridge::from_parts(
+        Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+        Arc::new(AtomicBool::new(false)),
+        Arc::new(Mutex::new(())),
+        1,
+    ));
+    let opts = base_opts(vec![serde_json::json!({
+        "role": "user",
+        "content": "stream a visible reply",
+    })]);
+
+    let expected_text = tokio::task::LocalSet::new()
+        .run_until(async {
+            let result = observed_llm_call(
+                &opts,
+                None,
+                Some(&bridge),
+                &LlmRetryConfig::default(),
+                None,
+                user_visible,
+                false,
+            )
+            .await
+            .unwrap();
+            for _ in 0..10 {
+                if bridge.recorded_notifications().len() >= 3 {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+            result.text
+        })
+        .await;
+
+    let notifications = bridge.recorded_notifications();
+    let session_updates: Vec<_> = notifications
+        .iter()
+        .filter(|notification| notification["method"] == "session/update")
+        .collect();
+    assert_eq!(session_updates.len(), 3);
+
+    let call_start = session_updates
+        .iter()
+        .find(|notification| notification["params"]["update"]["sessionUpdate"] == "call_start")
+        .expect("call_start notification")["params"]["update"]["content"]
+        .clone();
+    let call_id = call_start["call_id"].as_str().expect("call_start call_id");
+    assert_eq!(call_start["metadata"]["user_visible"], json!(user_visible));
+
+    let call_progress = session_updates
+        .iter()
+        .find(|notification| notification["params"]["update"]["sessionUpdate"] == "call_progress")
+        .expect("call_progress notification")["params"]["update"]["content"]
+        .clone();
+    assert_eq!(call_progress["call_id"].as_str(), Some(call_id));
+    assert_eq!(
+        call_progress["delta"].as_str(),
+        Some(expected_text.as_str())
+    );
+    assert_eq!(
+        call_progress["visible_text"].as_str(),
+        Some(expected_text.as_str())
+    );
+    assert_eq!(call_progress["user_visible"], json!(user_visible));
+
+    let call_end = session_updates
+        .iter()
+        .find(|notification| notification["params"]["update"]["sessionUpdate"] == "call_end")
+        .expect("call_end notification")["params"]["update"]["content"]
+        .clone();
+    assert_eq!(call_end["call_id"].as_str(), Some(call_id));
+    assert_eq!(call_end["metadata"]["user_visible"], json!(user_visible));
+
+    reset_llm_mock_state();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn observed_llm_call_bridge_events_include_user_visible() {
+    assert_observed_llm_call_bridge_user_visible(true).await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn observed_llm_call_bridge_events_include_non_user_visible() {
+    assert_observed_llm_call_bridge_user_visible(false).await;
 }
 
 #[tokio::test(flavor = "current_thread")]

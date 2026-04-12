@@ -116,7 +116,7 @@ run_security_audit() {
 run_rust_audit() {
   make fmt-check
   cargo clippy --workspace --all-targets -- -D warnings
-  cargo test --workspace
+  make test
 }
 
 run_harn_audit() {
