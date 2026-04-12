@@ -1,0 +1,37 @@
+version: 2
+
+updates:
+  - package-ecosystem: "cargo"
+    directories:
+      - "/"
+      - "/crates/harn-wasm"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Los_Angeles"
+
+  - package-ecosystem: "npm"
+    directories:
+      - "/"
+      - "/crates/harn-cli/portal"
+      - "/editors/vscode"
+      - "/tree-sitter-harn"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Los_Angeles"
+    groups:
+      npm:
+        patterns:
+          - "*"
+        group-by: "dependency-name"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Los_Angeles"
