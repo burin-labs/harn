@@ -1459,6 +1459,10 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("list")),
     },
     BuiltinSig {
+        name: "transcript_events_by_kind",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
         name: "transcript_export",
         return_type: Some(BuiltinReturn::Named("string")),
     },
@@ -1496,6 +1500,10 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
     },
     BuiltinSig {
         name: "transcript_resume",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "transcript_stats",
         return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {

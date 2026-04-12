@@ -1325,6 +1325,8 @@ and `plan`.
 | `transcript_assets(transcript)` | transcript | list | Return transcript asset descriptors |
 | `transcript_add_asset(transcript, asset)` | transcript, asset | transcript | Register a durable asset reference on a transcript |
 | `transcript_events(transcript)` | transcript | list | Return canonical transcript events |
+| `transcript_events_by_kind(transcript, kind)` | transcript, kind | list | Filter transcript events by their `kind` field |
+| `transcript_stats(transcript)` | transcript | dict | Count messages, tool calls, and visible events on a transcript |
 | `transcript_summary(transcript)` | transcript | string or nil | Return transcript summary |
 | `transcript_fork(transcript, options?)` | transcript, options | transcript | Fork transcript state |
 | `transcript_reset(options?)` | options | transcript | Start a fresh active transcript with optional metadata |

@@ -2,6 +2,35 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.77
+
+### Added
+
+- **`transcript_stats(transcript) -> dict`** — introspection builtin returning
+  `message_count`, `user_facing_message_count`, `tool_result_message_count`,
+  `tool_call_count`, `assistant_message_count`, `user_message_count`, and
+  `visible_event_count`. Lets pipeline tests assert transcript continuity
+  invariants across stage transitions without scraping run-record JSON. Nil /
+  non-dict inputs return zero-filled stats rather than erroring.
+
+- **`transcript_events_by_kind(transcript, kind) -> list`** — filter transcript
+  events by their `kind` field (`message`, `tool_result`, ...). Companion to
+  `transcript_events` for targeted assertions.
+
+- **`conformance/tests/transcript_stats.harn`** — conformance test validating
+  both the builtin shape and transcript monotonicity across a persistent
+  two-stage workflow (`review.message_count >= act.message_count`).
+
+### Removed
+
+- **`WorkflowNode.timeout_ms`** and its `tokio::time::timeout` wrapper around
+  stage execution. The agent loop already self-bounds via `max_iterations`,
+  `max_nudges`, and per-LLM-call `timeout_ms` / `idle_timeout_ms`. A stage-wide
+  wall-clock kill dropped the accumulated `recorded_messages` mid-flight,
+  leaving follow-up stages to start from the original task prompt with no
+  knowledge of what had already been tried. Stages now run to their agent-loop
+  bounds and surface the full transcript on every exit path.
+
 ## v0.5.76
 
 ### Added

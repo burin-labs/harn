@@ -1,0 +1,69 @@
+pipeline main() {
+  // --- Unit shape: transcript_stats on a hand-crafted transcript ---
+  let crafted = {
+    _type: "transcript",
+    messages: [
+    {role: "user", content: "hi"},
+    {role: "assistant", content: "hey"},
+    {role: "assistant", content: "", tool_calls: [{id: "a"}, {id: "b"}]},
+    {role: "tool", content: "ok", tool_use_id: "a"},
+    {role: "tool_result", content: "ok", tool_use_id: "b"},
+    {role: "system", content: "ignore"},
+  ],
+    events: [
+    {kind: "message", visibility: "visible"},
+    {kind: "tool_result", visibility: "hidden"},
+    {kind: "message", visibility: "visible"},
+  ],
+  }
+  let stats = transcript_stats(crafted)
+  println(stats?.message_count == 6)
+  println(stats?.user_message_count == 1)
+  println(stats?.assistant_message_count == 2)
+  println(stats?.user_facing_message_count == 3)
+  println(stats?.tool_result_message_count == 2)
+  println(stats?.tool_call_count == 2)
+  println(stats?.visible_event_count == 2)
+  // --- Events-by-kind filter ---
+  let visible_messages = transcript_events_by_kind(crafted, "message")
+  println(len(visible_messages) == 2)
+  let tool_results = transcript_events_by_kind(crafted, "tool_result")
+  println(len(tool_results) == 1)
+  // --- Nil transcript returns zero stats rather than erroring ---
+  let empty_stats = transcript_stats(nil)
+  println(empty_stats?.message_count == 0)
+  println(empty_stats?.user_facing_message_count == 0)
+  // --- Integration: transcript continuity across a persistent 2-stage workflow ---
+  let flow = workflow_graph(
+    {
+    name: "continuity_demo",
+    entry: "act",
+    persistent: true,
+    nodes: {
+    act: {
+    kind: "stage",
+    mode: "llm",
+    model_policy: {provider: "mock"},
+    transcript_policy: {mode: "continue"},
+  },
+    review: {
+    kind: "stage",
+    mode: "llm",
+    model_policy: {provider: "mock"},
+    transcript_policy: {mode: "continue"},
+  },
+  },
+    edges: [{from: "act", to: "review"}],
+  },
+  )
+  let result = workflow_execute("Write a note", flow, [], {max_steps: 4})
+  println(result?.status == "completed")
+  let stage_act = result?.run?.stages[0]
+  let stage_review = result?.run?.stages[1]
+  let act_stats = transcript_stats(stage_act?.transcript)
+  let review_stats = transcript_stats(stage_review?.transcript)
+  println(act_stats?.message_count >= 1)
+  println(review_stats?.message_count >= act_stats?.message_count)
+  println(review_stats?.user_facing_message_count >= act_stats?.user_facing_message_count)
+  println(review_stats?.assistant_message_count >= 1)
+}

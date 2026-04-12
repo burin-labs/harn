@@ -385,7 +385,6 @@ fn map_executes_stage(node: &crate::orchestration::WorkflowNode) -> bool {
     node.mode.is_some()
         || node.prompt.is_some()
         || node.system.is_some()
-        || node.timeout_ms.is_some()
         || !crate::orchestration::workflow_tool_names(&node.tools).is_empty()
         || node.model_policy != crate::orchestration::ModelPolicy::default()
 }
@@ -1252,21 +1251,7 @@ async fn execute_stage_attempts(
         };
         r
     };
-    let execution: Result<StageAttemptResult, VmError> = if let Some(timeout_ms) = node.timeout_ms {
-        match tokio::time::timeout(
-            std::time::Duration::from_millis(timeout_ms),
-            execution_future,
-        )
-        .await
-        {
-            Ok(result) => result,
-            Err(_elapsed) => Err(VmError::Runtime(format!(
-                "workflow stage {node_id} timed out after {timeout_ms}ms"
-            ))),
-        }
-    } else {
-        execution_future.await
-    };
+    let execution: Result<StageAttemptResult, VmError> = execution_future.await;
 
     match execution {
         Ok((result, produced, next_transcript, outcome, branch, verification)) => {

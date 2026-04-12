@@ -22,6 +22,7 @@ pub(crate) mod cost;
 pub(crate) mod daemon;
 pub(crate) mod helpers;
 pub(crate) mod mock;
+mod transcript_stats;
 
 // ---------------------------------------------------------------------------
 // Shared HTTP clients — reuse connections and TLS sessions across LLM calls.
@@ -412,6 +413,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
     config_builtins::register_config_builtins(vm);
     cost::register_cost_builtins(vm);
     register_llm_mock_builtins(vm);
+    transcript_stats::register_transcript_builtins(vm);
 
     vm.register_builtin("agent_trace", |_args, _out| {
         let events = trace::peek_agent_trace();
