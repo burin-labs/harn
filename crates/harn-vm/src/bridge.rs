@@ -476,7 +476,7 @@ impl HostBridge {
                 "update": {
                     "sessionUpdate": "call_start",
                     "content": {
-                        "call_id": call_id,
+                        "toolCallId": call_id,
                         "call_type": call_type,
                         "name": name,
                         "script": script,
@@ -519,7 +519,7 @@ impl HostBridge {
                 "update": {
                     "sessionUpdate": "call_progress",
                     "content": {
-                        "call_id": call_id,
+                        "toolCallId": call_id,
                         "delta": delta,
                         "accumulated_tokens": accumulated_tokens,
                         "visible_text": visible_text,
@@ -558,7 +558,7 @@ impl HostBridge {
                 "update": {
                     "sessionUpdate": "call_end",
                     "content": {
-                        "call_id": call_id,
+                        "toolCallId": call_id,
                         "call_type": call_type,
                         "name": name,
                         "script": script,

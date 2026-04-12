@@ -630,7 +630,7 @@ async fn assert_observed_llm_call_bridge_user_visible(user_visible: bool) {
         .find(|notification| notification["params"]["update"]["sessionUpdate"] == "call_start")
         .expect("call_start notification")["params"]["update"]["content"]
         .clone();
-    let call_id = call_start["call_id"].as_str().expect("call_start call_id");
+    let call_id = call_start["toolCallId"].as_str().expect("call_start toolCallId");
     assert_eq!(call_start["metadata"]["user_visible"], json!(user_visible));
 
     let call_progress = session_updates
@@ -638,7 +638,7 @@ async fn assert_observed_llm_call_bridge_user_visible(user_visible: bool) {
         .find(|notification| notification["params"]["update"]["sessionUpdate"] == "call_progress")
         .expect("call_progress notification")["params"]["update"]["content"]
         .clone();
-    assert_eq!(call_progress["call_id"].as_str(), Some(call_id));
+    assert_eq!(call_progress["toolCallId"].as_str(), Some(call_id));
     assert_eq!(
         call_progress["delta"].as_str(),
         Some(expected_text.as_str())
@@ -654,7 +654,7 @@ async fn assert_observed_llm_call_bridge_user_visible(user_visible: bool) {
         .find(|notification| notification["params"]["update"]["sessionUpdate"] == "call_end")
         .expect("call_end notification")["params"]["update"]["content"]
         .clone();
-    assert_eq!(call_end["call_id"].as_str(), Some(call_id));
+    assert_eq!(call_end["toolCallId"].as_str(), Some(call_id));
     assert_eq!(call_end["metadata"]["user_visible"], json!(user_visible));
 
     reset_llm_mock_state();

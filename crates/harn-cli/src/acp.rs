@@ -611,7 +611,7 @@ impl AcpBridge {
                 "update": {
                     "sessionUpdate": "call_start",
                     "content": {
-                        "call_id": call_id,
+                        "toolCallId": call_id,
                         "call_type": call_type,
                         "name": name,
                         "script": script,
@@ -641,7 +641,7 @@ impl AcpBridge {
                 "update": {
                     "sessionUpdate": "call_end",
                     "content": {
-                        "call_id": call_id,
+                        "toolCallId": call_id,
                         "call_type": call_type,
                         "name": name,
                         "script": script,
