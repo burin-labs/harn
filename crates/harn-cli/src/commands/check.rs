@@ -62,7 +62,8 @@ pub(crate) fn check_file_inner(
     let mut diagnostic_count = 0;
 
     // Type checking
-    let type_diagnostics = TypeChecker::new().check(&program);
+    let type_diagnostics =
+        TypeChecker::with_strict_types(config.strict_types).check(&program);
     for diag in &type_diagnostics {
         let severity = match diag.severity {
             DiagnosticSeverity::Error => {
@@ -185,7 +186,8 @@ pub(crate) fn lint_fix_file(
     );
 
     // Collect type-check fixes
-    let type_diags = TypeChecker::new().check_with_source(&program, &source);
+    let type_diags =
+        TypeChecker::with_strict_types(config.strict_types).check_with_source(&program, &source);
 
     // Merge all fixable edits
     let mut edits: Vec<&harn_lexer::FixEdit> = lint_diags

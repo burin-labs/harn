@@ -2,6 +2,33 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.70
+
+### Added
+
+- **Strict types mode** (`--strict-types` / `strict_types = true` in
+  `harn.toml`) — flags unvalidated boundary-API values (from `json_parse`,
+  `llm_call`, `http_get`, etc.) used in property or subscript access without
+  prior schema validation or a concrete type annotation.  Validation escape
+  hatches include `schema_expect()`, `schema_is()` in an if-guard, shape/struct
+  type annotations, and `schema_check`/`schema_parse` with match on the `Ok`
+  branch.
+
+- **Schema-aware `llm_call` type inference** — when `llm_call` or
+  `llm_completion` is called with a `schema` (or `output_schema`) option, the
+  type checker now infers a shape return type with a typed `data` field matching
+  the schema.  This means `result.data.field` is statically typed and the call
+  is not considered a boundary source in strict types mode.
+
+- **`schema_expect` / `schema_check` / `schema_parse` return type inference** —
+  the type checker now infers `schema_expect` return type as the schema type,
+  and `schema_check`/`schema_parse` as `Result<SchemaType, string>`, enabling
+  downstream match arms to carry the validated shape.
+
+- **`untyped-dict-access` lint rule** — always-on (disableable) lint that warns
+  on direct property or subscript access on raw boundary-API call results (e.g.
+  `json_parse(x).field`).
+
 ## v0.5.69
 
 ### Changed

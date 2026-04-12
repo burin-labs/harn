@@ -100,6 +100,9 @@ pub(crate) struct CheckArgs {
     /// Alternate root for render/template path checks.
     #[arg(long = "bundle-root")]
     pub bundle_root: Option<String>,
+    /// Flag unvalidated boundary-API values used in field access.
+    #[arg(long = "strict-types")]
+    pub strict_types: bool,
     /// One or more .harn files or directories.
     #[arg(required = true)]
     pub targets: Vec<String>,

@@ -84,6 +84,10 @@ struct TypeScope {
     /// Schema literals bound to variables, reduced to a TypeExpr subset so
     /// `schema_is(x, some_schema)` can participate in flow refinement.
     schema_bindings: BTreeMap<String, InferredType>,
+    /// Variables holding unvalidated values from boundary APIs (json_parse, llm_call, etc.).
+    /// Maps var name → source function name (e.g. "json_parse").
+    /// Empty string = explicitly cleared (shadows parent scope entry).
+    untyped_sources: BTreeMap<String, String>,
     parent: Option<Box<TypeScope>>,
 }
 
@@ -128,6 +132,7 @@ impl TypeScope {
             mutable_vars: std::collections::BTreeSet::new(),
             narrowed_vars: BTreeMap::new(),
             schema_bindings: BTreeMap::new(),
+            untyped_sources: BTreeMap::new(),
             parent: None,
         };
         scope.enums.insert(
@@ -173,6 +178,7 @@ impl TypeScope {
             mutable_vars: std::collections::BTreeSet::new(),
             narrowed_vars: BTreeMap::new(),
             schema_bindings: BTreeMap::new(),
+            untyped_sources: BTreeMap::new(),
             parent: Some(Box::new(self.clone())),
         }
     }
@@ -257,6 +263,29 @@ impl TypeScope {
         self.schema_bindings.insert(name.to_string(), ty);
     }
 
+    /// Check whether a variable holds an unvalidated boundary-API value.
+    /// Returns the source function name (e.g. "json_parse") or `None`.
+    fn is_untyped_source(&self, name: &str) -> Option<&str> {
+        if let Some(source) = self.untyped_sources.get(name) {
+            if source.is_empty() {
+                return None; // explicitly cleared in this scope
+            }
+            return Some(source.as_str());
+        }
+        self.parent.as_ref()?.is_untyped_source(name)
+    }
+
+    fn mark_untyped_source(&mut self, name: &str, source: &str) {
+        self.untyped_sources
+            .insert(name.to_string(), source.to_string());
+    }
+
+    /// Clear the untyped-source flag for a variable, shadowing any parent entry.
+    fn clear_untyped_source(&mut self, name: &str) {
+        self.untyped_sources
+            .insert(name.to_string(), String::new());
+    }
+
     /// Check if a variable is mutable (declared with `var`).
     fn is_mutable(&self, name: &str) -> bool {
         self.mutable_vars.contains(name) || self.parent.as_ref().is_some_and(|p| p.is_mutable(name))
@@ -309,6 +338,8 @@ pub struct TypeChecker {
     scope: TypeScope,
     source: Option<String>,
     hints: Vec<InlayHintInfo>,
+    /// When true, flag unvalidated boundary-API values used in field access.
+    strict_types: bool,
 }
 
 impl TypeChecker {
@@ -334,6 +365,19 @@ impl TypeChecker {
             scope: TypeScope::new(),
             source: None,
             hints: Vec::new(),
+            strict_types: false,
+        }
+    }
+
+    /// Create a type checker with strict types mode.
+    /// When enabled, flags unvalidated boundary-API values used in field access.
+    pub fn with_strict_types(strict: bool) -> Self {
+        Self {
+            diagnostics: Vec::new(),
+            scope: TypeScope::new(),
+            source: None,
+            hints: Vec::new(),
+            strict_types: strict,
         }
     }
 
@@ -343,9 +387,74 @@ impl TypeChecker {
         self.check_inner(program).0
     }
 
+    /// Check a program with strict types mode and source text.
+    pub fn check_strict_with_source(
+        mut self,
+        program: &[SNode],
+        source: &str,
+    ) -> Vec<TypeDiagnostic> {
+        self.source = Some(source.to_string());
+        self.check_inner(program).0
+    }
+
     /// Check a program and return diagnostics.
     pub fn check(self, program: &[SNode]) -> Vec<TypeDiagnostic> {
         self.check_inner(program).0
+    }
+
+    /// Check whether a function call value is a boundary source that produces
+    /// unvalidated data.  Returns `None` if the value is type-safe
+    /// (e.g. llm_call with a schema option, or a non-boundary function).
+    fn detect_boundary_source(value: &SNode, scope: &TypeScope) -> Option<String> {
+        match &value.node {
+            Node::FunctionCall { name, args } => {
+                if !builtin_signatures::is_untyped_boundary_source(name) {
+                    return None;
+                }
+                // llm_call/llm_completion with a schema option are type-safe
+                if (name == "llm_call" || name == "llm_completion")
+                    && Self::extract_llm_schema_from_options(args, scope).is_some()
+                {
+                    return None;
+                }
+                Some(name.clone())
+            }
+            Node::Identifier(name) => scope.is_untyped_source(name).map(|s| s.to_string()),
+            _ => None,
+        }
+    }
+
+    /// Extract a schema TypeExpr from the options dict of an llm_call/llm_completion.
+    /// Looks for `schema` or `output_schema` key in the 3rd argument (dict literal).
+    fn extract_llm_schema_from_options(args: &[SNode], scope: &TypeScope) -> Option<TypeExpr> {
+        let opts = args.get(2)?;
+        let entries = match &opts.node {
+            Node::DictLiteral(entries) => entries,
+            _ => return None,
+        };
+        for entry in entries {
+            let key = match &entry.key.node {
+                Node::StringLiteral(k) | Node::Identifier(k) => k.as_str(),
+                _ => continue,
+            };
+            if key == "schema" || key == "output_schema" {
+                return schema_type_expr_from_node(&entry.value, scope);
+            }
+        }
+        None
+    }
+
+    /// Check whether a type annotation is a concrete shape/struct type
+    /// (as opposed to bare `dict` or no annotation).
+    fn is_concrete_type(ty: &TypeExpr) -> bool {
+        matches!(
+            ty,
+            TypeExpr::Shape(_)
+                | TypeExpr::Applied { .. }
+                | TypeExpr::FnType { .. }
+                | TypeExpr::List(_)
+                | TypeExpr::DictType(_, _)
+        ) || matches!(ty, TypeExpr::Named(n) if n != "dict" && n != "any" && n != "_")
     }
 
     /// Check a program and return both diagnostics and inlay hints.
@@ -619,6 +728,17 @@ impl TypeChecker {
                     let ty = type_ann.clone().or(inferred);
                     scope.define_var(name, ty);
                     scope.define_schema_binding(name, schema_type_expr_from_node(value, scope));
+                    // Strict types: mark variables assigned from boundary APIs
+                    if self.strict_types {
+                        if let Some(boundary) = Self::detect_boundary_source(value, scope) {
+                            let has_concrete_ann = type_ann
+                                .as_ref()
+                                .is_some_and(|t| Self::is_concrete_type(t));
+                            if !has_concrete_ann {
+                                scope.mark_untyped_source(name, &boundary);
+                            }
+                        }
+                    }
                 } else {
                     self.check_pattern_defaults(pattern, scope);
                     Self::define_pattern_vars(pattern, scope, false);
@@ -663,6 +783,17 @@ impl TypeChecker {
                     let ty = type_ann.clone().or(inferred);
                     scope.define_var_mutable(name, ty);
                     scope.define_schema_binding(name, schema_type_expr_from_node(value, scope));
+                    // Strict types: mark variables assigned from boundary APIs
+                    if self.strict_types {
+                        if let Some(boundary) = Self::detect_boundary_source(value, scope) {
+                            let has_concrete_ann = type_ann
+                                .as_ref()
+                                .is_some_and(|t| Self::is_concrete_type(t));
+                            if !has_concrete_ann {
+                                scope.mark_untyped_source(name, &boundary);
+                            }
+                        }
+                    }
                 } else {
                     self.check_pattern_defaults(pattern, scope);
                     Self::define_pattern_vars(pattern, scope, true);
@@ -725,6 +856,17 @@ impl TypeChecker {
 
             Node::FunctionCall { name, args } => {
                 self.check_call(name, args, scope, span);
+                // Strict types: schema_expect clears untyped source status
+                if self.strict_types && name == "schema_expect" && args.len() >= 2 {
+                    if let Node::Identifier(var_name) = &args[0].node {
+                        scope.clear_untyped_source(var_name);
+                        if let Some(schema_type) =
+                            schema_type_expr_from_node(&args[1], scope)
+                        {
+                            scope.define_var(var_name, Some(schema_type));
+                        }
+                    }
+                }
             }
 
             Node::IfElse {
@@ -737,6 +879,17 @@ impl TypeChecker {
 
                 let mut then_scope = scope.child();
                 apply_refinements(&mut then_scope, &refs.truthy);
+                // Strict types: schema_is/is_type in condition clears
+                // untyped source in then-branch
+                if self.strict_types {
+                    if let Node::FunctionCall { name, args } = &condition.node {
+                        if (name == "schema_is" || name == "is_type") && args.len() == 2 {
+                            if let Node::Identifier(var_name) = &args[0].node {
+                                then_scope.clear_untyped_source(var_name);
+                            }
+                        }
+                    }
+                }
                 self.check_block(then_body, &mut then_scope);
 
                 if let Some(else_body) = else_body {
@@ -1182,9 +1335,71 @@ impl TypeChecker {
                 }
             }
             Node::PropertyAccess { object, .. } | Node::OptionalPropertyAccess { object, .. } => {
+                if self.strict_types {
+                    // Direct property access on boundary function result
+                    if let Node::FunctionCall { name, args } = &object.node {
+                        if builtin_signatures::is_untyped_boundary_source(name) {
+                            let has_schema = (name == "llm_call" || name == "llm_completion")
+                                && Self::extract_llm_schema_from_options(args, scope).is_some();
+                            if !has_schema {
+                                self.warning_at_with_help(
+                                    format!(
+                                        "Direct property access on unvalidated `{}()` result",
+                                        name
+                                    ),
+                                    span,
+                                    "assign to a variable and validate with schema_expect() or a type annotation first".to_string(),
+                                );
+                            }
+                        }
+                    }
+                    // Property access on known untyped variable
+                    if let Node::Identifier(name) = &object.node {
+                        if let Some(source) = scope.is_untyped_source(name) {
+                            self.warning_at_with_help(
+                                format!(
+                                    "Accessing property on unvalidated value '{}' from `{}`",
+                                    name, source
+                                ),
+                                span,
+                                "validate with schema_expect(), schema_is() in an if-condition, or add a shape type annotation".to_string(),
+                            );
+                        }
+                    }
+                }
                 self.check_node(object, scope);
             }
             Node::SubscriptAccess { object, index } => {
+                if self.strict_types {
+                    if let Node::FunctionCall { name, args } = &object.node {
+                        if builtin_signatures::is_untyped_boundary_source(name) {
+                            let has_schema = (name == "llm_call" || name == "llm_completion")
+                                && Self::extract_llm_schema_from_options(args, scope).is_some();
+                            if !has_schema {
+                                self.warning_at_with_help(
+                                    format!(
+                                        "Direct subscript access on unvalidated `{}()` result",
+                                        name
+                                    ),
+                                    span,
+                                    "assign to a variable and validate with schema_expect() or a type annotation first".to_string(),
+                                );
+                            }
+                        }
+                    }
+                    if let Node::Identifier(name) = &object.node {
+                        if let Some(source) = scope.is_untyped_source(name) {
+                            self.warning_at_with_help(
+                                format!(
+                                    "Subscript access on unvalidated value '{}' from `{}`",
+                                    name, source
+                                ),
+                                span,
+                                "validate with schema_expect(), schema_is() in an if-condition, or add a shape type annotation".to_string(),
+                            );
+                        }
+                    }
+                }
                 self.check_node(object, scope);
                 self.check_node(index, scope);
             }
@@ -2764,6 +2979,80 @@ impl TypeChecker {
                         return Some(Self::apply_type_bindings(&ty, &bindings));
                     }
                     return None;
+                }
+                // Schema-aware return types for validation/boundary builtins
+                if name == "schema_expect" && args.len() >= 2 {
+                    if let Some(schema_type) = schema_type_expr_from_node(&args[1], scope) {
+                        return Some(schema_type);
+                    }
+                }
+                if (name == "schema_check" || name == "schema_parse") && args.len() >= 2 {
+                    if let Some(schema_type) = schema_type_expr_from_node(&args[1], scope) {
+                        return Some(TypeExpr::Applied {
+                            name: "Result".into(),
+                            args: vec![schema_type, TypeExpr::Named("string".into())],
+                        });
+                    }
+                }
+                // Schema-aware llm_call: when options contain a schema, return
+                // a shape with typed `data` field
+                if (name == "llm_call" || name == "llm_completion") && args.len() >= 3 {
+                    if let Some(schema_type) =
+                        Self::extract_llm_schema_from_options(args, scope)
+                    {
+                        return Some(TypeExpr::Shape(vec![
+                            ShapeField {
+                                name: "text".into(),
+                                type_expr: TypeExpr::Named("string".into()),
+                                optional: false,
+                            },
+                            ShapeField {
+                                name: "model".into(),
+                                type_expr: TypeExpr::Named("string".into()),
+                                optional: false,
+                            },
+                            ShapeField {
+                                name: "provider".into(),
+                                type_expr: TypeExpr::Named("string".into()),
+                                optional: false,
+                            },
+                            ShapeField {
+                                name: "input_tokens".into(),
+                                type_expr: TypeExpr::Named("int".into()),
+                                optional: false,
+                            },
+                            ShapeField {
+                                name: "output_tokens".into(),
+                                type_expr: TypeExpr::Named("int".into()),
+                                optional: false,
+                            },
+                            ShapeField {
+                                name: "data".into(),
+                                type_expr: schema_type,
+                                optional: false,
+                            },
+                            ShapeField {
+                                name: "visible_text".into(),
+                                type_expr: TypeExpr::Named("string".into()),
+                                optional: true,
+                            },
+                            ShapeField {
+                                name: "tool_calls".into(),
+                                type_expr: TypeExpr::Named("list".into()),
+                                optional: true,
+                            },
+                            ShapeField {
+                                name: "thinking".into(),
+                                type_expr: TypeExpr::Named("string".into()),
+                                optional: true,
+                            },
+                            ShapeField {
+                                name: "stop_reason".into(),
+                                type_expr: TypeExpr::Named("string".into()),
+                                optional: true,
+                            },
+                        ]));
+                    }
                 }
                 // Check builtin return types
                 builtin_return_type(name)
@@ -5478,5 +5767,247 @@ add("hello", 2) }"#,
     #[test]
     fn test_format_type_never() {
         assert_eq!(format_type(&TypeExpr::Never), "never");
+    }
+
+    // ── Strict types mode tests ──────────────────────────────────────
+
+    fn check_source_strict(source: &str) -> Vec<TypeDiagnostic> {
+        let mut lexer = Lexer::new(source);
+        let tokens = lexer.tokenize().unwrap();
+        let mut parser = Parser::new(tokens);
+        let program = parser.parse().unwrap();
+        TypeChecker::with_strict_types(true).check(&program)
+    }
+
+    fn strict_warnings(source: &str) -> Vec<String> {
+        check_source_strict(source)
+            .into_iter()
+            .filter(|d| d.severity == DiagnosticSeverity::Warning)
+            .map(|d| d.message)
+            .collect()
+    }
+
+    #[test]
+    fn test_strict_types_json_parse_property_access() {
+        let warns = strict_warnings(
+            r#"pipeline t(task) {
+  let data = json_parse("{}")
+  log(data.name)
+}"#,
+        );
+        assert!(
+            warns.iter().any(|w| w.contains("unvalidated")),
+            "expected unvalidated warning, got: {warns:?}"
+        );
+    }
+
+    #[test]
+    fn test_strict_types_direct_chain_access() {
+        let warns = strict_warnings(
+            r#"pipeline t(task) {
+  log(json_parse("{}").name)
+}"#,
+        );
+        assert!(
+            warns.iter().any(|w| w.contains("Direct property access")),
+            "expected direct access warning, got: {warns:?}"
+        );
+    }
+
+    #[test]
+    fn test_strict_types_schema_expect_clears() {
+        let warns = strict_warnings(
+            r#"pipeline t(task) {
+  let my_schema = {type: "object", properties: {name: {type: "string"}}}
+  let data = json_parse("{}")
+  schema_expect(data, my_schema)
+  log(data.name)
+}"#,
+        );
+        assert!(
+            !warns.iter().any(|w| w.contains("unvalidated")),
+            "expected no unvalidated warning after schema_expect, got: {warns:?}"
+        );
+    }
+
+    #[test]
+    fn test_strict_types_schema_is_if_guard() {
+        let warns = strict_warnings(
+            r#"pipeline t(task) {
+  let my_schema = {type: "object", properties: {name: {type: "string"}}}
+  let data = json_parse("{}")
+  if schema_is(data, my_schema) {
+    log(data.name)
+  }
+}"#,
+        );
+        assert!(
+            !warns.iter().any(|w| w.contains("unvalidated")),
+            "expected no unvalidated warning inside schema_is guard, got: {warns:?}"
+        );
+    }
+
+    #[test]
+    fn test_strict_types_shape_annotation_clears() {
+        let warns = strict_warnings(
+            r#"pipeline t(task) {
+  let data: {name: string, age: int} = json_parse("{}")
+  log(data.name)
+}"#,
+        );
+        assert!(
+            !warns.iter().any(|w| w.contains("unvalidated")),
+            "expected no warning with shape annotation, got: {warns:?}"
+        );
+    }
+
+    #[test]
+    fn test_strict_types_propagation() {
+        let warns = strict_warnings(
+            r#"pipeline t(task) {
+  let data = json_parse("{}")
+  let x = data
+  log(x.name)
+}"#,
+        );
+        assert!(
+            warns.iter().any(|w| w.contains("unvalidated") && w.contains("'x'")),
+            "expected propagation warning for x, got: {warns:?}"
+        );
+    }
+
+    #[test]
+    fn test_strict_types_non_boundary_no_warning() {
+        let warns = strict_warnings(
+            r#"pipeline t(task) {
+  let x = len("hello")
+  log(x)
+}"#,
+        );
+        assert!(
+            !warns.iter().any(|w| w.contains("unvalidated")),
+            "non-boundary function should not be flagged, got: {warns:?}"
+        );
+    }
+
+    #[test]
+    fn test_strict_types_subscript_access() {
+        let warns = strict_warnings(
+            r#"pipeline t(task) {
+  let data = json_parse("{}")
+  log(data["name"])
+}"#,
+        );
+        assert!(
+            warns.iter().any(|w| w.contains("unvalidated")),
+            "expected subscript warning, got: {warns:?}"
+        );
+    }
+
+    #[test]
+    fn test_strict_types_disabled_by_default() {
+        let diags = check_source(
+            r#"pipeline t(task) {
+  let data = json_parse("{}")
+  log(data.name)
+}"#,
+        );
+        assert!(
+            !diags.iter().any(|d| d.message.contains("unvalidated")),
+            "strict types should be off by default, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_strict_types_llm_call_without_schema() {
+        let warns = strict_warnings(
+            r#"pipeline t(task) {
+  let result = llm_call("prompt", "system")
+  log(result.text)
+}"#,
+        );
+        assert!(
+            warns.iter().any(|w| w.contains("unvalidated")),
+            "llm_call without schema should warn, got: {warns:?}"
+        );
+    }
+
+    #[test]
+    fn test_strict_types_llm_call_with_schema_clean() {
+        let warns = strict_warnings(
+            r#"pipeline t(task) {
+  let result = llm_call("prompt", "system", {
+    schema: {type: "object", properties: {name: {type: "string"}}}
+  })
+  log(result.data)
+  log(result.text)
+}"#,
+        );
+        assert!(
+            !warns.iter().any(|w| w.contains("unvalidated")),
+            "llm_call with schema should not warn, got: {warns:?}"
+        );
+    }
+
+    #[test]
+    fn test_strict_types_schema_expect_result_typed() {
+        let warns = strict_warnings(
+            r#"pipeline t(task) {
+  let my_schema = {type: "object", properties: {name: {type: "string"}}}
+  let validated = schema_expect(json_parse("{}"), my_schema)
+  log(validated.name)
+}"#,
+        );
+        assert!(
+            !warns.iter().any(|w| w.contains("unvalidated")),
+            "schema_expect result should be typed, got: {warns:?}"
+        );
+    }
+
+    #[test]
+    fn test_strict_types_realistic_orchestration() {
+        let warns = strict_warnings(
+            r#"pipeline t(task) {
+  let payload_schema = {type: "object", properties: {
+    name: {type: "string"},
+    steps: {type: "list", items: {type: "string"}}
+  }}
+
+  // Good: schema-aware llm_call
+  let result = llm_call("generate a workflow", "system", {
+    schema: payload_schema
+  })
+  let workflow_name = result.data.name
+
+  // Good: validate then access
+  let raw = json_parse("{}")
+  schema_expect(raw, payload_schema)
+  let steps = raw.steps
+
+  log(workflow_name)
+  log(steps)
+}"#,
+        );
+        assert!(
+            !warns.iter().any(|w| w.contains("unvalidated")),
+            "validated orchestration should be clean, got: {warns:?}"
+        );
+    }
+
+    #[test]
+    fn test_strict_types_llm_call_with_schema_via_variable() {
+        let warns = strict_warnings(
+            r#"pipeline t(task) {
+  let my_schema = {type: "object", properties: {score: {type: "float"}}}
+  let result = llm_call("rate this", "system", {
+    schema: my_schema
+  })
+  log(result.data.score)
+}"#,
+        );
+        assert!(
+            !warns.iter().any(|w| w.contains("unvalidated")),
+            "llm_call with schema variable should not warn, got: {warns:?}"
+        );
     }
 }

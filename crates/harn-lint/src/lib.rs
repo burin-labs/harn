@@ -274,6 +274,27 @@ impl<'a> Linter<'a> {
         matches!(&node.node, Node::InterpolatedString(segments) if segments.iter().any(|segment| matches!(segment, StringSegment::Expression(_, _, _))))
     }
 
+    /// Returns true if the function is a boundary API that returns untyped/opaque data.
+    fn is_boundary_api(name: &str) -> bool {
+        matches!(
+            name,
+            "json_parse"
+                | "json_extract"
+                | "yaml_parse"
+                | "toml_parse"
+                | "llm_call"
+                | "llm_completion"
+                | "http_get"
+                | "http_post"
+                | "http_put"
+                | "http_patch"
+                | "http_delete"
+                | "http_request"
+                | "host_call"
+                | "mcp_call"
+        )
+    }
+
     /// Extract the root variable name from an assignment target.
     /// For `x = ...` returns `x`, for `x.foo = ...` or `x[i] = ...` returns `x`.
     fn root_var_name(node: &SNode) -> Option<String> {
@@ -628,10 +649,46 @@ impl<'a> Linter<'a> {
             }
 
             Node::PropertyAccess { object, .. } | Node::OptionalPropertyAccess { object, .. } => {
+                if let Node::FunctionCall { name, .. } = &object.node {
+                    if Self::is_boundary_api(name) {
+                        self.diagnostics.push(LintDiagnostic {
+                            rule: "untyped-dict-access",
+                            message: format!(
+                                "property access on raw `{}()` result without schema validation",
+                                name
+                            ),
+                            span: snode.span,
+                            severity: LintSeverity::Warning,
+                            suggestion: Some(
+                                "assign to a variable and validate with schema_expect() or a type annotation first"
+                                    .to_string(),
+                            ),
+                            fix: None,
+                        });
+                    }
+                }
                 self.lint_node(object);
             }
 
             Node::SubscriptAccess { object, index } => {
+                if let Node::FunctionCall { name, .. } = &object.node {
+                    if Self::is_boundary_api(name) {
+                        self.diagnostics.push(LintDiagnostic {
+                            rule: "untyped-dict-access",
+                            message: format!(
+                                "subscript access on raw `{}()` result without schema validation",
+                                name
+                            ),
+                            span: snode.span,
+                            severity: LintSeverity::Warning,
+                            suggestion: Some(
+                                "assign to a variable and validate with schema_expect() or a type annotation first"
+                                    .to_string(),
+                            ),
+                            fix: None,
+                        });
+                    }
+                }
                 self.lint_node(object);
                 self.lint_node(index);
             }

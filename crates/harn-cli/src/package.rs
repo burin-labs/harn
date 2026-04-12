@@ -27,6 +27,8 @@ pub struct CheckConfig {
     #[serde(default)]
     pub strict: bool,
     #[serde(default)]
+    pub strict_types: bool,
+    #[serde(default)]
     pub disable_rules: Vec<String>,
     #[serde(default)]
     pub host_capabilities: HashMap<String, Vec<String>>,

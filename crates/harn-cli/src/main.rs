@@ -82,6 +82,9 @@ async fn main() {
                 if let Some(path) = args.bundle_root.as_ref() {
                     config.bundle_root = Some(path.clone());
                 }
+                if args.strict_types {
+                    config.strict_types = true;
+                }
                 let outcome = commands::check::check_file_inner(file, &config, &cross_file_imports);
                 should_fail |= outcome.should_fail(config.strict);
             }

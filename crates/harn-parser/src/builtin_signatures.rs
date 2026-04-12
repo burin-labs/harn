@@ -1683,6 +1683,28 @@ pub(crate) fn builtin_return_type(name: &str) -> Option<TypeExpr> {
     }
 }
 
+/// Returns true if this builtin produces an untyped/opaque value that should
+/// be validated before field access in strict types mode.
+pub fn is_untyped_boundary_source(name: &str) -> bool {
+    matches!(
+        name,
+        "json_parse"
+            | "json_extract"
+            | "yaml_parse"
+            | "toml_parse"
+            | "llm_call"
+            | "llm_completion"
+            | "http_get"
+            | "http_post"
+            | "http_put"
+            | "http_patch"
+            | "http_delete"
+            | "http_request"
+            | "host_call"
+            | "mcp_call"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
