@@ -10,7 +10,8 @@ use super::daemon::{
 use super::helpers::{transcript_event, transcript_to_vm_with_events};
 use super::tools::{
     build_assistant_tool_message, build_tool_calling_contract_prompt, build_tool_result_message,
-    collect_tool_schemas, normalize_tool_args, parse_text_tool_calls_with_tools, validate_tool_args,
+    collect_tool_schemas, normalize_tool_args, parse_text_tool_calls_with_tools,
+    validate_tool_args,
 };
 
 // Imports from extracted submodules.
@@ -18,10 +19,10 @@ use super::agent_config::{parse_post_turn_directive, AgentLoopConfig};
 use super::agent_observe::{dump_llm_interpreted_response, observed_llm_call, LlmRetryConfig};
 use super::agent_tools::{
     classify_tool_mutation, declared_paths, denied_tool_result, dispatch_tool_execution,
-    is_denied_tool_result, is_read_only_tool, loop_intervention_message, LoopIntervention,
-    merge_agent_loop_policy, native_protocol_violation_nudge, normalize_native_tools_for_format,
+    is_denied_tool_result, is_read_only_tool, loop_intervention_message, merge_agent_loop_policy,
+    native_protocol_violation_nudge, normalize_native_tools_for_format,
     normalize_tool_choice_for_format, normalize_tool_examples_for_format, render_tool_result,
-    stable_hash, stable_hash_str, ToolCallTracker,
+    stable_hash, stable_hash_str, LoopIntervention, ToolCallTracker,
 };
 use super::daemon::DaemonLoopConfig;
 
@@ -161,7 +162,6 @@ pub(crate) fn install_current_host_bridge(bridge: Rc<crate::bridge::HostBridge>)
 pub(crate) fn current_host_bridge() -> Option<Rc<crate::bridge::HostBridge>> {
     CURRENT_HOST_BRIDGE.with(|slot| slot.borrow().clone())
 }
-
 
 async fn inject_queued_user_messages(
     bridge: Option<&Rc<crate::bridge::HostBridge>>,
@@ -478,7 +478,6 @@ async fn apply_agent_context_callback(
         ))),
     }
 }
-
 
 pub async fn run_agent_loop_internal(
     opts: &mut super::api::LlmCallOptions,

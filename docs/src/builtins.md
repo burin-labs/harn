@@ -823,6 +823,26 @@ trace_end(span)
 println(trace_summary())
 ```
 
+### Agent trace events
+
+Fine-grained agent loop trace events for observability and debugging.
+Events are collected during `agent_loop` execution and can be inspected
+after the loop completes.
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `agent_trace()` | none | list | Peek at collected agent trace events. Each event is a dict with a `type` field (`llm_call`, `tool_execution`, `tool_rejected`, `loop_intervention`, `context_compaction`, `phase_change`, `loop_complete`) and type-specific fields |
+| `agent_trace_summary()` | none | dict | Rolled-up summary of agent trace events with aggregated token counts, durations, tool usage, and iteration counts |
+
+Example:
+
+```harn,ignore
+let result = agent_loop("summarize this file", tools: [read_file])
+let summary = agent_trace_summary()
+println("LLM calls: " + str(summary.llm_calls))
+println("Tools used: " + str(summary.tools_used))
+```
+
 ## Error classification
 
 Structured error throwing and classification for retry logic and error handling.
@@ -1123,7 +1143,7 @@ Notes:
 - `mcp_tools(registry)` (or the alias `mcp_serve`) must be called to register tools.
 - Resources, resource templates, and prompts are registered individually.
 - All `print`/`println` output goes to stderr (stdout is the MCP transport).
-- The server supports the `2024-11-05` MCP protocol version over stdio.
+- The server supports the `2025-11-25` MCP protocol version over stdio.
 - Tool handlers receive arguments as a dict and should return a string result.
 - Prompt handlers receive arguments as a dict and return a string (single
   user message) or a list of `{role, content}` dicts.

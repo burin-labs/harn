@@ -630,7 +630,9 @@ async fn assert_observed_llm_call_bridge_user_visible(user_visible: bool) {
         .find(|notification| notification["params"]["update"]["sessionUpdate"] == "call_start")
         .expect("call_start notification")["params"]["update"]["content"]
         .clone();
-    let call_id = call_start["toolCallId"].as_str().expect("call_start toolCallId");
+    let call_id = call_start["toolCallId"]
+        .as_str()
+        .expect("call_start toolCallId");
     assert_eq!(call_start["metadata"]["user_visible"], json!(user_visible));
 
     let call_progress = session_updates

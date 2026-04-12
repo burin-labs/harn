@@ -202,7 +202,7 @@ harn mcp-serve agent.harn
 ```
 
 All `print`/`println` output goes to stderr (stdout is the MCP
-transport). The server supports the `2024-11-05` MCP protocol version
+transport). The server supports the `2025-11-25` MCP protocol version
 over stdio.
 
 ### Configuring in Claude Desktop
@@ -323,7 +323,7 @@ builtins.
 ## A2A (Agent-to-Agent Protocol)
 
 A2A exposes a Harn pipeline as an HTTP server that other agents can
-interact with.
+interact with. The server implements A2A protocol version 1.0.0.
 
 ### Running the server
 

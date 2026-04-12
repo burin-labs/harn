@@ -188,3 +188,111 @@ async fn failed_verify_stage_preserves_verification_artifact_and_result() {
         Some(false)
     );
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_stage_preserves_input_transcript() {
+    // Build a mock transcript with conversation history, simulating what an
+    // implement stage would return after an agent loop.
+    let messages = vec![
+        serde_json::json!({"role": "user", "content": "implement the feature"}),
+        serde_json::json!({"role": "assistant", "content": "I'll edit the file now."}),
+        serde_json::json!({"role": "user", "content": "Tool result: file written"}),
+    ];
+    let input_transcript = crate::llm::helpers::transcript_to_vm_with_events(
+        Some("test-transcript-id".to_string()),
+        None,
+        None,
+        &messages,
+        Vec::new(),
+        Vec::new(),
+        Some("active"),
+    );
+
+    let node = crate::orchestration::WorkflowNode {
+        id: Some("verify".to_string()),
+        kind: "verify".to_string(),
+        retry_policy: crate::orchestration::RetryPolicy {
+            max_attempts: 1,
+            ..Default::default()
+        },
+        verify: Some(serde_json::json!({
+            "command": "echo ok",
+            "expect_status": 0,
+        })),
+        output_contract: crate::orchestration::StageContract {
+            output_kinds: vec!["verification_result".to_string()],
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let executed =
+        execute_stage_attempts("run tests", "verify", &node, &[], Some(input_transcript))
+            .await
+            .expect("stage executes");
+
+    assert_eq!(executed.status, "completed");
+    // The critical check: the transcript must survive the verify stage.
+    let transcript = executed
+        .transcript
+        .expect("verify stage must preserve input transcript");
+    let dict = transcript.as_dict().expect("transcript must be a dict");
+    let msg_list = match dict.get("messages") {
+        Some(crate::value::VmValue::List(list)) => list,
+        _ => panic!("transcript must have a messages list"),
+    };
+    assert_eq!(
+        msg_list.len(),
+        3,
+        "verify stage should preserve all 3 messages from the implement stage transcript"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_stage_with_reset_transcript_policy_clears_transcript() {
+    let messages = vec![
+        serde_json::json!({"role": "user", "content": "implement the feature"}),
+        serde_json::json!({"role": "assistant", "content": "Done."}),
+    ];
+    let input_transcript = crate::llm::helpers::transcript_to_vm_with_events(
+        Some("test-transcript-id".to_string()),
+        None,
+        None,
+        &messages,
+        Vec::new(),
+        Vec::new(),
+        Some("active"),
+    );
+
+    let node = crate::orchestration::WorkflowNode {
+        id: Some("verify".to_string()),
+        kind: "verify".to_string(),
+        retry_policy: crate::orchestration::RetryPolicy {
+            max_attempts: 1,
+            ..Default::default()
+        },
+        transcript_policy: crate::orchestration::TranscriptPolicy {
+            mode: Some("reset".to_string()),
+            ..Default::default()
+        },
+        verify: Some(serde_json::json!({
+            "command": "echo ok",
+            "expect_status": 0,
+        })),
+        output_contract: crate::orchestration::StageContract {
+            output_kinds: vec!["verification_result".to_string()],
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let executed =
+        execute_stage_attempts("run tests", "verify", &node, &[], Some(input_transcript))
+            .await
+            .expect("stage executes");
+
+    assert!(
+        executed.transcript.is_none(),
+        "reset transcript policy should clear the transcript even for verify stages"
+    );
+}

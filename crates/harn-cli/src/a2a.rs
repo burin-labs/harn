@@ -6,7 +6,6 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use uuid::Uuid;
 
-
 /// The supported A2A protocol version.
 const SUPPORTED_A2A_VERSION: &str = "1.0.0";
 

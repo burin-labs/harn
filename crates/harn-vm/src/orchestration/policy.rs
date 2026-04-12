@@ -1202,10 +1202,7 @@ mod transcript_policy_tests {
         let result = apply_input_transcript_policy(Some(transcript), &policy);
         let result = result.expect("fork should return a transcript");
         let dict = result.as_dict().expect("must be a dict");
-        let id = dict
-            .get("id")
-            .map(|v| v.display())
-            .unwrap_or_default();
+        let id = dict.get("id").map(|v| v.display()).unwrap_or_default();
         assert_ne!(id, "test-id", "fork should assign a new transcript ID");
         assert_eq!(message_count(&result), 3, "fork should preserve messages");
     }

@@ -622,10 +622,14 @@ mod tests {
 
     #[test]
     fn test_json_rpc_request_format() {
-        let request = crate::jsonrpc::request(1, "llm_call", serde_json::json!({
-            "prompt": "Hello",
-            "system": "Be helpful",
-        }));
+        let request = crate::jsonrpc::request(
+            1,
+            "llm_call",
+            serde_json::json!({
+                "prompt": "Hello",
+                "system": "Be helpful",
+            }),
+        );
         let s = serde_json::to_string(&request).unwrap();
         assert!(s.contains("\"jsonrpc\":\"2.0\""));
         assert!(s.contains("\"id\":1"));
@@ -634,7 +638,8 @@ mod tests {
 
     #[test]
     fn test_json_rpc_notification_format() {
-        let notification = crate::jsonrpc::notification("output", serde_json::json!({"text": "[harn] hello\n"}));
+        let notification =
+            crate::jsonrpc::notification("output", serde_json::json!({"text": "[harn] hello\n"}));
         let s = serde_json::to_string(&notification).unwrap();
         assert!(s.contains("\"method\":\"output\""));
         assert!(!s.contains("\"id\""));
@@ -652,11 +657,14 @@ mod tests {
 
     #[test]
     fn test_json_rpc_success_response_parsing() {
-        let response = crate::jsonrpc::response(1, serde_json::json!({
-            "text": "Hello world",
-            "input_tokens": 10,
-            "output_tokens": 5,
-        }));
+        let response = crate::jsonrpc::response(
+            1,
+            serde_json::json!({
+                "text": "Hello world",
+                "input_tokens": 10,
+                "output_tokens": 5,
+            }),
+        );
         assert!(response.get("result").is_some());
         assert_eq!(response["result"]["text"].as_str().unwrap(), "Hello world");
     }

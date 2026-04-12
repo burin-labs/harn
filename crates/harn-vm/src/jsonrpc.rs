@@ -5,7 +5,11 @@
 
 /// Build a JSON-RPC 2.0 request object.
 #[inline]
-pub fn request(id: impl Into<serde_json::Value>, method: &str, params: serde_json::Value) -> serde_json::Value {
+pub fn request(
+    id: impl Into<serde_json::Value>,
+    method: &str,
+    params: serde_json::Value,
+) -> serde_json::Value {
     serde_json::json!({
         "jsonrpc": "2.0",
         "id": id.into(),
@@ -100,7 +104,8 @@ mod tests {
 
     #[test]
     fn error_response_with_data_includes_data() {
-        let resp = error_response_with_data(1, -32602, "Bad params", serde_json::json!({"field": "x"}));
+        let resp =
+            error_response_with_data(1, -32602, "Bad params", serde_json::json!({"field": "x"}));
         assert_eq!(resp["error"]["data"]["field"], "x");
     }
 

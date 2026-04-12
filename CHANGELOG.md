@@ -2,6 +2,66 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.74
+
+### Added
+
+- **Structured agent trace events** — new `AgentTraceEvent` enum with seven
+  variants (`LlmCall`, `ToolExecution`, `ToolRejected`, `LoopIntervention`,
+  `ContextCompaction`, `PhaseChange`, `LoopComplete`) emitted at each
+  instrumentation point during agent loops.  New `agent_trace` and
+  `agent_trace_summary` builtins expose trace data to Harn programs.
+
+- **`ToolApprovalPolicy` for declarative tool gating** — new policy type with
+  `auto_approve`, `auto_deny`, `require_approval`, and `write_path_allowlist`
+  fields.  Policy intersection uses most-restrictive-wins semantics so
+  workflow authors and hosts can layer security boundaries.
+
+- **`jsonrpc` helper module** — centralized JSON-RPC 2.0 request, notification,
+  response, and error builders replace ~40 inline `serde_json::json!` call
+  sites across bridge, MCP, ACP, and A2A code.
+
+- **`PipelineError` and source pipeline API** — new `parse_source`,
+  `check_source`, and `check_source_strict` entry points in `harn-parser`
+  with a structured `PipelineError` enum carrying span information for all
+  error variants.
+
+- **OpenTelemetry sink** — `OtelSink` behind the `otel` feature flag exports
+  Harn spans and log events to any OTLP-compatible collector via HTTP.
+
+- **Portal build verification** — `make all` now includes `portal-check`
+  (lint + build) so frontend regressions are caught in the standard CI gate.
+
+### Changed
+
+- **A2A server upgraded to protocol v1.0.0** — version header validation,
+  structured error responses for version mismatches, and alignment with the
+  latest A2A specification.
+
+- **MCP server upgraded to protocol version 2025-11-25** — initialization
+  handshake now advertises the latest protocol version.
+
+- **Agent module split** — the monolithic `agent.rs` (3,300+ lines) has been
+  split into `agent_config.rs`, `agent_observe.rs`, `agent_tools.rs`, and a
+  slimmer `agent.rs` core loop, with no public API changes.
+
+- **`toolCallId` naming convention** — session/update bridge notifications
+  now use `toolCallId` instead of `call_id` for consistency with the A2A and
+  MCP protocols.
+
+### Fixed
+
+- **Verify stage transcript passthrough** — non-LLM workflow stages (e.g.
+  verify command execution) now pass the input transcript through to
+  downstream stages when the LLM result does not contain one, so repair
+  stages inherit the full conversation history.
+
+### Internal
+
+- Regenerated `docs/theme/harn-keywords.js` to include `agent_trace` and
+  `agent_trace_summary` builtins.
+- Portal dependency alignment: `vite` ^7→^8, `@eslint/js` ^10→^9.
+
 ## v0.5.73
 
 ### Changed

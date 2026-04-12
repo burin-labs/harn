@@ -609,8 +609,8 @@ pub async fn execute_stage_node(
     }
     let selected = super::select_artifacts_adaptive(artifacts.to_vec(), &selection_policy);
     let rendered_context = super::render_artifacts_context(&selected, &node.context_policy);
-    let transcript = apply_input_transcript_policy(transcript, &node.transcript_policy);
-    if node.input_contract.require_transcript && transcript.is_none() {
+    let input_transcript = apply_input_transcript_policy(transcript, &node.transcript_policy);
+    if node.input_contract.require_transcript && input_transcript.is_none() {
         return Err(VmError::Runtime(format!(
             "workflow stage {node_id} requires transcript input"
         )));
@@ -744,7 +744,7 @@ pub async fn execute_stage_node(
         if tools_value.is_some() && !tool_names.is_empty() {
             options.insert("tools".to_string(), tools_value.unwrap_or(VmValue::Nil));
         }
-        if let Some(transcript) = transcript.clone() {
+        if let Some(transcript) = input_transcript.clone() {
             options.insert("transcript".to_string(), transcript);
         }
 
@@ -904,11 +904,18 @@ pub async fn execute_stage_node(
     }
 
     let visible_text = llm_result["text"].as_str().unwrap_or_default().to_string();
-    let transcript = llm_result
+    // Extract the transcript from the LLM result. For non-LLM stages (e.g.
+    // verify command execution), the result won't contain a "transcript" field.
+    // In that case, pass through the input transcript so downstream stages
+    // (like repair) inherit the conversation history from earlier LLM stages.
+    let result_transcript = llm_result
         .get("transcript")
         .cloned()
         .map(|value| crate::stdlib::json_to_vm_value(&value));
-    let transcript = apply_output_transcript_policy(transcript, &node.transcript_policy);
+    let transcript = apply_output_transcript_policy(
+        result_transcript.or(input_transcript),
+        &node.transcript_policy,
+    );
     let output_kind = node
         .output_contract
         .output_kinds
