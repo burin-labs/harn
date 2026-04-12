@@ -731,7 +731,7 @@ impl TypeChecker {
                     if self.strict_types {
                         if let Some(boundary) = Self::detect_boundary_source(value, scope) {
                             let has_concrete_ann =
-                                type_ann.as_ref().is_some_and(|t| Self::is_concrete_type(t));
+                                type_ann.as_ref().is_some_and(Self::is_concrete_type);
                             if !has_concrete_ann {
                                 scope.mark_untyped_source(name, &boundary);
                             }
@@ -785,7 +785,7 @@ impl TypeChecker {
                     if self.strict_types {
                         if let Some(boundary) = Self::detect_boundary_source(value, scope) {
                             let has_concrete_ann =
-                                type_ann.as_ref().is_some_and(|t| Self::is_concrete_type(t));
+                                type_ann.as_ref().is_some_and(Self::is_concrete_type);
                             if !has_concrete_ann {
                                 scope.mark_untyped_source(name, &boundary);
                             }
