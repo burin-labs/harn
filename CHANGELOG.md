@@ -2,6 +2,17 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.78
+
+### Fixed
+
+- **Release hygiene** — republish of the v0.5.77 content. The v0.5.77
+  crates.io upload timed out mid-batch after `harn-lexer`, `harn-parser`,
+  `harn-fmt`, and `harn-vm` were accepted but before `harn-lint`, `harn-dap`,
+  `harn-lsp`, and `harn-cli` could upload. v0.5.78 carries the same code as
+  v0.5.77 and republishes the full workspace at a single consistent version
+  so downstream consumers get a complete install.
+
 ## v0.5.77
 
 ### Added
