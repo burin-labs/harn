@@ -29,6 +29,15 @@ All notable changes to Harn are documented in this file.
   on direct property or subscript access on raw boundary-API call results (e.g.
   `json_parse(x).field`).
 
+### Changed
+
+- **Tighter structured output parsing** — structured output JSON extraction
+  and validation tightened for robustness.
+
+- **Simplified tool contract rendering** — native prompt tool schemas dropped
+  in favor of text-based tool contracts; tool prompt rendering separated into
+  native and text paths for clarity.
+
 ## v0.5.69
 
 ### Changed
