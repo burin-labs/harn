@@ -2,11 +2,9 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use harn_lexer::Lexer;
-use harn_parser::Parser;
 use harn_vm::{
-    register_http_builtins, register_llm_builtins, register_vm_stdlib, Compiler, DebugAction,
-    DebugState, Vm, VmError, VmValue,
+    register_http_builtins, register_llm_builtins, register_vm_stdlib, DebugAction, DebugState, Vm,
+    VmError, VmValue,
 };
 use serde_json::json;
 
@@ -195,13 +193,7 @@ impl Debugger {
     }
 
     fn compile_program(&mut self, source: &str) -> Result<(), String> {
-        let mut lexer = Lexer::new(source);
-        let tokens = lexer.tokenize().map_err(|e| e.to_string())?;
-        let mut parser = Parser::new(tokens);
-        let program = parser.parse().map_err(|e| e.to_string())?;
-        let chunk = Compiler::new()
-            .compile(&program)
-            .map_err(|e| e.to_string())?;
+        let chunk = harn_vm::compile_source(source)?;
 
         let mut vm = Vm::new();
         register_vm_stdlib(&mut vm);

@@ -882,7 +882,10 @@ pub enum ToolApprovalDecision {
     /// Tool is auto-denied by policy.
     AutoDenied { reason: String },
     /// Tool requires explicit host approval.
-    RequiresHostApproval { tool: String, args: serde_json::Value },
+    RequiresHostApproval {
+        tool: String,
+        args: serde_json::Value,
+    },
 }
 
 impl ToolApprovalPolicy {
@@ -1120,5 +1123,105 @@ mod turn_policy_tests {
         .expect("deserialize");
         assert!(policy.require_action_or_yield);
         assert!(!policy.allow_done_sentinel);
+    }
+}
+
+#[cfg(test)]
+mod transcript_policy_tests {
+    use super::*;
+    use crate::value::VmValue;
+
+    fn mock_transcript(message_count: usize) -> VmValue {
+        let messages: Vec<serde_json::Value> = (0..message_count)
+            .map(|i| {
+                let role = if i % 2 == 0 { "user" } else { "assistant" };
+                serde_json::json!({"role": role, "content": format!("message {i}")})
+            })
+            .collect();
+        crate::llm::helpers::transcript_to_vm_with_events(
+            Some("test-id".to_string()),
+            None,
+            None,
+            &messages,
+            Vec::new(),
+            Vec::new(),
+            Some("active"),
+        )
+    }
+
+    fn message_count(transcript: &VmValue) -> usize {
+        transcript
+            .as_dict()
+            .and_then(|d| d.get("messages"))
+            .and_then(|v| match v {
+                VmValue::List(list) => Some(list.len()),
+                _ => None,
+            })
+            .unwrap_or(0)
+    }
+
+    #[test]
+    fn continue_mode_passes_transcript_through() {
+        let transcript = mock_transcript(4);
+        let policy = TranscriptPolicy {
+            mode: Some("continue".to_string()),
+            ..Default::default()
+        };
+        let result = apply_input_transcript_policy(Some(transcript), &policy);
+        assert!(result.is_some());
+        assert_eq!(message_count(&result.unwrap()), 4);
+    }
+
+    #[test]
+    fn default_mode_passes_transcript_through() {
+        let transcript = mock_transcript(3);
+        let policy = TranscriptPolicy::default();
+        let result = apply_input_transcript_policy(Some(transcript), &policy);
+        assert!(result.is_some());
+        assert_eq!(message_count(&result.unwrap()), 3);
+    }
+
+    #[test]
+    fn reset_mode_clears_transcript() {
+        let transcript = mock_transcript(4);
+        let policy = TranscriptPolicy {
+            mode: Some("reset".to_string()),
+            ..Default::default()
+        };
+        let result = apply_input_transcript_policy(Some(transcript), &policy);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn fork_mode_assigns_new_id() {
+        let transcript = mock_transcript(3);
+        let policy = TranscriptPolicy {
+            mode: Some("fork".to_string()),
+            ..Default::default()
+        };
+        let result = apply_input_transcript_policy(Some(transcript), &policy);
+        let result = result.expect("fork should return a transcript");
+        let dict = result.as_dict().expect("must be a dict");
+        let id = dict
+            .get("id")
+            .map(|v| v.display())
+            .unwrap_or_default();
+        assert_ne!(id, "test-id", "fork should assign a new transcript ID");
+        assert_eq!(message_count(&result), 3, "fork should preserve messages");
+    }
+
+    #[test]
+    fn none_input_stays_none_for_all_modes() {
+        for mode in &["continue", "reset", "fork"] {
+            let policy = TranscriptPolicy {
+                mode: Some(mode.to_string()),
+                ..Default::default()
+            };
+            let result = apply_input_transcript_policy(None, &policy);
+            assert!(
+                result.is_none(),
+                "mode {mode} with None input should return None"
+            );
+        }
     }
 }

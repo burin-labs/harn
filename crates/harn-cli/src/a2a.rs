@@ -6,8 +6,6 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use uuid::Uuid;
 
-use harn_lexer::Lexer;
-use harn_parser::{DiagnosticSeverity, Parser, TypeChecker};
 
 /// The supported A2A protocol version.
 const SUPPORTED_A2A_VERSION: &str = "1.0.0";
@@ -205,21 +203,7 @@ fn pipeline_name_from_path(path: &str) -> String {
 async fn execute_pipeline(path: &str, task_text: &str) -> Result<String, String> {
     let source = std::fs::read_to_string(path).map_err(|e| format!("read error: {e}"))?;
 
-    let mut lexer = Lexer::new(&source);
-    let tokens = lexer.tokenize().map_err(|e| e.to_string())?;
-    let mut parser = Parser::new(tokens);
-    let program = parser.parse().map_err(|e| e.to_string())?;
-
-    let type_diagnostics = TypeChecker::new().check(&program);
-    for diag in &type_diagnostics {
-        if diag.severity == DiagnosticSeverity::Error {
-            return Err(diag.message.clone());
-        }
-    }
-
-    let chunk = harn_vm::Compiler::new()
-        .compile(&program)
-        .map_err(|e| e.to_string())?;
+    let chunk = harn_vm::compile_source(&source)?;
 
     let local = tokio::task::LocalSet::new();
     let source_owned = source;
@@ -420,9 +404,7 @@ async fn write_http_response(
 }
 
 /// Write an SSE (Server-Sent Events) HTTP response header.
-async fn write_sse_header(
-    stream: &mut (impl AsyncWriteExt + Unpin),
-) -> tokio::io::Result<()> {
+async fn write_sse_header(stream: &mut (impl AsyncWriteExt + Unpin)) -> tokio::io::Result<()> {
     let header = "HTTP/1.1 200 OK\r\n\
          Content-Type: text/event-stream\r\n\
          Cache-Control: no-cache\r\n\
@@ -555,8 +537,7 @@ async fn handle_connection(
                 .unwrap_or(serde_json::Value::Null);
 
             if let Some(version_err) = check_version_header(&req.headers, &rpc_id) {
-                let resp_bytes =
-                    serde_json::to_string(&version_err).unwrap_or_default();
+                let resp_bytes = serde_json::to_string(&version_err).unwrap_or_default();
                 let _ = write_http_response(
                     &mut stream,
                     200,
@@ -577,24 +558,12 @@ async fn handle_connection(
                 .unwrap_or("");
 
             if method == "a2a.SendStreamingMessage" {
-                handle_streaming_request(
-                    &mut stream,
-                    pipeline_path,
-                    &req.body,
-                    store,
-                )
-                .await;
+                handle_streaming_request(&mut stream, pipeline_path, &req.body, store).await;
             } else {
                 let resp = handle_jsonrpc(pipeline_path, &req.body, store).await;
                 let resp_bytes = resp.as_bytes();
-                let _ = write_http_response(
-                    &mut stream,
-                    200,
-                    "OK",
-                    "application/json",
-                    resp_bytes,
-                )
-                .await;
+                let _ = write_http_response(&mut stream, 200, "OK", "application/json", resp_bytes)
+                    .await;
             }
         }
         // REST-style task listing: GET /tasks
@@ -701,11 +670,7 @@ fn cancel_task(store: &TaskStore, task_id: &str) -> Result<serde_json::Value, St
 /// List tasks with optional cursor-based pagination.
 /// `cursor` is an optional task id to start after.
 /// `limit` is the maximum number of tasks to return (default 50).
-fn list_tasks(
-    store: &TaskStore,
-    cursor: Option<&str>,
-    limit: Option<usize>,
-) -> serde_json::Value {
+fn list_tasks(store: &TaskStore, cursor: Option<&str>, limit: Option<usize>) -> serde_json::Value {
     let map = store.lock().unwrap();
     let limit = limit.unwrap_or(50);
 
@@ -754,7 +719,9 @@ fn extract_message_params(parsed: &serde_json::Value) -> (String, Option<String>
         .and_then(|arr| {
             arr.iter().find_map(|p| {
                 if p.get("type").and_then(|t| t.as_str()) == Some("text") {
-                    p.get("text").and_then(|t| t.as_str()).map(|s| s.to_string())
+                    p.get("text")
+                        .and_then(|t| t.as_str())
+                        .map(|s| s.to_string())
                 } else {
                     None
                 }
@@ -863,9 +830,7 @@ async fn handle_jsonrpc(pipeline_path: &str, body: &str, store: &TaskStore) -> S
             }
         }
         "a2a.ListTasks" => {
-            let cursor = parsed
-                .pointer("/params/cursor")
-                .and_then(|v| v.as_str());
+            let cursor = parsed.pointer("/params/cursor").and_then(|v| v.as_str());
             let limit = parsed
                 .pointer("/params/limit")
                 .and_then(|v| v.as_u64())
@@ -900,14 +865,9 @@ async fn handle_streaming_request(
                 &format!("Parse error: {e}"),
             );
             let resp_bytes = serde_json::to_string(&resp).unwrap_or_default();
-            let _ = write_http_response(
-                stream,
-                200,
-                "OK",
-                "application/json",
-                resp_bytes.as_bytes(),
-            )
-            .await;
+            let _ =
+                write_http_response(stream, 200, "OK", "application/json", resp_bytes.as_bytes())
+                    .await;
             return;
         }
     };
@@ -923,8 +883,7 @@ async fn handle_streaming_request(
         );
         let resp_bytes = serde_json::to_string(&resp).unwrap_or_default();
         let _ =
-            write_http_response(stream, 200, "OK", "application/json", resp_bytes.as_bytes())
-                .await;
+            write_http_response(stream, 200, "OK", "application/json", resp_bytes.as_bytes()).await;
         return;
     }
 
@@ -1399,7 +1358,10 @@ mod tests {
     fn test_pipeline_name_from_path() {
         assert_eq!(pipeline_name_from_path("examples/hello.harn"), "hello");
         assert_eq!(pipeline_name_from_path("agent.harn"), "agent");
-        assert_eq!(pipeline_name_from_path("/path/to/my-pipeline.harn"), "my-pipeline");
+        assert_eq!(
+            pipeline_name_from_path("/path/to/my-pipeline.harn"),
+            "my-pipeline"
+        );
     }
 
     #[test]
@@ -1474,7 +1436,8 @@ mod tests {
     #[tokio::test]
     async fn test_handle_jsonrpc_get_task_not_found() {
         let store: TaskStore = Arc::new(Mutex::new(HashMap::new()));
-        let body = r#"{"jsonrpc":"2.0","id":1,"method":"a2a.GetTask","params":{"id":"nonexistent"}}"#;
+        let body =
+            r#"{"jsonrpc":"2.0","id":1,"method":"a2a.GetTask","params":{"id":"nonexistent"}}"#;
         let resp = handle_jsonrpc("/nonexistent.harn", body, &store).await;
         let parsed: serde_json::Value = serde_json::from_str(&resp).unwrap();
         assert_eq!(parsed["error"]["code"], A2A_TASK_NOT_FOUND);

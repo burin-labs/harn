@@ -338,7 +338,7 @@ impl AcpServer {
         host_bridge.set_session_id(&bridge.session_id);
 
         let compile_started = Instant::now();
-        let chunk = match compile_source(&source, source_path.as_deref()) {
+        let chunk = match harn_vm::compile_source(&source) {
             Ok(c) => c,
             Err(e) => fatal_prompt_error(format!("Compilation error: {e}")),
         };
@@ -712,28 +712,6 @@ impl AcpBridge {
 // ---------------------------------------------------------------------------
 
 /// Compile harn source code into a bytecode chunk.
-fn compile_source(
-    source: &str,
-    _source_path: Option<&std::path::Path>,
-) -> Result<harn_vm::Chunk, String> {
-    let mut lexer = harn_lexer::Lexer::new(source);
-    let tokens = lexer.tokenize().map_err(|e| e.to_string())?;
-    let mut parser = harn_parser::Parser::new(tokens);
-    let program = parser.parse().map_err(|e| e.to_string())?;
-
-    // Static type checking.
-    let type_diagnostics = harn_parser::TypeChecker::new().check(&program);
-    for diag in &type_diagnostics {
-        if diag.severity == harn_parser::DiagnosticSeverity::Error {
-            return Err(diag.message.clone());
-        }
-    }
-
-    harn_vm::Compiler::new()
-        .compile(&program)
-        .map_err(|e| e.to_string())
-}
-
 /// Execute a compiled chunk with ACP bridge builtins.
 async fn execute_chunk(
     chunk: harn_vm::Chunk,

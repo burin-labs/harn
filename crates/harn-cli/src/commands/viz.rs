@@ -2,8 +2,7 @@ use std::fs;
 use std::path::Path;
 use std::process;
 
-use harn_lexer::Lexer;
-use harn_parser::{BindingPattern, MatchArm, Node, Parser, SNode};
+use harn_parser::{BindingPattern, MatchArm, Node, SNode};
 
 pub(crate) fn run_viz(file: &str, output: Option<&str>) {
     let source = fs::read_to_string(file).unwrap_or_else(|error| {
@@ -30,10 +29,7 @@ pub(crate) fn run_viz(file: &str, output: Option<&str>) {
 }
 
 fn render_source_to_mermaid(source: &str) -> Result<String, String> {
-    let mut lexer = Lexer::new(source);
-    let tokens = lexer.tokenize().map_err(|error| error.to_string())?;
-    let mut parser = Parser::new(tokens);
-    let program = parser.parse().map_err(|error| error.to_string())?;
+    let program = harn_parser::parse_source(source).map_err(|e| e.to_string())?;
     Ok(render_program_to_mermaid(&program))
 }
 
