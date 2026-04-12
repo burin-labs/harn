@@ -55,7 +55,9 @@ pub struct MutationSessionRecord {
     pub worker_id: Option<String>,
     pub execution_kind: Option<String>,
     pub mutation_scope: String,
-    pub approval_mode: String,
+    /// Declarative per-tool approval policy for this session. When `None`,
+    /// the host drives approval out-of-band via `tool/pre_use` (legacy path).
+    pub approval_policy: Option<ToolApprovalPolicy>,
 }
 
 impl MutationSessionRecord {
@@ -65,9 +67,6 @@ impl MutationSessionRecord {
         }
         if self.mutation_scope.is_empty() {
             self.mutation_scope = "read_only".to_string();
-        }
-        if self.approval_mode.is_empty() {
-            self.approval_mode = "host_enforced".to_string();
         }
         self
     }
@@ -138,21 +137,25 @@ mod tests {
         let normalized = MutationSessionRecord::default().normalize();
         assert!(normalized.session_id.starts_with("session_"));
         assert_eq!(normalized.mutation_scope, "read_only");
-        assert_eq!(normalized.approval_mode, "host_enforced");
+        assert!(normalized.approval_policy.is_none());
     }
 
     #[test]
     fn install_current_mutation_session_round_trips() {
+        let policy = ToolApprovalPolicy {
+            require_approval: vec!["edit*".to_string()],
+            ..Default::default()
+        };
         install_current_mutation_session(Some(MutationSessionRecord {
             session_id: "session_test".to_string(),
             mutation_scope: "apply_workspace".to_string(),
-            approval_mode: "explicit".to_string(),
+            approval_policy: Some(policy.clone()),
             ..Default::default()
         }));
         let current = current_mutation_session().expect("session installed");
         assert_eq!(current.session_id, "session_test");
         assert_eq!(current.mutation_scope, "apply_workspace");
-        assert_eq!(current.approval_mode, "explicit");
+        assert_eq!(current.approval_policy.as_ref(), Some(&policy));
 
         install_current_mutation_session(None);
         assert!(current_mutation_session().is_none());

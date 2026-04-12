@@ -75,6 +75,8 @@ pub struct AgentLoopConfig {
     pub context_callback: Option<VmValue>,
     /// Capability policy scoped to this agent loop.
     pub policy: Option<crate::orchestration::CapabilityPolicy>,
+    /// Declarative approval policy (auto-approve / auto-deny / require host confirmation).
+    pub approval_policy: Option<crate::orchestration::ToolApprovalPolicy>,
     /// Daemon mode.
     pub daemon: bool,
     /// Extended daemon lifecycle settings.
@@ -319,6 +321,15 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                 serde_json::from_value::<crate::orchestration::CapabilityPolicy>(json)
                     .unwrap_or_default()
             });
+            let approval_policy =
+                options
+                    .as_ref()
+                    .and_then(|o| o.get("approval_policy"))
+                    .map(|v| {
+                        let json = crate::llm::helpers::vm_value_to_json(v);
+                        serde_json::from_value::<crate::orchestration::ToolApprovalPolicy>(json)
+                            .unwrap_or_default()
+                    });
             let daemon_config = parse_daemon_loop_config(options.as_ref());
             let turn_policy = options
                 .as_ref()
@@ -344,6 +355,7 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                     auto_compact,
                     context_callback,
                     policy,
+                    approval_policy,
                     daemon,
                     daemon_config,
                     llm_retries: opt_int(&options, "llm_retries").unwrap_or(4) as usize,

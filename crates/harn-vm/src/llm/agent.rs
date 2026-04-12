@@ -19,10 +19,11 @@ use super::agent_config::{parse_post_turn_directive, AgentLoopConfig};
 use super::agent_observe::{dump_llm_interpreted_response, observed_llm_call, LlmRetryConfig};
 use super::agent_tools::{
     classify_tool_mutation, declared_paths, denied_tool_result, dispatch_tool_execution,
-    is_denied_tool_result, is_read_only_tool, loop_intervention_message, merge_agent_loop_policy,
-    native_protocol_violation_nudge, normalize_native_tools_for_format,
-    normalize_tool_choice_for_format, normalize_tool_examples_for_format, render_tool_result,
-    stable_hash, stable_hash_str, LoopIntervention, ToolCallTracker,
+    is_denied_tool_result, is_read_only_tool, loop_intervention_message,
+    merge_agent_loop_approval_policy, merge_agent_loop_policy, native_protocol_violation_nudge,
+    normalize_native_tools_for_format, normalize_tool_choice_for_format,
+    normalize_tool_examples_for_format, render_tool_result, stable_hash, stable_hash_str,
+    LoopIntervention, ToolCallTracker,
 };
 use super::daemon::DaemonLoopConfig;
 
@@ -495,6 +496,18 @@ pub async fn run_agent_loop_internal(
         }
     }
 
+    struct ApprovalPolicyGuard {
+        active: bool,
+    }
+
+    impl Drop for ApprovalPolicyGuard {
+        fn drop(&mut self) {
+            if self.active {
+                crate::orchestration::pop_approval_policy();
+            }
+        }
+    }
+
     let bridge = current_host_bridge();
     let max_iterations = config.max_iterations;
     let persistent = config.persistent;
@@ -534,6 +547,15 @@ pub async fn run_agent_loop_internal(
     }
     let _policy_guard = ExecutionPolicyGuard {
         active: effective_policy.is_some(),
+    };
+
+    let effective_approval_policy =
+        merge_agent_loop_approval_policy(config.approval_policy.clone());
+    if let Some(ref policy) = effective_approval_policy {
+        crate::orchestration::push_approval_policy(policy.clone());
+    }
+    let _approval_guard = ApprovalPolicyGuard {
+        active: effective_approval_policy.is_some(),
     };
 
     let tools_owned = opts.tools.clone();
@@ -1120,6 +1142,106 @@ pub async fn run_agent_loop_internal(
                     continue;
                 }
 
+                // Declarative approval policy: auto-approve / auto-deny / require host.
+                let approval_decision = crate::orchestration::current_approval_policy()
+                    .map(|policy| policy.evaluate(tool_name, &tool_args));
+                let approval_outcome = match approval_decision {
+                    None | Some(crate::orchestration::ToolApprovalDecision::AutoApproved) => {
+                        Ok(None)
+                    }
+                    Some(crate::orchestration::ToolApprovalDecision::AutoDenied { reason }) => {
+                        Err(("auto_denied", reason))
+                    }
+                    Some(crate::orchestration::ToolApprovalDecision::RequiresHostApproval) => {
+                        if let Some(bridge) = bridge.as_ref() {
+                            let mutation = crate::orchestration::current_mutation_session();
+                            let payload = serde_json::json!({
+                                "tool_name": tool_name,
+                                "tool_use_id": tool_id,
+                                "args": tool_args,
+                                "mutation": mutation,
+                                "declared_paths": declared_paths(tool_name, &tool_args),
+                            });
+                            match bridge.call("tool/request_approval", payload).await {
+                                Ok(response) => {
+                                    let granted = response
+                                        .get("granted")
+                                        .and_then(|v| v.as_bool())
+                                        .unwrap_or(false);
+                                    if granted {
+                                        if let Some(new_args) = response.get("args") {
+                                            tool_args = new_args.clone();
+                                        }
+                                        Ok(Some("host_granted"))
+                                    } else {
+                                        let reason = response
+                                            .get("reason")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("host did not grant approval")
+                                            .to_string();
+                                        Err(("host_denied", reason))
+                                    }
+                                }
+                                Err(_) => Err((
+                                    "host_denied",
+                                    "approval request failed or host does not implement \
+                                     tool/request_approval"
+                                        .to_string(),
+                                )),
+                            }
+                        } else {
+                            Err((
+                                "host_denied",
+                                "approval required but no host bridge is available".to_string(),
+                            ))
+                        }
+                    }
+                };
+                if let Err((approval_status, reason)) = approval_outcome {
+                    let result_text = render_tool_result(&denied_tool_result(tool_name, reason));
+                    if !rejected_tools.contains(&tool_name.to_string()) {
+                        rejected_tools.push(tool_name.to_string());
+                    }
+                    transcript_events.push(transcript_event(
+                        "tool_execution",
+                        "tool",
+                        "internal",
+                        &result_text,
+                        Some(serde_json::json!({
+                            "tool_name": tool_name,
+                            "tool_use_id": tool_id,
+                            "rejected": true,
+                            "arguments": tool_args.clone(),
+                            "approval": approval_status,
+                        })),
+                    ));
+                    if tool_format == "native" {
+                        append_message_to_contexts(
+                            &mut visible_messages,
+                            &mut recorded_messages,
+                            build_tool_result_message(tool_id, &result_text, &opts.provider),
+                        );
+                    } else {
+                        observations.push_str(&format!(
+                            "[result of {tool_name}]\n{result_text}\n[end of {tool_name} result]\n\n"
+                        ));
+                    }
+                    continue;
+                }
+                if let Ok(Some(approval_status)) = approval_outcome {
+                    transcript_events.push(transcript_event(
+                        "tool_execution",
+                        "tool",
+                        "internal",
+                        "",
+                        Some(serde_json::json!({
+                            "tool_name": tool_name,
+                            "tool_use_id": tool_id,
+                            "approval": approval_status,
+                        })),
+                    ));
+                }
+
                 // PreToolUse hooks: in-process hooks first, then bridge gate
                 match crate::orchestration::run_pre_tool_hooks(tool_name, &tool_args) {
                     crate::orchestration::PreToolAction::Allow => {}
@@ -1151,7 +1273,9 @@ pub async fn run_agent_loop_internal(
                     }
                 }
 
-                // on_tool_call closure hook (Harn-level pre-execution)
+                // on_tool_call closure hook (Harn-level pre-execution).
+                // For declarative deny/approve, use `approval_policy` on the agent loop.
+                // This hook remains for arg rewriting before dispatch.
                 if let Some(VmValue::Closure(ref closure)) = config.on_tool_call {
                     if let Some(mut vm) = crate::vm::clone_async_builtin_child_vm() {
                         let hook_arg = crate::stdlib::json_to_vm_value(&serde_json::json!({
@@ -1160,33 +1284,6 @@ pub async fn run_agent_loop_internal(
                         }));
                         if let Ok(result) = vm.call_closure_pub(closure, &[hook_arg], &[]).await {
                             if let Some(dict) = result.as_dict() {
-                                if matches!(dict.get("allow"), Some(VmValue::Bool(false))) {
-                                    let reason = dict
-                                        .get("reason")
-                                        .map(|v| v.display())
-                                        .unwrap_or_else(|| "denied by on_tool_call hook".into());
-                                    let result_text =
-                                        render_tool_result(&denied_tool_result(tool_name, reason));
-                                    if !rejected_tools.contains(&tool_name.to_string()) {
-                                        rejected_tools.push(tool_name.to_string());
-                                    }
-                                    if tool_format == "native" {
-                                        append_message_to_contexts(
-                                            &mut visible_messages,
-                                            &mut recorded_messages,
-                                            build_tool_result_message(
-                                                tool_id,
-                                                &result_text,
-                                                &opts.provider,
-                                            ),
-                                        );
-                                    } else {
-                                        observations.push_str(&format!(
-                                            "[result of {tool_name}]\n{result_text}\n[end of {tool_name} result]\n\n"
-                                        ));
-                                    }
-                                    continue;
-                                }
                                 if let Some(new_args) = dict.get("args") {
                                     tool_args = crate::llm::vm_value_to_json(new_args);
                                 }

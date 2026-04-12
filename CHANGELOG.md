@@ -2,6 +2,57 @@
 
 All notable changes to Harn are documented in this file.
 
+## Unreleased
+
+### Added
+
+- **`ToolApprovalPolicy` is now load-bearing** — `agent_loop`, workflow stage
+  nodes, workflow graphs, and delegated workers accept `approval_policy` and
+  enforce it during tool dispatch. Evaluation order is `auto_deny` →
+  `write_path_allowlist` → `auto_approve` → `require_approval`. Policies are
+  stored on a thread-local stack mirroring `CapabilityPolicy` and intersect
+  across nested scopes (most-restrictive wins).
+
+- **`tool/request_approval` bridge method** — new request sent when the policy
+  classifies a call as `RequiresHostApproval`. Fails closed if the host does
+  not implement it. Response shape: `{granted: bool, args?: object, reason?: string}`.
+
+- **Transcript events carry `approval` status** — tool_execution events now
+  include `auto_denied`, `host_denied`, `host_granted`, or implicit
+  auto-approval so replays and the portal can render approval history.
+
+### Changed
+
+- **`MutationSessionRecord.approval_mode: String` replaced by
+  `approval_policy: Option<ToolApprovalPolicy>`** (breaking). `RunChildRecord`
+  updated the same way. Workflow and worker session-audit APIs that previously
+  accepted `approval_mode: "host_enforced"` strings now accept an approval
+  policy object (or `null`).
+
+- **`agent_loop` `on_tool_call` hook no longer denies via `{allow: false}`**
+  (breaking). The hook now only rewrites args via `{args: ...}`; declarative
+  deny/approve moves to the `approval_policy` surface.
+
+- **`ToolApprovalDecision::RequiresHostApproval` is now a unit variant** —
+  the previous `{tool, args}` payload duplicated data the caller already owns.
+
+- **Workflow stages run exactly once; `RetryPolicy.max_attempts` is a no-op**
+  (breaking). The stage-level retry loop is removed. Blind retries reset the
+  input transcript on each attempt, discarding whatever the model produced in
+  the failed attempt — an anti-pattern for agent orchestration. Iteration is
+  now expressed in two places:
+  (a) loop-back edges in the workflow graph, for cross-stage retry with full
+  transcript continuity; and
+  (b) `exit_when_verified` + tool-driven feedback inside the agent loop, for
+  intra-stage iteration where verify output feeds back as a natural tool
+  result. `RetryPolicy` fields are retained for serde compatibility.
+
+- **Stage input transcripts survive non-LLM stages.** A `verify`-kind stage
+  (or any non-LLM stage) whose result lacks a `transcript` field now passes
+  its input transcript through as the output transcript, subject to the
+  stage's output `transcript_policy`. Cross-stage transcripts are
+  monotonically growing by default.
+
 ## v0.5.74
 
 ### Added

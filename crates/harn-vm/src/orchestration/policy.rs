@@ -12,6 +12,7 @@ use crate::value::{VmError, VmValue};
 
 thread_local! {
     static EXECUTION_POLICY_STACK: RefCell<Vec<CapabilityPolicy>> = const { RefCell::new(Vec::new()) };
+    static EXECUTION_APPROVAL_POLICY_STACK: RefCell<Vec<ToolApprovalPolicy>> = const { RefCell::new(Vec::new()) };
 }
 
 // ── Per-agent policy with argument patterns ───────────────────────────
@@ -454,6 +455,22 @@ pub fn current_execution_policy() -> Option<CapabilityPolicy> {
     EXECUTION_POLICY_STACK.with(|stack| stack.borrow().last().cloned())
 }
 
+// ── Approval policy stack ───────────────────────────────────────────
+
+pub fn push_approval_policy(policy: ToolApprovalPolicy) {
+    EXECUTION_APPROVAL_POLICY_STACK.with(|stack| stack.borrow_mut().push(policy));
+}
+
+pub fn pop_approval_policy() {
+    EXECUTION_APPROVAL_POLICY_STACK.with(|stack| {
+        stack.borrow_mut().pop();
+    });
+}
+
+pub fn current_approval_policy() -> Option<ToolApprovalPolicy> {
+    EXECUTION_APPROVAL_POLICY_STACK.with(|stack| stack.borrow().last().cloned())
+}
+
 pub fn current_tool_metadata(tool: &str) -> Option<ToolRuntimePolicyMetadata> {
     current_execution_policy().and_then(|policy| policy.tool_metadata.get(tool).cloned())
 }
@@ -881,11 +898,9 @@ pub enum ToolApprovalDecision {
     AutoApproved,
     /// Tool is auto-denied by policy.
     AutoDenied { reason: String },
-    /// Tool requires explicit host approval.
-    RequiresHostApproval {
-        tool: String,
-        args: serde_json::Value,
-    },
+    /// Tool requires explicit host approval; the caller already owns the
+    /// tool name and args and forwards them to the host bridge.
+    RequiresHostApproval,
 }
 
 impl ToolApprovalPolicy {
@@ -929,10 +944,7 @@ impl ToolApprovalPolicy {
         // Require approval.
         for pattern in &self.require_approval {
             if glob_match(pattern, tool_name) {
-                return ToolApprovalDecision::RequiresHostApproval {
-                    tool: tool_name.to_string(),
-                    args: args.clone(),
-                };
+                return ToolApprovalDecision::RequiresHostApproval;
             }
         }
 
@@ -1031,7 +1043,7 @@ mod approval_policy_tests {
         let decision = policy.evaluate("edit_file", &serde_json::json!({"path": "foo.rs"}));
         assert!(matches!(
             decision,
-            ToolApprovalDecision::RequiresHostApproval { .. }
+            ToolApprovalDecision::RequiresHostApproval
         ));
     }
 

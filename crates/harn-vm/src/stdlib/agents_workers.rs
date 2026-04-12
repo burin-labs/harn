@@ -643,11 +643,10 @@ fn parse_worker_audit(dict: &BTreeMap<String, VmValue>) -> Result<MutationSessio
             .map(|session| session.mutation_scope.clone())
             .unwrap_or_else(|| "read_only".to_string());
     }
-    if audit.approval_mode.is_empty() {
-        audit.approval_mode = parent_session
+    if audit.approval_policy.is_none() {
+        audit.approval_policy = parent_session
             .as_ref()
-            .map(|session| session.approval_mode.clone())
-            .unwrap_or_else(|| "host_enforced".to_string());
+            .and_then(|session| session.approval_policy.clone());
     }
     Ok(audit.normalize())
 }
@@ -997,11 +996,18 @@ pub(super) fn spawn_worker_task(state: Rc<RefCell<WorkerState>>) {
             });
         }
 
-        // Push per-worker capability policy
+        // Push per-worker capability and approval policies
         if let Some(ref policy) = worker_policy {
             push_execution_policy(policy.clone());
         }
+        let worker_approval = audit.approval_policy.clone();
+        if let Some(ref approval) = worker_approval {
+            crate::orchestration::push_approval_policy(approval.clone());
+        }
         let result = execute_worker_config(worker_id, task, config, execution, audit).await;
+        if worker_approval.is_some() {
+            crate::orchestration::pop_approval_policy();
+        }
         if worker_policy.is_some() {
             pop_execution_policy();
         }
@@ -1160,7 +1166,7 @@ pub(super) async fn execute_delegated_stage(
         audit: MutationSessionRecord {
             parent_session_id: Some(node_id.to_string()),
             mutation_scope: "read_only".to_string(),
-            approval_mode: "host_enforced".to_string(),
+            approval_policy: crate::orchestration::current_approval_policy(),
             execution_kind: Some("delegated_stage".to_string()),
             ..Default::default()
         }
@@ -1299,7 +1305,7 @@ mod tests {
                 worker_id: Some("worker_test".to_string()),
                 execution_kind: Some("workflow".to_string()),
                 mutation_scope: "apply_worktree".to_string(),
-                approval_mode: "host_enforced".to_string(),
+                approval_policy: None,
             }
             .normalize(),
         };

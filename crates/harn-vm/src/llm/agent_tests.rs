@@ -66,6 +66,7 @@ fn base_agent_config() -> AgentLoopConfig {
         auto_compact: None,
         context_callback: None,
         policy: None,
+        approval_policy: None,
         daemon: false,
         daemon_config: DaemonLoopConfig::default(),
         llm_retries: 0,
@@ -179,6 +180,41 @@ fn merge_agent_loop_policy_rejects_exceeding_capabilities() {
         result.is_err(),
         "should reject capabilities outside ceiling"
     );
+}
+
+#[test]
+fn merge_approval_policy_intersects_with_ambient_ceiling() {
+    use crate::llm::agent_tools::merge_agent_loop_approval_policy;
+    use crate::orchestration::{pop_approval_policy, push_approval_policy, ToolApprovalPolicy};
+
+    push_approval_policy(ToolApprovalPolicy {
+        auto_deny: vec!["shell*".to_string()],
+        ..Default::default()
+    });
+    let merged = merge_agent_loop_approval_policy(Some(ToolApprovalPolicy {
+        auto_deny: vec!["fs_delete".to_string()],
+        ..Default::default()
+    }))
+    .expect("policy present");
+    pop_approval_policy();
+
+    // Union of deny lists (more restrictive).
+    assert!(merged.auto_deny.iter().any(|p| p == "shell*"));
+    assert!(merged.auto_deny.iter().any(|p| p == "fs_delete"));
+}
+
+#[test]
+fn merge_approval_policy_defers_when_only_one_side_present() {
+    use crate::llm::agent_tools::merge_agent_loop_approval_policy;
+    use crate::orchestration::{current_approval_policy, ToolApprovalPolicy};
+
+    assert!(current_approval_policy().is_none());
+    let merged = merge_agent_loop_approval_policy(Some(ToolApprovalPolicy {
+        auto_approve: vec!["read*".to_string()],
+        ..Default::default()
+    }))
+    .expect("policy present");
+    assert_eq!(merged.auto_approve, vec!["read*".to_string()]);
 }
 
 #[test]

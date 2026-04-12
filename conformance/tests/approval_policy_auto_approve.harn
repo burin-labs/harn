@@ -1,0 +1,25 @@
+fn read_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "read_file",
+    "Read a file",
+    {handler: nil, parameters: {path: {type: "string", description: "Path"}}, returns: {type: "string"}},
+  )
+  return tools
+}
+
+pipeline main() {
+  let result = agent_loop(
+    "Call read",
+    "You are helpful",
+    {
+    provider: "mock",
+    tools: read_tools(),
+    tool_format: "native",
+    max_iterations: 1,
+    approval_policy: {auto_approve: ["read*"], auto_deny: ["shell*"]},
+  },
+  )
+  println(len(result?.rejected_tools) == 0)
+}

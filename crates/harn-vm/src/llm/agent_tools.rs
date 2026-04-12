@@ -64,6 +64,19 @@ pub(crate) fn merge_agent_loop_policy(
     }
 }
 
+/// Intersect any active ambient approval policy with a loop-requested one.
+/// Approval intersection is always safe (strictly more restrictive), so no error path.
+pub(crate) fn merge_agent_loop_approval_policy(
+    requested: Option<crate::orchestration::ToolApprovalPolicy>,
+) -> Option<crate::orchestration::ToolApprovalPolicy> {
+    match (crate::orchestration::current_approval_policy(), requested) {
+        (Some(current), Some(requested)) => Some(current.intersect(&requested)),
+        (Some(current), None) => Some(current),
+        (None, Some(requested)) => Some(requested),
+        (None, None) => None,
+    }
+}
+
 pub(super) struct ToolCallTracker {
     /// (tool_name, args_hash) -> (consecutive_count, last_result_hash)
     entries: HashMap<(String, u64), (usize, u64)>,

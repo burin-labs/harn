@@ -30,6 +30,7 @@ pub struct WorkflowNode {
     pub context_policy: ContextPolicy,
     pub retry_policy: RetryPolicy,
     pub capability_policy: CapabilityPolicy,
+    pub approval_policy: super::ToolApprovalPolicy,
     pub input_contract: StageContract,
     pub output_contract: StageContract,
     pub branch_semantics: BranchSemantics,
@@ -249,6 +250,7 @@ pub struct WorkflowGraph {
     pub nodes: BTreeMap<String, WorkflowNode>,
     pub edges: Vec<WorkflowEdge>,
     pub capability_policy: CapabilityPolicy,
+    pub approval_policy: super::ToolApprovalPolicy,
     pub metadata: BTreeMap<String, serde_json::Value>,
     pub audit_log: Vec<WorkflowAuditEntry>,
 }
@@ -831,6 +833,7 @@ pub async fn execute_stage_node(
                     auto_compact,
                     context_callback: None,
                     policy: Some(effective_policy),
+                    approval_policy: Some(node.approval_policy.clone()),
                     daemon: false,
                     daemon_config: Default::default(),
                     llm_retries: 2,
@@ -904,10 +907,9 @@ pub async fn execute_stage_node(
     }
 
     let visible_text = llm_result["text"].as_str().unwrap_or_default().to_string();
-    // Extract the transcript from the LLM result. For non-LLM stages (e.g.
-    // verify command execution), the result won't contain a "transcript" field.
-    // In that case, pass through the input transcript so downstream stages
-    // (like repair) inherit the conversation history from earlier LLM stages.
+    // Non-LLM stages (verify command, condition, fork, join, ...) don't
+    // produce a "transcript" field. Fall back to the stage's input transcript
+    // so the running conversation survives cross-stage transitions.
     let result_transcript = llm_result
         .get("transcript")
         .cloned()

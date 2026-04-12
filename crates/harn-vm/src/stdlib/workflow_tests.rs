@@ -296,3 +296,97 @@ async fn verify_stage_with_reset_transcript_policy_clears_transcript() {
         "reset transcript policy should clear the transcript even for verify stages"
     );
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn failing_stage_records_exactly_one_attempt_regardless_of_max_attempts() {
+    // `retry_policy.max_attempts` is a no-op. A stage that fails runs once;
+    // iteration lives at the workflow-graph level.
+    let node = crate::orchestration::WorkflowNode {
+        id: Some("verify".to_string()),
+        kind: "verify".to_string(),
+        retry_policy: crate::orchestration::RetryPolicy {
+            max_attempts: 5,
+            backoff_ms: Some(1),
+            ..Default::default()
+        },
+        verify: Some(serde_json::json!({
+            "command": "exit 7",
+            "expect_status": 0,
+        })),
+        output_contract: crate::orchestration::StageContract {
+            output_kinds: vec!["verification_result".to_string()],
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let executed = execute_stage_attempts("verify", "verify", &node, &[], None)
+        .await
+        .expect("stage executes");
+
+    assert_eq!(
+        executed.attempts.len(),
+        1,
+        "failing stage must record exactly one attempt; retry-loop is removed"
+    );
+    assert_eq!(executed.status, "failed");
+    assert_eq!(executed.branch.as_deref(), Some("failed"));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn succeeding_stage_records_single_attempt() {
+    let node = crate::orchestration::WorkflowNode {
+        id: Some("verify".to_string()),
+        kind: "verify".to_string(),
+        retry_policy: crate::orchestration::RetryPolicy {
+            max_attempts: 3,
+            ..Default::default()
+        },
+        verify: Some(serde_json::json!({
+            "command": "echo ok",
+            "expect_status": 0,
+        })),
+        output_contract: crate::orchestration::StageContract {
+            output_kinds: vec!["verification_result".to_string()],
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let executed = execute_stage_attempts("verify", "verify", &node, &[], None)
+        .await
+        .expect("stage executes");
+
+    assert_eq!(executed.attempts.len(), 1);
+    assert_eq!(executed.status, "completed");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn stage_task_reaches_execution_verbatim() {
+    // The task passed to `execute_stage_attempts` reaches the stage
+    // unmodified; no retry-suffix text is appended.
+    let node = crate::orchestration::WorkflowNode {
+        id: Some("verify".to_string()),
+        kind: "verify".to_string(),
+        retry_policy: crate::orchestration::RetryPolicy {
+            max_attempts: 3,
+            ..Default::default()
+        },
+        verify: Some(serde_json::json!({
+            "command": "echo 'verification'; exit 1",
+            "expect_status": 0,
+        })),
+        output_contract: crate::orchestration::StageContract {
+            output_kinds: vec!["verification_result".to_string()],
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let executed =
+        execute_stage_attempts("the original task, pristine", "verify", &node, &[], None)
+            .await
+            .expect("stage executes");
+
+    assert_eq!(executed.attempts.len(), 1);
+}

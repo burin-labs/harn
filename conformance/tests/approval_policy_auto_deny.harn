@@ -1,0 +1,32 @@
+fn write_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "shell_exec",
+    "Run shell command",
+    {
+    handler: nil,
+    parameters: {cmd: {type: "string", description: "Command"}},
+    returns: {type: "string"},
+  },
+  )
+  return tools
+}
+
+pipeline main() {
+  let denied = agent_loop(
+    "Try to run shell",
+    "You are helpful",
+    {
+    provider: "mock",
+    tools: write_tools(),
+    tool_format: "native",
+    max_iterations: 1,
+    approval_policy: {auto_deny: ["shell*"]},
+  },
+  )
+  println(denied?.rejected_tools[0] == "shell_exec")
+  let transcript = json_stringify(transcript_messages(denied?.transcript))
+  println(transcript.contains("permission_denied"))
+  println(transcript.contains("auto_denied") || transcript.contains("deny pattern"))
+}

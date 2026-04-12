@@ -185,7 +185,7 @@ Options currently include:
 - `replay_mode: "deterministic"`
 - `audit`
 - `mutation_scope`
-- `approval_mode`
+- `approval_policy`
 
 Resuming is practical rather than magical: if a saved run has unfinished
 successor stages, Harn continues from persisted ready-node checkpoints with
@@ -223,7 +223,7 @@ used to tie tool gates, workers, and artifacts back to one mutation boundary:
 - `worker_id`
 - `execution_kind`
 - `mutation_scope`
-- `approval_mode`
+- `approval_policy`
 
 This is not an editor undo stack. It is the runtime-side provenance contract
 that hosts can map onto their own approval and undo/redo UX.

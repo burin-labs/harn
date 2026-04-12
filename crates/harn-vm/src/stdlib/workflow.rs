@@ -737,11 +737,13 @@ fn append_child_run_record(run: &mut RunRecord, stage_id: &str, stage: &serde_js
             .and_then(|value| value.get("mutation_scope"))
             .and_then(|value| value.as_str())
             .map(|value| value.to_string()),
-        approval_mode: worker
+        approval_policy: worker
             .get("audit")
-            .and_then(|value| value.get("approval_mode"))
-            .and_then(|value| value.as_str())
-            .map(|value| value.to_string()),
+            .and_then(|value| value.get("approval_policy"))
+            .and_then(|value| {
+                serde_json::from_value::<crate::orchestration::ToolApprovalPolicy>(value.clone())
+                    .ok()
+            }),
         task: worker
             .get("task")
             .and_then(|value| value.as_str())
@@ -853,6 +855,16 @@ fn effective_node_policy(
         .map_err(VmError::Runtime)
 }
 
+fn effective_node_approval_policy(
+    graph: &WorkflowGraph,
+    node: &crate::orchestration::WorkflowNode,
+) -> crate::orchestration::ToolApprovalPolicy {
+    let base = crate::orchestration::current_approval_policy()
+        .unwrap_or_default()
+        .intersect(&graph.approval_policy);
+    base.intersect(&node.approval_policy)
+}
+
 async fn execute_stage_attempts(
     task: &str,
     node_id: &str,
@@ -872,504 +884,458 @@ async fn execute_stage_attempts(
         .into_iter()
         .map(|artifact| artifact.id)
         .collect::<Vec<_>>();
+    // A stage runs once. Iteration is expressed at two levels: loop-back
+    // edges in the workflow graph (for cross-stage retry) and
+    // `exit_when_verified` + tool feedback inside the agent loop (for
+    // intra-stage iteration). `RetryPolicy` fields remain for serde
+    // compatibility but are no-ops.
     let mut attempts = Vec::new();
-    let max_attempts = node.retry_policy.max_attempts.max(1);
-    let mut last_error = None;
-    let mut last_result = serde_json::json!({"status": "failed", "text": ""});
-    let mut last_artifacts = Vec::new();
-    let mut last_transcript = transcript.clone();
-    let mut last_verification = None;
-    let mut last_usage = LlmUsageRecord::default();
-    let mut last_outcome = "failed".to_string();
-    let mut last_branch = Some("failed".to_string());
-
-    for attempt in 1..=max_attempts {
-        // Exponential backoff between retry attempts (skip delay on first attempt).
-        if attempt > 1 {
-            if let Some(base_ms) = node.retry_policy.backoff_ms {
-                let multiplier = node.retry_policy.backoff_multiplier.unwrap_or(2.0);
-                let delay_ms =
-                    (base_ms as f64 * multiplier.powi((attempt as i32) - 2)).round() as u64;
-                tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
-            }
-        }
-        let started_at = uuid::Uuid::now_v7().to_string();
-        let usage_before = llm_usage_snapshot();
-        let attempt_task = if attempt == 1 {
-            task.to_string()
-        } else {
-            format!(
-                "{task}\n\nRetry attempt {attempt} of {max_attempts}. Repair the previous failure and produce a corrected result."
-            )
-        };
-        let execution_future = async {
-            let r: Result<StageAttemptResult, VmError> = match node.kind.as_str() {
-                "fork" => Ok((
-                    serde_json::json!({"status": "completed", "text": "forked"}),
+    let started_at = uuid::Uuid::now_v7().to_string();
+    let usage_before = llm_usage_snapshot();
+    let attempt = 1usize;
+    let attempt_task = task.to_string();
+    let execution_future = async {
+        let r: Result<StageAttemptResult, VmError> = match node.kind.as_str() {
+            "fork" => Ok((
+                serde_json::json!({"status": "completed", "text": "forked"}),
+                Vec::new(),
+                transcript.clone(),
+                "forked".to_string(),
+                Some("fork".to_string()),
+                None,
+            )),
+            "join" => Ok((
+                serde_json::json!({"status": "completed", "text": "joined"}),
+                Vec::new(),
+                transcript.clone(),
+                "joined".to_string(),
+                Some("join".to_string()),
+                None,
+            )),
+            "condition" => {
+                let selected = select_artifacts(artifacts.to_vec(), &node.context_policy);
+                let (matched, _) = evaluate_condition(node, &selected);
+                Ok((
+                    serde_json::json!({"status": "completed", "text": if matched { "true" } else { "false" }}),
                     Vec::new(),
                     transcript.clone(),
-                    "forked".to_string(),
-                    Some("fork".to_string()),
-                    None,
-                )),
-                "join" => Ok((
-                    serde_json::json!({"status": "completed", "text": "joined"}),
-                    Vec::new(),
-                    transcript.clone(),
-                    "joined".to_string(),
-                    Some("join".to_string()),
-                    None,
-                )),
-                "condition" => {
-                    let selected = select_artifacts(artifacts.to_vec(), &node.context_policy);
-                    let (matched, _) = evaluate_condition(node, &selected);
-                    Ok((
-                        serde_json::json!({"status": "completed", "text": if matched { "true" } else { "false" }}),
-                        Vec::new(),
-                        transcript.clone(),
-                        if matched {
-                            "condition_true".to_string()
-                        } else {
-                            "condition_false".to_string()
-                        },
-                        Some(if matched {
-                            "true".to_string()
-                        } else {
-                            "false".to_string()
-                        }),
-                        None,
-                    ))
-                }
-                "map" => {
-                    let items = map_work_items(node, artifacts);
-                    let total_items = items.len();
-                    let branch_policy = crate::orchestration::current_execution_policy();
-                    let runs_stage = map_executes_stage(node);
-                    let stage_template = runs_stage.then(|| map_stage_node(node));
-                    let shared_lineage = items
-                        .iter()
-                        .flat_map(|item| match item {
-                            MapWorkItem::Artifact { artifact, .. } => vec![artifact.id.clone()],
-                            MapWorkItem::Value { .. } => Vec::new(),
-                        })
-                        .collect::<Vec<_>>();
-                    let strategy = if node.join_policy.strategy.is_empty() {
-                        "all".to_string()
+                    if matched {
+                        "condition_true".to_string()
                     } else {
-                        node.join_policy.strategy.clone()
-                    };
-                    let tasks = items
-                        .into_iter()
-                        .map(|item| {
-                            let branch_policy = branch_policy.clone();
-                            let branch_transcript = transcript.clone();
-                            let task_label = task.to_string();
-                            let stage_template = stage_template.clone();
-                            let node_id = node_id.to_string();
-                            let output_kind = node
-                                .map_policy
-                                .output_kind
-                                .clone()
-                                .or_else(|| node.output_contract.output_kinds.first().cloned())
-                                .unwrap_or_else(|| "artifact".to_string());
-                            let lineage = shared_lineage.clone();
-                            Box::pin(async move {
-                                if let Some(policy) = branch_policy.clone() {
-                                    push_execution_policy(policy);
-                                }
-                                let result = match stage_template {
-                                    Some(stage_node) => {
-                                        let index = match &item {
-                                            MapWorkItem::Artifact { index, .. }
-                                            | MapWorkItem::Value { index, .. } => *index,
-                                        };
-                                        let branch_input =
-                                            vec![map_branch_artifact(&node_id, &item, &lineage)];
-                                        let branch_task = format!(
-                                            "{task_label}\n\nMap item {} of {}",
-                                            index + 1,
-                                            total_items.max(1)
-                                        );
-                                        let executed = execute_stage_attempts(
-                                            &branch_task,
-                                            &format!("{node_id}_map_{}", index + 1),
-                                            &stage_node,
-                                            &branch_input,
-                                            branch_transcript,
-                                        )
-                                        .await?;
-                                        Ok(MapBranchResult {
-                                            index,
-                                            status: executed.status.clone(),
-                                            result: executed.result,
-                                            artifacts: executed.artifacts,
-                                            usage: executed.usage,
-                                            error: executed.error,
-                                        })
-                                    }
-                                    None => {
-                                        let index = match &item {
-                                            MapWorkItem::Artifact { index, .. }
-                                            | MapWorkItem::Value { index, .. } => *index,
-                                        };
-                                        let artifact = match &item {
-                                            MapWorkItem::Artifact { artifact, .. } => {
-                                                let value = artifact
-                                                    .data
-                                                    .clone()
-                                                    .or_else(|| {
-                                                        artifact
-                                                            .text
-                                                            .clone()
-                                                            .map(serde_json::Value::String)
-                                                    })
-                                                    .unwrap_or(serde_json::Value::Null);
-                                                artifact_from_value(
-                                                    &node_id,
-                                                    &output_kind,
-                                                    index,
-                                                    value,
-                                                    std::slice::from_ref(&artifact.id),
-                                                    format!("map {} item {}", node_id, index + 1),
-                                                )
-                                            }
-                                            MapWorkItem::Value { value, .. } => {
-                                                artifact_from_value(
-                                                    &node_id,
-                                                    &output_kind,
-                                                    index,
-                                                    value.clone(),
-                                                    &lineage,
-                                                    format!("map {} item {}", node_id, index + 1),
-                                                )
-                                            }
-                                        };
-                                        Ok(MapBranchResult {
-                                            index,
-                                            status: "completed".to_string(),
-                                            result: serde_json::json!({
-                                                "status": "completed",
-                                                "text": artifact.text,
-                                            }),
-                                            artifacts: vec![artifact],
-                                            usage: LlmUsageRecord::default(),
-                                            error: None,
-                                        })
-                                    }
-                                };
-                                if branch_policy.is_some() {
-                                    pop_execution_policy();
-                                }
-                                result
-                            })
-                                as LocalTask<Result<MapBranchResult, VmError>>
-                        })
-                        .collect::<Vec<_>>();
-
-                    let branch_results = execute_join_policy(
-                        tasks,
-                        &strategy,
-                        node.join_policy.min_completed,
-                        node.map_policy.max_concurrent,
-                    )
-                    .await;
-
-                    let mut completed = Vec::new();
-                    let mut failures = Vec::new();
-                    let mut produced = Vec::new();
-                    let mut usage = LlmUsageRecord::default();
-                    for branch_result in branch_results {
-                        match branch_result {
-                            Ok(Ok(branch)) => {
-                                merge_usage(&mut usage, &branch.usage);
-                                if branch.status == "completed" && branch.error.is_none() {
-                                    produced.extend(branch.artifacts.clone());
-                                    completed.push(serde_json::json!({
-                                        "index": branch.index,
-                                        "status": branch.status,
-                                        "result": branch.result,
-                                        "artifact_count": branch.artifacts.len(),
-                                    }));
-                                } else {
-                                    failures.push(serde_json::json!({
-                                        "index": branch.index,
-                                        "status": branch.status,
-                                        "error": branch.error,
-                                    }));
-                                }
-                            }
-                            Ok(Err(error)) => failures.push(serde_json::json!({
-                                "status": "failed",
-                                "error": error.to_string(),
-                            })),
-                            Err(error) => failures.push(serde_json::json!({
-                                "status": "failed",
-                                "error": error,
-                            })),
-                        }
-                    }
-                    produced.sort_by(|left, right| {
-                        let left_index = left
-                            .metadata
-                            .get("index")
-                            .and_then(|value| value.as_u64())
-                            .unwrap_or(u64::MAX);
-                        let right_index = right
-                            .metadata
-                            .get("index")
-                            .and_then(|value| value.as_u64())
-                            .unwrap_or(u64::MAX);
-                        left_index.cmp(&right_index)
-                    });
-                    let status = if failures.is_empty() {
-                        "completed"
-                    } else if produced.is_empty() {
-                        "failed"
-                    } else {
-                        "partial"
-                    };
-                    let text = if status == "failed" {
-                        format!("map failed after {} branch failures", failures.len())
-                    } else {
-                        format!("mapped {} of {} items", produced.len(), total_items)
-                    };
-                    let branch = if status == "failed" {
-                        Some("failed".to_string())
-                    } else {
-                        Some("mapped".to_string())
-                    };
-                    let result = serde_json::json!({
-                        "status": status,
-                        "text": text,
-                        "join_strategy": strategy,
-                        "completed": completed,
-                        "failures": failures,
-                    });
-                    Ok((
-                        result,
-                        produced,
-                        transcript.clone(),
-                        "mapped".to_string(),
-                        branch,
-                        None,
-                    ))
-                }
-                "reduce" => {
-                    let selected = select_artifacts(artifacts.to_vec(), &node.context_policy);
-                    let separator = node
-                        .reduce_policy
-                        .separator
-                        .clone()
-                        .unwrap_or_else(|| "\n\n".to_string());
-                    let reduced_text = selected
-                        .iter()
-                        .filter_map(|artifact| artifact.text.clone())
-                        .collect::<Vec<_>>()
-                        .join(&separator);
-                    let reduced = artifact_from_value(
-                        node_id,
-                        node.output_contract
-                            .output_kinds
-                            .first()
-                            .map(|kind| kind.as_str())
-                            .unwrap_or("summary"),
-                        0,
-                        serde_json::Value::String(reduced_text.clone()),
-                        &selected
-                            .iter()
-                            .map(|artifact| artifact.id.clone())
-                            .collect::<Vec<_>>(),
-                        format!("reduce {} output", node_id),
-                    );
-                    Ok((
-                        serde_json::json!({"status": "completed", "text": reduced_text}),
-                        vec![reduced],
-                        transcript.clone(),
-                        "reduced".to_string(),
-                        Some("reduced".to_string()),
-                        None,
-                    ))
-                }
-                "escalation" => {
-                    let reason = node
-                        .escalation_policy
-                        .reason
-                        .clone()
-                        .unwrap_or_else(|| "manual review required".to_string());
-                    let produced = artifact_from_value(
-                        node_id,
-                        node.output_contract
-                            .output_kinds
-                            .first()
-                            .map(|kind| kind.as_str())
-                            .unwrap_or("plan"),
-                        0,
-                        serde_json::json!({
-                            "queue": node.escalation_policy.queue,
-                            "level": node.escalation_policy.level,
-                            "reason": reason,
-                        }),
-                        &consumed_artifact_ids,
-                        format!("escalation {}", node_id),
-                    );
-                    Ok((
-                        serde_json::json!({"status": "completed", "text": reason}),
-                        vec![produced],
-                        transcript.clone(),
-                        "escalated".to_string(),
-                        Some("escalated".to_string()),
-                        None,
-                    ))
-                }
-                "subagent" => {
-                    let (result, produced, next_transcript) =
-                        super::agents_workers::execute_delegated_stage(
-                            node_id,
-                            node,
-                            &attempt_task,
-                            artifacts,
-                            transcript.clone(),
-                        )
-                        .await?;
-                    Ok((
-                        result,
-                        produced,
-                        next_transcript,
-                        "subagent_completed".to_string(),
-                        Some("success".to_string()),
-                        None,
-                    ))
-                }
-                _ => {
-                    let (result, produced, next_transcript) =
-                        crate::orchestration::execute_stage_node(
-                            node_id,
-                            node,
-                            &attempt_task,
-                            artifacts,
-                            transcript.clone(),
-                        )
-                        .await?;
-                    let verification = evaluate_verification(node, &result);
-                    let (outcome, branch) =
-                        classify_stage_outcome(&node.kind, &result, &verification);
-                    Ok((
-                        result,
-                        produced,
-                        next_transcript,
-                        outcome,
-                        branch,
-                        Some(verification),
-                    ))
-                }
-            };
-            r
-        };
-        let execution: Result<StageAttemptResult, VmError> =
-            if let Some(timeout_ms) = node.timeout_ms {
-                match tokio::time::timeout(
-                    std::time::Duration::from_millis(timeout_ms),
-                    execution_future,
-                )
-                .await
-                {
-                    Ok(result) => result,
-                    Err(_elapsed) => Err(VmError::Runtime(format!(
-                        "workflow stage {node_id} timed out after {timeout_ms}ms"
-                    ))),
-                }
-            } else {
-                execution_future.await
-            };
-
-        match execution {
-            Ok((result, produced, next_transcript, outcome, branch, verification)) => {
-                let usage = llm_usage_delta(&usage_before, &llm_usage_snapshot());
-                let success = !matches!(branch.as_deref(), Some("failed"));
-                last_result = result.clone();
-                last_artifacts = produced.clone();
-                last_transcript = next_transcript.clone();
-                last_verification = verification.clone();
-                last_usage = usage.clone();
-                last_outcome = outcome.clone();
-                last_branch = branch.clone();
-                attempts.push(RunStageAttemptRecord {
-                    attempt,
-                    status: if success {
-                        "completed".to_string()
-                    } else {
-                        "failed".to_string()
+                        "condition_false".to_string()
                     },
-                    outcome: outcome.clone(),
-                    branch: branch.clone(),
-                    error: None,
-                    verification: verification.clone(),
-                    started_at,
-                    finished_at: Some(uuid::Uuid::now_v7().to_string()),
-                });
-                if success {
-                    return Ok(ExecutedStage {
-                        status: "completed".to_string(),
-                        outcome,
-                        branch,
-                        result,
-                        artifacts: produced,
-                        transcript: next_transcript,
-                        verification,
-                        usage,
-                        error: None,
-                        attempts,
-                        consumed_artifact_ids,
-                    });
-                }
-                last_error = Some("verification failed".to_string());
+                    Some(if matched {
+                        "true".to_string()
+                    } else {
+                        "false".to_string()
+                    }),
+                    None,
+                ))
             }
-            Err(error) => {
-                let usage = llm_usage_delta(&usage_before, &llm_usage_snapshot());
-                let error_message = error.to_string();
-                attempts.push(RunStageAttemptRecord {
-                    attempt,
-                    status: "failed".to_string(),
-                    outcome: "error".to_string(),
-                    branch: Some("error".to_string()),
-                    error: Some(error_message.clone()),
-                    verification: None,
-                    started_at,
-                    finished_at: Some(uuid::Uuid::now_v7().to_string()),
-                });
-                last_error = Some(error_message.clone());
-                if attempt == max_attempts {
-                    return Ok(ExecutedStage {
-                        status: "failed".to_string(),
-                        outcome: last_outcome.clone(),
-                        branch: last_branch.clone(),
-                        result: last_result.clone(),
-                        artifacts: last_artifacts.clone(),
-                        transcript: last_transcript.clone(),
-                        verification: last_verification.clone(),
-                        usage,
-                        error: Some(error_message),
-                        attempts,
-                        consumed_artifact_ids,
-                    });
+            "map" => {
+                let items = map_work_items(node, artifacts);
+                let total_items = items.len();
+                let branch_policy = crate::orchestration::current_execution_policy();
+                let runs_stage = map_executes_stage(node);
+                let stage_template = runs_stage.then(|| map_stage_node(node));
+                let shared_lineage = items
+                    .iter()
+                    .flat_map(|item| match item {
+                        MapWorkItem::Artifact { artifact, .. } => vec![artifact.id.clone()],
+                        MapWorkItem::Value { .. } => Vec::new(),
+                    })
+                    .collect::<Vec<_>>();
+                let strategy = if node.join_policy.strategy.is_empty() {
+                    "all".to_string()
+                } else {
+                    node.join_policy.strategy.clone()
+                };
+                let tasks = items
+                    .into_iter()
+                    .map(|item| {
+                        let branch_policy = branch_policy.clone();
+                        let branch_transcript = transcript.clone();
+                        let task_label = task.to_string();
+                        let stage_template = stage_template.clone();
+                        let node_id = node_id.to_string();
+                        let output_kind = node
+                            .map_policy
+                            .output_kind
+                            .clone()
+                            .or_else(|| node.output_contract.output_kinds.first().cloned())
+                            .unwrap_or_else(|| "artifact".to_string());
+                        let lineage = shared_lineage.clone();
+                        Box::pin(async move {
+                            if let Some(policy) = branch_policy.clone() {
+                                push_execution_policy(policy);
+                            }
+                            let result = match stage_template {
+                                Some(stage_node) => {
+                                    let index = match &item {
+                                        MapWorkItem::Artifact { index, .. }
+                                        | MapWorkItem::Value { index, .. } => *index,
+                                    };
+                                    let branch_input =
+                                        vec![map_branch_artifact(&node_id, &item, &lineage)];
+                                    let branch_task = format!(
+                                        "{task_label}\n\nMap item {} of {}",
+                                        index + 1,
+                                        total_items.max(1)
+                                    );
+                                    let executed = execute_stage_attempts(
+                                        &branch_task,
+                                        &format!("{node_id}_map_{}", index + 1),
+                                        &stage_node,
+                                        &branch_input,
+                                        branch_transcript,
+                                    )
+                                    .await?;
+                                    Ok(MapBranchResult {
+                                        index,
+                                        status: executed.status.clone(),
+                                        result: executed.result,
+                                        artifacts: executed.artifacts,
+                                        usage: executed.usage,
+                                        error: executed.error,
+                                    })
+                                }
+                                None => {
+                                    let index = match &item {
+                                        MapWorkItem::Artifact { index, .. }
+                                        | MapWorkItem::Value { index, .. } => *index,
+                                    };
+                                    let artifact = match &item {
+                                        MapWorkItem::Artifact { artifact, .. } => {
+                                            let value = artifact
+                                                .data
+                                                .clone()
+                                                .or_else(|| {
+                                                    artifact
+                                                        .text
+                                                        .clone()
+                                                        .map(serde_json::Value::String)
+                                                })
+                                                .unwrap_or(serde_json::Value::Null);
+                                            artifact_from_value(
+                                                &node_id,
+                                                &output_kind,
+                                                index,
+                                                value,
+                                                std::slice::from_ref(&artifact.id),
+                                                format!("map {} item {}", node_id, index + 1),
+                                            )
+                                        }
+                                        MapWorkItem::Value { value, .. } => artifact_from_value(
+                                            &node_id,
+                                            &output_kind,
+                                            index,
+                                            value.clone(),
+                                            &lineage,
+                                            format!("map {} item {}", node_id, index + 1),
+                                        ),
+                                    };
+                                    Ok(MapBranchResult {
+                                        index,
+                                        status: "completed".to_string(),
+                                        result: serde_json::json!({
+                                            "status": "completed",
+                                            "text": artifact.text,
+                                        }),
+                                        artifacts: vec![artifact],
+                                        usage: LlmUsageRecord::default(),
+                                        error: None,
+                                    })
+                                }
+                            };
+                            if branch_policy.is_some() {
+                                pop_execution_policy();
+                            }
+                            result
+                        }) as LocalTask<Result<MapBranchResult, VmError>>
+                    })
+                    .collect::<Vec<_>>();
+
+                let branch_results = execute_join_policy(
+                    tasks,
+                    &strategy,
+                    node.join_policy.min_completed,
+                    node.map_policy.max_concurrent,
+                )
+                .await;
+
+                let mut completed = Vec::new();
+                let mut failures = Vec::new();
+                let mut produced = Vec::new();
+                let mut usage = LlmUsageRecord::default();
+                for branch_result in branch_results {
+                    match branch_result {
+                        Ok(Ok(branch)) => {
+                            merge_usage(&mut usage, &branch.usage);
+                            if branch.status == "completed" && branch.error.is_none() {
+                                produced.extend(branch.artifacts.clone());
+                                completed.push(serde_json::json!({
+                                    "index": branch.index,
+                                    "status": branch.status,
+                                    "result": branch.result,
+                                    "artifact_count": branch.artifacts.len(),
+                                }));
+                            } else {
+                                failures.push(serde_json::json!({
+                                    "index": branch.index,
+                                    "status": branch.status,
+                                    "error": branch.error,
+                                }));
+                            }
+                        }
+                        Ok(Err(error)) => failures.push(serde_json::json!({
+                            "status": "failed",
+                            "error": error.to_string(),
+                        })),
+                        Err(error) => failures.push(serde_json::json!({
+                            "status": "failed",
+                            "error": error,
+                        })),
+                    }
                 }
+                produced.sort_by(|left, right| {
+                    let left_index = left
+                        .metadata
+                        .get("index")
+                        .and_then(|value| value.as_u64())
+                        .unwrap_or(u64::MAX);
+                    let right_index = right
+                        .metadata
+                        .get("index")
+                        .and_then(|value| value.as_u64())
+                        .unwrap_or(u64::MAX);
+                    left_index.cmp(&right_index)
+                });
+                let status = if failures.is_empty() {
+                    "completed"
+                } else if produced.is_empty() {
+                    "failed"
+                } else {
+                    "partial"
+                };
+                let text = if status == "failed" {
+                    format!("map failed after {} branch failures", failures.len())
+                } else {
+                    format!("mapped {} of {} items", produced.len(), total_items)
+                };
+                let branch = if status == "failed" {
+                    Some("failed".to_string())
+                } else {
+                    Some("mapped".to_string())
+                };
+                let result = serde_json::json!({
+                    "status": status,
+                    "text": text,
+                    "join_strategy": strategy,
+                    "completed": completed,
+                    "failures": failures,
+                });
+                Ok((
+                    result,
+                    produced,
+                    transcript.clone(),
+                    "mapped".to_string(),
+                    branch,
+                    None,
+                ))
             }
+            "reduce" => {
+                let selected = select_artifacts(artifacts.to_vec(), &node.context_policy);
+                let separator = node
+                    .reduce_policy
+                    .separator
+                    .clone()
+                    .unwrap_or_else(|| "\n\n".to_string());
+                let reduced_text = selected
+                    .iter()
+                    .filter_map(|artifact| artifact.text.clone())
+                    .collect::<Vec<_>>()
+                    .join(&separator);
+                let reduced = artifact_from_value(
+                    node_id,
+                    node.output_contract
+                        .output_kinds
+                        .first()
+                        .map(|kind| kind.as_str())
+                        .unwrap_or("summary"),
+                    0,
+                    serde_json::Value::String(reduced_text.clone()),
+                    &selected
+                        .iter()
+                        .map(|artifact| artifact.id.clone())
+                        .collect::<Vec<_>>(),
+                    format!("reduce {} output", node_id),
+                );
+                Ok((
+                    serde_json::json!({"status": "completed", "text": reduced_text}),
+                    vec![reduced],
+                    transcript.clone(),
+                    "reduced".to_string(),
+                    Some("reduced".to_string()),
+                    None,
+                ))
+            }
+            "escalation" => {
+                let reason = node
+                    .escalation_policy
+                    .reason
+                    .clone()
+                    .unwrap_or_else(|| "manual review required".to_string());
+                let produced = artifact_from_value(
+                    node_id,
+                    node.output_contract
+                        .output_kinds
+                        .first()
+                        .map(|kind| kind.as_str())
+                        .unwrap_or("plan"),
+                    0,
+                    serde_json::json!({
+                        "queue": node.escalation_policy.queue,
+                        "level": node.escalation_policy.level,
+                        "reason": reason,
+                    }),
+                    &consumed_artifact_ids,
+                    format!("escalation {}", node_id),
+                );
+                Ok((
+                    serde_json::json!({"status": "completed", "text": reason}),
+                    vec![produced],
+                    transcript.clone(),
+                    "escalated".to_string(),
+                    Some("escalated".to_string()),
+                    None,
+                ))
+            }
+            "subagent" => {
+                let (result, produced, next_transcript) =
+                    super::agents_workers::execute_delegated_stage(
+                        node_id,
+                        node,
+                        &attempt_task,
+                        artifacts,
+                        transcript.clone(),
+                    )
+                    .await?;
+                Ok((
+                    result,
+                    produced,
+                    next_transcript,
+                    "subagent_completed".to_string(),
+                    Some("success".to_string()),
+                    None,
+                ))
+            }
+            _ => {
+                let (result, produced, next_transcript) = crate::orchestration::execute_stage_node(
+                    node_id,
+                    node,
+                    &attempt_task,
+                    artifacts,
+                    transcript.clone(),
+                )
+                .await?;
+                let verification = evaluate_verification(node, &result);
+                let (outcome, branch) = classify_stage_outcome(&node.kind, &result, &verification);
+                Ok((
+                    result,
+                    produced,
+                    next_transcript,
+                    outcome,
+                    branch,
+                    Some(verification),
+                ))
+            }
+        };
+        r
+    };
+    let execution: Result<StageAttemptResult, VmError> = if let Some(timeout_ms) = node.timeout_ms {
+        match tokio::time::timeout(
+            std::time::Duration::from_millis(timeout_ms),
+            execution_future,
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(_elapsed) => Err(VmError::Runtime(format!(
+                "workflow stage {node_id} timed out after {timeout_ms}ms"
+            ))),
+        }
+    } else {
+        execution_future.await
+    };
+
+    match execution {
+        Ok((result, produced, next_transcript, outcome, branch, verification)) => {
+            let usage = llm_usage_delta(&usage_before, &llm_usage_snapshot());
+            let success = !matches!(branch.as_deref(), Some("failed"));
+            attempts.push(RunStageAttemptRecord {
+                attempt,
+                status: if success {
+                    "completed".to_string()
+                } else {
+                    "failed".to_string()
+                },
+                outcome: outcome.clone(),
+                branch: branch.clone(),
+                error: None,
+                verification: verification.clone(),
+                started_at,
+                finished_at: Some(uuid::Uuid::now_v7().to_string()),
+            });
+            Ok(ExecutedStage {
+                status: if success {
+                    "completed".to_string()
+                } else {
+                    "failed".to_string()
+                },
+                outcome,
+                branch,
+                result,
+                artifacts: produced,
+                transcript: next_transcript,
+                verification,
+                usage,
+                error: if success {
+                    None
+                } else {
+                    Some("verification failed".to_string())
+                },
+                attempts,
+                consumed_artifact_ids,
+            })
+        }
+        Err(error) => {
+            let usage = llm_usage_delta(&usage_before, &llm_usage_snapshot());
+            let error_message = error.to_string();
+            attempts.push(RunStageAttemptRecord {
+                attempt,
+                status: "failed".to_string(),
+                outcome: "error".to_string(),
+                branch: Some("error".to_string()),
+                error: Some(error_message.clone()),
+                verification: None,
+                started_at,
+                finished_at: Some(uuid::Uuid::now_v7().to_string()),
+            });
+            Ok(ExecutedStage {
+                status: "failed".to_string(),
+                outcome: "error".to_string(),
+                branch: Some("error".to_string()),
+                result: serde_json::json!({"status": "failed", "text": ""}),
+                artifacts: Vec::new(),
+                transcript: transcript.clone(),
+                verification: None,
+                usage,
+                error: Some(error_message),
+                attempts,
+                consumed_artifact_ids,
+            })
         }
     }
-
-    Ok(ExecutedStage {
-        status: "failed".to_string(),
-        outcome: last_outcome,
-        branch: last_branch,
-        result: last_result,
-        artifacts: last_artifacts,
-        transcript: last_transcript,
-        verification: last_verification,
-        usage: last_usage,
-        error: last_error,
-        attempts,
-        consumed_artifact_ids,
-    })
 }
 
 struct MutationSessionResetGuard;
@@ -1377,6 +1343,16 @@ struct MutationSessionResetGuard;
 impl Drop for MutationSessionResetGuard {
     fn drop(&mut self) {
         install_current_mutation_session(None);
+    }
+}
+
+struct WorkflowApprovalPolicyGuard(bool);
+
+impl Drop for WorkflowApprovalPolicyGuard {
+    fn drop(&mut self) {
+        if self.0 {
+            crate::orchestration::pop_approval_policy();
+        }
     }
 }
 
@@ -1481,8 +1457,12 @@ pub(in crate::stdlib) async fn execute_workflow(
                 })
                 .unwrap_or_else(|| "read_only".to_string())
         });
-    let mutation_approval_mode = optional_string_option(&options, "approval_mode")
-        .unwrap_or_else(|| "host_enforced".to_string());
+    let mutation_approval_policy = options.get("approval_policy").and_then(|value| {
+        serde_json::from_value::<crate::orchestration::ToolApprovalPolicy>(
+            crate::llm::vm_value_to_json(value),
+        )
+        .ok()
+    });
     let audit_input = options
         .get("audit")
         .cloned()
@@ -1495,8 +1475,8 @@ pub(in crate::stdlib) async fn execute_workflow(
     if mutation_session.mutation_scope.is_empty() {
         mutation_session.mutation_scope = requested_mutation_scope;
     }
-    if mutation_session.approval_mode.is_empty() {
-        mutation_session.approval_mode = mutation_approval_mode;
+    if mutation_session.approval_policy.is_none() {
+        mutation_session.approval_policy = mutation_approval_policy;
     }
     mutation_session = mutation_session.normalize();
     if run.transcript.is_none() {
@@ -1618,6 +1598,14 @@ pub(in crate::stdlib) async fn execute_workflow(
         .map(|source| VecDeque::from(source.stages.clone()));
     install_current_mutation_session(Some(mutation_session.clone()));
     let _mutation_session_guard = MutationSessionResetGuard;
+    let workflow_approval_guard = match mutation_session.approval_policy.clone() {
+        Some(policy) => {
+            crate::orchestration::push_approval_policy(policy);
+            WorkflowApprovalPolicyGuard(true)
+        }
+        None => WorkflowApprovalPolicyGuard(false),
+    };
+    let _workflow_approval_guard = workflow_approval_guard;
     checkpoint_run(
         &mut run,
         &ready_nodes,
@@ -1659,10 +1647,12 @@ pub(in crate::stdlib) async fn execute_workflow(
         }
         let node = apply_runtime_node_overrides(node, &options);
         let stage_policy = effective_node_policy(&graph, &node)?;
+        let stage_approval = effective_node_approval_policy(&graph, &node);
 
         let stage_id = format!("{}:{}:{}", run.id, current, run.stages.len() + 1);
         let started_at = uuid::Uuid::now_v7().to_string();
         push_execution_policy(stage_policy.clone());
+        crate::orchestration::push_approval_policy(stage_approval.clone());
         let executed_result = if replay_mode.as_deref() == Some("deterministic") {
             match replay_stages.as_mut() {
                 Some(stages) => replay_stage(&current, stages),
@@ -1673,6 +1663,7 @@ pub(in crate::stdlib) async fn execute_workflow(
         } else {
             execute_stage_attempts(&task, &current, &node, &artifacts, transcript.clone()).await
         };
+        crate::orchestration::pop_approval_policy();
         pop_execution_policy();
         let executed = match executed_result {
             Ok(executed) => executed,

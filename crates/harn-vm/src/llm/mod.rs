@@ -347,6 +347,14 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                 let json = crate::llm::helpers::vm_value_to_json(v);
                 serde_json::from_value::<crate::orchestration::TurnPolicy>(json).unwrap_or_default()
             });
+        let approval_policy = options
+            .as_ref()
+            .and_then(|o| o.get("approval_policy"))
+            .map(|v| {
+                let json = crate::llm::helpers::vm_value_to_json(v);
+                serde_json::from_value::<crate::orchestration::ToolApprovalPolicy>(json)
+                    .unwrap_or_default()
+            });
         let done_sentinel = opt_str(&options, "done_sentinel");
         let break_unless_phase = opt_str(&options, "break_unless_phase");
         let exit_when_verified = opt_bool(&options, "exit_when_verified");
@@ -367,6 +375,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                 auto_compact,
                 context_callback,
                 policy,
+                approval_policy,
                 daemon,
                 daemon_config,
                 llm_retries: opt_int(&options, "llm_retries").unwrap_or(3) as usize,

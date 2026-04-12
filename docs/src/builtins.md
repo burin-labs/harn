@@ -1086,6 +1086,30 @@ When a workflow node uses that registry, Harn intersects the declared tool
 policy with the graph, node, and host ceilings during validation and at
 execution time.
 
+### Declarative tool approval
+
+`agent_loop`, `workflow_execute`, and workflow stage nodes accept an
+`approval_policy` option that declaratively gates tool calls:
+
+```harn
+agent_loop("task", "system", {
+  approval_policy: {
+    auto_approve: ["read*", "list_*"],
+    auto_deny: ["shell*"],
+    require_approval: ["edit_*", "write_*"],
+    write_path_allowlist: ["/workspace/**"]
+  }
+})
+```
+
+Evaluation order: `auto_deny` → `write_path_allowlist` → `auto_approve` →
+`require_approval`. Tools that match no pattern default to `AutoApproved`.
+`require_approval` calls the host via the `tool/request_approval` bridge
+request and **fail closed** if the host does not implement it. Policies compose
+across nested scopes with most-restrictive intersection: auto-deny and
+require-approval take the union, while `auto_approve` and
+`write_path_allowlist` take the intersection.
+
 Example (`agent.harn`):
 
 ```harn
@@ -1204,7 +1228,7 @@ These builtins expose Harn's typed orchestration runtime.
 - `execution` (`{cwd?, env?, worktree?}` for isolated delegated execution)
 - `audit` (seed mutation-session metadata for trust/audit grouping)
 - `mutation_scope`
-- `approval_mode`
+- `approval_policy` (declarative tool approval policy; see below)
 
 `verify` nodes may also define execution checks inside `node.verify`, including:
 
@@ -1249,7 +1273,7 @@ These builtins expose Harn's typed orchestration runtime.
   worker policy that only allows those tool names.
 - Either shape may also include `execution: {cwd?, env?, worktree?}` where
   `worktree` accepts `{repo, path?, branch?, base_ref?, cleanup?}`.
-- Either shape may also include `audit: {session_id?, parent_session_id?, mutation_scope?, approval_mode?}`
+- Either shape may also include `audit: {session_id?, parent_session_id?, mutation_scope?, approval_policy?}`
 
 Worker configs may also include `carry` to control continuation behavior:
 

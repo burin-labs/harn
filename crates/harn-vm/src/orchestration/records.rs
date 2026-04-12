@@ -269,7 +269,7 @@ pub struct RunChildRecord {
     pub session_id: Option<String>,
     pub parent_session_id: Option<String>,
     pub mutation_scope: Option<String>,
-    pub approval_mode: Option<String>,
+    pub approval_policy: Option<super::ToolApprovalPolicy>,
     pub task: String,
     pub status: String,
     pub started_at: String,

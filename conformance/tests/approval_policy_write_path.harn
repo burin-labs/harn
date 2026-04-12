@@ -1,0 +1,30 @@
+fn write_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "write_file",
+    "Write a file",
+    {
+    handler: nil,
+    parameters: {path: {type: "string", description: "Path"}},
+    returns: {type: "string"},
+    metadata: {path_params: ["path"], mutation_classification: "apply_workspace"},
+  },
+  )
+  return tools
+}
+
+pipeline main() {
+  let denied = agent_loop(
+    "Try to write outside allowlist",
+    "You are helpful",
+    {
+    provider: "mock",
+    tools: write_tools(),
+    tool_format: "native",
+    max_iterations: 1,
+    approval_policy: {write_path_allowlist: ["/tmp/*"]},
+  },
+  )
+  println(len(denied?.rejected_tools) == 0 || denied?.rejected_tools[0] == "write_file")
+}

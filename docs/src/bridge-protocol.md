@@ -27,7 +27,7 @@ Request payload:
       "run_id": "run_123",
       "worker_id": null,
       "mutation_scope": "read_only",
-      "approval_mode": "host_enforced"
+      "approval_policy": null
     }
   }
 }
@@ -41,6 +41,42 @@ Response payload:
 
 `mutation.classification` is advisory runtime metadata from Harn. Hosts may
 apply stricter local policy.
+
+### `tool/request_approval`
+
+Sent as a bridge request when the active `ToolApprovalPolicy` classifies the
+call as `RequiresHostApproval` (matching a `require_approval` pattern). The
+host is expected to prompt the user and return a decision. Unlike
+`tool/pre_use`, this call **fails closed**: if the host does not implement it
+or returns an error, the tool is denied.
+
+Request payload:
+
+```json
+{
+  "tool_name": "edit_file",
+  "tool_use_id": "call_123",
+  "args": {"path": "src/main.rs"},
+  "declared_paths": ["src/main.rs"],
+  "mutation": {
+    "session_id": "session_123",
+    "run_id": "run_123",
+    "worker_id": null,
+    "mutation_scope": "apply_workspace",
+    "approval_policy": {"require_approval": ["edit*"]}
+  }
+}
+```
+
+Response payload:
+
+- `{ "granted": true }`: proceed with the original arguments
+- `{ "granted": true, "args": {...} }`: proceed with rewritten arguments
+- `{ "granted": false, "reason": "..." }`: reject the tool call
+
+Use `tool/pre_use` for passive host-side filtering that does not need user
+input (audit logging, automatic allow/deny from stored rules); use
+`tool/request_approval` for any call that should surface an interactive prompt.
 
 ### `tool/post_use`
 
@@ -62,7 +98,7 @@ Request payload:
       "run_id": "run_123",
       "worker_id": null,
       "mutation_scope": "read_only",
-      "approval_mode": "host_enforced"
+      "approval_policy": null
     }
   }
 }
