@@ -1,11 +1,11 @@
 use super::{
-    action_turn_nudge, compact_malformed_assistant_turn, extract_retry_after_ms,
-    has_successful_tools, is_read_only_tool, loop_state_requests_phase_change,
-    normalize_native_tools_for_format, normalize_tool_choice_for_format,
-    normalize_tool_examples_for_format, observed_llm_call, prose_exceeds_budget,
-    required_tool_choice_for_provider, run_agent_loop_internal, sentinel_without_action_nudge,
-    should_stop_after_successful_tools, trim_prose_for_history, AgentLoopConfig, LlmRetryConfig,
-    build_llm_call_result,
+    action_turn_nudge, build_llm_call_result, compact_malformed_assistant_turn,
+    extract_retry_after_ms, has_successful_tools, is_read_only_tool,
+    loop_state_requests_phase_change, normalize_native_tools_for_format,
+    normalize_tool_choice_for_format, normalize_tool_examples_for_format, observed_llm_call,
+    prose_exceeds_budget, required_tool_choice_for_provider, run_agent_loop_internal,
+    sentinel_without_action_nudge, should_stop_after_successful_tools, trim_prose_for_history,
+    AgentLoopConfig, LlmRetryConfig,
 };
 use crate::llm::api::{LlmCallOptions, LlmResult};
 use crate::llm::daemon::{persist_snapshot, DaemonLoopConfig, DaemonSnapshot};
@@ -307,7 +307,10 @@ fn build_llm_call_result_uses_output_schema_without_response_format_flag() {
 
     let vm_result = build_llm_call_result(&result, &opts);
     let dict = vm_result.as_dict().expect("dict");
-    assert!(dict.get("data").is_some(), "structured output should populate data");
+    assert!(
+        dict.get("data").is_some(),
+        "structured output should populate data"
+    );
 }
 
 #[test]
