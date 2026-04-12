@@ -116,11 +116,7 @@ impl AcpServer {
 
     /// Send a JSON-RPC success response.
     fn send_response(&self, id: &serde_json::Value, result: serde_json::Value) {
-        let response = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "result": result,
-        });
+        let response = harn_vm::jsonrpc::response(id.clone(), result);
         if let Ok(line) = serde_json::to_string(&response) {
             self.write_line(&line);
         }
@@ -128,14 +124,7 @@ impl AcpServer {
 
     /// Send a JSON-RPC error response.
     fn send_error(&self, id: &serde_json::Value, code: i64, message: &str) {
-        let response = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "error": {
-                "code": code,
-                "message": message,
-            },
-        });
+        let response = harn_vm::jsonrpc::error_response(id.clone(), code, message);
         if let Ok(line) = serde_json::to_string(&response) {
             self.write_line(&line);
         }
@@ -144,11 +133,7 @@ impl AcpServer {
     /// Send a JSON-RPC notification (no id, no response expected).
     #[allow(dead_code)]
     fn send_notification(&self, method: &str, params: serde_json::Value) {
-        let notification = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": method,
-            "params": params,
-        });
+        let notification = harn_vm::jsonrpc::notification(method, params);
         if let Ok(line) = serde_json::to_string(&notification) {
             self.write_line(&line);
         }
@@ -491,11 +476,7 @@ impl AcpBridge {
 
     /// Send a JSON-RPC notification.
     fn send_notification(&self, method: &str, params: serde_json::Value) {
-        let notification = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": method,
-            "params": params,
-        });
+        let notification = harn_vm::jsonrpc::notification(method, params);
         if let Ok(line) = serde_json::to_string(&notification) {
             self.write_line(&line);
         }

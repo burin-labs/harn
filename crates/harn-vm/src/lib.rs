@@ -6,6 +6,7 @@ mod chunk;
 mod compiler;
 pub mod events;
 mod http;
+pub mod jsonrpc;
 pub mod llm;
 pub mod llm_config;
 pub mod mcp;

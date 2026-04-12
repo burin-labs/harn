@@ -262,12 +262,7 @@ impl HostBridge {
 
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
 
-        let request = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "method": method,
-            "params": params,
-        });
+        let request = crate::jsonrpc::request(id, method, params);
 
         // Register a oneshot channel to receive the response
         let (tx, rx) = oneshot::channel();
@@ -326,11 +321,7 @@ impl HostBridge {
     /// Send a JSON-RPC notification to the host (no response expected).
     /// Serialized through the stdout mutex to prevent interleaving.
     pub fn notify(&self, method: &str, params: serde_json::Value) {
-        let notification = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": method,
-            "params": params,
-        });
+        let notification = crate::jsonrpc::notification(method, params);
         #[cfg(test)]
         self.recorded_notifications
             .lock()
@@ -631,15 +622,10 @@ mod tests {
 
     #[test]
     fn test_json_rpc_request_format() {
-        let request = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "llm_call",
-            "params": {
-                "prompt": "Hello",
-                "system": "Be helpful",
-            },
-        });
+        let request = crate::jsonrpc::request(1, "llm_call", serde_json::json!({
+            "prompt": "Hello",
+            "system": "Be helpful",
+        }));
         let s = serde_json::to_string(&request).unwrap();
         assert!(s.contains("\"jsonrpc\":\"2.0\""));
         assert!(s.contains("\"id\":1"));
@@ -648,11 +634,7 @@ mod tests {
 
     #[test]
     fn test_json_rpc_notification_format() {
-        let notification = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "output",
-            "params": {"text": "[harn] hello\n"},
-        });
+        let notification = crate::jsonrpc::notification("output", serde_json::json!({"text": "[harn] hello\n"}));
         let s = serde_json::to_string(&notification).unwrap();
         assert!(s.contains("\"method\":\"output\""));
         assert!(!s.contains("\"id\""));
@@ -660,14 +642,7 @@ mod tests {
 
     #[test]
     fn test_json_rpc_error_response_parsing() {
-        let response = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "error": {
-                "code": -32600,
-                "message": "Invalid request",
-            },
-        });
+        let response = crate::jsonrpc::error_response(1, -32600, "Invalid request");
         assert!(response.get("error").is_some());
         assert_eq!(
             response["error"]["message"].as_str().unwrap(),
@@ -677,15 +652,11 @@ mod tests {
 
     #[test]
     fn test_json_rpc_success_response_parsing() {
-        let response = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "result": {
-                "text": "Hello world",
-                "input_tokens": 10,
-                "output_tokens": 5,
-            },
-        });
+        let response = crate::jsonrpc::response(1, serde_json::json!({
+            "text": "Hello world",
+            "input_tokens": 10,
+            "output_tokens": 5,
+        }));
         assert!(response.get("result").is_some());
         assert_eq!(response["result"]["text"].as_str().unwrap(), "Hello world");
     }

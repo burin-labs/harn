@@ -308,11 +308,7 @@ fn task_rpc_response(
     rpc_id: &serde_json::Value,
     task_json: serde_json::Value,
 ) -> serde_json::Value {
-    serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": rpc_id,
-        "result": task_json,
-    })
+    harn_vm::jsonrpc::response(rpc_id.clone(), task_json)
 }
 
 // A2A-standard JSON-RPC error codes (aligned with A2A protocol spec v1.0)
@@ -327,14 +323,7 @@ const A2A_VERSION_NOT_SUPPORTED: i64 = -32009;
 
 /// Build a JSON-RPC error response.
 fn error_response(rpc_id: &serde_json::Value, code: i64, message: &str) -> serde_json::Value {
-    serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": rpc_id,
-        "error": {
-            "code": code,
-            "message": message
-        }
-    })
+    harn_vm::jsonrpc::error_response(rpc_id.clone(), code, message)
 }
 
 /// Parsed HTTP request including headers.

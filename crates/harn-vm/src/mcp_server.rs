@@ -361,15 +361,13 @@ impl McpServer {
 
             let response = match method {
                 "initialize" => self.handle_initialize(&id),
-                "ping" => serde_json::json!({ "jsonrpc": "2.0", "id": id, "result": {} }),
+                "ping" => crate::jsonrpc::response(id.clone(), serde_json::json!({})),
                 "logging/setLevel" => self.handle_logging_set_level(&id, &params),
                 "tools/list" => self.handle_tools_list(&id, &params),
                 "tools/call" => self.handle_tools_call(&id, &params, vm).await,
                 "resources/list" => self.handle_resources_list(&id, &params),
                 "resources/read" => self.handle_resources_read(&id, &params, vm).await,
-                "resources/templates/list" => {
-                    self.handle_resource_templates_list(&id, &params)
-                }
+                "resources/templates/list" => self.handle_resource_templates_list(&id, &params),
                 "prompts/list" => self.handle_prompts_list(&id, &params),
                 "prompts/get" => self.handle_prompts_get(&id, &params, vm).await,
                 _ => serde_json::json!({
@@ -727,7 +725,7 @@ impl McpServer {
             .and_then(|l| l.as_str())
             .unwrap_or("warning");
         *self.log_level.borrow_mut() = level.to_string();
-        serde_json::json!({ "jsonrpc": "2.0", "id": id, "result": {} })
+        crate::jsonrpc::response(id.clone(), serde_json::json!({}))
     }
 
     async fn handle_prompts_get(
