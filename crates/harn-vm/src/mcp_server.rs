@@ -81,6 +81,7 @@ pub fn register_mcp_server_builtins(vm: &mut Vm) {
             .get("name")
             .map(|v| v.display())
             .ok_or_else(|| VmError::Runtime("mcp_resource: 'name' is required".into()))?;
+        let title = dict.get("title").map(|v| v.display());
         let description = dict.get("description").map(|v| v.display());
         let mime_type = dict.get("mime_type").map(|v| v.display());
         let text = dict
@@ -92,6 +93,7 @@ pub fn register_mcp_server_builtins(vm: &mut Vm) {
             cell.borrow_mut().push(McpResourceDef {
                 uri,
                 name,
+                title,
                 description,
                 mime_type,
                 text,
@@ -125,6 +127,7 @@ pub fn register_mcp_server_builtins(vm: &mut Vm) {
             .get("name")
             .map(|v| v.display())
             .ok_or_else(|| VmError::Runtime("mcp_resource_template: 'name' is required".into()))?;
+        let title = dict.get("title").map(|v| v.display());
         let description = dict.get("description").map(|v| v.display());
         let mime_type = dict.get("mime_type").map(|v| v.display());
         let handler = match dict.get("handler") {
@@ -140,6 +143,7 @@ pub fn register_mcp_server_builtins(vm: &mut Vm) {
             cell.borrow_mut().push(McpResourceTemplateDef {
                 uri_template,
                 name,
+                title,
                 description,
                 mime_type,
                 handler,
@@ -165,6 +169,7 @@ pub fn register_mcp_server_builtins(vm: &mut Vm) {
             .get("name")
             .map(|v| v.display())
             .ok_or_else(|| VmError::Runtime("mcp_prompt: 'name' is required".into()))?;
+        let title = dict.get("title").map(|v| v.display());
         let description = dict.get("description").map(|v| v.display());
 
         let handler = match dict.get("handler") {
@@ -205,6 +210,7 @@ pub fn register_mcp_server_builtins(vm: &mut Vm) {
         MCP_SERVE_PROMPTS.with(|cell| {
             cell.borrow_mut().push(McpPromptDef {
                 name,
+                title,
                 description,
                 arguments,
                 handler,
@@ -236,7 +242,10 @@ pub fn take_mcp_serve_prompts() -> Vec<McpPromptDef> {
 }
 
 /// MCP protocol version.
-const PROTOCOL_VERSION: &str = "2024-11-05";
+const PROTOCOL_VERSION: &str = "2025-11-25";
+
+/// Default page size for cursor-based pagination.
+const DEFAULT_PAGE_SIZE: usize = 50;
 
 // =============================================================================
 // Definitions
@@ -245,8 +254,10 @@ const PROTOCOL_VERSION: &str = "2024-11-05";
 /// A tool extracted from a Harn tool_registry, ready to serve over MCP.
 pub struct McpToolDef {
     pub name: String,
+    pub title: Option<String>,
     pub description: String,
     pub input_schema: serde_json::Value,
+    pub output_schema: Option<serde_json::Value>,
     pub annotations: Option<serde_json::Value>,
     pub handler: VmClosure,
 }
@@ -255,6 +266,7 @@ pub struct McpToolDef {
 pub struct McpResourceDef {
     pub uri: String,
     pub name: String,
+    pub title: Option<String>,
     pub description: Option<String>,
     pub mime_type: Option<String>,
     pub text: String,
@@ -264,6 +276,7 @@ pub struct McpResourceDef {
 pub struct McpResourceTemplateDef {
     pub uri_template: String,
     pub name: String,
+    pub title: Option<String>,
     pub description: Option<String>,
     pub mime_type: Option<String>,
     pub handler: VmClosure,
@@ -279,6 +292,7 @@ pub struct McpPromptArgDef {
 /// A prompt template to serve over MCP.
 pub struct McpPromptDef {
     pub name: String,
+    pub title: Option<String>,
     pub description: Option<String>,
     pub arguments: Option<Vec<McpPromptArgDef>>,
     pub handler: VmClosure,
@@ -296,6 +310,7 @@ pub struct McpServer {
     resources: Vec<McpResourceDef>,
     resource_templates: Vec<McpResourceTemplateDef>,
     prompts: Vec<McpPromptDef>,
+    log_level: RefCell<String>,
 }
 
 impl McpServer {
@@ -313,6 +328,7 @@ impl McpServer {
             resources,
             resource_templates,
             prompts,
+            log_level: RefCell::new("warning".to_string()),
         }
     }
 
@@ -346,12 +362,15 @@ impl McpServer {
             let response = match method {
                 "initialize" => self.handle_initialize(&id),
                 "ping" => serde_json::json!({ "jsonrpc": "2.0", "id": id, "result": {} }),
-                "tools/list" => self.handle_tools_list(&id),
+                "logging/setLevel" => self.handle_logging_set_level(&id, &params),
+                "tools/list" => self.handle_tools_list(&id, &params),
                 "tools/call" => self.handle_tools_call(&id, &params, vm).await,
-                "resources/list" => self.handle_resources_list(&id),
+                "resources/list" => self.handle_resources_list(&id, &params),
                 "resources/read" => self.handle_resources_read(&id, &params, vm).await,
-                "resources/templates/list" => self.handle_resource_templates_list(&id),
-                "prompts/list" => self.handle_prompts_list(&id),
+                "resources/templates/list" => {
+                    self.handle_resource_templates_list(&id, &params)
+                }
+                "prompts/list" => self.handle_prompts_list(&id, &params),
                 "prompts/get" => self.handle_prompts_get(&id, &params, vm).await,
                 _ => serde_json::json!({
                     "jsonrpc": "2.0",
@@ -390,6 +409,7 @@ impl McpServer {
         if !self.prompts.is_empty() {
             capabilities.insert("prompts".into(), serde_json::json!({}));
         }
+        capabilities.insert("logging".into(), serde_json::json!({}));
 
         serde_json::json!({
             "jsonrpc": "2.0",
@@ -409,9 +429,14 @@ impl McpServer {
     // Tools
     // =========================================================================
 
-    fn handle_tools_list(&self, id: &serde_json::Value) -> serde_json::Value {
-        let tools: Vec<serde_json::Value> = self
-            .tools
+    fn handle_tools_list(
+        &self,
+        id: &serde_json::Value,
+        params: &serde_json::Value,
+    ) -> serde_json::Value {
+        let (offset, page_size) = parse_cursor(params);
+        let page_end = (offset + page_size).min(self.tools.len());
+        let tools: Vec<serde_json::Value> = self.tools[offset..page_end]
             .iter()
             .map(|t| {
                 let mut entry = serde_json::json!({
@@ -419,6 +444,12 @@ impl McpServer {
                     "description": t.description,
                     "inputSchema": t.input_schema,
                 });
+                if let Some(ref title) = t.title {
+                    entry["title"] = serde_json::json!(title);
+                }
+                if let Some(ref output_schema) = t.output_schema {
+                    entry["outputSchema"] = output_schema.clone();
+                }
                 if let Some(ref annotations) = t.annotations {
                     entry["annotations"] = annotations.clone();
                 }
@@ -426,10 +457,15 @@ impl McpServer {
             })
             .collect();
 
+        let mut result = serde_json::json!({ "tools": tools });
+        if page_end < self.tools.len() {
+            result["nextCursor"] = serde_json::json!(encode_cursor(page_end));
+        }
+
         serde_json::json!({
             "jsonrpc": "2.0",
             "id": id,
-            "result": { "tools": tools }
+            "result": result
         })
     }
 
@@ -462,14 +498,23 @@ impl McpServer {
 
         match result {
             Ok(value) => {
-                let text = value.display();
+                let content = vm_value_to_content(&value);
+                let mut call_result = serde_json::json!({
+                    "content": content,
+                    "isError": false
+                });
+                if tool.output_schema.is_some() {
+                    let text = value.display();
+                    let structured = match serde_json::from_str::<serde_json::Value>(&text) {
+                        Ok(v) => v,
+                        _ => serde_json::json!(text),
+                    };
+                    call_result["structuredContent"] = structured;
+                }
                 serde_json::json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": {
-                        "content": [{ "type": "text", "text": text }],
-                        "isError": false
-                    }
+                    "result": call_result
                 })
             }
             Err(e) => serde_json::json!({
@@ -487,12 +532,20 @@ impl McpServer {
     // Resources
     // =========================================================================
 
-    fn handle_resources_list(&self, id: &serde_json::Value) -> serde_json::Value {
-        let resources: Vec<serde_json::Value> = self
-            .resources
+    fn handle_resources_list(
+        &self,
+        id: &serde_json::Value,
+        params: &serde_json::Value,
+    ) -> serde_json::Value {
+        let (offset, page_size) = parse_cursor(params);
+        let page_end = (offset + page_size).min(self.resources.len());
+        let resources: Vec<serde_json::Value> = self.resources[offset..page_end]
             .iter()
             .map(|r| {
                 let mut entry = serde_json::json!({ "uri": r.uri, "name": r.name });
+                if let Some(ref title) = r.title {
+                    entry["title"] = serde_json::json!(title);
+                }
                 if let Some(ref desc) = r.description {
                     entry["description"] = serde_json::json!(desc);
                 }
@@ -503,10 +556,15 @@ impl McpServer {
             })
             .collect();
 
+        let mut result = serde_json::json!({ "resources": resources });
+        if page_end < self.resources.len() {
+            result["nextCursor"] = serde_json::json!(encode_cursor(page_end));
+        }
+
         serde_json::json!({
             "jsonrpc": "2.0",
             "id": id,
-            "result": { "resources": resources }
+            "result": result
         })
     }
 
@@ -567,13 +625,21 @@ impl McpServer {
         })
     }
 
-    fn handle_resource_templates_list(&self, id: &serde_json::Value) -> serde_json::Value {
-        let templates: Vec<serde_json::Value> = self
-            .resource_templates
+    fn handle_resource_templates_list(
+        &self,
+        id: &serde_json::Value,
+        params: &serde_json::Value,
+    ) -> serde_json::Value {
+        let (offset, page_size) = parse_cursor(params);
+        let page_end = (offset + page_size).min(self.resource_templates.len());
+        let templates: Vec<serde_json::Value> = self.resource_templates[offset..page_end]
             .iter()
             .map(|t| {
                 let mut entry =
                     serde_json::json!({ "uriTemplate": t.uri_template, "name": t.name });
+                if let Some(ref title) = t.title {
+                    entry["title"] = serde_json::json!(title);
+                }
                 if let Some(ref desc) = t.description {
                     entry["description"] = serde_json::json!(desc);
                 }
@@ -584,10 +650,15 @@ impl McpServer {
             })
             .collect();
 
+        let mut result = serde_json::json!({ "resourceTemplates": templates });
+        if page_end < self.resource_templates.len() {
+            result["nextCursor"] = serde_json::json!(encode_cursor(page_end));
+        }
+
         serde_json::json!({
             "jsonrpc": "2.0",
             "id": id,
-            "result": { "resourceTemplates": templates }
+            "result": result
         })
     }
 
@@ -595,12 +666,20 @@ impl McpServer {
     // Prompts
     // =========================================================================
 
-    fn handle_prompts_list(&self, id: &serde_json::Value) -> serde_json::Value {
-        let prompts: Vec<serde_json::Value> = self
-            .prompts
+    fn handle_prompts_list(
+        &self,
+        id: &serde_json::Value,
+        params: &serde_json::Value,
+    ) -> serde_json::Value {
+        let (offset, page_size) = parse_cursor(params);
+        let page_end = (offset + page_size).min(self.prompts.len());
+        let prompts: Vec<serde_json::Value> = self.prompts[offset..page_end]
             .iter()
             .map(|p| {
                 let mut entry = serde_json::json!({ "name": p.name });
+                if let Some(ref title) = p.title {
+                    entry["title"] = serde_json::json!(title);
+                }
                 if let Some(ref desc) = p.description {
                     entry["description"] = serde_json::json!(desc);
                 }
@@ -622,11 +701,33 @@ impl McpServer {
             })
             .collect();
 
+        let mut result = serde_json::json!({ "prompts": prompts });
+        if page_end < self.prompts.len() {
+            result["nextCursor"] = serde_json::json!(encode_cursor(page_end));
+        }
+
         serde_json::json!({
             "jsonrpc": "2.0",
             "id": id,
-            "result": { "prompts": prompts }
+            "result": result
         })
+    }
+
+    // =========================================================================
+    // Logging
+    // =========================================================================
+
+    fn handle_logging_set_level(
+        &self,
+        id: &serde_json::Value,
+        params: &serde_json::Value,
+    ) -> serde_json::Value {
+        let level = params
+            .get("level")
+            .and_then(|l| l.as_str())
+            .unwrap_or("warning");
+        *self.log_level.borrow_mut() = level.to_string();
+        serde_json::json!({ "jsonrpc": "2.0", "id": id, "result": {} })
     }
 
     async fn handle_prompts_get(
@@ -677,6 +778,27 @@ impl McpServer {
 // =============================================================================
 // Helpers
 // =============================================================================
+
+/// Encode an offset as a base64 cursor string.
+fn encode_cursor(offset: usize) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD.encode(offset.to_string().as_bytes())
+}
+
+/// Decode a cursor from the request params, returning `(offset, page_size)`.
+fn parse_cursor(params: &serde_json::Value) -> (usize, usize) {
+    let offset = params
+        .get("cursor")
+        .and_then(|c| c.as_str())
+        .and_then(|c| {
+            use base64::Engine;
+            let bytes = base64::engine::general_purpose::STANDARD.decode(c).ok()?;
+            let s = String::from_utf8(bytes).ok()?;
+            s.parse::<usize>().ok()
+        })
+        .unwrap_or(0);
+    (offset, DEFAULT_PAGE_SIZE)
+}
 
 /// Convert a VmValue returned by a prompt handler into MCP messages.
 fn prompt_value_to_messages(value: &VmValue) -> Vec<serde_json::Value> {
@@ -775,6 +897,85 @@ fn match_uri_template(
     }
 }
 
+/// Convert a tool result VmValue into MCP content items.
+///
+/// Supports text, embedded resource, and resource_link content types.
+/// If the value is a list of dicts with a `type` field, each is treated as a
+/// content item. Otherwise, the whole value is serialized as a single text item.
+fn vm_value_to_content(value: &VmValue) -> Vec<serde_json::Value> {
+    if let VmValue::List(items) = value {
+        let mut content = Vec::new();
+        for item in items.iter() {
+            if let VmValue::Dict(d) = item {
+                let item_type = d.get("type").map(|v| v.display()).unwrap_or_default();
+                match item_type.as_str() {
+                    "resource" => {
+                        let mut entry = serde_json::json!({ "type": "resource" });
+                        if let Some(resource) = d.get("resource") {
+                            entry["resource"] = vm_value_to_json(resource);
+                        }
+                        content.push(entry);
+                    }
+                    "resource_link" => {
+                        let mut entry = serde_json::json!({ "type": "resource_link" });
+                        if let Some(uri) = d.get("uri") {
+                            entry["uri"] = serde_json::json!(uri.display());
+                        }
+                        if let Some(name) = d.get("name") {
+                            entry["name"] = serde_json::json!(name.display());
+                        }
+                        if let Some(desc) = d.get("description") {
+                            entry["description"] = serde_json::json!(desc.display());
+                        }
+                        if let Some(mime) = d.get("mimeType") {
+                            entry["mimeType"] = serde_json::json!(mime.display());
+                        }
+                        content.push(entry);
+                    }
+                    _ => {
+                        let text = d
+                            .get("text")
+                            .map(|v| v.display())
+                            .unwrap_or_else(|| item.display());
+                        content.push(serde_json::json!({ "type": "text", "text": text }));
+                    }
+                }
+            } else {
+                content.push(serde_json::json!({ "type": "text", "text": item.display() }));
+            }
+        }
+        if content.is_empty() {
+            vec![serde_json::json!({ "type": "text", "text": value.display() })]
+        } else {
+            content
+        }
+    } else {
+        vec![serde_json::json!({ "type": "text", "text": value.display() })]
+    }
+}
+
+/// Convert a VmValue to a serde_json::Value.
+fn vm_value_to_json(value: &VmValue) -> serde_json::Value {
+    match value {
+        VmValue::Nil => serde_json::Value::Null,
+        VmValue::Bool(b) => serde_json::json!(b),
+        VmValue::Int(n) => serde_json::json!(n),
+        VmValue::Float(f) => serde_json::json!(f),
+        VmValue::String(s) => serde_json::json!(&**s),
+        VmValue::List(items) => {
+            serde_json::Value::Array(items.iter().map(vm_value_to_json).collect())
+        }
+        VmValue::Dict(d) => {
+            let mut map = serde_json::Map::new();
+            for (k, v) in d.iter() {
+                map.insert(k.clone(), vm_value_to_json(v));
+            }
+            serde_json::Value::Object(map)
+        }
+        _ => serde_json::json!(value.display()),
+    }
+}
+
 /// Convert a VmValue annotations dict to a serde_json::Value with only the
 /// recognized MCP annotation fields.
 fn annotations_to_json(annotations: &VmValue) -> Option<serde_json::Value> {
@@ -843,6 +1044,7 @@ pub fn tool_registry_to_mcp_tools(registry: &VmValue) -> Result<Vec<McpToolDef>,
     for tool in tools.iter() {
         if let VmValue::Dict(entry) = tool {
             let name = entry.get("name").map(|v| v.display()).unwrap_or_default();
+            let title = entry.get("title").map(|v| v.display());
             let description = entry
                 .get("description")
                 .map(|v| v.display())
@@ -858,12 +1060,21 @@ pub fn tool_registry_to_mcp_tools(registry: &VmValue) -> Result<Vec<McpToolDef>,
             };
 
             let input_schema = params_to_json_schema(entry.get("parameters"));
+            let output_schema = entry.get("output_schema").and_then(|v| {
+                if let VmValue::Dict(_) = v {
+                    Some(vm_value_to_json(v))
+                } else {
+                    None
+                }
+            });
             let annotations = entry.get("annotations").and_then(annotations_to_json);
 
             mcp_tools.push(McpToolDef {
                 name,
+                title,
                 description,
                 input_schema,
+                output_schema,
                 annotations,
                 handler,
             });
