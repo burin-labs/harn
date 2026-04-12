@@ -1367,6 +1367,7 @@ EOF
 - Heredoc `<<TAG` ... `TAG`: raw content, no escaping needed. Put TAG at the start of the closing line; closing punctuation like `},` may follow on that same line.
 - Double quotes for single-line strings. Trailing commas optional.
 - Do not wrap tool calls in Markdown fences unless the host explicitly asks for them.
+- Do not prefix tool calls with labels like `tool_code:`, `tool_call:`, `python:`, `shell:`, or any language/wrapper tag. The runtime parses only bare function-call syntax; any prefix label makes the call invisible to the tool pipeline even if the call body looks correct.
 - If the workflow uses a done sentinel such as `##DONE##`, emit it on its own line in a response that contains no tool calls.
 - Prefer tool calls over prose.
 ";
@@ -1503,7 +1504,25 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                         k += 1;
                     }
                 }
-                for prefix in ["call:", "tool:", "use:"] {
+                // Gemma-family models RL-trained for tool use fall back to
+                // their native `tool_code: fn(args)` inline prefix when text
+                // mode asks them to emit bare calls. Strip it alongside the
+                // other common labels so the call still parses. `python:` /
+                // `javascript:` / etc. are language-tag labels some models
+                // add when they think the runtime wants a code block.
+                for prefix in [
+                    "tool_code:",
+                    "tool_call:",
+                    "tool_output:",
+                    "call:",
+                    "tool:",
+                    "use:",
+                    "python:",
+                    "javascript:",
+                    "typescript:",
+                    "shell:",
+                    "bash:",
+                ] {
                     if text[k..].starts_with(prefix) {
                         k += prefix.len();
                         // Also skip optional whitespace after the prefix.
@@ -1513,6 +1532,58 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                         break;
                     }
                 }
+                // Near-miss detection: a line shaped like
+                // `some_label: known_tool(...)` where `some_label` isn't
+                // in our strip allowlist. Silently treating the whole line
+                // as prose gives the model no signal about its syntax
+                // mistake, so it keeps emitting the same bad form. Only
+                // fire when the SECOND identifier is a known tool name —
+                // that guard prevents false positives on incidental prose
+                // like `Tip: edit(...)` where `edit` happens to match or
+                // on arbitrary `Note: something(args)` phrasing.
+                //
+                // We only emit the diagnostic; we do NOT treat the line
+                // as a call. A false positive on an innocent prose line
+                // like "Reminder: read(src/mod.rs) carefully" would still
+                // be safe because the tool would not actually execute —
+                // the model just sees an instruction on next turn not to
+                // use that prefix.
+                if let Some(label_len) = ident_length(&bytes[k..]) {
+                    if bytes.get(k + label_len) == Some(&b':') {
+                        let mut after_colon = k + label_len + 1;
+                        while after_colon < bytes.len()
+                            && (bytes[after_colon] == b' ' || bytes[after_colon] == b'\t')
+                        {
+                            after_colon += 1;
+                        }
+                        if let Some(inner_len) = ident_length(&bytes[after_colon..]) {
+                            if bytes.get(after_colon + inner_len) == Some(&b'(') {
+                                let inner_name = std::str::from_utf8(
+                                    &bytes[after_colon..after_colon + inner_len],
+                                )
+                                .unwrap_or("");
+                                if known.contains(inner_name) {
+                                    let label =
+                                        std::str::from_utf8(&bytes[k..k + label_len]).unwrap_or("");
+                                    errors.push(format!(
+                                        "Saw `{label}: {inner_name}(...)`. Do not prefix tool \
+                                         calls with `{label}:` — emit bare \
+                                         `{inner_name}({{ ... }})` on its own line. The \
+                                         previous line was treated as prose and no tool \
+                                         ran; re-emit it without the prefix."
+                                    ));
+                                    // Skip past the rest of this line without parsing it as
+                                    // a call. The model re-emits cleanly on the next turn.
+                                    while i < bytes.len() && bytes[i] != b'\n' {
+                                        i += 1;
+                                    }
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Candidate tool call at line start: <ident>( directly.
                 if let Some(name_len) = ident_length(&bytes[k..]) {
                     if bytes.get(k + name_len) == Some(&b'(') {

@@ -2,6 +2,29 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.80
+
+### Fixed
+
+- **Text-mode tool-call parser accepts Gemma's native `tool_code:` prefix
+  and other common language-tag labels.** Gemma 3/4 models RL-trained for
+  tool use emit `tool_code: fn(args)` as their native inline form; other
+  models sometimes prefix calls with `python:`, `javascript:`,
+  `typescript:`, `shell:`, `bash:`, `tool_call:`, or `tool_output:` when
+  they think the runtime wants a code block. Previously only `call:`,
+  `tool:`, and `use:` were stripped, so those models' calls silently
+  drifted into prose. All of the above labels are now stripped before the
+  parser looks for a bare function-call expression. The text-mode system
+  prompt was also extended with an explicit rule telling models not to
+  add such prefixes.
+- **Near-miss diagnostic for unknown label prefixes on known tools.** When
+  a line is shaped like `SomeLabel: known_tool(...)` and `SomeLabel` is
+  not in the strip allowlist, the parser now surfaces a self-correction
+  error ("Do not prefix tool calls with `SomeLabel:`…") instead of
+  silently treating the line as prose. The guard fires only when the
+  inner identifier is a registered tool name, which prevents false
+  positives on incidental prose like `Note: make_coffee(...)`.
+
 ## v0.5.79
 
 ### Changed

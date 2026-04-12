@@ -323,6 +323,117 @@ fn reports_unknown_tool_names() {
 }
 
 #[test]
+fn strips_gemma_tool_code_prefix_so_native_format_parses() {
+    // Gemma 3/4 are RL-trained to emit `tool_code: fn(args)` as their
+    // native inline tool-call form. In text mode we want that to parse
+    // cleanly instead of silently drifting into prose.
+    let tools = sample_tool_registry();
+    let text = "tool_code: run({ command: \"ls\" })";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_eq!(
+        result.calls.len(),
+        1,
+        "tool_code: prefix should strip: {result:?}",
+        result = &result.errors
+    );
+    assert_eq!(result.calls[0]["name"], json!("run"));
+    assert_eq!(result.calls[0]["arguments"]["command"], json!("ls"));
+}
+
+#[test]
+fn strips_assorted_language_and_wrapper_prefixes() {
+    let tools = sample_tool_registry();
+    for prefix in [
+        "tool_call:",
+        "tool_output:",
+        "python:",
+        "javascript:",
+        "shell:",
+        "bash:",
+    ] {
+        let text = format!("{prefix} run({{ command: \"ls\" }})");
+        let result = parse_text_tool_calls_with_tools(&text, Some(&tools));
+        assert_eq!(
+            result.calls.len(),
+            1,
+            "prefix `{prefix}` should be stripped and the call should parse; errors={:?}",
+            result.errors
+        );
+        assert_eq!(result.calls[0]["name"], json!("run"));
+    }
+}
+
+#[test]
+fn explicit_parse_error_for_unknown_label_prefix_on_known_tool() {
+    // When the line looks like `SomeLabel: known_tool(...)` and the label
+    // isn't in our strip allowlist, we should surface a parse error so
+    // the model gets a self-correction signal instead of a silent drop.
+    // The guard is on the second identifier being a known tool, which
+    // keeps us from false-positive'ing on arbitrary prose.
+    let tools = sample_tool_registry();
+    let text = "Hint: run({ command: \"ls\" })";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_eq!(
+        result.calls.len(),
+        0,
+        "ambiguous prefixed-line should not silently execute: {:?}",
+        result.calls
+    );
+    assert_eq!(
+        result.errors.len(),
+        1,
+        "should emit a self-correction error"
+    );
+    let err = &result.errors[0];
+    assert!(
+        err.contains("Hint:"),
+        "error should name the observed prefix: {err}"
+    );
+    assert!(err.contains("run"), "error should name the tool: {err}");
+    assert!(
+        err.contains("Do not prefix"),
+        "error should explain the fix: {err}"
+    );
+}
+
+#[test]
+fn parses_gemma_fenced_tool_code_block() {
+    // The full-response `unwrap_exact_code_wrapper` path handles Gemma's
+    // other native form: ```tool_code\nrun({...})\n```
+    let tools = sample_tool_registry();
+    let text = "```tool_code\nrun({ command: \"ls\" })\n```";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_eq!(result.calls.len(), 1);
+    assert_eq!(result.calls[0]["name"], json!("run"));
+}
+
+#[test]
+fn unknown_label_prefix_with_unknown_identifier_stays_prose() {
+    // `note: make_coffee(...)` must NOT fire the near-miss diagnostic
+    // because `make_coffee` isn't a known tool. This is the guardrail
+    // against false positives on arbitrary prose containing colons.
+    let tools = sample_tool_registry();
+    let text = "Note: make_coffee({ strength: \"strong\" })";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_eq!(result.calls.len(), 0);
+    // `make_coffee` followed by `(` with an object-literal arg WILL hit
+    // the existing unknown-tool error path, but only because the line
+    // starts with `Note: ` — our near-miss path must be a no-op here.
+    // The existing unknown-tool error is fine; we just check we didn't
+    // add a duplicate.
+    let near_miss_errors: Vec<&String> = result
+        .errors
+        .iter()
+        .filter(|e| e.contains("Do not prefix"))
+        .collect();
+    assert!(
+        near_miss_errors.is_empty(),
+        "near-miss error must not fire when the identifier isn't a known tool: {:?}",
+        result.errors
+    );
+}
+
+#[test]
 fn parses_multiple_calls_in_one_response() {
     let tools = sample_tool_registry();
     let text = "edit({ action: \"create\", path: \"a.go\", content: \"a\" })\nThen we will:\nedit({ action: \"patch\", path: \"b.go\" })\n";
