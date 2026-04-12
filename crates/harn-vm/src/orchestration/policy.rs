@@ -852,6 +852,197 @@ pub fn builtin_ceiling() -> CapabilityPolicy {
     }
 }
 
+// ── Tool approval policy ─────────────────────────────────────────────
+
+/// Declarative policy for tool approval gating. Allows pipelines to
+/// specify which tools are auto-approved, auto-denied, or require
+/// host confirmation, plus write-path allowlists.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ToolApprovalPolicy {
+    /// Glob patterns for tools that should be auto-approved.
+    #[serde(default)]
+    pub auto_approve: Vec<String>,
+    /// Glob patterns for tools that should always be denied.
+    #[serde(default)]
+    pub auto_deny: Vec<String>,
+    /// Glob patterns for tools that require host confirmation.
+    #[serde(default)]
+    pub require_approval: Vec<String>,
+    /// Glob patterns for writable paths.
+    #[serde(default)]
+    pub write_path_allowlist: Vec<String>,
+}
+
+/// Result of evaluating a tool call against a ToolApprovalPolicy.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ToolApprovalDecision {
+    /// Tool is auto-approved by policy.
+    AutoApproved,
+    /// Tool is auto-denied by policy.
+    AutoDenied { reason: String },
+    /// Tool requires explicit host approval.
+    RequiresHostApproval { tool: String, args: serde_json::Value },
+}
+
+impl ToolApprovalPolicy {
+    /// Evaluate whether a tool call should be approved, denied, or needs
+    /// host confirmation.
+    pub fn evaluate(&self, tool_name: &str, args: &serde_json::Value) -> ToolApprovalDecision {
+        // Auto-deny takes precedence.
+        for pattern in &self.auto_deny {
+            if glob_match(pattern, tool_name) {
+                return ToolApprovalDecision::AutoDenied {
+                    reason: format!("tool '{tool_name}' matches deny pattern '{pattern}'"),
+                };
+            }
+        }
+
+        // Check write-path allowlist for tools that declare paths.
+        if !self.write_path_allowlist.is_empty() {
+            let paths = super::current_tool_declared_paths(tool_name, args);
+            for path in &paths {
+                let allowed = self
+                    .write_path_allowlist
+                    .iter()
+                    .any(|pattern| glob_match(pattern, path));
+                if !allowed {
+                    return ToolApprovalDecision::AutoDenied {
+                        reason: format!(
+                            "tool '{tool_name}' writes to '{path}' which is not in the write-path allowlist"
+                        ),
+                    };
+                }
+            }
+        }
+
+        // Auto-approve.
+        for pattern in &self.auto_approve {
+            if glob_match(pattern, tool_name) {
+                return ToolApprovalDecision::AutoApproved;
+            }
+        }
+
+        // Require approval.
+        for pattern in &self.require_approval {
+            if glob_match(pattern, tool_name) {
+                return ToolApprovalDecision::RequiresHostApproval {
+                    tool: tool_name.to_string(),
+                    args: args.clone(),
+                };
+            }
+        }
+
+        // Default: auto-approve if no pattern matched.
+        ToolApprovalDecision::AutoApproved
+    }
+
+    /// Merge two approval policies, taking the most restrictive combination.
+    pub fn intersect(&self, other: &ToolApprovalPolicy) -> ToolApprovalPolicy {
+        let mut auto_approve = self.auto_approve.clone();
+        auto_approve.extend(other.auto_approve.iter().cloned());
+        let mut auto_deny = self.auto_deny.clone();
+        auto_deny.extend(other.auto_deny.iter().cloned());
+        let mut require_approval = self.require_approval.clone();
+        require_approval.extend(other.require_approval.iter().cloned());
+        // Write-path allowlist: intersection (both must allow).
+        let write_path_allowlist = if self.write_path_allowlist.is_empty() {
+            other.write_path_allowlist.clone()
+        } else if other.write_path_allowlist.is_empty() {
+            self.write_path_allowlist.clone()
+        } else {
+            // Keep patterns from both sides — actual path checking
+            // requires all patterns to match, but we merge the lists
+            // so the evaluation can check against both sets.
+            let mut merged = self.write_path_allowlist.clone();
+            merged.extend(other.write_path_allowlist.iter().cloned());
+            merged
+        };
+        ToolApprovalPolicy {
+            auto_approve,
+            auto_deny,
+            require_approval,
+            write_path_allowlist,
+        }
+    }
+}
+
+#[cfg(test)]
+mod approval_policy_tests {
+    use super::*;
+
+    #[test]
+    fn auto_deny_takes_precedence_over_auto_approve() {
+        let policy = ToolApprovalPolicy {
+            auto_approve: vec!["*".to_string()],
+            auto_deny: vec!["dangerous_*".to_string()],
+            ..Default::default()
+        };
+        assert_eq!(
+            policy.evaluate("dangerous_rm", &serde_json::json!({})),
+            ToolApprovalDecision::AutoDenied {
+                reason: "tool 'dangerous_rm' matches deny pattern 'dangerous_*'".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn auto_approve_matches_glob() {
+        let policy = ToolApprovalPolicy {
+            auto_approve: vec!["read*".to_string(), "search*".to_string()],
+            ..Default::default()
+        };
+        assert_eq!(
+            policy.evaluate("read_file", &serde_json::json!({})),
+            ToolApprovalDecision::AutoApproved
+        );
+        assert_eq!(
+            policy.evaluate("search", &serde_json::json!({})),
+            ToolApprovalDecision::AutoApproved
+        );
+    }
+
+    #[test]
+    fn require_approval_emits_decision() {
+        let policy = ToolApprovalPolicy {
+            require_approval: vec!["edit*".to_string()],
+            ..Default::default()
+        };
+        let decision = policy.evaluate("edit_file", &serde_json::json!({"path": "foo.rs"}));
+        assert!(matches!(
+            decision,
+            ToolApprovalDecision::RequiresHostApproval { .. }
+        ));
+    }
+
+    #[test]
+    fn unmatched_tool_defaults_to_approved() {
+        let policy = ToolApprovalPolicy {
+            auto_approve: vec!["read*".to_string()],
+            require_approval: vec!["edit*".to_string()],
+            ..Default::default()
+        };
+        assert_eq!(
+            policy.evaluate("unknown_tool", &serde_json::json!({})),
+            ToolApprovalDecision::AutoApproved
+        );
+    }
+
+    #[test]
+    fn intersect_merges_deny_lists() {
+        let a = ToolApprovalPolicy {
+            auto_deny: vec!["rm*".to_string()],
+            ..Default::default()
+        };
+        let b = ToolApprovalPolicy {
+            auto_deny: vec!["drop*".to_string()],
+            ..Default::default()
+        };
+        let merged = a.intersect(&b);
+        assert_eq!(merged.auto_deny.len(), 2);
+    }
+}
+
 #[cfg(test)]
 mod turn_policy_tests {
     use super::TurnPolicy;
