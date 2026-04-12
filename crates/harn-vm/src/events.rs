@@ -254,15 +254,20 @@ pub fn log_warn_meta(category: &str, message: &str, metadata: BTreeMap<String, s
 
 /// OpenTelemetry exporter sink. Requires the `otel` feature flag.
 /// Forwards Harn log events and span lifecycle to OTLP collectors.
+///
+/// Active spans are stored keyed by Harn's `span_id` so that
+/// `emit_span_end` can close the correct OTel span.
 #[cfg(feature = "otel")]
 pub struct OtelSink {
     provider: opentelemetry_sdk::trace::SdkTracerProvider,
+    active_spans:
+        std::cell::RefCell<std::collections::HashMap<u64, opentelemetry_sdk::trace::Span>>,
 }
 
 #[cfg(feature = "otel")]
 impl OtelSink {
     /// Create a new OTel sink. Initialises the OTLP span exporter
-    /// (default endpoint: localhost:4317 via gRPC, or OTEL_EXPORTER_OTLP_ENDPOINT).
+    /// (default endpoint via OTEL_EXPORTER_OTLP_ENDPOINT, or localhost:4318).
     pub fn new() -> Result<Self, String> {
         use opentelemetry_otlp::SpanExporter;
         use opentelemetry_sdk::trace::SdkTracerProvider;
@@ -278,7 +283,10 @@ impl OtelSink {
 
         opentelemetry::global::set_tracer_provider(provider.clone());
 
-        Ok(Self { provider })
+        Ok(Self {
+            provider,
+            active_spans: std::cell::RefCell::new(std::collections::HashMap::new()),
+        })
     }
 }
 
@@ -287,6 +295,7 @@ impl EventSink for OtelSink {
     fn emit_log(&self, event: &LogEvent) {
         use opentelemetry::trace::{Tracer, TracerProvider};
         let tracer = self.provider.tracer("harn");
+        // Log events are zero-duration spans — start and immediately drop.
         let _span = tracer
             .span_builder(format!("log.{}", event.category))
             .with_attributes(vec![
@@ -300,32 +309,35 @@ impl EventSink for OtelSink {
     fn emit_span_start(&self, event: &SpanEvent) {
         use opentelemetry::trace::{Tracer, TracerProvider};
         let tracer = self.provider.tracer("harn");
-        let _span = tracer
+        let span = tracer
             .span_builder(event.name.clone())
             .with_attributes(vec![
-                opentelemetry::KeyValue::new("span_id", event.span_id as i64),
-                opentelemetry::KeyValue::new("kind", event.kind.clone()),
+                opentelemetry::KeyValue::new("harn.span_id", event.span_id as i64),
+                opentelemetry::KeyValue::new("harn.kind", event.kind.clone()),
             ])
             .start(&tracer);
+        self.active_spans.borrow_mut().insert(event.span_id, span);
     }
 
     fn emit_span_end(&self, span_id: u64, metadata: &BTreeMap<String, serde_json::Value>) {
-        use opentelemetry::trace::TraceContextExt;
-        let cx = opentelemetry::Context::current();
-        let span = cx.span();
-        for (key, value) in metadata {
-            span.set_attribute(opentelemetry::KeyValue::new(
-                key.clone(),
-                format!("{value}"),
-            ));
+        use opentelemetry::trace::Span;
+        if let Some(mut span) = self.active_spans.borrow_mut().remove(&span_id) {
+            for (key, value) in metadata {
+                span.set_attribute(opentelemetry::KeyValue::new(
+                    key.clone(),
+                    format!("{value}"),
+                ));
+            }
+            span.end();
         }
-        let _ = span_id;
     }
 }
 
 #[cfg(feature = "otel")]
 impl Drop for OtelSink {
     fn drop(&mut self) {
+        // End any spans that were never closed (abnormal shutdown).
+        self.active_spans.borrow_mut().clear();
         let _ = self.provider.shutdown();
     }
 }
