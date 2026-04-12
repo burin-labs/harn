@@ -4,8 +4,10 @@ This repository implements Harn, a programming language and runtime for orchestr
 
 ## Dev Environment Tips
 
-- Run `make setup` on a fresh clone. It configures `.githooks/`, installs repo-local Node tooling when
-  `npm` is available, and runs `cargo check --workspace`.
+- Run `make setup` on a fresh clone. It configures `.githooks/`, installs `cargo-nextest` and
+  `sccache`, installs repo-local Node tooling when `npm` is available, enables the sccache
+  rustc wrapper, and runs `cargo check --workspace`.
+- Use `make test-fast` for faster test runs (uses `cargo nextest` when available).
 - Run `make install-hooks` if the git hooks path is not already set.
 - Use `cargo run --quiet --bin harn -- --help` to inspect the current CLI surface.
 - The root `package.json` is only for repo tooling. The portal UI, tree-sitter grammar, and VS Code

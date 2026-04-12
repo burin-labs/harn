@@ -14,6 +14,31 @@ fi
 git config core.hooksPath .githooks
 echo "Configured git hooks path -> .githooks"
 
+# Install optional but recommended Cargo tools.
+for tool_spec in "cargo-nextest:cargo-nextest --locked" "sccache:sccache --locked"; do
+  tool="${tool_spec%%:*}"
+  install_args="${tool_spec#*:}"
+  if ! command -v "$tool" >/dev/null 2>&1; then
+    echo "Installing $tool..."
+    cargo install $install_args || echo "warning: failed to install $tool (non-fatal)"
+  else
+    echo "$tool already installed."
+  fi
+done
+
+# Enable sccache as the rustc wrapper if installed. The generated config is
+# gitignored so fresh clones without sccache still work.
+if command -v sccache >/dev/null 2>&1; then
+  mkdir -p .cargo
+  if [[ ! -f .cargo/config.toml ]] || ! grep -q rustc-wrapper .cargo/config.toml 2>/dev/null; then
+    cat >> .cargo/config.toml <<'TOML'
+[build]
+rustc-wrapper = "sccache"
+TOML
+    echo "Configured sccache as rustc wrapper in .cargo/config.toml"
+  fi
+fi
+
 if command -v npm >/dev/null 2>&1; then
   echo "Installing repo-local Node tooling..."
   npm install

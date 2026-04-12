@@ -28,6 +28,10 @@ categories = ["compilers", "command-line-utilities"]
 [profile.dev]
 debug = "line-tables-only"
 
+# Tests rarely need debuginfo; dropping it shaves seconds off linking.
+[profile.test]
+debug = 0
+
 [profile.release]
 lto = true
 codegen-units = 1

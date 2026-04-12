@@ -262,8 +262,9 @@ make all
 make portal
 ```
 
-`dev_setup.sh` installs repo-local Node tooling, sets up git hooks, and runs a
-workspace `cargo check`. `make portal` launches the built-in observability UI
+`dev_setup.sh` configures git hooks, installs `cargo-nextest` and `sccache`,
+installs repo-local Node tooling, enables the sccache rustc wrapper, and runs
+a workspace `cargo check`. `make portal` launches the built-in observability UI
 for persisted runs under `.harn-runs/`.
 
 ## Why This Matters
@@ -417,7 +418,8 @@ notifications:
 ```bash
 make fmt
 make lint
-make test
+make test           # cargo test --workspace
+make test-fast      # cargo nextest (faster, bounded timeouts)
 make conformance
 harn test conformance --timing
 harn test conformance tests/worktree_runtime.harn

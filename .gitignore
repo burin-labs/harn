@@ -10,5 +10,8 @@ tree-sitter-harn/*.dylib
 tree-sitter-harn/*.so
 tree-sitter-harn/*.dll
 .harn/
-.claude/
+.cargo/config.toml
+# .claude/ is local-only except for shared skill definitions
+.claude/*
+!.claude/commands/
 meta_scratch/

@@ -13,6 +13,8 @@ cd harn
 This script:
 
 - configures `.githooks` as the repo hook path
+- installs `cargo-nextest` and `sccache` (for faster tests and cached builds)
+- enables the sccache rustc wrapper via a local `.cargo/config.toml`
 - installs repo-local markdown tooling plus Node dependencies for
   `tree-sitter-harn/` and `editors/vscode/` when `npm` is available
 - runs `cargo check --workspace`
