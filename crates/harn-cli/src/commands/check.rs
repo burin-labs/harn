@@ -62,8 +62,7 @@ pub(crate) fn check_file_inner(
     let mut diagnostic_count = 0;
 
     // Type checking
-    let type_diagnostics =
-        TypeChecker::with_strict_types(config.strict_types).check(&program);
+    let type_diagnostics = TypeChecker::with_strict_types(config.strict_types).check(&program);
     for diag in &type_diagnostics {
         let severity = match diag.severity {
             DiagnosticSeverity::Error => {

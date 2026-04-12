@@ -282,8 +282,7 @@ impl TypeScope {
 
     /// Clear the untyped-source flag for a variable, shadowing any parent entry.
     fn clear_untyped_source(&mut self, name: &str) {
-        self.untyped_sources
-            .insert(name.to_string(), String::new());
+        self.untyped_sources.insert(name.to_string(), String::new());
     }
 
     /// Check if a variable is mutable (declared with `var`).
@@ -731,9 +730,8 @@ impl TypeChecker {
                     // Strict types: mark variables assigned from boundary APIs
                     if self.strict_types {
                         if let Some(boundary) = Self::detect_boundary_source(value, scope) {
-                            let has_concrete_ann = type_ann
-                                .as_ref()
-                                .is_some_and(|t| Self::is_concrete_type(t));
+                            let has_concrete_ann =
+                                type_ann.as_ref().is_some_and(|t| Self::is_concrete_type(t));
                             if !has_concrete_ann {
                                 scope.mark_untyped_source(name, &boundary);
                             }
@@ -786,9 +784,8 @@ impl TypeChecker {
                     // Strict types: mark variables assigned from boundary APIs
                     if self.strict_types {
                         if let Some(boundary) = Self::detect_boundary_source(value, scope) {
-                            let has_concrete_ann = type_ann
-                                .as_ref()
-                                .is_some_and(|t| Self::is_concrete_type(t));
+                            let has_concrete_ann =
+                                type_ann.as_ref().is_some_and(|t| Self::is_concrete_type(t));
                             if !has_concrete_ann {
                                 scope.mark_untyped_source(name, &boundary);
                             }
@@ -860,9 +857,7 @@ impl TypeChecker {
                 if self.strict_types && name == "schema_expect" && args.len() >= 2 {
                     if let Node::Identifier(var_name) = &args[0].node {
                         scope.clear_untyped_source(var_name);
-                        if let Some(schema_type) =
-                            schema_type_expr_from_node(&args[1], scope)
-                        {
+                        if let Some(schema_type) = schema_type_expr_from_node(&args[1], scope) {
                             scope.define_var(var_name, Some(schema_type));
                         }
                     }
@@ -2997,9 +2992,7 @@ impl TypeChecker {
                 // Schema-aware llm_call: when options contain a schema, return
                 // a shape with typed `data` field
                 if (name == "llm_call" || name == "llm_completion") && args.len() >= 3 {
-                    if let Some(schema_type) =
-                        Self::extract_llm_schema_from_options(args, scope)
-                    {
+                    if let Some(schema_type) = Self::extract_llm_schema_from_options(args, scope) {
                         return Some(TypeExpr::Shape(vec![
                             ShapeField {
                                 name: "text".into(),
@@ -5871,7 +5864,9 @@ add("hello", 2) }"#,
 }"#,
         );
         assert!(
-            warns.iter().any(|w| w.contains("unvalidated") && w.contains("'x'")),
+            warns
+                .iter()
+                .any(|w| w.contains("unvalidated") && w.contains("'x'")),
             "expected propagation warning for x, got: {warns:?}"
         );
     }
