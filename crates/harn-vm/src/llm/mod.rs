@@ -12,6 +12,9 @@
 //! - `config_builtins`: Provider configuration query builtins
 
 mod agent;
+mod agent_config;
+mod agent_observe;
+mod agent_tools;
 pub(crate) mod api;
 mod config_builtins;
 mod conversation;
@@ -155,10 +158,9 @@ fn validated_output_data(
 // Public re-exports (used by other crates/modules)
 // =============================================================================
 
-pub(crate) use self::agent::{
-    agent_loop_result_from_llm, current_host_bridge, run_agent_loop_internal, AgentLoopConfig,
-};
-pub use self::agent::{register_agent_loop_with_bridge, register_llm_call_with_bridge};
+pub(crate) use self::agent::{current_host_bridge, run_agent_loop_internal};
+pub(crate) use self::agent_config::{agent_loop_result_from_llm, AgentLoopConfig};
+pub use self::agent_config::{register_agent_loop_with_bridge, register_llm_call_with_bridge};
 // observed_llm_call, LlmRetryConfig, build_llm_call_result are used by
 // register_llm_builtins above but accessed via the agent module path.
 pub use self::api::fetch_provider_max_context;
@@ -188,12 +190,12 @@ pub fn register_llm_builtins(vm: &mut Vm) {
     vm.register_async_builtin("llm_call", |args| async move {
         let opts = extract_llm_options(&args)?;
         let options = args.get(2).and_then(|a| a.as_dict()).cloned();
-        let retry_config = agent::LlmRetryConfig {
+        let retry_config = agent_observe::LlmRetryConfig {
             retries: helpers::opt_int(&options, "llm_retries").unwrap_or(0) as usize,
             backoff_ms: helpers::opt_int(&options, "llm_backoff_ms").unwrap_or(2000) as u64,
         };
 
-        let result = agent::observed_llm_call(
+        let result = agent_observe::observed_llm_call(
             &opts,
             helpers::opt_str(&options, "tool_format").as_deref(),
             None, // no bridge
@@ -207,7 +209,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
         // Output schema validation (non-bridge only; bridge path delegates
         // to the same build_llm_call_result which skips validation — the
         // host is expected to handle schema enforcement).
-        let mut vm_result = agent::build_llm_call_result(&result, &opts);
+        let mut vm_result = agent_config::build_llm_call_result(&result, &opts);
         if helpers::expects_structured_output(&opts) {
             if let VmValue::Dict(ref dict) = vm_result {
                 if let Some(data) = dict.get("data") {
