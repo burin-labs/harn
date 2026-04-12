@@ -52,7 +52,16 @@ pub(crate) fn register_crypto_builtins(vm: &mut Vm) {
     register_hash!(vm, "sha384", sha2::Sha384);
     register_hash!(vm, "sha512", sha2::Sha512);
     register_hash!(vm, "sha512_256", sha2::Sha512_256);
-    register_hash!(vm, "md5", md5::Md5);
+
+    // md-5 0.11 uses digest 0.11 while sha2 0.10 uses digest 0.10, so
+    // md5::Md5 cannot go through the sha2::Digest-based macro above.
+    vm.register_builtin("md5", |args, _out| {
+        use md5::Digest as _;
+        let val = args.first().map(|a| a.display()).unwrap_or_default();
+        let hash = md5::Md5::digest(val.as_bytes());
+        let hex: String = hash.iter().map(|b| format!("{b:02x}")).collect();
+        Ok(VmValue::String(Rc::from(hex)))
+    });
 
     vm.register_builtin("url_encode", |args, _out| {
         let val = args.first().map(|a| a.display()).unwrap_or_default();
