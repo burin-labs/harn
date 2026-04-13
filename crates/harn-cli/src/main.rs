@@ -133,6 +133,7 @@ async fn main() {
             let targets: Vec<&str> = args.targets.iter().map(String::as_str).collect();
             let opts = harn_fmt::FmtOptions {
                 line_width: args.line_width,
+                ..harn_fmt::FmtOptions::default()
             };
             commands::check::fmt_targets(&targets, args.check, &opts);
         }

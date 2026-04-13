@@ -181,7 +181,7 @@ impl Formatter {
         if import_count > 0 {
             self.format_sorted_import_block(nodes);
         } else if let Some(first) = nodes.first() {
-            self.emit_comments_in_range(1, first.span.line);
+            self.emit_top_level_comments_in_range(1, first.span.line);
         }
         for (i, node) in nodes.iter().enumerate().skip(import_count) {
             if i > 0 {
@@ -189,23 +189,23 @@ impl Formatter {
                 // end of the import block and the first non-import item), emit
                 // exactly one blank line. `writeln` already terminated the
                 // previous line with `\n`, so pushing another `\n` here yields
-                // the blank line. Any leading comments (including doc blocks)
-                // are emitted AFTER the blank line so a doc comment stays
-                // glued to the item it documents.
+                // the blank line. Any leading comments (including doc blocks
+                // or section-header bars) are emitted AFTER the blank line so
+                // a doc comment stays glued to the item it documents.
                 self.output.push('\n');
                 let prev_end = if i == import_count && import_count > 0 {
                     nodes[import_count - 1].span.line + 1
                 } else {
                     nodes[i - 1].span.line + 1
                 };
-                self.emit_comments_in_range(prev_end, node.span.line);
+                self.emit_top_level_comments_in_range(prev_end, node.span.line);
             }
             self.format_node(node);
         }
         if !self.comments.is_empty() {
             let max_line = *self.comments.keys().max().unwrap_or(&0);
             let last_line = nodes.last().map(|n| n.span.line + 1).unwrap_or(1);
-            self.emit_comments_in_range(last_line, max_line + 1);
+            self.emit_top_level_comments_in_range(last_line, max_line + 1);
         }
     }
 

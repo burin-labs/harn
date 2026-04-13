@@ -595,7 +595,10 @@ fn test_backslash_continuation_roundtrip() {
 // --- Custom line width ---
 
 fn fmt_opts(source: &str, line_width: usize) -> String {
-    let opts = FmtOptions { line_width };
+    let opts = FmtOptions {
+        line_width,
+        separator_width: 80,
+    };
     format_source_opts(source, &opts).unwrap()
 }
 
@@ -684,7 +687,10 @@ fn test_custom_line_width_idempotent() {
     let source = r#"pipeline default() {
   let x = really_long_function_name(alpha, beta, gamma)
 }"#;
-    let opts = FmtOptions { line_width: 40 };
+    let opts = FmtOptions {
+        line_width: 40,
+        separator_width: 80,
+    };
     let first = format_source_opts(source, &opts).unwrap();
     let second = format_source_opts(&first, &opts).unwrap();
     assert_eq!(first, second, "Custom-width formatter is not idempotent");
@@ -1049,6 +1055,100 @@ fn test_doc_comment_glued_to_item_blank_line_above() {
     assert_eq!(
         result, result2,
         "formatter is not idempotent with doc comments between items"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Section-header canonicalization
+// ---------------------------------------------------------------------------
+
+fn canonical_bar() -> String {
+    // Default separator_width is 80 → 77 dashes after `// `.
+    let dashes: String = std::iter::repeat('-').take(77).collect();
+    format!("// {dashes}")
+}
+
+#[test]
+fn test_section_header_three_line_canonical_passthrough() {
+    let bar = canonical_bar();
+    let source = format!(
+        "fn a() -> int {{\n  return 1\n}}\n{bar}\n// Helpers\n{bar}\nfn b() -> int {{\n  return 2\n}}\n"
+    );
+    let result = format_source(&source).unwrap();
+    let expected = format!(
+        "fn a() -> int {{\n  return 1\n}}\n\n{bar}\n// Helpers\n{bar}\n\nfn b() -> int {{\n  return 2\n}}\n"
+    );
+    assert_eq!(result, expected, "canonical 3-line header not passthrough");
+    let result2 = format_source(&result).unwrap();
+    assert_eq!(result, result2, "3-line header not idempotent");
+}
+
+#[test]
+fn test_section_header_three_line_short_bars_normalized() {
+    let source = "fn a() -> int { return 1 }\n// ----\n// Helpers\n// ----\nfn b() -> int { return 2 }\n";
+    let result = format_source(source).unwrap();
+    let bar = canonical_bar();
+    assert!(
+        result.contains(&format!("{bar}\n// Helpers\n{bar}")),
+        "short bars should normalize to separator_width, got:\n{result}"
+    );
+}
+
+#[test]
+fn test_section_header_one_line_bar_normalized() {
+    let source = "fn a() -> int { return 1 }\n// ----\nfn b() -> int { return 2 }\n";
+    let result = format_source(source).unwrap();
+    let bar = canonical_bar();
+    assert!(
+        result.contains(&format!("\n{bar}\n")),
+        "one-line bar should normalize, got:\n{result}"
+    );
+    // Pure bars stay one-liner (no title promotion).
+    assert!(
+        !result.contains("// Helpers"),
+        "pure bar must not gain a title"
+    );
+}
+
+#[test]
+fn test_section_header_one_line_bar_with_title_promoted() {
+    let source =
+        "fn a() -> int { return 1 }\n// ---- Helpers ----\nfn b() -> int { return 2 }\n";
+    let result = format_source(source).unwrap();
+    let bar = canonical_bar();
+    assert!(
+        result.contains(&format!("{bar}\n// Helpers\n{bar}")),
+        "one-liner with title should promote to 3-line form, got:\n{result}"
+    );
+}
+
+#[test]
+fn test_section_header_blank_lines_above_and_below() {
+    let source = "fn a() -> int {\n  return 1\n}\n// ----\n// Helpers\n// ----\nfn b() -> int {\n  return 2\n}\n";
+    let result = format_source(source).unwrap();
+    let bar = canonical_bar();
+    // Expect: prev fn close, blank, header, blank, next fn.
+    let header = format!("{bar}\n// Helpers\n{bar}");
+    let expected_window = format!("}}\n\n{header}\n\nfn b");
+    assert!(
+        result.contains(&expected_window),
+        "expected blank lines above and below section header, got:\n{result}"
+    );
+}
+
+#[test]
+fn test_section_header_respects_custom_separator_width() {
+    let opts = FmtOptions {
+        line_width: 100,
+        separator_width: 40,
+    };
+    let source = "fn a() -> int { return 1 }\n// ----\nfn b() -> int { return 2 }\n";
+    let result = format_source_opts(source, &opts).unwrap();
+    let dashes: String = std::iter::repeat('-').take(37).collect();
+    let bar = format!("// {dashes}");
+    assert!(
+        result.contains(&bar),
+        "separator should match separator_width=40, got:\n{result}"
     );
 }
 

@@ -21,11 +21,17 @@ struct Comment {
 pub struct FmtOptions {
     /// Maximum line width before wrapping (default: 100).
     pub line_width: usize,
+    /// Total width of `// ----` separator bars rendered by the formatter
+    /// when it normalizes section-header comment blocks (default: 80).
+    pub separator_width: usize,
 }
 
 impl Default for FmtOptions {
     fn default() -> Self {
-        Self { line_width: 100 }
+        Self {
+            line_width: 100,
+            separator_width: 80,
+        }
     }
 }
 
@@ -66,7 +72,7 @@ pub fn format_source_opts(source: &str, opts: &FmtOptions) -> Result<String, Str
     let mut parser = Parser::new(parser_tokens);
     let program = parser.parse().map_err(|e| e.to_string())?;
 
-    let mut fmt = Formatter::new(comments, opts.line_width);
+    let mut fmt = Formatter::new(comments, opts.line_width, opts.separator_width);
     fmt.format_program(&program);
     Ok(fmt.finish())
 }
@@ -75,6 +81,7 @@ pub(crate) struct Formatter {
     output: String,
     indent: usize,
     line_width: usize,
+    separator_width: usize,
     /// Line → comments on that line.
     comments: BTreeMap<usize, Vec<Comment>>,
     /// Track which comment lines have been emitted.
@@ -82,11 +89,16 @@ pub(crate) struct Formatter {
 }
 
 impl Formatter {
-    pub(crate) fn new(comments: BTreeMap<usize, Vec<Comment>>, line_width: usize) -> Self {
+    pub(crate) fn new(
+        comments: BTreeMap<usize, Vec<Comment>>,
+        line_width: usize,
+        separator_width: usize,
+    ) -> Self {
         Self {
             output: String::new(),
             indent: 0,
             line_width,
+            separator_width,
             comments,
             emitted_lines: std::collections::HashSet::new(),
         }
@@ -267,4 +279,191 @@ impl Formatter {
             self.emit_comments_for_line(line);
         }
     }
+
+    /// Emit comments in the given range, recognizing and canonicalizing
+    /// section-header separator bars and three-line section blocks. Intended
+    /// for use between top-level items (not inside function bodies).
+    ///
+    /// Returns `true` if at least one section header was emitted in the
+    /// range — callers use this to ensure exactly one blank line follows the
+    /// last header before the next item.
+    pub(crate) fn emit_top_level_comments_in_range(&mut self, from: usize, to: usize) -> bool {
+        // Collect candidate lines in order.
+        let lines: Vec<usize> = self
+            .comments
+            .keys()
+            .filter(|&&l| l >= from && l < to && !self.emitted_lines.contains(&l))
+            .copied()
+            .collect();
+        let mut any_section_header = false;
+        let mut idx = 0;
+        while idx < lines.len() {
+            let line = lines[idx];
+            if self.emitted_lines.contains(&line) {
+                idx += 1;
+                continue;
+            }
+            // Pull this line's comments — section headers are always
+            // single-line standalone comments (one `//` per line).
+            let here = match self.comments.get(&line).cloned() {
+                Some(cs) if cs.len() == 1 && !cs[0].is_block && !cs[0].is_doc => cs,
+                _ => {
+                    self.emit_comments_for_line(line);
+                    idx += 1;
+                    continue;
+                }
+            };
+            let here_text = &here[0].text;
+            // Try to match a three-line section header:
+            //   // ----
+            //   // <title>
+            //   // ----
+            // The two surrounding lines must be bars (≥4 dashes).
+            if idx + 2 < lines.len()
+                && lines[idx + 1] == line + 1
+                && lines[idx + 2] == line + 2
+                && is_bar_only_line(here_text)
+            {
+                let mid = self.comments.get(&lines[idx + 1]).cloned();
+                let last = self.comments.get(&lines[idx + 2]).cloned();
+                if let (Some(mid), Some(last)) = (mid, last) {
+                    if mid.len() == 1
+                        && !mid[0].is_block
+                        && !mid[0].is_doc
+                        && last.len() == 1
+                        && !last[0].is_block
+                        && !last[0].is_doc
+                        && is_bar_only_line(&last[0].text)
+                    {
+                        let title = mid[0].text.trim();
+                        if !title.is_empty() && !is_bar_only_line(&mid[0].text) {
+                            self.ensure_blank_line_above();
+                            self.emit_section_header(title);
+                            self.emitted_lines.insert(lines[idx]);
+                            self.emitted_lines.insert(lines[idx + 1]);
+                            self.emitted_lines.insert(lines[idx + 2]);
+                            self.ensure_blank_line_below();
+                            any_section_header = true;
+                            idx += 3;
+                            continue;
+                        }
+                    }
+                }
+            }
+            // Single-line bar: `// ----` optionally with inline text `// ---- Title ----`.
+            if let Some(kind) = classify_bar_line(here_text) {
+                self.ensure_blank_line_above();
+                match kind {
+                    BarKind::PureBar => self.emit_separator_bar(),
+                    BarKind::WithTitle(title) => self.emit_section_header(&title),
+                }
+                self.emitted_lines.insert(line);
+                self.ensure_blank_line_below();
+                any_section_header = true;
+                idx += 1;
+                continue;
+            }
+            self.emit_comments_for_line(line);
+            idx += 1;
+        }
+        any_section_header
+    }
+
+    fn ensure_blank_line_above(&mut self) {
+        // Output should end with exactly `\n\n` to yield one blank line above
+        // the next emission. Strip trailing whitespace on the current line,
+        // then ensure exactly two trailing newlines.
+        while self.output.ends_with(' ') || self.output.ends_with('\t') {
+            self.output.pop();
+        }
+        if self.output.is_empty() {
+            return;
+        }
+        // Count trailing newlines.
+        let trailing = self.output.chars().rev().take_while(|c| *c == '\n').count();
+        match trailing {
+            0 => self.output.push_str("\n\n"),
+            1 => self.output.push('\n'),
+            _ => {}
+        }
+    }
+
+    fn ensure_blank_line_below(&mut self) {
+        // After emitting a section header (which ends with `\n`), we want
+        // subsequent emissions to be preceded by exactly one blank line.
+        // The simplest way: ensure the output currently ends with `\n\n`.
+        let trailing = self.output.chars().rev().take_while(|c| *c == '\n').count();
+        match trailing {
+            0 => self.output.push_str("\n\n"),
+            1 => self.output.push('\n'),
+            _ => {}
+        }
+    }
+
+    fn emit_separator_bar(&mut self) {
+        let dashes = self.separator_width.saturating_sub(3);
+        let bar: String = "-".repeat(dashes);
+        self.writeln(&format!("// {bar}"));
+    }
+
+    fn emit_section_header(&mut self, title: &str) {
+        let dashes = self.separator_width.saturating_sub(3);
+        let bar: String = "-".repeat(dashes);
+        self.writeln(&format!("// {bar}"));
+        self.writeln(&format!("// {title}"));
+        self.writeln(&format!("// {bar}"));
+    }
+}
+
+/// Returns true if `text` (the raw text following `//`, with the leading
+/// space not yet trimmed) is a dash-only separator bar with ≥4 dashes.
+fn is_bar_only_line(text: &str) -> bool {
+    let t = text.trim();
+    t.len() >= 4 && t.chars().all(|c| c == '-')
+}
+
+enum BarKind {
+    PureBar,
+    WithTitle(String),
+}
+
+/// Classify a single-line comment body (text after `//`) as a pure bar, a
+/// bar-with-inline-title, or neither.
+fn classify_bar_line(text: &str) -> Option<BarKind> {
+    let t = text.trim();
+    if t.is_empty() {
+        return None;
+    }
+    // Pure bar: 4+ dashes only.
+    if t.len() >= 4 && t.chars().all(|c| c == '-') {
+        return Some(BarKind::PureBar);
+    }
+    // Inline-titled bar: starts with ≥4 dashes, then whitespace, then title,
+    // optionally ending with whitespace + ≥4 dashes.
+    let chars: Vec<char> = t.chars().collect();
+    let lead_dashes = chars.iter().take_while(|c| **c == '-').count();
+    if lead_dashes < 4 {
+        return None;
+    }
+    let remaining: String = chars[lead_dashes..].iter().collect();
+    let remaining = remaining.trim();
+    if remaining.is_empty() {
+        return None; // already handled as PureBar above
+    }
+    // Strip a trailing run of ≥4 dashes (optionally).
+    let rchars: Vec<char> = remaining.chars().collect();
+    let trail_dashes = rchars.iter().rev().take_while(|c| **c == '-').count();
+    let title = if trail_dashes >= 4 {
+        rchars[..rchars.len() - trail_dashes]
+            .iter()
+            .collect::<String>()
+            .trim()
+            .to_string()
+    } else {
+        remaining.to_string()
+    };
+    if title.is_empty() {
+        return None;
+    }
+    Some(BarKind::WithTitle(title))
 }
