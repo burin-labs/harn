@@ -1229,31 +1229,33 @@ pub(crate) fn build_tool_calling_contract_prompt(
     ));
 
     if mode == "native" {
+        // Native mode: the provider's tool-calling channel is the preferred
+        // path. But many local OpenAI-compatible servers (Ollama with bare
+        // `{{ .Prompt }}` templates being the canonical case) silently drop
+        // the `tools` parameter because the chat template doesn't reference
+        // it. When that happens the model receives zero tool guidance and
+        // either narrates or guesses at a tool-call format from training.
+        // Including the text-mode protocol + schemas inline guarantees the
+        // model always has a fallback that works regardless of how the host
+        // serves the request. The downstream parser accepts either channel.
         prompt.push_str(
-            "Use the provider's native tool-calling channel for tool invocations. \
-             Do not emit handwritten tool-call text or JSON in the assistant message.\n\n",
+            "Prefer the provider's native tool-calling channel when it is available. \
+             If the channel does not surface to you (some local OpenAI-compatible \
+             servers strip the tools parameter), emit a `<tool_call>name({ ... })</tool_call>` \
+             block in the assistant message and the runtime will execute it from there.\n\n",
         );
-        if require_action {
-            prompt.push_str(
-                "This turn is action-gated. If tools are available, respond with a native tool call instead of prose.\n\n",
-            );
-        }
-        prompt.push_str(
-            "The provider already has the authoritative tool names and argument schemas. \
-             Do not restate or invent tool parameters in prose.\n\n",
-        );
-        return prompt;
+    } else {
+        // Front-load format instructions and examples BEFORE schemas so that
+        // weaker models encounter the calling convention early, while attention
+        // is strongest.
     }
-
-    // Front-load format instructions and examples BEFORE schemas so that
-    // weaker models encounter the calling convention early, while attention
-    // is strongest.
     prompt.push_str(TS_CALL_CONTRACT_HELP);
     if require_action {
         prompt.push_str(
             "\nThis turn is action-gated. If tools are available, open your response \
-             with a <tool_call> block, not prose. Do not emit raw source code, diffs, \
-             JSON, or a <done> block before the first <tool_call> block.\n",
+             with a tool call (native channel or `<tool_call>` block), not prose. Do not \
+             emit raw source code, diffs, JSON, or a <done> block before the first tool \
+             call.\n",
         );
     }
     if let Some(examples) = tool_examples {
@@ -1877,7 +1879,13 @@ pub(crate) fn parse_text_tool_calls_with_tools(
             while cursor < bytes.len() && bytes[cursor] != b'<' {
                 cursor += 1;
             }
-            report_stray(&src[start..cursor], &mut violations, tools_val);
+            report_stray(
+                &src[start..cursor],
+                &mut violations,
+                tools_val,
+                &mut calls,
+                &mut canonical_parts,
+            );
             continue;
         }
 
@@ -1923,6 +1931,37 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                 canonical_parts.push(format!("<done>{trimmed}</done>"));
             }
             cursor = after;
+        } else if let Some((call, after_call)) =
+            try_parse_angle_wrapped_call(src, cursor, tools_val)
+        {
+            // `<name({ ... })>` — angle-bracket-wrapped tool call (Qwen
+            // family commonly falls back to this when their template puts
+            // tools inside generic XML brackets). Execute the call and
+            // record a soft violation so the model learns to use
+            // `<tool_call>` wrapping next turn. Pre-v0.5.82 the parser
+            // dropped these silently and the model spun emitting the same
+            // wrong-wrapper response indefinitely.
+            let name = call
+                .get("name")
+                .and_then(|n| n.as_str())
+                .unwrap_or("")
+                .to_string();
+            let args = call
+                .get("arguments")
+                .cloned()
+                .unwrap_or(serde_json::json!({}));
+            canonical_parts.push(format!(
+                "<tool_call>\n{}\n</tool_call>",
+                render_canonical_call(&name, &args)
+            ));
+            calls.push(call);
+            violations.push(format!(
+                "Tool call `{name}` was emitted as `<{name}(...)>` instead of \
+                 `<tool_call>{name}({{ ... }})</tool_call>`. Executed this turn \
+                 so work moves forward; wrap each call in `<tool_call>` tags on \
+                 subsequent turns."
+            ));
+            cursor = after_call;
         } else {
             // Unclosed or unknown tag — skip to end of line or `>` and record.
             let start = cursor;
@@ -1934,7 +1973,6 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                 end += 1;
             }
             let fragment = &src[start..end];
-            // Detect likely bare-call attempts so feedback is concrete.
             if fragment.starts_with('<') && !fragment.contains('>') {
                 violations.push(format!(
                     "Unclosed tag starting at {:?}. Close it or remove it; only \
@@ -1976,28 +2014,104 @@ pub(crate) fn parse_text_tool_calls_with_tools(
     }
 }
 
-/// Report stray text that sits outside any recognized top-level tag. If
-/// the stray content looks like a bare tool call, extract the call (so
-/// the agent can see what the model tried to do) but still mark the turn
-/// as a violation — the model must re-emit wrapped in `<tool_call>`.
-fn report_stray(fragment: &str, violations: &mut Vec<String>, tools_val: Option<&VmValue>) {
+/// Try to parse `<name({...})>` (or `<name({...})` with the closing `>`
+/// optional / on a later line) at `cursor`. Returns the parsed call and
+/// the byte position after the call (including any trailing `>`).
+/// Only succeeds when `name` resolves to a registered tool.
+fn try_parse_angle_wrapped_call(
+    src: &str,
+    cursor: usize,
+    tools_val: Option<&VmValue>,
+) -> Option<(serde_json::Value, usize)> {
+    let bytes = src.as_bytes();
+    if bytes.get(cursor) != Some(&b'<') {
+        return None;
+    }
+    // Identifier immediately after `<`.
+    let name_start = cursor + 1;
+    let name_len = ident_length(&bytes[name_start..])?;
+    if name_len == 0 {
+        return None;
+    }
+    if bytes.get(name_start + name_len) != Some(&b'(') {
+        return None;
+    }
+    let name_str = std::str::from_utf8(&bytes[name_start..name_start + name_len]).ok()?;
+    // Only known tools are eligible — keeps `<notes>...` out of the path.
+    let known: BTreeSet<String> = collect_tool_schemas(tools_val, None)
+        .into_iter()
+        .map(|s| s.name)
+        .chain(std::iter::once("ledger".to_string()))
+        .collect();
+    if !known.contains(name_str) {
+        return None;
+    }
+    // Reuse the TS-call parser. It scans for the matching `)` honoring
+    // heredocs, template literals, and nested object/array literals, so
+    // multi-line calls with `<<EOF ... EOF` bodies are handled.
+    let (arguments, consumed) =
+        parse_ts_call_from(&src[name_start..], name_str.to_string()).ok()?;
+    let mut end = name_start + consumed;
+    // Step past optional whitespace and a single trailing `>`.
+    while end < bytes.len() && (bytes[end] == b' ' || bytes[end] == b'\t') {
+        end += 1;
+    }
+    if bytes.get(end) == Some(&b'>') {
+        end += 1;
+    }
+    let call = serde_json::json!({
+        "id": format!("tc_angle_{name_str}"),
+        "name": name_str,
+        "arguments": arguments,
+    });
+    Some((call, end))
+}
+
+/// Report stray text that sits outside any recognized top-level tag.
+/// When the stray content contains parseable tool calls, execute them
+/// (route them through the canonical-call path) and add a soft violation
+/// so the model still gets the signal to wrap calls properly. Pre-v0.5.82
+/// the parser flagged-and-dropped these calls, which was correct in
+/// principle but stranded weaker locally-hosted models in loops where
+/// they kept re-emitting the same right-shape-wrong-wrapper response.
+fn report_stray(
+    fragment: &str,
+    violations: &mut Vec<String>,
+    tools_val: Option<&VmValue>,
+    calls: &mut Vec<serde_json::Value>,
+    canonical_parts: &mut Vec<String>,
+) {
     let trimmed = fragment.trim();
     if trimmed.is_empty() {
         return;
     }
-    // Cheap heuristic for call-shaped stray text so feedback is concrete.
     let sniff = parse_bare_calls_in_body(trimmed, tools_val);
     if !sniff.calls.is_empty() {
         let names: Vec<_> = sniff
             .calls
             .iter()
-            .filter_map(|c| c.get("name").and_then(|n| n.as_str()))
+            .filter_map(|c| c.get("name").and_then(|n| n.as_str()).map(|s| s.to_string()))
             .collect();
+        for call in &sniff.calls {
+            let name = call
+                .get("name")
+                .and_then(|n| n.as_str())
+                .unwrap_or("")
+                .to_string();
+            let args = call
+                .get("arguments")
+                .cloned()
+                .unwrap_or(serde_json::json!({}));
+            canonical_parts.push(format!(
+                "<tool_call>\n{}\n</tool_call>",
+                render_canonical_call(&name, &args)
+            ));
+            calls.push(call.clone());
+        }
         violations.push(format!(
-            "Detected {} bare tool call(s) ({}) not wrapped in <tool_call> tags. \
-             Re-emit each call inside its own <tool_call>...</tool_call> block. \
-             This response's calls were NOT executed.",
-            sniff.calls.len(),
+            "Tool call(s) ({}) were emitted as bare text outside `<tool_call>` tags. \
+             Executed this turn so work moves forward; please wrap each call in \
+             `<tool_call>...</tool_call>` on subsequent turns.",
             names.join(", ")
         ));
     } else {

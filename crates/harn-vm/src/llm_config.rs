@@ -546,7 +546,14 @@ fn default_config() -> ProvidersConfig {
         },
     );
 
-    // Ollama
+    // Ollama default. Note: Burin overrides this to `/v1/chat/completions`
+    // via its bundled `providers.toml` (loaded by setting
+    // `HARN_PROVIDERS_CONFIG` in the host process). The OpenAI-compat
+    // path bypasses Ollama's per-model tool-call post-processors
+    // (qwen3coder.go, qwen35.go) which raise HTTP 500s on text-mode
+    // responses for the Qwen3.5 family. The default here stays on
+    // `/api/chat` so the harn-vm test stub keeps working with Ollama's
+    // native NDJSON wire format.
     config.providers.insert(
         "ollama".to_string(),
         ProviderDef {

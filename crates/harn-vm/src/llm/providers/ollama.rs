@@ -54,15 +54,23 @@ impl OllamaProvider {
         if body["options"].get("num_predict").is_none() && opts.max_tokens > 0 {
             body["options"]["num_predict"] = serde_json::json!(opts.max_tokens);
         }
-        // Always enable thinking for thinking-capable models
+        // Thinking control: Ollama's chat templates (e.g. qwen3:30b-a3b)
+        // gate `<think>` emission on the Go-template booleans `$.IsThinkSet`
+        // and `.Thinking`, which are populated from the top-level `think`
+        // field — NOT from `chat_template_kwargs.enable_thinking`. Even
+        // when we drive Ollama through `/v1/chat/completions`, the OpenAI-
+        // compat shim passes the `think` extension through to the same
+        // template context. Default to `false` so an agent loop turn is
+        // fast and tool-call-shaped; callers that want extended reasoning
+        // set `thinking` explicitly. (`chat_template_kwargs` is still set
+        // by the OpenAI-compat builder for vLLM/SGLang hosts that key off
+        // it instead.)
         body["think"] = match opts.thinking {
-            Some(ThinkingConfig::Enabled) | Some(ThinkingConfig::WithBudget(_)) | None => {
+            Some(ThinkingConfig::Enabled) | Some(ThinkingConfig::WithBudget(_)) => {
                 serde_json::json!(true)
             }
+            None => serde_json::json!(false),
         };
-        // Remove OpenAI-specific fields that Ollama doesn't understand
-        body.as_object_mut()
-            .map(|o| o.remove("chat_template_kwargs"));
         body
     }
 

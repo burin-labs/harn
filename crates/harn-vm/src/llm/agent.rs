@@ -20,7 +20,7 @@ use super::agent_observe::{dump_llm_interpreted_response, observed_llm_call, Llm
 use super::agent_tools::{
     classify_tool_mutation, declared_paths, denied_tool_result, dispatch_tool_execution,
     is_denied_tool_result, is_read_only_tool, loop_intervention_message,
-    merge_agent_loop_approval_policy, merge_agent_loop_policy, native_protocol_violation_nudge,
+    merge_agent_loop_approval_policy, merge_agent_loop_policy,
     normalize_native_tools_for_format, normalize_tool_choice_for_format,
     normalize_tool_examples_for_format, render_tool_result, stable_hash, stable_hash_str,
     LoopIntervention, ToolCallTracker,
@@ -1013,21 +1013,23 @@ pub async fn run_agent_loop_internal(
         } else if has_tools {
             let parse_result = parse_text_tool_calls_with_tools(&text, tools_val);
             tool_parse_errors = parse_result.errors;
-            if tool_format == "native" {
-                if !parse_result.calls.is_empty() || !tool_parse_errors.is_empty() {
-                    let feedback = native_protocol_violation_nudge(
-                        &tool_format,
-                        config.turn_policy.as_ref(),
-                        !parse_result.calls.is_empty(),
-                    );
-                    append_message_to_contexts(
-                        &mut visible_messages,
-                        &mut recorded_messages,
-                        runtime_feedback_message("protocol_violation", feedback),
-                    );
-                }
-                Vec::new()
-            } else {
+            // Text-mode tool calls are the universal protocol every model is
+            // expected to follow. Honor them regardless of `tool_format` —
+            // many models served via Ollama / OpenAI-compat fall back to
+            // emitting `<tool_call>name({...})</tool_call>` in text even
+            // when the request advertised a native `tools` channel, because
+            // the model's chat template doesn't actually route through the
+            // host's native function-call surface. Discarding those would
+            // strand a legitimate tool call mid-loop. When in native mode
+            // and the model still chose text, log a hint so we can spot
+            // mis-tuned aliases later, but execute the call.
+            if tool_format == "native" && !parse_result.calls.is_empty() {
+                crate::events::log_info(
+                    "llm.tool",
+                    "native-mode stage accepted text-mode tool calls (model fell back to text)",
+                );
+            }
+            {
                 let calls = parse_result.calls;
 
                 // When the parser found tool-call-looking text but couldn't

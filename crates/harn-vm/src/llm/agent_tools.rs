@@ -207,21 +207,22 @@ pub(super) fn normalize_native_tools_for_format(
 }
 
 pub(super) fn normalize_tool_examples_for_format(
-    tool_format: &str,
+    _tool_format: &str,
     tool_examples: Option<String>,
 ) -> Option<String> {
-    if tool_format == "text" {
-        tool_examples.and_then(|examples| {
-            let trimmed = examples.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed.to_string())
-            }
-        })
-    } else {
-        None
-    }
+    // Pass examples through in both modes. In native mode they serve as a
+    // fallback that lets the model hand-write `<tool_call>` blocks when the
+    // host's chat template strips the native `tools` parameter. The
+    // downstream parser accepts either channel, so showing both in the
+    // contract prompt costs tokens but never causes confusion.
+    tool_examples.and_then(|examples| {
+        let trimmed = examples.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
 }
 
 pub(super) fn required_tool_choice_for_provider(provider: &str) -> serde_json::Value {
@@ -254,22 +255,10 @@ pub(super) fn normalize_tool_choice_for_format(
     None
 }
 
-pub(super) fn native_protocol_violation_nudge(
-    tool_format: &str,
-    turn_policy: Option<&crate::orchestration::TurnPolicy>,
-    saw_text_tool_calls: bool,
-) -> String {
-    let mut message = if saw_text_tool_calls {
-        "This transcript is native-tool-only. Your previous response used handwritten tool-call text, which was not executed. Call an available tool through the provider tool channel instead of writing tool syntax in the assistant message.".to_string()
-    } else {
-        "This transcript is native-tool-only. Call an available tool through the provider tool channel now instead of replying with prose or bare code.".to_string()
-    };
-    if let Some(nudge) = super::agent::action_turn_nudge(tool_format, turn_policy, false) {
-        message.push(' ');
-        message.push_str(&nudge);
-    }
-    message
-}
+// `native_protocol_violation_nudge` removed in v0.5.82: native-mode stages
+// now accept text-mode tool calls as a fallback, so chastising the model
+// for using text when its host stripped the native channel is incorrect
+// behavior. The tool-format hint already lives in the contract prompt.
 
 // ---------------------------------------------------------------------------
 // Tool dispatch

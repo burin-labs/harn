@@ -459,15 +459,26 @@ fn native_tool_format_preserves_native_tool_channel() {
 }
 
 #[test]
-fn native_format_drops_text_tool_examples() {
+fn tool_examples_render_in_both_formats() {
+    // Pre-v0.5.82 native mode dropped the text-mode examples to avoid two
+    // protocols competing in the prompt. That breaks for hosts that strip
+    // the native `tools` parameter (e.g. Ollama models with bare
+    // `{{ .Prompt }}` chat templates) — the model ends up with no tool
+    // guidance at all. Examples now flow through in both modes; the parser
+    // accepts either channel.
     assert_eq!(
-        normalize_tool_examples_for_format("native", Some("edit({ path: \"a\" })".to_string())),
-        None
+        normalize_tool_examples_for_format("native", Some(" edit({ path: \"a\" }) ".to_string())),
+        Some("edit({ path: \"a\" })".to_string())
     );
     assert_eq!(
         normalize_tool_examples_for_format("text", Some(" edit({ path: \"a\" }) ".to_string())),
         Some("edit({ path: \"a\" })".to_string())
     );
+    assert_eq!(
+        normalize_tool_examples_for_format("native", Some("   ".to_string())),
+        None
+    );
+    assert_eq!(normalize_tool_examples_for_format("native", None), None);
 }
 
 #[test]

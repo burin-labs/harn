@@ -613,17 +613,30 @@ fn contract_prompt_help_block_documents_tagged_protocol() {
 }
 
 #[test]
-fn contract_prompt_native_mode_omits_text_help() {
+fn contract_prompt_native_mode_includes_text_fallback() {
+    // Pre-v0.5.82 native mode emitted a four-line "use the native channel"
+    // preamble and stripped all schemas/examples. That broke for hosts
+    // (Ollama with bare templates, some OpenAI-compat servers) that drop
+    // the `tools` parameter — the model would receive zero tool guidance.
+    // Native mode now keeps the preamble preferring the native channel
+    // AND includes the text-mode protocol + schemas as a fallback.
     let tools = sample_tool_registry();
     let prompt = build_tool_calling_contract_prompt(Some(&tools), None, "native", true, None);
-    assert!(prompt.contains("native tool-calling channel"));
-    assert!(prompt.contains("Do not emit handwritten tool-call text or JSON"));
-    assert!(prompt.contains("authoritative tool names and argument schemas"));
-    assert!(prompt.contains("This turn is action-gated"));
-    assert!(!prompt.contains("How to call tools"));
-    assert!(!prompt.contains("declare function edit(args:"));
-    assert!(!prompt.contains("## Available tools"));
-    assert!(!prompt.contains("### `edit`"));
+    assert!(
+        prompt.contains("native tool-calling channel"),
+        "native preamble missing: {prompt}"
+    );
+    assert!(
+        prompt.contains("strip the tools parameter"),
+        "fallback rationale missing: {prompt}"
+    );
+    assert!(
+        prompt.contains("This turn is action-gated"),
+        "action gate missing: {prompt}"
+    );
+    // Text-mode help and schemas are now present in native mode too.
+    assert!(prompt.contains("declare function edit(args:"));
+    assert!(prompt.contains("## Available tools"));
 }
 
 #[test]
@@ -631,7 +644,7 @@ fn contract_prompt_text_mode_mentions_action_gate_before_examples() {
     let tools = sample_tool_registry();
     let prompt = build_tool_calling_contract_prompt(Some(&tools), None, "text", true, None);
     assert!(prompt.contains("This turn is action-gated."));
-    assert!(prompt.contains("open your response with a <tool_call> block"));
+    assert!(prompt.contains("native channel or `<tool_call>` block"));
     assert!(prompt.contains("Do not emit raw source code"));
 }
 
@@ -1620,19 +1633,35 @@ fn tagged_parser_flags_stray_prose_outside_tags() {
 }
 
 #[test]
-fn tagged_parser_flags_bare_tool_call_without_wrapper() {
+fn tagged_parser_executes_bare_tool_call_with_soft_violation() {
+    // Pre-v0.5.82 bare calls without `<tool_call>` wrappers were flagged
+    // AND dropped, which stranded weaker locally-hosted models that kept
+    // emitting the same right-shape-wrong-wrapper response. Now we
+    // execute the call and surface a soft violation so the model still
+    // learns the canonical wrapping next turn.
     let tools = sample_tool_registry();
     let text = "edit({ action: \"create\", path: \"a.rs\", content: \"x\" })";
     let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_eq!(
+        result.calls.len(),
+        1,
+        "bare call must execute (calls: {}, violations: {:?})",
+        result.calls.len(),
+        result.violations
+    );
+    assert_eq!(
+        result.calls[0]
+            .get("name")
+            .and_then(|n| n.as_str())
+            .unwrap_or(""),
+        "edit"
+    );
     assert!(
         !result.violations.is_empty(),
-        "bare tool call (no <tool_call> wrapper) must be a violation"
+        "bare call still warrants a violation so the model wraps next turn"
     );
-    // When the call isn't wrapped, it is NOT executed — the violation
-    // message explicitly mentions that so the model re-emits.
-    assert!(result.calls.is_empty(), "unwrapped calls must not execute");
     assert!(
-        result.violations[0].contains("not wrapped in <tool_call>"),
+        result.violations[0].contains("bare text") || result.violations[0].contains("<tool_call>"),
         "violation must name the missing wrapper: {}",
         result.violations[0]
     );

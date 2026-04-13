@@ -108,14 +108,16 @@ impl OpenAiCompatibleProvider {
         if let Some(ref tc) = opts.tool_choice {
             body["tool_choice"] = tc.clone();
         }
-        // OpenAI-compatible thinking — added unconditionally here; providers
-        // that don't support it (e.g. OpenRouter) strip it via
-        // `transform_request()`.
-        if opts.thinking.is_some() {
-            body["chat_template_kwargs"] = serde_json::json!({
-                "enable_thinking": true,
-            });
-        }
+        // OpenAI-compatible thinking — set explicitly in both directions
+        // so the request is unambiguous about what we want. Qwen-family
+        // chat templates default to enabled when this is absent, which
+        // means a stage that wants fast tool-call responses gets a
+        // thinking-mode pass that swallows the budget. Providers that
+        // don't support the field (OpenRouter, Anthropic-routed) strip it
+        // via `transform_request()`.
+        body["chat_template_kwargs"] = serde_json::json!({
+            "enable_thinking": opts.thinking.is_some(),
+        });
         body
     }
 
