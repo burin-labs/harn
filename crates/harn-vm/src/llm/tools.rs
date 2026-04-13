@@ -1873,11 +1873,27 @@ pub(crate) fn parse_text_tool_calls_with_tools(
             break;
         }
 
-        // Collect any stray non-tag bytes up to the next `<`.
+        // Collect any stray non-tag bytes up to the next `<`. A naive
+        // scan-to-next-`<` truncates bare `name({ key: <<EOF\n...\nEOF })`
+        // tool calls at the heredoc opener, leaving the salvage path with
+        // a fragment that can't parse. Skip past `<<TAG ... TAG` heredoc
+        // bodies in-line so a complete bare call survives the chunker.
         if bytes[cursor] != b'<' {
             let start = cursor;
-            while cursor < bytes.len() && bytes[cursor] != b'<' {
-                cursor += 1;
+            loop {
+                while cursor < bytes.len() && bytes[cursor] != b'<' {
+                    cursor += 1;
+                }
+                if cursor + 1 < bytes.len()
+                    && bytes[cursor] == b'<'
+                    && bytes[cursor + 1] == b'<'
+                {
+                    if let Some(after) = skip_heredoc_body(src, cursor) {
+                        cursor = after;
+                        continue;
+                    }
+                }
+                break;
             }
             report_stray(
                 &src[start..cursor],
@@ -2336,6 +2352,74 @@ fn collapse_blank_lines(text: &str) -> String {
         }
     }
     out
+}
+
+/// Skip past a `<<TAG\n...\nTAG` heredoc body starting at `start` in `src`.
+/// Returns the byte position immediately after the closing tag (mirroring
+/// `Parser::parse_heredoc`'s rewind), or `None` when the heredoc is malformed
+/// or unterminated. Used by the top-level scanner so a stray-bytes chunker
+/// doesn't truncate bare `name({ key: <<EOF\n...\nEOF })` tool calls at the
+/// `<<` opener.
+fn skip_heredoc_body(src: &str, start: usize) -> Option<usize> {
+    let bytes = src.as_bytes();
+    if bytes.get(start) != Some(&b'<') || bytes.get(start + 1) != Some(&b'<') {
+        return None;
+    }
+    let mut pos = start + 2;
+    let has_quote = matches!(bytes.get(pos), Some(b'\'') | Some(b'"'));
+    let quote_char = bytes.get(pos).copied();
+    if has_quote {
+        pos += 1;
+    }
+    let tag_start = pos;
+    while let Some(b) = bytes.get(pos) {
+        if b.is_ascii_alphanumeric() || *b == b'_' {
+            pos += 1;
+        } else {
+            break;
+        }
+    }
+    if pos == tag_start {
+        return None;
+    }
+    let tag = &src[tag_start..pos];
+    if has_quote && bytes.get(pos).copied() == quote_char {
+        pos += 1;
+    }
+    if bytes.get(pos) == Some(&b'\r') {
+        pos += 1;
+    }
+    if bytes.get(pos) != Some(&b'\n') {
+        return None;
+    }
+    pos += 1;
+    while pos < bytes.len() {
+        let line_start = pos;
+        while let Some(b) = bytes.get(pos) {
+            if *b == b'\n' {
+                break;
+            }
+            pos += 1;
+        }
+        let line = &src[line_start..pos];
+        let leading_ws_len = line.len() - line.trim_start().len();
+        let after_ws = &line[leading_ws_len..];
+        if let Some(rest) = after_ws.strip_prefix(tag) {
+            let at_word_boundary = rest
+                .chars()
+                .next()
+                .is_none_or(|c| !(c.is_ascii_alphanumeric() || c == '_'));
+            if at_word_boundary {
+                return Some(line_start + leading_ws_len + tag.len());
+            }
+        }
+        if bytes.get(pos) == Some(&b'\n') {
+            pos += 1;
+        } else {
+            return None;
+        }
+    }
+    None
 }
 
 /// Length of a JavaScript-ish identifier starting at bytes[0]. Returns None

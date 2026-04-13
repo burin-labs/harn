@@ -1668,6 +1668,42 @@ fn tagged_parser_executes_bare_tool_call_with_soft_violation() {
 }
 
 #[test]
+fn tagged_parser_executes_bare_tool_call_with_heredoc_body() {
+    // Regression: the top-level scanner's stray-bytes chunker scanned to
+    // the next `<` byte, which truncated bare `name({ key: <<EOF\n...\nEOF })`
+    // calls at the heredoc opener and left the salvage path with a fragment
+    // that couldn't parse. qwen2.5-coder hits this on every py-test edit
+    // because it emits the entire test body as a heredoc value without
+    // wrapping the call in `<tool_call>` tags.
+    let tools = sample_tool_registry();
+    let text = "edit({ action: \"replace_range\", path: \"tests/test.py\", \
+                range_start: 1, range_end: 4, content: <<EOF\n\
+                import pytest\n\n\
+                def test_one():\n    assert 1 == 1\n\
+                EOF\n})";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_eq!(
+        result.calls.len(),
+        1,
+        "heredoc-bodied bare call must execute (calls: {}, violations: {:?}, errors: {:?})",
+        result.calls.len(),
+        result.violations,
+        result.errors,
+    );
+    assert_eq!(
+        result.calls[0]["arguments"]["action"]
+            .as_str()
+            .unwrap_or(""),
+        "replace_range"
+    );
+    let body = result.calls[0]["arguments"]["content"]
+        .as_str()
+        .unwrap_or("");
+    assert!(body.contains("import pytest"), "heredoc body preserved: {body:?}");
+    assert!(body.contains("def test_one"), "heredoc body preserved: {body:?}");
+}
+
+#[test]
 fn tagged_parser_flags_unknown_top_level_tag() {
     let tools = sample_tool_registry();
     let text = "<notes>my thoughts</notes><tool_call>\nedit({ action: \"create\", path: \"a.rs\", content: \"x\" })\n</tool_call>";
