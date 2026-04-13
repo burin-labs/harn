@@ -1,0 +1,12 @@
+// TODO: upgrade to `.take(10).to_list()` after step (d) lands `take`.
+// Proves combinators are lazy: `.first()` pulls exactly one item; later
+// `.first()` calls on the same iter continue advancing the underlying
+// source (single-pass semantics).
+pipeline test(task) {
+  let it = iter([1, 2, 3, 4]).map({ x -> x * 10 })
+  log(it.first())
+  log(it.first())
+  log(it.first())
+  log(it.first())
+  log(it.first())
+}

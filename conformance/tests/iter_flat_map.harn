@@ -1,0 +1,4 @@
+pipeline test(task) {
+  let out = iter([1, 2, 3]).flat_map({ x -> [x, x * 10] }).to_list()
+  log(out)
+}

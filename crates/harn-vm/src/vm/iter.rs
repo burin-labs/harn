@@ -32,6 +32,22 @@ pub enum VmIter {
     Gen { gen: VmGenerator },
     /// Reads from a channel handle.
     Chan { handle: VmChannelHandle },
+    /// Maps each item through a closure.
+    Map {
+        inner: Rc<RefCell<VmIter>>,
+        f: VmValue,
+    },
+    /// Keeps only items for which the predicate is truthy.
+    Filter {
+        inner: Rc<RefCell<VmIter>>,
+        p: VmValue,
+    },
+    /// Maps each item to an iterable and flattens one level.
+    FlatMap {
+        inner: Rc<RefCell<VmIter>>,
+        f: VmValue,
+        cur: Option<Rc<RefCell<VmIter>>>,
+    },
     /// Terminal state: `next` always returns `None`.
     Exhausted,
 }
@@ -39,13 +55,21 @@ pub enum VmIter {
 impl VmIter {
     /// Produce the next value, or `None` when exhausted.
     ///
-    /// Step (a) doesn't invoke closures, so the `_vm` / `_functions` arguments
-    /// are unused. They're kept in the signature so combinator variants added
-    /// in later steps can call back into the VM without a breaking API change.
-    pub async fn next(
+    /// Combinator variants (`Map`, `Filter`, `FlatMap`) invoke user-provided
+    /// closures through the `vm` / `functions` parameters.
+    pub fn next<'a>(
+        &'a mut self,
+        vm: &'a mut crate::vm::Vm,
+        functions: &'a [CompiledFunction],
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<VmValue>, VmError>> + 'a>>
+    {
+        Box::pin(async move { self.next_impl(vm, functions).await })
+    }
+
+    async fn next_impl(
         &mut self,
-        _vm: &mut crate::vm::Vm,
-        _functions: &[CompiledFunction],
+        vm: &mut crate::vm::Vm,
+        functions: &[CompiledFunction],
     ) -> Result<Option<VmValue>, VmError> {
         match self {
             VmIter::Exhausted => Ok(None),
@@ -104,6 +128,68 @@ impl VmIter {
                     }
                 }
             }
+            VmIter::Map { inner, f } => {
+                let f = f.clone();
+                let item = inner.borrow_mut().next(vm, functions).await?;
+                match item {
+                    None => {
+                        *self = VmIter::Exhausted;
+                        Ok(None)
+                    }
+                    Some(v) => {
+                        let out = vm.call_callable_value(&f, &[v], functions).await?;
+                        Ok(Some(out))
+                    }
+                }
+            }
+            VmIter::Filter { inner, p } => {
+                let p = p.clone();
+                loop {
+                    let item = inner.borrow_mut().next(vm, functions).await?;
+                    match item {
+                        None => {
+                            *self = VmIter::Exhausted;
+                            return Ok(None);
+                        }
+                        Some(v) => {
+                            let keep = vm.call_callable_value(&p, &[v.clone()], functions).await?;
+                            if keep.is_truthy() {
+                                return Ok(Some(v));
+                            }
+                        }
+                    }
+                }
+            }
+            VmIter::FlatMap { inner, f, cur } => {
+                let f = f.clone();
+                loop {
+                    if let Some(cur_iter) = cur.clone() {
+                        let item = cur_iter.borrow_mut().next(vm, functions).await?;
+                        if let Some(v) = item {
+                            return Ok(Some(v));
+                        }
+                        *cur = None;
+                    }
+                    let item = inner.borrow_mut().next(vm, functions).await?;
+                    match item {
+                        None => {
+                            *self = VmIter::Exhausted;
+                            return Ok(None);
+                        }
+                        Some(v) => {
+                            let result = vm.call_callable_value(&f, &[v], functions).await?;
+                            let lifted = iter_from_value(result)?;
+                            if let VmValue::Iter(h) = lifted {
+                                *cur = Some(h);
+                            } else {
+                                return Err(VmError::TypeError(
+                                    "flat_map: expected iterable result".to_string(),
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
             VmIter::Chan { handle } => {
                 let is_closed = handle.closed.load(std::sync::atomic::Ordering::Relaxed);
                 let rx = handle.receiver.clone();
@@ -124,6 +210,23 @@ impl VmIter {
             }
         }
     }
+}
+
+/// Fully consume an iter handle into a Vec of values.
+pub async fn drain(
+    handle: &Rc<RefCell<VmIter>>,
+    vm: &mut crate::vm::Vm,
+    functions: &[CompiledFunction],
+) -> Result<Vec<VmValue>, VmError> {
+    let mut out = Vec::new();
+    loop {
+        let v = handle.borrow_mut().next(vm, functions).await?;
+        match v {
+            Some(v) => out.push(v),
+            None => break,
+        }
+    }
+    Ok(out)
 }
 
 /// Convenience: wrap a source value into a `VmValue::Iter`. Used by the
