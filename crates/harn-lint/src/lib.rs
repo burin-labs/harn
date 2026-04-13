@@ -427,6 +427,7 @@ impl<'a> Linter<'a> {
     fn lint_program(&mut self, nodes: &[SNode]) {
         if let Some(src) = self.source {
             check_legacy_doc_comments(src, nodes, &mut self.diagnostics);
+            check_blank_line_between_items(src, nodes, &mut self.diagnostics);
         }
         for node in nodes {
             self.lint_node(node);
@@ -1649,6 +1650,33 @@ impl<'a> Linter<'a> {
     }
 }
 
+/// Return true when this node kind is a top-level item for the purposes of
+/// the `blank-line-between-items` rule. This is the slightly-broader set
+/// that includes let/var bindings at module scope.
+fn is_top_level_item(node: &Node) -> bool {
+    matches!(
+        node,
+        Node::FnDecl { .. }
+            | Node::Pipeline { .. }
+            | Node::StructDecl { .. }
+            | Node::EnumDecl { .. }
+            | Node::InterfaceDecl { .. }
+            | Node::TypeDecl { .. }
+            | Node::ToolDecl { .. }
+            | Node::ImplBlock { .. }
+            | Node::OverrideDecl { .. }
+            | Node::LetBinding { .. }
+            | Node::VarBinding { .. }
+    )
+}
+
+fn is_import_item(node: &Node) -> bool {
+    matches!(
+        node,
+        Node::ImportDecl { .. } | Node::SelectiveImport { .. }
+    )
+}
+
 /// Return true when this node kind participates in the `legacy-doc-comment`
 /// rule (i.e. is a documented item whose preceding comments should use the
 /// canonical `/** */` form). Mirrors the plan's whitelist.
@@ -2111,6 +2139,115 @@ pub fn collect_selective_import_names(program: &[SNode]) -> HashSet<String> {
         }
     }
     names
+}
+
+/// Emit `blank-line-between-items` diagnostics: whenever two top-level
+/// items are adjacent in the source with no blank line between them, the
+/// rule fires with an autofix that inserts the blank line at the correct
+/// offset. Doc comments immediately preceding an item count as part of the
+/// item — the blank line goes above the doc block, not between doc and
+/// item.
+fn check_blank_line_between_items(
+    source: &str,
+    program: &[SNode],
+    diagnostics: &mut Vec<LintDiagnostic>,
+) {
+    if program.len() < 2 {
+        return;
+    }
+    // Collect all comment tokens keyed by starting line (1-based).
+    let comment_tokens = collect_comment_tokens(source);
+    let comments_by_line: std::collections::HashMap<usize, &LegacyCommentTok> = comment_tokens
+        .iter()
+        .map(|c| (c.line, c))
+        .collect();
+
+    // Precompute line → byte offset of start of line (1-based lines).
+    let line_starts = build_line_starts(source);
+
+    for pair in program.windows(2) {
+        let prev = &pair[0];
+        let next = &pair[1];
+
+        // Skip consecutive imports: they intentionally stay tight.
+        if is_import_item(&prev.node) && is_import_item(&next.node) {
+            continue;
+        }
+        if !is_top_level_item(&prev.node) && !is_import_item(&prev.node) {
+            continue;
+        }
+        if !is_top_level_item(&next.node) && !is_import_item(&next.node) {
+            continue;
+        }
+        if prev.span.line == 0 || next.span.line == 0 {
+            continue;
+        }
+
+        // Walk upward from `next.span.line - 1` collecting contiguous
+        // comment lines (no blank line between them and the item). The
+        // "first line of the item-with-its-doc-block" is the topmost such
+        // line.
+        let mut first_line = next.span.line;
+        let mut probe = next.span.line;
+        while probe > 1 {
+            let above = probe - 1;
+            if comments_by_line.contains_key(&above) {
+                first_line = above;
+                probe = above;
+                continue;
+            }
+            break;
+        }
+
+        let prev_end_line = prev.span.end_line.max(prev.span.line);
+        // Number of source lines that sit strictly between the end of prev
+        // and the start of (next + its glued comment block). If there is
+        // at least one fully-blank line between them the rule is satisfied.
+        if first_line <= prev_end_line + 1 {
+            // Adjacent — no blank line. Check that the line literally
+            // following prev is non-blank, otherwise we'd be flagging a
+            // case that already has blank space.
+            let insert_line = prev_end_line + 1;
+            let Some(&insert_offset) = line_starts.get(insert_line.saturating_sub(1)) else {
+                continue;
+            };
+            let span = Span::with_offsets(
+                insert_offset,
+                insert_offset,
+                insert_line,
+                1,
+            );
+            diagnostics.push(LintDiagnostic {
+                rule: "blank-line-between-items",
+                message: "top-level items should be separated by a blank line".to_string(),
+                span,
+                severity: LintSeverity::Warning,
+                suggestion: Some(
+                    "insert a blank line above the next item (doc comments \
+                     stay glued to the item they describe)"
+                        .to_string(),
+                ),
+                fix: Some(vec![FixEdit {
+                    span,
+                    replacement: "\n".to_string(),
+                }]),
+            });
+        }
+    }
+}
+
+/// Build a Vec where index `i` is the byte offset of the start of line
+/// `i + 1` (1-based lines). Convenient for constructing zero-width FixEdit
+/// spans at "beginning of line N".
+fn build_line_starts(source: &str) -> Vec<usize> {
+    let mut starts = Vec::new();
+    starts.push(0);
+    for (idx, ch) in source.char_indices() {
+        if ch == '\n' {
+            starts.push(idx + 1);
+        }
+    }
+    starts
 }
 
 /// Simplify a boolean comparison expression like `x == true` → `x`.

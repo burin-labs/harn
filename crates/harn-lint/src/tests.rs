@@ -1766,3 +1766,62 @@ pipeline default(task) {
         "llm_call direct access should trigger rule, got: {diags:?}"
     );
 }
+
+// --- blank-line-between-items ---
+
+#[test]
+fn test_blank_line_between_items_fires_for_two_adjacent_fns() {
+    let source = "fn a() -> int {\n  return 1\n}\nfn b() -> int {\n  return 2\n}\n";
+    let diags = lint_source(source);
+    assert!(
+        has_rule(&diags, "blank-line-between-items"),
+        "expected blank-line-between-items, got: {diags:?}"
+    );
+}
+
+#[test]
+fn test_blank_line_between_items_ok_when_blank_present() {
+    let source = "fn a() -> int {\n  return 1\n}\n\nfn b() -> int {\n  return 2\n}\n";
+    let diags = lint_source(source);
+    assert!(
+        !has_rule(&diags, "blank-line-between-items"),
+        "should not fire with blank line present, got: {diags:?}"
+    );
+}
+
+#[test]
+fn test_blank_line_between_items_ok_with_doc_block_and_blank_above() {
+    // Blank line above the doc block — doc block is glued to fn b.
+    let source = "fn a() -> int {\n  return 1\n}\n\n/** Describes b. */\nfn b() -> int {\n  return 2\n}\n";
+    let diags = lint_source(source);
+    assert!(
+        !has_rule(&diags, "blank-line-between-items"),
+        "blank line above doc block should satisfy the rule, got: {diags:?}"
+    );
+}
+
+#[test]
+fn test_blank_line_between_items_fires_when_doc_has_no_blank_above() {
+    // No blank line above the doc block — the rule fires.
+    let source = "fn a() -> int {\n  return 1\n}\n/** Describes b. */\nfn b() -> int {\n  return 2\n}\n";
+    let diags = lint_source(source);
+    let hit = diags
+        .iter()
+        .find(|d| d.rule == "blank-line-between-items")
+        .expect("expected blank-line-between-items to fire");
+    // Autofix should insert a newline at the start of the doc comment's
+    // line (line 4) — the "\n" replacement lives above the doc block.
+    let fix = hit.fix.as_ref().expect("autofix expected");
+    assert_eq!(fix.len(), 1);
+    assert_eq!(fix[0].replacement, "\n");
+}
+
+#[test]
+fn test_blank_line_between_items_does_not_fire_between_imports() {
+    let source = "import \"std/strings\"\nimport \"std/io\"\n\nfn a() -> int { return 1 }\n";
+    let diags = lint_source(source);
+    assert!(
+        !has_rule(&diags, "blank-line-between-items"),
+        "consecutive imports are intentionally tight, got: {diags:?}"
+    );
+}
