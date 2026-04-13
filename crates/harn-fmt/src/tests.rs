@@ -1004,3 +1004,62 @@ fn test_doc_comment_inside_impl_block() {
         "no `///` should remain after formatting, got:\n{result}"
     );
 }
+
+#[test]
+fn test_blank_line_between_top_level_fns() {
+    let source =
+        "fn one() -> int {\n  return 1\n}\nfn two() -> int {\n  return 2\n}\n";
+    let result = format_source(&source).unwrap();
+    assert!(
+        result.contains("}\n\nfn two"),
+        "expected a blank line between adjacent top-level fns, got:\n{result}"
+    );
+    // Idempotence: formatting the formatted output must yield the same string.
+    let result2 = format_source(&result).unwrap();
+    assert_eq!(result, result2, "formatter is not idempotent for two fns");
+}
+
+#[test]
+fn test_blank_line_between_mixed_top_level_items_idempotent() {
+    let source = "type A = int\ntype B = string\nstruct C {\n  a: int\n}\nenum E {\n  X\n}\nfn f() -> int {\n  return 1\n}\n";
+    let result = format_source(&source).unwrap();
+    // Each adjacent pair should be separated by exactly one blank line.
+    assert!(result.contains("type A = int\n\ntype B"));
+    assert!(result.contains("type B = string\n\nstruct"));
+    assert!(result.contains("}\n\nenum"));
+    assert!(result.contains("}\n\nfn"));
+    let result2 = format_source(&result).unwrap();
+    assert_eq!(
+        result, result2,
+        "formatter is not idempotent for mixed top-level items"
+    );
+}
+
+#[test]
+fn test_doc_comment_glued_to_item_blank_line_above() {
+    let source =
+        "fn first() -> int {\n  return 1\n}\n/// Second docs.\n/// More.\nfn second() -> int {\n  return 2\n}\n";
+    let result = format_source(&source).unwrap();
+    // Blank line above the doc block; doc block glued to fn second.
+    assert!(
+        result.contains("}\n\n/**\n * Second docs.\n * More.\n */\nfn second"),
+        "doc block should have blank line above and be glued to item, got:\n{result}"
+    );
+    let result2 = format_source(&result).unwrap();
+    assert_eq!(
+        result, result2,
+        "formatter is not idempotent with doc comments between items"
+    );
+}
+
+#[test]
+fn test_imports_stay_tight_then_blank_before_first_item() {
+    let source = "import \"std/http\"\nimport \"alpha\"\nimport \"zeta\"\npipeline default(task) { log(1) }\n";
+    let result = format_source(&source).unwrap();
+    assert!(
+        result.contains("import \"std/http\"\nimport \"alpha\"\nimport \"zeta\"\n\npipeline"),
+        "imports should be tight with a single blank line before the first non-import item, got:\n{result}"
+    );
+    let result2 = format_source(&result).unwrap();
+    assert_eq!(result, result2, "formatter is not idempotent around imports");
+}

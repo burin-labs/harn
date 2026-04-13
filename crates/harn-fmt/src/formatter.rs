@@ -132,14 +132,15 @@ impl Formatter {
         });
 
         for (position, (original_index, node)) in imports.into_iter().enumerate() {
-            if position > 0 {
-                self.output.push('\n');
-            }
             let comment_from = if original_index == 0 {
                 1
             } else {
                 nodes[original_index - 1].span.line + 1
             };
+            // Consecutive imports inside the sorted block stay tight: no blank
+            // line between them. `writeln` already terminates each import with
+            // a single `\n`, so we deliberately skip adding another.
+            let _ = position;
             self.emit_comments_in_range(comment_from, node.span.line);
             self.format_node(node);
         }
@@ -184,6 +185,13 @@ impl Formatter {
         }
         for (i, node) in nodes.iter().enumerate().skip(import_count) {
             if i > 0 {
+                // Between adjacent non-import top-level items (and between the
+                // end of the import block and the first non-import item), emit
+                // exactly one blank line. `writeln` already terminated the
+                // previous line with `\n`, so pushing another `\n` here yields
+                // the blank line. Any leading comments (including doc blocks)
+                // are emitted AFTER the blank line so a doc comment stays
+                // glued to the item it documents.
                 self.output.push('\n');
                 let prev_end = if i == import_count && import_count > 0 {
                     nodes[import_count - 1].span.line + 1
