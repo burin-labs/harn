@@ -171,16 +171,21 @@ pub(crate) fn lint_file_inner(
     path: &Path,
     config: &CheckConfig,
     externally_imported_names: &std::collections::HashSet<String>,
-    _require_file_header: bool,
+    require_file_header: bool,
 ) -> CommandOutcome {
     let path_str = path.to_string_lossy().to_string();
     let (source, program) = parse_source_file(&path_str);
 
-    let diagnostics = harn_lint::lint_with_cross_file_imports(
+    let options = harn_lint::LintOptions {
+        file_path: Some(path),
+        require_file_header,
+    };
+    let diagnostics = harn_lint::lint_with_options(
         &program,
         &config.disable_rules,
         Some(&source),
         externally_imported_names,
+        &options,
     );
 
     if diagnostics.is_empty() {
@@ -205,17 +210,22 @@ pub(crate) fn lint_fix_file(
     path: &Path,
     config: &CheckConfig,
     externally_imported_names: &HashSet<String>,
-    _require_file_header: bool,
+    require_file_header: bool,
 ) -> usize {
     let path_str = path.to_string_lossy().to_string();
     let (source, program) = parse_source_file(&path_str);
 
     // Collect lint fixes
-    let lint_diags = harn_lint::lint_with_cross_file_imports(
+    let options = harn_lint::LintOptions {
+        file_path: Some(path),
+        require_file_header,
+    };
+    let lint_diags = harn_lint::lint_with_options(
         &program,
         &config.disable_rules,
         Some(&source),
         externally_imported_names,
+        &options,
     );
 
     // Collect type-check fixes
@@ -266,11 +276,12 @@ pub(crate) fn lint_fix_file(
 
     // Re-lint to report remaining issues
     let (source2, program2) = parse_source_file(&path_str);
-    let remaining = harn_lint::lint_with_cross_file_imports(
+    let remaining = harn_lint::lint_with_options(
         &program2,
         &config.disable_rules,
         Some(&source2),
         externally_imported_names,
+        &options,
     );
     if !remaining.is_empty() {
         print_lint_diagnostics(&path_str, &source, &remaining);

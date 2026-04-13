@@ -2068,6 +2068,19 @@ fn to_pascal_case(name: &str) -> String {
     out
 }
 
+/// Extra options for source-aware lint rules. Keeps the main entry points
+/// backward compatible while allowing callers that know about the source
+/// file's path or want opt-in rules (like `require-file-header`) to turn
+/// them on.
+#[derive(Debug, Default, Clone)]
+pub struct LintOptions<'a> {
+    /// Filesystem path of the source being linted (used by rules like
+    /// `require-file-header` to derive a title from the basename).
+    pub file_path: Option<&'a std::path::Path>,
+    /// When true, the opt-in `require-file-header` rule runs. Default false.
+    pub require_file_header: bool,
+}
+
 /// Lint an AST program and return all diagnostics.
 pub fn lint(program: &[SNode]) -> Vec<LintDiagnostic> {
     lint_with_config_and_source(program, &[], None)
@@ -2089,7 +2102,13 @@ pub fn lint_with_config_and_source(
     disabled_rules: &[String],
     source: Option<&str>,
 ) -> Vec<LintDiagnostic> {
-    lint_full(program, disabled_rules, source, &HashSet::new())
+    lint_full(
+        program,
+        disabled_rules,
+        source,
+        &HashSet::new(),
+        &LintOptions::default(),
+    )
 }
 
 /// Lint with cross-file import awareness.  `externally_imported_names` is the
@@ -2101,7 +2120,31 @@ pub fn lint_with_cross_file_imports(
     source: Option<&str>,
     externally_imported_names: &HashSet<String>,
 ) -> Vec<LintDiagnostic> {
-    lint_full(program, disabled_rules, source, externally_imported_names)
+    lint_full(
+        program,
+        disabled_rules,
+        source,
+        externally_imported_names,
+        &LintOptions::default(),
+    )
+}
+
+/// Lint with cross-file import awareness plus extra options (path-aware and
+/// opt-in rules). Thin wrapper over [`lint_full`].
+pub fn lint_with_options(
+    program: &[SNode],
+    disabled_rules: &[String],
+    source: Option<&str>,
+    externally_imported_names: &HashSet<String>,
+    options: &LintOptions<'_>,
+) -> Vec<LintDiagnostic> {
+    lint_full(
+        program,
+        disabled_rules,
+        source,
+        externally_imported_names,
+        options,
+    )
 }
 
 fn lint_full(
@@ -2109,12 +2152,18 @@ fn lint_full(
     disabled_rules: &[String],
     source: Option<&str>,
     externally_imported_names: &HashSet<String>,
+    options: &LintOptions<'_>,
 ) -> Vec<LintDiagnostic> {
     let mut linter = Linter::new(source);
     linter
         .externally_imported_names
         .clone_from(externally_imported_names);
     linter.lint_program(program);
+    if let Some(src) = source {
+        if options.require_file_header {
+            check_require_file_header(src, options.file_path, &mut linter.diagnostics);
+        }
+    }
     linter.finalize();
     if disabled_rules.is_empty() {
         linter.diagnostics
@@ -2511,6 +2560,86 @@ fn render_import_source(source: &str, node: &SNode) -> String {
         .get(node.span.start..node.span.end)
         .unwrap_or("")
         .to_string()
+}
+
+/// Emit `require-file-header` when the source does not begin with a
+/// `/** */` doc block. Autofix inserts a canonical header at byte 0 with a
+/// title derived from the filename (when a path is provided).
+fn check_require_file_header(
+    source: &str,
+    file_path: Option<&std::path::Path>,
+    diagnostics: &mut Vec<LintDiagnostic>,
+) {
+    // Find the first non-whitespace character in the source and verify
+    // it's the start of a `/**` block. Any other content (including plain
+    // `//` line comments, `/*` non-doc block comments, or code) is a
+    // violation.
+    let bytes = source.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() && matches!(bytes[i], b' ' | b'\t' | b'\r' | b'\n') {
+        i += 1;
+    }
+    if i + 2 < bytes.len() && &bytes[i..i + 3] == b"/**" {
+        return;
+    }
+    let title = derive_file_header_title(file_path);
+    let header = format!("/**\n * {title}\n */\n\n");
+    let span = Span::with_offsets(0, 0, 1, 1);
+    diagnostics.push(LintDiagnostic {
+        rule: "require-file-header",
+        message: "file is missing a `/** */` header doc block".to_string(),
+        span,
+        severity: LintSeverity::Warning,
+        suggestion: Some(format!(
+            "add a `/** <title> */` block at the top of the file (e.g. `{title}`)"
+        )),
+        fix: Some(vec![FixEdit {
+            span,
+            replacement: header,
+        }]),
+    });
+}
+
+/// Derive the title shown inside the autofix's file-header block. Falls
+/// back to a generic "Module." when no path is available.
+pub fn derive_file_header_title(file_path: Option<&std::path::Path>) -> String {
+    let stem = file_path
+        .and_then(|p| p.file_stem().and_then(|s| s.to_str()))
+        .unwrap_or("module");
+    // Replace `-` and `_` with spaces, then capitalize the first letter
+    // only. We intentionally do NOT title-case every word — the plan
+    // specifies "first letter capitalized" for readability.
+    let mut cleaned = String::with_capacity(stem.len());
+    for ch in stem.chars() {
+        if ch == '-' || ch == '_' {
+            cleaned.push(' ');
+        } else {
+            cleaned.push(ch);
+        }
+    }
+    // Normalize whitespace: collapse internal runs of spaces.
+    let collapsed = cleaned
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut trimmed = collapsed.trim().to_string();
+    if trimmed.is_empty() {
+        trimmed.push_str("module");
+    }
+    // Capitalize the very first character.
+    let mut chars = trimmed.chars();
+    let head = chars.next().unwrap().to_ascii_uppercase();
+    let tail: String = chars.collect();
+    let mut out = String::new();
+    out.push(head);
+    out.push_str(&tail.to_lowercase());
+    // Append a terminal period if the title does not already end in one
+    // of `.`, `!`, or `?`.
+    let last = out.chars().last().unwrap_or('.');
+    if !matches!(last, '.' | '!' | '?') {
+        out.push('.');
+    }
+    out
 }
 
 /// Build a Vec where index `i` is the byte offset of the start of line
