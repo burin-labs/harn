@@ -13,6 +13,7 @@ use harn_parser::Parser;
 struct Comment {
     text: String,
     is_block: bool,
+    is_doc: bool,
 }
 
 /// Options controlling formatter behavior.
@@ -44,16 +45,18 @@ pub fn format_source_opts(source: &str, opts: &FmtOptions) -> Result<String, Str
     let mut parser_tokens = Vec::with_capacity(all_tokens.len());
     for tok in all_tokens {
         match &tok.kind {
-            TokenKind::LineComment(text) => {
+            TokenKind::LineComment { text, is_doc } => {
                 comments.entry(tok.span.line).or_default().push(Comment {
                     text: text.clone(),
                     is_block: false,
+                    is_doc: *is_doc,
                 });
             }
-            TokenKind::BlockComment(text) => {
+            TokenKind::BlockComment { text, is_doc } => {
                 comments.entry(tok.span.line).or_default().push(Comment {
                     text: text.clone(),
                     is_block: true,
+                    is_doc: *is_doc,
                 });
             }
             _ => parser_tokens.push(tok),

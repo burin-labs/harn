@@ -238,8 +238,8 @@ pub enum TokenKind {
     Semicolon, // ;
 
     // Comments
-    LineComment(String),  // // text
-    BlockComment(String), // /* text */
+    LineComment { text: String, is_doc: bool },  // // text or /// text
+    BlockComment { text: String, is_doc: bool }, // /* text */ or /** text */
 
     // Special
     Newline,
@@ -336,8 +336,14 @@ impl fmt::Display for TokenKind {
             TokenKind::Comma => write!(f, ","),
             TokenKind::Colon => write!(f, ":"),
             TokenKind::Semicolon => write!(f, ";"),
-            TokenKind::LineComment(s) => write!(f, "// {s}"),
-            TokenKind::BlockComment(s) => write!(f, "/* {s} */"),
+            TokenKind::LineComment { text, is_doc } => {
+                let prefix = if *is_doc { "///" } else { "//" };
+                write!(f, "{prefix} {text}")
+            }
+            TokenKind::BlockComment { text, is_doc } => {
+                let prefix = if *is_doc { "/**" } else { "/*" };
+                write!(f, "{prefix} {text} */")
+            }
             TokenKind::Newline => write!(f, "\\n"),
             TokenKind::Eof => write!(f, "EOF"),
         }

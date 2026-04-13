@@ -202,13 +202,20 @@ impl Lexer {
         let start_line = self.line;
         self.advance(); // skip first /
         self.advance(); // skip second /
+        // Detect doc-comment marker: a third `/` that is NOT followed by another
+        // `/`. So `///foo` is a doc comment, `////foo` (a separator bar) is not.
+        let is_doc = self.source.get(self.pos).copied() == Some('/')
+            && self.source.get(self.pos + 1).copied() != Some('/');
+        if is_doc {
+            self.advance(); // skip third /
+        }
         let mut text = String::new();
         while self.pos < self.source.len() && self.source[self.pos] != '\n' {
             text.push(self.source[self.pos]);
             self.advance();
         }
         Token::with_span(
-            TokenKind::LineComment(text),
+            TokenKind::LineComment { text, is_doc },
             Span::with_offsets(start_byte, self.byte_pos, start_line, start_col),
         )
     }
@@ -218,6 +225,15 @@ impl Lexer {
         let start = Span::with_offsets(self.byte_pos, self.byte_pos, self.line, self.column);
         self.advance(); // skip /
         self.advance(); // skip *
+        // Detect doc-comment marker: a second `*` that is not followed by
+        // another `*` (so `/*** */` stays regular) and not followed by `/`
+        // (so the empty `/**/` block stays regular).
+        let is_doc = self.source.get(self.pos).copied() == Some('*')
+            && self.source.get(self.pos + 1).copied() != Some('*')
+            && self.source.get(self.pos + 1).copied() != Some('/');
+        if is_doc {
+            self.advance(); // skip second *
+        }
         let mut text = String::new();
         let mut depth = 1;
         while self.pos < self.source.len() && depth > 0 {
@@ -250,7 +266,7 @@ impl Lexer {
             return Err(LexerError::UnterminatedBlockComment(start));
         }
         Ok(Token::with_span(
-            TokenKind::BlockComment(text),
+            TokenKind::BlockComment { text, is_doc },
             Span::with_offsets(start_byte, self.byte_pos, self.line, start.column),
         ))
     }
@@ -948,6 +964,53 @@ mod tests {
         assert_eq!(tokens[0].kind, TokenKind::IntLiteral(42));
         assert_eq!(tokens[1].kind, TokenKind::Newline);
         assert_eq!(tokens[2].kind, TokenKind::IntLiteral(43));
+    }
+
+    #[test]
+    fn test_doc_line_comment_detection() {
+        let cases = [
+            ("// regular", false),
+            ("/// doc", true),
+            ("//// separator bar", false),
+            ("///// also a bar", false),
+            ("///", true), // empty doc comment
+        ];
+        for (src, expect_doc) in cases {
+            let mut lex = Lexer::new(src);
+            let tokens = lex.tokenize_with_comments().unwrap();
+            match &tokens[0].kind {
+                TokenKind::LineComment { is_doc, .. } => {
+                    assert_eq!(
+                        *is_doc, expect_doc,
+                        "expected is_doc={expect_doc} for input {src:?}",
+                    );
+                }
+                other => panic!("expected LineComment for {src:?}, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_doc_block_comment_detection() {
+        let cases = [
+            ("/* regular */", false),
+            ("/** doc */", true),
+            ("/*** not a doc */", false),
+            ("/**/", false), // empty block comment, not a doc
+        ];
+        for (src, expect_doc) in cases {
+            let mut lex = Lexer::new(src);
+            let tokens = lex.tokenize_with_comments().unwrap();
+            match &tokens[0].kind {
+                TokenKind::BlockComment { is_doc, .. } => {
+                    assert_eq!(
+                        *is_doc, expect_doc,
+                        "expected is_doc={expect_doc} for input {src:?}",
+                    );
+                }
+                other => panic!("expected BlockComment for {src:?}, got {other:?}"),
+            }
+        }
     }
 
     #[test]
