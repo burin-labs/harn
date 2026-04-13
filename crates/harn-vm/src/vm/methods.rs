@@ -1001,6 +1001,66 @@ impl super::Vm {
                                 cur: None,
                             }))))
                         }
+                        "take" => {
+                            let n = match args.first() {
+                                Some(VmValue::Int(i)) if *i >= 0 => *i as usize,
+                                _ => {
+                                    return Err(VmError::TypeError(
+                                        "iter.take: expected non-negative int".to_string(),
+                                    ))
+                                }
+                            };
+                            Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Take {
+                                inner: handle,
+                                remaining: n,
+                            }))))
+                        }
+                        "skip" => {
+                            let n = match args.first() {
+                                Some(VmValue::Int(i)) if *i >= 0 => *i as usize,
+                                _ => {
+                                    return Err(VmError::TypeError(
+                                        "iter.skip: expected non-negative int".to_string(),
+                                    ))
+                                }
+                            };
+                            Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Skip {
+                                inner: handle,
+                                remaining: n,
+                            }))))
+                        }
+                        "take_while" => {
+                            let p = args
+                                .first()
+                                .filter(|v| Self::is_callable_value(v))
+                                .cloned()
+                                .ok_or_else(|| {
+                                    VmError::TypeError(
+                                        "iter.take_while: expected callable".to_string(),
+                                    )
+                                })?;
+                            Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::TakeWhile {
+                                inner: handle,
+                                p,
+                                done: false,
+                            }))))
+                        }
+                        "skip_while" => {
+                            let p = args
+                                .first()
+                                .filter(|v| Self::is_callable_value(v))
+                                .cloned()
+                                .ok_or_else(|| {
+                                    VmError::TypeError(
+                                        "iter.skip_while: expected callable".to_string(),
+                                    )
+                                })?;
+                            Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::SkipWhile {
+                                inner: handle,
+                                p,
+                                primed: false,
+                            }))))
+                        }
                         "to_list" => {
                             let items = drain(&handle, self, functions).await?;
                             Ok(VmValue::List(Rc::new(items)))

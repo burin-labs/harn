@@ -48,6 +48,31 @@ pub enum VmIter {
         f: VmValue,
         cur: Option<Rc<RefCell<VmIter>>>,
     },
+    /// Yields up to `remaining` items from `inner`, then becomes Exhausted.
+    Take {
+        inner: Rc<RefCell<VmIter>>,
+        remaining: usize,
+    },
+    /// Skips the first `remaining` items from `inner` on the first call, then
+    /// forwards. `remaining == 0` is the sentinel for "already primed".
+    Skip {
+        inner: Rc<RefCell<VmIter>>,
+        remaining: usize,
+    },
+    /// Yields items from `inner` while the predicate is truthy; after the
+    /// first falsy predicate or inner exhaustion, becomes Exhausted.
+    TakeWhile {
+        inner: Rc<RefCell<VmIter>>,
+        p: VmValue,
+        done: bool,
+    },
+    /// Discards items while the predicate is truthy; after the first falsy
+    /// item, forwards that item and all subsequent items from `inner`.
+    SkipWhile {
+        inner: Rc<RefCell<VmIter>>,
+        p: VmValue,
+        primed: bool,
+    },
     /// Terminal state: `next` always returns `None`.
     Exhausted,
 }
@@ -185,6 +210,100 @@ impl VmIter {
                                 return Err(VmError::TypeError(
                                     "flat_map: expected iterable result".to_string(),
                                 ));
+                            }
+                        }
+                    }
+                }
+            }
+            VmIter::Take { inner, remaining } => {
+                if *remaining == 0 {
+                    *self = VmIter::Exhausted;
+                    return Ok(None);
+                }
+                let item = inner.borrow_mut().next(vm, functions).await?;
+                match item {
+                    None => {
+                        *self = VmIter::Exhausted;
+                        Ok(None)
+                    }
+                    Some(v) => {
+                        *remaining -= 1;
+                        if *remaining == 0 {
+                            *self = VmIter::Exhausted;
+                        }
+                        Ok(Some(v))
+                    }
+                }
+            }
+            VmIter::Skip { inner, remaining } => {
+                while *remaining > 0 {
+                    let item = inner.borrow_mut().next(vm, functions).await?;
+                    match item {
+                        None => {
+                            *self = VmIter::Exhausted;
+                            return Ok(None);
+                        }
+                        Some(_) => {
+                            *remaining -= 1;
+                        }
+                    }
+                }
+                let item = inner.borrow_mut().next(vm, functions).await?;
+                match item {
+                    None => {
+                        *self = VmIter::Exhausted;
+                        Ok(None)
+                    }
+                    Some(v) => Ok(Some(v)),
+                }
+            }
+            VmIter::TakeWhile { inner, p, done } => {
+                if *done {
+                    return Ok(None);
+                }
+                let p = p.clone();
+                let item = inner.borrow_mut().next(vm, functions).await?;
+                match item {
+                    None => {
+                        *self = VmIter::Exhausted;
+                        Ok(None)
+                    }
+                    Some(v) => {
+                        let keep = vm.call_callable_value(&p, &[v.clone()], functions).await?;
+                        if keep.is_truthy() {
+                            Ok(Some(v))
+                        } else {
+                            *self = VmIter::Exhausted;
+                            Ok(None)
+                        }
+                    }
+                }
+            }
+            VmIter::SkipWhile { inner, p, primed } => {
+                if *primed {
+                    let item = inner.borrow_mut().next(vm, functions).await?;
+                    return match item {
+                        None => {
+                            *self = VmIter::Exhausted;
+                            Ok(None)
+                        }
+                        Some(v) => Ok(Some(v)),
+                    };
+                }
+                let p = p.clone();
+                loop {
+                    let item = inner.borrow_mut().next(vm, functions).await?;
+                    match item {
+                        None => {
+                            *self = VmIter::Exhausted;
+                            return Ok(None);
+                        }
+                        Some(v) => {
+                            let drop_it =
+                                vm.call_callable_value(&p, &[v.clone()], functions).await?;
+                            if !drop_it.is_truthy() {
+                                *primed = true;
+                                return Ok(Some(v));
                             }
                         }
                     }

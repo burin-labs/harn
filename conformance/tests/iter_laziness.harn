@@ -1,12 +1,13 @@
-// TODO: upgrade to `.take(10).to_list()` after step (d) lands `take`.
-// Proves combinators are lazy: `.first()` pulls exactly one item; later
-// `.first()` calls on the same iter continue advancing the underlying
-// source (single-pass semantics).
+// Proves combinators are lazy via `.take()`: mapping over a large-ish list
+// but taking only 2 materializes 2 elements. Single-pass semantics are
+// preserved — a second drain of the same iter yields only what remains.
 pipeline test(task) {
+  let xs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+  log(iter(xs).map({ x -> x * 10 }).take(2).to_list())
+  log(iter(xs).map({ x -> x * 10 }).filter({ x -> x > 30 }).take(3).to_list())
+
+  // Single-pass: consuming the same iter twice yields only remaining items.
   let it = iter([1, 2, 3, 4]).map({ x -> x * 10 })
-  log(it.first())
-  log(it.first())
-  log(it.first())
-  log(it.first())
-  log(it.first())
+  log(it.take(2).to_list())
+  log(it.take(10).to_list())
 }
