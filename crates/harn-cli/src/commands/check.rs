@@ -6,6 +6,7 @@ use harn_fmt::{format_source_opts, FmtOptions};
 use harn_lint::LintSeverity;
 use harn_parser::{DiagnosticSeverity, Node, SNode, TypeChecker};
 
+use crate::config as harn_config;
 use crate::package::CheckConfig;
 use crate::parse_source_file;
 
@@ -135,10 +136,42 @@ pub(crate) fn check_file_inner(
     }
 }
 
+/// Apply `[lint]` options from the nearest harn.toml onto an existing
+/// `CheckConfig`. Today this only merges the `disabled` list into
+/// `disable_rules`; the `require_file_header` flag is surfaced separately
+/// via `harn_lint_require_file_header` so it can be enabled even when a
+/// user hasn't authored a full `[check]` section.
+pub(crate) fn apply_harn_lint_config(path: &Path, config: &mut CheckConfig) {
+    let Ok(cfg) = harn_config::load_for_path(path) else {
+        return;
+    };
+    if let Some(disabled) = cfg.lint.disabled {
+        for rule in disabled {
+            if !config.disable_rules.iter().any(|r| r == &rule) {
+                config.disable_rules.push(rule);
+            }
+        }
+    }
+}
+
+/// Read `[lint] require_file_header` from the nearest harn.toml, defaulting
+/// to `false`. Invalid config is treated as `false` and surfaced via a
+/// warning.
+pub(crate) fn harn_lint_require_file_header(path: &Path) -> bool {
+    match harn_config::load_for_path(path) {
+        Ok(cfg) => cfg.lint.require_file_header.unwrap_or(false),
+        Err(e) => {
+            eprintln!("warning: {e}");
+            false
+        }
+    }
+}
+
 pub(crate) fn lint_file_inner(
     path: &Path,
     config: &CheckConfig,
     externally_imported_names: &std::collections::HashSet<String>,
+    _require_file_header: bool,
 ) -> CommandOutcome {
     let path_str = path.to_string_lossy().to_string();
     let (source, program) = parse_source_file(&path_str);
@@ -172,6 +205,7 @@ pub(crate) fn lint_fix_file(
     path: &Path,
     config: &CheckConfig,
     externally_imported_names: &HashSet<String>,
+    _require_file_header: bool,
 ) -> usize {
     let path_str = path.to_string_lossy().to_string();
     let (source, program) = parse_source_file(&path_str);

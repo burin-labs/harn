@@ -202,6 +202,9 @@ pub(crate) struct PathTargetsArgs {
     /// Automatically apply safe fixes.
     #[arg(long)]
     pub fix: bool,
+    /// Force-enable the `require-file-header` rule (overrides harn.toml).
+    #[arg(long = "require-file-header")]
+    pub require_file_header: bool,
     /// One or more .harn files or directories.
     #[arg(required = true)]
     pub targets: Vec<String>,
@@ -212,9 +215,18 @@ pub(crate) struct FmtArgs {
     /// Check formatting without rewriting files.
     #[arg(long)]
     pub check: bool,
-    /// Maximum line width before wrapping.
-    #[arg(long = "line-width", default_value_t = 100)]
-    pub line_width: usize,
+    /// Maximum line width before wrapping. Overrides `[fmt] line_width` in harn.toml.
+    #[arg(long = "line-width")]
+    pub line_width: Option<usize>,
+    /// Total width of `// ----` separator bars. Overrides `[fmt] separator_width`.
+    #[arg(long = "separator-width")]
+    pub separator_width: Option<usize>,
+    /// Allow the formatter to auto-insert separator bars (no-op today; reserved).
+    #[arg(long = "auto-separators", conflicts_with = "no_auto_separators")]
+    pub auto_separators: bool,
+    /// Force-disable auto-inserted separator bars.
+    #[arg(long = "no-auto-separators")]
+    pub no_auto_separators: bool,
     /// One or more .harn files or directories.
     #[arg(required = true)]
     pub targets: Vec<String>,

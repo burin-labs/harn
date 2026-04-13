@@ -598,6 +598,7 @@ fn fmt_opts(source: &str, line_width: usize) -> String {
     let opts = FmtOptions {
         line_width,
         separator_width: 80,
+        auto_insert_separators: false,
     };
     format_source_opts(source, &opts).unwrap()
 }
@@ -690,6 +691,7 @@ fn test_custom_line_width_idempotent() {
     let opts = FmtOptions {
         line_width: 40,
         separator_width: 80,
+        auto_insert_separators: false,
     };
     let first = format_source_opts(source, &opts).unwrap();
     let second = format_source_opts(&first, &opts).unwrap();
@@ -1141,6 +1143,7 @@ fn test_section_header_respects_custom_separator_width() {
     let opts = FmtOptions {
         line_width: 100,
         separator_width: 40,
+        auto_insert_separators: false,
     };
     let source = "fn a() -> int { return 1 }\n// ----\nfn b() -> int { return 2 }\n";
     let result = format_source_opts(source, &opts).unwrap();
