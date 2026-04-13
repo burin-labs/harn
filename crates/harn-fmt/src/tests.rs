@@ -941,3 +941,66 @@ fn test_roundtrip_never_type_annotation() {
 }"#,
     );
 }
+
+#[test]
+fn test_doc_comment_triple_slash_multiline() {
+    let source = "/// First line.\n/// Second line.\npub fn exposed() -> string {\n  return \"x\"\n}\n";
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("/**\n * First line.\n * Second line.\n */"),
+        "expected canonical multi-line /** */ block, got:\n{result}"
+    );
+    assert!(
+        !result.contains("///"),
+        "formatter should not emit `///` after normalization, got:\n{result}"
+    );
+}
+
+#[test]
+fn test_doc_comment_triple_slash_compact_one_liner() {
+    let source = "/// Short.\npub fn exposed() -> string {\n  return \"x\"\n}\n";
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("/** Short. */"),
+        "expected compact one-liner doc comment, got:\n{result}"
+    );
+}
+
+#[test]
+fn test_doc_comment_existing_block_is_canonicalized() {
+    let source = "/** messy\n   alignment */\npub fn exposed() -> string {\n  return \"x\"\n}\n";
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("/**\n * messy\n * alignment\n */"),
+        "expected canonical multi-line shape, got:\n{result}"
+    );
+}
+
+#[test]
+fn test_plain_double_slash_comment_preserved_verbatim() {
+    let source = "// plain comment\npub fn exposed() -> string {\n  return \"x\"\n}\n";
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("// plain comment"),
+        "plain // comment should be preserved verbatim, got:\n{result}"
+    );
+    assert!(
+        !result.contains("/**"),
+        "formatter should not convert // to /** */ (that's the linter's job), got:\n{result}"
+    );
+}
+
+#[test]
+fn test_doc_comment_inside_impl_block() {
+    let source =
+        "impl Foo {\n  /// Inner method.\n  pub fn bar() -> string {\n    return \"x\"\n  }\n}\n";
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("  /** Inner method. */"),
+        "doc comment inside impl body should be normalized, got:\n{result}"
+    );
+    assert!(
+        !result.contains("///"),
+        "no `///` should remain after formatting, got:\n{result}"
+    );
+}
