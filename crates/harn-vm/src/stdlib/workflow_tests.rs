@@ -1,4 +1,5 @@
 use super::*;
+use crate::orchestration::{render_artifacts_context, render_workflow_prompt};
 use crate::orchestration::{save_run_record, RunChildRecord, RunRecord};
 use crate::tracing::{set_tracing_enabled, span_end, span_start, SpanKind};
 use std::cell::Cell;
@@ -91,6 +92,50 @@ fn snapshot_trace_spans_returns_completed_trace_tree() {
     assert_eq!(spans[1].kind, "pipeline");
 
     set_tracing_enabled(false);
+}
+
+#[test]
+fn render_workflow_prompt_puts_task_before_context() {
+    let prompt = render_workflow_prompt(
+        "Create the missing test file with one edit call.",
+        Some("Create Required Outputs"),
+        "<artifact>\n<title>tests/unit/test_example.py</title>\n<body>\npass\n</body>\n</artifact>",
+    );
+    let task_index = prompt
+        .find("<workflow_task>")
+        .expect("workflow task block should exist");
+    let context_index = prompt
+        .find("<workflow_context>")
+        .expect("workflow context block should exist");
+    assert!(
+        task_index < context_index,
+        "task block should precede context block"
+    );
+    assert!(prompt.contains("<label>Create Required Outputs</label>"));
+    assert!(prompt.contains("Create the missing test file with one edit call."));
+    assert!(prompt.contains("<workflow_response_contract>"));
+    assert!(
+        prompt.trim_end().ends_with("</workflow_response_contract>"),
+        "prompt should end on the response contract instead of artifact text"
+    );
+}
+
+#[test]
+fn render_artifacts_context_uses_structured_artifact_blocks() {
+    let artifacts = vec![crate::orchestration::ArtifactRecord {
+        kind: "workspace_file".to_string(),
+        title: Some("tests/unit/test_example.py".to_string()),
+        text: Some("def test_example():\n    assert True\n".to_string()),
+        source: Some("required_output_phase".to_string()),
+        freshness: Some("fresh".to_string()),
+        priority: Some(70),
+        ..Default::default()
+    }];
+    let rendered =
+        render_artifacts_context(&artifacts, &crate::orchestration::ContextPolicy::default());
+    assert!(rendered.contains("<artifact>"));
+    assert!(rendered.contains("<title>tests/unit/test_example.py</title>"));
+    assert!(rendered.contains("<body>\ndef test_example():"));
 }
 
 #[tokio::test(flavor = "current_thread")]

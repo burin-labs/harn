@@ -16,6 +16,34 @@ pub(crate) struct Cli {
 #[derive(Debug, Subcommand)]
 pub(crate) enum Command {
     /// Execute a .harn file or an inline expression.
+    #[command(long_about = "\
+Execute a .harn file or an inline expression.
+
+USAGE
+    harn run script.harn
+    harn run -e 'println(\"hello\")'
+    harn run script.harn -- arg1 arg2   (script reads `argv` as list<string>)
+
+CONCURRENCY
+    Harn supports first-class concurrency primitives:
+      - spawn { ... }         — launch a task, return a handle
+      - parallel each LIST    — concurrent map
+      - parallel settle LIST  — concurrent map, collect Ok/Err
+      - parallel N            — N-way fan-out
+      - with { max_concurrent: N }  — cap in-flight workers
+      - channels, retry, select
+    https://harn.burincode.com/concurrency.html
+
+LLM THROTTLING
+    Providers can be rate-limited via `rpm:` in harn.toml / providers.toml
+    or via `HARN_RATE_LIMIT_<PROVIDER>=N`. Rate limits control throughput
+    (RPM); `max_concurrent` on `parallel` caps simultaneous in-flight jobs.
+
+SCRIPTING
+    LLM-readable one-pager: https://harn.burincode.com/docs/llm/harn-quickref.md
+    Human cheatsheet:       https://harn.burincode.com/scripting-cheatsheet.html
+    Full docs:              https://harn.burincode.com/
+")]
     Run(RunArgs),
     /// Type-check .harn files or directories without executing them.
     Check(CheckArgs),
@@ -90,6 +118,15 @@ pub(crate) struct RunArgs {
     pub eval: Option<String>,
     /// Path to the .harn file to execute.
     pub file: Option<String>,
+    /// Positional arguments passed to the pipeline as the global `argv`
+    /// list. Place them after a `--` separator: `harn run script.harn -- a b c`.
+    //
+    // NOTE: use `last = true` alone here. Combining it with
+    // `trailing_var_arg = true` panics at clap runtime (the two flags
+    // conflict). `last = true` is sufficient to route every token after
+    // `--` into `argv`.
+    #[arg(last = true)]
+    pub argv: Vec<String>,
 }
 
 #[derive(Debug, Args)]

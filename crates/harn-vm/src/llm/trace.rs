@@ -120,6 +120,15 @@ pub enum AgentTraceEvent {
         tools_used: Vec<String>,
         successful_tools: Vec<String>,
     },
+    /// Emitted when `llm_call` re-prompts the model after the previous
+    /// response failed `output_schema` validation. One event per retry;
+    /// `attempt` counts retries (the initial call is attempt 0 and
+    /// produces no event; the first retry emits `attempt: 1`).
+    SchemaRetry {
+        attempt: usize,
+        errors: Vec<String>,
+        nudge_used: bool,
+    },
 }
 
 thread_local! {
@@ -203,6 +212,7 @@ pub fn agent_trace_summary() -> serde_json::Value {
                     iterations = *i;
                     total_duration_ms = *d;
                 }
+                AgentTraceEvent::SchemaRetry { .. } => {}
             }
         }
 

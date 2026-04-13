@@ -625,6 +625,64 @@ impl Parser {
         };
 
         let expr = self.parse_expression()?;
+
+        // Optional trailing `with { max_concurrent: N, ... }` option
+        // block. Parsed before the body `{` so the two braces don't
+        // collide. Only `max_concurrent` is accepted today; unknown
+        // keys surface as a parser error.
+        let options = if self.check_identifier("with") {
+            self.advance();
+            self.consume(&TokenKind::LBrace, "{")?;
+            let mut options = Vec::new();
+            loop {
+                self.skip_newlines();
+                if matches!(
+                    self.current().map(|t| &t.kind),
+                    Some(&TokenKind::RBrace) | None
+                ) {
+                    break;
+                }
+                let key_span = self.current_span();
+                let key = match self.current().map(|t| &t.kind) {
+                    Some(TokenKind::Identifier(name)) => name.clone(),
+                    _ => {
+                        return Err(ParserError::Unexpected {
+                            got: self
+                                .current()
+                                .map(|t| format!("{:?}", t.kind))
+                                .unwrap_or_else(|| "end of input".to_string()),
+                            expected: "option name in `parallel ... with { ... }` block"
+                                .to_string(),
+                            span: key_span,
+                        });
+                    }
+                };
+                self.advance();
+                if key != "max_concurrent" {
+                    return Err(ParserError::Unexpected {
+                        got: key.clone(),
+                        expected: format!(
+                            "known option (only `max_concurrent` is supported in \
+                             `parallel ... with {{ ... }}`; got `{key}`)"
+                        ),
+                        span: key_span,
+                    });
+                }
+                self.consume(&TokenKind::Colon, ":")?;
+                let value = self.parse_expression()?;
+                options.push((key, value));
+                self.skip_newlines();
+                if matches!(self.current().map(|t| &t.kind), Some(&TokenKind::Comma)) {
+                    self.advance();
+                    self.skip_newlines();
+                }
+            }
+            self.consume(&TokenKind::RBrace, "}")?;
+            options
+        } else {
+            Vec::new()
+        };
+
         self.consume(&TokenKind::LBrace, "{")?;
 
         // Optional closure parameter: { item ->
@@ -649,6 +707,7 @@ impl Parser {
                 expr: Box::new(expr),
                 variable,
                 body,
+                options,
             },
             Span::merge(start, self.prev_span()),
         ))
@@ -1896,6 +1955,24 @@ impl Parser {
             TokenKind::Try => self.parse_try_catch(),
             TokenKind::Match => self.parse_match(),
             TokenKind::Fn => self.parse_fn_expr(),
+            // Heredoc-style `<<TAG ... TAG` is only valid inside LLM
+            // tool-call argument JSON (see crates/harn-vm/src/llm/tools.rs).
+            // In source-position expressions, point the author at
+            // triple-quoted `"""..."""` strings.
+            TokenKind::Lt
+                if matches!(self.peek_kind(), Some(&TokenKind::Lt))
+                    && matches!(self.peek_kind_at(2), Some(TokenKind::Identifier(_))) =>
+            {
+                Err(ParserError::Unexpected {
+                    got: "`<<` heredoc-like syntax".to_string(),
+                    expected: "an expression — heredocs are only valid \
+                               inside LLM tool-call argument JSON; \
+                               for multiline strings in source code use \
+                               triple-quoted `\"\"\"...\"\"\"`"
+                        .to_string(),
+                    span: start,
+                })
+            }
             _ => Err(self.error("expression")),
         }
     }
@@ -2458,6 +2535,10 @@ impl Parser {
 
     fn peek_kind(&self) -> Option<&TokenKind> {
         self.tokens.get(self.pos + 1).map(|t| &t.kind)
+    }
+
+    fn peek_kind_at(&self, offset: usize) -> Option<&TokenKind> {
+        self.tokens.get(self.pos + offset).map(|t| &t.kind)
     }
 
     fn check(&self, kind: &TokenKind) -> bool {

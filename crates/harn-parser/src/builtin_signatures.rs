@@ -1031,6 +1031,10 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("string")),
     },
     BuiltinSig {
+        name: "regex_replace_all",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
         name: "register_tool_hook",
         return_type: Some(BuiltinReturn::Named("nil")),
     },

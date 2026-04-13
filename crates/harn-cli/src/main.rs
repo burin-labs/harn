@@ -17,7 +17,13 @@ use harn_parser::{DiagnosticSeverity, Parser, TypeChecker};
 async fn main() {
     let raw_args: Vec<String> = env::args().collect();
     if raw_args.len() == 2 && raw_args[1].ends_with(".harn") {
-        commands::run::run_file(&raw_args[1], false, std::collections::HashSet::new()).await;
+        commands::run::run_file(
+            &raw_args[1],
+            false,
+            std::collections::HashSet::new(),
+            Vec::new(),
+        )
+        .await;
         return;
     }
 
@@ -50,10 +56,12 @@ async fn main() {
                         process::exit(1);
                     });
                     let tmp_str = tmp_path.to_string_lossy().to_string();
-                    commands::run::run_file(&tmp_str, args.trace, denied).await;
+                    commands::run::run_file(&tmp_str, args.trace, denied, args.argv.clone()).await;
                     let _ = fs::remove_file(&tmp_path);
                 }
-                (None, Some(file)) => commands::run::run_file(file, args.trace, denied).await,
+                (None, Some(file)) => {
+                    commands::run::run_file(file, args.trace, denied, args.argv.clone()).await
+                }
                 (Some(_), Some(_)) => command_error(
                     "`harn run` accepts either `-e <code>` or `<file.harn>`, not both",
                 ),

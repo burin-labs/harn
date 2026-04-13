@@ -66,7 +66,12 @@ pub(crate) fn build_denied_builtins(
     }
 }
 
-pub(crate) async fn run_file(path: &str, trace: bool, denied_builtins: HashSet<String>) {
+pub(crate) async fn run_file(
+    path: &str,
+    trace: bool,
+    denied_builtins: HashSet<String>,
+    script_argv: Vec<String>,
+) {
     let (source, program) = parse_source_file(path);
 
     // Static type checking
@@ -154,6 +159,18 @@ pub(crate) async fn run_file(path: &str, trace: bool, denied_builtins: HashSet<S
             vm.set_source_dir(p);
         }
     }
+
+    // Expose positional CLI args to the pipeline as `argv` (list of strings).
+    // `harn run script.harn -- a b c` yields `argv == ["a", "b", "c"]`.
+    // Always set — scripts can branch on `len(argv) == 0`.
+    let argv_values: Vec<harn_vm::VmValue> = script_argv
+        .iter()
+        .map(|s| harn_vm::VmValue::String(std::rc::Rc::from(s.as_str())))
+        .collect();
+    vm.set_global(
+        "argv",
+        harn_vm::VmValue::List(std::rc::Rc::new(argv_values)),
+    );
 
     // Auto-connect MCP servers declared in harn.toml
     if let Some(manifest) = package::try_read_manifest_for(Path::new(path)) {
@@ -468,7 +485,7 @@ pub(crate) async fn run_watch(path: &str, denied_builtins: HashSet<String>) {
 
     // Initial run
     eprintln!("\x1b[2m[watch] running {path}...\x1b[0m");
-    run_file(path, false, denied_builtins.clone()).await;
+    run_file(path, false, denied_builtins.clone(), Vec::new()).await;
 
     let (tx, mut rx) = tokio::sync::mpsc::channel::<()>(1);
     let _watcher = {
@@ -516,6 +533,6 @@ pub(crate) async fn run_watch(path: &str, denied_builtins: HashSet<String>) {
 
         eprintln!();
         eprintln!("\x1b[2m[watch] change detected, re-running {path}...\x1b[0m");
-        run_file(path, false, denied_builtins.clone()).await;
+        run_file(path, false, denied_builtins.clone(), Vec::new()).await;
     }
 }

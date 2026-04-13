@@ -21,6 +21,7 @@ mod conversation;
 pub(crate) mod cost;
 pub(crate) mod daemon;
 pub(crate) mod helpers;
+pub(crate) mod ledger;
 pub(crate) mod mock;
 mod transcript_stats;
 
@@ -106,10 +107,53 @@ use self::api::{vm_build_llm_result, vm_call_completion_full};
 use self::daemon::parse_daemon_loop_config;
 use self::helpers::{opt_bool, opt_int, opt_str, opt_str_list};
 use self::stream::vm_stream_llm;
+use self::trace::emit_agent_event;
 use self::trace::trace_llm_call;
 
 fn output_validation_mode(opts: &api::LlmCallOptions) -> &str {
     opts.output_validation.as_deref().unwrap_or("off")
+}
+
+/// Extract an initial task ledger from agent_loop options. Mirrors the
+/// identical helper in `agent_config.rs` — kept in both places because
+/// the two registration paths (bridge-aware and bridge-less) each
+/// build their own `AgentLoopConfig` literal.
+fn parse_task_ledger_from_vm_options(
+    options: &Option<std::collections::BTreeMap<String, VmValue>>,
+) -> ledger::TaskLedger {
+    use ledger::{Deliverable, DeliverableStatus, TaskLedger};
+
+    let Some(opts) = options.as_ref() else {
+        return TaskLedger::default();
+    };
+    if let Some(explicit) = opts.get("task_ledger") {
+        let json = helpers::vm_value_to_json(explicit);
+        if let Ok(parsed) = serde_json::from_value::<TaskLedger>(json) {
+            return parsed;
+        }
+    }
+    let mut builder = TaskLedger::default();
+    if let Some(VmValue::String(s)) = opts.get("root_task") {
+        builder.root_task = s.trim().to_string();
+    }
+    if let Some(deliverables) = opts.get("deliverables").and_then(|v| match v {
+        VmValue::List(items) => Some(items.clone()),
+        _ => None,
+    }) {
+        for (idx, item) in deliverables.iter().enumerate() {
+            let text = item.display().trim().to_string();
+            if text.is_empty() {
+                continue;
+            }
+            builder.deliverables.push(Deliverable {
+                id: format!("deliverable-{}", idx + 1),
+                text,
+                status: DeliverableStatus::Open,
+                note: None,
+            });
+        }
+    }
+    builder
 }
 
 fn schema_validation_errors(result: &VmValue) -> Vec<String> {
@@ -131,27 +175,104 @@ fn schema_validation_errors(result: &VmValue) -> Vec<String> {
     }
 }
 
-fn validated_output_data(
-    data: &VmValue,
-    opts: &api::LlmCallOptions,
-) -> Result<Option<VmValue>, VmValue> {
+/// Compute schema validation errors against `opts.output_schema` without
+/// deciding disposition (warn vs error vs off). Returns an empty vec when
+/// no schema is configured or the data validates. Used by the schema-retry
+/// loop in `llm_call`.
+fn compute_validation_errors(data: &VmValue, opts: &api::LlmCallOptions) -> Vec<String> {
     let Some(schema_json) = &opts.output_schema else {
-        return Ok(Some(data.clone()));
+        return Vec::new();
     };
     let schema_vm = json_to_vm_value(schema_json);
     let validation = schema_result_value(data, &schema_vm, false);
-    let errors = schema_validation_errors(&validation);
-    if errors.is_empty() {
-        return Ok(Some(data.clone()));
+    schema_validation_errors(&validation)
+}
+
+/// How `llm_call` should nudge the model when `output_schema` validation
+/// fails and `schema_retries > 0`.
+#[derive(Debug, Clone)]
+enum SchemaNudge {
+    /// Build a default corrective user message from the schema's top-level
+    /// `required` / `properties` keys plus the validation errors. This is
+    /// the default when `schema_retry_nudge` is unset or `true`.
+    Auto,
+    /// Use the caller's string verbatim (plus a short tail listing the
+    /// validation errors).
+    Verbatim(String),
+    /// Retry without appending any corrective message (bare retry).
+    /// Selected when `schema_retry_nudge: false`.
+    Disabled,
+}
+
+fn parse_schema_nudge(
+    options: &Option<std::collections::BTreeMap<String, VmValue>>,
+) -> SchemaNudge {
+    let Some(opts) = options.as_ref() else {
+        return SchemaNudge::Auto;
+    };
+    match opts.get("schema_retry_nudge") {
+        None | Some(VmValue::Nil) => SchemaNudge::Auto,
+        Some(VmValue::Bool(true)) => SchemaNudge::Auto,
+        Some(VmValue::Bool(false)) => SchemaNudge::Disabled,
+        Some(VmValue::String(s)) => SchemaNudge::Verbatim(s.to_string()),
+        Some(other) => SchemaNudge::Verbatim(other.display()),
     }
-    let message = format!("LLM output failed schema validation: {}", errors.join("; "));
-    match output_validation_mode(opts) {
-        "warn" => {
-            crate::events::log_warn("llm", &message);
-            Ok(Some(data.clone()))
+}
+
+/// Build the corrective user message appended before a schema-retry
+/// attempt. Callers that want full control pass a string via
+/// `schema_retry_nudge`; the `Auto` variant enumerates the schema's
+/// top-level required keys so small / local models re-emit conforming
+/// JSON reliably (see `docs/llm/harn-quickref.md` "Schema retries").
+fn build_schema_nudge(
+    errors: &[String],
+    schema: Option<&serde_json::Value>,
+    mode: &SchemaNudge,
+) -> String {
+    let errors_line = if errors.is_empty() {
+        String::from("(no detailed errors)")
+    } else {
+        errors.join("; ")
+    };
+    match mode {
+        SchemaNudge::Disabled => String::new(),
+        SchemaNudge::Verbatim(s) => {
+            format!("{s}\n\nValidation errors: {errors_line}")
         }
-        "error" => Err(VmValue::String(Rc::from(message))),
-        _ => Ok(Some(data.clone())),
+        SchemaNudge::Auto => {
+            let mut required_keys: Vec<String> = Vec::new();
+            let mut property_keys: Vec<String> = Vec::new();
+            if let Some(schema) = schema {
+                if let Some(req) = schema.get("required").and_then(|v| v.as_array()) {
+                    for r in req {
+                        if let Some(k) = r.as_str() {
+                            required_keys.push(k.to_string());
+                        }
+                    }
+                }
+                if let Some(props) = schema.get("properties").and_then(|v| v.as_object()) {
+                    for k in props.keys() {
+                        property_keys.push(k.clone());
+                    }
+                }
+            }
+            let mut msg =
+                String::from("Your previous response did not match the required JSON schema.");
+            msg.push_str(&format!("\nValidation errors: {errors_line}."));
+            if !required_keys.is_empty() {
+                msg.push_str(&format!("\nRequired keys: {}.", required_keys.join(", ")));
+            }
+            if !property_keys.is_empty() {
+                msg.push_str(&format!(
+                    "\nAllowed top-level keys: {}.",
+                    property_keys.join(", ")
+                ));
+            }
+            msg.push_str(
+                "\nRespond again with ONLY valid JSON conforming to the schema. No prose, no markdown fences.",
+            );
+            msg
+        }
     }
 }
 
@@ -193,45 +314,104 @@ pub fn register_llm_builtins(vm: &mut Vm) {
     // llm_call -- core LLM request with structured output + tool use
     // =========================================================================
     vm.register_async_builtin("llm_call", |args| async move {
-        let opts = extract_llm_options(&args)?;
+        let mut opts = extract_llm_options(&args)?;
         let options = args.get(2).and_then(|a| a.as_dict()).cloned();
+        // Default `llm_retries` to 2 so a one-shot `llm_call` matches the
+        // resilience of `agent_loop` (which defaults to 4) for transient
+        // HTTP / provider failures. Scripts that want the old fail-fast
+        // behavior can pass `llm_retries: 0` explicitly. This is a
+        // breaking change relative to pre-0.6 releases.
         let retry_config = agent_observe::LlmRetryConfig {
-            retries: helpers::opt_int(&options, "llm_retries").unwrap_or(0) as usize,
+            retries: helpers::opt_int(&options, "llm_retries").unwrap_or(2) as usize,
             backoff_ms: helpers::opt_int(&options, "llm_backoff_ms").unwrap_or(2000) as u64,
         };
+        // Schema retry loop — orthogonal to transient retries above. Each
+        // schema retry re-invokes `observed_llm_call` with a fresh
+        // transient budget. Default: 1 retry. Small/local models need the
+        // corrective nudge to reliably produce conforming JSON.
+        let schema_retries = helpers::opt_int(&options, "schema_retries")
+            .unwrap_or(1)
+            .max(0) as usize;
+        let nudge_mode = parse_schema_nudge(&options);
 
-        let result = agent_observe::observed_llm_call(
-            &opts,
-            helpers::opt_str(&options, "tool_format").as_deref(),
-            None, // no bridge
-            &retry_config,
-            None,
-            false,
-            false, // non-bridge path runs on the local set
-        )
-        .await?;
+        let tool_format = helpers::opt_str(&options, "tool_format");
+        for attempt in 0..=schema_retries {
+            let result = agent_observe::observed_llm_call(
+                &opts,
+                tool_format.as_deref(),
+                None, // no bridge
+                &retry_config,
+                None,
+                false,
+                false, // non-bridge path runs on the local set
+            )
+            .await?;
 
-        // Output schema validation (non-bridge only; bridge path delegates
-        // to the same build_llm_call_result which skips validation — the
-        // host is expected to handle schema enforcement).
-        let mut vm_result = agent_config::build_llm_call_result(&result, &opts);
-        if helpers::expects_structured_output(&opts) {
-            if let VmValue::Dict(ref dict) = vm_result {
-                if let Some(data) = dict.get("data") {
-                    match validated_output_data(data, &opts) {
-                        Ok(validated) => {
-                            if let Some(val) = validated {
-                                let mut d = dict.as_ref().clone();
-                                d.insert("data".to_string(), val);
-                                vm_result = VmValue::Dict(Rc::new(d));
-                            }
-                        }
-                        Err(error) => return Err(crate::value::VmError::Thrown(error)),
-                    }
+            // Output schema validation (non-bridge only; bridge path
+            // delegates to build_llm_call_result which skips validation
+            // — the host is expected to handle schema enforcement).
+            let mut vm_result = agent_config::build_llm_call_result(&result, &opts);
+            if !helpers::expects_structured_output(&opts) {
+                return Ok(vm_result);
+            }
+            let VmValue::Dict(ref dict) = vm_result else {
+                return Ok(vm_result);
+            };
+            let Some(data) = dict.get("data") else {
+                return Ok(vm_result);
+            };
+            let errors = compute_validation_errors(data, &opts);
+            if errors.is_empty() {
+                // Passthrough — keep shape identical to pre-loop code.
+                let mut d = dict.as_ref().clone();
+                d.insert("data".to_string(), data.clone());
+                vm_result = VmValue::Dict(Rc::new(d));
+                return Ok(vm_result);
+            }
+
+            let more_attempts = attempt < schema_retries;
+            let should_retry = more_attempts && !matches!(nudge_mode, SchemaNudge::Disabled);
+            if should_retry {
+                let nudge = build_schema_nudge(&errors, opts.output_schema.as_ref(), &nudge_mode);
+                emit_agent_event(AgentTraceEvent::SchemaRetry {
+                    attempt: attempt + 1,
+                    errors: errors.clone(),
+                    nudge_used: !nudge.is_empty(),
+                });
+                // Append the assistant's broken response and the corrective
+                // nudge so the next call has progressively richer context.
+                opts.messages.push(serde_json::json!({
+                    "role": "assistant",
+                    "content": result.text,
+                }));
+                if !nudge.is_empty() {
+                    opts.messages.push(serde_json::json!({
+                        "role": "user",
+                        "content": nudge,
+                    }));
                 }
+                continue;
+            }
+
+            // Attempts exhausted (or nudge disabled): honor the caller's
+            // configured `output_validation` mode.
+            let message = format!("LLM output failed schema validation: {}", errors.join("; "));
+            match output_validation_mode(&opts) {
+                "error" => {
+                    return Err(crate::value::VmError::Thrown(VmValue::String(Rc::from(
+                        message,
+                    ))));
+                }
+                "warn" => {
+                    crate::events::log_warn("llm", &message);
+                    return Ok(vm_result);
+                }
+                _ => return Ok(vm_result),
             }
         }
-        Ok(vm_result)
+        // Unreachable: the loop always returns or continues, and
+        // `schema_retries` is usize so `0..=N` yields at least one iter.
+        unreachable!("schema retry loop exited without returning");
     });
 
     vm.register_async_builtin("llm_completion", |args| async move {
@@ -401,6 +581,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                     .as_ref()
                     .and_then(|o| o.get("on_tool_result"))
                     .cloned(),
+                task_ledger: parse_task_ledger_from_vm_options(&options),
             },
         )
         .await?;
@@ -593,7 +774,7 @@ fn register_llm_stream(vm: &mut Vm) {
 #[cfg(test)]
 mod tests {
     use super::api::LlmCallOptions;
-    use super::validated_output_data;
+    use super::compute_validation_errors;
     use crate::value::VmValue;
     use std::rc::Rc;
 
@@ -642,8 +823,8 @@ mod tests {
         let mut map = std::collections::BTreeMap::new();
         map.insert("name".to_string(), VmValue::String(Rc::from("Ada")));
         let data = VmValue::Dict(Rc::new(map));
-        let validated = validated_output_data(&data, &opts).expect("schema should pass");
-        assert!(validated.is_some());
+        let errors = compute_validation_errors(&data, &opts);
+        assert!(errors.is_empty(), "schema should pass: {errors:?}");
     }
 
     #[test]
@@ -652,7 +833,8 @@ mod tests {
         let mut map = std::collections::BTreeMap::new();
         map.insert("name".to_string(), VmValue::Int(42));
         let data = VmValue::Dict(Rc::new(map));
-        let error = validated_output_data(&data, &opts).expect_err("schema should fail");
-        assert!(error.display().contains("schema validation"));
+        let errors = compute_validation_errors(&data, &opts);
+        assert!(!errors.is_empty(), "schema should fail");
+        assert!(errors.join(" ").contains("string"));
     }
 }

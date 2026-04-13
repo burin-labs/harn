@@ -1249,6 +1249,13 @@ pub(crate) fn build_tool_calling_contract_prompt(
     // weaker models encounter the calling convention early, while attention
     // is strongest.
     prompt.push_str(TS_CALL_CONTRACT_HELP);
+    if require_action {
+        prompt.push_str(
+            "\nThis turn is action-gated. If tools are available, open your response \
+             with a <tool_call> block, not prose. Do not emit raw source code, diffs, \
+             JSON, or a <done> block before the first <tool_call> block.\n",
+        );
+    }
     if let Some(examples) = tool_examples {
         let trimmed = examples.trim();
         if !trimmed.is_empty() {
@@ -1355,21 +1362,51 @@ fn build_tool_args_type(params: &[ToolParamSchema]) -> TypeExpr {
 /// fenced code block caused confusion because models had to balance several
 /// levels of backticks at once.
 pub(crate) const TS_CALL_CONTRACT_HELP: &str = "
-## How to call tools
+## Response protocol
 
-Write `tool_name({ key: value })` on its own line.
-Use heredoc for multiline string fields:
-tool_name({ content: <<EOF
-multi-line text
+Every response must be a sequence of these tags, with only whitespace between them:
+
+<tool_call>
+name({ key: value })
+</tool_call>
+
+<assistant_prose>
+Short narration. Optional.
+</assistant_prose>
+
+<done>##DONE##</done>
+
+Rules the runtime enforces:
+
+- No text, code, diffs, JSON, or reasoning outside these tags. Any stray content is rejected with structured feedback.
+- `<tool_call>` wraps exactly one bare call `name({ key: value })`. Do not quote or JSON-encode the call. Use heredoc `<<TAG` ... `TAG` for multiline string fields — raw content, no escaping. Place TAG at the start of the closing line; closing punctuation like `},` may follow on that same line.
+- `<assistant_prose>` is optional and must be brief. Never paste source code, file contents, command transcripts, or long plans here — wrap those in the relevant tool call instead.
+- `<done>##DONE##</done>` signals task completion. Emit it only after a successful verifying tool call; the runtime rejects it otherwise.
+- Do not prefix calls with labels like `tool_code:`, `python:`, `shell:`, or any language tag, and do not wrap tool calls in Markdown fences.
+- Prefer `<tool_call>` over `<assistant_prose>`. If you have nothing concrete to say, omit prose entirely.
+
+Example of a well-formed response:
+
+<assistant_prose>Creating the test file.</assistant_prose>
+<tool_call>
+edit({ action: \"create\", path: \"tests/test_foo.py\", content: <<EOF
+def test_foo():
+    assert foo() == 42
 EOF
 })
+</tool_call>
 
-- Heredoc `<<TAG` ... `TAG`: raw content, no escaping needed. Put TAG at the start of the closing line; closing punctuation like `},` may follow on that same line.
-- Double quotes for single-line strings. Trailing commas optional.
-- Do not wrap tool calls in Markdown fences unless the host explicitly asks for them.
-- Do not prefix tool calls with labels like `tool_code:`, `tool_call:`, `python:`, `shell:`, or any language/wrapper tag. The runtime parses only bare function-call syntax; any prefix label makes the call invisible to the tool pipeline even if the call body looks correct.
-- If the workflow uses a done sentinel such as `##DONE##`, emit it on its own line in a response that contains no tool calls.
-- Prefer tool calls over prose.
+## Task ledger
+
+The runtime maintains a durable `<task_ledger>` of the user's deliverables (injected into each turn above this prompt). The `<done>` block is REJECTED while any deliverable is `open` or `blocked`. Use the always-available `ledger` tool to mutate it:
+
+- `ledger({ action: \"add\", text: \"what needs to happen\" })` — declare a new sub-deliverable.
+- `ledger({ action: \"mark\", id: \"deliverable-N\", status: \"done\" })` — mark a deliverable complete after a real tool call satisfied it.
+- `ledger({ action: \"mark\", id: \"deliverable-N\", status: \"dropped\", note: \"why\" })` — escape hatch when scope truly changed; the note is required.
+- `ledger({ action: \"rationale\", text: \"one-sentence answer to why the user will call this done\" })` — commit to an interpretation of the success criterion.
+- `ledger({ action: \"note\", text: \"observation worth remembering across turns\" })` — durable cross-stage memory.
+
+Prefer marking deliverables done only AFTER a concrete tool call demonstrates completion (an edit landed, a run() returned exit 0, a read confirmed an invariant). Don't mark done on prose alone.
 ";
 
 /// Result of parsing a prose-interleaved TS tool-call stream.
@@ -1386,6 +1423,22 @@ pub(crate) struct TextToolParseResult {
     pub calls: Vec<serde_json::Value>,
     pub errors: Vec<String>,
     pub prose: String,
+    /// Protocol-level grammar violations (stray text outside tags, unknown
+    /// tags, unclosed tags, malformed `<done>` contents). Distinct from
+    /// `errors`, which carry per-call parse diagnostics. The agent loop
+    /// replays these to the model as structured `protocol_violation`
+    /// feedback so it can self-correct.
+    pub violations: Vec<String>,
+    /// Body of the `<done>` block when one was emitted, trimmed of
+    /// surrounding whitespace. The agent compares this against the
+    /// pipeline's configured `done_sentinel` (default `##DONE##`) to
+    /// decide whether to honor completion. Replaces substring matching
+    /// against a bare sentinel string.
+    pub done_marker: Option<String>,
+    /// Canonical reconstruction of the response in the tagged grammar.
+    /// Used as the assistant's history entry so future turns see the
+    /// well-formed shape instead of the raw provider bytes.
+    pub canonical: String,
 }
 
 /// Parse every fenceless TS tool call found in a model's text response.
@@ -1426,7 +1479,15 @@ fn strip_thinking_tags(text: &str) -> std::borrow::Cow<'_, str> {
     std::borrow::Cow::Owned(result)
 }
 
-pub(crate) fn parse_text_tool_calls_with_tools(
+/// Scan a text body for bare `name({ ... })` tool calls and diagnostics.
+///
+/// This is the body-level parser used inside `<tool_call>` tags by the
+/// tagged-protocol scanner. It is also called on whole responses as a
+/// diagnostic fallback: when a model emits calls without wrapping them in
+/// `<tool_call>` tags, we detect the calls here, report a grammar violation
+/// at the outer layer, and refuse to execute until the model re-emits
+/// properly wrapped.
+pub(crate) fn parse_bare_calls_in_body(
     text: &str,
     tools_val: Option<&VmValue>,
 ) -> TextToolParseResult {
@@ -1435,15 +1496,20 @@ pub(crate) fn parse_text_tool_calls_with_tools(
     let text = cleaned.as_ref();
 
     if let Some(unwrapped) = unwrap_exact_code_wrapper(text) {
-        let result = parse_text_tool_calls_with_tools(unwrapped, tools_val);
+        let result = parse_bare_calls_in_body(unwrapped, tools_val);
         if !result.calls.is_empty() || !result.errors.is_empty() {
             return result;
         }
     }
-    let known: BTreeSet<String> = collect_tool_schemas(tools_val, None)
+    let mut known: BTreeSet<String> = collect_tool_schemas(tools_val, None)
         .into_iter()
         .map(|s| s.name)
         .collect();
+    // `ledger` is a runtime-owned pseudo-tool: always available during
+    // agent_loop so the agent can maintain task-wide deliverables state
+    // without each host having to register it separately. Handled inline
+    // in `agent.rs` rather than dispatched through the tool executor.
+    known.insert("ledger".to_string());
     let mut calls = Vec::new();
     let mut errors = Vec::new();
     // Byte ranges [start, end) to excise from the original text to produce
@@ -1741,6 +1807,9 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                 calls: native_calls,
                 errors: native_errors,
                 prose: String::new(),
+                violations: Vec::new(),
+                done_marker: None,
+                canonical: String::new(),
             };
         }
     }
@@ -1749,7 +1818,260 @@ pub(crate) fn parse_text_tool_calls_with_tools(
         calls,
         errors,
         prose,
+        violations: Vec::new(),
+        done_marker: None,
+        canonical: String::new(),
     }
+}
+
+/// Parse a model response under the strict tagged response protocol.
+///
+/// The grammar accepts a sequence of top-level blocks separated by
+/// whitespace only:
+///
+/// ```text
+///   <tool_call> <bare `name({...})` expression> </tool_call>
+///   <assistant_prose> short narration </assistant_prose>
+///   <done>##DONE##</done>
+/// ```
+///
+/// Anything else at the top level — stray prose, code, unknown tags,
+/// unclosed tags — is reported as a `violation`. Malformed call bodies
+/// are reported as `errors` (per-call diagnostics). The function always
+/// runs to completion so every violation can be surfaced to the model
+/// on the next turn.
+///
+/// The `canonical` field is the response re-emitted in the tagged form.
+/// It's what should be replayed as the assistant history entry, not the
+/// raw provider bytes — that closes the self-poison loop where a turn
+/// with leading raw code becomes "what the agent said" on the next turn.
+pub(crate) fn parse_text_tool_calls_with_tools(
+    text: &str,
+    tools_val: Option<&VmValue>,
+) -> TextToolParseResult {
+    let cleaned = strip_thinking_tags(text);
+    let src = cleaned.as_ref();
+
+    let mut calls: Vec<serde_json::Value> = Vec::new();
+    let mut errors: Vec<String> = Vec::new();
+    let mut violations: Vec<String> = Vec::new();
+    let mut prose_parts: Vec<String> = Vec::new();
+    let mut canonical_parts: Vec<String> = Vec::new();
+    let mut done_marker: Option<String> = None;
+
+    let mut cursor = 0usize;
+    let bytes = src.as_bytes();
+
+    while cursor < bytes.len() {
+        // Skip whitespace between top-level tags.
+        while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+            cursor += 1;
+        }
+        if cursor >= bytes.len() {
+            break;
+        }
+
+        // Collect any stray non-tag bytes up to the next `<`.
+        if bytes[cursor] != b'<' {
+            let start = cursor;
+            while cursor < bytes.len() && bytes[cursor] != b'<' {
+                cursor += 1;
+            }
+            report_stray(&src[start..cursor], &mut violations, tools_val);
+            continue;
+        }
+
+        // Try to match a known top-level tag.
+        if let Some((body, after)) = match_block(src, cursor, "tool_call") {
+            match parse_single_tool_call(body, tools_val) {
+                Ok(call) => {
+                    let name = call
+                        .get("name")
+                        .and_then(|n| n.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let args = call
+                        .get("arguments")
+                        .cloned()
+                        .unwrap_or(serde_json::json!({}));
+                    canonical_parts.push(format!(
+                        "<tool_call>\n{}\n</tool_call>",
+                        render_canonical_call(&name, &args)
+                    ));
+                    calls.push(call);
+                }
+                Err(msg) => errors.push(msg),
+            }
+            cursor = after;
+        } else if let Some((body, after)) = match_block(src, cursor, "assistant_prose") {
+            let trimmed = body.trim();
+            if !trimmed.is_empty() {
+                prose_parts.push(trimmed.to_string());
+                canonical_parts.push(format!("<assistant_prose>\n{trimmed}\n</assistant_prose>"));
+            }
+            cursor = after;
+        } else if let Some((body, after)) = match_block(src, cursor, "done") {
+            let trimmed = body.trim();
+            if trimmed.is_empty() {
+                violations.push(
+                    "<done> block is empty. Emit the configured done sentinel \
+                     (default `##DONE##`) inside the block."
+                        .to_string(),
+                );
+            } else {
+                done_marker = Some(trimmed.to_string());
+                canonical_parts.push(format!("<done>{trimmed}</done>"));
+            }
+            cursor = after;
+        } else {
+            // Unclosed or unknown tag — skip to end of line or `>` and record.
+            let start = cursor;
+            let mut end = cursor + 1;
+            while end < bytes.len() && bytes[end] != b'>' && bytes[end] != b'\n' {
+                end += 1;
+            }
+            if end < bytes.len() && bytes[end] == b'>' {
+                end += 1;
+            }
+            let fragment = &src[start..end];
+            // Detect likely bare-call attempts so feedback is concrete.
+            if fragment.starts_with('<') && !fragment.contains('>') {
+                violations.push(format!(
+                    "Unclosed tag starting at {:?}. Close it or remove it; only \
+                     <tool_call>, <assistant_prose>, and <done> are accepted.",
+                    preview_str(fragment, 40)
+                ));
+            } else {
+                violations.push(format!(
+                    "Unknown top-level tag {:?}. Use <tool_call>, <assistant_prose>, \
+                     or <done> — no other tags are accepted at the top level.",
+                    preview_str(fragment, 40)
+                ));
+            }
+            cursor = end;
+        }
+    }
+
+    // Detect empty responses: nothing parseable and no violations already recorded.
+    let response_is_effectively_empty = calls.is_empty()
+        && prose_parts.is_empty()
+        && done_marker.is_none()
+        && violations.is_empty()
+        && errors.is_empty();
+    if response_is_effectively_empty && !src.trim().is_empty() {
+        violations.push(
+            "Response contained no <tool_call>, <assistant_prose>, or <done> block. \
+             Every response must be composed of these tags only."
+                .to_string(),
+        );
+    }
+
+    TextToolParseResult {
+        calls,
+        errors,
+        prose: prose_parts.join("\n\n"),
+        violations,
+        done_marker,
+        canonical: canonical_parts.join("\n\n"),
+    }
+}
+
+/// Report stray text that sits outside any recognized top-level tag. If
+/// the stray content looks like a bare tool call, extract the call (so
+/// the agent can see what the model tried to do) but still mark the turn
+/// as a violation — the model must re-emit wrapped in `<tool_call>`.
+fn report_stray(fragment: &str, violations: &mut Vec<String>, tools_val: Option<&VmValue>) {
+    let trimmed = fragment.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    // Cheap heuristic for call-shaped stray text so feedback is concrete.
+    let sniff = parse_bare_calls_in_body(trimmed, tools_val);
+    if !sniff.calls.is_empty() {
+        let names: Vec<_> = sniff
+            .calls
+            .iter()
+            .filter_map(|c| c.get("name").and_then(|n| n.as_str()))
+            .collect();
+        violations.push(format!(
+            "Detected {} bare tool call(s) ({}) not wrapped in <tool_call> tags. \
+             Re-emit each call inside its own <tool_call>...</tool_call> block. \
+             This response's calls were NOT executed.",
+            sniff.calls.len(),
+            names.join(", ")
+        ));
+    } else {
+        violations.push(format!(
+            "Stray text outside response tags: {:?}. Wrap all prose in \
+             <assistant_prose>...</assistant_prose> and every tool call in \
+             <tool_call>...</tool_call>.",
+            preview_str(trimmed, 120)
+        ));
+    }
+}
+
+/// Parse a single `<tool_call>` body. Expects exactly one bare
+/// `name({ ... })` expression (possibly with surrounding whitespace).
+fn parse_single_tool_call(
+    body: &str,
+    tools_val: Option<&VmValue>,
+) -> Result<serde_json::Value, String> {
+    let inner = parse_bare_calls_in_body(body, tools_val);
+    if let Some(err) = inner.errors.into_iter().next() {
+        return Err(err);
+    }
+    if inner.calls.is_empty() {
+        return Err(format!(
+            "<tool_call> body did not contain a bare `name({{ ... }})` expression. \
+             Got: {:?}",
+            preview_str(body.trim(), 120)
+        ));
+    }
+    if inner.calls.len() > 1 {
+        return Err(format!(
+            "<tool_call> body contained {} calls; emit one call per <tool_call> block.",
+            inner.calls.len()
+        ));
+    }
+    Ok(inner.calls.into_iter().next().expect("len == 1"))
+}
+
+/// Match a balanced `<tag>...</tag>` block starting at `start` in `src`.
+/// Returns `(body_slice, end_cursor)` on success. Does not support nested
+/// same-name tags — not needed for this grammar and attempting to support
+/// them bloats the error surface for no real benefit.
+fn match_block<'a>(src: &'a str, start: usize, tag: &str) -> Option<(&'a str, usize)> {
+    let open = format!("<{tag}>");
+    if !src[start..].starts_with(&open) {
+        return None;
+    }
+    let body_start = start + open.len();
+    let close = format!("</{tag}>");
+    let close_idx = src[body_start..].find(&close)?;
+    let body_end = body_start + close_idx;
+    let after = body_end + close.len();
+    Some((&src[body_start..body_end], after))
+}
+
+/// Render a parsed tool call back to the bare TS syntax used inside
+/// `<tool_call>` tags. Used to build the canonical history entry.
+fn render_canonical_call(name: &str, args: &serde_json::Value) -> String {
+    // serde_json gives us valid JSON, which parses as a TS object literal
+    // under our tool-call grammar (strings become double-quoted, no
+    // trailing commas, keys quoted). That's enough for replay purposes —
+    // the next turn's parser accepts JSON-style object literals just
+    // like TS-style ones.
+    let rendered_args = serde_json::to_string_pretty(args).unwrap_or_else(|_| "{}".to_string());
+    format!("{name}({rendered_args})")
+}
+
+fn preview_str(s: &str, max: usize) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    if chars.len() <= max {
+        return s.to_string();
+    }
+    let kept: String = chars.into_iter().take(max).collect();
+    format!("{kept}…")
 }
 
 fn has_object_literal_arg_start(text: &str, open_paren_idx: usize) -> bool {

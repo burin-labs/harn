@@ -1,0 +1,19 @@
+let GREETING = "hello"
+
+let NAME = "harn"
+
+pub fn greet() -> string {
+  return GREETING
+}
+
+pub fn full_greeting() -> string {
+  return GREETING + ", " + NAME
+}
+
+// Immutable let at module top is visible to functions. Previously this
+// raised "Undefined variable: GREETING" — the compiler silently dropped
+// module-level bindings in pipeline mode.
+pipeline default() {
+  println(greet())
+  println(full_greeting())
+}

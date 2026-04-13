@@ -9,8 +9,8 @@
 use super::{
     build_assistant_response_message, build_assistant_tool_message,
     build_tool_calling_contract_prompt, collect_tool_schemas, collect_tool_schemas_with_registry,
-    normalize_tool_args, parse_native_json_tool_calls, parse_text_tool_calls_with_tools,
-    validate_tool_args, ComponentRegistry, TS_CALL_CONTRACT_HELP,
+    normalize_tool_args, parse_bare_calls_in_body, parse_native_json_tool_calls,
+    parse_text_tool_calls_with_tools, validate_tool_args, ComponentRegistry, TS_CALL_CONTRACT_HELP,
 };
 use crate::value::VmValue;
 use serde_json::json;
@@ -144,7 +144,7 @@ fn parses_a_simple_object_literal_call() {
     let text = r#"I'll write the scaffold now.
 edit({ action: "create", path: "a.go", content: "package a\n" })
 That should work."#;
-    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    let result = parse_bare_calls_in_body(text, Some(&tools));
     assert!(
         result.errors.is_empty(),
         "unexpected errors: {:?}",
@@ -164,7 +164,7 @@ That should work."#;
 fn parses_a_template_literal_multiline_body() {
     let tools = sample_tool_registry();
     let text = "edit({\n  action: \"replace_body\",\n  path: \"a.go\",\n  new_body: `\nfunc Foo() {\n    return 1\n}\n`\n})";
-    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    let result = parse_bare_calls_in_body(text, Some(&tools));
     assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
     assert_eq!(result.calls.len(), 1);
     let body = result.calls[0]["arguments"]["new_body"].as_str().unwrap();
@@ -177,7 +177,7 @@ fn escapes_inside_template_literals_are_honored() {
     let tools = sample_tool_registry();
     // \` must be passed through as a literal backtick; \\ as a backslash.
     let text = "edit({ action: \"create\", path: \"a.md\", content: `line with a \\` backtick` })";
-    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    let result = parse_bare_calls_in_body(text, Some(&tools));
     assert!(result.errors.is_empty());
     assert_eq!(
         result.calls[0]["arguments"]["content"],
@@ -189,7 +189,7 @@ fn escapes_inside_template_literals_are_honored() {
 fn parses_tool_calls_inside_markdown_code_fences() {
     let tools = sample_tool_registry();
     let text = "Here's how to use it:\n```python\nedit({ action: \"create\", path: \"fenced.go\" })\n```\nAnd another:\nedit({ action: \"create\", path: \"bare.go\" })\n";
-    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    let result = parse_bare_calls_in_body(text, Some(&tools));
     assert!(result.errors.is_empty());
     assert_eq!(
         result.calls.len(),
@@ -210,7 +210,7 @@ fn parses_tool_calls_inside_markdown_code_fences() {
 fn ignores_tool_name_mentions_inside_inline_code_spans() {
     let tools = sample_tool_registry();
     let text = "I considered `edit({...})` but chose a different approach.\nedit({ action: \"create\", path: \"real.go\" })\n";
-    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    let result = parse_bare_calls_in_body(text, Some(&tools));
     assert_eq!(result.calls.len(), 1);
     assert_eq!(result.calls[0]["arguments"]["path"], json!("real.go"));
 }
@@ -219,7 +219,7 @@ fn ignores_tool_name_mentions_inside_inline_code_spans() {
 fn recovers_single_inline_wrapped_tool_call_when_it_is_the_entire_response() {
     let tools = sample_tool_registry();
     let text = r#"`edit({ action: "create", path: "wrapped.go" })`"#;
-    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    let result = parse_bare_calls_in_body(text, Some(&tools));
     assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
     assert_eq!(result.calls.len(), 1);
     assert_eq!(result.calls[0]["arguments"]["path"], json!("wrapped.go"));
@@ -229,7 +229,7 @@ fn recovers_single_inline_wrapped_tool_call_when_it_is_the_entire_response() {
 fn recovers_single_fenced_tool_call_when_it_is_the_entire_response() {
     let tools = sample_tool_registry();
     let text = "```typescript\nedit({ action: \"create\", path: \"wrapped.go\" })\n```";
-    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    let result = parse_bare_calls_in_body(text, Some(&tools));
     assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
     assert_eq!(result.calls.len(), 1);
     assert_eq!(result.calls[0]["arguments"]["path"], json!("wrapped.go"));
@@ -248,7 +248,7 @@ EOF
   { op: "add_import", import_statement: "from app.types import RequestContext" }
 ]})
 ```"#;
-    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    let result = parse_bare_calls_in_body(text, Some(&tools));
     assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
     assert_eq!(result.calls.len(), 1);
     assert_eq!(
@@ -282,7 +282,7 @@ def test_create_experiment():
     assert "ok" == "ok"
 EOF
 })"#;
-    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    let result = parse_bare_calls_in_body(text, Some(&tools));
     assert!(
         result.errors.is_empty(),
         "quoted heredoc should be salvaged: {:?}",
@@ -306,7 +306,7 @@ fn reports_unknown_tool_names() {
     // registry, so the scanner should report an error and still parse the
     // valid `edit` call.
     let text = "fictitious_tool({ x: 1 })\nedit({ action: \"create\", path: \"a.go\" })";
-    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    let result = parse_bare_calls_in_body(text, Some(&tools));
     assert_eq!(result.errors.len(), 1, "should report unknown tool");
     assert!(
         result.errors[0].contains("Unknown tool 'fictitious_tool'"),
@@ -329,7 +329,7 @@ fn strips_gemma_tool_code_prefix_so_native_format_parses() {
     // cleanly instead of silently drifting into prose.
     let tools = sample_tool_registry();
     let text = "tool_code: run({ command: \"ls\" })";
-    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    let result = parse_bare_calls_in_body(text, Some(&tools));
     assert_eq!(
         result.calls.len(),
         1,
@@ -352,7 +352,7 @@ fn strips_assorted_language_and_wrapper_prefixes() {
         "bash:",
     ] {
         let text = format!("{prefix} run({{ command: \"ls\" }})");
-        let result = parse_text_tool_calls_with_tools(&text, Some(&tools));
+        let result = parse_bare_calls_in_body(&text, Some(&tools));
         assert_eq!(
             result.calls.len(),
             1,
@@ -372,7 +372,7 @@ fn explicit_parse_error_for_unknown_label_prefix_on_known_tool() {
     // keeps us from false-positive'ing on arbitrary prose.
     let tools = sample_tool_registry();
     let text = "Hint: run({ command: \"ls\" })";
-    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    let result = parse_bare_calls_in_body(text, Some(&tools));
     assert_eq!(
         result.calls.len(),
         0,
@@ -402,7 +402,7 @@ fn parses_gemma_fenced_tool_code_block() {
     // other native form: ```tool_code\nrun({...})\n```
     let tools = sample_tool_registry();
     let text = "```tool_code\nrun({ command: \"ls\" })\n```";
-    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    let result = parse_bare_calls_in_body(text, Some(&tools));
     assert_eq!(result.calls.len(), 1);
     assert_eq!(result.calls[0]["name"], json!("run"));
 }
@@ -414,7 +414,7 @@ fn unknown_label_prefix_with_unknown_identifier_stays_prose() {
     // against false positives on arbitrary prose containing colons.
     let tools = sample_tool_registry();
     let text = "Note: make_coffee({ strength: \"strong\" })";
-    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    let result = parse_bare_calls_in_body(text, Some(&tools));
     assert_eq!(result.calls.len(), 0);
     // `make_coffee` followed by `(` with an object-literal arg WILL hit
     // the existing unknown-tool error path, but only because the line
@@ -437,7 +437,7 @@ fn unknown_label_prefix_with_unknown_identifier_stays_prose() {
 fn parses_multiple_calls_in_one_response() {
     let tools = sample_tool_registry();
     let text = "edit({ action: \"create\", path: \"a.go\", content: \"a\" })\nThen we will:\nedit({ action: \"patch\", path: \"b.go\" })\n";
-    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    let result = parse_bare_calls_in_body(text, Some(&tools));
     assert_eq!(result.calls.len(), 2);
     assert_eq!(result.calls[0]["arguments"]["path"], json!("a.go"));
     assert_eq!(result.calls[1]["arguments"]["path"], json!("b.go"));
@@ -452,7 +452,7 @@ fn parses_nested_object_and_array_literals() {
     content: "x",
     new_body: { "nested": [1, 2, "three"], "flag": true }
 })"#;
-    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    let result = parse_bare_calls_in_body(text, Some(&tools));
     // new_body is a string in the schema, but the parser is structural and
     // returns whatever shape the model writes; the tool handler will coerce.
     assert!(result.errors.is_empty());
@@ -468,7 +468,7 @@ fn reports_unclosed_object_literal_with_precise_diagnostic() {
     let tools = sample_tool_registry();
     // Truncated mid-object: model hit token limit before closing brace.
     let text = "edit({ action: \"create\", path: \"a.go\", content: `hello";
-    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    let result = parse_bare_calls_in_body(text, Some(&tools));
     assert!(result.calls.is_empty());
     assert_eq!(result.errors.len(), 1);
     let err = &result.errors[0];
@@ -482,7 +482,7 @@ fn reports_unclosed_object_literal_with_precise_diagnostic() {
 fn reports_bare_scalar_argument_as_needing_object_wrapper() {
     let tools = sample_tool_registry();
     let text = "edit(\"a.go\")";
-    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    let result = parse_bare_calls_in_body(text, Some(&tools));
     assert!(result.calls.is_empty());
     assert_eq!(result.errors.len(), 1);
     let err = &result.errors[0];
@@ -500,7 +500,7 @@ fn parses_trailing_commas() {
     path: "a.go",
     content: "x",
 })"#;
-    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    let result = parse_bare_calls_in_body(text, Some(&tools));
     assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
     assert_eq!(result.calls.len(), 1);
 }
@@ -514,7 +514,7 @@ fn parses_line_and_block_comments() {
     path: "a.go",
     content: "package a"
 })"#;
-    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    let result = parse_bare_calls_in_body(text, Some(&tools));
     assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
     assert_eq!(result.calls.len(), 1);
     assert_eq!(result.calls[0]["arguments"]["action"], json!("create"));
@@ -524,7 +524,7 @@ fn parses_line_and_block_comments() {
 fn accepts_single_quoted_string_literals() {
     let tools = sample_tool_registry();
     let text = "edit({ action: 'create', path: 'a.go' })";
-    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    let result = parse_bare_calls_in_body(text, Some(&tools));
     assert!(result.errors.is_empty());
     assert_eq!(result.calls[0]["arguments"]["action"], json!("create"));
     assert_eq!(result.calls[0]["arguments"]["path"], json!("a.go"));
@@ -534,7 +534,7 @@ fn accepts_single_quoted_string_literals() {
 fn rejects_legacy_named_argument_call_form() {
     let tools = sample_tool_registry();
     let text = "edit(action=\"replace_body\", path=\"a.go\", new_body=`return 1`)";
-    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    let result = parse_bare_calls_in_body(text, Some(&tools));
     assert!(result.calls.is_empty());
     assert_eq!(result.errors.len(), 1);
     assert!(
@@ -549,7 +549,7 @@ fn ignores_non_tool_function_calls_inside_code_examples() {
     let tools = sample_tool_registry();
     let text =
         "Here is the target test body:\n\n    assert divide(10, 2) == 5.0\n    multiply(2, 3)\n";
-    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    let result = parse_bare_calls_in_body(text, Some(&tools));
     assert!(result.calls.is_empty());
     assert!(
         result.errors.is_empty(),
@@ -592,21 +592,24 @@ fn contract_prompt_renders_edit_signature_with_enum_and_required_markers() {
     assert!(prompt.contains("content?: string /* optional"));
     assert!(prompt.contains("\"internal/manifest/parser.go\""));
     assert!(!prompt.contains("@param path"));
-    // TS call contract help is included in text mode.
-    assert!(prompt.contains("declare function") || prompt.contains("How to call tools"));
+    // Tagged response protocol contract is included in text mode.
+    assert!(prompt.contains("declare function") || prompt.contains("Response protocol"));
 }
 
 #[test]
-fn contract_prompt_help_block_has_ts_call_example() {
-    // The help constant is included verbatim in text mode and stays generic,
-    // while still documenting the heredoc form the parser accepts.
-    assert!(TS_CALL_CONTRACT_HELP.contains("tool_name({ key: value })"));
+fn contract_prompt_help_block_documents_tagged_protocol() {
+    // The help constant teaches the three top-level tags, the call shape
+    // inside <tool_call>, and the done-block grammar.
+    assert!(TS_CALL_CONTRACT_HELP.contains("Response protocol"));
+    assert!(TS_CALL_CONTRACT_HELP.contains("<tool_call>"));
+    assert!(TS_CALL_CONTRACT_HELP.contains("</tool_call>"));
+    assert!(TS_CALL_CONTRACT_HELP.contains("<assistant_prose>"));
+    assert!(TS_CALL_CONTRACT_HELP.contains("<done>##DONE##</done>"));
+    assert!(TS_CALL_CONTRACT_HELP.contains("name({ key: value })"));
     assert!(TS_CALL_CONTRACT_HELP.contains("heredoc"));
-    assert!(TS_CALL_CONTRACT_HELP.contains("closing punctuation like `},`"));
-    assert!(TS_CALL_CONTRACT_HELP.contains("Do not wrap tool calls in Markdown fences"));
-    assert!(TS_CALL_CONTRACT_HELP.contains("contains no tool calls"));
+    // Legacy bare-call phrasing must not regress.
+    assert!(!TS_CALL_CONTRACT_HELP.contains("contains no tool calls"));
     assert!(!TS_CALL_CONTRACT_HELP.contains("```call"));
-    assert!(!TS_CALL_CONTRACT_HELP.contains("<<'EOF'"));
 }
 
 #[test]
@@ -621,6 +624,15 @@ fn contract_prompt_native_mode_omits_text_help() {
     assert!(!prompt.contains("declare function edit(args:"));
     assert!(!prompt.contains("## Available tools"));
     assert!(!prompt.contains("### `edit`"));
+}
+
+#[test]
+fn contract_prompt_text_mode_mentions_action_gate_before_examples() {
+    let tools = sample_tool_registry();
+    let prompt = build_tool_calling_contract_prompt(Some(&tools), None, "text", true, None);
+    assert!(prompt.contains("This turn is action-gated."));
+    assert!(prompt.contains("open your response with a <tool_call> block"));
+    assert!(prompt.contains("Do not emit raw source code"));
 }
 
 #[test]
@@ -781,7 +793,7 @@ func main() {
 }
 EOF
 })"#;
-    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    let result = parse_bare_calls_in_body(text, Some(&tools));
     assert_eq!(
         result.calls.len(),
         1,
@@ -824,7 +836,7 @@ services:
 }
 CONTENT
 })"#;
-    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    let result = parse_bare_calls_in_body(text, Some(&tools));
     assert_eq!(
         result.calls.len(),
         1,
@@ -856,7 +868,7 @@ def test_escaping():
     assert len(s) > 0
 END
 })"#;
-    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    let result = parse_bare_calls_in_body(text, Some(&tools));
     assert_eq!(result.calls.len(), 1, "errors: {:?}", result.errors);
     let content = result.calls[0]["arguments"]["content"].as_str().unwrap();
     assert!(
@@ -886,7 +898,7 @@ func fixed() {
 }
 NEW
 })"#;
-    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    let result = parse_bare_calls_in_body(text, Some(&tools));
     assert_eq!(result.calls.len(), 1, "errors: {:?}", result.errors);
     let args = &result.calls[0]["arguments"];
     assert!(
@@ -918,7 +930,7 @@ func TestMissingRequiredFields(t *testing.T) {
 }
 EOF }
 ] })"#;
-    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    let result = parse_bare_calls_in_body(text, Some(&tools));
     assert!(
         result.errors.is_empty(),
         "same-line close tail should parse cleanly, errors: {:?}",
@@ -948,7 +960,7 @@ fn heredoc_close_with_multiple_closers_on_same_line() {
     let text = r#"edit({ path: "a.go", ops: [ { op: "replace_body", function_name: "F", new_body: <<EOF
 body
 EOF } ] })"#;
-    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    let result = parse_bare_calls_in_body(text, Some(&tools));
     assert!(
         result.errors.is_empty(),
         "close tail with multiple closers on same line should parse cleanly, errors: {:?}",
@@ -974,7 +986,7 @@ let EOFunction = 1;
 let x = 2;
 EOF
 })"#;
-    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    let result = parse_bare_calls_in_body(text, Some(&tools));
     assert!(
         result.errors.is_empty(),
         "tag-prefixed identifier inside content should not terminate the heredoc, errors: {:?}",
@@ -1002,7 +1014,7 @@ fn heredoc_unterminated_is_error() {
 package main
 // no closing EOF tag
 })"#;
-    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    let result = parse_bare_calls_in_body(text, Some(&tools));
     assert!(
         result.calls.is_empty(),
         "unterminated heredoc should produce no calls"
@@ -1020,7 +1032,7 @@ fn heredoc_missing_tag_is_error() {
 package main
 EOF
 })"#;
-    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    let result = parse_bare_calls_in_body(text, Some(&tools));
     assert!(
         result.calls.is_empty() || !result.errors.is_empty(),
         "missing tag should error"
@@ -1031,7 +1043,7 @@ EOF
 fn template_literal_still_works() {
     let tools = sample_tool_registry();
     let text = "edit({\n    action: \"create\",\n    path: \"simple.txt\",\n    content: `hello world`\n})";
-    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    let result = parse_bare_calls_in_body(text, Some(&tools));
     assert_eq!(
         result.calls.len(),
         1,
@@ -1045,7 +1057,7 @@ fn template_literal_still_works() {
 fn double_quoted_string_still_works() {
     let tools = sample_tool_registry();
     let text = "run({ command: \"go test ./internal/manifest/\" })";
-    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    let result = parse_bare_calls_in_body(text, Some(&tools));
     assert_eq!(
         result.calls.len(),
         1,
@@ -1072,7 +1084,7 @@ EOF
 })
 
 run({ command: "go test ./..." })"#;
-    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    let result = parse_bare_calls_in_body(text, Some(&tools));
     assert_eq!(
         result.calls.len(),
         2,
@@ -1135,7 +1147,7 @@ GOFILE
 Now let me run the tests.
 
 run({ command: "go test ./internal/manifest/ -v" })"#;
-    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    let result = parse_bare_calls_in_body(text, Some(&tools));
     assert_eq!(
         result.calls.len(),
         2,
@@ -1189,7 +1201,7 @@ EOF
 })
 
 run({ command: "go build ./..." })"#;
-    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    let result = parse_bare_calls_in_body(text, Some(&tools));
     assert_eq!(
         result.calls.len(),
         4,
@@ -1218,7 +1230,7 @@ EOF
 That should compile. Let me verify.
 
 run({ command: "go build" })"#;
-    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    let result = parse_bare_calls_in_body(text, Some(&tools));
     assert_eq!(result.calls.len(), 2);
     assert!(
         result.prose.contains("Here's my plan."),
@@ -1367,7 +1379,7 @@ fn text_parser_falls_through_to_native_json_fallback() {
     let text = r#"I'll create the file.
 
 [{"id":"call_001","type":"function","function":{"name":"edit","arguments":"{\"action\":\"create\",\"path\":\"main.go\",\"content\":\"package main\\nfunc main() {}\"}"}}]"#;
-    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    let result = parse_bare_calls_in_body(text, Some(&tools));
     assert!(
         result.errors.is_empty(),
         "should not produce errors: {:?}",
@@ -1389,7 +1401,7 @@ fn text_parser_prefers_text_format_over_native_json() {
     let text = r#"edit({ action: "create", path: "a.go", content: "pkg a" })
 
 [{"id":"call_001","type":"function","function":{"name":"run","arguments":"{\"command\":\"go test\"}"}}]"#;
-    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    let result = parse_bare_calls_in_body(text, Some(&tools));
     // Text parser should find the edit call and NOT fall through to native
     assert_eq!(result.calls.len(), 1, "text format should take priority");
     assert_eq!(result.calls[0]["name"], json!("edit"));
@@ -1546,7 +1558,7 @@ fn text_parser_reports_unknown_tool_in_native_json_fallback() {
     // an error in the TextToolParseResult.
     let tools = sample_tool_registry();
     let text = r#"[{"id":"call_001","type":"function","function":{"name":"nonexistent","arguments":"{}"}}]"#;
-    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    let result = parse_bare_calls_in_body(text, Some(&tools));
     assert!(result.calls.is_empty(), "no valid calls");
     assert!(
         !result.errors.is_empty(),
@@ -1558,4 +1570,167 @@ fn text_parser_reports_unknown_tool_in_native_json_fallback() {
         "error message: {}",
         result.errors[0]
     );
+}
+
+// ─── Tagged response protocol ──────────────────────────────────────────────
+//
+// These tests exercise the top-level `parse_text_tool_calls_with_tools`
+// grammar: responses must be composed only of <tool_call>, <assistant_prose>,
+// and <done> blocks at the top level, with whitespace between them.
+
+#[test]
+fn tagged_parser_accepts_well_formed_response() {
+    let tools = sample_tool_registry();
+    let text = "<assistant_prose>Creating the file.</assistant_prose>\n\
+                <tool_call>\n\
+                edit({ action: \"create\", path: \"a.rs\", content: \"fn a() {}\" })\n\
+                </tool_call>\n\
+                <done>##DONE##</done>";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert!(
+        result.violations.is_empty(),
+        "no violations expected, got {:?}",
+        result.violations,
+    );
+    assert!(result.errors.is_empty(), "no errors: {:?}", result.errors);
+    assert_eq!(result.calls.len(), 1);
+    assert_eq!(result.calls[0]["name"], json!("edit"));
+    assert_eq!(result.prose, "Creating the file.");
+    assert_eq!(result.done_marker.as_deref(), Some("##DONE##"));
+    assert!(
+        !result.canonical.is_empty(),
+        "canonical must be populated so history replays the tagged shape"
+    );
+    assert!(result.canonical.contains("<tool_call>"));
+    assert!(result.canonical.contains("<done>##DONE##</done>"));
+}
+
+#[test]
+fn tagged_parser_flags_stray_prose_outside_tags() {
+    let tools = sample_tool_registry();
+    let text = "def foo():\n    pass\n\n<tool_call>\nedit({ action: \"create\", path: \"a.rs\", content: \"x\" })\n</tool_call>";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert!(
+        !result.violations.is_empty(),
+        "stray prose before <tool_call> must be flagged"
+    );
+    // The inside-tag call still parses; the model sees the violation on the
+    // next turn but the runtime doesn't lose the action.
+    assert_eq!(result.calls.len(), 1);
+}
+
+#[test]
+fn tagged_parser_flags_bare_tool_call_without_wrapper() {
+    let tools = sample_tool_registry();
+    let text = "edit({ action: \"create\", path: \"a.rs\", content: \"x\" })";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert!(
+        !result.violations.is_empty(),
+        "bare tool call (no <tool_call> wrapper) must be a violation"
+    );
+    // When the call isn't wrapped, it is NOT executed — the violation
+    // message explicitly mentions that so the model re-emits.
+    assert!(result.calls.is_empty(), "unwrapped calls must not execute");
+    assert!(
+        result.violations[0].contains("not wrapped in <tool_call>"),
+        "violation must name the missing wrapper: {}",
+        result.violations[0]
+    );
+}
+
+#[test]
+fn tagged_parser_flags_unknown_top_level_tag() {
+    let tools = sample_tool_registry();
+    let text = "<notes>my thoughts</notes><tool_call>\nedit({ action: \"create\", path: \"a.rs\", content: \"x\" })\n</tool_call>";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert!(
+        result.violations.iter().any(|v| v.contains("Unknown")),
+        "unknown top-level tag should be flagged: {:?}",
+        result.violations
+    );
+    assert_eq!(result.calls.len(), 1, "known <tool_call> still executes");
+}
+
+#[test]
+fn tagged_parser_flags_empty_done_block() {
+    let tools = sample_tool_registry();
+    let text = "<tool_call>\nedit({ action: \"create\", path: \"a.rs\", content: \"x\" })\n</tool_call>\n<done></done>";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert!(
+        result.done_marker.is_none(),
+        "empty <done> is not a completion"
+    );
+    assert!(
+        result
+            .violations
+            .iter()
+            .any(|v| v.contains("<done> block is empty")),
+        "empty <done> must be flagged: {:?}",
+        result.violations
+    );
+}
+
+#[test]
+fn tagged_parser_empty_response_flags_violation() {
+    let tools = sample_tool_registry();
+    let text = "";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert!(result.calls.is_empty());
+    assert!(
+        result.violations.is_empty(),
+        "whitespace-only text is not a violation"
+    );
+
+    let text = "just prose with no tags at all";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert!(
+        !result.violations.is_empty(),
+        "response with no tags must violate"
+    );
+}
+
+#[test]
+fn tagged_parser_preserves_heredoc_inside_tool_call() {
+    let tools = sample_tool_registry();
+    let text = "<tool_call>\n\
+                edit({ action: \"create\", path: \"a.py\", content: <<EOF\n\
+                def foo():\n\
+                    return 1\n\
+                EOF\n\
+                })\n\
+                </tool_call>";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert!(
+        result.errors.is_empty(),
+        "heredoc should parse: {:?}",
+        result.errors
+    );
+    assert_eq!(result.calls.len(), 1);
+    let content = result.calls[0]["arguments"]["content"].as_str().unwrap();
+    assert!(content.contains("def foo():"));
+}
+
+#[test]
+fn tagged_parser_canonical_omits_raw_stray_text() {
+    let tools = sample_tool_registry();
+    let text = "leading garbage\n<assistant_prose>Narration.</assistant_prose>";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    // Canonical reflects only the well-formed tagged content.
+    assert_eq!(
+        result.canonical.trim(),
+        "<assistant_prose>\nNarration.\n</assistant_prose>"
+    );
+    assert!(!result.canonical.contains("leading garbage"));
+}
+
+#[test]
+fn tagged_parser_accepts_configured_done_body() {
+    // The parser captures the body verbatim; the agent compares it to the
+    // pipeline's configured `done_sentinel` value. Non-default sentinels
+    // like "PLAN_READY" must round-trip through the grammar.
+    let tools = sample_tool_registry();
+    let text = "<done>PLAN_READY</done>";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_eq!(result.done_marker.as_deref(), Some("PLAN_READY"));
+    assert!(result.violations.is_empty());
 }

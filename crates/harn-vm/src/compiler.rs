@@ -2555,7 +2555,22 @@ impl Compiler {
                 expr,
                 variable,
                 body,
+                options,
             } => {
+                // Push the `max_concurrent` cap first so the runtime
+                // opcodes can pop it beneath the iterable + closure. A
+                // cap of 0 (or a missing `with { ... }` clause) means
+                // "unlimited". Unknown option keys are parser errors.
+                let cap_expr = options
+                    .iter()
+                    .find(|(key, _)| key == "max_concurrent")
+                    .map(|(_, value)| value);
+                if let Some(cap_expr) = cap_expr {
+                    self.compile_node(cap_expr)?;
+                } else {
+                    let zero_idx = self.chunk.add_constant(Constant::Int(0));
+                    self.chunk.emit_u16(Op::Constant, zero_idx, self.line);
+                }
                 self.compile_node(expr)?;
                 let mut fn_compiler = Compiler::new();
                 fn_compiler.enum_names = self.enum_names.clone();
@@ -2981,6 +2996,21 @@ impl Compiler {
     }
 
     fn compile_top_level_declarations(&mut self, program: &[SNode]) -> Result<(), CompileError> {
+        // Phase 1: evaluate module-level `let` / `var` bindings first, in
+        // source order. This ensures function closures compiled in phase 2
+        // capture these names in their env snapshot via `Op::Closure` —
+        // fixing the "Undefined variable: FOO" surprise where a top-level
+        // `let FOO = "..."` was silently dropped because it wasn't in this
+        // match list. Keep in step with the import-time init path in
+        // `crates/harn-vm/src/vm/imports.rs` (`module_state` construction).
+        for sn in program {
+            if matches!(&sn.node, Node::LetBinding { .. } | Node::VarBinding { .. }) {
+                self.compile_node(sn)?;
+            }
+        }
+        // Phase 2: compile type and function declarations. Function closures
+        // created here capture the current env which now includes the
+        // module-level bindings from phase 1.
         for sn in program {
             if matches!(
                 &sn.node,

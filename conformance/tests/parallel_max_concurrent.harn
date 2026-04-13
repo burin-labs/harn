@@ -1,0 +1,47 @@
+pipeline default() {
+  // Baseline: no `with { max_concurrent }` — existing behavior, all
+  // tasks run concurrently. Each task returns its index.
+  let nums = [0, 1, 2, 3, 4]
+  let doubled = parallel each nums { n ->
+    return n * 2
+  }
+  println(doubled)
+  // With a cap of 2: same result (order preserved), lower peak
+  // in-flight count. We can't directly observe peak here but we can
+  // assert ordering and total length.
+  let capped = parallel each nums with { max_concurrent: 2 } { n ->
+    return n + 10
+  }
+  println(capped)
+  // settle variant also accepts max_concurrent.
+  let settled = parallel settle nums with { max_concurrent: 3 } { n ->
+    return n
+  }
+  println(settled.succeeded)
+  println(settled.failed)
+  // count mode: `parallel N with { ... } { i -> ... }`.
+  let counted = parallel 4 with { max_concurrent: 1 } { i ->
+    return i
+  }
+  println(counted)
+  // Cap larger than the list — still runs correctly.
+  let big_cap = parallel each nums with { max_concurrent: 999 } { n ->
+    return n * 3
+  }
+  println(big_cap)
+  // Observable cap: track peak in-flight count via atomics. With 8
+  // tasks each sleeping briefly and a cap of 2, peak must be <= 2.
+  let in_flight = atomic(0)
+  let peak = atomic(0)
+  let work = [1, 2, 3, 4, 5, 6, 7, 8]
+  parallel each work with { max_concurrent: 2 } { _ ->
+    let now = atomic_add(in_flight, 1)
+    // atomic_add returns the new value, so we compare directly.
+    if now > atomic_get(peak) {
+      atomic_set(peak, now)
+    }
+    sleep(25ms)
+    atomic_add(in_flight, -1)
+  }
+  println(atomic_get(peak) <= 2)
+}

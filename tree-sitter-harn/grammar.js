@@ -592,10 +592,31 @@ module.exports = grammar({
 
     try_expression: ($) => prec.right(seq("try", $.block)),
 
+    parallel_options: ($) =>
+      seq(
+        "with",
+        "{",
+        repeat(choice($._block_sep, $._line_sep)),
+        field("key", $.identifier),
+        ":",
+        field("value", $._expression),
+        repeat(seq(
+          optional(","),
+          repeat(choice($._block_sep, $._line_sep)),
+          field("key", $.identifier),
+          ":",
+          field("value", $._expression),
+        )),
+        optional(","),
+        repeat(choice($._block_sep, $._line_sep)),
+        "}"
+      ),
+
     parallel_expression: ($) =>
       seq(
         "parallel",
         field("count", $._expression),
+        optional(field("options", $.parallel_options)),
         "{",
         optional(seq(
           repeat(choice($._block_sep, $._line_sep)),
@@ -612,6 +633,7 @@ module.exports = grammar({
         "parallel",
         "each",
         field("list", $._expression),
+        optional(field("options", $.parallel_options)),
         "{",
         repeat(choice($._block_sep, $._line_sep)),
         optional(seq(
@@ -628,6 +650,7 @@ module.exports = grammar({
         "parallel",
         "settle",
         field("list", $._expression),
+        optional(field("options", $.parallel_options)),
         "{",
         repeat(choice($._block_sep, $._line_sep)),
         optional(seq(

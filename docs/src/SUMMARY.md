@@ -5,6 +5,7 @@
 # Getting started
 
 - [Getting started](./getting-started.md)
+- [Scripting cheatsheet](./scripting-cheatsheet.md)
 - [Why Harn?](./why-harn.md)
 
 # The language

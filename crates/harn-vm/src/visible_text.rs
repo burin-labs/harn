@@ -34,6 +34,11 @@ fn internal_block_patterns() -> &'static [Regex] {
             r"(?s)<think>.*?</think>",
             r"(?s)<think>.*$",
             r"(?s)<\|tool_call\|>.*?</\|tool_call\|>",
+            // Tagged response protocol: hide tool-call bodies (executed as
+            // structured data, never surfaced as narration) and done
+            // blocks (runtime signal, not user-facing).
+            r"(?s)<tool_call>.*?</tool_call>",
+            r"(?s)<done>.*?</done>",
             r"(?s)<tool_result[^>]*>.*?</tool_result>",
             r"(?s)\[result of [^\]]+\].*?\[end of [^\]]+\]",
             r"(?m)^\s*(##DONE##|DONE|PLAN_READY)\s*$",
@@ -42,6 +47,19 @@ fn internal_block_patterns() -> &'static [Regex] {
         .map(|pattern| Regex::new(pattern).expect("valid assistant sanitization regex"))
         .collect()
     })
+}
+
+/// Strip the wrapper tags around `<assistant_prose>` blocks so the
+/// surfaced visible text reads as plain narration. Matched tags that
+/// are unclosed (model still streaming) are held back until the next
+/// chunk resolves them.
+fn unwrap_assistant_prose(text: &str) -> String {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| {
+        Regex::new(r"(?s)<assistant_prose>\s*(.*?)\s*</assistant_prose>")
+            .expect("valid assistant_prose regex")
+    });
+    re.replace_all(text, "$1").to_string()
 }
 
 fn json_fence_regex() -> &'static Regex {
@@ -151,6 +169,20 @@ fn strip_unclosed_internal_blocks(text: &str) -> String {
         }
     }
 
+    if let Some(open_idx) = text.rfind("<tool_call>") {
+        let close_idx = text.rfind("</tool_call>");
+        if close_idx.is_none_or(|idx| idx < open_idx) {
+            return text[..open_idx].to_string();
+        }
+    }
+
+    if let Some(open_idx) = text.rfind("<done>") {
+        let close_idx = text.rfind("</done>");
+        if close_idx.is_none_or(|idx| idx < open_idx) {
+            return text[..open_idx].to_string();
+        }
+    }
+
     if let Some(open_idx) = text.rfind("[result of ") {
         let close_idx = text.rfind("[end of ");
         if close_idx.is_none_or(|idx| idx < open_idx) {
@@ -181,8 +213,11 @@ fn strip_inline_internal_planning_json(text: &str, partial: bool) -> String {
 }
 
 fn strip_partial_marker_suffix(text: &str) -> String {
-    const MARKERS: [&str; 6] = [
+    const MARKERS: [&str; 9] = [
         "<|tool_call|>",
+        "<tool_call>",
+        "<assistant_prose>",
+        "<done>",
         "<tool_result",
         "[result of ",
         "##DONE##",
@@ -212,6 +247,9 @@ pub fn sanitize_visible_assistant_text(text: &str, partial: bool) -> String {
     for pattern in internal_block_patterns() {
         sanitized = pattern.replace_all(&sanitized, "").to_string();
     }
+    // After runtime tags are stripped, unwrap the <assistant_prose> wrapper
+    // so the user-visible stream reads as plain narration.
+    sanitized = unwrap_assistant_prose(&sanitized);
     sanitized = strip_internal_json_fences(&sanitized);
     sanitized = strip_inline_internal_planning_json(&sanitized, partial);
     if partial {

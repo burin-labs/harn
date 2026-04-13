@@ -202,3 +202,52 @@ defer { close(f) }
 
 Multiple `defer` blocks execute in LIFO (last-registered, first-executed)
 order, similar to Go's `defer`.
+
+## Capping in-flight work with `max_concurrent`
+
+`parallel each`, `parallel settle`, and `parallel N` all accept an
+optional `with { max_concurrent: N }` clause that caps how many
+workers are in flight at once. Tasks past the cap wait until a slot
+frees up — fan-out stays bounded while the total work is unchanged.
+
+```harn
+// Without a cap: all 200 requests hit the server at once.
+let results = parallel settle paths { p -> llm_call(p, nil, opts) }
+
+// With max_concurrent=8: at most 8 in-flight calls at any moment.
+let results = parallel settle paths with { max_concurrent: 8 } { p ->
+  llm_call(p, nil, opts)
+}
+```
+
+`max_concurrent: 0` (or a missing `with` clause) means unlimited.
+Negative values are treated as unlimited. The cap applies to every
+parallel mode, including the count form:
+
+```harn
+parallel 100 with { max_concurrent: 4 } { i ->
+  process(i)
+}
+```
+
+## Rate limiting LLM providers
+
+`max_concurrent` bounds *simultaneous* in-flight tasks on the caller's
+side. A provider can additionally be rate-limited at the throughput
+layer (requests per minute). The RPM limiter is a sliding-window
+budget enforced before each `llm_call` / `llm_completion` — requests
+past the budget wait for the window to free up rather than error.
+
+Configure RPM per provider via:
+
+- `rpm: 600` in the provider's entry in `providers.toml` / `harn.toml`.
+- `HARN_RATE_LIMIT_<PROVIDER>=600` environment variable
+  (e.g. `HARN_RATE_LIMIT_TOGETHER=600`, `HARN_RATE_LIMIT_LOCAL=60`).
+  Env overrides config.
+- `llm_rate_limit("provider", 600)` at runtime from a pipeline.
+
+The two controls compose: `max_concurrent` prevents bursts from
+saturating the server; RPM shapes sustained throughput. When batching
+hundreds of LLM calls against a local single-GPU server, both are
+worth setting — otherwise the RPM budget can be spent in a 2-second
+burst that overwhelms the queue and drops requests.

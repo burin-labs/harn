@@ -13,5 +13,7 @@ pipeline default() {
   let prompt = prompt_compose("Fix it", ctx, {system: "You are helpful", task_label: "Work"})
   println(prompt?.system)
   println(contains(prompt?.prompt, "[repo]"))
-  println(contains(prompt?.prompt, "Work:\nFix it"))
+  // The prompt wraps the task in a <workflow_task> / <label> /
+  // <instructions> block. Assert both pieces are present.
+  println(contains(prompt?.prompt, "<label>Work</label>") && contains(prompt?.prompt, "Fix it"))
 }

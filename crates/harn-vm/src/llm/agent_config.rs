@@ -105,6 +105,11 @@ pub struct AgentLoopConfig {
     pub on_tool_call: Option<VmValue>,
     /// Post-execution tool hook.
     pub on_tool_result: Option<VmValue>,
+    /// Optional initial task ledger. When populated (typically from a
+    /// prior planning stage's `tasks` array or a caller-supplied
+    /// deliverables list), the ledger is rendered into each turn's
+    /// prompt and gates `<done>` until resolved. See `llm/ledger.rs`.
+    pub task_ledger: crate::llm::ledger::TaskLedger,
 }
 
 // ---------------------------------------------------------------------------
@@ -386,12 +391,59 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                         .as_ref()
                         .and_then(|o| o.get("on_tool_result"))
                         .cloned(),
+                    task_ledger: parse_task_ledger_from_options(&options),
                 },
             )
             .await?;
             Ok(crate::stdlib::json_to_vm_value(&result))
         }
     });
+}
+
+/// Extract an initial task ledger from agent_loop options. Accepts:
+///
+/// - `task_ledger: { root_task, deliverables: [...], rationale, ... }` verbatim
+/// - `deliverables: ["task A", "task B"]` as shorthand for seeding
+/// - `root_task: "..."` standalone to record the original user ask
+///
+/// Unrecognised shapes fall through to an empty ledger (the loop runs
+/// un-gated, which is correct for trivial one-shots).
+fn parse_task_ledger_from_options(
+    options: &Option<std::collections::BTreeMap<String, VmValue>>,
+) -> crate::llm::ledger::TaskLedger {
+    use crate::llm::ledger::{Deliverable, DeliverableStatus, TaskLedger};
+
+    let Some(opts) = options.as_ref() else {
+        return TaskLedger::default();
+    };
+    if let Some(explicit) = opts.get("task_ledger") {
+        let json = crate::llm::helpers::vm_value_to_json(explicit);
+        if let Ok(parsed) = serde_json::from_value::<TaskLedger>(json) {
+            return parsed;
+        }
+    }
+    let mut ledger = TaskLedger::default();
+    if let Some(VmValue::String(s)) = opts.get("root_task") {
+        ledger.root_task = s.trim().to_string();
+    }
+    if let Some(deliverables) = opts.get("deliverables").and_then(|v| match v {
+        VmValue::List(items) => Some(items.clone()),
+        _ => None,
+    }) {
+        for (idx, item) in deliverables.iter().enumerate() {
+            let text = item.display().trim().to_string();
+            if text.is_empty() {
+                continue;
+            }
+            ledger.deliverables.push(Deliverable {
+                id: format!("deliverable-{}", idx + 1),
+                text,
+                status: DeliverableStatus::Open,
+                note: None,
+            });
+        }
+    }
+    ledger
 }
 
 /// Register a bridge-aware `llm_call` that emits call_start/call_end notifications.

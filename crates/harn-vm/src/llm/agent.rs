@@ -114,24 +114,26 @@ const ASSISTANT_HISTORY_HARD_CAP_CHARS: usize = 131_072;
 
 /// Content to replay for an assistant turn in conversation history.
 ///
-/// In text-mode tool calling, the model's own tool-call expressions are
-/// part of its output and must be preserved in history so the next turn
-/// can see what it invoked. Stripping them leaves the model with amnesia
-/// about its own actions and triggers degenerate re-read / narration loops.
-/// The provider never re-parses historical assistant turns — only the most
-/// recent response runs through `parse_text_tool_calls_with_tools` — so
-/// replaying tool-call syntax carries no re-execution risk.
+/// Under the tagged response protocol, `canonical` is the parser's
+/// well-formed reconstruction of the turn (tool calls wrapped in
+/// `<tool_call>`, prose in `<assistant_prose>`, etc). Replaying the
+/// canonical form rather than the raw provider bytes closes the
+/// self-poison loop where a turn with leading raw code becomes "what
+/// the agent said" on the next turn, teaching the model to repeat the
+/// bad shape.
 ///
-/// When tool parsing failed, replay a compact placeholder instead of the
-/// raw malformed text. Otherwise the next iteration sees its own broken
-/// syntax and mutates it further (observed self-poison loop).
+/// When canonical is missing (native-format path, no tools, or the
+/// response contained nothing parseable), fall back to the raw text.
+/// When tool parsing failed, replay a compact placeholder instead —
+/// otherwise the next iteration sees its own broken syntax and mutates
+/// it further.
 ///
 /// Truncation is deterministic and bounded only by
-/// `ASSISTANT_HISTORY_HARD_CAP_CHARS`, keeping prompt-cache prefixes stable
-/// across turns. Prose-budget discipline is enforced via the post-turn
-/// nudge, not by trimming replayed history.
+/// `ASSISTANT_HISTORY_HARD_CAP_CHARS`, keeping prompt-cache prefixes
+/// stable across turns.
 fn assistant_history_text(
-    text: &str,
+    canonical: Option<&str>,
+    raw_text: &str,
     tool_parse_errors: usize,
     tool_calls: &[serde_json::Value],
 ) -> String {
@@ -148,11 +150,14 @@ fn assistant_history_text(
             tool_parse_errors,
         );
     }
-    let trimmed = text.trim();
-    let chars: Vec<char> = trimmed.chars().collect();
+    let source = canonical
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| raw_text.trim());
+    let chars: Vec<char> = source.chars().collect();
     let total = chars.len();
     if total <= ASSISTANT_HISTORY_HARD_CAP_CHARS {
-        return trimmed.to_string();
+        return source.to_string();
     }
     let kept: String = chars
         .into_iter()
@@ -183,9 +188,9 @@ pub(super) fn action_turn_nudge(
         ""
     };
     let completion_clause = if policy.allow_done_sentinel {
-        "either call at least one tool, switch phase, or output the done sentinel if the task is genuinely complete."
+        "either make concrete progress with a well-formed <tool_call> block, switch phase, or emit a <done> block if the task is genuinely complete."
     } else {
-        "either call at least one tool or switch phase if the workflow allows it."
+        "either make concrete progress with a well-formed <tool_call> block or switch phase if the workflow allows it."
     };
     let mode_clause = if tool_format == "native" {
         " Use the provider tool channel only; handwritten tool-call text is invalid in this transcript."
@@ -202,9 +207,9 @@ fn sentinel_without_action_nudge(
     turn_policy: Option<&crate::orchestration::TurnPolicy>,
 ) -> String {
     let mut message = if turn_policy.is_some_and(|policy| !policy.allow_done_sentinel) {
-        "You emitted a done sentinel in a workflow-owned action stage. The task is not complete yet. Use an available tool now, or switch phase if the workflow allows it. Do not output a done sentinel in this stage.".to_string()
+        "You emitted a <done> block in a workflow-owned action stage. The task is not complete yet. Make concrete progress with an available tool now, or switch phase if the workflow allows it. Do not output a <done> block in this stage.".to_string()
     } else {
-        "You emitted the done sentinel without taking any tool action. The task is not complete yet. Use an available tool now, or switch phase if the workflow allows it. Do not output the done sentinel again until you have acted.".to_string()
+        "You emitted a <done> block without taking any tool action. The task is not complete yet. Make concrete progress with an available tool now, or switch phase if the workflow allows it. Do not emit <done> again until you have acted.".to_string()
     };
     if let Some(nudge) = action_turn_nudge(tool_format, turn_policy, false) {
         message.push(' ');
@@ -261,6 +266,107 @@ fn append_host_messages_to_recorded(
             "content": message.content.clone(),
         }));
     }
+}
+
+/// Scan the agent's prose for file paths and identifier-shaped tokens
+/// that look like concrete claims ("src/foo.rs", "FooService::bar").
+/// Returns the subset that isn't backed by any prior read/lookup/search
+/// visible in `grounded_refs`. Heuristic, deliberately conservative:
+/// only flags tokens that strongly resemble file paths (contain `/` +
+/// extension) or qualified identifiers (contain `::` or `.` between
+/// alphabetic runs) to avoid false-positiving on English prose.
+fn grounding_lint_scan(
+    prose: &str,
+    grounded_refs: &std::collections::BTreeSet<String>,
+) -> Vec<String> {
+    use std::collections::BTreeSet;
+    let mut flagged: BTreeSet<String> = BTreeSet::new();
+    // File-path-shaped tokens: contain a `/` and end with a recognized
+    // file extension.
+    for word in prose.split(|c: char| c.is_whitespace() || "(),;:\"`".contains(c)) {
+        let token = word.trim_matches(|c: char| {
+            !c.is_alphanumeric() && c != '/' && c != '.' && c != '_' && c != '-'
+        });
+        if token.len() < 4 || token.len() > 128 {
+            continue;
+        }
+        let looks_like_path = token.contains('/')
+            && token.chars().filter(|c| *c == '.').count() >= 1
+            && token
+                .rsplit('.')
+                .next()
+                .map(|ext| {
+                    matches!(
+                        ext,
+                        "rs" | "py"
+                            | "ts"
+                            | "tsx"
+                            | "js"
+                            | "jsx"
+                            | "go"
+                            | "java"
+                            | "kt"
+                            | "rb"
+                            | "php"
+                            | "swift"
+                            | "cpp"
+                            | "cc"
+                            | "cxx"
+                            | "hpp"
+                            | "h"
+                            | "c"
+                            | "cs"
+                            | "ex"
+                            | "exs"
+                            | "scala"
+                            | "zig"
+                            | "sh"
+                            | "bash"
+                            | "json"
+                            | "yaml"
+                            | "yml"
+                            | "toml"
+                            | "md"
+                            | "sql"
+                            | "harn"
+                    )
+                })
+                .unwrap_or(false);
+        if !looks_like_path {
+            continue;
+        }
+        // Any grounded_ref whose suffix matches the token, or vice versa,
+        // counts as backed. Path prefixes often differ between absolute
+        // and relative, so we accept suffix overlap.
+        let backed = grounded_refs.iter().any(|g| {
+            let g = g.trim_start_matches("./");
+            let t = token.trim_start_matches("./");
+            g == t || g.ends_with(t) || t.ends_with(g)
+        });
+        if !backed {
+            flagged.insert(token.to_string());
+        }
+    }
+    flagged.into_iter().collect()
+}
+
+fn runtime_feedback_message(kind: &str, content: impl Into<String>) -> serde_json::Value {
+    let content = content.into();
+    serde_json::json!({
+        "role": "user",
+        "content": format!(
+            "<runtime_feedback kind=\"{}\">\n{}\n</runtime_feedback>",
+            escape_runtime_feedback_kind(kind),
+            content.trim(),
+        ),
+    })
+}
+
+fn escape_runtime_feedback_kind(kind: &str) -> String {
+    kind.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
 
 fn build_agent_system_prompt(
@@ -657,35 +763,32 @@ pub async fn run_agent_loop_internal(
         .unwrap_or(true);
     let persistent_system_prompt = if persistent {
         if exit_when_verified {
-            // When exit_when_verified is set, the harness enforces that the
-            // done sentinel is only honoured after a passing run(). The
-            // system prompt only needs a brief reminder, not a long rule.
             if allow_done_sentinel {
                 Some(format!(
-                    "\n\nKeep working until the task is complete. Take action with tools — \
-                     do not stop to explain. Output {done_sentinel} when done."
+                    "\n\nKeep working until the task is complete. Take action with tool calls — \
+                     do not stop to explain. Emit `<done>{done_sentinel}</done>` only after a \
+                     passing verification run."
                 ))
             } else {
                 Some(
-                    "\n\nKeep working until the task is complete. Take action with tools — \
+                    "\n\nKeep working until the task is complete. Take action with tool calls — \
                      do not stop to explain."
                         .to_string(),
                 )
             }
+        } else if allow_done_sentinel {
+            Some(format!(
+                "\n\nIMPORTANT: You MUST keep working until the task is complete. \
+                 Do NOT stop to explain or summarize — take action with tool calls. \
+                 When the requested work is complete, emit `<done>{done_sentinel}</done>` \
+                 as its own top-level block."
+            ))
         } else {
-            if allow_done_sentinel {
-                Some(format!(
-                    "\n\nIMPORTANT: You MUST keep working until the task is complete. \
-                     Do NOT stop to explain or summarize — take action with tools. \
-                     When the requested work is complete, output {done_sentinel} on its own line."
-                ))
-            } else {
-                Some(
-                    "\n\nIMPORTANT: You MUST keep working until the task is complete. \
-                     Do NOT stop to explain or summarize — take action with tools."
-                        .to_string(),
-                )
-            }
+            Some(
+                "\n\nIMPORTANT: You MUST keep working until the task is complete. \
+                 Do NOT stop to explain or summarize — take action with tool calls."
+                    .to_string(),
+            )
         }
     } else {
         None
@@ -710,6 +813,15 @@ pub async fn run_agent_loop_internal(
     let mut last_iteration_text = String::new();
     let mut consecutive_text_only = 0usize;
     let mut consecutive_single_tool_turns = 0usize;
+    // Task ledger: durable task-wide state (root task + deliverables +
+    // rationale) that persists across turns and gates `<done>`. Seeded
+    // from `config.task_ledger`; mutated via `ledger(...)` tool calls.
+    // See `llm/ledger.rs` for shape, semantics, and the `<done>` gate.
+    let mut task_ledger = config.task_ledger.clone();
+    // Whether the agent has already been nudged about a `<done>`
+    // rejected by the ledger gate. Used to escalate the nudge if the
+    // agent keeps trying to emit `<done>` without resolving items.
+    let mut ledger_done_rejections = 0usize;
     let mut all_tools_used: Vec<String> = Vec::new();
     let mut successful_tools_used: Vec<String> = Vec::new();
     let mut rejected_tools: Vec<String> = Vec::new();
@@ -790,7 +902,7 @@ pub async fn run_agent_loop_internal(
             tool_contract_prompt.as_deref(),
             persistent_system_prompt.as_deref(),
         );
-        let (call_messages, call_system) = if let Some(callback) = context_callback.as_ref() {
+        let (mut call_messages, call_system) = if let Some(callback) = context_callback.as_ref() {
             apply_agent_context_callback(
                 callback,
                 iteration,
@@ -802,6 +914,21 @@ pub async fn run_agent_loop_internal(
         } else {
             (visible_messages.clone(), default_system)
         };
+        // Inject the task ledger as a transient user-role message at the
+        // tail of the call payload. Not added to visible/recorded history
+        // so the prompt cache stays stable between turns and the
+        // conversation record isn't polluted with repeated ledger echoes.
+        // The ledger IS reflected in history indirectly via the
+        // `ledger(...)` tool calls the agent emits to mutate it.
+        let ledger_rendered = task_ledger.render_for_prompt();
+        if !ledger_rendered.is_empty() {
+            call_messages.push(serde_json::json!({
+                "role": "user",
+                "content": format!(
+                    "<runtime_injection kind=\"task_ledger\">\n{ledger_rendered}\n</runtime_injection>"
+                ),
+            }));
+        }
         crate::llm::api::debug_log_message_shapes(
             &format!("agent iteration={iteration} preflight"),
             &call_messages,
@@ -854,16 +981,38 @@ pub async fn run_agent_loop_internal(
         }
 
         let mut tool_parse_errors: Vec<String> = Vec::new();
-        // `text_prose` is the model's text with any fenceless TS tool-call
-        // expressions excised. When the parser doesn't run (native-format
-        // path or no-tools path), it falls back to the raw text verbatim.
-        let mut text_prose = text.clone();
+        // `text_prose` is the content of `<assistant_prose>` blocks under
+        // the tagged response protocol (concatenated with blank-line joins).
+        // Always run the tagged parser — even with no tools or native-tool
+        // provider channel — so `visible_text` is the unwrapped prose and
+        // `<done>` / `<assistant_prose>` tags never leak to callers that
+        // just want the model's answer. The tool-call gate below controls
+        // only whether parsed TS-expression calls are promoted into
+        // `tool_calls`, not whether the parser runs.
+        let (text_prose, protocol_violations, tagged_done_marker, canonical_history) = {
+            let parse_result = parse_text_tool_calls_with_tools(&text, tools_val);
+            let prose = if parse_result.prose.is_empty() {
+                text.clone()
+            } else {
+                parse_result.prose.clone()
+            };
+            let canonical = if parse_result.canonical.is_empty() {
+                None
+            } else {
+                Some(parse_result.canonical)
+            };
+            (
+                prose,
+                parse_result.violations,
+                parse_result.done_marker,
+                canonical,
+            )
+        };
         let tool_calls = if !result.tool_calls.is_empty() {
             result.tool_calls.clone()
         } else if has_tools {
             let parse_result = parse_text_tool_calls_with_tools(&text, tools_val);
             tool_parse_errors = parse_result.errors;
-            text_prose = parse_result.prose;
             if tool_format == "native" {
                 if !parse_result.calls.is_empty() || !tool_parse_errors.is_empty() {
                     let feedback = native_protocol_violation_nudge(
@@ -874,7 +1023,7 @@ pub async fn run_agent_loop_internal(
                     append_message_to_contexts(
                         &mut visible_messages,
                         &mut recorded_messages,
-                        serde_json::json!({"role": "user", "content": feedback}),
+                        runtime_feedback_message("protocol_violation", feedback),
                     );
                 }
                 Vec::new()
@@ -919,7 +1068,7 @@ pub async fn run_agent_loop_internal(
                     append_message_to_contexts(
                         &mut visible_messages,
                         &mut recorded_messages,
-                        serde_json::json!({"role": "user", "content": feedback}),
+                        runtime_feedback_message("parse_guidance", feedback),
                     );
                 }
                 calls
@@ -941,15 +1090,81 @@ pub async fn run_agent_loop_internal(
         // Surface the prose (not the raw text) to callers that read
         // `last_iteration_text` / `visible_text`. Tool call expressions are
         // structured data in `tool_calls`, not something the user should
-        // see as the agent's "answer". This also means conversation history
-        // will carry the prose, so future iterations don't see their own
-        // prior call syntax as narration.
-        last_iteration_text = shaped_text_prose.clone();
+        // see as the agent's "answer". When the model emitted a `<done>`
+        // block, append its canonical wrapper so post-turn callbacks can
+        // substring-match the configured sentinel without the UI showing
+        // it (visible-text sanitization strips `<done>` blocks downstream).
+        last_iteration_text = match tagged_done_marker.as_deref() {
+            Some(body) if shaped_text_prose.trim().is_empty() => {
+                format!("<done>{body}</done>")
+            }
+            Some(body) => format!("{shaped_text_prose}\n\n<done>{body}</done>"),
+            None => shaped_text_prose.clone(),
+        };
+
+        // Grounding lint: when the assistant's prose references file paths
+        // or identifier-shaped strings that are NOT in the ledger's
+        // grounded_refs, emit structured feedback telling the agent to
+        // either back the claim with a read/lookup or drop it. Runs only
+        // when the ledger has any grounded_refs — a cold ledger produces
+        // too many false positives in trivial one-shots.
+        if !task_ledger.grounded_refs.is_empty() && !text_prose.trim().is_empty() {
+            let ungrounded = grounding_lint_scan(&text_prose, &task_ledger.grounded_refs);
+            if !ungrounded.is_empty() {
+                let message = format!(
+                    "Grounding check: your prose references {} item(s) you have not inspected this session: {}. Either run `read`, `lookup`, or `search` on them before asserting specifics, or drop the claim. Speculative claims about APIs, module internals, or file contents you have not read are prohibited.",
+                    ungrounded.len(),
+                    ungrounded
+                        .iter()
+                        .take(5)
+                        .map(|s| format!("`{s}`"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+                append_message_to_contexts(
+                    &mut visible_messages,
+                    &mut recorded_messages,
+                    runtime_feedback_message("grounding_violation", message),
+                );
+            }
+        }
+
+        // Inject structured feedback for any tagged-protocol violations.
+        // The response-protocol parser enforces top-level grammar; these
+        // feedbacks teach the model how to fix its shape before the next
+        // turn. Done first so protocol errors surface even when tool-call
+        // dispatch still happens (e.g. calls parsed inside tags plus stray
+        // prose outside).
+        if !protocol_violations.is_empty() && tool_format != "native" {
+            let feedback = format!(
+                "Your response violated the tagged response protocol. Each issue:\n- {}\n\n\
+                 Re-emit using only these top-level tags, separated by whitespace:\n\n\
+                 <assistant_prose>short narration (optional)</assistant_prose>\n\
+                 <tool_call>\nname({{ key: value }})\n</tool_call>\n\
+                 <done>{done_sentinel}</done>\n\n\
+                 Nothing outside these tags is accepted. Do not paste source code, \
+                 diffs, JSON, or command output as prose — wrap each action in its \
+                 own <tool_call> block.",
+                protocol_violations.join("\n- "),
+            );
+            append_message_to_contexts(
+                &mut visible_messages,
+                &mut recorded_messages,
+                runtime_feedback_message("protocol_violation", feedback),
+            );
+        }
 
         // Check done_sentinel on EVERY response, not just text-only ones.
         // If present alongside tool calls, we still process the tools (so their
         // results land in the conversation), but mark the loop to exit afterward.
-        let sentinel_in_text = text.contains(&done_sentinel);
+        let sentinel_in_text = tagged_done_marker
+            .as_deref()
+            .is_some_and(|body| body == done_sentinel.as_str())
+            // Native-format and no-tools paths bypass the tagged parser;
+            // fall back to substring match so their transcripts still honour
+            // the configured sentinel.
+            || (tool_format == "native" && text.contains(done_sentinel.as_str()))
+            || (!has_tools && text.contains(done_sentinel.as_str()));
         let phase_change = break_unless_phase
             .as_deref()
             .is_some_and(|phase| loop_state_requests_phase_change(&text, phase));
@@ -976,8 +1191,24 @@ pub async fn run_agent_loop_internal(
         // done sentinel is honoured.  This prevents premature exits where the
         // model describes a plan and emits ##DONE## without actually acting.
         let has_acted = !all_tools_used.is_empty() || !tool_calls.is_empty();
-        let sentinel_hit =
-            persistent && ((sentinel_in_text && verified && has_acted) || phase_change);
+        // Ledger gate: if a task ledger was seeded and still has open or
+        // blocked deliverables, the done sentinel is rejected. This is
+        // the general-purpose "what does the user call done?" mechanism
+        // that replaces ad-hoc task-specific guardrails. See
+        // `llm/ledger.rs` for the structured semantics.
+        let ledger_blocks_done = task_ledger.gates_done();
+        let sentinel_hit = persistent
+            && ((sentinel_in_text && verified && has_acted && !ledger_blocks_done) || phase_change);
+
+        if sentinel_in_text && ledger_blocks_done && persistent {
+            let corrective = task_ledger.done_gate_feedback();
+            append_message_to_contexts(
+                &mut visible_messages,
+                &mut recorded_messages,
+                runtime_feedback_message("ledger_not_satisfied", corrective),
+            );
+            ledger_done_rejections += 1;
+        }
 
         // If the model emitted the sentinel but verification hasn't passed,
         // inject a corrective so the model knows it must keep going.
@@ -991,10 +1222,7 @@ pub async fn run_agent_loop_internal(
             append_message_to_contexts(
                 &mut visible_messages,
                 &mut recorded_messages,
-                serde_json::json!({
-                    "role": "user",
-                    "content": corrective
-                }),
+                runtime_feedback_message("verification_gate", corrective),
             );
         }
         // If the model emitted the sentinel without having made any tool
@@ -1005,11 +1233,50 @@ pub async fn run_agent_loop_internal(
             append_message_to_contexts(
                 &mut visible_messages,
                 &mut recorded_messages,
-                serde_json::json!({
-                    "role": "user",
-                    "content": corrective
-                }),
+                runtime_feedback_message("sentinel_without_action", corrective),
             );
+        }
+
+        // Intercept `ledger(...)` tool calls before the normal dispatch
+        // pipeline. The ledger tool has no host executor — it mutates
+        // runtime state (task_ledger) and emits a synthetic tool-result
+        // message. Filtering here lets the rest of the pipeline stay
+        // unaware of ledger bookkeeping.
+        let mut tool_calls: Vec<serde_json::Value> = tool_calls;
+        let mut ledger_tool_results: Vec<serde_json::Value> = Vec::new();
+        tool_calls.retain(|tc| {
+            if tc.get("name").and_then(|n| n.as_str()) != Some("ledger") {
+                return true;
+            }
+            let call_id = tc
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("ledger_call")
+                .to_string();
+            let args = tc
+                .get("arguments")
+                .cloned()
+                .unwrap_or(serde_json::json!({}));
+            let result_text = match task_ledger.apply(&args) {
+                Ok(summary) => {
+                    all_tools_used.push("ledger".to_string());
+                    successful_tools_used.push("ledger".to_string());
+                    format!("<tool_result>ledger: {summary}</tool_result>")
+                }
+                Err(err) => format!("<tool_result>ledger error: {err}</tool_result>"),
+            };
+            ledger_tool_results.push(serde_json::json!({
+                "role": "user",
+                "content": result_text,
+                "metadata": {
+                    "tool_call_id": call_id,
+                    "tool_name": "ledger",
+                },
+            }));
+            false
+        });
+        for message in ledger_tool_results.drain(..) {
+            append_message_to_contexts(&mut visible_messages, &mut recorded_messages, message);
         }
 
         if !tool_calls.is_empty() {
@@ -1022,8 +1289,12 @@ pub async fn run_agent_loop_internal(
                     build_assistant_tool_message(&text, &tool_calls, &opts.provider),
                 );
             } else {
-                let assistant_content_for_history =
-                    assistant_history_text(&text, tool_parse_errors.len(), &tool_calls);
+                let assistant_content_for_history = assistant_history_text(
+                    canonical_history.as_deref(),
+                    &text,
+                    tool_parse_errors.len(),
+                    &tool_calls,
+                );
                 append_message_to_contexts(
                     &mut visible_messages,
                     &mut recorded_messages,
@@ -1108,6 +1379,12 @@ pub async fn run_agent_loop_internal(
                 let tool_id = tc["id"].as_str().unwrap_or("");
                 let tool_name = tc["name"].as_str().unwrap_or("");
                 let mut tool_args = normalize_tool_args(tool_name, &tc["arguments"]);
+
+                // Record grounded references BEFORE dispatch so the ledger's
+                // grounded_refs reflects what the agent has inspected even
+                // if the tool later errors. Grounding-lint uses this to
+                // distinguish "I read this" from "I'm claiming this".
+                crate::llm::ledger::record_grounded_refs(&mut task_ledger, tool_name, &tool_args);
 
                 // Detect malformed JSON arguments that the provider returned
                 // (marked with __parse_error sentinel during response parsing).
@@ -1854,20 +2131,14 @@ pub async fn run_agent_loop_internal(
                 append_message_to_contexts(
                     &mut visible_messages,
                     &mut recorded_messages,
-                    serde_json::json!({
-                        "role": "user",
-                        "content": observations.trim_end(),
-                    }),
+                    runtime_feedback_message("tool_results", observations.trim_end()),
                 );
             }
             if !rejection_followups.is_empty() {
                 append_message_to_contexts(
                     &mut visible_messages,
                     &mut recorded_messages,
-                    serde_json::json!({
-                        "role": "user",
-                        "content": rejection_followups.join("\n\n"),
-                    }),
+                    runtime_feedback_message("tool_rejection", rejection_followups.join("\n\n")),
                 );
             }
             let finish_step_messages = inject_queued_user_messages(
@@ -1940,10 +2211,7 @@ pub async fn run_agent_loop_internal(
                             append_message_to_contexts(
                                 &mut visible_messages,
                                 &mut recorded_messages,
-                                serde_json::json!({
-                                    "role": "user",
-                                    "content": msg,
-                                }),
+                                runtime_feedback_message("post_turn", msg),
                             );
                             consecutive_single_tool_turns = 0;
                         }
@@ -2021,10 +2289,7 @@ pub async fn run_agent_loop_internal(
                 append_message_to_contexts(
                     &mut visible_messages,
                     &mut recorded_messages,
-                    serde_json::json!({
-                        "role": "user",
-                        "content": error_msg,
-                    }),
+                    runtime_feedback_message("parse_error", error_msg),
                 );
             }
             if sentinel_hit {
@@ -2043,8 +2308,12 @@ pub async fn run_agent_loop_internal(
             continue;
         }
 
-        let assistant_content_for_history =
-            assistant_history_text(&text, tool_parse_errors.len(), &tool_calls);
+        let assistant_content_for_history = assistant_history_text(
+            canonical_history.as_deref(),
+            &text,
+            tool_parse_errors.len(),
+            &tool_calls,
+        );
         append_message_to_contexts(
             &mut visible_messages,
             &mut recorded_messages,
@@ -2066,10 +2335,7 @@ pub async fn run_agent_loop_internal(
             append_message_to_contexts(
                 &mut visible_messages,
                 &mut recorded_messages,
-                serde_json::json!({
-                    "role": "user",
-                    "content": error_msg,
-                }),
+                runtime_feedback_message("parse_error", error_msg),
             );
             tool_parse_errors.clear();
             consecutive_text_only = 0;
@@ -2185,10 +2451,7 @@ pub async fn run_agent_loop_internal(
                         append_message_to_contexts(
                             &mut visible_messages,
                             &mut recorded_messages,
-                            serde_json::json!({
-                                "role": "user",
-                                "content": message,
-                            }),
+                            runtime_feedback_message(reason, message),
                         );
                     }
                     transcript_events.push(transcript_event(
@@ -2254,10 +2517,7 @@ pub async fn run_agent_loop_internal(
         append_message_to_contexts(
             &mut visible_messages,
             &mut recorded_messages,
-            serde_json::json!({
-                "role": "user",
-                "content": nudge,
-            }),
+            runtime_feedback_message("nudge", nudge),
         );
     }
 
@@ -2318,6 +2578,11 @@ pub async fn run_agent_loop_internal(
     });
     let trace_summary = super::trace::agent_trace_summary();
 
+    // Serialize the final ledger state into the result so workflow post-
+    // processors (QC officer, audit pipelines) can reason over what the
+    // agent thought "done" meant.
+    let ledger_json = serde_json::to_value(&task_ledger).unwrap_or(serde_json::Value::Null);
+    let ledger_done_nudge_count = ledger_done_rejections as i64;
     Ok(serde_json::json!({
         "status": final_status,
         "daemon_state": daemon_state,
@@ -2331,6 +2596,8 @@ pub async fn run_agent_loop_internal(
         "rejected_tools": rejected_tools,
         "tool_calling_mode": tool_format,
         "deferred_user_messages": deferred_user_messages,
+        "task_ledger": ledger_json,
+        "ledger_done_rejections": ledger_done_nudge_count,
         "trace": trace_summary,
         "transcript": super::helpers::vm_value_to_json(&transcript_to_vm_with_events(
             opts.transcript_id.clone(),

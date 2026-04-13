@@ -1,9 +1,16 @@
 pipeline default() {
-  // Mock provider returns deterministic responses without API keys
-  // llm_call always returns a dict with .text, .model, .input_tokens, .output_tokens
+  // Mock provider returns deterministic responses without API keys.
+  // llm_call returns a dict with .text (raw tagged response), .prose
+  // (the text unwrapped from <assistant_prose>...</assistant_prose>),
+  // .canonical_text (canonical reconstruction preserving tags), plus
+  // .model / .input_tokens / .output_tokens. Scripts that want the
+  // user-visible answer should read .prose.
   let response = llm_call("Hello world", nil, {provider: "mock"})
-  println(response.text)
-  // Mock with agent_loop terminates immediately via ##DONE##
+  println(response.prose)
+  // Mock with agent_loop terminates immediately via ##DONE##.
+  // agent_loop exposes `.visible_text` which is the prose from the final
+  // iteration (tool call expressions stripped, `<done>` sentinel wrapped
+  // as a tag downstream viewers can strip).
   let result = agent_loop("Do the task", "You are helpful", {provider: "mock"})
-  println(result?.text)
+  println(result?.visible_text)
 }

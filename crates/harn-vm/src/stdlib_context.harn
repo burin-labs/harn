@@ -123,11 +123,19 @@ pub fn prompt_compose(task, ctx, options) {
   let opts = options ?? {}
   let rendered = context_render(ctx, opts)
   let task_label = opts?.task_label ?? "Task"
-  let prompt = if rendered == "" {
-    task
-  } else {
-    rendered + "\n\n" + task_label + ":\n" + task
-  }
+  let prompt = "<workflow_task>\n<label>"
+    + task_label
+    + "</label>\n<instructions>\n"
+    + task
+    + "\n</instructions>\n</workflow_task>"
+    + if rendered == "" {
+      ""
+    } else {
+      "\n\n<workflow_context>\n" + rendered + "\n</workflow_context>"
+    }
+    + "\n\n<workflow_response_contract>\n"
+    + "Respond to the workflow task above. Do not continue the trailing artifact text verbatim. Keep commentary minimal and use the active tool-calling contract for concrete progress.\n"
+    + "</workflow_response_contract>"
   return filter_nil({
     prompt: prompt,
     system: opts?.system,

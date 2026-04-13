@@ -281,22 +281,65 @@ pub fn render_artifacts_context(artifacts: &[ArtifactRecord], policy: &ContextPo
                 );
             }
             _ => parts.push(format!(
-                "[{title}] kind={} source={} freshness={} priority={}\n{}",
-                artifact.kind,
-                artifact
-                    .source
-                    .clone()
-                    .unwrap_or_else(|| "unknown".to_string()),
-                artifact
-                    .freshness
-                    .clone()
-                    .unwrap_or_else(|| "normal".to_string()),
+                "<artifact>\n<title>{}</title>\n<kind>{}</kind>\n<source>{}</source>\n\
+<freshness>{}</freshness>\n<priority>{}</priority>\n<body>\n{}\n</body>\n</artifact>",
+                escape_prompt_text(&title),
+                escape_prompt_text(&artifact.kind),
+                escape_prompt_text(
+                    artifact
+                        .source
+                        .clone()
+                        .unwrap_or_else(|| "unknown".to_string())
+                        .as_str(),
+                ),
+                escape_prompt_text(
+                    artifact
+                        .freshness
+                        .clone()
+                        .unwrap_or_else(|| "normal".to_string())
+                        .as_str(),
+                ),
                 artifact.priority.unwrap_or_default(),
                 body
             )),
         }
     }
     parts.join("\n\n")
+}
+
+pub fn render_workflow_prompt(
+    task: &str,
+    task_label: Option<&str>,
+    rendered_context: &str,
+) -> String {
+    let label = task_label
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("Task");
+    let mut prompt = format!(
+        "<workflow_task>\n<label>{}</label>\n<instructions>\n{}\n</instructions>\n</workflow_task>",
+        escape_prompt_text(label),
+        task.trim(),
+    );
+    let context = rendered_context.trim();
+    if !context.is_empty() {
+        prompt.push_str("\n\n<workflow_context>\n");
+        prompt.push_str(context);
+        prompt.push_str("\n</workflow_context>");
+    }
+    prompt.push_str(
+        "\n\n<workflow_response_contract>\n\
+Respond to the workflow task above. Do not continue the trailing artifact text verbatim. \
+Keep commentary minimal and use the active tool-calling contract for concrete progress.\n\
+</workflow_response_contract>",
+    );
+    prompt
+}
+
+fn escape_prompt_text(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 pub fn normalize_artifact(

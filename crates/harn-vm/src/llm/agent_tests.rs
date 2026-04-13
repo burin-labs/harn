@@ -81,6 +81,7 @@ fn base_agent_config() -> AgentLoopConfig {
         require_successful_tools: None,
         on_tool_call: None,
         on_tool_result: None,
+        task_ledger: Default::default(),
     }
 }
 
@@ -92,57 +93,41 @@ fn detects_phase_change_from_latest_loop_state_footer() {
 }
 
 #[test]
-fn assistant_history_preserves_tool_call_syntax_in_text_mode() {
-    // The model's own tool-call expressions must survive into replayed
-    // history. Stripping them causes the next turn to see an empty
-    // assistant message and lose track of what it invoked.
-    let raw_text = "I'll read the file first.\n\
-                    read({ path: \"src/lib.rs\" })\n\
-                    run({ command: \"cargo test\" })";
-    let tool_calls = vec![
-        json!({"name": "read", "arguments": {"path": "src/lib.rs"}}),
-        json!({"name": "run", "arguments": {"command": "cargo test"}}),
-    ];
+fn assistant_history_prefers_canonical_over_raw_text() {
+    // Under the tagged response protocol the parser reconstructs a
+    // canonical form of the turn. Replaying that form — not the raw
+    // provider bytes — is what closes the self-poison loop where leading
+    // raw code became "what the agent said" on the next turn.
+    let raw_text = "def foo(): pass\n<tool_call>\nread({ path: \"src/lib.rs\" })\n</tool_call>";
+    let canonical = "<tool_call>\nread({\n  \"path\": \"src/lib.rs\"\n})\n</tool_call>";
+    let tool_calls = vec![json!({"name": "read", "arguments": {"path": "src/lib.rs"}})];
 
-    let replayed = assistant_history_text(raw_text, 0, &tool_calls);
+    let replayed = assistant_history_text(Some(canonical), raw_text, 0, &tool_calls);
+    assert_eq!(replayed, canonical);
     assert!(
-        replayed.contains("read({ path: \"src/lib.rs\" })"),
-        "replayed history must carry the tool-call expression verbatim, got: {replayed}",
-    );
-    assert!(
-        replayed.contains("run({ command: \"cargo test\" })"),
-        "replayed history must carry every tool-call expression, got: {replayed}",
-    );
-    assert!(
-        replayed.contains("I'll read the file first."),
-        "prose preceding tool calls must be preserved so the model's chain of thought \
-         is stable across turns",
+        !replayed.contains("def foo"),
+        "raw leading code must NOT leak into replayed history: {replayed}",
     );
 }
 
 #[test]
-fn assistant_history_is_never_empty_for_successful_tool_calls() {
-    // Regression: a pure-tool-call response ("run({...})") previously
-    // replayed as an empty string because the prose parser stripped the
-    // entire response. Next turn then saw amnesia about what it invoked.
-    let raw_text = "run({ command: \"ls\" })";
-    let tool_calls = vec![json!({"name": "run", "arguments": {"command": "ls"}})];
-
-    let replayed = assistant_history_text(raw_text, 0, &tool_calls);
-    assert!(
-        !replayed.trim().is_empty(),
-        "assistant history for a successful tool-call turn must not collapse to empty",
-    );
-    assert!(replayed.contains("run("));
+fn assistant_history_falls_back_to_raw_when_no_canonical() {
+    // Native tool-call mode and no-tools paths don't run the tagged
+    // parser, so canonical is None. In that case we still need a
+    // non-empty replay so the model remembers what it said.
+    let raw_text = "Short native-mode response.";
+    let replayed = assistant_history_text(None, raw_text, 0, &[]);
+    assert_eq!(replayed, "Short native-mode response.");
 }
 
 #[test]
 fn assistant_history_elides_malformed_turns() {
     // When parsing failed we still want a compact placeholder so the next
-    // iteration doesn't see (and mutate) its own broken syntax.
-    let raw_text = "```call\nread({ path: 'broken }\n```";
+    // iteration doesn't see (and mutate) its own broken syntax. The
+    // placeholder fires irrespective of whether canonical was captured.
+    let raw_text = "<tool_call>\nread({ path: 'broken }\n</tool_call>";
     let tool_calls = vec![json!({"name": "read"})];
-    let replayed = assistant_history_text(raw_text, 2, &tool_calls);
+    let replayed = assistant_history_text(None, raw_text, 2, &tool_calls);
     assert!(replayed.contains("malformed tool call"));
     assert!(!replayed.contains("'broken"));
 }
@@ -541,7 +526,7 @@ fn action_turn_nudge_mentions_action_or_yield() {
     };
     let msg = action_turn_nudge("text", Some(&policy), true).expect("nudge");
     assert!(
-        msg.contains("either call at least one tool, switch phase, or output the done sentinel")
+        msg.contains("either make concrete progress with a well-formed <tool_call> block, switch phase, or emit a <done> block")
     );
     assert!(msg.contains("120"));
     assert!(msg.contains("too much budget on prose"));
@@ -556,7 +541,7 @@ fn sentinel_without_action_nudge_stays_stage_agnostic() {
     };
     let msg = sentinel_without_action_nudge("text", Some(&policy));
     assert!(msg.contains("without taking any tool action"));
-    assert!(msg.contains("Use an available tool now, or switch phase"));
+    assert!(msg.contains("Make concrete progress with an available tool now, or switch phase"));
     assert!(!msg.contains("lookup() or read()"));
     assert!(msg.contains("Keep prose to at most 180 visible characters"));
 }
@@ -569,8 +554,10 @@ fn action_turn_nudge_omits_done_sentinel_when_stage_disallows_it() {
         max_prose_chars: Some(90),
     };
     let msg = action_turn_nudge("text", Some(&policy), false).expect("nudge");
-    assert!(!msg.contains("done sentinel"));
-    assert!(msg.contains("either call at least one tool or switch phase"));
+    assert!(!msg.contains("<done>"));
+    assert!(msg.contains(
+        "either make concrete progress with a well-formed <tool_call> block or switch phase"
+    ));
 }
 
 #[test]
@@ -582,7 +569,7 @@ fn sentinel_without_action_nudge_explains_workflow_owned_stage_rule() {
     };
     let msg = sentinel_without_action_nudge("text", Some(&policy));
     assert!(msg.contains("workflow-owned action stage"));
-    assert!(msg.contains("Do not output a done sentinel in this stage"));
+    assert!(msg.contains("Do not output a <done> block in this stage"));
 }
 
 #[test]
@@ -618,7 +605,7 @@ async fn persistent_prompt_omits_done_sentinel_when_stage_disallows_it() {
         .last()
         .and_then(|call| call.system.as_ref())
         .expect("mock call system prompt");
-    assert!(system.contains("take action with tools"));
+    assert!(system.contains("take action with tool calls"));
     assert!(!system.contains("##DONE##"));
     reset_llm_mock_state();
 }
@@ -817,13 +804,19 @@ async fn assert_observed_llm_call_bridge_user_visible(user_visible: bool) {
         .expect("call_progress notification")["params"]["update"]["content"]
         .clone();
     assert_eq!(call_progress["toolCallId"].as_str(), Some(call_id));
+    // `delta` carries the raw provider bytes for observability, including
+    // any tagged-protocol wrappers. `visible_text` goes through the
+    // user-facing sanitizer that unwraps <assistant_prose> and hides
+    // <tool_call> / <done> blocks. Check each against its own contract.
     assert_eq!(
         call_progress["delta"].as_str(),
         Some(expected_text.as_str())
     );
+    let visible_expected =
+        crate::visible_text::sanitize_visible_assistant_text(&expected_text, false);
     assert_eq!(
         call_progress["visible_text"].as_str(),
-        Some(expected_text.as_str())
+        Some(visible_expected.as_str())
     );
     assert_eq!(call_progress["user_visible"], json!(user_visible));
 

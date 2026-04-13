@@ -2,6 +2,20 @@
 
 This repository implements Harn, a programming language and runtime for orchestrating AI agents.
 
+## For agents writing Harn scripts
+
+Before writing or editing `.harn` code, read the one-page Harn
+quickref. It distills syntax, concurrency primitives (`parallel each`
+/ `parallel settle` with `max_concurrent`), the `llm_call` options
+table (including `schema_retries` + `provider: "auto"`), and the
+gotchas that repeatedly trip up first-time scripters.
+
+- In-repo: `docs/llm/harn-quickref.md`
+- Canonical URL: <https://harn.burincode.com/docs/llm/harn-quickref.md>
+
+Claude Code users get this autoloaded via the `harn-scripting` skill
+at `.claude/skills/harn-scripting/SKILL.md`.
+
 ## Dev Environment Tips
 
 - Run `make setup` on a fresh clone. It configures `.githooks/`, installs `cargo-nextest` and

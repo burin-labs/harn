@@ -193,6 +193,11 @@ pub enum Node {
         expr: Box<SNode>,
         variable: Option<String>,
         body: Vec<SNode>,
+        /// Optional trailing `with { max_concurrent: N, ... }` option block.
+        /// A vec (rather than a dict) preserves source order for error
+        /// reporting and keeps parsing cheap. Only `max_concurrent` is
+        /// currently honored; unknown keys are rejected by the parser.
+        options: Vec<(String, SNode)>,
     },
 
     SelectExpr {

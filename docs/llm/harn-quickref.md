@@ -1,0 +1,287 @@
+# Harn Quick Reference (LLM-friendly)
+
+**Canonical URL:** <https://harn.burincode.com/docs/llm/harn-quickref.md>
+
+This file is a one-pass reference optimized for LLM consumption and
+grep. It covers the syntax, stdlib highlights, concurrency, and the
+LLM / agent_loop surface an agent typically needs to write scripts.
+You can fetch this file directly in any agent context that supports
+HTTP fetches (Claude with `WebFetch`, Cursor's `@web`, Aider, etc.)
+using the canonical URL above.
+
+The human-facing companion lives at `docs/src/scripting-cheatsheet.md`.
+Keep the two in lockstep when syntax changes.
+
+## Files and execution
+
+- File extension: `.harn`.
+- Entry points: a file can either declare `pipeline default() { ... }`
+  (pipeline mode — `compile_top_level_declarations` runs first, then
+  the pipeline body) or be a bare script with top-level statements.
+- Run: `harn run script.harn`.
+- Inline: `harn run -e 'println("hi")'`.
+- CLI arguments: `harn run script.harn -- a b c` exposes
+  `argv: list<string>` as a global (`argv == ["a", "b", "c"]`).
+- Exit code: `exit(code)` terminates with that code. Uncaught errors
+  exit with code 1 and a rendered diagnostic.
+
+## Strings
+
+```harn
+let plain = "hello\n"
+let interp = "Hello, ${name}!"
+let multi = """
+This is a triple-quoted multiline string.
+It keeps line breaks verbatim and is the preferred way to declare
+long system prompts in source code.
+"""
+let raw = r"C:\path\does\no\escapes"
+```
+
+Heredoc-style `<<TAG ... TAG` is **only** valid inside LLM tool-call
+argument JSON. In source code, use `"""..."""`.
+
+## Slicing
+
+End-exclusive slicing works on strings and lists:
+
+```harn
+let s = "hello world"
+println(s[0:5])        // "hello"
+println(s[6:11])       // "world"
+
+let xs = [1, 2, 3, 4, 5]
+println(xs[1:4])       // [2, 3, 4]
+```
+
+`substring(s, start, length)` also exists — note the third argument
+is a **length**, not an end index. Prefer the slice syntax to avoid
+that footgun.
+
+## Control flow: `if` is an expression
+
+`if` / `else` produces a value. Bind it directly into `let`, pass it
+to functions, or `return` it:
+
+```harn
+let body = if len(content) > 2400 {
+  head_slice + "..." + tail_slice
+} else {
+  content
+}
+
+let grade = if score >= 90 { "A" } else if score >= 80 { "B" } else { "C" }
+```
+
+## Module scope
+
+Top-level `let` / `var` and `fn` declarations are visible inside
+functions defined in the same file:
+
+```harn
+let GRADER_SYSTEM = """
+You are a strict grader...
+"""
+
+pub fn grade_file(path) {
+  // GRADER_SYSTEM is in scope here.
+  return llm_call("...", GRADER_SYSTEM, { ... })
+}
+```
+
+Top-level mutable `var` cross-fn mutation is not fully supported yet
+(each function closure captures its own value copy). If you need
+shared mutable state across functions, use atomics (`atomic(0)`,
+`atomic_add`, `atomic_get`) or a channel.
+
+## Results and errors
+
+`try { ... }` returns a `Result.Ok(value)` on success or
+`Result.Err(value)` on thrown error. Unwrap with:
+
+- `unwrap(r) -> T` — returns `T`, panics if `Err`.
+- `unwrap_err(r) -> string` — returns the error message, panics if
+  `Ok`.
+- `r?.field` — optional chaining that returns `nil` on `Err`.
+
+```harn
+let r = try { llm_call("hi", nil, opts) }
+let text = r?.text ?? "no response"
+```
+
+## Concurrency
+
+```harn
+// Spawn a background task.
+let h = spawn { long_work() }
+let value = await(h)
+
+// parallel each: concurrent map.
+let results = parallel each paths { p -> process(p) }
+
+// parallel settle: like `each` but collects per-item Ok/Err.
+let outcome = parallel settle paths { p -> grade(p) }
+println(outcome.succeeded)  // count
+println(outcome.failed)
+for r in outcome.results {
+  // r is Result.Ok(...) or Result.Err(...)
+}
+
+// parallel N: fan-out with an index.
+let indices = parallel 8 { i -> fetch(i) }
+
+// Cap in-flight work to avoid overwhelming downstream services.
+let results = parallel settle paths with { max_concurrent: 4 } { p ->
+  llm_call(p, nil, opts)
+}
+```
+
+`max_concurrent: 0` (or no `with` clause) means unlimited. See also
+`retry { } catch err { }`, channels, `select`, and `deadline` in
+`docs/src/concurrency.md`.
+
+## Regex
+
+```harn
+let matches  = regex_match("[0-9]+", "abc 42 def 7")   // ["42", "7"] or nil
+let swapped  = regex_replace("(\\w+)\\s(\\w+)", "$2 $1", "hello world")
+//           -> "world hello"
+let same     = regex_replace_all("(\\w+)\\s(\\w+)", "$2 $1", "hello world")
+//           -> alias of regex_replace; every match replaced.
+let captures = regex_captures("(?P<day>[A-Z][a-z]+)", "Mon Tue")
+```
+
+`regex_replace` and `regex_replace_all` both replace every match and
+both support `$1`, `$2`, `${name}` backrefs.
+
+## LLM surface
+
+```harn
+let response = llm_call(prompt, system, options)
+println(response.prose)          // unwrapped prose (text minus tags)
+println(response.text)           // raw provider text (may include tags)
+println(response.canonical_text) // canonical tagged reconstruction
+println(response.input_tokens)
+println(response.output_tokens)
+```
+
+### `llm_call` options
+
+| Option | Type | Default | Notes |
+|---|---|---|---|
+| `provider` | string | `"auto"` | `"auto"` infers from `model` (`local:*` → local, `/` → openrouter, `claude-*` → anthropic, `gpt-*` → openai, `llm:` → ollama). Explicit wins. |
+| `model` | string | (inferred) | `local:gemma-4-e4b-it` routes through local. |
+| `max_tokens` | int | 4096 | |
+| `temperature` | float | provider default | |
+| `tools` | list | nil | Registered tool schemas. |
+| `response_format` | string | nil | `"json"` asks the provider for JSON mode. |
+| `output_schema` | dict | nil | JSON-schema-shaped dict. Validated after parse. |
+| `output_validation` | string | `"off"` | `"error"` throws on mismatch; `"warn"` logs. |
+| `schema_retries` | int | 1 | When validation fails, re-prompt up to N times with a corrective nudge. Works alongside `output_validation: "error"`. |
+| `schema_retry_nudge` | string \| bool | auto | String = verbatim corrective message (+ validation errors appended). `true` = auto nudge from schema required/properties keys. `false` = retry without a nudge. |
+| `llm_retries` | int | 2 | Retries on transient HTTP / provider errors. Set to 0 for fail-fast. |
+| `llm_backoff_ms` | int | 2000 | Base exponential backoff. |
+| `stream` | bool | true | SSE streaming transport. |
+
+### Common patterns
+
+Structured output with automatic retry:
+
+```harn
+let schema = {
+  type: "object",
+  required: ["verdict"],
+  properties: {
+    verdict: {type: "string"},
+    improvement: {type: "string"},
+  },
+}
+let r = llm_call(prompt, sys, {
+  provider: "auto",
+  model: "local:gemma-4-e4b-it",
+  output_schema: schema,
+  output_validation: "error",
+  schema_retries: 2,
+  response_format: "json",
+})
+println(r.data.verdict)
+```
+
+Batch grading at bounded concurrency:
+
+```harn
+let outcome = parallel settle paths with { max_concurrent: 4 } { path ->
+  llm_call(read_file(path), GRADER_SYSTEM, {
+    provider: "auto",
+    model: "local:gemma-4-e4b-it",
+    output_schema: grader_schema,
+    output_validation: "error",
+    schema_retries: 2,
+    response_format: "json",
+  })
+}
+```
+
+### `agent_loop`
+
+`agent_loop(prompt, system?, options?)` runs a multi-turn loop with
+tool dispatch. Terminates when the model emits `<done>##DONE##</done>`
+(or `##DONE##` in legacy text) — the sentinel is configurable via
+`done_sentinel`.
+
+Returns a dict with `status`, `text`, `visible_text` (last iteration's
+prose with tool calls stripped), `iterations`, `duration_ms`,
+`tools_used`, `task_ledger`, `transcript`, and more. Respects the same
+`llm_retries` / `llm_backoff_ms` options plus its own `tool_retries`,
+`max_iterations`, `max_nudges`.
+
+## Rate limiting
+
+Per-provider RPM limiting is built in:
+
+- Set `rpm: 600` in the provider entry in `providers.toml` /
+  `harn.toml`.
+- Or `HARN_RATE_LIMIT_<PROVIDER>=600` env var (e.g.
+  `HARN_RATE_LIMIT_TOGETHER=600`, `HARN_RATE_LIMIT_LOCAL=60`). Env
+  overrides config.
+- Or `llm_rate_limit("provider", 600)` at runtime.
+
+RPM shapes sustained throughput; `max_concurrent` caps simultaneous
+in-flight work. Use both when batching LLM calls at scale.
+
+## Gotchas (friction-log distilled)
+
+- Heredoc `<<TAG ... TAG` is **not** a source-level string. Use
+  `"""..."""`. The parser emits a targeted error pointing here.
+- `substring(s, start, length)` takes a **length**, not an end index.
+  Prefer `s[start:end]` slicing.
+- Do NOT add `trailing_var_arg = true` to `RunArgs.argv` in clap — it
+  conflicts with `last = true` at runtime. `last = true` alone is
+  sufficient for `harn run script.harn -- a b c`.
+- Don't set `minLength` on optional-feeling schema fields like
+  `improvement`. Small models often leave them blank, and validation
+  will fail every time. Use the system prompt to demand non-empty
+  strings instead.
+- On `llm_call`, `provider: "auto"` with `model: "local:foo"` routes
+  to the local provider. Without `"auto"`, explicit `"local"` wins.
+- `schema_retries` retries schema-validation failures with a
+  corrective nudge. `llm_retries` retries transient provider errors.
+  They compose orthogonally — each schema retry starts a fresh
+  transient budget.
+- Module-level `var` cross-fn mutation is not shared yet. Prefer
+  atomics (`atomic(0)` / `atomic_add`) for shared counters.
+- Small / local models benefit heavily from:
+  1. Wrapping judge input in `<transcript_to_grade>...</transcript_to_grade>`.
+  2. Forcing canonical start tokens (`Start with VERDICT:`).
+  3. `output_validation: "error"` + `schema_retries: 2`.
+  4. Generous `maxLength` / `maxItems` bounds in the schema.
+
+## Discovery
+
+- Human cheatsheet: `docs/src/scripting-cheatsheet.md`.
+- Language spec: `spec/HARN_SPEC.md` (mirrored to
+  `docs/src/language-spec.md`).
+- Concurrency: `docs/src/concurrency.md` (`max_concurrent`, RPM
+  limits, channels, `select`, `deadline`).
+- LLM / agent surface: `docs/src/llm-and-agents.md`.
+- Conformance examples: `conformance/tests/*.harn`.

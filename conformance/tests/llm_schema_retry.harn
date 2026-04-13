@@ -1,0 +1,49 @@
+pipeline default() {
+  let schema = {
+    type: "object",
+    required: ["verdict"],
+    properties: {verdict: {type: "string"}, improvement: {type: "string"}},
+  }
+  // First mock: invalid JSON (missing required "verdict" key).
+  // Second mock: valid JSON on the nudge retry.
+  llm_mock({text: "{\"improvement\": \"try again\"}"})
+  llm_mock({text: "{\"verdict\": \"YES\", \"improvement\": \"\"}"})
+  let r = llm_call(
+    "Grade this",
+    nil,
+    {
+    provider: "mock",
+    output_schema: schema,
+    output_validation: "error",
+    schema_retries: 2,
+    response_format: "json",
+  },
+  )
+  println(r.data.verdict)
+  // Exactly two calls happened — one initial + one retry.
+  let calls = llm_mock_calls()
+  println(len(calls))
+  // The second call's message list must end with the corrective user
+  // nudge containing the word "schema".
+  let second_msgs = calls[1].messages
+  let last_msg = second_msgs[len(second_msgs) - 1]
+  println(contains(last_msg.content, "schema"))
+  // schema_retries: 0 — no retry; invalid JSON surfaces as an error.
+  llm_mock_clear()
+  llm_mock({text: "{\"improvement\": \"try again\"}"})
+  let err = try {
+    llm_call(
+    "Grade again",
+    nil,
+    {
+    provider: "mock",
+    output_schema: schema,
+    output_validation: "error",
+    schema_retries: 0,
+    response_format: "json",
+  },
+  )
+  }
+  println(contains(unwrap_err(err), "schema"))
+  println(len(llm_mock_calls()))
+}

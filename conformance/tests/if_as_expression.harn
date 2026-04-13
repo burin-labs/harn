@@ -1,0 +1,37 @@
+pipeline default() {
+  // `if` / `else` is an expression: the block that runs produces a
+  // value that can flow into `let`, a function call argument, or a
+  // `return`. Friction logs kept reporting this as missing — it
+  // works, but a test under a searchable name helps people find it.
+  let x = if true {
+    1
+  } else {
+    2
+  }
+  println(x)
+  let label = if 3 > 2 {
+    "bigger"
+  } else {
+    "smaller"
+  }
+  println(label)
+  // Nested in function call args.
+  println(
+    if false {
+    "a"
+  } else {
+    "b"
+  },
+  )
+  // Multiple branches via chained else-if still work.
+  let grade = if 75 >= 90 {
+    "A"
+  } else {
+    if 75 >= 80 {
+      "B"
+    } else {
+      "C"
+    }
+  }
+  println(grade)
+}

@@ -378,23 +378,25 @@ pub(crate) fn mock_llm_response(
         }
     }
 
-    // Generate response based on the prompt content.
-    // Include ##DONE## if the system prompt mentions it (agent_loop compatibility).
-    let done_sentinel = if system.is_some_and(|s| s.contains("##DONE##")) {
-        " ##DONE##"
+    // Generate response under the tagged response protocol. Wrap prose in
+    // <assistant_prose> and emit a <done> block when the host system prompt
+    // advertises the sentinel (agent_loop compatibility).
+    let done_block = if system.is_some_and(|s| s.contains("##DONE##")) {
+        "\n<done>##DONE##</done>"
     } else {
         ""
     };
 
-    let response = if last_msg.is_empty() {
-        format!("Mock LLM response{done_sentinel}")
+    let prose_body = if last_msg.is_empty() {
+        "Mock LLM response".to_string()
     } else {
         let word_count = last_msg.split_whitespace().count();
         format!(
-            "Mock response to {word_count}-word prompt: {}{done_sentinel}",
+            "Mock response to {word_count}-word prompt: {}",
             last_msg.chars().take(100).collect::<String>()
         )
     };
+    let response = format!("<assistant_prose>{prose_body}</assistant_prose>{done_block}");
 
     LlmResult {
         text: response.clone(),

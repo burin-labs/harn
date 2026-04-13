@@ -632,16 +632,7 @@ pub async fn execute_stage_node(
             )));
         }
     }
-    let prompt = if rendered_context.is_empty() {
-        task.to_string()
-    } else {
-        format!(
-            "{rendered_context}\n\n{}:\n{task}",
-            node.task_label
-                .clone()
-                .unwrap_or_else(|| "Task".to_string())
-        )
-    };
+    let prompt = super::render_workflow_prompt(task, node.task_label.as_deref(), &rendered_context);
 
     let tool_format = std::env::var("HARN_AGENT_TOOL_FORMAT")
         .ok()
@@ -869,6 +860,18 @@ pub async fn execute_stage_node(
                         .and_then(|v| v.as_dict())
                         .and_then(|d| d.get("on_tool_result"))
                         .cloned(),
+                    // Seed the ledger from the workflow stage's explicit
+                    // deliverables/ledger fields so the graph can carry a
+                    // task-wide plan down through map branches and nested
+                    // stages. Falls back to an empty ledger (no gate).
+                    task_ledger: node
+                        .raw_model_policy
+                        .as_ref()
+                        .and_then(|v| v.as_dict())
+                        .and_then(|d| d.get("task_ledger"))
+                        .map(crate::llm::helpers::vm_value_to_json)
+                        .and_then(|json| serde_json::from_value(json).ok())
+                        .unwrap_or_default(),
                 },
             )
             .await?

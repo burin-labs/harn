@@ -1,0 +1,12 @@
+pipeline default() {
+  // `regex_replace_all` is an alias for `regex_replace`. Both
+  // replace every match and both support `$1`, `$2`, `${name}`
+  // backrefs from the `regex` crate.
+  let swapped = regex_replace("(\\w+)\\s(\\w+)", "$2 $1", "hello world")
+  println(swapped)
+  let swapped_alias = regex_replace_all("(\\w+)\\s(\\w+)", "$2 $1", "hello world")
+  println(swapped_alias)
+  // Named backrefs work as well.
+  let shouty = regex_replace_all("(?P<word>\\w+)", "<$word>", "one two three")
+  println(shouty)
+}

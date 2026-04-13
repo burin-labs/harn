@@ -225,9 +225,90 @@ pub(crate) fn vm_build_llm_result(
         dict.insert("data".to_string(), json_val);
     }
 
-    if !result.tool_calls.is_empty() {
-        let calls: Vec<VmValue> = result.tool_calls.iter().map(json_to_vm_value).collect();
+    // Run the tagged-protocol parser unconditionally so `canonical_text`,
+    // `protocol_violations`, `tool_parse_errors`, and `done_marker` are
+    // always available to callers — even when no tools were registered
+    // and the model emitted plain `<assistant_prose>...</assistant_prose>`.
+    // The parser is cheap and idempotent when the text has no tags at
+    // all. When native tool calls came back from the provider, those are
+    // authoritative and we skip text-parsed calls (but still expose the
+    // canonical prose reconstruction and sentinel surface).
+    let tagged = Some(super::tools::parse_text_tool_calls_with_tools(
+        &result.text,
+        tools_val,
+    ));
+
+    let merged_tool_calls: Vec<serde_json::Value> = if !result.tool_calls.is_empty() {
+        result.tool_calls.clone()
+    } else if let Some(parse) = tagged.as_ref() {
+        parse.calls.clone()
+    } else {
+        Vec::new()
+    };
+    if !merged_tool_calls.is_empty() {
+        let calls: Vec<VmValue> = merged_tool_calls.iter().map(json_to_vm_value).collect();
         dict.insert("tool_calls".to_string(), VmValue::List(Rc::new(calls)));
+    }
+
+    // Expose the tagged-protocol surface so one-shot callers can detect
+    // grammar violations, the `<done>` sentinel body, and the canonical
+    // reconstruction without re-running the parser themselves.
+    if let Some(parse) = tagged.as_ref() {
+        if !parse.violations.is_empty() {
+            let violations: Vec<VmValue> = parse
+                .violations
+                .iter()
+                .map(|v| VmValue::String(Rc::from(v.as_str())))
+                .collect();
+            dict.insert(
+                "protocol_violations".to_string(),
+                VmValue::List(Rc::new(violations)),
+            );
+        }
+        if !parse.errors.is_empty() {
+            let errors: Vec<VmValue> = parse
+                .errors
+                .iter()
+                .map(|e| VmValue::String(Rc::from(e.as_str())))
+                .collect();
+            dict.insert(
+                "tool_parse_errors".to_string(),
+                VmValue::List(Rc::new(errors)),
+            );
+        }
+        if let Some(ref body) = parse.done_marker {
+            dict.insert(
+                "done_marker".to_string(),
+                VmValue::String(Rc::from(body.as_str())),
+            );
+        }
+        if !parse.canonical.is_empty() {
+            dict.insert(
+                "canonical_text".to_string(),
+                VmValue::String(Rc::from(parse.canonical.as_str())),
+            );
+        }
+        // `prose` is the unwrapped prose extracted from
+        // `<assistant_prose>...</assistant_prose>` blocks — the text the
+        // user would see in a chat bubble, without any protocol tags.
+        // This is usually what scripts want when they ask for "the
+        // model's answer" rather than the raw tagged wire format.
+        //
+        // Always emit this field: when the model didn't use the tagged
+        // protocol (or emitted plain text without tags) fall back to the
+        // raw text so callers have a single reliable key for "the
+        // answer". Keeping the field unconditional avoids the footgun
+        // where `.prose` silently becomes `nil` the first time a provider
+        // drifts from the protocol.
+        let prose = if parse.prose.is_empty() {
+            result.text.clone()
+        } else {
+            parse.prose.clone()
+        };
+        dict.insert(
+            "prose".to_string(),
+            VmValue::String(Rc::from(prose.as_str())),
+        );
     }
 
     if let Some(ref thinking) = result.thinking {

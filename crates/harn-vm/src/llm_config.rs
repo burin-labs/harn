@@ -246,7 +246,13 @@ pub fn infer_provider(model_id: &str) -> String {
             }
         }
     }
-    // Fallback to hardcoded inference
+    // Fallback to hardcoded inference.
+    // Order matters: `local:` must beat the generic `:` → ollama rule, and
+    // any prefix-based rule must beat the generic `/` → openrouter rule for
+    // ids like `local:owner/model`.
+    if model_id.starts_with("local:") {
+        return "local".to_string();
+    }
     if model_id.starts_with("claude-") {
         return "anthropic".to_string();
     }
@@ -375,6 +381,33 @@ pub fn resolve_tier_model(
     }
 
     None
+}
+
+/// Return all configured alias-backed model/provider pairs whose resolved
+/// model falls into the requested capability tier. The result is de-duplicated
+/// and sorted deterministically by provider then model id.
+pub fn tier_candidates(target: &str) -> Vec<(String, String)> {
+    let config = load_config();
+    let mut seen = std::collections::BTreeSet::new();
+    let mut candidates = Vec::new();
+
+    for alias in config.aliases.values() {
+        let pair = (alias.id.clone(), alias.provider.clone());
+        if seen.contains(&pair) {
+            continue;
+        }
+        if model_tier(&alias.id) == target {
+            seen.insert(pair.clone());
+            candidates.push(pair);
+        }
+    }
+
+    candidates.sort_by(|(model_a, provider_a), (model_b, provider_b)| {
+        provider_a
+            .cmp(provider_b)
+            .then_with(|| model_a.cmp(model_b))
+    });
+    candidates
 }
 
 // =============================================================================
@@ -598,6 +631,12 @@ fn default_config() -> ProvidersConfig {
             provider: "openai".to_string(),
         },
         InferenceRule {
+            pattern: Some("local:*".to_string()),
+            contains: None,
+            exact: None,
+            provider: "local".to_string(),
+        },
+        InferenceRule {
             pattern: None,
             contains: Some("/".to_string()),
             exact: None,
@@ -624,6 +663,42 @@ fn default_config() -> ProvidersConfig {
             pattern: None,
             exact: None,
             tier: "small".to_string(),
+        },
+        TierRule {
+            contains: Some("gemma-4-e2b".to_string()),
+            pattern: None,
+            exact: None,
+            tier: "small".to_string(),
+        },
+        TierRule {
+            contains: Some("gemma-4-e4b".to_string()),
+            pattern: None,
+            exact: None,
+            tier: "small".to_string(),
+        },
+        TierRule {
+            contains: Some("gemma-4-26b".to_string()),
+            pattern: None,
+            exact: None,
+            tier: "mid".to_string(),
+        },
+        TierRule {
+            contains: Some("gemma-4-31b".to_string()),
+            pattern: None,
+            exact: None,
+            tier: "frontier".to_string(),
+        },
+        TierRule {
+            contains: Some("gemma4:26b".to_string()),
+            pattern: None,
+            exact: None,
+            tier: "mid".to_string(),
+        },
+        TierRule {
+            contains: Some("gemma4:31b".to_string()),
+            pattern: None,
+            exact: None,
+            tier: "frontier".to_string(),
         },
         TierRule {
             pattern: Some("claude-*".to_string()),
@@ -691,6 +766,46 @@ fn default_config() -> ProvidersConfig {
             tool_format: None,
         },
     );
+    config.aliases.insert(
+        "local-gemma4".to_string(),
+        AliasDef {
+            id: "gemma-4-26b-a4b-it".to_string(),
+            provider: "local".to_string(),
+            tool_format: None,
+        },
+    );
+    config.aliases.insert(
+        "local-gemma4-26b".to_string(),
+        AliasDef {
+            id: "gemma-4-26b-a4b-it".to_string(),
+            provider: "local".to_string(),
+            tool_format: None,
+        },
+    );
+    config.aliases.insert(
+        "local-gemma4-31b".to_string(),
+        AliasDef {
+            id: "gemma-4-31b-it".to_string(),
+            provider: "local".to_string(),
+            tool_format: None,
+        },
+    );
+    config.aliases.insert(
+        "local-gemma4-e4b".to_string(),
+        AliasDef {
+            id: "gemma-4-e4b-it".to_string(),
+            provider: "local".to_string(),
+            tool_format: None,
+        },
+    );
+    config.aliases.insert(
+        "local-gemma4-e2b".to_string(),
+        AliasDef {
+            id: "gemma-4-e2b-it".to_string(),
+            provider: "local".to_string(),
+            tool_format: None,
+        },
+    );
 
     config
 }
@@ -738,6 +853,16 @@ mod tests {
         assert_eq!(infer_provider("qwen/qwen3-coder"), "openrouter");
         assert_eq!(infer_provider("llama3.2:latest"), "ollama");
         assert_eq!(infer_provider("unknown-model"), "anthropic");
+    }
+
+    #[test]
+    fn test_infer_provider_local_prefix() {
+        // `local:` must route to the local OpenAI-compatible provider, not
+        // ollama (which would otherwise swallow everything containing `:`).
+        assert_eq!(infer_provider("local:gemma-4-e4b-it"), "local");
+        assert_eq!(infer_provider("local:qwen2.5"), "local");
+        // Even when the id also contains `/`, the `local:` prefix wins.
+        assert_eq!(infer_provider("local:owner/model"), "local");
     }
 
     #[test]

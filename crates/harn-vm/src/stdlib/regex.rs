@@ -45,7 +45,14 @@ pub(crate) fn register_regex_builtins(vm: &mut Vm) {
         Ok(VmValue::Nil)
     });
 
-    vm.register_builtin("regex_replace", |args, _out| {
+    // `regex_replace(pattern, replacement, text)` replaces *every*
+    // match. The replacement string supports the standard `$1`, `$2`,
+    // `${name}` backreferences from the `regex` crate.
+    //
+    // Scripts and docs that reach for "replace all" sometimes search
+    // for the `_all` spelling; `regex_replace_all` is a thin alias on
+    // the same implementation so both discovery paths land.
+    fn replace_all_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
         if args.len() >= 3 {
             let pattern = args[0].display();
             let replacement = args[1].display();
@@ -56,7 +63,9 @@ pub(crate) fn register_regex_builtins(vm: &mut Vm) {
             )));
         }
         Ok(VmValue::Nil)
-    });
+    }
+    vm.register_builtin("regex_replace", |args, _out| replace_all_impl(args));
+    vm.register_builtin("regex_replace_all", |args, _out| replace_all_impl(args));
 
     vm.register_builtin("regex_captures", |args, _out| {
         if args.len() < 2 {

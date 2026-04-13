@@ -233,6 +233,7 @@ impl MermaidGraph {
                 expr,
                 variable,
                 body,
+                options: _,
             } => {
                 let mode_label = match mode {
                     harn_parser::ParallelMode::Count => "parallel count",

@@ -55,6 +55,10 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
         "regex_replace",
         "regex_replace(pattern, replacement, text) -> string",
     ),
+    (
+        "regex_replace_all",
+        "regex_replace_all(pattern, replacement, text) -> string (alias of regex_replace)",
+    ),
     // HTTP
     ("http_get", "http_get(url) -> dict"),
     ("http_post", "http_post(url, body, headers?) -> dict"),
@@ -535,7 +539,10 @@ pub(crate) fn builtin_doc(name: &str) -> Option<String> {
         "exit" => "**exit(code)** — Terminate process with exit code",
         "regex_match" => "**regex_match(pattern, text)** → list | nil — Find all regex matches",
         "regex_replace" => {
-            "**regex_replace(pattern, replacement, text)** → string — Replace regex matches"
+            "**regex_replace(pattern, replacement, text)** → string — Replace every regex match; supports `$1`, `$2`, `${name}` backrefs"
+        }
+        "regex_replace_all" => {
+            "**regex_replace_all(pattern, replacement, text)** → string — Alias of `regex_replace`; same semantics, different spelling"
         }
         "http_get" => "**http_get(url)** → string — HTTP GET request",
         "http_post" => "**http_post(url, body, headers?)** → string — HTTP POST request",

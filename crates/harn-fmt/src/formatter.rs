@@ -512,30 +512,30 @@ impl Formatter {
                 expr,
                 variable,
                 body,
+                options,
             } => {
                 let e = self.format_expr(expr);
-                let header = match mode {
-                    ParallelMode::Count => {
-                        if let Some(var) = variable {
-                            format!("parallel {e} {{ {var} ->")
-                        } else {
-                            format!("parallel {e} {{")
-                        }
-                    }
-                    ParallelMode::Each => {
-                        if let Some(var) = variable {
-                            format!("parallel each {e} {{ {var} ->")
-                        } else {
-                            format!("parallel each {e} {{")
-                        }
-                    }
-                    ParallelMode::Settle => {
-                        if let Some(var) = variable {
-                            format!("parallel settle {e} {{ {var} ->")
-                        } else {
-                            format!("parallel settle {e} {{")
-                        }
-                    }
+                let mode_word = match mode {
+                    ParallelMode::Count => "",
+                    ParallelMode::Each => "each ",
+                    ParallelMode::Settle => "settle ",
+                };
+                // Render `with { max_concurrent: N, ... }` inline. Only
+                // recognized keys are emitted — unknown keys never reach
+                // the AST (parser rejects them).
+                let options_clause = if options.is_empty() {
+                    String::new()
+                } else {
+                    let formatted: Vec<String> = options
+                        .iter()
+                        .map(|(key, value)| format!("{key}: {}", self.format_expr(value)))
+                        .collect();
+                    format!(" with {{ {} }}", formatted.join(", "))
+                };
+                let header = if let Some(var) = variable {
+                    format!("parallel {mode_word}{e}{options_clause} {{ {var} ->")
+                } else {
+                    format!("parallel {mode_word}{e}{options_clause} {{")
                 };
                 self.writeln(&header);
                 self.indent();
@@ -1034,6 +1034,7 @@ impl Formatter {
                 expr,
                 variable,
                 body,
+                options,
             } => {
                 let e = self.format_expr(expr);
                 let keyword = match mode {
@@ -1041,10 +1042,19 @@ impl Formatter {
                     ParallelMode::Each => "parallel each",
                     ParallelMode::Settle => "parallel settle",
                 };
-                let opening = if let Some(var) = variable {
-                    format!("{keyword} {e} {{ {var} ->")
+                let options_clause = if options.is_empty() {
+                    String::new()
                 } else {
-                    format!("{keyword} {e} {{")
+                    let formatted: Vec<String> = options
+                        .iter()
+                        .map(|(key, value)| format!("{key}: {}", self.format_expr(value)))
+                        .collect();
+                    format!(" with {{ {} }}", formatted.join(", "))
+                };
+                let opening = if let Some(var) = variable {
+                    format!("{keyword} {e}{options_clause} {{ {var} ->")
+                } else {
+                    format!("{keyword} {e}{options_clause} {{")
                 };
                 self.format_block_expr(&opening, body)
             }

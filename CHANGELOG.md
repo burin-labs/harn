@@ -2,6 +2,76 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.81
+
+### Breaking
+
+- **`llm_call` default `llm_retries` bumped from `0` to `2`.** A plain
+  `llm_call` now retries transient HTTP / provider errors twice before
+  surfacing the failure, matching the resilience `agent_loop` already
+  had. Scripts that relied on fail-fast behavior should pass
+  `llm_retries: 0` explicitly. `llm_backoff_ms` default (`2000`)
+  unchanged.
+
+### Added
+
+- **`parallel each` / `parallel settle` / `parallel N` accept
+  `with { max_concurrent: N }`.** Caps simultaneous in-flight workers
+  while preserving per-item ordering in results. Complements the
+  provider-level RPM limiter (`rpm:` / `HARN_RATE_LIMIT_<PROVIDER>`):
+  RPM shapes sustained throughput, `max_concurrent` caps bursts.
+- **`llm_call` gains `schema_retries` + `schema_retry_nudge`.** When
+  `output_validation: "error"` rejects the model's response, re-prompt
+  up to N times with a corrective user message auto-built from the
+  schema's `required` / `properties` keys (or a verbatim string). Each
+  retry emits a `SchemaRetry` agent-trace event. Orthogonal to
+  transient retries (`llm_retries`); each schema retry gets a fresh
+  transient budget.
+- **`provider: "auto"` on `llm_call` now routes `local:*` model ids to
+  the local provider.** Previously the generic `:` inference rule
+  claimed them as `ollama`, surfacing as `Missing API key: set
+  ANTHROPIC_API_KEY`. `infer_provider` gained a `local:*` rule ahead
+  of the generic `:` rule; `vm_resolve_provider` treats
+  `provider: "auto"` (case-insensitive) as fall-through.
+- **Top-level `let` / `var` bindings are visible inside functions
+  declared in the same file.** Previously the compiler silently
+  dropped module-level bindings in pipeline mode, surfacing as
+  `Undefined variable: FOO` at runtime. `compile_top_level_declarations`
+  now compiles bindings before type / fn declarations so closures
+  capture them.
+- **`regex_replace_all(pattern, replacement, text)` alias for
+  `regex_replace`.** Same semantics (every match replaced, `$1`
+  backrefs supported); added because scripters search for the `_all`
+  spelling.
+- **`llm_call` result always includes `prose` and `canonical_text`.**
+  `prose` is the unwrapped `<assistant_prose>...</assistant_prose>`
+  content (falls back to raw text when no tags present).
+  `canonical_text` is the canonical tagged reconstruction. Agents and
+  scripts that want "the model's answer" should read `.prose`.
+- **`harn run --help` gains a `long_about` footer** pointing at
+  `https://harn.burincode.com/concurrency.html`,
+  `https://harn.burincode.com/docs/llm/harn-quickref.md`, and the
+  scripting cheatsheet.
+- **New scripting cheatsheet and LLM-friendly quickref.**
+  `docs/src/scripting-cheatsheet.md` (mdBook) and
+  `docs/llm/harn-quickref.md` (raw Markdown, served at the canonical
+  URL) cover the same ground with prose vs dense-code shapes. A
+  `harn-scripting` Claude skill auto-loads the quickref when editing
+  `.harn` files in the repo.
+- **Targeted parse error for source-level `<<TAG` heredoc syntax.**
+  Heredocs remain valid inside LLM tool-call argument JSON; source-
+  position heredocs now point authors at `"""..."""` triple-quoted
+  strings.
+
+### Fixed
+
+- **Tagged-protocol parser runs on every `llm_call` result and every
+  `agent_loop` iteration.** Previously the parser only ran when tools
+  were registered, so `<assistant_prose>...</assistant_prose>` tags
+  leaked into `.text` / `.visible_text` for plain calls. The parser
+  always runs now, so the `prose` / `canonical_text` / `done_marker`
+  / `protocol_violations` surface is uniform.
+
 ## v0.5.80
 
 ### Fixed

@@ -1456,8 +1456,28 @@ impl TypeChecker {
                 expr,
                 variable,
                 body,
+                options,
             } => {
                 self.check_node(expr, scope);
+                for (key, value) in options {
+                    // `max_concurrent` must resolve to `int`; other keys
+                    // are rejected by the parser, so no need to match
+                    // here. Still type-check the expression so bad
+                    // references surface a diagnostic.
+                    self.check_node(value, scope);
+                    if key == "max_concurrent" {
+                        if let Some(ty) = self.infer_type(value, scope) {
+                            if !matches!(ty, TypeExpr::Named(ref n) if n == "int") {
+                                self.error_at(
+                                    format!(
+                                        "`max_concurrent` on `parallel` must be int, got {ty:?}"
+                                    ),
+                                    value.span,
+                                );
+                            }
+                        }
+                    }
+                }
                 let mut par_scope = scope.child();
                 if let Some(var) = variable {
                     let var_type = match mode {
