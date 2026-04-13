@@ -1,5 +1,6 @@
 mod format;
 mod imports;
+pub mod iter;
 mod methods;
 mod ops;
 
@@ -102,6 +103,9 @@ pub(crate) enum IterState {
     },
     Generator {
         gen: crate::value::VmGenerator,
+    },
+    VmIter {
+        handle: std::rc::Rc<std::cell::RefCell<crate::vm::iter::VmIter>>,
     },
 }
 

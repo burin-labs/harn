@@ -82,6 +82,8 @@ pub enum VmValue {
     McpClient(VmMcpClientHandle),
     Set(Rc<Vec<VmValue>>),
     Generator(VmGenerator),
+    /// Lazy iterator handle. Single-pass, fused. See `crate::vm::iter::VmIter`.
+    Iter(Rc<RefCell<crate::vm::iter::VmIter>>),
 }
 
 /// A compiled closure value.
@@ -478,6 +480,7 @@ impl VmValue {
             VmValue::McpClient(_) => true,
             VmValue::Set(s) => !s.is_empty(),
             VmValue::Generator(_) => true,
+            VmValue::Iter(_) => true,
         }
     }
 
@@ -501,6 +504,7 @@ impl VmValue {
             VmValue::McpClient(_) => "mcp_client",
             VmValue::Set(_) => "set",
             VmValue::Generator(_) => "generator",
+            VmValue::Iter(_) => "iter",
         }
     }
 
@@ -627,6 +631,13 @@ impl VmValue {
                     out.push_str("<generator (done)>");
                 } else {
                     out.push_str("<generator>");
+                }
+            }
+            VmValue::Iter(h) => {
+                if matches!(&*h.borrow(), crate::vm::iter::VmIter::Exhausted) {
+                    out.push_str("<iter (exhausted)>");
+                } else {
+                    out.push_str("<iter>");
                 }
             }
         }
@@ -835,6 +846,7 @@ pub fn values_equal(a: &VmValue, b: &VmValue) -> bool {
             a.len() == b.len() && a.iter().all(|x| b.iter().any(|y| values_equal(x, y)))
         }
         (VmValue::Generator(_), VmValue::Generator(_)) => false, // generators are never equal
+        (VmValue::Iter(a), VmValue::Iter(b)) => Rc::ptr_eq(a, b),
         _ => false,
     }
 }

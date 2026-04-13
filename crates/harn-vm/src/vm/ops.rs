@@ -1134,6 +1134,9 @@ impl super::Vm {
                 VmValue::Generator(gen) => {
                     self.iterators.push(super::IterState::Generator { gen });
                 }
+                VmValue::Iter(handle) => {
+                    self.iterators.push(super::IterState::VmIter { handle });
+                }
                 _ => {
                     self.iterators.push(super::IterState::Vec {
                         items: Vec::new(),
@@ -1145,7 +1148,32 @@ impl super::Vm {
             let frame = self.frames.last_mut().unwrap();
             let target = frame.chunk.read_u16(frame.ip) as usize;
             frame.ip += 2;
-            if let Some(state) = self.iterators.last_mut() {
+            // VmIter path: clone the handle out first so we don't hold a
+            // borrow on self.iterators across the async next() call.
+            let vm_iter_handle = match self.iterators.last() {
+                Some(super::IterState::VmIter { handle }) => Some(handle.clone()),
+                _ => None,
+            };
+            if let Some(handle) = vm_iter_handle {
+                // SAFETY: we only hold the RefCell borrow for the duration
+                // of next(); inside next() the borrow is on `handle`, not
+                // on self.iterators, so recursive VM reentry via closures
+                // (future combinator variants) is safe as long as they
+                // don't re-enter the same iter.
+                let functions = self.frames.last().unwrap().chunk.functions.clone();
+                let next_val = {
+                    let mut inner = handle.borrow_mut();
+                    inner.next(self, &functions).await?
+                };
+                match next_val {
+                    Some(v) => self.stack.push(v),
+                    None => {
+                        self.iterators.pop();
+                        let frame = self.frames.last_mut().unwrap();
+                        frame.ip = target;
+                    }
+                }
+            } else if let Some(state) = self.iterators.last_mut() {
                 match state {
                     super::IterState::Vec { items, idx } => {
                         if *idx < items.len() {
@@ -1201,6 +1229,10 @@ impl super::Vm {
                                 }
                             }
                         }
+                    }
+                    super::IterState::VmIter { .. } => {
+                        // Handled in the early VmIter path above; unreachable.
+                        unreachable!("VmIter state handled before this match");
                     }
                 }
             } else {

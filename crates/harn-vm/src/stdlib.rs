@@ -9,6 +9,7 @@ mod datetime;
 mod fs;
 mod host;
 mod io;
+mod iter;
 pub(crate) mod json;
 mod logging;
 mod math;
@@ -47,6 +48,7 @@ pub fn register_core_stdlib(vm: &mut Vm) {
     crypto::register_crypto_builtins(vm);
     path::register_path_helper_builtins(vm);
     sets::register_set_builtins(vm);
+    iter::register_iter_builtins(vm);
     shapes::register_shape_builtins(vm);
     testing::register_testing_builtins(vm);
 }
