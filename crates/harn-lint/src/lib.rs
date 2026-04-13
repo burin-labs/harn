@@ -428,6 +428,8 @@ impl<'a> Linter<'a> {
         if let Some(src) = self.source {
             check_legacy_doc_comments(src, nodes, &mut self.diagnostics);
             check_blank_line_between_items(src, nodes, &mut self.diagnostics);
+            check_trailing_comma(src, &mut self.diagnostics);
+            check_import_order(src, nodes, &mut self.diagnostics);
         }
         for node in nodes {
             self.lint_node(node);
@@ -2234,6 +2236,281 @@ fn check_blank_line_between_items(
             });
         }
     }
+}
+
+/// Emit `trailing-comma` diagnostics by scanning the source's tokens for
+/// multiline comma-separated lists that lack a trailing comma. Autofix
+/// inserts a `,` at the byte offset immediately after the last item.
+fn check_trailing_comma(source: &str, diagnostics: &mut Vec<LintDiagnostic>) {
+    let mut lexer = harn_lexer::Lexer::new(source);
+    let Ok(tokens) = lexer.tokenize_with_comments() else {
+        return;
+    };
+
+    // Stack of open-bracket records. Each entry remembers the start-line of
+    // the opener, the opener's byte position, which kind it is, and whether
+    // we've seen any `,` at this depth (= "this is a comma-separated list").
+    #[derive(Clone, Copy)]
+    enum Opener {
+        Paren,
+        Bracket,
+        Brace,
+    }
+    struct Frame {
+        opener: Opener,
+        open_line: usize,
+        saw_comma: bool,
+        /// True when we've decided this `{ ... }` is a dict/struct literal
+        /// (applies only when `opener == Brace`). For Paren/Bracket this is
+        /// always `true` — those are always comma-lists when they have
+        /// commas.
+        eligible: bool,
+        /// For `{ ... }` we need to look at the first "meaningful" token to
+        /// decide eligibility. Track whether we've made that decision yet.
+        decision_made: bool,
+        /// Track the first-seen identifier/string token inside, to combine
+        /// with a subsequent `:` for the dict/struct decision.
+        pending_key_token: bool,
+    }
+    let mut stack: Vec<Frame> = Vec::new();
+
+    // Helper to find the byte offset of the last non-whitespace,
+    // non-comment character strictly before `pos` in `source`.
+    fn last_meaningful_byte_before(source: &str, pos: usize) -> Option<usize> {
+        let bytes = source.as_bytes();
+        if pos == 0 {
+            return None;
+        }
+        let mut i = pos;
+        while i > 0 {
+            i -= 1;
+            let b = bytes[i];
+            if matches!(b, b' ' | b'\t' | b'\n' | b'\r') {
+                continue;
+            }
+            // We don't strip comments here — the FixEdit is allowed to land
+            // after the comment if a trailing comment sits above the close.
+            return Some(i);
+        }
+        None
+    }
+
+    for tok in &tokens {
+        // Ignore comments and newlines for the decision-making layer, but
+        // we still look at everything for bracket tracking.
+        match &tok.kind {
+            harn_lexer::TokenKind::LineComment { .. }
+            | harn_lexer::TokenKind::BlockComment { .. }
+            | harn_lexer::TokenKind::Newline => continue,
+            _ => {}
+        }
+
+        match &tok.kind {
+            harn_lexer::TokenKind::LParen => {
+                stack.push(Frame {
+                    opener: Opener::Paren,
+                    open_line: tok.span.line,
+                    saw_comma: false,
+                    eligible: true,
+                    decision_made: true,
+                    pending_key_token: false,
+                });
+            }
+            harn_lexer::TokenKind::LBracket => {
+                stack.push(Frame {
+                    opener: Opener::Bracket,
+                    open_line: tok.span.line,
+                    saw_comma: false,
+                    eligible: true,
+                    decision_made: true,
+                    pending_key_token: false,
+                });
+            }
+            harn_lexer::TokenKind::LBrace => {
+                stack.push(Frame {
+                    opener: Opener::Brace,
+                    open_line: tok.span.line,
+                    saw_comma: false,
+                    eligible: false,
+                    decision_made: false,
+                    pending_key_token: false,
+                });
+            }
+            harn_lexer::TokenKind::RParen
+            | harn_lexer::TokenKind::RBracket
+            | harn_lexer::TokenKind::RBrace => {
+                let Some(frame) = stack.pop() else { continue };
+                // Only care if opener matches (sanity check).
+                let matching = matches!(
+                    (&frame.opener, &tok.kind),
+                    (Opener::Paren, harn_lexer::TokenKind::RParen)
+                        | (Opener::Bracket, harn_lexer::TokenKind::RBracket)
+                        | (Opener::Brace, harn_lexer::TokenKind::RBrace)
+                );
+                if !matching {
+                    continue;
+                }
+                if !frame.eligible || !frame.saw_comma {
+                    continue;
+                }
+                // Must be multiline: closer on a later line than opener.
+                if tok.span.line <= frame.open_line {
+                    continue;
+                }
+                let close_pos = tok.span.start;
+                let Some(last_byte) = last_meaningful_byte_before(source, close_pos) else {
+                    continue;
+                };
+                if source.as_bytes()[last_byte] == b',' {
+                    continue; // already has trailing comma
+                }
+                // Don't fire on genuinely-empty containers. We already
+                // required `saw_comma == true`, so that's handled, but
+                // defensively check that there's real content.
+                let insert_pos = last_byte + 1;
+                let span = Span::with_offsets(insert_pos, insert_pos, tok.span.line, 1);
+                diagnostics.push(LintDiagnostic {
+                    rule: "trailing-comma",
+                    message: "multiline comma-separated list is missing a trailing comma"
+                        .to_string(),
+                    span,
+                    severity: LintSeverity::Warning,
+                    suggestion: Some("add a trailing comma after the last item".to_string()),
+                    fix: Some(vec![FixEdit {
+                        span,
+                        replacement: ",".to_string(),
+                    }]),
+                });
+            }
+            harn_lexer::TokenKind::Comma => {
+                if let Some(top) = stack.last_mut() {
+                    top.saw_comma = true;
+                }
+            }
+            harn_lexer::TokenKind::Colon => {
+                if let Some(top) = stack.last_mut() {
+                    if matches!(top.opener, Opener::Brace)
+                        && !top.decision_made
+                        && top.pending_key_token
+                    {
+                        top.eligible = true;
+                        top.decision_made = true;
+                    }
+                }
+            }
+            harn_lexer::TokenKind::Identifier(_)
+            | harn_lexer::TokenKind::StringLiteral(_) => {
+                if let Some(top) = stack.last_mut() {
+                    if matches!(top.opener, Opener::Brace) && !top.decision_made {
+                        top.pending_key_token = true;
+                    }
+                }
+            }
+            _ => {
+                // Any other token inside a `{ ... }` before we decided —
+                // means this isn't a dict/struct literal (probably a
+                // block). Lock the decision as ineligible.
+                if let Some(top) = stack.last_mut() {
+                    if matches!(top.opener, Opener::Brace) && !top.decision_made {
+                        top.decision_made = true;
+                        top.eligible = false;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Emit `import-order` diagnostics when the program's import block is not
+/// in canonical order (stdlib first, alphabetical by path, selective
+/// imports after bare imports for the same path). Autofix rewrites the
+/// whole import block in canonical order.
+fn check_import_order(source: &str, program: &[SNode], diagnostics: &mut Vec<LintDiagnostic>) {
+    let mut imports: Vec<&SNode> = Vec::new();
+    for node in program {
+        if is_import_item(&node.node) {
+            imports.push(node);
+        } else {
+            break; // imports live at the top of the file
+        }
+    }
+    if imports.len() < 2 {
+        return;
+    }
+    let mut sorted = imports.clone();
+    sorted.sort_by(|a, b| import_sort_key(a).cmp(&import_sort_key(b)));
+    let already_sorted = imports
+        .iter()
+        .zip(sorted.iter())
+        .all(|(a, b)| std::ptr::eq(*a, *b));
+    if already_sorted {
+        return;
+    }
+
+    // Autofix: replace the span from the first import's start to the last
+    // import's end with the canonical sorted rendering. Preserve one
+    // newline between imports. The existing formatter handles exact
+    // formatting; we just need something functional.
+    let first = imports.first().unwrap();
+    let last = imports.last().unwrap();
+    let replacement = sorted
+        .iter()
+        .map(|n| render_import_source(source, n))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let replace_span = Span::with_offsets(
+        first.span.start,
+        last.span.end,
+        first.span.line,
+        first.span.column,
+    );
+    diagnostics.push(LintDiagnostic {
+        rule: "import-order",
+        message: "imports are not in canonical order (stdlib first, then alphabetical by path)"
+            .to_string(),
+        span: replace_span,
+        severity: LintSeverity::Warning,
+        suggestion: Some(
+            "reorder imports: std/ first, then third-party and local paths alphabetically"
+                .to_string(),
+        ),
+        fix: Some(vec![FixEdit {
+            span: replace_span,
+            replacement,
+        }]),
+    });
+}
+
+fn import_sort_key(node: &SNode) -> (u8, String, u8, String) {
+    match &node.node {
+        Node::ImportDecl { path } => (
+            u8::from(!path.starts_with("std/")),
+            path.clone(),
+            0,
+            String::new(),
+        ),
+        Node::SelectiveImport { names, path } => {
+            let mut sorted_names = names.clone();
+            sorted_names.sort();
+            (
+                u8::from(!path.starts_with("std/")),
+                path.clone(),
+                1,
+                sorted_names.join(","),
+            )
+        }
+        _ => (2, String::new(), 2, String::new()),
+    }
+}
+
+/// Slice the raw source covered by an import node's span. The formatter
+/// will re-normalize these in a subsequent pass; for the autofix we just
+/// need the existing text in the correct order.
+fn render_import_source(source: &str, node: &SNode) -> String {
+    source
+        .get(node.span.start..node.span.end)
+        .unwrap_or("")
+        .to_string()
 }
 
 /// Build a Vec where index `i` is the byte offset of the start of line

@@ -1825,3 +1825,108 @@ fn test_blank_line_between_items_does_not_fire_between_imports() {
         "consecutive imports are intentionally tight, got: {diags:?}"
     );
 }
+
+// --- trailing-comma ---
+
+#[test]
+fn test_trailing_comma_fires_on_multiline_list() {
+    let source = "pipeline default(task) {\n  let xs = [\n    1,\n    2,\n    3\n  ]\n  log(xs[0])\n}\n";
+    let diags = lint_source(source);
+    assert!(
+        has_rule(&diags, "trailing-comma"),
+        "expected trailing-comma on multiline list, got: {diags:?}"
+    );
+}
+
+#[test]
+fn test_trailing_comma_ok_when_present() {
+    let source = "pipeline default(task) {\n  let xs = [\n    1,\n    2,\n    3,\n  ]\n  log(xs[0])\n}\n";
+    let diags = lint_source(source);
+    assert!(
+        !has_rule(&diags, "trailing-comma"),
+        "should not fire when comma already present, got: {diags:?}"
+    );
+}
+
+#[test]
+fn test_trailing_comma_ignores_single_line_list() {
+    let source = "pipeline default(task) {\n  let xs = [1, 2, 3]\n  log(xs[0])\n}\n";
+    let diags = lint_source(source);
+    assert!(
+        !has_rule(&diags, "trailing-comma"),
+        "single-line list should not fire, got: {diags:?}"
+    );
+}
+
+#[test]
+fn test_trailing_comma_ignores_fn_body_block() {
+    // fn body is `{ ... }` but not a dict/struct — must not fire.
+    let source = "fn x() -> int {\n  let y = 1\n  return y\n}\n";
+    let diags = lint_source(source);
+    assert!(
+        !has_rule(&diags, "trailing-comma"),
+        "fn body block should not fire, got: {diags:?}"
+    );
+}
+
+#[test]
+fn test_trailing_comma_fires_on_dict_literal() {
+    let source = "pipeline default(task) {\n  let d = {\n    \"a\": 1,\n    \"b\": 2\n  }\n  log(d)\n}\n";
+    let diags = lint_source(source);
+    assert!(
+        has_rule(&diags, "trailing-comma"),
+        "expected trailing-comma on multiline dict, got: {diags:?}"
+    );
+}
+
+#[test]
+fn test_trailing_comma_fires_on_fn_call_args() {
+    let source = "pipeline default(task) {\n  log(\n    \"first\",\n    \"second\"\n  )\n}\n";
+    let diags = lint_source(source);
+    assert!(
+        has_rule(&diags, "trailing-comma"),
+        "expected trailing-comma on multiline call args, got: {diags:?}"
+    );
+}
+
+// --- import-order ---
+
+#[test]
+fn test_import_order_fires_when_out_of_order() {
+    let source = "import \"std/io\"\nimport \"std/fs\"\n\nfn a() -> int { return 1 }\n";
+    let diags = lint_source(source);
+    assert!(
+        has_rule(&diags, "import-order"),
+        "expected import-order when out of order, got: {diags:?}"
+    );
+}
+
+#[test]
+fn test_import_order_canonical_does_not_fire() {
+    let source = "import \"std/fs\"\nimport \"std/io\"\n\nfn a() -> int { return 1 }\n";
+    let diags = lint_source(source);
+    assert!(
+        !has_rule(&diags, "import-order"),
+        "canonical order should not fire, got: {diags:?}"
+    );
+}
+
+#[test]
+fn test_import_order_single_import_does_not_fire() {
+    let source = "import \"std/io\"\n\nfn a() -> int { return 1 }\n";
+    let diags = lint_source(source);
+    assert!(
+        !has_rule(&diags, "import-order"),
+        "single import should not fire, got: {diags:?}"
+    );
+}
+
+#[test]
+fn test_import_order_stdlib_before_third_party() {
+    let source = "import \"mypkg/util\"\nimport \"std/io\"\n\nfn a() -> int { return 1 }\n";
+    let diags = lint_source(source);
+    assert!(
+        has_rule(&diags, "import-order"),
+        "stdlib should come before third-party, got: {diags:?}"
+    );
+}
