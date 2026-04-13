@@ -21,7 +21,7 @@
 //
 // On first run all three stages execute. On a resumed run (after a crash),
 // completed stages are skipped automatically.
-/// checkpoint_stage.
+/** checkpoint_stage. */
 pub fn checkpoint_stage(name, f) {
   if checkpoint_exists(name) {
     return checkpoint_get(name)
@@ -39,7 +39,7 @@ pub fn checkpoint_stage(name, f) {
 //
 // Example:
 //   let data = checkpoint_stage_retry("fetch", 3, fn() { fetch_with_timeout(url) })
-/// checkpoint_stage_retry.
+/** checkpoint_stage_retry. */
 pub fn checkpoint_stage_retry(name, max_retries, f) {
   if checkpoint_exists(name) {
     return checkpoint_get(name)

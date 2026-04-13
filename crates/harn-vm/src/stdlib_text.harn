@@ -2,7 +2,7 @@
 
 // Convert an integer-compatible value into a decimal string with explicit
 // stdlib import ergonomics for Harn-authored libraries.
-/// int_to_string.
+/** int_to_string. */
 pub fn int_to_string(value) {
   let parsed = to_int(value)
   require parsed != nil, "int_to_string expects an integer-compatible value"
@@ -10,7 +10,7 @@ pub fn int_to_string(value) {
 }
 
 // Convert a float-compatible value into a string.
-/// float_to_string.
+/** float_to_string. */
 pub fn float_to_string(value) {
   let parsed = to_float(value)
   require parsed != nil, "float_to_string expects a float-compatible value"
@@ -18,13 +18,13 @@ pub fn float_to_string(value) {
 }
 
 // Parse an integer-like value, returning fallback when conversion fails.
-/// parse_int_or.
+/** parse_int_or. */
 pub fn parse_int_or(value, fallback) {
   return to_int(value) ?? fallback
 }
 
 // Parse a float-like value, returning fallback when conversion fails.
-/// parse_float_or.
+/** parse_float_or. */
 pub fn parse_float_or(value, fallback) {
   return to_float(value) ?? fallback
 }
@@ -32,7 +32,7 @@ pub fn parse_float_or(value, fallback) {
 // Extract file paths from text.
 // Splits on newlines, skips comment lines, extracts path-like words,
 // validates extensions, and deduplicates.
-/// extract_paths.
+/** extract_paths. */
 pub fn extract_paths(text) {
   let lines = split(text, "\n")
     .filter({ line ->
@@ -64,7 +64,7 @@ pub fn extract_paths(text) {
 // Parse fenced code blocks from LLM response text.
 // Returns list of {type: "code"|"call", lang: string|nil, code: string}.
 // State machine — not easily expressed as pure map/filter.
-/// parse_cells.
+/** parse_cells. */
 pub fn parse_cells(response) {
   let lines = split(response, "\n")
   var cells = []
@@ -110,7 +110,7 @@ pub fn parse_cells(response) {
 // Filter parsed cells to keep test-relevant ones.
 // Keeps type="code" cells and type="call" cells containing "write_file".
 // If target_file is provided, only write_file calls mentioning that file are kept.
-/// filter_test_cells.
+/** filter_test_cells. */
 pub fn filter_test_cells(cells, target_file) {
   return cells.filter({ cell ->
     if cell.type == "call" && contains(cell.code, "write_file") {
@@ -124,7 +124,7 @@ pub fn filter_test_cells(cells, target_file) {
 }
 
 // Keep first n and last n lines of text, with an omission marker in between.
-/// truncate_head_tail.
+/** truncate_head_tail. */
 pub fn truncate_head_tail(text, n) {
   let lines = split(text, "\n")
   if len(lines) <= n * 2 {
@@ -138,7 +138,7 @@ pub fn truncate_head_tail(text, n) {
 
 // Check if compiler/build output contains compile error indicators.
 // Matches Python errors and generic patterns (case-sensitive, matching burin-code behavior).
-/// detect_compile_error.
+/** detect_compile_error. */
 pub fn detect_compile_error(output) {
   return contains(output, "SyntaxError")
     || contains(output, "IndentationError")
@@ -150,7 +150,7 @@ pub fn detect_compile_error(output) {
 
 // Check if test output contains both got/actual AND want/expected indicators.
 // Returns true only if BOTH sides are present.
-/// has_got_want.
+/** has_got_want. */
 pub fn has_got_want(output) {
   let has_got = contains(output, "got:")
     || contains(output, "Got:")
@@ -165,7 +165,7 @@ pub fn has_got_want(output) {
 
 // Extract error-relevant lines from test output.
 // Filters for lines containing error keywords, returns first 20 joined with newlines.
-/// format_test_errors.
+/** format_test_errors. */
 pub fn format_test_errors(output) {
   let error_lines = split(output, "\n").filter({ line ->
     return contains(line, "FAIL")

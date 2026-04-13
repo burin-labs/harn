@@ -2,7 +2,7 @@
 //
 // Import with: import "std/path"
 
-/// Get the file extension without the dot.
+/** Get the file extension without the dot. */
 fn ext(path) {
   let e = extname(path)
   if len(e) > 0 {
@@ -11,7 +11,7 @@ fn ext(path) {
   return ""
 }
 
-/// Get the filename without extension.
+/** Get the filename without extension. */
 fn stem(path) {
   let base = basename(path)
   let dot = base.index_of(".")
@@ -19,17 +19,17 @@ fn stem(path) {
   return base.substring(0, dot)
 }
 
-/// Normalize path separators (replace backslash with forward slash).
+/** Normalize path separators (replace backslash with forward slash). */
 fn normalize(path) {
   return path.replace("\\", "/")
 }
 
-/// Check if a path is absolute.
+/** Check if a path is absolute. */
 fn is_absolute(path) {
   return path.starts_with("/") || (len(path) >= 3 && path.substring(1, 1) == ":")
 }
 
-/// List files in a directory recursively (one level).
+/** List files in a directory recursively (one level). */
 fn list_files(dir) {
   let entries = list_dir(dir)
   return entries.filter({ name ->
@@ -39,7 +39,7 @@ fn list_files(dir) {
   })
 }
 
-/// List subdirectories.
+/** List subdirectories. */
 fn list_dirs(dir) {
   let entries = list_dir(dir)
   return entries.filter({ name ->

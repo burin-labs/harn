@@ -1,9 +1,9 @@
-/// Double a value.
+/** Double a value. */
 pub fn double(x) {
   return x * 2
 }
 
-/// Greet by name.
+/** Greet by name. */
 pub fn greet(name) {
   return "hello " + name
 }

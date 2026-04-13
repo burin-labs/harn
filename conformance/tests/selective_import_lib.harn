@@ -1,9 +1,9 @@
-/// Greet by name.
+/** Greet by name. */
 pub fn greet(name) {
   return "Hello, " + name + "!"
 }
 
-/// add.
+/** add. */
 pub fn add(a, b) {
   return a + b
 }
