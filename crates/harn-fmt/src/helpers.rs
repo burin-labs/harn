@@ -153,6 +153,30 @@ pub(crate) fn escape_string(s: &str) -> String {
         .replace('\t', "\\t")
 }
 
+/// Reconstruct a multi-line `"""..."""` string with body and closing
+/// delimiter indented one level deeper than the surrounding statement.
+/// The lexer already strips common leading indent from the body, so
+/// re-indenting here only affects source aesthetics — the lexed value
+/// after a round-trip is identical.
+pub(crate) fn format_multiline_triple_quoted(body: &str, indent: usize) -> String {
+    let pad = "  ".repeat(indent + 1);
+    let indented: String = if body.is_empty() {
+        String::new()
+    } else {
+        body.split('\n')
+            .map(|l| {
+                if l.is_empty() {
+                    String::new()
+                } else {
+                    format!("{pad}{l}")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    format!("\"\"\"\n{indented}\n{pad}\"\"\"")
+}
+
 /// Format the `(error_var: Type)` portion of a catch clause.
 pub(crate) fn format_catch_param(
     error_var: &Option<String>,

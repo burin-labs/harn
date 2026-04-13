@@ -1153,6 +1153,37 @@ fn test_section_header_respects_custom_separator_width() {
 }
 
 #[test]
+fn test_multiline_string_preserves_indent() {
+    let source = "pipeline test(task) {\n  let g = \"\"\"\n    hello world\n    second line\n    \"\"\"\n  log(g)\n}\n";
+    let out = format_source(source).unwrap();
+    assert!(
+        out.contains("    hello world"),
+        "multiline string body should keep indent, got:\n{out}"
+    );
+    assert!(
+        out.contains("    \"\"\""),
+        "closing \"\"\" should be indented one level deeper than the let, got:\n{out}"
+    );
+    let out2 = format_source(&out).unwrap();
+    assert_eq!(
+        out, out2,
+        "formatter should be idempotent on multiline strings"
+    );
+}
+
+#[test]
+fn test_multiline_interpolated_string_preserves_indent() {
+    let source = "pipeline test(task) {\n  let name = \"x\"\n  let g = \"\"\"\n    hi ${name}\n    \"\"\"\n  log(g)\n}\n";
+    let out = format_source(source).unwrap();
+    assert!(
+        out.contains("    hi ${name}"),
+        "interpolated body should keep indent, got:\n{out}"
+    );
+    let out2 = format_source(&out).unwrap();
+    assert_eq!(out, out2, "formatter should be idempotent");
+}
+
+#[test]
 fn test_imports_stay_tight_then_blank_before_first_item() {
     let source = "import \"std/http\"\nimport \"alpha\"\nimport \"zeta\"\npipeline default(task) { log(1) }\n";
     let result = format_source(&source).unwrap();

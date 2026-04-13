@@ -670,8 +670,7 @@ impl Formatter {
         match &node.node {
             Node::StringLiteral(s) => {
                 if node.span.line != node.span.end_line {
-                    // Multiline string: reconstruct """...""" form
-                    format!("\"\"\"\n{s}\n\"\"\"")
+                    format_multiline_triple_quoted(s, self.indent)
                 } else {
                     let escaped = escape_string(s);
                     format!("\"{escaped}\"")
@@ -682,18 +681,16 @@ impl Formatter {
             }
             Node::InterpolatedString(segments) => {
                 if node.span.line != node.span.end_line {
-                    // Multiline interpolated string: reconstruct """...""" form
-                    let mut result = String::from("\"\"\"\n");
+                    let mut body = String::new();
                     for seg in segments {
                         match seg {
-                            StringSegment::Literal(s) => result.push_str(s),
+                            StringSegment::Literal(s) => body.push_str(s),
                             StringSegment::Expression(e, _, _) => {
-                                result.push_str(&format!("${{{e}}}"));
+                                body.push_str(&format!("${{{e}}}"));
                             }
                         }
                     }
-                    result.push_str("\n\"\"\"");
-                    return result;
+                    return format_multiline_triple_quoted(&body, self.indent);
                 }
                 let mut result = String::from("\"");
                 for seg in segments {
