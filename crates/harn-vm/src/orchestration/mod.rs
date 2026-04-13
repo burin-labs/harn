@@ -1025,6 +1025,7 @@ mod tests {
             tool_arg_constraints: vec![ToolArgConstraint {
                 tool: "exec".to_string(),
                 arg_patterns: vec!["cargo *".to_string()],
+                arg_key: Some("command".to_string()),
             }],
             ..Default::default()
         };
@@ -1042,6 +1043,7 @@ mod tests {
             tool_arg_constraints: vec![ToolArgConstraint {
                 tool: "exec".to_string(),
                 arg_patterns: vec!["cargo *".to_string()],
+                arg_key: Some("command".to_string()),
             }],
             ..Default::default()
         };
@@ -1059,6 +1061,7 @@ mod tests {
             tool_arg_constraints: vec![ToolArgConstraint {
                 tool: "exec".to_string(),
                 arg_patterns: vec!["cargo *".to_string()],
+                arg_key: Some("command".to_string()),
             }],
             ..Default::default()
         };
@@ -1084,6 +1087,7 @@ mod tests {
             tool_arg_constraints: vec![ToolArgConstraint {
                 tool: "edit".to_string(),
                 arg_patterns: vec!["tests/*".to_string()],
+                arg_key: None,
             }],
             tool_metadata,
             ..Default::default()
@@ -1098,6 +1102,121 @@ mod tests {
             }),
         );
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn arg_constraint_without_arg_key_or_metadata_skips_with_warning() {
+        // Bug-1 regression: the prior heuristic fallback picked the first
+        // string arg (often `action`) and produced misleading errors like
+        // "tool 'edit' argument 'exact_patch' does not match …". The new
+        // contract requires the policy author to declare either `arg_key`
+        // on the constraint or `path_params` in tool metadata. When
+        // neither is present the constraint is SKIPPED with a structured
+        // `log_warn` — the VM refuses to guess argument semantics by
+        // name.
+        let policy = CapabilityPolicy {
+            tool_arg_constraints: vec![ToolArgConstraint {
+                tool: "edit".to_string(),
+                arg_patterns: vec!["tests/unit/test_experiment_service.py".to_string()],
+                arg_key: None,
+            }],
+            ..Default::default()
+        };
+        let result = enforce_tool_arg_constraints(
+            &policy,
+            "edit",
+            &serde_json::json!({
+                "action": "exact_patch",
+                "path": "tests/unit/test_experiment_service.py",
+                "old_string": "assert len(items) == 1",
+                "new_string": "assert len(items) == 2",
+            }),
+        );
+        assert!(
+            result.is_ok(),
+            "unresolved constraint must skip (not reject) so a misconfigured policy doesn't silently block work; got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn arg_constraint_with_explicit_arg_key_allows_matching_path() {
+        let policy = CapabilityPolicy {
+            tool_arg_constraints: vec![ToolArgConstraint {
+                tool: "edit".to_string(),
+                arg_patterns: vec!["tests/unit/*".to_string()],
+                arg_key: Some("path".to_string()),
+            }],
+            ..Default::default()
+        };
+        let result = enforce_tool_arg_constraints(
+            &policy,
+            "edit",
+            &serde_json::json!({
+                "action": "exact_patch",
+                "path": "tests/unit/test_experiment_service.py",
+            }),
+        );
+        assert!(result.is_ok(), "expected allow (path matches), got: {result:?}");
+    }
+
+    #[test]
+    fn arg_constraint_error_names_the_path_key_not_the_action_value() {
+        let policy = CapabilityPolicy {
+            tool_arg_constraints: vec![ToolArgConstraint {
+                tool: "edit".to_string(),
+                arg_patterns: vec!["src/allowed/*".to_string()],
+                arg_key: Some("path".to_string()),
+            }],
+            ..Default::default()
+        };
+        let result = enforce_tool_arg_constraints(
+            &policy,
+            "edit",
+            &serde_json::json!({
+                "action": "replace_range",
+                "path": "src/forbidden/foo.rs",
+                "content": "..."
+            }),
+        );
+        let Err(err) = result else {
+            panic!("expected rejection, got Ok");
+        };
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("path 'src/forbidden/foo.rs'"),
+            "error should name the `path` argument, got: {msg}"
+        );
+        assert!(
+            !msg.contains("argument 'replace_range'"),
+            "error must not blame the `action` value, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn arg_constraint_skips_when_no_path_key_present_in_call() {
+        // A call that has no value at the declared arg_key is outside the
+        // scope of the allow-list — skip the check instead of silently
+        // rejecting the empty string against the patterns.
+        let policy = CapabilityPolicy {
+            tool_arg_constraints: vec![ToolArgConstraint {
+                tool: "edit".to_string(),
+                arg_patterns: vec!["tests/*".to_string()],
+                arg_key: Some("path".to_string()),
+            }],
+            ..Default::default()
+        };
+        let result = enforce_tool_arg_constraints(
+            &policy,
+            "edit",
+            &serde_json::json!({
+                "action": "noop",
+                "content": "...",
+            }),
+        );
+        assert!(
+            result.is_ok(),
+            "no path arg → constraint should skip, got: {result:?}"
+        );
     }
 
     #[test]

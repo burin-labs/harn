@@ -267,88 +267,6 @@ fn append_host_messages_to_recorded(
     }
 }
 
-/// Scan the agent's prose for file paths and identifier-shaped tokens
-/// that look like concrete claims ("src/foo.rs", "FooService::bar").
-/// Returns the subset that isn't backed by any prior read/lookup/search
-/// visible in `grounded_refs`. Heuristic, deliberately conservative:
-/// only flags tokens that strongly resemble file paths (contain `/` +
-/// extension) or qualified identifiers (contain `::` or `.` between
-/// alphabetic runs) to avoid false-positiving on English prose.
-fn grounding_lint_scan(
-    prose: &str,
-    grounded_refs: &std::collections::BTreeSet<String>,
-) -> Vec<String> {
-    use std::collections::BTreeSet;
-    let mut flagged: BTreeSet<String> = BTreeSet::new();
-    // File-path-shaped tokens: contain a `/` and end with a recognized
-    // file extension.
-    for word in prose.split(|c: char| c.is_whitespace() || "(),;:\"`".contains(c)) {
-        let token = word.trim_matches(|c: char| {
-            !c.is_alphanumeric() && c != '/' && c != '.' && c != '_' && c != '-'
-        });
-        if token.len() < 4 || token.len() > 128 {
-            continue;
-        }
-        let looks_like_path = token.contains('/')
-            && token.chars().filter(|c| *c == '.').count() >= 1
-            && token
-                .rsplit('.')
-                .next()
-                .map(|ext| {
-                    matches!(
-                        ext,
-                        "rs" | "py"
-                            | "ts"
-                            | "tsx"
-                            | "js"
-                            | "jsx"
-                            | "go"
-                            | "java"
-                            | "kt"
-                            | "rb"
-                            | "php"
-                            | "swift"
-                            | "cpp"
-                            | "cc"
-                            | "cxx"
-                            | "hpp"
-                            | "h"
-                            | "c"
-                            | "cs"
-                            | "ex"
-                            | "exs"
-                            | "scala"
-                            | "zig"
-                            | "sh"
-                            | "bash"
-                            | "json"
-                            | "yaml"
-                            | "yml"
-                            | "toml"
-                            | "md"
-                            | "sql"
-                            | "harn"
-                    )
-                })
-                .unwrap_or(false);
-        if !looks_like_path {
-            continue;
-        }
-        // Any grounded_ref whose suffix matches the token, or vice versa,
-        // counts as backed. Path prefixes often differ between absolute
-        // and relative, so we accept suffix overlap.
-        let backed = grounded_refs.iter().any(|g| {
-            let g = g.trim_start_matches("./");
-            let t = token.trim_start_matches("./");
-            g == t || g.ends_with(t) || t.ends_with(g)
-        });
-        if !backed {
-            flagged.insert(token.to_string());
-        }
-    }
-    flagged.into_iter().collect()
-}
-
 fn runtime_feedback_message(kind: &str, content: impl Into<String>) -> serde_json::Value {
     let content = content.into();
     serde_json::json!({
@@ -1103,33 +1021,6 @@ pub async fn run_agent_loop_internal(
             None => shaped_text_prose.clone(),
         };
 
-        // Grounding lint: when the assistant's prose references file paths
-        // or identifier-shaped strings that are NOT in the ledger's
-        // grounded_refs, emit structured feedback telling the agent to
-        // either back the claim with a read/lookup or drop it. Runs only
-        // when the ledger has any grounded_refs — a cold ledger produces
-        // too many false positives in trivial one-shots.
-        if !task_ledger.grounded_refs.is_empty() && !text_prose.trim().is_empty() {
-            let ungrounded = grounding_lint_scan(&text_prose, &task_ledger.grounded_refs);
-            if !ungrounded.is_empty() {
-                let message = format!(
-                    "Grounding check: your prose references {} item(s) you have not inspected this session: {}. Either run `read`, `lookup`, or `search` on them before asserting specifics, or drop the claim. Speculative claims about APIs, module internals, or file contents you have not read are prohibited.",
-                    ungrounded.len(),
-                    ungrounded
-                        .iter()
-                        .take(5)
-                        .map(|s| format!("`{s}`"))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                );
-                append_message_to_contexts(
-                    &mut visible_messages,
-                    &mut recorded_messages,
-                    runtime_feedback_message("grounding_violation", message),
-                );
-            }
-        }
-
         // Inject structured feedback for any tagged-protocol violations.
         // The response-protocol parser enforces top-level grammar; these
         // feedbacks teach the model how to fix its shape before the next
@@ -1380,12 +1271,6 @@ pub async fn run_agent_loop_internal(
                 let tool_id = tc["id"].as_str().unwrap_or("");
                 let tool_name = tc["name"].as_str().unwrap_or("");
                 let mut tool_args = normalize_tool_args(tool_name, &tc["arguments"]);
-
-                // Record grounded references BEFORE dispatch so the ledger's
-                // grounded_refs reflects what the agent has inspected even
-                // if the tool later errors. Grounding-lint uses this to
-                // distinguish "I read this" from "I'm claiming this".
-                crate::llm::ledger::record_grounded_refs(&mut task_ledger, tool_name, &tool_args);
 
                 // Detect malformed JSON arguments that the provider returned
                 // (marked with __parse_error sentinel during response parsing).
@@ -2079,6 +1964,7 @@ pub async fn run_agent_loop_internal(
                 } else {
                     "ok"
                 };
+
                 tool_results_this_iter.push(serde_json::json!({
                     "tool_name": tool_name,
                     "status": tool_status,

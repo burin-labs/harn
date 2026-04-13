@@ -3015,6 +3015,7 @@ mod tests {
                 tool_arg_constraints: vec![harn_vm::orchestration::ToolArgConstraint {
                     tool: "read".to_string(),
                     arg_patterns: vec!["src/*".to_string()],
+                    arg_key: Some("path".to_string()),
                 }],
                 tool_metadata: BTreeMap::new(),
             },

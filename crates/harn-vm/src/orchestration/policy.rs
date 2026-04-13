@@ -18,17 +18,36 @@ thread_local! {
 // ── Per-agent policy with argument patterns ───────────────────────────
 
 /// Extended policy that supports argument-level constraints.
+///
+/// `arg_key` names the argument whose string value must match one of
+/// `arg_patterns`. It is the self-describing form and should be set
+/// explicitly by the policy author. When absent, the enforcer falls
+/// back to `tool_metadata[tool].path_params`. If neither is populated,
+/// the constraint is skipped with a structured `log_warn` — the VM is
+/// intentionally domain-agnostic and does not guess argument semantics
+/// by name (no "path"/"file"/"command"/... fallback list).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct ToolArgConstraint {
-    /// Tool name to constrain.
+    /// Tool name to constrain (glob-matched against dispatched tool names).
     pub tool: String,
-    /// Glob patterns that the first string argument must match.
+    /// Glob patterns that the resolved argument value must match.
     /// If empty, no argument constraint is applied.
     pub arg_patterns: Vec<String>,
+    /// Optional argument key whose string value is the constraint target.
+    /// When present, overrides any metadata-derived key.
+    #[serde(default)]
+    pub arg_key: Option<String>,
 }
 
 /// Check if a tool call satisfies argument constraints in the policy.
+///
+/// Resolution order for which argument value to match:
+/// 1. `constraint.arg_key` if set (explicit, self-describing).
+/// 2. `policy.tool_metadata[tool].path_params` (first key that yields a
+///    string value in the args object).
+/// 3. No candidate — `log_warn` and skip the constraint. The VM refuses
+///    to guess which argument holds the domain-relevant value.
 pub fn enforce_tool_arg_constraints(
     policy: &CapabilityPolicy,
     tool_name: &str,
@@ -41,26 +60,65 @@ pub fn enforce_tool_arg_constraints(
         if constraint.arg_patterns.is_empty() {
             continue;
         }
-        let first_arg = args
-            .as_object()
-            .and_then(|o| {
-                policy
-                    .tool_metadata
-                    .get(tool_name)
-                    .into_iter()
-                    .flat_map(|metadata| metadata.path_params.iter())
-                    .find_map(|param| o.get(param).and_then(|v| v.as_str()))
-                    .or_else(|| o.values().find_map(|v| v.as_str()))
-            })
-            .or_else(|| args.as_str())
-            .unwrap_or("");
+
+        // Prefer explicit arg_key on the constraint; fall back to
+        // declared path_params from tool metadata. Never guess by
+        // common argument names — that's a Burin-specific heuristic,
+        // not a VM concern.
+        let declared_keys: Vec<String> = if let Some(key) = constraint.arg_key.as_ref() {
+            vec![key.clone()]
+        } else {
+            policy
+                .tool_metadata
+                .get(tool_name)
+                .map(|m| m.path_params.clone())
+                .unwrap_or_default()
+        };
+
+        let (arg_key, arg_value): (String, Option<String>) = if let Some(obj) = args.as_object() {
+            if declared_keys.is_empty() {
+                // No way to know which argument the constraint targets.
+                // Emit a structured warning and skip — permissive by
+                // design so missing metadata doesn't silently block work.
+                crate::events::log_warn(
+                    "policy.constraint_unresolved",
+                    &format!(
+                        "tool_arg_constraint for tool '{}' has no arg_key and tool_metadata.path_params is empty; skipping (policy author should declare arg_key on the constraint or path_params in tool_metadata)",
+                        tool_name
+                    ),
+                );
+                continue;
+            }
+            let mut found: (String, Option<String>) = (declared_keys[0].clone(), None);
+            for param in &declared_keys {
+                if let Some(value) = obj.get(param).and_then(|v| v.as_str()) {
+                    found = (param.clone(), Some(value.to_string()));
+                    break;
+                }
+            }
+            found
+        } else {
+            // Args is a bare string — match directly.
+            (
+                "value".to_string(),
+                args.as_str().map(|s| s.to_string()),
+            )
+        };
+
+        // If the declared argument is absent on this call, the
+        // constraint does not apply — skip rather than reject.
+        let Some(candidate) = arg_value else {
+            continue;
+        };
         let matches = constraint
             .arg_patterns
             .iter()
-            .any(|pattern| glob_match(pattern, first_arg));
+            .any(|pattern| glob_match(pattern, &candidate));
         if !matches {
             return reject_policy(format!(
-                "tool '{tool_name}' argument '{first_arg}' does not match allowed patterns: {:?}",
+                "tool '{tool_name}' {arg_key} '{candidate}' does not match allowed patterns: {:?}. \
+                 Only the {arg_key} argument is checked against this allow-list — other argument \
+                 values are not.",
                 constraint.arg_patterns
             ));
         }

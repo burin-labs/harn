@@ -22,7 +22,6 @@
 //!   deliverables: Vec<Deliverable>,
 //!   rationale: String,
 //!   observations: Vec<String>,
-//!   grounded_refs: BTreeSet<String>,
 //! }
 //!
 //! Deliverable {
@@ -39,7 +38,6 @@
 //! `Dropped` is the agent's declared escape hatch for scope changes and
 //! satisfies the gate while leaving an audit record.
 
-use std::collections::BTreeSet;
 use std::rc::Rc;
 
 use serde::{Deserialize, Serialize};
@@ -101,7 +99,6 @@ pub(crate) struct TaskLedger {
     pub deliverables: Vec<Deliverable>,
     pub rationale: String,
     pub observations: Vec<String>,
-    pub grounded_refs: BTreeSet<String>,
 }
 
 impl TaskLedger {
@@ -385,61 +382,6 @@ impl TaskLedger {
     }
 }
 
-/// Record grounded references from the result of an exploration tool.
-/// Populates the ledger's `grounded_refs` set so the grounding lint can
-/// distinguish "the agent read this" from "the agent guessed".
-pub(crate) fn record_grounded_refs(
-    ledger: &mut TaskLedger,
-    tool_name: &str,
-    args: &serde_json::Value,
-) {
-    // Record arguments that shape what the agent claims to have seen.
-    // This is deliberately coarse — we want to over-record file paths
-    // and symbol names so the lint rarely false-positives.
-    let mut harvest = |value: &serde_json::Value| {
-        if let Some(s) = value.as_str() {
-            let trimmed = s.trim();
-            if !trimmed.is_empty() && trimmed.len() < 256 {
-                ledger.grounded_refs.insert(trimmed.to_string());
-            }
-        }
-    };
-    match tool_name {
-        "read" | "lookup" | "search" | "outline" | "get_file_outline" | "word" => {
-            if let Some(obj) = args.as_object() {
-                for key in [
-                    "path", "file", "folder", "query", "pattern", "symbol", "word",
-                ] {
-                    if let Some(value) = obj.get(key) {
-                        harvest(value);
-                    }
-                }
-            }
-        }
-        "bundle" => {
-            if let Some(ops) = args.get("ops").and_then(|v| v.as_array()) {
-                for op in ops {
-                    if let Some(nested) = op.get("args") {
-                        record_grounded_refs(ledger, "bundle_op", nested);
-                    }
-                }
-            }
-        }
-        "bundle_op" => {
-            if let Some(obj) = args.as_object() {
-                for key in [
-                    "path", "file", "folder", "query", "pattern", "symbol", "word",
-                ] {
-                    if let Some(value) = obj.get(key) {
-                        harvest(value);
-                    }
-                }
-            }
-        }
-        _ => {}
-    }
-}
-
 /// Convert a `TaskLedger` to a `VmValue` for exposure to Harn code that
 /// wants to inspect ledger state (e.g. pipeline post-turn callbacks).
 ///
@@ -492,15 +434,6 @@ pub(crate) fn ledger_to_vm_value(ledger: &TaskLedger) -> VmValue {
     root.insert(
         "observations".to_string(),
         VmValue::List(Rc::new(observations)),
-    );
-    let grounded: Vec<VmValue> = ledger
-        .grounded_refs
-        .iter()
-        .map(|s| VmValue::String(Rc::from(s.as_str())))
-        .collect();
-    root.insert(
-        "grounded_refs".to_string(),
-        VmValue::List(Rc::new(grounded)),
     );
     root.insert(
         "blocking_count".to_string(),
@@ -635,32 +568,4 @@ mod tests {
         assert!(rendered.contains("existing middleware lives in src/auth/"));
     }
 
-    #[test]
-    fn grounded_refs_collected_from_read_and_search_tools() {
-        let mut ledger = TaskLedger::default();
-        record_grounded_refs(
-            &mut ledger,
-            "read",
-            &serde_json::json!({"path": "src/lib.rs"}),
-        );
-        record_grounded_refs(
-            &mut ledger,
-            "search",
-            &serde_json::json!({"pattern": "FooService", "file_glob": "src/**/*.py"}),
-        );
-        record_grounded_refs(
-            &mut ledger,
-            "bundle",
-            &serde_json::json!({
-                "ops": [
-                    {"tool": "read", "args": {"path": "src/service.py"}},
-                    {"tool": "search", "args": {"pattern": "handle_request"}},
-                ]
-            }),
-        );
-        assert!(ledger.grounded_refs.contains("src/lib.rs"));
-        assert!(ledger.grounded_refs.contains("FooService"));
-        assert!(ledger.grounded_refs.contains("src/service.py"));
-        assert!(ledger.grounded_refs.contains("handle_request"));
-    }
 }
