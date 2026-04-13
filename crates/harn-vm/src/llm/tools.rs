@@ -2090,7 +2090,11 @@ fn report_stray(
         let names: Vec<_> = sniff
             .calls
             .iter()
-            .filter_map(|c| c.get("name").and_then(|n| n.as_str()).map(|s| s.to_string()))
+            .filter_map(|c| {
+                c.get("name")
+                    .and_then(|n| n.as_str())
+                    .map(|s| s.to_string())
+            })
             .collect();
         for call in &sniff.calls {
             let name = call

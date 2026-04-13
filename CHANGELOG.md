@@ -2,6 +2,39 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.82
+
+### Fixed
+
+- **Text-mode tool calls execute regardless of `tool_format`.** Pre-v0.5.82
+  native-mode stages discarded `<tool_call>name({...})</tool_call>` blocks
+  emitted in the assistant message, and the tagged-protocol parser
+  flagged-and-dropped bare `name({...})` calls and `<name({...})>`
+  angle-wrapped calls. That stranded weaker locally-hosted models in
+  loops where they kept emitting the same right-shape-wrong-wrapper
+  response. The parser now executes any of these forms wherever they
+  appear in the response stream and emits a soft `protocol_violation`
+  so the model still learns the canonical wrapping next turn. The
+  obsolete `native_protocol_violation_nudge` (which chastised the model
+  for falling back to text) is removed.
+- **Native-mode contract prompt now includes the text-mode protocol +
+  inline tool schemas as a fallback.** Many local OpenAI-compatible
+  hosts (Ollama with bare `{{ .Prompt }}` chat templates being the
+  canonical case) silently drop the `tools` API parameter because their
+  template doesn't reference `.Tools`. The model would otherwise see
+  zero tool guidance and fall back to whatever its training instinct
+  extrapolated. Showing both channels costs tokens but never causes
+  confusion since the downstream parser accepts either.
+- **Ollama provider defaults `think: false`.** Thinking-capable models
+  like `qwen3:30b-a3b` route their long reasoning block into
+  `message.content` under default Ollama chat templates, swallowing the
+  entire response budget before the model reaches its tool-call answer
+  phase. Callers that want extended reasoning pass `thinking: "enabled"`
+  explicitly. `chat_template_kwargs.enable_thinking` is now also set
+  explicitly in both directions on the OpenAI-compat builder so
+  vLLM/SGLang hosts that key off it instead of the top-level `think`
+  field stay in sync.
+
 ## v0.5.81
 
 ### Breaking

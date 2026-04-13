@@ -20,10 +20,9 @@ use super::agent_observe::{dump_llm_interpreted_response, observed_llm_call, Llm
 use super::agent_tools::{
     classify_tool_mutation, declared_paths, denied_tool_result, dispatch_tool_execution,
     is_denied_tool_result, is_read_only_tool, loop_intervention_message,
-    merge_agent_loop_approval_policy, merge_agent_loop_policy,
-    normalize_native_tools_for_format, normalize_tool_choice_for_format,
-    normalize_tool_examples_for_format, render_tool_result, stable_hash, stable_hash_str,
-    LoopIntervention, ToolCallTracker,
+    merge_agent_loop_approval_policy, merge_agent_loop_policy, normalize_native_tools_for_format,
+    normalize_tool_choice_for_format, normalize_tool_examples_for_format, render_tool_result,
+    stable_hash, stable_hash_str, LoopIntervention, ToolCallTracker,
 };
 use super::daemon::DaemonLoopConfig;
 
