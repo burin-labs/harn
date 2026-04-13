@@ -425,6 +425,9 @@ impl<'a> Linter<'a> {
     }
 
     fn lint_program(&mut self, nodes: &[SNode]) {
+        if let Some(src) = self.source {
+            check_legacy_doc_comments(src, nodes, &mut self.diagnostics);
+        }
         for node in nodes {
             self.lint_node(node);
         }
@@ -479,11 +482,13 @@ impl<'a> Linter<'a> {
                 {
                     self.diagnostics.push(LintDiagnostic {
                         rule: "missing-harndoc",
-                        message: format!("public function `{name}` is missing a `///` doc comment"),
+                        message: format!(
+                            "public function `{name}` is missing a `/** */` doc comment"
+                        ),
                         span: snode.span,
                         severity: LintSeverity::Warning,
                         suggestion: Some(format!(
-                            "add a contiguous `///` HarnDoc block above `pub fn {name}`"
+                            "add a `/** ... */` HarnDoc block directly above `pub fn {name}`"
                         )),
                         fix: None,
                     });
@@ -1644,32 +1649,359 @@ impl<'a> Linter<'a> {
     }
 }
 
+/// Return true when this node kind participates in the `legacy-doc-comment`
+/// rule (i.e. is a documented item whose preceding comments should use the
+/// canonical `/** */` form). Mirrors the plan's whitelist.
+fn is_documentable_item(node: &Node) -> bool {
+    matches!(
+        node,
+        Node::FnDecl { .. }
+            | Node::Pipeline { .. }
+            | Node::StructDecl { .. }
+            | Node::EnumDecl { .. }
+            | Node::InterfaceDecl { .. }
+            | Node::TypeDecl { .. }
+            | Node::ToolDecl { .. }
+            | Node::ImplBlock { .. }
+            | Node::OverrideDecl { .. }
+    )
+}
+
+fn item_is_pub(node: &Node) -> bool {
+    match node {
+        Node::FnDecl { is_pub, .. }
+        | Node::Pipeline { is_pub, .. }
+        | Node::StructDecl { is_pub, .. }
+        | Node::EnumDecl { is_pub, .. }
+        | Node::ToolDecl { is_pub, .. } => *is_pub,
+        // InterfaceDecl / ImplBlock / TypeDecl / OverrideDecl have no
+        // is_pub flag — treat them as always-eligible when they appear at
+        // the top level.
+        Node::InterfaceDecl { .. }
+        | Node::ImplBlock { .. }
+        | Node::TypeDecl { .. }
+        | Node::OverrideDecl { .. } => true,
+        _ => false,
+    }
+}
+
+/// A comment token recovered from a re-lex of the source.
+#[derive(Clone)]
+struct LegacyCommentTok {
+    line: usize,
+    start_byte: usize,
+    end_byte: usize,
+    is_line: bool,
+    is_doc: bool,
+    text: String,
+}
+
+/// Walk the source with the lexer and return a vector of line-comment and
+/// block-comment tokens, in source order.
+fn collect_comment_tokens(source: &str) -> Vec<LegacyCommentTok> {
+    let mut lexer = harn_lexer::Lexer::new(source);
+    let Ok(tokens) = lexer.tokenize_with_comments() else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for tok in tokens {
+        match tok.kind {
+            harn_lexer::TokenKind::LineComment { text, is_doc } => {
+                out.push(LegacyCommentTok {
+                    line: tok.span.line,
+                    start_byte: tok.span.start,
+                    end_byte: tok.span.end,
+                    is_line: true,
+                    is_doc,
+                    text,
+                });
+            }
+            harn_lexer::TokenKind::BlockComment { text, is_doc } => {
+                out.push(LegacyCommentTok {
+                    line: tok.span.line,
+                    start_byte: tok.span.start,
+                    end_byte: tok.span.end,
+                    is_line: false,
+                    is_doc,
+                    text,
+                });
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Produce the canonical `/** */` replacement text for a run of comment
+/// tokens. `body_lines` contains one text line per collected comment (already
+/// stripped of leading `//` / `///` markers). `indent` is the column indent
+/// (in spaces) to use for continuation lines. The return value does NOT
+/// include a trailing newline — the replacement span is expected to cover
+/// exactly the original comment lines' textual range.
+fn canonical_doc_block(body_lines: &[String], indent: usize, line_width: usize) -> String {
+    let indent_str = " ".repeat(indent);
+    // Trim leading/trailing blank lines.
+    let mut start = 0;
+    while start < body_lines.len() && body_lines[start].trim().is_empty() {
+        start += 1;
+    }
+    let mut end = body_lines.len();
+    while end > start && body_lines[end - 1].trim().is_empty() {
+        end -= 1;
+    }
+    let body = &body_lines[start..end];
+    if body.is_empty() {
+        return format!("{indent_str}/** */");
+    }
+    if body.len() == 1 {
+        let only = body[0].trim();
+        let compact = format!("{indent_str}/** {only} */");
+        if compact.len() <= line_width {
+            return compact;
+        }
+    }
+    let mut out = String::new();
+    out.push_str(&indent_str);
+    out.push_str("/**");
+    for line in body {
+        out.push('\n');
+        if line.trim().is_empty() {
+            out.push_str(&indent_str);
+            out.push_str(" *");
+        } else {
+            out.push_str(&indent_str);
+            out.push_str(" * ");
+            out.push_str(line.trim_end());
+        }
+    }
+    out.push('\n');
+    out.push_str(&indent_str);
+    out.push_str(" */");
+    out
+}
+
+/// Collect and emit `legacy-doc-comment` diagnostics. Walks top-level items
+/// plus `pub` methods inside `impl` blocks, looks for a contiguous run of
+/// `///` lines (or `//` lines with no blank line between the run and the
+/// item), and produces an autofix replacement with the canonical form.
+fn check_legacy_doc_comments(
+    source: &str,
+    program: &[SNode],
+    diagnostics: &mut Vec<LintDiagnostic>,
+) {
+    let comments = collect_comment_tokens(source);
+    if comments.is_empty() {
+        return;
+    }
+    // Index by starting line for fast upward walks.
+    let by_line: std::collections::HashMap<usize, &LegacyCommentTok> = comments
+        .iter()
+        .map(|c| (c.line, c))
+        .collect();
+
+    fn visit(
+        node: &SNode,
+        comments: &[LegacyCommentTok],
+        by_line: &std::collections::HashMap<usize, &LegacyCommentTok>,
+        source: &str,
+        diagnostics: &mut Vec<LintDiagnostic>,
+        is_top_level: bool,
+    ) {
+        // Eligible if: the item is documentable AND it's either top-level
+        // OR explicitly `pub`. Impl methods are only eligible when pub (since
+        // impl itself is the "top-level" container for them).
+        if is_documentable_item(&node.node) && (is_top_level || item_is_pub(&node.node)) {
+            check_one_item(node, comments, by_line, source, diagnostics);
+        }
+        match &node.node {
+            Node::Pipeline { body, .. }
+            | Node::FnDecl { body, .. }
+            | Node::ToolDecl { body, .. }
+            | Node::OverrideDecl { body, .. } => {
+                for child in body {
+                    visit(child, comments, by_line, source, diagnostics, false);
+                }
+            }
+            Node::ImplBlock { methods, .. } => {
+                for m in methods {
+                    visit(m, comments, by_line, source, diagnostics, false);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    for node in program {
+        visit(node, &comments, &by_line, source, diagnostics, true);
+    }
+}
+
+fn check_one_item(
+    node: &SNode,
+    _comments: &[LegacyCommentTok],
+    by_line: &std::collections::HashMap<usize, &LegacyCommentTok>,
+    source: &str,
+    diagnostics: &mut Vec<LintDiagnostic>,
+) {
+    let item_line = node.span.line;
+    if item_line == 0 {
+        return;
+    }
+    // Walk upward. For each candidate previous line, require a line-comment
+    // token there. Stop at the first non-comment line.
+    let mut walked: Vec<&LegacyCommentTok> = Vec::new();
+    let mut cursor = item_line.saturating_sub(1);
+    while cursor > 0 {
+        let Some(tok) = by_line.get(&cursor) else {
+            break;
+        };
+        // Only `//`-style line comments participate in this heuristic. An
+        // existing `/** */` block doesn't need rewriting.
+        if !tok.is_line {
+            break;
+        }
+        walked.push(*tok);
+        cursor -= 1;
+    }
+    if walked.is_empty() {
+        return;
+    }
+    walked.reverse(); // now in top-to-bottom order
+    // Any contiguous run of `//` / `///` line comments directly above the
+    // item (no blank-line gap) is treated as a doc comment and rewritten.
+    // This covers both design triggers:
+    //  - entirely `///` lines (the original HarnDoc form), and
+    //  - entirely plain `//` lines adjacent to a def,
+    // as well as the pragmatic mixed case (legacy hand-written `//` block
+    // followed by an auto-generated `///` stub — both are the item's doc).
+    let any_doc = walked.iter().any(|c| c.is_doc);
+    let any_plain = walked.iter().any(|c| !c.is_doc);
+
+    // Compute the byte range covering the entire comment run, including the
+    // line's leading indentation. Replacement span starts at the start of
+    // the first comment's line (so we can reset indentation).
+    let first = walked.first().unwrap();
+    let last = walked.last().unwrap();
+    let line_start = line_start_byte(source, first.start_byte);
+    let indent_cols = first.start_byte - line_start;
+    // Build body text lines from the stripped comments.
+    let mut body_lines: Vec<String> = Vec::with_capacity(walked.len());
+    for c in &walked {
+        let s = c.text.strip_prefix(' ').unwrap_or(&c.text);
+        body_lines.push(s.trim_end().to_string());
+    }
+    let replacement = canonical_doc_block(&body_lines, indent_cols, 100);
+    // Find the span we're replacing: from line_start of first comment up to
+    // end of last comment byte. This preserves the trailing newline after
+    // the run (we don't consume it).
+    let replace_span = Span::with_offsets(
+        line_start,
+        last.end_byte,
+        first.line,
+        1,
+    );
+    let fix = vec![FixEdit {
+        span: replace_span,
+        replacement,
+    }];
+    let (prefix, suggestion_form): (&str, &str) = match (any_doc, any_plain) {
+        (true, false) => ("`///`", "/// lines"),
+        (false, true) => ("plain `//`", "// lines adjacent to the definition"),
+        _ => (
+            "adjacent `//` / `///`",
+            "line-comment block adjacent to the definition",
+        ),
+    };
+    diagnostics.push(LintDiagnostic {
+        rule: "legacy-doc-comment",
+        message: format!("{prefix} doc comment(s) above this item should use `/** */` form"),
+        span: Span::with_offsets(first.start_byte, last.end_byte, first.line, 1),
+        severity: LintSeverity::Warning,
+        suggestion: Some(format!(
+            "rewrite the {suggestion_form} as a canonical `/** ... */` block"
+        )),
+        fix: Some(fix),
+    });
+}
+
+/// Given a byte offset, walk backward to find the start-of-line byte.
+fn line_start_byte(source: &str, offset: usize) -> usize {
+    let bytes = source.as_bytes();
+    let mut i = offset;
+    while i > 0 && bytes[i - 1] != b'\n' {
+        i -= 1;
+    }
+    i
+}
+
 fn extract_harndoc(source: &str, span: &Span) -> Option<String> {
+    // Recognize only canonical `/** */` doc-block comments directly above the
+    // item. The block must end on the line immediately preceding the item
+    // (no blank line between). Legacy `///` forms are NOT accepted — they're
+    // flagged by the `legacy-doc-comment` lint rule instead.
     let lines: Vec<&str> = source.lines().collect();
     let def_line = span.line.saturating_sub(1);
     if def_line == 0 {
         return None;
     }
-    let mut comment_lines = Vec::new();
-    let mut line_idx = def_line - 1;
-    loop {
-        let line = lines.get(line_idx)?;
-        let trimmed = line.trim();
-        if trimmed.starts_with("///") {
-            comment_lines.push(trimmed.trim_start_matches("///").trim_start().to_string());
-        } else {
-            break;
-        }
-        if line_idx == 0 {
-            break;
-        }
-        line_idx -= 1;
+    // `def_line` is the item's line, 0-indexed: lines[def_line - 1] is the
+    // line directly above. That line must end with `*/`.
+    let above_idx = def_line - 1;
+    let above = lines.get(above_idx)?.trim_end();
+    if !above.ends_with("*/") {
+        return None;
     }
-    if comment_lines.is_empty() {
+    // Walk upward to find the start `/**`. The opening `/**` may be on the
+    // same line (compact `/** ... */`) or on an earlier line.
+    let above_trim = above.trim_start();
+    if above_trim.starts_with("/**") && above_trim.ends_with("*/") && above_trim.len() >= 5 {
+        // Compact form: `/** body */`
+        let inner = &above_trim[3..above_trim.len() - 2];
+        let text = inner.trim();
+        return Some(text.to_string());
+    }
+    let mut start_idx = above_idx;
+    loop {
+        let cur = lines.get(start_idx)?.trim_start();
+        if cur.starts_with("/**") {
+            break;
+        }
+        if start_idx == 0 {
+            return None;
+        }
+        start_idx -= 1;
+    }
+    let mut body = Vec::new();
+    for (i, line) in lines.iter().enumerate().take(above_idx + 1).skip(start_idx) {
+        let t = line.trim();
+        let stripped: &str = if i == start_idx {
+            t.strip_prefix("/**").unwrap_or(t).trim_start()
+        } else if i == above_idx {
+            // Strip trailing `*/` plus optional leading ` * `.
+            let without_tail = t.strip_suffix("*/").unwrap_or(t).trim_end();
+            let without_star = without_tail
+                .strip_prefix('*')
+                .map(|s| s.strip_prefix(' ').unwrap_or(s))
+                .unwrap_or(without_tail);
+            without_star
+        } else {
+            t.strip_prefix('*')
+                .map(|s| s.strip_prefix(' ').unwrap_or(s))
+                .unwrap_or(t)
+        };
+        body.push(stripped.trim_end().to_string());
+    }
+    // Trim leading/trailing empty lines.
+    while body.first().is_some_and(|s| s.is_empty()) {
+        body.remove(0);
+    }
+    while body.last().is_some_and(|s| s.is_empty()) {
+        body.pop();
+    }
+    if body.is_empty() {
         None
     } else {
-        comment_lines.reverse();
-        Some(comment_lines.join("\n"))
+        Some(body.join("\n"))
     }
 }
 
