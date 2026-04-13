@@ -661,6 +661,10 @@ impl TypeChecker {
                     define(scope, &elem.name);
                 }
             }
+            BindingPattern::Pair(a, b) => {
+                define(scope, a);
+                define(scope, b);
+            }
         }
     }
 
@@ -682,6 +686,7 @@ impl TypeChecker {
                     }
                 }
             }
+            BindingPattern::Pair(_, _) => {}
         }
     }
 

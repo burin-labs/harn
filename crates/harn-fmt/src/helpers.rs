@@ -142,6 +142,7 @@ pub(crate) fn format_pattern(pattern: &BindingPattern) -> String {
                 .collect();
             format!("[{}]", parts.join(", "))
         }
+        BindingPattern::Pair(a, b) => format!("({}, {})", a, b),
     }
 }
 

@@ -486,6 +486,7 @@ fn binding_pattern_label(pattern: &BindingPattern) -> String {
                 .collect();
             format!("[{}]", names.join(", "))
         }
+        BindingPattern::Pair(a, b) => format!("({}, {})", a, b),
     }
 }
 

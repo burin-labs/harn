@@ -413,7 +413,17 @@ impl Parser {
     fn parse_for_in(&mut self) -> Result<SNode, ParserError> {
         let start = self.current_span();
         self.consume(&TokenKind::For, "for")?;
-        let pattern = self.parse_binding_pattern()?;
+        let pattern = if self.check(&TokenKind::LParen) {
+            // Pair destructuring: `for (a, b) in ...`
+            self.advance(); // consume (
+            let first = self.consume_identifier("pair pattern element")?;
+            self.consume(&TokenKind::Comma, ",")?;
+            let second = self.consume_identifier("pair pattern element")?;
+            self.consume(&TokenKind::RParen, ")")?;
+            BindingPattern::Pair(first, second)
+        } else {
+            self.parse_binding_pattern()?
+        };
         self.consume(&TokenKind::In, "in")?;
         let iterable = self.parse_expression()?;
         self.consume(&TokenKind::LBrace, "{")?;

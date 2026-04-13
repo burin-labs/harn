@@ -1,0 +1,10 @@
+pipeline test(task) {
+  let p = pair(1, "hello")
+  log(p.first)
+  log(p.second)
+  log(p)
+  let d = {a: 1, b: 2}
+  for (k, v) in iter(d) {
+    log("${k}=${v}")
+  }
+}

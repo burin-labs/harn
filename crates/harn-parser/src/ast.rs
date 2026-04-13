@@ -405,6 +405,9 @@ pub enum BindingPattern {
     Dict(Vec<DictPatternField>),
     /// List destructuring: `let [a, b] = ...`
     List(Vec<ListPatternElement>),
+    /// Pair destructuring for `for (a, b) in iter { ... }`. The iter must
+    /// yield `VmValue::Pair` values. Not valid in let/var bindings.
+    Pair(String, String),
 }
 
 /// A field in a dict destructuring pattern.

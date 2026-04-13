@@ -845,6 +845,15 @@ impl super::Vm {
                 VmValue::StructInstance { fields, .. } => {
                     fields.get(&name).cloned().unwrap_or(VmValue::Nil)
                 }
+                VmValue::Pair(p) => match name.as_str() {
+                    "first" => p.0.clone(),
+                    "second" => p.1.clone(),
+                    _ => {
+                        return Err(VmError::TypeError(format!(
+                            "cannot access property `{name}` on pair (expected `first` or `second`)"
+                        )));
+                    }
+                },
                 VmValue::Nil => {
                     return Err(VmError::TypeError(format!(
                         "cannot access property `{name}` on nil"
@@ -890,6 +899,11 @@ impl super::Vm {
                 VmValue::StructInstance { fields, .. } => {
                     fields.get(&name).cloned().unwrap_or(VmValue::Nil)
                 }
+                VmValue::Pair(p) => match name.as_str() {
+                    "first" => p.0.clone(),
+                    "second" => p.1.clone(),
+                    _ => VmValue::Nil,
+                },
                 _ => VmValue::Nil,
             };
             self.stack.push(result);

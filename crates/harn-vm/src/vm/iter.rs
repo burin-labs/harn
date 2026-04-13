@@ -63,11 +63,11 @@ impl VmIter {
                 if *idx < keys.len() {
                     let k = &keys[*idx];
                     let v = entries.get(k).cloned().unwrap_or(VmValue::Nil);
-                    let mut map: BTreeMap<String, VmValue> = BTreeMap::new();
-                    map.insert("key".to_string(), VmValue::String(Rc::from(k.as_str())));
-                    map.insert("value".to_string(), v);
                     *idx += 1;
-                    Ok(Some(VmValue::Dict(Rc::new(map))))
+                    Ok(Some(VmValue::Pair(Rc::new((
+                        VmValue::String(Rc::from(k.as_str())),
+                        v,
+                    )))))
                 } else {
                     *self = VmIter::Exhausted;
                     Ok(None)

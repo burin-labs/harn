@@ -317,6 +317,7 @@ impl<'a> Linter<'a> {
                 .map(|f| f.alias.as_deref().unwrap_or(&f.key).to_string())
                 .collect(),
             BindingPattern::List(elements) => elements.iter().map(|e| e.name.clone()).collect(),
+            BindingPattern::Pair(a, b) => vec![a.clone(), b.clone()],
         }
     }
 

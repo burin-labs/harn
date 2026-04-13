@@ -113,6 +113,7 @@ pub(crate) fn binding_pattern_names(pattern: &harn_parser::BindingPattern) -> Ve
         harn_parser::BindingPattern::List(elements) => {
             elements.iter().map(|e| e.name.clone()).collect()
         }
+        harn_parser::BindingPattern::Pair(a, b) => vec![a.clone(), b.clone()],
     }
 }
 
