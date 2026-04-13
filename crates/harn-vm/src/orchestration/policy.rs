@@ -8,7 +8,10 @@ use std::thread_local;
 use serde::{Deserialize, Serialize};
 
 use super::{glob_match, new_id};
+use crate::tool_annotations::{SideEffectLevel, ToolAnnotations};
 use crate::value::{VmError, VmValue};
+
+pub use crate::tool_annotations::{ToolArgSchema, ToolKind};
 
 thread_local! {
     static EXECUTION_POLICY_STACK: RefCell<Vec<CapabilityPolicy>> = const { RefCell::new(Vec::new()) };
@@ -22,7 +25,7 @@ thread_local! {
 /// `arg_key` names the argument whose string value must match one of
 /// `arg_patterns`. It is the self-describing form and should be set
 /// explicitly by the policy author. When absent, the enforcer falls
-/// back to `tool_metadata[tool].path_params`. If neither is populated,
+/// back to `tool_annotations[tool].arg_schema.path_params`. If neither is populated,
 /// the constraint is skipped with a structured `log_warn` — the VM is
 /// intentionally domain-agnostic and does not guess argument semantics
 /// by name (no "path"/"file"/"command"/... fallback list).
@@ -44,8 +47,8 @@ pub struct ToolArgConstraint {
 ///
 /// Resolution order for which argument value to match:
 /// 1. `constraint.arg_key` if set (explicit, self-describing).
-/// 2. `policy.tool_metadata[tool].path_params` (first key that yields a
-///    string value in the args object).
+/// 2. `policy.tool_annotations[tool].arg_schema.path_params` (first key
+///    that yields a string value in the args object).
 /// 3. No candidate — `log_warn` and skip the constraint. The VM refuses
 ///    to guess which argument holds the domain-relevant value.
 pub fn enforce_tool_arg_constraints(
@@ -62,16 +65,16 @@ pub fn enforce_tool_arg_constraints(
         }
 
         // Prefer explicit arg_key on the constraint; fall back to
-        // declared path_params from tool metadata. Never guess by
-        // common argument names — that's a Burin-specific heuristic,
+        // declared path_params from tool annotations. Never guess by
+        // common argument names — that's a pipeline-level concern,
         // not a VM concern.
         let declared_keys: Vec<String> = if let Some(key) = constraint.arg_key.as_ref() {
             vec![key.clone()]
         } else {
             policy
-                .tool_metadata
+                .tool_annotations
                 .get(tool_name)
-                .map(|m| m.path_params.clone())
+                .map(|a| a.arg_schema.path_params.clone())
                 .unwrap_or_default()
         };
 
@@ -79,11 +82,11 @@ pub fn enforce_tool_arg_constraints(
             if declared_keys.is_empty() {
                 // No way to know which argument the constraint targets.
                 // Emit a structured warning and skip — permissive by
-                // design so missing metadata doesn't silently block work.
+                // design so missing annotations don't silently block work.
                 crate::events::log_warn(
                     "policy.constraint_unresolved",
                     &format!(
-                        "tool_arg_constraint for tool '{}' has no arg_key and tool_metadata.path_params is empty; skipping (policy author should declare arg_key on the constraint or path_params in tool_metadata)",
+                        "tool_arg_constraint for tool '{}' has no arg_key and tool_annotations.arg_schema.path_params is empty; skipping (policy author should declare arg_key on the constraint or path_params in the tool's annotations)",
                         tool_name
                     ),
                 );
@@ -128,15 +131,6 @@ pub fn enforce_tool_arg_constraints(
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct ToolRuntimePolicyMetadata {
-    pub capabilities: BTreeMap<String, Vec<String>>,
-    pub side_effect_level: Option<String>,
-    pub path_params: Vec<String>,
-    pub mutation_classification: Option<String>,
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(default)]
 pub struct CapabilityPolicy {
     pub tools: Vec<String>,
     pub capabilities: BTreeMap<String, Vec<String>>,
@@ -146,8 +140,10 @@ pub struct CapabilityPolicy {
     /// Argument-level constraints for specific tools.
     #[serde(default)]
     pub tool_arg_constraints: Vec<ToolArgConstraint>,
+    /// Per-tool annotations (kind, arg schema, capabilities, side-effect
+    /// level). Pipelines own the registry; the VM reads it.
     #[serde(default)]
-    pub tool_metadata: BTreeMap<String, ToolRuntimePolicyMetadata>,
+    pub tool_annotations: BTreeMap<String, ToolAnnotations>,
 }
 
 impl CapabilityPolicy {
@@ -255,15 +251,15 @@ impl CapabilityPolicy {
         let mut tool_arg_constraints = self.tool_arg_constraints.clone();
         tool_arg_constraints.extend(requested.tool_arg_constraints.clone());
 
-        let tool_metadata = tools
+        let tool_annotations = tools
             .iter()
             .filter_map(|tool| {
                 requested
-                    .tool_metadata
+                    .tool_annotations
                     .get(tool)
-                    .or_else(|| self.tool_metadata.get(tool))
+                    .or_else(|| self.tool_annotations.get(tool))
                     .cloned()
-                    .map(|metadata| (tool.clone(), metadata))
+                    .map(|annotations| (tool.clone(), annotations))
             })
             .collect();
 
@@ -274,7 +270,7 @@ impl CapabilityPolicy {
             side_effect_level,
             recursion_limit,
             tool_arg_constraints,
-            tool_metadata,
+            tool_annotations,
         })
     }
 }
@@ -529,8 +525,8 @@ pub fn current_approval_policy() -> Option<ToolApprovalPolicy> {
     EXECUTION_APPROVAL_POLICY_STACK.with(|stack| stack.borrow().last().cloned())
 }
 
-pub fn current_tool_metadata(tool: &str) -> Option<ToolRuntimePolicyMetadata> {
-    current_execution_policy().and_then(|policy| policy.tool_metadata.get(tool).cloned())
+pub fn current_tool_annotations(tool: &str) -> Option<ToolAnnotations> {
+    current_execution_policy().and_then(|policy| policy.tool_annotations.get(tool).cloned())
 }
 
 fn policy_allows_tool(policy: &CapabilityPolicy, tool: &str) -> bool {
@@ -570,67 +566,29 @@ fn reject_policy(reason: String) -> Result<(), VmError> {
     })
 }
 
-fn fallback_mutation_classification(tool_name: &str) -> String {
-    let lower = tool_name.to_ascii_lowercase();
-    if lower.starts_with("mcp_") {
-        return "host_defined".to_string();
-    }
-    if lower == "exec"
-        || lower == "shell"
-        || lower == "exec_at"
-        || lower == "shell_at"
-        || lower == "run"
-        || lower.starts_with("run_")
-    {
-        return "ambient_side_effect".to_string();
-    }
-    if lower.starts_with("delete")
-        || lower.starts_with("remove")
-        || lower.starts_with("move")
-        || lower.starts_with("rename")
-    {
-        return "destructive".to_string();
-    }
-    if lower.contains("write")
-        || lower.contains("edit")
-        || lower.contains("patch")
-        || lower.contains("create")
-        || lower.contains("scaffold")
-        || lower.starts_with("insert")
-        || lower.starts_with("replace")
-        || lower == "add_import"
-    {
-        return "apply_workspace".to_string();
-    }
-    "read_only".to_string()
-}
-
+/// Mutation classification for a tool, derived from the pipeline's
+/// declared `ToolKind`. Used in telemetry and pre/post-bridge payloads
+/// while those methods still exist. Returns `"other"` for unannotated
+/// tools (fail-safe; unknown tools don't auto-classify).
 pub fn current_tool_mutation_classification(tool_name: &str) -> String {
-    current_tool_metadata(tool_name)
-        .and_then(|metadata| metadata.mutation_classification)
-        .unwrap_or_else(|| fallback_mutation_classification(tool_name))
+    current_tool_annotations(tool_name)
+        .map(|annotations| annotations.kind.mutation_class().to_string())
+        .unwrap_or_else(|| "other".to_string())
 }
 
+/// Workspace paths declared by this tool call, read from the tool's
+/// annotated `arg_schema.path_params`. Unannotated tools declare no
+/// paths — the VM no longer guesses by common argument names.
 pub fn current_tool_declared_paths(tool_name: &str, args: &serde_json::Value) -> Vec<String> {
     let Some(map) = args.as_object() else {
         return Vec::new();
     };
-    let path_keys = current_tool_metadata(tool_name)
-        .map(|metadata| metadata.path_params)
-        .filter(|keys| !keys.is_empty())
-        .unwrap_or_else(|| {
-            vec![
-                "path".to_string(),
-                "file".to_string(),
-                "cwd".to_string(),
-                "repo".to_string(),
-                "target".to_string(),
-                "destination".to_string(),
-            ]
-        });
+    let Some(annotations) = current_tool_annotations(tool_name) else {
+        return Vec::new();
+    };
     let mut paths = Vec::new();
-    for key in path_keys {
-        if let Some(value) = map.get(&key).and_then(|value| value.as_str()) {
+    for key in &annotations.arg_schema.path_params {
+        if let Some(value) = map.get(key).and_then(|value| value.as_str()) {
             if !value.is_empty() {
                 paths.push(value.to_string());
             }
@@ -655,19 +613,15 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
         return Ok(());
     };
     match name {
-        "read" | "read_file" => {
-            if !policy_allows_tool(&policy, name)
-                || !policy_allows_capability(&policy, "workspace", "read_text")
-            {
+        "read_file" => {
+            if !policy_allows_capability(&policy, "workspace", "read_text") {
                 return reject_policy(format!(
                     "builtin '{name}' exceeds workspace.read_text ceiling"
                 ));
             }
         }
-        "search" | "list_dir" => {
-            if !policy_allows_tool(&policy, name)
-                || !policy_allows_capability(&policy, "workspace", "list")
-            {
+        "list_dir" => {
+            if !policy_allows_capability(&policy, "workspace", "list") {
                 return reject_policy(format!("builtin '{name}' exceeds workspace.list ceiling"));
             }
         }
@@ -676,9 +630,8 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
                 return reject_policy(format!("builtin '{name}' exceeds workspace.exists ceiling"));
             }
         }
-        "edit" | "write_file" | "append_file" | "mkdir" | "copy_file" => {
-            if !policy_allows_tool(&policy, "edit")
-                || !policy_allows_capability(&policy, "workspace", "write_text")
+        "write_file" | "append_file" | "mkdir" | "copy_file" => {
+            if !policy_allows_capability(&policy, "workspace", "write_text")
                 || !policy_allows_side_effect(&policy, "workspace_write")
             {
                 return reject_policy(format!("builtin '{name}' exceeds workspace write ceiling"));
@@ -702,9 +655,8 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
                 );
             }
         }
-        "exec" | "exec_at" | "shell" | "shell_at" | "run_command" => {
-            if !policy_allows_tool(&policy, "run")
-                || !policy_allows_capability(&policy, "process", "exec")
+        "exec" | "exec_at" | "shell" | "shell_at" => {
+            if !policy_allows_capability(&policy, "process", "exec")
                 || !policy_allows_side_effect(&policy, "process_exec")
             {
                 return reject_policy(format!("builtin '{name}' exceeds process.exec ceiling"));
@@ -725,8 +677,7 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
         | "mcp_get_prompt"
         | "mcp_server_info"
         | "mcp_disconnect" => {
-            if !policy_allows_tool(&policy, "run")
-                || !policy_allows_capability(&policy, "process", "exec")
+            if !policy_allows_capability(&policy, "process", "exec")
                 || !policy_allows_side_effect(&policy, "process_exec")
             {
                 return reject_policy(format!("builtin '{name}' exceeds process.exec ceiling"));
@@ -776,8 +727,8 @@ pub fn enforce_current_policy_for_tool(tool_name: &str) -> Result<(), VmError> {
     if !policy_allows_tool(&policy, tool_name) {
         return reject_policy(format!("tool '{tool_name}' exceeds tool ceiling"));
     }
-    if let Some(metadata) = policy.tool_metadata.get(tool_name) {
-        for (capability, ops) in &metadata.capabilities {
+    if let Some(annotations) = policy.tool_annotations.get(tool_name) {
+        for (capability, ops) in &annotations.capabilities {
             for op in ops {
                 if !policy_allows_capability(&policy, capability, op) {
                     return reject_policy(format!(
@@ -786,12 +737,14 @@ pub fn enforce_current_policy_for_tool(tool_name: &str) -> Result<(), VmError> {
                 }
             }
         }
-        if let Some(side_effect_level) = metadata.side_effect_level.as_deref() {
-            if !policy_allows_side_effect(&policy, side_effect_level) {
-                return reject_policy(format!(
-                    "tool '{tool_name}' exceeds side-effect ceiling: {side_effect_level}"
-                ));
-            }
+        let requested_level = annotations.side_effect_level;
+        if requested_level != SideEffectLevel::None
+            && !policy_allows_side_effect(&policy, requested_level.as_str())
+        {
+            return reject_policy(format!(
+                "tool '{tool_name}' exceeds side-effect ceiling: {}",
+                requested_level.as_str()
+            ));
         }
     }
     Ok(())
@@ -923,7 +876,7 @@ pub fn builtin_ceiling() -> CapabilityPolicy {
         side_effect_level: Some("network".to_string()),
         recursion_limit: Some(8),
         tool_arg_constraints: Vec::new(),
-        tool_metadata: BTreeMap::new(),
+        tool_annotations: BTreeMap::new(),
     }
 }
 

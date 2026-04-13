@@ -310,6 +310,8 @@ pub fn reset_llm_state() {
 /// Register LLM builtins on a VM.
 pub fn register_llm_builtins(vm: &mut Vm) {
     rate_limit::init_from_config();
+    agent_config::register_agent_subscribe(vm);
+    agent_config::register_agent_inject_feedback(vm);
     // =========================================================================
     // llm_call -- core LLM request with structured output + tool use
     // =========================================================================
@@ -479,13 +481,9 @@ pub fn register_llm_builtins(vm: &mut Vm) {
         let tool_backoff_ms = opt_int(&options, "tool_backoff_ms").unwrap_or(1000) as u64;
         let tool_format = opt_str(&options, "tool_format").unwrap_or_else(|| "text".to_string());
         let daemon = opt_bool(&options, "daemon");
-        let context_callback = options
-            .as_ref()
-            .and_then(|o| {
-                o.get("context_callback")
-                    .or_else(|| o.get("context_filter"))
-            })
-            .cloned();
+        let session_id = opt_str(&options, "session_id").unwrap_or_else(|| {
+            format!("agent_session_{}", uuid::Uuid::now_v7())
+        });
         let auto_compact = if opt_bool(&options, "auto_compact") {
             let mut ac = crate::orchestration::AutoCompactConfig::default();
             if let Some(v) = opt_int(&options, "compact_threshold") {
@@ -554,7 +552,6 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                 tool_backoff_ms,
                 tool_format,
                 auto_compact,
-                context_callback,
                 policy,
                 approval_policy,
                 daemon,
@@ -566,21 +563,11 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                 loop_detect_block: opt_int(&options, "loop_detect_block").unwrap_or(3) as usize,
                 loop_detect_skip: opt_int(&options, "loop_detect_skip").unwrap_or(4) as usize,
                 tool_examples: opt_str(&options, "tool_examples"),
-                post_turn_callback: options
-                    .as_ref()
-                    .and_then(|o| o.get("post_turn_callback"))
-                    .cloned(),
                 turn_policy,
                 stop_after_successful_tools: opt_str_list(&options, "stop_after_successful_tools"),
                 require_successful_tools: opt_str_list(&options, "require_successful_tools"),
-                on_tool_call: options
-                    .as_ref()
-                    .and_then(|o| o.get("on_tool_call"))
-                    .cloned(),
-                on_tool_result: options
-                    .as_ref()
-                    .and_then(|o| o.get("on_tool_result"))
-                    .cloned(),
+                session_id,
+                event_sink: None,
                 task_ledger: parse_task_ledger_from_vm_options(&options),
             },
         )

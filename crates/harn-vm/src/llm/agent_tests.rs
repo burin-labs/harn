@@ -1,7 +1,7 @@
 use super::{
     action_turn_nudge, assistant_history_text, build_llm_call_result, extract_retry_after_ms,
-    has_successful_tools, is_read_only_tool, loop_state_requests_phase_change,
-    merge_agent_loop_policy, normalize_native_tools_for_format, normalize_tool_choice_for_format,
+    has_successful_tools, loop_state_requests_phase_change, merge_agent_loop_policy,
+    normalize_native_tools_for_format, normalize_tool_choice_for_format,
     normalize_tool_examples_for_format, observed_llm_call, prose_exceeds_budget,
     required_tool_choice_for_provider, run_agent_loop_internal, sentinel_without_action_nudge,
     should_stop_after_successful_tools, trim_prose_for_history, AgentLoopConfig, LlmRetryConfig,
@@ -11,6 +11,7 @@ use crate::llm::api::{LlmCallOptions, LlmResult};
 use crate::llm::daemon::{persist_snapshot, DaemonLoopConfig, DaemonSnapshot};
 use crate::llm::mock::{get_llm_mock_calls, reset_llm_mock_state};
 use crate::orchestration::{pop_execution_policy, push_execution_policy, TurnPolicy};
+use crate::tool_annotations::{ToolAnnotations, ToolKind};
 use crate::value::{VmError, VmValue};
 use serde_json::json;
 use std::rc::Rc;
@@ -63,7 +64,6 @@ fn base_agent_config() -> AgentLoopConfig {
         tool_backoff_ms: 1,
         tool_format: "text".to_string(),
         auto_compact: None,
-        context_callback: None,
         policy: None,
         approval_policy: None,
         daemon: false,
@@ -75,12 +75,11 @@ fn base_agent_config() -> AgentLoopConfig {
         loop_detect_block: 0,
         loop_detect_skip: 0,
         tool_examples: None,
-        post_turn_callback: None,
         turn_policy: None,
         stop_after_successful_tools: None,
         require_successful_tools: None,
-        on_tool_call: None,
-        on_tool_result: None,
+        session_id: "test_session".to_string(),
+        event_sink: None,
         task_ledger: Default::default(),
     }
 }
@@ -282,24 +281,62 @@ fn retry_after_with_extra_whitespace() {
 }
 
 #[test]
-fn read_only_tools_recognized() {
-    assert!(is_read_only_tool("read"));
-    assert!(is_read_only_tool("read_file"));
-    assert!(is_read_only_tool("lookup"));
-    assert!(is_read_only_tool("search"));
-    assert!(is_read_only_tool("outline"));
-    assert!(is_read_only_tool("list_directory"));
-    assert!(is_read_only_tool("web_search"));
-    assert!(is_read_only_tool("web_fetch"));
-}
+fn read_only_classification_follows_tool_kind_annotations() {
+    // Tools declared with ACP Read|Search|Think|Fetch kinds are read-only;
+    // Edit|Delete|Move|Execute|Other are not. The VM reads from the
+    // active policy's tool_annotations registry — no hardcoded names.
+    let mut registry = std::collections::BTreeMap::new();
+    for (name, kind) in [
+        ("read", ToolKind::Read),
+        ("lookup", ToolKind::Read),
+        ("search", ToolKind::Search),
+        ("outline", ToolKind::Search),
+        ("web_search", ToolKind::Search),
+        ("web_fetch", ToolKind::Fetch),
+        ("think", ToolKind::Think),
+        ("write", ToolKind::Edit),
+        ("edit", ToolKind::Edit),
+        ("delete", ToolKind::Delete),
+        ("exec", ToolKind::Execute),
+        ("other", ToolKind::Other),
+    ] {
+        registry.insert(
+            name.to_string(),
+            ToolAnnotations {
+                kind,
+                ..Default::default()
+            },
+        );
+    }
+    let policy = crate::orchestration::CapabilityPolicy {
+        tool_annotations: registry,
+        ..Default::default()
+    };
+    push_execution_policy(policy);
 
-#[test]
-fn write_tools_not_read_only() {
-    assert!(!is_read_only_tool("write"));
-    assert!(!is_read_only_tool("edit"));
-    assert!(!is_read_only_tool("delete"));
-    assert!(!is_read_only_tool("exec"));
-    assert!(!is_read_only_tool(""));
+    let is_ro = |name: &str| {
+        crate::orchestration::current_tool_annotations(name)
+            .map(|a| a.kind.is_read_only())
+            .unwrap_or(false)
+    };
+    assert!(is_ro("read"));
+    assert!(is_ro("lookup"));
+    assert!(is_ro("search"));
+    assert!(is_ro("outline"));
+    assert!(is_ro("web_search"));
+    assert!(is_ro("web_fetch"));
+    assert!(is_ro("think"));
+    assert!(!is_ro("write"));
+    assert!(!is_ro("edit"));
+    assert!(!is_ro("delete"));
+    assert!(!is_ro("exec"));
+    // Other is NOT read-only (fail-safe).
+    assert!(!is_ro("other"));
+    // Unannotated tools are NOT read-only.
+    assert!(!is_ro("unknown_tool"));
+    assert!(!is_ro(""));
+
+    pop_execution_policy();
 }
 
 #[test]

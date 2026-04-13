@@ -8,9 +8,9 @@ use serde::{Deserialize, Serialize};
 use super::{
     apply_input_transcript_policy, apply_output_transcript_policy, new_id, now_rfc3339,
     ArtifactRecord, BranchSemantics, CapabilityPolicy, ContextPolicy, EscalationPolicy, JoinPolicy,
-    MapPolicy, ModelPolicy, ReducePolicy, RetryPolicy, StageContract, ToolRuntimePolicyMetadata,
-    TranscriptPolicy,
+    MapPolicy, ModelPolicy, ReducePolicy, RetryPolicy, StageContract, TranscriptPolicy,
 };
+use crate::tool_annotations::{SideEffectLevel, ToolAnnotations, ToolArgSchema, ToolKind};
 use crate::llm::{extract_llm_options, vm_call_llm_full, vm_value_to_json};
 use crate::value::{VmError, VmValue};
 
@@ -109,12 +109,26 @@ fn max_side_effect_level(levels: impl Iterator<Item = String>) -> Option<String>
     levels.max_by_key(|level| rank(level))
 }
 
-fn parse_tool_runtime_policy(
-    map: &serde_json::Map<String, serde_json::Value>,
-) -> ToolRuntimePolicyMetadata {
-    let Some(policy) = map.get("policy").and_then(|value| value.as_object()) else {
-        return ToolRuntimePolicyMetadata::default();
-    };
+fn parse_tool_kind(value: Option<&serde_json::Value>) -> ToolKind {
+    match value.and_then(|v| v.as_str()).unwrap_or("") {
+        "read" => ToolKind::Read,
+        "edit" => ToolKind::Edit,
+        "delete" => ToolKind::Delete,
+        "move" => ToolKind::Move,
+        "search" => ToolKind::Search,
+        "execute" => ToolKind::Execute,
+        "think" => ToolKind::Think,
+        "fetch" => ToolKind::Fetch,
+        _ => ToolKind::Other,
+    }
+}
+
+fn parse_tool_annotations(map: &serde_json::Map<String, serde_json::Value>) -> ToolAnnotations {
+    let policy = map
+        .get("policy")
+        .and_then(|value| value.as_object())
+        .cloned()
+        .unwrap_or_default();
 
     let capabilities = policy
         .get("capabilities")
@@ -137,34 +151,65 @@ fn parse_tool_runtime_policy(
         })
         .unwrap_or_default();
 
-    let path_params = policy
-        .get("path_params")
-        .and_then(|value| value.as_array())
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| item.as_str().map(|s| s.to_string()))
-                .collect::<Vec<_>>()
-        })
+    // Pipelines may declare arg_schema under `policy.arg_schema` as a
+    // fully structured object, or as legacy flat fields on `policy`.
+    // Prefer the structured form; fall back to the flat form for
+    // gradual migration.
+    let arg_schema = if let Some(schema) = policy.get("arg_schema") {
+        serde_json::from_value::<ToolArgSchema>(schema.clone()).unwrap_or_default()
+    } else {
+        ToolArgSchema {
+            path_params: policy
+                .get("path_params")
+                .and_then(|value| value.as_array())
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|item| item.as_str().map(|s| s.to_string()))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default(),
+            arg_aliases: policy
+                .get("arg_aliases")
+                .and_then(|value| value.as_object())
+                .map(|aliases| {
+                    aliases
+                        .iter()
+                        .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                        .collect::<BTreeMap<_, _>>()
+                })
+                .unwrap_or_default(),
+            required: policy
+                .get("required")
+                .and_then(|value| value.as_array())
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|item| item.as_str().map(|s| s.to_string()))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default(),
+        }
+    };
+
+    let kind = parse_tool_kind(policy.get("kind"));
+    let side_effect_level = policy
+        .get("side_effect_level")
+        .and_then(|value| value.as_str())
+        .map(SideEffectLevel::parse)
         .unwrap_or_default();
 
-    ToolRuntimePolicyMetadata {
+    ToolAnnotations {
+        kind,
+        side_effect_level,
+        arg_schema,
         capabilities,
-        side_effect_level: policy
-            .get("side_effect_level")
-            .and_then(|value| value.as_str())
-            .map(|s| s.to_string()),
-        path_params,
-        mutation_classification: policy
-            .get("mutation_classification")
-            .and_then(|value| value.as_str())
-            .map(|s| s.to_string()),
     }
 }
 
-pub fn workflow_tool_metadata(
+pub fn workflow_tool_annotations(
     value: &serde_json::Value,
-) -> BTreeMap<String, ToolRuntimePolicyMetadata> {
+) -> BTreeMap<String, ToolAnnotations> {
     match value {
         serde_json::Value::Null => BTreeMap::new(),
         serde_json::Value::Array(items) => items
@@ -174,7 +219,7 @@ pub fn workflow_tool_metadata(
                     .get("name")
                     .and_then(|value| value.as_str())
                     .filter(|name| !name.is_empty())
-                    .map(|name| (name.to_string(), parse_tool_runtime_policy(map))),
+                    .map(|name| (name.to_string(), parse_tool_annotations(map))),
                 _ => None,
             })
             .collect(),
@@ -182,16 +227,16 @@ pub fn workflow_tool_metadata(
             if map.get("_type").and_then(|value| value.as_str()) == Some("tool_registry") {
                 return map
                     .get("tools")
-                    .map(workflow_tool_metadata)
+                    .map(workflow_tool_annotations)
                     .unwrap_or_default();
             }
             map.get("name")
                 .and_then(|value| value.as_str())
                 .filter(|name| !name.is_empty())
                 .map(|name| {
-                    let mut metadata = BTreeMap::new();
-                    metadata.insert(name.to_string(), parse_tool_runtime_policy(map));
-                    metadata
+                    let mut annotations = BTreeMap::new();
+                    annotations.insert(name.to_string(), parse_tool_annotations(map));
+                    annotations
                 })
                 .unwrap_or_default()
         }
@@ -201,10 +246,10 @@ pub fn workflow_tool_metadata(
 
 pub fn workflow_tool_policy_from_tools(value: &serde_json::Value) -> CapabilityPolicy {
     let tools = workflow_tool_names(value);
-    let tool_metadata = workflow_tool_metadata(value);
+    let tool_annotations = workflow_tool_annotations(value);
     let mut capabilities: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for metadata in tool_metadata.values() {
-        for (capability, ops) in &metadata.capabilities {
+    for annotations in tool_annotations.values() {
+        for (capability, ops) in &annotations.capabilities {
             let entry = capabilities.entry(capability.clone()).or_default();
             for op in ops {
                 if !entry.contains(op) {
@@ -215,9 +260,10 @@ pub fn workflow_tool_policy_from_tools(value: &serde_json::Value) -> CapabilityP
         }
     }
     let side_effect_level = max_side_effect_level(
-        tool_metadata
+        tool_annotations
             .values()
-            .filter_map(|metadata| metadata.side_effect_level.clone()),
+            .map(|annotations| annotations.side_effect_level.as_str().to_string())
+            .filter(|level| level != "none"),
     );
     CapabilityPolicy {
         tools,
@@ -226,7 +272,7 @@ pub fn workflow_tool_policy_from_tools(value: &serde_json::Value) -> CapabilityP
         side_effect_level,
         recursion_limit: None,
         tool_arg_constraints: Vec::new(),
-        tool_metadata,
+        tool_annotations,
     }
 }
 
@@ -823,7 +869,6 @@ pub async fn execute_stage_node(
                     tool_backoff_ms: 1000,
                     tool_format: tool_format.clone(),
                     auto_compact,
-                    context_callback: None,
                     policy: Some(effective_policy),
                     approval_policy: Some(node.approval_policy.clone()),
                     daemon: false,
@@ -835,31 +880,14 @@ pub async fn execute_stage_node(
                     loop_detect_block: 3,
                     loop_detect_skip: 4,
                     tool_examples: node.model_policy.tool_examples.clone(),
-                    // Extract post_turn_callback from raw dict since serde(skip) drops it
-                    post_turn_callback: node
-                        .raw_model_policy
-                        .as_ref()
-                        .and_then(|v| v.as_dict())
-                        .and_then(|d| d.get("post_turn_callback"))
-                        .cloned(),
                     turn_policy: node.model_policy.turn_policy.clone(),
                     stop_after_successful_tools: node
                         .model_policy
                         .stop_after_successful_tools
                         .clone(),
                     require_successful_tools: node.model_policy.require_successful_tools.clone(),
-                    on_tool_call: node
-                        .raw_model_policy
-                        .as_ref()
-                        .and_then(|v| v.as_dict())
-                        .and_then(|d| d.get("on_tool_call"))
-                        .cloned(),
-                    on_tool_result: node
-                        .raw_model_policy
-                        .as_ref()
-                        .and_then(|v| v.as_dict())
-                        .and_then(|d| d.get("on_tool_result"))
-                        .cloned(),
+                    session_id: format!("workflow_stage_{}", uuid::Uuid::now_v7()),
+                    event_sink: None,
                     // Seed the ledger from the workflow stage's explicit
                     // deliverables/ledger fields so the graph can carry a
                     // task-wide plan down through map branches and nested

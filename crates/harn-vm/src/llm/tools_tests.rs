@@ -753,39 +753,61 @@ fn component_registry_handles_recursive_refs_without_looping() {
     let _ = registry.render_aliases();
 }
 
-// ─── normalize_tool_args pass-through ───────────────────────────────────────
+// ─── normalize_tool_args alias rewriting ───────────────────────────────────
+//
+// The VM consults the active policy's tool_annotations registry for the
+// arg_aliases table; no tool-name branches live in harn. Tool-specific
+// command shaping (e.g. joining argv arrays into shell strings) now lives
+// in the pipeline's tool handler, not the VM.
 
 #[test]
-fn normalize_tool_args_joins_run_command_arrays() {
-    let args = json!({"command": ["go", "test", "./..."]});
-    let out = normalize_tool_args("run", &args);
-    assert_eq!(out["command"], json!("go test ./..."));
-}
+fn normalize_tool_args_rewrites_declared_aliases_from_active_policy() {
+    use crate::orchestration::{pop_execution_policy, push_execution_policy, CapabilityPolicy};
+    use crate::tool_annotations::{ToolAnnotations, ToolArgSchema, ToolKind};
 
-#[test]
-fn normalize_tool_args_accepts_run_args_alias() {
-    let args = json!({"args": ["go", "test"]});
-    let out = normalize_tool_args("run", &args);
-    assert_eq!(out["command"], json!("go test"));
-}
-
-#[test]
-fn normalize_tool_args_recovers_stringified_run_array() {
-    let args = json!({"command": "[\"go\", \"test\"]"});
-    let out = normalize_tool_args("run", &args);
-    assert_eq!(out["command"], json!("go test"));
-}
-
-#[test]
-fn normalize_tool_args_recovers_fragmented_run_array() {
-    // The model sometimes splits a JSON-encoded command array across `args`
-    // and `command` when it runs out of tokens mid-literal. The normalizer
-    // reassembles them into a single shell string.
-    let out = normalize_tool_args(
-        "run",
-        &json!({"command": "\"internal/manifest/\"]", "args": "[\"ls\""}),
+    let mut annotations = std::collections::BTreeMap::new();
+    let mut arg_aliases = std::collections::BTreeMap::new();
+    arg_aliases.insert("file".to_string(), "path".to_string());
+    arg_aliases.insert("mode".to_string(), "action".to_string());
+    annotations.insert(
+        "edit".to_string(),
+        ToolAnnotations {
+            kind: ToolKind::Edit,
+            arg_schema: ToolArgSchema {
+                arg_aliases,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
     );
-    assert_eq!(out["command"], json!("ls internal/manifest/"));
+    let policy = CapabilityPolicy {
+        tool_annotations: annotations,
+        ..Default::default()
+    };
+    push_execution_policy(policy);
+
+    // Aliases get rewritten to their canonical keys; non-aliased fields
+    // pass through untouched; canonical key already present wins over alias.
+    let out = normalize_tool_args(
+        "edit",
+        &json!({"file": "lib/foo.rs", "mode": "replace_range", "range_start": "3"}),
+    );
+    assert_eq!(out["path"], json!("lib/foo.rs"));
+    assert_eq!(out["action"], json!("replace_range"));
+    assert!(out.get("file").is_none());
+    assert!(out.get("mode").is_none());
+    // range_start still coerces string-numerics to integers.
+    assert_eq!(out["range_start"], json!(3));
+
+    pop_execution_policy();
+}
+
+#[test]
+fn normalize_tool_args_skips_unannotated_tool() {
+    // Unannotated tools get no alias rewriting — harn has no
+    // hardcoded tool-name knowledge.
+    let out = normalize_tool_args("mystery_tool", &json!({"file": "x.rs"}));
+    assert_eq!(out, json!({"file": "x.rs"}));
 }
 
 // ─── Heredoc parser tests ──────────────────────────────────────────────────

@@ -108,66 +108,27 @@ pub(crate) fn build_tool_result_message(
 }
 
 /// Normalize tool call arguments before dispatch.
-/// Handles alias mapping so tool schemas and host implementations stay consistent
-/// regardless of which parameter names the model chooses.
+///
+/// The VM walks the active policy's
+/// `tool_annotations[name].arg_schema.arg_aliases` table and rewrites any
+/// aliases present in the arguments object to their canonical keys. This
+/// is purely driven by pipeline declarations — the VM has no hardcoded
+/// tool-name branches. If a tool isn't annotated, no aliases are rewritten.
 pub(crate) fn normalize_tool_args(name: &str, args: &serde_json::Value) -> serde_json::Value {
     let mut obj = match args.as_object() {
         Some(o) => o.clone(),
         None => return args.clone(),
     };
 
-    if name == "edit" {
-        // Normalize action aliases: mode, command -> action
-        if !obj.contains_key("action") {
-            if let Some(v) = obj.remove("mode").or_else(|| obj.remove("command")) {
-                obj.insert("action".to_string(), v);
+    if let Some(annotations) = crate::orchestration::current_tool_annotations(name) {
+        for (alias, canonical) in &annotations.arg_schema.arg_aliases {
+            if obj.contains_key(canonical) {
+                continue;
+            }
+            if let Some(value) = obj.remove(alias) {
+                obj.insert(canonical.clone(), value);
             }
         }
-
-        // For patch actions: normalize find->old_string, content->new_string
-        let action = obj
-            .get("action")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        if action == "patch" || action == "replace" {
-            if !obj.contains_key("old_string") {
-                if let Some(v) = obj.remove("find") {
-                    obj.insert("old_string".to_string(), v);
-                }
-            }
-            if !obj.contains_key("new_string") {
-                if let Some(v) = obj.remove("content") {
-                    obj.insert("new_string".to_string(), v);
-                }
-            }
-        }
-
-        // Normalize file->path alias
-        if !obj.contains_key("path") {
-            if let Some(v) = obj.remove("file") {
-                obj.insert("path".to_string(), v);
-            }
-        }
-    }
-
-    if name == "run" || name == "exec" {
-        if !obj.contains_key("command") {
-            if let Some(v) = obj.remove("args").or_else(|| obj.remove("argv")) {
-                obj.insert("command".to_string(), v);
-            }
-        }
-
-        let command_value = obj.get("command").cloned();
-        let args_value = obj
-            .get("args")
-            .cloned()
-            .or_else(|| obj.get("argv").cloned());
-        if let Some(command) = normalize_run_command(command_value.as_ref(), args_value.as_ref()) {
-            obj.insert("command".to_string(), serde_json::json!(command));
-        }
-        obj.remove("args");
-        obj.remove("argv");
     }
 
     let mut normalized = serde_json::Value::Object(obj);
@@ -211,117 +172,6 @@ fn coerce_integer_like_tool_args(value: &mut serde_json::Value) {
     }
 }
 
-fn normalize_run_command(
-    command_value: Option<&serde_json::Value>,
-    fallback_value: Option<&serde_json::Value>,
-) -> Option<String> {
-    let command_parts = command_value
-        .and_then(run_command_tokens)
-        .unwrap_or_default();
-    let fallback_parts = fallback_value
-        .and_then(run_command_tokens)
-        .unwrap_or_default();
-    let parts = if command_parts.is_empty() {
-        fallback_parts
-    } else if fallback_parts.is_empty() {
-        command_parts
-    } else {
-        let mut combined = fallback_parts;
-        combined.extend(command_parts);
-        combined
-    };
-
-    if parts.is_empty() {
-        None
-    } else {
-        Some(parts.join(" "))
-    }
-}
-
-fn run_command_tokens(value: &serde_json::Value) -> Option<Vec<String>> {
-    match value {
-        serde_json::Value::Array(parts) => {
-            let tokens = parts
-                .iter()
-                .filter_map(|part| part.as_str())
-                .map(|part| part.trim().to_string())
-                .filter(|part| !part.is_empty())
-                .collect::<Vec<_>>();
-            (!tokens.is_empty()).then_some(tokens)
-        }
-        serde_json::Value::String(text) => run_command_tokens_from_str(text),
-        _ => None,
-    }
-}
-
-fn run_command_tokens_from_str(text: &str) -> Option<Vec<String>> {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    if trimmed.starts_with('[') && trimmed.ends_with(']') {
-        if let Ok(parts) = serde_json::from_str::<Vec<String>>(trimmed) {
-            let tokens = parts
-                .into_iter()
-                .map(|part| part.trim().to_string())
-                .filter(|part| !part.is_empty())
-                .collect::<Vec<_>>();
-            if !tokens.is_empty() {
-                return Some(tokens);
-            }
-        }
-    }
-
-    if (trimmed.contains('[') || trimmed.contains(']') || trimmed.contains("\\\""))
-        && trimmed.contains('"')
-    {
-        let tokens = extract_quoted_tokens(trimmed);
-        if !tokens.is_empty() {
-            return Some(tokens);
-        }
-    }
-
-    Some(vec![trimmed.to_string()])
-}
-
-fn extract_quoted_tokens(text: &str) -> Vec<String> {
-    let mut tokens = Vec::new();
-    let mut current = String::new();
-    let mut in_quote = false;
-    let mut escape = false;
-
-    for ch in text.chars() {
-        if !in_quote {
-            if ch == '"' {
-                in_quote = true;
-                current.clear();
-            }
-            continue;
-        }
-
-        if escape {
-            current.push(ch);
-            escape = false;
-            continue;
-        }
-
-        match ch {
-            '\\' => escape = true,
-            '"' => {
-                if !current.trim().is_empty() {
-                    tokens.push(current.trim().to_string());
-                }
-                current.clear();
-                in_quote = false;
-            }
-            _ => current.push(ch),
-        }
-    }
-
-    tokens
-}
-
 fn resolve_local_tool_path(path: &str) -> std::path::PathBuf {
     let candidate = std::path::PathBuf::from(path);
     if candidate.is_absolute() {
@@ -339,7 +189,7 @@ fn resolve_local_tool_path(path: &str) -> std::path::PathBuf {
 /// This reduces latency and split-brain for passive operations.
 pub(crate) fn handle_tool_locally(name: &str, args: &serde_json::Value) -> Option<String> {
     match name {
-        "read_file" | "read" => {
+        "read_file" => {
             let path = args
                 .get("path")
                 .or_else(|| args.get("name"))

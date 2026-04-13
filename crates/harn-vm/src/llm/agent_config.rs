@@ -2,7 +2,9 @@
 //! extracted from `agent.rs` for maintainability.
 
 use std::rc::Rc;
+use std::sync::Arc;
 
+use crate::agent_events::{self, AgentEventSink};
 use crate::value::VmValue;
 use crate::vm::Vm;
 
@@ -15,50 +17,10 @@ use super::helpers::{
 use super::tools::build_assistant_response_message;
 
 // ---------------------------------------------------------------------------
-// Post-turn directives
-// ---------------------------------------------------------------------------
-
-#[derive(Default)]
-pub(super) struct PostTurnDirective {
-    pub message: Option<String>,
-    pub stop: bool,
-}
-
-pub(super) fn parse_post_turn_directive(value: &VmValue) -> PostTurnDirective {
-    match value {
-        VmValue::String(s) => {
-            let trimmed = s.trim();
-            if trimmed.is_empty() {
-                PostTurnDirective::default()
-            } else {
-                PostTurnDirective {
-                    message: Some(trimmed.to_string()),
-                    stop: false,
-                }
-            }
-        }
-        VmValue::Bool(stop) => PostTurnDirective {
-            message: None,
-            stop: *stop,
-        },
-        VmValue::Dict(map) => {
-            let message = map
-                .get("message")
-                .map(VmValue::display)
-                .map(|msg| msg.trim().to_string())
-                .filter(|msg| !msg.is_empty());
-            let stop = matches!(map.get("stop"), Some(VmValue::Bool(true)));
-            PostTurnDirective { message, stop }
-        }
-        _ => PostTurnDirective::default(),
-    }
-}
-
-// ---------------------------------------------------------------------------
 // AgentLoopConfig
 // ---------------------------------------------------------------------------
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct AgentLoopConfig {
     pub persistent: bool,
     pub max_iterations: usize,
@@ -71,8 +33,6 @@ pub struct AgentLoopConfig {
     pub tool_format: String,
     /// Auto-compaction config.
     pub auto_compact: Option<crate::orchestration::AutoCompactConfig>,
-    /// Optional per-turn callback.
-    pub context_callback: Option<VmValue>,
     /// Capability policy scoped to this agent loop.
     pub policy: Option<crate::orchestration::CapabilityPolicy>,
     /// Declarative approval policy (auto-approve / auto-deny / require host confirmation).
@@ -93,23 +53,37 @@ pub struct AgentLoopConfig {
     pub loop_detect_skip: usize,
     /// Optional few-shot examples for the tool-calling contract.
     pub tool_examples: Option<String>,
-    /// Optional Harn closure called after each tool-calling turn.
-    pub post_turn_callback: Option<VmValue>,
     /// Optional turn-shape constraints.
     pub turn_policy: Option<crate::orchestration::TurnPolicy>,
     /// Stop after successful use of named tools.
     pub stop_after_successful_tools: Option<Vec<String>>,
     /// Require successful use of named tools.
     pub require_successful_tools: Option<Vec<String>>,
-    /// Pre-execution tool hook.
-    pub on_tool_call: Option<VmValue>,
-    /// Post-execution tool hook.
-    pub on_tool_result: Option<VmValue>,
+    /// Stable identifier for this agent-loop session. Events emitted
+    /// through the stream are tagged with this id; subscribers key on
+    /// it to scope their observation to a specific session.
+    pub session_id: String,
+    /// Optional sink that receives every `AgentEvent` the turn loop
+    /// produces. In addition to this direct sink, any sinks registered
+    /// via `agent_subscribe(session_id, closure)` from inside the
+    /// pipeline receive the same events (registry is keyed on session id).
+    pub event_sink: Option<Arc<dyn AgentEventSink>>,
     /// Optional initial task ledger. When populated (typically from a
     /// prior planning stage's `tasks` array or a caller-supplied
     /// deliverables list), the ledger is rendered into each turn's
     /// prompt and gates `<done>` until resolved. See `llm/ledger.rs`.
     pub task_ledger: crate::llm::ledger::TaskLedger,
+}
+
+impl std::fmt::Debug for AgentLoopConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AgentLoopConfig")
+            .field("persistent", &self.persistent)
+            .field("max_iterations", &self.max_iterations)
+            .field("session_id", &self.session_id)
+            .field("event_sink", &self.event_sink.as_ref().map(|_| "..."))
+            .finish_non_exhaustive()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -258,13 +232,9 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
             });
             let done_sentinel = opt_str(&options, "done_sentinel");
             let break_unless_phase = opt_str(&options, "break_unless_phase");
-            let context_callback = options
-                .as_ref()
-                .and_then(|o| {
-                    o.get("context_callback")
-                        .or_else(|| o.get("context_filter"))
-                })
-                .cloned();
+            let session_id = opt_str(&options, "session_id").unwrap_or_else(|| {
+                format!("agent_session_{}", uuid::Uuid::now_v7())
+            });
             let daemon = opt_bool(&options, "daemon");
             let auto_compact = if opt_bool(&options, "auto_compact") {
                 let mut ac = crate::orchestration::AutoCompactConfig::default();
@@ -358,7 +328,6 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                     tool_backoff_ms,
                     tool_format,
                     auto_compact,
-                    context_callback,
                     policy,
                     approval_policy,
                     daemon,
@@ -370,10 +339,6 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                     loop_detect_block: opt_int(&options, "loop_detect_block").unwrap_or(3) as usize,
                     loop_detect_skip: opt_int(&options, "loop_detect_skip").unwrap_or(4) as usize,
                     tool_examples: opt_str(&options, "tool_examples"),
-                    post_turn_callback: options
-                        .as_ref()
-                        .and_then(|o| o.get("post_turn_callback"))
-                        .cloned(),
                     turn_policy,
                     stop_after_successful_tools: crate::llm::helpers::opt_str_list(
                         &options,
@@ -383,20 +348,77 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                         &options,
                         "require_successful_tools",
                     ),
-                    on_tool_call: options
-                        .as_ref()
-                        .and_then(|o| o.get("on_tool_call"))
-                        .cloned(),
-                    on_tool_result: options
-                        .as_ref()
-                        .and_then(|o| o.get("on_tool_result"))
-                        .cloned(),
+                    session_id,
+                    event_sink: None,
                     task_ledger: parse_task_ledger_from_options(&options),
                 },
             )
             .await?;
             Ok(crate::stdlib::json_to_vm_value(&result))
         }
+    });
+}
+
+// ---------------------------------------------------------------------------
+// agent_subscribe / agent_inject_feedback host builtins
+// ---------------------------------------------------------------------------
+
+pub fn register_agent_subscribe(vm: &mut Vm) {
+    vm.register_builtin("agent_subscribe", |args, _out| {
+        let session_id = match args.first() {
+            Some(VmValue::String(s)) => s.to_string(),
+            _ => {
+                return Err(crate::value::VmError::Runtime(
+                    "agent_subscribe(session_id, callback): session_id must be a string".into(),
+                ))
+            }
+        };
+        let callback = args.get(1).cloned().ok_or_else(|| {
+            crate::value::VmError::Runtime(
+                "agent_subscribe(session_id, callback): callback closure required".into(),
+            )
+        })?;
+        if !matches!(callback, VmValue::Closure(_)) {
+            return Err(crate::value::VmError::Runtime(
+                "agent_subscribe(session_id, callback): callback must be a closure".into(),
+            ));
+        }
+        agent_events::register_closure_subscriber(session_id, callback);
+        Ok(VmValue::Nil)
+    });
+}
+
+pub fn register_agent_inject_feedback(vm: &mut Vm) {
+    vm.register_builtin("agent_inject_feedback", |args, _out| {
+        let session_id = match args.first() {
+            Some(VmValue::String(s)) => s.to_string(),
+            _ => {
+                return Err(crate::value::VmError::Runtime(
+                    "agent_inject_feedback(session_id, kind, content): session_id must be a string"
+                        .into(),
+                ))
+            }
+        };
+        let kind = match args.get(1) {
+            Some(VmValue::String(s)) => s.to_string(),
+            _ => {
+                return Err(crate::value::VmError::Runtime(
+                    "agent_inject_feedback(session_id, kind, content): kind must be a string"
+                        .into(),
+                ))
+            }
+        };
+        let content = match args.get(2) {
+            Some(VmValue::String(s)) => s.to_string(),
+            _ => {
+                return Err(crate::value::VmError::Runtime(
+                    "agent_inject_feedback(session_id, kind, content): content must be a string"
+                        .into(),
+                ))
+            }
+        };
+        super::agent::push_pending_feedback(&session_id, &kind, &content);
+        Ok(VmValue::Nil)
     });
 }
 

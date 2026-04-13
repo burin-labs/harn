@@ -1,7 +1,6 @@
 use std::rc::Rc;
 
-use serde::Deserialize;
-
+use crate::agent_events::{self, AgentEvent, ToolCallStatus};
 use crate::value::{ErrorCategory, VmError, VmValue};
 
 use super::daemon::{
@@ -15,14 +14,14 @@ use super::tools::{
 };
 
 // Imports from extracted submodules.
-use super::agent_config::{parse_post_turn_directive, AgentLoopConfig};
+use super::agent_config::AgentLoopConfig;
 use super::agent_observe::{dump_llm_interpreted_response, observed_llm_call, LlmRetryConfig};
 use super::agent_tools::{
     classify_tool_mutation, declared_paths, denied_tool_result, dispatch_tool_execution,
-    is_denied_tool_result, is_read_only_tool, loop_intervention_message,
-    merge_agent_loop_approval_policy, merge_agent_loop_policy, normalize_native_tools_for_format,
-    normalize_tool_choice_for_format, normalize_tool_examples_for_format, render_tool_result,
-    stable_hash, stable_hash_str, LoopIntervention, ToolCallTracker,
+    is_denied_tool_result, loop_intervention_message, merge_agent_loop_approval_policy,
+    merge_agent_loop_policy, normalize_native_tools_for_format, normalize_tool_choice_for_format,
+    normalize_tool_examples_for_format, render_tool_result, stable_hash, stable_hash_str,
+    LoopIntervention, ToolCallTracker,
 };
 use super::daemon::DaemonLoopConfig;
 
@@ -36,6 +35,65 @@ pub(super) use super::agent_tools::required_tool_choice_for_provider;
 
 thread_local! {
     static CURRENT_HOST_BRIDGE: std::cell::RefCell<Option<Rc<crate::bridge::HostBridge>>> = const { std::cell::RefCell::new(None) };
+    /// Queue of feedback items pushed via `agent_inject_feedback(session_id, kind, content)`
+    /// from inside a pipeline event handler. The turn loop drains this
+    /// queue at safe boundaries (before each LLM call) and appends each
+    /// entry as a runtime-feedback message.
+    static PENDING_FEEDBACK: std::cell::RefCell<Vec<(String, String, String)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Emit an event through both external sinks (sync) and closure
+/// subscribers (async, via the agent-loop's VM context). Called by the
+/// turn loop at every phase.
+async fn emit_agent_event(event: &AgentEvent) {
+    // External (Rust-side) sinks first — they're always sync.
+    agent_events::emit_event(event);
+
+    // Pipeline closure subscribers — invoke via the async VM API.
+    let subscribers = agent_events::closure_subscribers_for(event.session_id());
+    if subscribers.is_empty() {
+        return;
+    }
+    let payload = serde_json::to_value(event).unwrap_or(serde_json::Value::Null);
+    for closure in subscribers {
+        let VmValue::Closure(closure) = closure else {
+            continue;
+        };
+        let Some(mut vm) = crate::vm::clone_async_builtin_child_vm() else {
+            continue;
+        };
+        let arg = crate::stdlib::json_to_vm_value(&payload);
+        let _ = vm.call_closure_pub(&closure, &[arg], &[]).await;
+    }
+}
+
+/// Push a pending-feedback item. Called by the `agent_inject_feedback`
+/// host builtin; drained by the turn loop.
+pub(crate) fn push_pending_feedback(session_id: &str, kind: &str, content: &str) {
+    PENDING_FEEDBACK.with(|q| {
+        q.borrow_mut()
+            .push((session_id.to_string(), kind.to_string(), content.to_string()))
+    });
+}
+
+/// Drain every pending-feedback item for a session. Called by the turn
+/// loop at injection boundaries.
+fn drain_pending_feedback(session_id: &str) -> Vec<(String, String)> {
+    PENDING_FEEDBACK.with(|q| {
+        let mut queue = q.borrow_mut();
+        let mut drained: Vec<(String, String)> = Vec::new();
+        let mut kept: Vec<(String, String, String)> = Vec::new();
+        for (sid, kind, content) in queue.drain(..) {
+            if sid == session_id {
+                drained.push((kind, content));
+            } else {
+                kept.push((sid, kind, content));
+            }
+        }
+        *queue = kept;
+        drained
+    })
 }
 
 fn loop_state_requests_phase_change(text: &str, current_phase: &str) -> bool {
@@ -397,159 +455,6 @@ fn maybe_persist_daemon_snapshot(
     persist_snapshot(path, snapshot).map(Some)
 }
 
-#[derive(Debug, Deserialize)]
-struct AgentContextCallbackResponse {
-    #[serde(default)]
-    messages: Option<Vec<serde_json::Value>>,
-    #[serde(default)]
-    system: Option<String>,
-}
-
-fn message_content_text(message: &serde_json::Value) -> Option<String> {
-    let content = message.get("content")?;
-    if let Some(text) = content.as_str() {
-        return Some(text.to_string());
-    }
-    let items = content.as_array()?;
-    let mut parts: Vec<String> = Vec::new();
-    for item in items {
-        let item_type = item
-            .get("type")
-            .and_then(|value| value.as_str())
-            .unwrap_or("");
-        match item_type {
-            "text" => {
-                if let Some(text) = item.get("text").and_then(|value| value.as_str()) {
-                    if !text.is_empty() {
-                        parts.push(text.to_string());
-                    }
-                }
-            }
-            "tool_result" => {
-                if let Some(text) = item.get("content").and_then(|value| value.as_str()) {
-                    if !text.is_empty() {
-                        parts.push(text.to_string());
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    if parts.is_empty() {
-        None
-    } else {
-        Some(parts.join("\n\n"))
-    }
-}
-
-fn latest_message_text(messages: &[serde_json::Value], role: &str) -> Option<String> {
-    messages
-        .iter()
-        .rev()
-        .find(|message| message.get("role").and_then(|value| value.as_str()) == Some(role))
-        .and_then(message_content_text)
-}
-
-fn latest_tool_result_text(messages: &[serde_json::Value]) -> Option<String> {
-    for message in messages.iter().rev() {
-        let role = message
-            .get("role")
-            .and_then(|value| value.as_str())
-            .unwrap_or("");
-        if role == "tool" {
-            if let Some(text) = message_content_text(message) {
-                if !text.is_empty() {
-                    return Some(text);
-                }
-            }
-            continue;
-        }
-        if role != "user" {
-            continue;
-        }
-        let Some(items) = message.get("content").and_then(|value| value.as_array()) else {
-            continue;
-        };
-        for item in items {
-            if item.get("type").and_then(|value| value.as_str()) != Some("tool_result") {
-                continue;
-            }
-            if let Some(text) = item.get("content").and_then(|value| value.as_str()) {
-                if !text.is_empty() {
-                    return Some(text.to_string());
-                }
-            }
-        }
-    }
-    None
-}
-
-fn recent_message_tail(messages: &[serde_json::Value], count: usize) -> Vec<serde_json::Value> {
-    let len = messages.len();
-    let start = len.saturating_sub(count);
-    messages[start..].to_vec()
-}
-
-async fn apply_agent_context_callback(
-    callback: &VmValue,
-    iteration: usize,
-    system: Option<&str>,
-    visible_messages: &[serde_json::Value],
-    recorded_messages: &[serde_json::Value],
-) -> Result<(Vec<serde_json::Value>, Option<String>), VmError> {
-    let Some(VmValue::Closure(closure)) = Some(callback.clone()) else {
-        return Err(VmError::Runtime(
-            "context_callback must be a closure".to_string(),
-        ));
-    };
-    let payload = serde_json::json!({
-        "iteration": iteration,
-        "system": system,
-        "messages": visible_messages,
-        "visible_messages": visible_messages,
-        "recorded_messages": recorded_messages,
-        "recent_visible_messages": recent_message_tail(visible_messages, 8),
-        "recent_recorded_messages": recent_message_tail(recorded_messages, 12),
-        "latest_visible_user_message": latest_message_text(visible_messages, "user"),
-        "latest_visible_assistant_message": latest_message_text(visible_messages, "assistant"),
-        "latest_recorded_user_message": latest_message_text(recorded_messages, "user"),
-        "latest_recorded_assistant_message": latest_message_text(recorded_messages, "assistant"),
-        "latest_tool_result": latest_tool_result_text(visible_messages),
-        "latest_recorded_tool_result": latest_tool_result_text(recorded_messages),
-    });
-    let mut vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
-        VmError::Runtime("context_callback requires an async builtin VM context".to_string())
-    })?;
-    let payload_vm = crate::stdlib::json_to_vm_value(&payload);
-    let result = vm.call_closure_pub(&closure, &[payload_vm], &[]).await;
-    let value = result?;
-    match value {
-        VmValue::Nil => Ok((visible_messages.to_vec(), system.map(|s| s.to_string()))),
-        VmValue::List(list) => Ok((
-            list.iter().map(crate::llm::helpers::vm_value_to_json).collect(),
-            system.map(|s| s.to_string()),
-        )),
-        VmValue::Dict(_) => {
-            let parsed: AgentContextCallbackResponse =
-                serde_json::from_value(crate::llm::helpers::vm_value_to_json(&value)).map_err(
-                    |error| {
-                        VmError::Runtime(format!(
-                            "context_callback returned an invalid response: {error}"
-                        ))
-                    },
-                )?;
-            Ok((
-                parsed.messages.unwrap_or_else(|| visible_messages.to_vec()),
-                parsed.system.or_else(|| system.map(|s| s.to_string())),
-            ))
-        }
-        other => Err(VmError::Runtime(format!(
-            "context_callback must return nil, a messages list, or a dict with optional messages/system fields; got {}",
-            other.display()
-        ))),
-    }
-}
-
 pub async fn run_agent_loop_internal(
     opts: &mut super::api::LlmCallOptions,
     config: AgentLoopConfig,
@@ -604,7 +509,7 @@ pub async fn run_agent_loop_internal(
     let tool_retries = config.tool_retries;
     let tool_backoff_ms = config.tool_backoff_ms;
     let tool_format = config.tool_format;
-    let context_callback = config.context_callback.clone();
+    let session_id = config.session_id.clone();
 
     let auto_compact = config.auto_compact.clone();
     let daemon = config.daemon;
@@ -819,18 +724,34 @@ pub async fn run_agent_loop_internal(
             tool_contract_prompt.as_deref(),
             persistent_system_prompt.as_deref(),
         );
-        let (mut call_messages, call_system) = if let Some(callback) = context_callback.as_ref() {
-            apply_agent_context_callback(
-                callback,
-                iteration,
-                default_system.as_deref(),
-                &visible_messages,
-                &recorded_messages,
-            )
-            .await?
-        } else {
-            (visible_messages.clone(), default_system)
-        };
+        let mut call_messages = visible_messages.clone();
+        let call_system = default_system;
+
+        // Emit a TurnStart event so pipeline subscribers (grounding,
+        // telemetry, etc.) can run per-turn setup. Happens before any
+        // pending-feedback drain so injections land before the LLM call.
+        emit_agent_event(&AgentEvent::TurnStart {
+            session_id: session_id.clone(),
+            iteration,
+        })
+        .await;
+
+        // Drain any feedback pushed by event subscribers since the last
+        // turn boundary; append each as a runtime-feedback message.
+        for (kind, content) in drain_pending_feedback(&session_id) {
+            emit_agent_event(&AgentEvent::FeedbackInjected {
+                session_id: session_id.clone(),
+                kind: kind.clone(),
+                content: content.clone(),
+            })
+            .await;
+            append_message_to_contexts(
+                &mut visible_messages,
+                &mut recorded_messages,
+                runtime_feedback_message(&kind, content),
+            );
+            call_messages = visible_messages.clone();
+        }
         // Inject the task ledger as a transient user-role message at the
         // tail of the call payload. Not added to visible/recorded history
         // so the prompt cache stays stable between turns and the
@@ -1219,9 +1140,17 @@ pub async fn run_agent_loop_internal(
             // parallelized, and only for tools whose index is in the cache.
             // Any hook denial or arg mutation falls through to the sequential
             // path, which safely recomputes that single call.
+            // A tool is eligible for concurrent dispatch iff its declared
+            // ToolKind is read-only. Unannotated tools are conservatively
+            // treated as NOT read-only (fail-safe default).
             let ro_prefix_len: usize = tool_calls
                 .iter()
-                .position(|tc| !is_read_only_tool(tc["name"].as_str().unwrap_or("")))
+                .position(|tc| {
+                    let name = tc["name"].as_str().unwrap_or("");
+                    !crate::orchestration::current_tool_annotations(name)
+                        .map(|a| a.kind.is_read_only())
+                        .unwrap_or(false)
+                })
                 .unwrap_or(tool_calls.len());
             let parallel_indices: Vec<usize> = if ro_prefix_len >= 2 {
                 (0..ro_prefix_len).collect()
@@ -1478,24 +1407,10 @@ pub async fn run_agent_loop_internal(
                     }
                 }
 
-                // on_tool_call closure hook (Harn-level pre-execution).
-                // For declarative deny/approve, use `approval_policy` on the agent loop.
-                // This hook remains for arg rewriting before dispatch.
-                if let Some(VmValue::Closure(ref closure)) = config.on_tool_call {
-                    if let Some(mut vm) = crate::vm::clone_async_builtin_child_vm() {
-                        let hook_arg = crate::stdlib::json_to_vm_value(&serde_json::json!({
-                            "tool_name": tool_name,
-                            "args": tool_args,
-                        }));
-                        if let Ok(result) = vm.call_closure_pub(closure, &[hook_arg], &[]).await {
-                            if let Some(dict) = result.as_dict() {
-                                if let Some(new_args) = dict.get("args") {
-                                    tool_args = crate::llm::vm_value_to_json(new_args);
-                                }
-                            }
-                        }
-                    }
-                }
+                // Arg rewriting is now a pipeline concern — it happens
+                // inside the tool's handler (or via `arg_aliases` in the
+                // tool's ToolAnnotations). The VM no longer provides a
+                // pre-dispatch mutation hook.
 
                 // Bridge-level PreToolUse gate: host can allow/deny/modify
                 if let Some(bridge) = bridge.as_ref() {
@@ -1615,6 +1530,30 @@ pub async fn run_agent_loop_internal(
                 } else {
                     format!("tool-{tool_id}")
                 };
+                // Emit a Pending ToolCall event so pipeline subscribers
+                // and the ACP server can observe the dispatch before it
+                // starts. Status transitions (InProgress, Completed,
+                // Failed) follow via ToolCallUpdate.
+                let tool_kind = crate::orchestration::current_tool_annotations(tool_name)
+                    .map(|a| a.kind);
+                emit_agent_event(&AgentEvent::ToolCall {
+                    session_id: session_id.clone(),
+                    tool_call_id: tool_call_id.clone(),
+                    tool_name: tool_name.to_string(),
+                    kind: tool_kind,
+                    status: ToolCallStatus::Pending,
+                    raw_input: tool_args.clone(),
+                })
+                .await;
+                emit_agent_event(&AgentEvent::ToolCallUpdate {
+                    session_id: session_id.clone(),
+                    tool_call_id: tool_call_id.clone(),
+                    tool_name: tool_name.to_string(),
+                    status: ToolCallStatus::InProgress,
+                    raw_output: None,
+                    error: None,
+                })
+                .await;
                 let tool_span_id = crate::tracing::span_start(
                     crate::tracing::SpanKind::ToolCall,
                     tool_name.to_string(),
@@ -1831,24 +1770,29 @@ pub async fn run_agent_loop_internal(
                 let result_text =
                     crate::orchestration::run_post_tool_hooks(tool_name, &result_text);
 
-                // on_tool_result closure hook (Harn-level post-execution)
-                let result_text = if let Some(VmValue::Closure(ref closure)) = config.on_tool_result
-                {
-                    if let Some(mut vm) = crate::vm::clone_async_builtin_child_vm() {
-                        let hook_arg = crate::stdlib::json_to_vm_value(&serde_json::json!({
-                            "tool_name": tool_name,
-                            "result": result_text,
-                        }));
-                        match vm.call_closure_pub(closure, &[hook_arg], &[]).await {
-                            Ok(VmValue::String(s)) if !s.is_empty() => s.to_string(),
-                            _ => result_text,
-                        }
+                // Emit a final ToolCallUpdate with the execution outcome
+                // so pipeline subscribers can lint, audit, or inject
+                // feedback. Result mutation is now a pipeline concern.
+                emit_agent_event(&AgentEvent::ToolCallUpdate {
+                    session_id: session_id.clone(),
+                    tool_call_id: tool_call_id.clone(),
+                    tool_name: tool_name.to_string(),
+                    status: if is_rejected {
+                        ToolCallStatus::Failed
                     } else {
-                        result_text
-                    }
-                } else {
-                    result_text
-                };
+                        ToolCallStatus::Completed
+                    },
+                    raw_output: Some(serde_json::json!({
+                        "text": result_text,
+                        "tool_use_id": tool_id,
+                    })),
+                    error: if is_rejected {
+                        Some(result_text.clone())
+                    } else {
+                        None
+                    },
+                })
+                .await;
 
                 // Bridge-level PostToolUse gate: host can inspect/modify result
                 let result_text = if let Some(bridge) = bridge.as_ref() {
@@ -2069,7 +2013,11 @@ pub async fn run_agent_loop_internal(
                     successful_tools_used.push((*tool_name).to_string());
                 }
             }
-            if let Some(VmValue::Closure(ref closure)) = config.post_turn_callback {
+            // Emit TurnEnd. Pipeline subscribers may react by pushing
+            // pending-feedback messages via `agent_inject_feedback`;
+            // those are drained at the top of the next iteration before
+            // the LLM is called again.
+            {
                 let tool_names: Vec<&str> = tool_calls
                     .iter()
                     .filter_map(|tc| tc["name"].as_str())
@@ -2084,33 +2032,12 @@ pub async fn run_agent_loop_internal(
                     "session_tools_used": all_tools_used,
                     "session_successful_tools": successful_tools_used,
                 });
-                let cb_arg = crate::stdlib::json_to_vm_value(&turn_info);
-                if let Ok(mut vm) = crate::vm::clone_async_builtin_child_vm()
-                    .ok_or_else(|| VmError::Runtime("no VM context".into()))
-                {
-                    if let Ok(val) = vm.call_closure_pub(closure, &[cb_arg], &[]).await {
-                        let directive = parse_post_turn_directive(&val);
-                        if let Some(msg) = directive.message {
-                            crate::events::log_debug(
-                                "agent.post_turn",
-                                &format!("iter={iteration} injecting nudge ({} chars)", msg.len()),
-                            );
-                            append_message_to_contexts(
-                                &mut visible_messages,
-                                &mut recorded_messages,
-                                runtime_feedback_message("post_turn", msg),
-                            );
-                            consecutive_single_tool_turns = 0;
-                        }
-                        if directive.stop {
-                            crate::events::log_debug(
-                                "agent.post_turn",
-                                &format!("iter={iteration} requested stage stop"),
-                            );
-                            break;
-                        }
-                    }
-                }
+                emit_agent_event(&AgentEvent::TurnEnd {
+                    session_id: session_id.clone(),
+                    iteration,
+                    turn_info,
+                })
+                .await;
             }
             if let Some(stop_tools) = config.stop_after_successful_tools.as_ref() {
                 if should_stop_after_successful_tools(&tool_results_this_iter, stop_tools) {

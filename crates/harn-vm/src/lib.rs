@@ -1,10 +1,12 @@
 #![allow(clippy::result_large_err, clippy::cloned_ref_to_slice_refs)]
 
+pub mod agent_events;
 pub mod bridge;
 pub mod checkpoint;
 mod chunk;
 mod compiler;
 pub mod events;
+pub mod tool_annotations;
 mod http;
 pub mod jsonrpc;
 pub mod llm;
@@ -62,4 +64,5 @@ pub fn reset_thread_local_state() {
     http::reset_http_state();
     stdlib::reset_stdlib_state();
     events::reset_event_sinks();
+    agent_events::reset_all_sinks();
 }

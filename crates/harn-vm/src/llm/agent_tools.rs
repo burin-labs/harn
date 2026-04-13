@@ -264,23 +264,6 @@ pub(super) fn normalize_tool_choice_for_format(
 // Tool dispatch
 // ---------------------------------------------------------------------------
 
-/// Tools that have no side effects and can be safely dispatched concurrently.
-pub(super) fn is_read_only_tool(name: &str) -> bool {
-    matches!(
-        name,
-        "read"
-            | "read_file"
-            | "lookup"
-            | "search"
-            | "outline"
-            | "list_directory"
-            | "list_templates"
-            | "get_template"
-            | "web_search"
-            | "web_fetch"
-    )
-}
-
 /// Dispatch a single tool invocation to its execution backend.
 pub(super) async fn dispatch_tool_execution(
     tool_name: &str,

@@ -1074,12 +1074,16 @@ mod tests {
     }
 
     #[test]
-    fn arg_constraint_prefers_declared_path_param_metadata() {
-        let mut tool_metadata = std::collections::BTreeMap::new();
-        tool_metadata.insert(
+    fn arg_constraint_prefers_declared_path_param_annotations() {
+        let mut tool_annotations = std::collections::BTreeMap::new();
+        tool_annotations.insert(
             "edit".to_string(),
-            ToolRuntimePolicyMetadata {
-                path_params: vec!["path".to_string()],
+            crate::tool_annotations::ToolAnnotations {
+                kind: crate::tool_annotations::ToolKind::Edit,
+                arg_schema: crate::tool_annotations::ToolArgSchema {
+                    path_params: vec!["path".to_string()],
+                    ..Default::default()
+                },
                 ..Default::default()
             },
         );
@@ -1089,7 +1093,7 @@ mod tests {
                 arg_patterns: vec!["tests/*".to_string()],
                 arg_key: None,
             }],
-            tool_metadata,
+            tool_annotations,
             ..Default::default()
         };
         let result = enforce_tool_arg_constraints(

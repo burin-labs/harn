@@ -3017,7 +3017,7 @@ mod tests {
                     arg_patterns: vec!["src/*".to_string()],
                     arg_key: Some("path".to_string()),
                 }],
-                tool_metadata: BTreeMap::new(),
+                tool_annotations: BTreeMap::new(),
             },
             metadata: BTreeMap::from([(
                 "validation".to_string(),
