@@ -23,6 +23,14 @@ impl std::fmt::Display for CompileError {
 
 impl std::error::Error for CompileError {}
 
+/// Entry in the compiler's pending-finally stack. See the field-level doc on
+/// `Compiler::finally_bodies` for the unwind semantics each variant encodes.
+#[derive(Clone, Debug)]
+enum FinallyEntry {
+    Finally(Vec<SNode>),
+    CatchBarrier,
+}
+
 /// Tracks loop context for break/continue compilation.
 struct LoopContext {
     /// Offset of the loop start (for continue).
@@ -52,8 +60,18 @@ pub struct Compiler {
     loop_stack: Vec<LoopContext>,
     /// Current depth of exception handlers (for cleanup on break/continue).
     handler_depth: usize,
-    /// Stack of pending finally bodies for return/break/continue handling.
-    finally_bodies: Vec<Vec<SNode>>,
+    /// Stack of pending finally bodies plus catch-handler barriers for
+    /// unwind-aware lowering of `throw`, `return`, `break`, and `continue`.
+    ///
+    /// A `Finally` entry is a pending finally body that must execute when
+    /// control exits its enclosing try block. A `CatchBarrier` marks the
+    /// boundary of an active `try/catch` handler: throws emitted inside
+    /// the try body are caught locally, so pre-running finallys *beyond*
+    /// the barrier would wrongly fire side effects for outer blocks the
+    /// throw never actually escapes. Throw lowering stops at the innermost
+    /// barrier; `return`/`break`/`continue`, which do transfer past local
+    /// handlers, still run every pending `Finally` up to their target.
+    finally_bodies: Vec<FinallyEntry>,
     /// Counter for unique temp variable names.
     temp_counter: usize,
     /// Number of lexical block scopes currently active in this compiled frame.
@@ -129,11 +147,8 @@ impl Compiler {
             }
         }
 
-        if !self.finally_bodies.is_empty() {
-            let finallys: Vec<_> = self.finally_bodies.iter().rev().cloned().collect();
-            for fb in &finallys {
-                self.compile_finally_inline(fb)?;
-            }
+        for fb in self.all_pending_finallys() {
+            self.compile_finally_inline(&fb)?;
         }
         self.chunk.emit(Op::Nil, self.line);
         self.chunk.emit(Op::Return, self.line);
@@ -171,11 +186,8 @@ impl Compiler {
             }
         }
 
-        if !self.finally_bodies.is_empty() {
-            let finallys: Vec<_> = self.finally_bodies.iter().rev().cloned().collect();
-            for fb in &finallys {
-                self.compile_finally_inline(fb)?;
-            }
+        for fb in self.all_pending_finallys() {
+            self.compile_finally_inline(&fb)?;
         }
         self.chunk.emit(Op::Nil, self.line);
         self.chunk.emit(Op::Return, self.line);
@@ -443,13 +455,61 @@ impl Compiler {
         Ok(())
     }
 
-    /// Compile rethrow pattern: save error to temp var, run finally, re-throw.
-    fn compile_rethrow_with_finally(&mut self, finally_body: &[SNode]) -> Result<(), CompileError> {
+    /// Collect pending finally bodies from the top of the stack down to
+    /// (but not including) the innermost `CatchBarrier`. Used by `throw`
+    /// lowering: throws caught locally don't unwind past the catch, so
+    /// finallys behind the barrier aren't on the throw's exit path.
+    fn pending_finallys_until_barrier(&self) -> Vec<Vec<SNode>> {
+        let mut out = Vec::new();
+        for entry in self.finally_bodies.iter().rev() {
+            match entry {
+                FinallyEntry::CatchBarrier => break,
+                FinallyEntry::Finally(body) => out.push(body.clone()),
+            }
+        }
+        out
+    }
+
+    /// Collect every pending finally body from the top of the stack down
+    /// to `floor` (an index produced by `finally_bodies.len()` at some
+    /// earlier point), skipping `CatchBarrier` markers. Used by `return`,
+    /// `break`, and `continue` lowering — they transfer control past local
+    /// handlers, so every `Finally` up to their target must run.
+    fn pending_finallys_down_to(&self, floor: usize) -> Vec<Vec<SNode>> {
+        let mut out = Vec::new();
+        for entry in self.finally_bodies[floor..].iter().rev() {
+            if let FinallyEntry::Finally(body) = entry {
+                out.push(body.clone());
+            }
+        }
+        out
+    }
+
+    /// All pending finally bodies (entire stack), skipping barriers.
+    fn all_pending_finallys(&self) -> Vec<Vec<SNode>> {
+        self.pending_finallys_down_to(0)
+    }
+
+    /// True if there are any pending finally bodies (not just barriers).
+    fn has_pending_finally(&self) -> bool {
+        self.finally_bodies
+            .iter()
+            .any(|e| matches!(e, FinallyEntry::Finally(_)))
+    }
+
+    /// Save a thrown value to a temp and rethrow without running finally.
+    ///
+    /// Historically this helper also invoked `compile_finally_inline` on the
+    /// thrown path, but that produced observable double-runs: the
+    /// `Node::ThrowStmt` lowering (below) already iterates `finally_bodies`
+    /// and runs each pending finally inline *before* emitting `Op::Throw`, so
+    /// a second run here fired the same side effects twice. Finally now runs
+    /// exactly once — via the throw-emit path during unwinding.
+    fn compile_plain_rethrow(&mut self) -> Result<(), CompileError> {
         self.temp_counter += 1;
         let temp_name = format!("__finally_err_{}__", self.temp_counter);
         let err_idx = self.chunk.add_constant(Constant::String(temp_name.clone()));
         self.chunk.emit_u16(Op::DefVar, err_idx, self.line);
-        self.compile_finally_inline(finally_body)?;
         let get_idx = self.chunk.add_constant(Constant::String(temp_name));
         self.chunk.emit_u16(Op::GetVar, get_idx, self.line);
         self.chunk.emit(Op::Throw, self.line);
@@ -1002,9 +1062,7 @@ impl Compiler {
             }
 
             Node::ReturnStmt { value } => {
-                let has_pending_finally = !self.finally_bodies.is_empty();
-
-                if has_pending_finally {
+                if self.has_pending_finally() {
                     // Inside try-finally: save value to a temp, run pending
                     // finallys, then restore and return.
                     if let Some(val) = value {
@@ -1016,10 +1074,10 @@ impl Compiler {
                     let temp_name = format!("__return_val_{}__", self.temp_counter);
                     let save_idx = self.chunk.add_constant(Constant::String(temp_name.clone()));
                     self.chunk.emit_u16(Op::DefVar, save_idx, self.line);
-                    // Innermost finally first.
-                    let finallys: Vec<_> = self.finally_bodies.iter().rev().cloned().collect();
-                    for fb in &finallys {
-                        self.compile_finally_inline(fb)?;
+                    // Innermost finally first; skip catch barriers since
+                    // return transfers past local handlers.
+                    for fb in self.all_pending_finallys() {
+                        self.compile_finally_inline(&fb)?;
                     }
                     let restore_idx = self.chunk.add_constant(Constant::String(temp_name));
                     self.chunk.emit_u16(Op::GetVar, restore_idx, self.line);
@@ -1070,15 +1128,8 @@ impl Compiler {
                 for _ in handler_depth..self.handler_depth {
                     self.chunk.emit(Op::PopHandler, self.line);
                 }
-                if self.finally_bodies.len() > finally_depth {
-                    let finallys: Vec<_> = self.finally_bodies[finally_depth..]
-                        .iter()
-                        .rev()
-                        .cloned()
-                        .collect();
-                    for fb in &finallys {
-                        self.compile_finally_inline(fb)?;
-                    }
+                for fb in self.pending_finallys_down_to(finally_depth) {
+                    self.compile_finally_inline(&fb)?;
                 }
                 self.unwind_scopes_to(scope_depth);
                 if has_iterator {
@@ -1107,15 +1158,8 @@ impl Compiler {
                 for _ in handler_depth..self.handler_depth {
                     self.chunk.emit(Op::PopHandler, self.line);
                 }
-                if self.finally_bodies.len() > finally_depth {
-                    let finallys: Vec<_> = self.finally_bodies[finally_depth..]
-                        .iter()
-                        .rev()
-                        .cloned()
-                        .collect();
-                    for fb in &finallys {
-                        self.compile_finally_inline(fb)?;
-                    }
+                for fb in self.pending_finallys_down_to(finally_depth) {
+                    self.compile_finally_inline(&fb)?;
                 }
                 self.unwind_scopes_to(scope_depth);
                 self.chunk.emit_u16(Op::Jump, loop_start as u16, self.line);
@@ -1256,12 +1300,8 @@ impl Compiler {
                 let is_gen = body_contains_yield(body);
                 fn_compiler.compile_block(body)?;
                 // Run pending defers before implicit return
-                if !fn_compiler.finally_bodies.is_empty() {
-                    let finallys: Vec<_> =
-                        fn_compiler.finally_bodies.iter().rev().cloned().collect();
-                    for fb in &finallys {
-                        fn_compiler.compile_finally_inline(fb)?;
-                    }
+                for fb in fn_compiler.all_pending_finallys() {
+                    fn_compiler.compile_finally_inline(&fb)?;
                 }
                 fn_compiler.chunk.emit(Op::Nil, self.line);
                 fn_compiler.chunk.emit(Op::Return, self.line);
@@ -1297,12 +1337,8 @@ impl Compiler {
                 fn_compiler.emit_type_checks(params);
                 fn_compiler.compile_block(body)?;
                 // Run pending defers before implicit return
-                if !fn_compiler.finally_bodies.is_empty() {
-                    let finallys: Vec<_> =
-                        fn_compiler.finally_bodies.iter().rev().cloned().collect();
-                    for fb in &finallys {
-                        fn_compiler.compile_finally_inline(fb)?;
-                    }
+                for fb in fn_compiler.all_pending_finallys() {
+                    fn_compiler.compile_finally_inline(&fb)?;
                 }
                 fn_compiler.chunk.emit(Op::Return, self.line);
 
@@ -1435,12 +1471,8 @@ impl Compiler {
                 let is_gen = body_contains_yield(body);
                 fn_compiler.compile_block(body)?;
                 // Run pending defers before implicit return
-                if !fn_compiler.finally_bodies.is_empty() {
-                    let finallys: Vec<_> =
-                        fn_compiler.finally_bodies.iter().rev().cloned().collect();
-                    for fb in &finallys {
-                        fn_compiler.compile_finally_inline(fb)?;
-                    }
+                for fb in fn_compiler.all_pending_finallys() {
+                    fn_compiler.compile_finally_inline(&fb)?;
                 }
                 fn_compiler.chunk.emit(Op::Return, self.line);
 
@@ -1459,15 +1491,19 @@ impl Compiler {
             }
 
             Node::ThrowStmt { value } => {
-                if !self.finally_bodies.is_empty() {
-                    // Run pending defers/finallys before throwing (innermost first).
+                // Only run finallys the unwind will actually cross — i.e.,
+                // those between this throw and the innermost `CatchBarrier`.
+                // Finallys beyond the nearest local `catch` aren't on the
+                // throw's escape path (the catch halts unwinding there), so
+                // pre-running them wrongly fires outer side effects.
+                let pending = self.pending_finallys_until_barrier();
+                if !pending.is_empty() {
                     self.compile_node(value)?;
                     self.temp_counter += 1;
                     let temp_name = format!("__throw_val_{}__", self.temp_counter);
                     let save_idx = self.chunk.add_constant(Constant::String(temp_name.clone()));
                     self.chunk.emit_u16(Op::DefVar, save_idx, self.line);
-                    let finallys: Vec<_> = self.finally_bodies.iter().rev().cloned().collect();
-                    for fb in &finallys {
+                    for fb in &pending {
                         self.compile_finally_inline(fb)?;
                     }
                     let restore_idx = self.chunk.add_constant(Constant::String(temp_name));
@@ -2030,7 +2066,8 @@ impl Compiler {
 
             Node::DeferStmt { body } => {
                 // Push onto the finally stack so it runs on return/throw/scope-exit.
-                self.finally_bodies.push(body.clone());
+                self.finally_bodies
+                    .push(FinallyEntry::Finally(body.clone()));
                 self.chunk.emit(Op::Nil, self.line);
             }
 
@@ -2245,8 +2282,14 @@ impl Compiler {
 
                 if has_catch && has_finally {
                     let finally_body = finally_body.as_ref().unwrap();
-                    // Push finally onto pending stack so return/break run it.
-                    self.finally_bodies.push(finally_body.clone());
+                    // During the try body: install both the catch barrier
+                    // (so throws don't pre-run finallys beyond our catch)
+                    // and our finally (so return/break/continue in the
+                    // body still run it). Order matters — barrier is below
+                    // our finally so pre-running stops *at* the barrier.
+                    self.finally_bodies.push(FinallyEntry::CatchBarrier);
+                    self.finally_bodies
+                        .push(FinallyEntry::Finally(finally_body.clone()));
 
                     self.handler_depth += 1;
                     let catch_jump = self.chunk.emit_jump(Op::TryCatchSetup, self.line);
@@ -2256,14 +2299,22 @@ impl Compiler {
 
                     self.handler_depth -= 1;
                     self.chunk.emit(Op::PopHandler, self.line);
+                    // Body-success path: throw never fired, so pre-run did
+                    // not happen. Run finally now.
                     self.compile_finally_inline(finally_body)?;
+                    // Drop both finally and barrier — we're leaving the
+                    // try body; the catch handler compiles without them.
+                    self.finally_bodies.pop(); // Finally
+                    self.finally_bodies.pop(); // CatchBarrier
                     let end_jump = self.chunk.emit_jump(Op::Jump, self.line);
 
                     self.chunk.patch_jump(catch_jump);
                     self.begin_scope();
                     self.compile_catch_binding(error_var)?;
 
-                    // Inner try around catch body so finally still runs if catch throws.
+                    // Inner try around catch body so a catch-body throw
+                    // lands in our `rethrow_jump` and we emit a plain
+                    // rethrow (finally already fired via the body's throw).
                     self.handler_depth += 1;
                     let rethrow_jump = self.chunk.emit_jump(Op::TryCatchSetup, self.line);
                     let empty_type = self.chunk.add_constant(Constant::String(String::new()));
@@ -2273,22 +2324,25 @@ impl Compiler {
 
                     self.handler_depth -= 1;
                     self.chunk.emit(Op::PopHandler, self.line);
-                    self.compile_finally_inline(finally_body)?;
                     self.end_scope();
                     let end_jump2 = self.chunk.emit_jump(Op::Jump, self.line);
 
-                    // Rethrow handler: save error, run finally, re-throw.
+                    // Rethrow handler: plain rethrow; finally already pre-ran
+                    // via the body's Throw lowering before the outer handler
+                    // delivered control into catch.
                     self.chunk.patch_jump(rethrow_jump);
-                    self.compile_rethrow_with_finally(finally_body)?;
+                    self.compile_plain_rethrow()?;
                     self.end_scope();
 
                     self.chunk.patch_jump(end_jump);
                     self.chunk.patch_jump(end_jump2);
-
-                    self.finally_bodies.pop();
                 } else if has_finally {
                     let finally_body = finally_body.as_ref().unwrap();
-                    self.finally_bodies.push(finally_body.clone());
+                    // No catch: throws in the body unwind through us, so
+                    // we don't install a barrier — our finally and any
+                    // outer finallys are on the throw's escape path.
+                    self.finally_bodies
+                        .push(FinallyEntry::Finally(finally_body.clone()));
 
                     self.handler_depth += 1;
                     let error_jump = self.chunk.emit_jump(Op::TryCatchSetup, self.line);
@@ -2302,14 +2356,20 @@ impl Compiler {
                     self.compile_finally_inline(finally_body)?;
                     let end_jump = self.chunk.emit_jump(Op::Jump, self.line);
 
-                    // Error path: save error, run finally, re-throw.
+                    // Error path: save error, re-throw. Finally already
+                    // pre-ran via the body's Throw lowering.
                     self.chunk.patch_jump(error_jump);
-                    self.compile_rethrow_with_finally(finally_body)?;
+                    self.compile_plain_rethrow()?;
 
                     self.chunk.patch_jump(end_jump);
 
-                    self.finally_bodies.pop();
+                    self.finally_bodies.pop(); // Finally
                 } else {
+                    // try-catch without finally: install a barrier so
+                    // throws in the body don't pre-run outer finallys
+                    // (the throw is caught here and won't unwind past).
+                    self.finally_bodies.push(FinallyEntry::CatchBarrier);
+
                     self.handler_depth += 1;
                     let catch_jump = self.chunk.emit_jump(Op::TryCatchSetup, self.line);
                     self.emit_type_name_extra(type_name_idx);
@@ -2318,6 +2378,7 @@ impl Compiler {
 
                     self.handler_depth -= 1;
                     self.chunk.emit(Op::PopHandler, self.line);
+                    self.finally_bodies.pop(); // CatchBarrier
                     let end_jump = self.chunk.emit_jump(Op::Jump, self.line);
 
                     self.chunk.patch_jump(catch_jump);

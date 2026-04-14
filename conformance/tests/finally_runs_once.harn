@@ -1,0 +1,93 @@
+// Regression test: finally must execute exactly once per control-flow
+// path through a try/catch/finally. Prior compiler runs double-fired
+// finally on the body-throw + catch-success path because throw-lowering
+// pre-ran the pending finally AND the post-catch compilation ran it
+// again manually; the rethrow-with-finally helper triple-fired it when
+// the catch body also threw. All three variants are verified here with
+// an explicit counter so any regression is immediately visible.
+pipeline test(task) {
+  // --- try/catch/finally on caught-throw path: one run ---
+  var counter_a = 0
+  try {
+    throw "x"
+  } catch (e) {
+    log("caught: ${e}")
+  } finally {
+    counter_a = counter_a + 1
+  }
+  log("catch_finally_count: ${counter_a}")
+  // --- try/finally on throw-escape path (caught by outer): one run ---
+  var counter_b = 0
+  try {
+    try {
+      throw "y"
+    } finally {
+      counter_b = counter_b + 1
+    }
+  } catch (e) {
+    log("outer-caught: ${e}")
+  }
+  log("finally_only_count: ${counter_b}")
+  // --- try/catch/finally where catch body re-throws: one run ---
+  var counter_c = 0
+  try {
+    try {
+      throw "first"
+    } catch (e) {
+      throw "rethrown"
+    } finally {
+      counter_c = counter_c + 1
+    }
+  } catch (e) {
+    log("outer-rethrown: ${e}")
+  }
+  log("catch_rethrow_count: ${counter_c}")
+  // --- try/finally on body-success path: one run ---
+  var counter_d = 0
+  try {
+    log("body-ok")
+  } finally {
+    counter_d = counter_d + 1
+  }
+  log("finally_success_count: ${counter_d}")
+  // --- Nested: outer try/finally wraps inner try/catch (no finally).
+  // Inner catch handles the throw locally; outer finally must run
+  // exactly once on the body-success exit of the outer try. A prior
+  // compiler emitted the outer finally twice because the inner throw's
+  // lowering pre-ran every pending finally regardless of whether a
+  // local catch would intercept the throw. ---
+  var counter_e = 0
+  try {
+    try {
+      throw "inner-throw"
+    } catch (e) {
+      log("inner-caught")
+    }
+  } finally {
+    counter_e = counter_e + 1
+  }
+  log("nested_bare_catch_count: ${counter_e}")
+  // --- Nested: outer try/finally wraps inner try/catch/finally where
+  // the inner catch performs a return from an enclosing function. The
+  // outer finally must fire exactly once as the return unwinds, not
+  // twice (once from the inner throw's pre-run, once from the return's
+  // pre-run). Counter isn't usable here — Harn closure-capture is
+  // read-only (see CLAUDE.md: "Module-level mutable var cross-function
+  // mutation is not fully supported yet") — so we log markers instead
+  // and count them in the `.expected` file. ---
+  fn helper() {
+    try {
+      try {
+        throw "boom"
+      } catch (e) {
+        return "resolved"
+      } finally {
+        log("inner-finally")
+      }
+    } finally {
+      log("outer-finally")
+    }
+  }
+  let resolved = helper()
+  log("resolved: ${resolved}")
+}

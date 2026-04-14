@@ -1,0 +1,18 @@
+[harn] success: 42
+[harn] caught: recovered:boom
+[harn] typed-match: typed:NotFound
+[harn] err_msg: shallow
+[harn] lub: ok
+[harn] finally-ok
+[harn] finally_ok_value: 7
+[harn] finally-err
+[harn] finally_err_value: 99
+[harn] finally-only
+[harn] finally_only_value: raw
+[harn] bare_ok: Result.Ok(5)
+[harn] bare_err_isErr: true
+[harn] stmt-body
+[harn] nested: inner-caught:inner
+[harn] anon: anon-caught
+[harn] inline-ok
+[harn] inline-caught

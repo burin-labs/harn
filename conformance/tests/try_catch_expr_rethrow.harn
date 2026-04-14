@@ -1,0 +1,19 @@
+// When a typed catch in an expression-position try/catch does not match
+// the thrown error's type, the throw propagates past the expression —
+// the `let` binding is never established.
+pipeline test(task) {
+  enum AppError {
+    NotFound(msg)
+  }
+  enum OtherError {
+    Kind(msg)
+  }
+  // The catch is typed for AppError, but the body throws OtherError.
+  // The throw must escape past the `let` and terminate the pipeline.
+  let v: int = try {
+    throw OtherError.Kind("mismatch")
+  } catch (e: AppError) {
+    -1
+  }
+  log("unreachable: ${v}")
+}

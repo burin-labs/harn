@@ -650,10 +650,6 @@
           "named": true
         },
         {
-          "type": "try_catch_statement",
-          "named": true
-        },
-        {
           "type": "type_declaration",
           "named": true
         },
@@ -837,10 +833,6 @@
         },
         {
           "type": "tool_declaration",
-          "named": true
-        },
-        {
-          "type": "try_catch_statement",
           "named": true
         },
         {
@@ -4683,10 +4675,6 @@
           "named": true
         },
         {
-          "type": "try_catch_statement",
-          "named": true
-        },
-        {
           "type": "type_declaration",
           "named": true
         },
@@ -4998,10 +4986,6 @@
         },
         {
           "type": "tool_declaration",
-          "named": true
-        },
-        {
-          "type": "try_catch_statement",
           "named": true
         },
         {
@@ -5486,10 +5470,6 @@
         },
         {
           "type": "tool_declaration",
-          "named": true
-        },
-        {
-          "type": "try_catch_statement",
           "named": true
         },
         {
@@ -7888,10 +7868,6 @@
           "named": true
         },
         {
-          "type": "try_catch_statement",
-          "named": true
-        },
-        {
           "type": "type_declaration",
           "named": true
         },
@@ -8938,10 +8914,6 @@
           "named": true
         },
         {
-          "type": "try_catch_statement",
-          "named": true
-        },
-        {
           "type": "type_annotation",
           "named": true
         },
@@ -8970,7 +8942,7 @@
     "fields": {}
   },
   {
-    "type": "try_catch_statement",
+    "type": "try_expression",
     "named": true,
     "fields": {
       "body": {
@@ -9023,21 +8995,6 @@
           }
         ]
       }
-    }
-  },
-  {
-    "type": "try_expression",
-    "named": true,
-    "fields": {},
-    "children": {
-      "multiple": false,
-      "required": true,
-      "types": [
-        {
-          "type": "block",
-          "named": true
-        }
-      ]
     }
   },
   {

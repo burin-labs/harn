@@ -7,6 +7,46 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## v0.7.2
+
+### Added
+
+- **`try/catch/finally` as an expression.** `let v = try { work() } catch (e)
+  { fallback }` now binds directly — the form evaluates to the try body's
+  tail value on success or the catch handler's tail value on a caught throw,
+  without routing through `Result` helpers. A trailing `finally { ... }`
+  runs once for side-effect only and does not contribute a value. Typed
+  catches (`catch (e: AppError) { ... }`) still rethrow past the expression
+  when the thrown error's type does not match the filter, so the `let`
+  binding is never established. The bare `try { body }` form continues to
+  wrap in `Result<T, E>` — only adding `catch` or `finally` switches to the
+  handled-expression shape. See `docs/src/error-handling.md` and
+  `spec/HARN_SPEC.md`.
+- **Tree-sitter grammar: `try` is now a unified expression rule.** The
+  grammar previously exposed `try_catch_statement` and `try_expression` as
+  separate rules; both forms — statement-position `try/catch/finally` and
+  expression-position `try`, `try/catch`, `try/finally`, and
+  `try/catch/finally` — are now modeled as one `try_expression` rule with
+  optional `catch` and `finally` clauses. This removes a parse-time
+  split that no longer matched runtime semantics and keeps the grammar
+  aligned with the parser.
+
+### Fixed
+
+- **`finally` runs exactly once per control-flow path.** A longstanding
+  compiler bug pre-ran pending `finally` bodies when lowering `throw`,
+  and then ran them *again* after a local `catch` finished — so on the
+  caught-throw path every `finally` fired twice, and when a catch body
+  itself rethrew, the outer `finally` fired three times. The compiler
+  now installs a `CatchBarrier` in the pending-finally stack for each
+  active `try/catch` handler: throws lowered inside that handler's try
+  body pre-run only the finallys they will actually unwind past, while
+  `return` / `break` / `continue` continue to run every pending finally
+  up to their target. The `compile_rethrow_with_finally` helper that
+  double-emitted the finally has been removed in favor of a plain
+  rethrow on the catch-escape path. Covered end-to-end by the new
+  `conformance/tests/finally_runs_once.*` fixture.
+
 ## v0.7.1
 
 ### Added

@@ -85,6 +85,11 @@ let text = r?.prose ?? "no response"
 if unwrap_err(r) != "" {
   log("failed")
 }
+
+// `try/catch` also works as an expression — the whole form evaluates to
+// the try body's tail value on success or the catch handler's tail value
+// on a caught throw, so simple fallbacks don't need Result gymnastics.
+let prose = try { llm_call(prompt, nil, opts).prose } catch (e) { "fallback" }
 ```
 
 ## Concurrency

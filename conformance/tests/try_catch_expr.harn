@@ -1,0 +1,128 @@
+// Comprehensive coverage for `try/catch/finally` used as an expression.
+//
+// Every form must produce a bindable value whose type is inferable and
+// whose runtime value matches semantics documented in spec/HARN_SPEC.md.
+// Explicit type annotations on the `let` are exercised alongside the
+// untyped form to pin down type-checker behavior, not just the runtime.
+pipeline test(task) {
+  enum AppError {
+    NotFound(msg)
+    Forbidden(msg)
+  }
+  // --- Success path, explicitly typed ---
+  let s: int = try {
+    41 + 1
+  } catch (e) {
+    -1
+  }
+  log("success: ${s}")
+  // --- Caught-throw path, explicitly typed as string ---
+  let c: string = try {
+    throw "boom"
+  } catch (e) {
+    "recovered:${e}"
+  }
+  log("caught: ${c}")
+  // --- Typed catch on matching throw, explicitly typed ---
+  fn not_found() {
+    throw AppError.NotFound("missing")
+  }
+  let t: string = try {
+    not_found()
+  } catch (e: AppError) {
+    "typed:${e.variant}"
+  }
+  log("typed-match: ${t}")
+  // --- Catch binds error variable; explicit type on result ---
+  let err_msg: string = try {
+    throw "shallow"
+  } catch (e) {
+    e
+  }
+  log("err_msg: ${err_msg}")
+  // --- Both branches return the same type; type-checker infers that type ---
+  let lub: string = try {
+    "ok"
+  } catch (e) {
+    "err"
+  }
+  log("lub: ${lub}")
+  // --- Finally on success; value is try body tail; annotated type ---
+  let f_ok: int = try {
+    7
+  } catch (e) {
+    0
+  } finally {
+    log("finally-ok")
+  }
+  log("finally_ok_value: ${f_ok}")
+  // --- Finally on caught throw; value is catch body tail; annotated type ---
+  let f_err: int = try {
+    throw "x"
+  } catch (e) {
+    99
+  } finally {
+    log("finally-err")
+  }
+  log("finally_err_value: ${f_err}")
+  // --- `try { ... } finally { ... }` without catch on success path;
+  //     finally runs for effect, value is body tail. (Throw through this
+  //     form propagates past the expression — exercised in
+  //     try_catch_expr_rethrow.harn.) ---
+  let f_only: string = try {
+    "raw"
+  } finally {
+    log("finally-only")
+  }
+  log("finally_only_value: ${f_only}")
+  // --- Bare try expression: Result<T, E> wrapping (unchanged) ---
+  let bare_ok = try {
+    5
+  }
+  let bare_err = try {
+    throw "nope"
+  }
+  log("bare_ok: ${bare_ok}")
+  log("bare_err_isErr: ${is_err(bare_err)}")
+  // --- Statement-position try/catch still works and discards its value ---
+  try {
+    log("stmt-body")
+    "ignored-value"
+  } catch (e) {
+    log("stmt-catch")
+  }
+  // --- Nested try/catch expressions ---
+  let nested: string = try {
+    try {
+      throw "inner"
+    } catch (e) {
+      "inner-caught:${e}"
+    }
+  } catch (e) {
+    "outer-caught"
+  }
+  log("nested: ${nested}")
+  // --- catch without error variable, still valued ---
+  let anon: string = try {
+    throw "silent"
+  } catch {
+    "anon-caught"
+  }
+  log("anon: ${anon}")
+  // --- Expression usage inline — no `let`, value piped to println-like
+  //     call directly; exercises expression-position outside a binding. ---
+  log(
+    try {
+    "inline-ok"
+  } catch (e) {
+    "inline-err"
+  },
+  )
+  log(
+    try {
+    throw "x"
+  } catch (e) {
+    "inline-caught"
+  },
+  )
+}

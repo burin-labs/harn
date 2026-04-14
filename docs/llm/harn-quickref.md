@@ -140,6 +140,15 @@ let r = try { llm_call("hi", nil, opts) }
 let text = r?.text ?? "no response"
 ```
 
+`try { body } catch (e) { handler }` is also an expression: its value is
+the body tail on success or the handler tail on a caught throw. A typed
+catch that doesn't match the thrown type rethrows past the expression. A
+trailing `finally { ... }` runs once for effect only.
+
+```harn
+let parsed = try { json_parse(raw) } catch (e) { default_config() }
+```
+
 ## Concurrency
 
 ```harn

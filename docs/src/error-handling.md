@@ -157,6 +157,35 @@ if is_err(parsed) {
 let data = unwrap(parsed)
 ```
 
+## Try/catch expression
+
+`try { ... } catch (e) { ... }` is also usable as an expression — the whole
+form evaluates to the try body's tail value on success, or the catch
+handler's tail value on a caught throw. The lub of the two branch types is
+inferred automatically, and an explicit type annotation on the `let` binds
+the result:
+
+```harn
+let parsed: dict = try { json_parse(input) } catch (e) { default_config() }
+```
+
+Typed catches work identically in expression position; when the thrown
+error's type does not match the catch's type filter, the throw propagates
+past the expression and the `let` binding is never established:
+
+```harn
+let user: User = try {
+  fetch_user(id)
+} catch (e: NetworkError) {
+  cached_user(id)
+}
+// Any non-`NetworkError` throw surfaces out of this block unchanged.
+```
+
+A `finally { ... }` tail is optional on either form and runs once for
+side-effect only — its value is discarded. The expression's value still
+comes from the try body or the catch handler.
+
 The try-expression pairs naturally with the `?` operator. Use `try` to
 enter Result-land and `?` to propagate within it:
 
@@ -169,8 +198,9 @@ fn fetch_json(url) {
 }
 ```
 
-If a `catch` block follows `try`, it is parsed as the traditional
-`try`/`catch` statement -- not a try-expression.
+When `catch` or `finally` follows `try`, the form is the handled
+expression described above; only the bare `try { body }` form wraps in
+`Result`.
 
 ## Runtime shape validation errors
 

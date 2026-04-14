@@ -175,7 +175,6 @@ module.exports = grammar({
         $.while_statement,
         $.match_statement,
         $.retry_statement,
-        $.try_catch_statement,
         $.return_statement,
         $.throw_statement,
         $.fn_declaration,
@@ -313,29 +312,6 @@ module.exports = grammar({
 
     retry_statement: ($) =>
       seq("retry", field("count", $._expression), field("body", $.block)),
-
-    try_catch_statement: ($) =>
-      seq(
-        "try",
-        field("body", $.block),
-        choice(
-          seq(
-            "catch",
-            optional(seq(
-              "(",
-              field("error_var", $.identifier),
-              optional(seq(":", field("error_type", $.type_annotation))),
-              ")"
-            )),
-            field("handler", $.block),
-            optional(seq("finally", field("finalizer", $.block)))
-          ),
-          seq(
-            "finally",
-            field("finalizer", $.block)
-          )
-        )
-      ),
 
     return_statement: ($) => prec.right(seq("return", optional($._expression))),
 
@@ -594,7 +570,26 @@ module.exports = grammar({
 
     spawn_expression: ($) => seq("spawn", $.block),
 
-    try_expression: ($) => prec.right(seq("try", $.block)),
+    try_expression: ($) =>
+      prec.right(
+        seq(
+          "try",
+          field("body", $.block),
+          optional(
+            seq(
+              "catch",
+              optional(seq(
+                "(",
+                field("error_var", $.identifier),
+                optional(seq(":", field("error_type", $.type_annotation))),
+                ")"
+              )),
+              field("handler", $.block)
+            )
+          ),
+          optional(seq("finally", field("finalizer", $.block)))
+        )
+      ),
 
     parallel_options: ($) =>
       seq(

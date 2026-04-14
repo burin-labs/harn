@@ -1205,6 +1205,16 @@ If the body throws:
 
 The error variable `(e)` is optional: `catch { ... }` is valid without it.
 
+`try { ... } catch (e) { ... }` is also usable as an expression: the value of
+the whole form is the tail value of the try body when it succeeds, and the tail
+value of the catch handler when an error is caught. This means the natural
+`let v = try { risky() } catch (e) { fallback }` binding is supported directly,
+without needing to restructure through `Result` helpers. When a typed catch
+(`catch (e: AppError) { ... }`) does not match the thrown error's type, the
+throw propagates past the expression unchanged — the surrounding `let` never
+binds. See the [Try-expression](#try-expression) section below for the
+`Result`-wrapping behavior when `catch` is omitted.
+
 ### finally
 
 The `finally` block is optional and runs regardless of whether the try body
@@ -1488,8 +1498,11 @@ fn compute(x) {
 }
 ```
 
-No `catch` or `finally` block is needed. If `catch` follows `try`, it is
-parsed as a `try`/`catch` statement instead.
+No `catch` or `finally` block is needed for the `Result`-wrapping form. When
+`catch` or `finally` follow `try`, the form is a handled `try`/`catch`
+expression whose value is the try or catch body's tail value (see
+[try/catch/finally](#trycatchfinally)); only the bare `try { ... }` form wraps
+in `Result`.
 
 ### Result in pipelines
 

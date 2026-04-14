@@ -1,0 +1,156 @@
+==================
+Bare Try Expression
+==================
+
+pipeline test(task) {
+  let r = try { risky() }
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (parameter_list
+      (typed_parameter
+        name: (identifier)))
+    (block
+      (let_binding
+        name: (identifier)
+        value: (try_expression
+          body: (block
+            (expression_statement
+              (call_expression
+                function: (identifier)))))))))
+
+==================
+Try Catch As Expression
+==================
+
+pipeline test(task) {
+  let v = try { work() } catch (e) { fallback }
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (parameter_list
+      (typed_parameter
+        name: (identifier)))
+    (block
+      (let_binding
+        name: (identifier)
+        value: (try_expression
+          body: (block
+            (expression_statement
+              (call_expression
+                function: (identifier))))
+          error_var: (identifier)
+          handler: (block
+            (expression_statement
+              (identifier))))))))
+
+==================
+Typed Catch Expression
+==================
+
+pipeline test(task) {
+  let v = try { parse(raw) } catch (e: AppError) { default }
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (parameter_list
+      (typed_parameter
+        name: (identifier)))
+    (block
+      (let_binding
+        name: (identifier)
+        value: (try_expression
+          body: (block
+            (expression_statement
+              (call_expression
+                function: (identifier)
+                (argument_list
+                  (identifier)))))
+          error_var: (identifier)
+          error_type: (type_annotation
+            (identifier))
+          handler: (block
+            (expression_statement
+              (identifier))))))))
+
+==================
+Try Catch Finally Statement
+==================
+
+pipeline test(task) {
+  try {
+    do_work()
+  } catch (e) {
+    println(e)
+  } finally {
+    cleanup()
+  }
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (parameter_list
+      (typed_parameter
+        name: (identifier)))
+    (block
+      (expression_statement
+        (try_expression
+          body: (block
+            (expression_statement
+              (call_expression
+                function: (identifier))))
+          error_var: (identifier)
+          handler: (block
+            (expression_statement
+              (call_expression
+                function: (identifier)
+                (argument_list
+                  (identifier)))))
+          finalizer: (block
+            (expression_statement
+              (call_expression
+                function: (identifier)))))))))
+
+==================
+Try Finally Only Expression
+==================
+
+pipeline test(task) {
+  let r = try { body() } finally { teardown() }
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (parameter_list
+      (typed_parameter
+        name: (identifier)))
+    (block
+      (let_binding
+        name: (identifier)
+        value: (try_expression
+          body: (block
+            (expression_statement
+              (call_expression
+                function: (identifier))))
+          finalizer: (block
+            (expression_statement
+              (call_expression
+                function: (identifier)))))))))
