@@ -23,7 +23,7 @@ tokio-stream = "0.1"
 base64 = "0.22"
 sha2 = "0.11"
 md-5 = "0.11"
-toml = "0.8"
+toml = "1.1"
 serde_yaml = "0.9"
 serde = { version = "1", features = ["derive"] }
 serde_path_to_error = "0.1"

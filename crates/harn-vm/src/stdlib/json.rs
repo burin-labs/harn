@@ -88,7 +88,7 @@ pub(crate) fn register_json_builtins(vm: &mut Vm) {
 
     vm.register_builtin("toml_parse", |args, _out| {
         let text = args.first().map(|a| a.display()).unwrap_or_default();
-        match text.parse::<toml::Value>() {
+        match toml::from_str::<toml::Value>(&text) {
             Ok(value) => match serde_json::to_value(value) {
                 Ok(json_value) => Ok(schema::json_to_vm_value(&json_value)),
                 Err(error) => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
