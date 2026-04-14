@@ -25,13 +25,8 @@ thread_local! {
     static MCP_SERVE_PROMPTS: RefCell<Vec<McpPromptDef>> = const { RefCell::new(Vec::new()) };
 }
 
-// =============================================================================
-// Builtins
-// =============================================================================
-
 /// Register all MCP server builtins on a VM.
 pub fn register_mcp_server_builtins(vm: &mut Vm) {
-    // ---- tools (renamed from mcp_serve; old name kept as alias) ----
     fn register_tools_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
         let registry = args.first().cloned().ok_or_else(|| {
             VmError::Runtime("mcp_tools: requires a tool_registry argument".into())
@@ -58,10 +53,9 @@ pub fn register_mcp_server_builtins(vm: &mut Vm) {
     }
 
     vm.register_builtin("mcp_tools", |args, _out| register_tools_impl(args));
-    // Keep old name as alias for backwards compatibility
+    // `mcp_serve` is the old name; kept as an alias.
     vm.register_builtin("mcp_serve", |args, _out| register_tools_impl(args));
 
-    // ---- static resource ----
     // mcp_resource({uri, name, text, description?, mime_type?}) -> nil
     vm.register_builtin("mcp_resource", |args, _out| {
         let dict = match args.first() {
@@ -103,9 +97,7 @@ pub fn register_mcp_server_builtins(vm: &mut Vm) {
         Ok(VmValue::Nil)
     });
 
-    // ---- resource template ----
     // mcp_resource_template({uri_template, name, handler, description?, mime_type?}) -> nil
-    //
     // The handler receives a dict of URI template arguments and returns a string.
     vm.register_builtin("mcp_resource_template", |args, _out| {
         let dict = match args.first() {
@@ -153,7 +145,6 @@ pub fn register_mcp_server_builtins(vm: &mut Vm) {
         Ok(VmValue::Nil)
     });
 
-    // ---- prompt ----
     // mcp_prompt({name, handler, description?, arguments?}) -> nil
     vm.register_builtin("mcp_prompt", |args, _out| {
         let dict = match args.first() {
@@ -221,9 +212,7 @@ pub fn register_mcp_server_builtins(vm: &mut Vm) {
     });
 }
 
-// =============================================================================
-// Thread-local accessors (used by CLI after pipeline execution)
-// =============================================================================
+// Thread-local accessors used by the CLI after pipeline execution.
 
 pub fn take_mcp_serve_registry() -> Option<VmValue> {
     MCP_SERVE_REGISTRY.with(|cell| cell.borrow_mut().take())
@@ -246,10 +235,6 @@ const PROTOCOL_VERSION: &str = "2025-11-25";
 
 /// Default page size for cursor-based pagination.
 const DEFAULT_PAGE_SIZE: usize = 50;
-
-// =============================================================================
-// Definitions
-// =============================================================================
 
 /// A tool extracted from a Harn tool_registry, ready to serve over MCP.
 pub struct McpToolDef {
@@ -297,10 +282,6 @@ pub struct McpPromptDef {
     pub arguments: Option<Vec<McpPromptArgDef>>,
     pub handler: VmClosure,
 }
-
-// =============================================================================
-// Server
-// =============================================================================
 
 /// MCP server that exposes Harn tools, resources, and prompts over stdio JSON-RPC.
 pub struct McpServer {
@@ -353,7 +334,7 @@ impl McpServer {
             let id = msg.get("id").cloned();
             let params = msg.get("params").cloned().unwrap_or(serde_json::json!({}));
 
-            // Notifications (no id) — handle silently
+            // Notifications have no id; ignore them silently.
             if id.is_none() {
                 continue;
             }
@@ -422,10 +403,6 @@ impl McpServer {
             }
         })
     }
-
-    // =========================================================================
-    // Tools
-    // =========================================================================
 
     fn handle_tools_list(
         &self,
@@ -526,10 +503,6 @@ impl McpServer {
         }
     }
 
-    // =========================================================================
-    // Resources
-    // =========================================================================
-
     fn handle_resources_list(
         &self,
         id: &serde_json::Value,
@@ -574,7 +547,7 @@ impl McpServer {
     ) -> serde_json::Value {
         let uri = params.get("uri").and_then(|u| u.as_str()).unwrap_or("");
 
-        // Check static resources first
+        // Static resources take precedence over templates.
         if let Some(resource) = self.resources.iter().find(|r| r.uri == uri) {
             let mut content = serde_json::json!({ "uri": resource.uri, "text": resource.text });
             if let Some(ref mime) = resource.mime_type {
@@ -587,7 +560,6 @@ impl McpServer {
             });
         }
 
-        // Try to match against resource templates
         for tmpl in &self.resource_templates {
             if let Some(args) = match_uri_template(&tmpl.uri_template, uri) {
                 let args_vm = json_to_vm_value(&serde_json::json!(args));
@@ -660,10 +632,6 @@ impl McpServer {
         })
     }
 
-    // =========================================================================
-    // Prompts
-    // =========================================================================
-
     fn handle_prompts_list(
         &self,
         id: &serde_json::Value,
@@ -710,10 +678,6 @@ impl McpServer {
             "result": result
         })
     }
-
-    // =========================================================================
-    // Logging
-    // =========================================================================
 
     fn handle_logging_set_level(
         &self,
@@ -772,10 +736,6 @@ impl McpServer {
         }
     }
 }
-
-// =============================================================================
-// Helpers
-// =============================================================================
 
 /// Encode an offset as a base64 cursor string.
 fn encode_cursor(offset: usize) -> String {
@@ -1008,10 +968,6 @@ fn annotations_to_json(annotations: &VmValue) -> Option<serde_json::Value> {
         Some(serde_json::Value::Object(out))
     }
 }
-
-// =============================================================================
-// Tool registry extraction
-// =============================================================================
 
 /// Extract tools from a Harn tool_registry VmValue and convert to MCP tool definitions.
 pub fn tool_registry_to_mcp_tools(registry: &VmValue) -> Result<Vec<McpToolDef>, VmError> {

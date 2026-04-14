@@ -146,12 +146,10 @@ pub(crate) fn normalize_tool_args(name: &str, args: &serde_json::Value) -> serde
     normalized
 }
 
-// ── Recursive type expression ───────────────────────────────────────────────
-//
-// TypeExpr is a structural representation of a JSON Schema / OAS 3.1 type that
-// we know how to render as a TypeScript-ish type string. Anything the extractor
-// cannot map cleanly becomes `Unknown`, which renders as `unknown` — we never
-// fabricate a type the model could read but the runtime would not honour.
+// TypeExpr is a structural representation of a JSON Schema / OAS 3.1 type
+// rendered as a TypeScript-ish type string. Anything the extractor cannot
+// map cleanly becomes `Unknown` — never fabricate types the runtime won't
+// honour.
 
 #[derive(Clone, Debug, serde::Serialize)]
 pub(crate) enum TypeExpr {
@@ -640,10 +638,8 @@ fn extract_params_from_vm_dict(
             });
         }
     }
-    // Required params first so the rendered TS signature — and any downstream
-    // consumers that iterate `params` in order — sees the critical fields up
-    // front. Stable-alphabetical within each group (BTreeMap iteration is
-    // already alphabetical).
+    // Required params first so the rendered TS signature and any
+    // order-dependent consumer see critical fields first.
     params.sort_by_key(|p| !p.required);
     params
 }
@@ -709,9 +705,8 @@ fn collect_vm_tool_schemas(
     tools_val: Option<&VmValue>,
     registry: &mut ComponentRegistry,
 ) -> Vec<ToolSchema> {
-    // Build a JSON mirror of the root tool-registry so `$ref` pointers inside
-    // individual param schemas can resolve against sibling `types` / `definitions`
-    // / `components.schemas` declarations.
+    // Mirror the root registry as JSON so `$ref` can resolve against
+    // sibling `types` / `definitions` / `components.schemas`.
     let root_json = match tools_val {
         Some(value) => vm_value_to_json(value),
         None => serde_json::Value::Null,
@@ -799,8 +794,7 @@ fn extract_params_from_provider_input_schema(
                     }
                 })
                 .collect::<Vec<_>>();
-            // Stable sort: required first (matching vm dict extractor), then
-            // alphabetical within each group so the signature is deterministic.
+            // Required first; alphabetical within groups for determinism.
             params.sort_by(|a, b| {
                 (!a.required)
                     .cmp(&!b.required)
@@ -835,9 +829,8 @@ fn collect_provider_declared_tool_schemas(
                 .or_else(|| tool.get("input_schema"))
                 .cloned()
                 .unwrap_or_else(|| serde_json::json!({"type": "object"}));
-            // Provider-declared JSON schemas hang off the tool wrapper itself
-            // (or the nested `function` object), so `$ref` must resolve
-            // against siblings such as `components.schemas` on that wrapper.
+            // Resolve `$ref` against the tool wrapper itself (siblings
+            // such as `components.schemas` hang off there).
             let root = tool.clone();
             Some(ToolSchema {
                 name: name.to_string(),
@@ -945,15 +938,9 @@ pub(crate) fn build_tool_calling_contract_prompt(
     ));
 
     if mode == "native" {
-        // Native mode: the provider's tool-calling channel is the preferred
-        // path. But many local OpenAI-compatible servers (Ollama with bare
-        // `{{ .Prompt }}` templates being the canonical case) silently drop
-        // the `tools` parameter because the chat template doesn't reference
-        // it. When that happens the model receives zero tool guidance and
-        // either narrates or guesses at a tool-call format from training.
-        // Including the text-mode protocol + schemas inline guarantees the
-        // model always has a fallback that works regardless of how the host
-        // serves the request. The downstream parser accepts either channel.
+        // Include the text-mode protocol + schemas inline as a fallback:
+        // Ollama with bare `{{ .Prompt }}` templates silently drops the
+        // `tools` parameter, leaving the model with zero guidance.
         prompt.push_str(
             "Prefer the provider's native tool-calling channel when it is available. \
              If the channel does not surface to you (some local OpenAI-compatible \
@@ -961,9 +948,8 @@ pub(crate) fn build_tool_calling_contract_prompt(
              block in the assistant message and the runtime will execute it from there.\n\n",
         );
     } else {
-        // Front-load format instructions and examples BEFORE schemas so that
-        // weaker models encounter the calling convention early, while attention
-        // is strongest.
+        // Front-load format + examples before schemas so weaker models
+        // see the calling convention while attention is strongest.
     }
     prompt.push_str(TS_CALL_CONTRACT_HELP);
     if require_action {
@@ -1131,15 +1117,12 @@ pub(crate) fn vm_tools_to_native(
     tools_val: &VmValue,
     provider: &str,
 ) -> Result<Vec<serde_json::Value>, VmError> {
-    // Accept either a tool_registry dict or a list of tool dicts
+    // Accept either a tool_registry dict or a list of tool dicts.
     let tools_list = match tools_val {
-        VmValue::Dict(d) => {
-            // tool_registry -- extract tools list
-            match d.get("tools") {
-                Some(VmValue::List(list)) => list.as_ref().clone(),
-                _ => Vec::new(),
-            }
-        }
+        VmValue::Dict(d) => match d.get("tools") {
+            Some(VmValue::List(list)) => list.as_ref().clone(),
+            _ => Vec::new(),
+        },
         VmValue::List(list) => list.as_ref().clone(),
         _ => {
             return Err(VmError::Thrown(VmValue::String(Rc::from(
@@ -1162,9 +1145,9 @@ pub(crate) fn vm_tools_to_native(
 
                 let input_schema = vm_build_json_schema(params);
 
-                // Use API style, not provider name, to determine schema format.
-                // Anthropic uses {name, description, input_schema}; everything
-                // else (OpenAI-compatible) uses {type: "function", function: {...}}.
+                // API style (not provider name) determines schema shape:
+                // Anthropic = {name, description, input_schema};
+                // OpenAI-compat = {type: "function", function: {...}}.
                 let is_anthropic =
                     super::helpers::ResolvedProvider::resolve(provider).is_anthropic_style;
                 if is_anthropic {

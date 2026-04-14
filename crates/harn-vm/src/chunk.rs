@@ -278,7 +278,6 @@ impl Chunk {
 
     /// Add a constant and return its index.
     pub fn add_constant(&mut self, constant: Constant) -> u16 {
-        // Reuse existing constant if possible
         for (i, c) in self.constants.iter().enumerate() {
             if c == &constant {
                 return i as u16;

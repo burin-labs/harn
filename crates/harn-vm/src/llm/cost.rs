@@ -5,10 +5,6 @@ use std::rc::Rc;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
-// =============================================================================
-// Thread-local cost tracking state
-// =============================================================================
-
 thread_local! {
     static LLM_BUDGET: RefCell<Option<f64>> = const { RefCell::new(None) };
     static LLM_ACCUMULATED_COST: RefCell<f64> = const { RefCell::new(0.0) };
@@ -24,9 +20,8 @@ pub fn peek_total_cost() -> f64 {
     LLM_ACCUMULATED_COST.with(|acc| *acc.borrow())
 }
 
-/// Pricing per million tokens (input, output) in USD.
+/// Pricing per million tokens (input, output) in USD, as of early 2026.
 fn model_pricing(model: &str) -> Option<(f64, f64)> {
-    // Prices per million tokens as of early 2026
     match model {
         // Anthropic
         m if m.contains("claude-3-5-haiku") || m.contains("claude-haiku-4") => Some((0.80, 4.00)),
@@ -76,7 +71,6 @@ pub(crate) fn accumulate_cost(
     LLM_ACCUMULATED_COST.with(|acc| {
         *acc.borrow_mut() += cost;
     });
-    // Check budget
     LLM_BUDGET.with(|budget| {
         if let Some(max) = *budget.borrow() {
             let total = LLM_ACCUMULATED_COST.with(|acc| *acc.borrow());
@@ -92,7 +86,6 @@ pub(crate) fn accumulate_cost(
 }
 
 pub(crate) fn register_cost_builtins(vm: &mut Vm) {
-    // llm_cost(model, input_tokens, output_tokens) -> float
     vm.register_builtin("llm_cost", |args, _out| {
         let model = args.first().map(|a| a.display()).unwrap_or_default();
         let input_tokens = args.get(1).and_then(|a| a.as_int()).unwrap_or(0);
@@ -101,7 +94,6 @@ pub(crate) fn register_cost_builtins(vm: &mut Vm) {
         Ok(VmValue::Float(cost))
     });
 
-    // llm_session_cost() -> dict {total_cost, input_tokens, output_tokens, call_count}
     vm.register_builtin("llm_session_cost", |_args, _out| {
         let (total_input, total_output, _duration, call_count) = super::trace::peek_trace_summary();
         let total_cost = LLM_ACCUMULATED_COST.with(|acc| *acc.borrow());
@@ -113,7 +105,6 @@ pub(crate) fn register_cost_builtins(vm: &mut Vm) {
         Ok(VmValue::Dict(Rc::new(result)))
     });
 
-    // llm_budget(max_cost) -> nil
     vm.register_builtin("llm_budget", |args, _out| {
         let max_cost = match args.first() {
             Some(VmValue::Float(f)) => *f,
@@ -130,7 +121,6 @@ pub(crate) fn register_cost_builtins(vm: &mut Vm) {
         Ok(VmValue::Nil)
     });
 
-    // llm_budget_remaining() -> float | nil
     vm.register_builtin("llm_budget_remaining", |_args, _out| {
         let remaining = LLM_BUDGET.with(|budget| {
             budget.borrow().map(|max| {

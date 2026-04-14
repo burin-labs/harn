@@ -65,9 +65,7 @@ fn hash_str(value: &str) -> u64 {
 }
 
 fn hash_json(value: &serde_json::Value) -> u64 {
-    // Canonicalize via serde_json::to_string which uses map-key insertion
-    // order. For dedup we only need stability within one process run, not
-    // across builds, so the built-in ordering is sufficient.
+    // Dedup only needs intra-process stability; built-in key ordering is fine.
     let encoded = serde_json::to_string(value).unwrap_or_default();
     hash_str(&encoded)
 }
@@ -90,10 +88,6 @@ pub(crate) fn set_current_iteration(iteration: Option<usize>) {
 fn current_iteration() -> Option<usize> {
     CURRENT_ITERATION.with(|cell| *cell.borrow())
 }
-
-// ---------------------------------------------------------------------------
-// Retryable error classification
-// ---------------------------------------------------------------------------
 
 /// Classify whether a VmError from an LLM call is transient and worth
 /// retrying.
@@ -118,7 +112,7 @@ pub(super) fn is_retryable_llm_error(err: &VmError) -> bool {
     if derived != ErrorCategory::Generic {
         return derived.is_transient();
     }
-    // String-level fallback for retryable shapes without a status code.
+    // Fallback for retryable shapes that don't carry a status code.
     let lower = msg.to_lowercase();
     lower.contains("too many requests")
         || lower.contains("rate limit")
@@ -162,15 +156,12 @@ pub(crate) fn parse_retry_after(msg: &str) -> Option<u64> {
     let lower = msg.to_lowercase();
     let pos = lower.find("retry-after:")?;
     let after = &msg[pos + "retry-after:".len()..];
-    // The header value ends at the next CRLF or end-of-string. Also cap
-    // at the next obvious header boundary so we don't grab a neighboring
-    // field.
+    // End at CRLF so we don't grab a neighboring header.
     let end = after.find(['\r', '\n']).unwrap_or(after.len());
     let value = after[..end].trim();
     if value.is_empty() {
         return None;
     }
-    // Try numeric seconds first (integer or fractional).
     if let Some(num_str) = value.split_whitespace().next() {
         if let Ok(secs) = num_str.parse::<f64>() {
             if !secs.is_finite() || secs < 0.0 {
@@ -180,7 +171,6 @@ pub(crate) fn parse_retry_after(msg: &str) -> Option<u64> {
             return Some(ms.min(MAX_MS));
         }
     }
-    // Otherwise try HTTP-date (IMF-fixdate, RFC 7231).
     if let Ok(target) = httpdate::parse_http_date(value) {
         let now = std::time::SystemTime::now();
         let delta = target
@@ -191,10 +181,6 @@ pub(crate) fn parse_retry_after(msg: &str) -> Option<u64> {
     }
     None
 }
-
-// ---------------------------------------------------------------------------
-// Transcript dump helpers (HARN_LLM_TRANSCRIPT_DIR)
-// ---------------------------------------------------------------------------
 
 /// Write the full LLM request payload to a JSONL transcript file.
 pub(super) fn append_llm_transcript_entry(entry: &serde_json::Value) {
@@ -302,9 +288,8 @@ pub(super) fn dump_llm_request(
     tool_format: &str,
     opts: &super::api::LlmCallOptions,
 ) {
-    // System prompt and tool schemas are high-entropy blobs that change
-    // rarely within a single stage. Emit them as their own events with
-    // hash-based dedup so subsequent requests don't repeat them.
+    // Emit system prompt + schemas as dedup'd events so they don't
+    // repeat on every request.
     emit_system_prompt_if_changed(opts.system.as_deref());
     let tool_schemas =
         crate::llm::tools::collect_tool_schemas(opts.tools.as_ref(), opts.native_tools.as_deref());
@@ -346,9 +331,7 @@ pub(super) fn dump_llm_response(
         "output_tokens": result.output_tokens,
         "cache_read_tokens": result.cache_read_tokens,
         "cache_write_tokens": result.cache_write_tokens,
-        // Explicit boolean so consumers don't need to re-compute it from
-        // the token counts; also makes cache-behavior regressions easier
-        // to spot in transcript tailing.
+        // Explicit bool for easy cache-regression spotting in tailed logs.
         "cache_hit": result.cache_read_tokens > 0,
         "thinking": result.thinking,
         "response_ms": response_ms,
@@ -392,10 +375,6 @@ pub(super) fn chrono_now() -> String {
     format!("{}.{:03}", now.as_secs(), now.subsec_millis())
 }
 
-// ---------------------------------------------------------------------------
-// Progress forwarding
-// ---------------------------------------------------------------------------
-
 /// Create an unbounded channel and spawn a local task that forwards text
 /// deltas to `bridge.send_call_progress()`.
 pub(super) fn spawn_progress_forwarder(
@@ -414,10 +393,6 @@ pub(super) fn spawn_progress_forwarder(
     });
     tx
 }
-
-// ---------------------------------------------------------------------------
-// LLM retry config
-// ---------------------------------------------------------------------------
 
 /// Configuration for LLM call retries.
 pub(crate) struct LlmRetryConfig {
@@ -462,7 +437,6 @@ pub(crate) async fn observed_llm_call(
         .unwrap_or_else(|| crate::llm_config::default_tool_format(&opts.model, &opts.provider));
     let mut attempt = 0usize;
     loop {
-        // Rate limit: yield until the provider's RPM window has capacity.
         super::rate_limit::acquire_permit(&opts.provider).await;
 
         let call_id = next_call_id();
@@ -473,7 +447,6 @@ pub(crate) async fn observed_llm_call(
             .map(|s| s.len())
             .sum();
 
-        // Span annotation
         let mut span_meta = vec![
             ("call_id", serde_json::json!(call_id.clone())),
             ("model", serde_json::json!(opts.model.clone())),
@@ -486,7 +459,6 @@ pub(crate) async fn observed_llm_call(
         }
         annotate_current_span(&span_meta);
 
-        // Bridge: call_start notification
         let mut call_start_meta =
             serde_json::json!({"model": opts.model, "prompt_chars": prompt_chars});
         call_start_meta["stream_publicly"] =
@@ -500,7 +472,6 @@ pub(crate) async fn observed_llm_call(
             b.send_call_start(&call_id, "llm", "llm_call", call_start_meta);
         }
 
-        // Transcript dump (enabled by HARN_LLM_TRANSCRIPT_DIR)
         dump_llm_request(
             iteration.unwrap_or(0),
             &call_id,
@@ -508,7 +479,6 @@ pub(crate) async fn observed_llm_call(
             opts,
         );
 
-        // Execute the LLM call
         let start = std::time::Instant::now();
         let llm_result = if let Some(b) = bridge {
             let delta_tx = spawn_progress_forwarder(b, call_id.clone(), user_visible);
@@ -666,7 +636,6 @@ mod retry_tests {
 
     #[test]
     fn http_503_is_retryable_via_classifier() {
-        // 503 used to be miscategorized as RateLimit; regression test.
         assert!(is_retryable_llm_error(&thrown(
             "HTTP 503 Service Unavailable"
         )));

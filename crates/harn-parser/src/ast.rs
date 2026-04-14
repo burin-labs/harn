@@ -31,7 +31,6 @@ pub fn spanned(node: Node, span: Span) -> SNode {
 /// AST nodes for the Harn language.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Node {
-    // Declarations
     Pipeline {
         name: String,
         params: Vec<String>,
@@ -86,7 +85,6 @@ pub enum Node {
         methods: Vec<SNode>,
     },
 
-    // Control flow
     IfElse {
         condition: Box<SNode>,
         then_body: Vec<SNode>,
@@ -186,7 +184,6 @@ pub enum Node {
     /// Continue to next loop iteration.
     ContinueStmt,
 
-    // Concurrency
     Parallel {
         mode: ParallelMode,
         /// For Count mode: the count expression. For Each/Settle: the list expression.
@@ -206,7 +203,6 @@ pub enum Node {
         default_body: Option<Vec<SNode>>,
     },
 
-    // Expressions
     FunctionCall {
         name: String,
         args: Vec<SNode>,
@@ -276,7 +272,6 @@ pub enum Node {
         fields: Vec<DictEntry>,
     },
 
-    // Literals
     InterpolatedString(Vec<StringSegment>),
     StringLiteral(String),
     /// Raw string literal `r"..."` — no escape processing.
@@ -295,7 +290,6 @@ pub enum Node {
         operand: Box<SNode>,
     },
 
-    // Blocks
     Block(Vec<SNode>),
     Closure {
         params: Vec<TypedParam>,

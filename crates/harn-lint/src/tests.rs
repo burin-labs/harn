@@ -690,8 +690,6 @@ foo(true)
     );
 }
 
-// ===== unused-function tests =====
-
 #[test]
 fn test_unused_function_basic() {
     let diags = lint_source(
@@ -1069,10 +1067,6 @@ fn local() { return foo() + bar() + baz() }
     assert!(names.contains("baz"), "should contain baz");
     assert_eq!(names.len(), 3, "should have exactly 3 names: {names:?}");
 }
-
-// -----------------------------------------------------------------------
-// Autofix tests
-// -----------------------------------------------------------------------
 
 /// Get the first fix for a given rule, or None.
 fn get_fix(diagnostics: &[LintDiagnostic], rule: &str) -> Option<Vec<FixEdit>> {
@@ -1683,8 +1677,6 @@ fn test_fix_unused_variable_is_word_boundary_safe() {
     );
 }
 
-// ── untyped-dict-access lint rule ───────────────────────────────────
-
 #[test]
 fn test_untyped_dict_access_json_parse_property() {
     let diags = lint_source(
@@ -1767,8 +1759,6 @@ pipeline default(task) {
     );
 }
 
-// --- blank-line-between-items ---
-
 #[test]
 fn test_blank_line_between_items_fires_for_two_adjacent_fns() {
     let source = "fn a() -> int {\n  return 1\n}\nfn b() -> int {\n  return 2\n}\n";
@@ -1800,10 +1790,6 @@ fn test_blank_line_between_items_ok_with_doc_block_and_blank_above() {
         "blank line above doc block should satisfy the rule, got: {diags:?}"
     );
 }
-
-// -----------------------------------------------------------------------
-// eager-collection-conversion
-// -----------------------------------------------------------------------
 
 #[test]
 fn test_eager_collection_conversion_let_list() {
@@ -1886,8 +1872,6 @@ fn test_blank_line_between_items_does_not_fire_between_imports() {
     );
 }
 
-// --- trailing-comma ---
-
 #[test]
 fn test_trailing_comma_fires_on_multiline_list() {
     let source =
@@ -1952,8 +1936,6 @@ fn test_trailing_comma_fires_on_fn_call_args() {
     );
 }
 
-// --- import-order ---
-
 #[test]
 fn test_import_order_fires_when_out_of_order() {
     let source = "import \"std/io\"\nimport \"std/fs\"\n\nfn a() -> int { return 1 }\n";
@@ -1993,8 +1975,6 @@ fn test_import_order_stdlib_before_third_party() {
         "stdlib should come before third-party, got: {diags:?}"
     );
 }
-
-// --- require-file-header ---
 
 fn lint_with_require_header(source: &str, path: Option<&std::path::Path>) -> Vec<LintDiagnostic> {
     let mut lexer = Lexer::new(source);

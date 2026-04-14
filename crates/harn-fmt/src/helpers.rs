@@ -5,19 +5,14 @@ use harn_parser::{BindingPattern, Node, SNode, TypeExpr, TypeParam, TypedParam, 
 use crate::Formatter;
 
 /// Format a default-value expression in a destructuring pattern.
-/// Creates a temporary formatter to render the expression.
 fn format_default_expr(node: &SNode) -> String {
     let fmt = Formatter::new(BTreeMap::new(), 100, 80);
     fmt.format_expr(node)
 }
 
-/// Return a numeric precedence for binary operators (higher = tighter binding).
-///
-/// `??` sits between additive and multiplicative — tighter than
-/// `+ - < > == != && || ?:` but looser than `* / % **`. This matches the
-/// parser's placement (harn-parser: parse_additive → parse_nil_coalescing →
-/// parse_multiplicative) and the intuition `xs?.count ?? 0 > 0` →
-/// `(xs?.count ?? 0) > 0`.
+/// Numeric precedence for binary operators (higher = tighter binding).
+/// `??` sits between additive and multiplicative so `xs?.count ?? 0 > 0`
+/// naturally groups as `(xs?.count ?? 0) > 0`; must track the parser.
 pub(crate) fn op_precedence(op: &str) -> u8 {
     match op {
         "|>" => 1,
@@ -65,29 +60,23 @@ pub(crate) fn child_needs_parens(parent_op: &str, child: &Node, is_right: bool) 
         let p = op_precedence(parent_op);
         let c = op_precedence(child_op);
 
-        // Correctness: child binds less tightly than parent.
         if c < p {
             return true;
         }
 
-        // Correctness: exponentiation is right-associative, so `(a ** b) ** c`
-        // must keep its left grouping while `a ** b ** c` does not need
-        // extra parens on the right.
+        // `**` is right-associative: `(a ** b) ** c` must keep its left grouping.
         if parent_op == "**" && child_op == "**" {
             return !is_right;
         }
 
-        // Correctness: right child at same precedence level needs parens.
-        //
-        // Even when the operator token matches, the formatter cannot prove
-        // the operation is safely associative across all runtime types
-        // (`+`/`*` on floats, for example), and the parser does not preserve
-        // explicit grouping nodes. Preserve the user's right-grouping.
+        // Same-precedence right child: the formatter can't prove associativity
+        // (e.g. `+`/`*` on floats aren't truly associative) and the AST has
+        // already dropped explicit grouping nodes, so preserve right-grouping.
         if is_right && c == p {
             return true;
         }
 
-        // Clarity: always parenthesise && inside || (and vice-versa).
+        // Mixing `&&` and `||` always gets parens for clarity.
         if matches!((parent_op, child_op.as_str()), ("||", "&&") | ("&&", "||")) {
             return true;
         }
@@ -154,14 +143,11 @@ pub(crate) fn escape_string(s: &str) -> String {
         .replace('\t', "\\t")
 }
 
-/// Reconstruct a multi-line `"""..."""` string with body and closing
-/// delimiter indented one level deeper than the surrounding statement.
-/// The lexer already strips common leading indent from the body, so
-/// re-indenting here only affects source aesthetics — the lexed value
-/// after a round-trip is identical.
+/// Render a multi-line `"""..."""` with body and closing delimiter indented
+/// one level deeper. The lexer strips common leading indent from the body, so
+/// re-indenting is purely aesthetic and round-trip safe.
 pub(crate) fn format_multiline_triple_quoted(body: &str, indent: usize) -> String {
     let pad = "  ".repeat(indent + 1);
-    // Empty body: collapse to `"""\n{pad}"""` rather than `"""\n\n{pad}"""`.
     if body.is_empty() {
         return format!("\"\"\"\n{pad}\"\"\"");
     }

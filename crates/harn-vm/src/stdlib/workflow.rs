@@ -2055,8 +2055,6 @@ pub(crate) fn register_workflow_builtins(vm: &mut Vm) {
         execute_workflow(task, graph, artifacts, options).await
     });
 
-    // ── Tool lifecycle hooks ──────────────────────────────────────────
-
     type PostHookFn = Rc<dyn Fn(&str, &str) -> crate::orchestration::PostToolAction>;
 
     vm.register_builtin("register_tool_hook", |args, _out| {
@@ -2106,8 +2104,6 @@ pub(crate) fn register_workflow_builtins(vm: &mut Vm) {
         Ok(VmValue::Nil)
     });
 
-    // ── Context assembly ──────────────────────────────────────────────
-
     vm.register_builtin("select_artifacts_adaptive", |args, _out| {
         let artifacts_val = args.first().cloned().unwrap_or(VmValue::Nil);
         let policy_val = args.get(1).cloned().unwrap_or(VmValue::Nil);
@@ -2116,8 +2112,6 @@ pub(crate) fn register_workflow_builtins(vm: &mut Vm) {
         let selected = crate::orchestration::select_artifacts_adaptive(artifacts, &policy);
         to_vm(&selected)
     });
-
-    // ── Auto-compaction builtins ──────────────────────────────────────
 
     vm.register_builtin("estimate_tokens", |args, _out| {
         let messages: Vec<serde_json::Value> = args

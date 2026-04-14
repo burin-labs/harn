@@ -281,9 +281,8 @@ pub(crate) fn register_path_helper_builtins(vm: &mut Vm) {
     });
 
     vm.register_builtin("path_to_native", |args, _out| {
-        // The Harn runtime normalises on `/` regardless of OS, so
-        // path_to_native currently mirrors path_to_posix. Reserved for
-        // future Windows-host specialisation.
+        // Harn normalises on `/` regardless of OS, so this currently mirrors
+        // path_to_posix. Reserved for future Windows-host specialisation.
         let p = args.first().map(|a| a.display()).unwrap_or_default();
         Ok(VmValue::String(Rc::from(to_posix(&p))))
     });
@@ -299,8 +298,7 @@ pub(crate) fn register_path_helper_builtins(vm: &mut Vm) {
         )))
     });
 
-    // Silence unused-import warnings if the VmError type ever goes unused
-    // in a future refactor of this module.
+    // Silence unused-import warnings if VmError becomes unused in a future refactor.
     let _ = std::marker::PhantomData::<VmError>;
 }
 

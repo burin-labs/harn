@@ -13,10 +13,6 @@ use super::{
     TRANSCRIPT_TYPE,
 };
 
-// =============================================================================
-// Utility helpers
-// =============================================================================
-
 pub(crate) fn extract_json(text: &str) -> String {
     crate::stdlib::json::extract_json_from_text(text)
 }
@@ -26,10 +22,6 @@ pub(crate) fn expects_structured_output(opts: &crate::llm::api::LlmCallOptions) 
         || opts.json_schema.is_some()
         || opts.output_schema.is_some()
 }
-
-// =============================================================================
-// Unified option extraction
-// =============================================================================
 
 /// Extract all LLM call options from the standard (prompt, system, options) args.
 pub(crate) fn extract_llm_options(
@@ -52,13 +44,8 @@ pub(crate) fn extract_llm_options(
     let model = vm_resolve_model(&options, &provider);
     let api_key = resolve_api_key(&provider)?;
 
-    // Default output ceiling. A value of 0 means "omit from request" (let
-    // provider decide). 8192 prevents degenerate repetition loops while
-    // leaving headroom on providers that allocate output tokens to internal
-    // reasoning (e.g. DeepInfra's 16K limit for Qwen models).
-    // Apply model_defaults from providers.toml as fallbacks for parameters
-    // the caller didn't specify. This ensures recommended defaults (e.g.
-    // presence_penalty=1.5 for Qwen) are applied automatically.
+    // Apply providers.toml model_defaults as fallbacks for unspecified params
+    // (e.g. presence_penalty=1.5 for Qwen to avoid repetition loops).
     let model_defaults = crate::llm_config::model_params(&model);
     let default_float =
         |key: &str| -> Option<f64> { model_defaults.get(key).and_then(|v| v.as_float()) };
@@ -90,7 +77,6 @@ pub(crate) fn extract_llm_options(
         });
     let output_validation = opt_str(&options, "output_validation");
 
-    // Thinking: bool or {budget_tokens: N}
     let thinking = options
         .as_ref()
         .and_then(|o| o.get("thinking"))
@@ -107,7 +93,6 @@ pub(crate) fn extract_llm_options(
             _ => None,
         });
 
-    // JSON schema: convert VmValue dict to serde_json::Value at extraction time
     let json_schema = options
         .as_ref()
         .and_then(|o| o.get("schema"))
@@ -128,7 +113,7 @@ pub(crate) fn extract_llm_options(
     let transcript_summary = transcript_dict.and_then(transcript_summary_text);
     let transcript_metadata = transcript_dict.and_then(transcript_metadata);
 
-    // Messages: options.messages > options.transcript > prompt
+    // Message source precedence: options.messages > transcript > prompt.
     let messages_val = options.as_ref().and_then(|o| o.get("messages")).cloned();
     let messages = if let Some(VmValue::List(msg_list)) = &messages_val {
         vm_messages_to_json(msg_list)?
@@ -154,7 +139,6 @@ pub(crate) fn extract_llm_options(
         (None, None) => None,
     };
 
-    // Tools
     let tools_val = options.as_ref().and_then(|o| o.get("tools")).cloned();
     let native_tools = if let Some(tools) = &tools_val {
         Some(vm_tools_to_native(tools, &provider)?)
@@ -162,20 +146,17 @@ pub(crate) fn extract_llm_options(
         None
     };
 
-    // Tool choice
     let tool_choice = options
         .as_ref()
         .and_then(|o| o.get("tool_choice"))
         .map(vm_value_to_json);
 
-    // Provider-specific overrides
     let provider_overrides = options
         .as_ref()
         .and_then(|o| o.get(&provider))
         .and_then(|v| v.as_dict())
         .map(vm_value_dict_to_json);
 
-    // Validate options against provider capabilities
     let opts = LlmCallOptions {
         provider,
         model,
@@ -274,6 +255,6 @@ fn validate_options(opts: &crate::llm::api::LlmCallOptions) {
                 warn("cache");
             }
         }
-        _ => {} // Unknown provider: skip validation
+        _ => {}
     }
 }

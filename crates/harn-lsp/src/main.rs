@@ -13,10 +13,6 @@ use document::DocumentState;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LspService, Server};
 
-// ---------------------------------------------------------------------------
-// LSP backend
-// ---------------------------------------------------------------------------
-
 struct HarnLsp {
     client: Client,
     documents: Mutex<HashMap<Url, DocumentState>>,
@@ -32,10 +28,6 @@ impl HarnLsp {
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// main
-// ---------------------------------------------------------------------------
 
 #[tokio::main]
 async fn main() {
@@ -53,8 +45,8 @@ mod tests {
     use crate::helpers::{lsp_position_to_offset, word_at_position};
     use crate::symbols::HarnSymbolKind;
 
-    /// Helper: build document state and find the best hover symbol for `word`
-    /// at the given (0-based) line and column.
+    /// Build document state and find the best hover symbol for `word` at
+    /// the given 0-based line/column.
     fn hover_symbol_at(
         source: &str,
         line: u32,
@@ -64,7 +56,6 @@ mod tests {
         let state = DocumentState::new(source.to_string());
         let position = Position::new(line, col);
 
-        // Verify word extraction
         let extracted = word_at_position(source, position);
         assert_eq!(
             extracted.as_deref(),
@@ -74,7 +65,7 @@ mod tests {
 
         let cursor_offset = lsp_position_to_offset(source, position);
 
-        // Mirror the hover handler's scope resolution logic
+        // Mirrors handlers::hover's scope resolution: tightest scope wins.
         let mut best: Option<&symbols::SymbolInfo> = None;
         for sym in &state.symbols {
             if sym.name != word {
@@ -113,7 +104,6 @@ mod tests {
     #[test]
     fn hover_top_level_fn() {
         let source = "fn greet(name: string) -> string {\n  return \"Hello, \" + name\n}\n\nlet result = greet(\"World\")\n";
-        //                           ^ line 4, col 14
         let sym = hover_symbol_at(source, 4, 14, "greet").expect("should find greet");
         assert_eq!(sym.kind, HarnSymbolKind::Function);
         assert_eq!(
@@ -201,7 +191,6 @@ mod tests {
             "let p = Point({x: 1, y: 2})\n",
             "let s = p.sum()\n",
         );
-        // "sum" on line 10 (0-indexed), col 12
         let sym = hover_symbol_at(source, 10, 12, "sum").expect("should find sum method");
         assert_eq!(sym.kind, HarnSymbolKind::Function);
         assert_eq!(sym.signature.as_deref(), Some("fn sum(self) -> int"));

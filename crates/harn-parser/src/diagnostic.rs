@@ -61,13 +61,11 @@ pub fn render_diagnostic(
     let help_prefix = style_fragment("help", Color::Cyan, true);
     let note_prefix = style_fragment("note", Color::Magenta, true);
 
-    // Header: severity + message
     out.push_str(&style_fragment(severity, severity_color, true));
     out.push_str(": ");
     out.push_str(message);
     out.push('\n');
 
-    // Location line
     let line_num = span.line;
     let col_num = span.column;
 
@@ -79,14 +77,12 @@ pub fn render_diagnostic(
         width = gutter_width + 1,
     ));
 
-    // Blank gutter
     out.push_str(&format!(
         "{:>width$} {gutter}\n",
         " ",
         width = gutter_width + 1,
     ));
 
-    // Source line
     let source_line_opt = source.lines().nth(line_num.wrapping_sub(1));
     if let Some(source_line) = source_line_opt.filter(|_| line_num > 0) {
         out.push_str(&format!(
@@ -95,16 +91,15 @@ pub fn render_diagnostic(
             width = gutter_width + 1,
         ));
 
-        // Caret line
         if let Some(label_text) = label {
-            // Calculate span display width using character counts, not byte offsets
+            // Span width must use char count, not byte offsets, so carets align with the source text.
             let span_len = if span.end > span.start && span.start <= source.len() {
                 let span_text = &source[span.start.min(source.len())..span.end.min(source.len())];
                 span_text.chars().count().max(1)
             } else {
                 1
             };
-            let col_num = col_num.max(1); // ensure at least 1
+            let col_num = col_num.max(1);
             let padding = " ".repeat(col_num - 1);
             let carets = style_fragment(&"^".repeat(span_len), severity_color, true);
             out.push_str(&format!(
@@ -115,7 +110,6 @@ pub fn render_diagnostic(
         }
     }
 
-    // Help line
     if let Some(help_text) = help {
         out.push_str(&format!(
             "{:>width$} = {help_prefix}: {help_text}\n",

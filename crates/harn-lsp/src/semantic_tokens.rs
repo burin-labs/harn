@@ -4,10 +4,6 @@ use tower_lsp::lsp_types::*;
 use crate::constants::{BUILTINS, TYPE_NAMES};
 use crate::symbols::{HarnSymbolKind, SymbolInfo};
 
-// ---------------------------------------------------------------------------
-// Semantic token types and mapping
-// ---------------------------------------------------------------------------
-
 /// Indices into the semantic token legend's token types array.
 /// These must match the order in `semantic_token_legend()`.
 pub(crate) mod sem {

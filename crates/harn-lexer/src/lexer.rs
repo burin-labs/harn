@@ -74,22 +74,20 @@ impl Lexer {
         while self.pos < self.source.len() {
             let ch = self.source[self.pos];
 
-            // Skip whitespace (not newlines)
             if ch == ' ' || ch == '\t' || ch == '\r' {
                 self.advance();
                 continue;
             }
 
-            // Backslash line continuation: `\` immediately before newline joins lines
+            // Backslash immediately before newline joins lines without emitting a Newline token.
             if ch == '\\' && self.peek() == Some('\n') {
-                self.advance(); // skip `\`
-                self.advance(); // skip `\n`
+                self.advance();
+                self.advance();
                 self.line += 1;
                 self.column = 1;
                 continue;
             }
 
-            // Newlines
             if ch == '\n' {
                 let start = self.byte_pos;
                 tokens.push(Token::with_span(
@@ -102,7 +100,6 @@ impl Lexer {
                 continue;
             }
 
-            // Comments
             if ch == '/' {
                 if self.peek() == Some('/') {
                     let tok = self.read_line_comment();
@@ -120,37 +117,31 @@ impl Lexer {
                 }
             }
 
-            // Raw string literals: r"..."
             if ch == 'r' && self.peek() == Some('"') {
                 tokens.push(self.read_raw_string()?);
                 continue;
             }
 
-            // String literals
             if ch == '"' {
                 tokens.push(self.read_string()?);
                 continue;
             }
 
-            // Numbers
             if ch.is_ascii_digit() {
                 tokens.push(self.read_number());
                 continue;
             }
 
-            // Identifiers and keywords
             if ch.is_alphabetic() || ch == '_' {
                 tokens.push(self.read_identifier());
                 continue;
             }
 
-            // Two-character operators
             if let Some(tok) = self.try_two_char_op() {
                 tokens.push(tok);
                 continue;
             }
 
-            // Single-character operators and delimiters
             if let Some(kind) = self.single_char_token(ch) {
                 let start = self.byte_pos;
                 let col = self.column;
@@ -200,14 +191,13 @@ impl Lexer {
         let start_byte = self.byte_pos;
         let start_col = self.column;
         let start_line = self.line;
-        self.advance(); // skip first /
-        self.advance(); // skip second /
-                        // Detect doc-comment marker: a third `/` that is NOT followed by another
-                        // `/`. So `///foo` is a doc comment, `////foo` (a separator bar) is not.
+        self.advance();
+        self.advance();
+        // `///foo` is a doc comment, but `////foo` (a separator bar) is not.
         let is_doc = self.source.get(self.pos).copied() == Some('/')
             && self.source.get(self.pos + 1).copied() != Some('/');
         if is_doc {
-            self.advance(); // skip third /
+            self.advance();
         }
         let mut text = String::new();
         while self.pos < self.source.len() && self.source[self.pos] != '\n' {
@@ -223,16 +213,14 @@ impl Lexer {
     fn read_block_comment(&mut self) -> Result<Token, LexerError> {
         let start_byte = self.byte_pos;
         let start = Span::with_offsets(self.byte_pos, self.byte_pos, self.line, self.column);
-        self.advance(); // skip /
-        self.advance(); // skip *
-                        // Detect doc-comment marker: a second `*` that is not followed by
-                        // another `*` (so `/*** */` stays regular) and not followed by `/`
-                        // (so the empty `/**/` block stays regular).
+        self.advance();
+        self.advance();
+        // `/** ... */` is a doc comment, but `/*** */` and `/**/` are not.
         let is_doc = self.source.get(self.pos).copied() == Some('*')
             && self.source.get(self.pos + 1).copied() != Some('*')
             && self.source.get(self.pos + 1).copied() != Some('/');
         if is_doc {
-            self.advance(); // skip second *
+            self.advance();
         }
         let mut text = String::new();
         let mut depth = 1;
@@ -275,7 +263,6 @@ impl Lexer {
         let start_byte = self.byte_pos;
         let start = Span::with_offsets(start_byte, start_byte, self.line, self.column);
 
-        // Check for triple-quote
         if self.pos + 2 < self.source.len()
             && self.source[self.pos + 1] == '"'
             && self.source[self.pos + 2] == '"'
@@ -283,7 +270,7 @@ impl Lexer {
             return self.read_multi_line_string(start_byte, start);
         }
 
-        self.advance(); // skip opening "
+        self.advance();
 
         let mut value = String::new();
         let mut segments: Vec<StringSegment> = Vec::new();
@@ -292,7 +279,7 @@ impl Lexer {
         while self.pos < self.source.len() {
             let ch = self.source[self.pos];
             if ch == '"' {
-                self.advance(); // skip closing "
+                self.advance();
                 if has_interpolation {
                     if !value.is_empty() {
                         segments.push(StringSegment::Literal(value));
@@ -308,14 +295,13 @@ impl Lexer {
                 ));
             }
 
-            // String interpolation: ${expression}
             if ch == '$' && self.peek() == Some('{') {
                 has_interpolation = true;
                 if !value.is_empty() {
                     segments.push(StringSegment::Literal(std::mem::take(&mut value)));
                 }
-                self.advance(); // skip $
-                self.advance(); // skip {
+                self.advance();
+                self.advance();
                 let expr_line = self.line;
                 let expr_col = self.column;
                 let mut depth = 1;
@@ -336,7 +322,7 @@ impl Lexer {
                 if self.pos >= self.source.len() {
                     return Err(LexerError::UnterminatedString(start));
                 }
-                self.advance(); // skip closing }
+                self.advance();
                 if expr.trim().is_empty() {
                     return Err(LexerError::UnexpectedCharacter(
                         '}',
@@ -388,11 +374,10 @@ impl Lexer {
         start_byte: usize,
         start: Span,
     ) -> Result<Token, LexerError> {
-        self.advance(); // skip first "
-        self.advance(); // skip second "
-        self.advance(); // skip third "
+        self.advance();
+        self.advance();
+        self.advance();
 
-        // Skip optional newline after opening """
         if self.pos < self.source.len() && self.source[self.pos] == '\n' {
             self.advance();
             self.line += 1;
@@ -409,15 +394,15 @@ impl Lexer {
                 && self.source[self.pos + 1] == '"'
                 && self.source[self.pos + 2] == '"'
             {
-                self.advance(); // skip first "
-                self.advance(); // skip second "
-                self.advance(); // skip third "
+                self.advance();
+                self.advance();
+                self.advance();
                 if has_interpolation {
                     if !value.is_empty() {
                         segments.push(StringSegment::Literal(std::mem::take(&mut value)));
                     }
-                    // Compute common indent across ALL literal content, then
-                    // strip it from each literal segment uniformly.
+                    // Strip the common indent across all literal segments together so
+                    // interpolation boundaries don't produce uneven dedenting.
                     let full_text: String = segments
                         .iter()
                         .map(|seg| match seg {
@@ -454,14 +439,13 @@ impl Lexer {
                 return Ok(Token::with_span(TokenKind::StringLiteral(stripped), span));
             }
 
-            // String interpolation: ${expression}
             if self.source[self.pos] == '$' && self.peek() == Some('{') {
                 has_interpolation = true;
                 if !value.is_empty() {
                     segments.push(StringSegment::Literal(std::mem::take(&mut value)));
                 }
-                self.advance(); // skip $
-                self.advance(); // skip {
+                self.advance();
+                self.advance();
                 let expr_line = self.line;
                 let expr_col = self.column;
                 let mut depth = 1;
@@ -478,7 +462,7 @@ impl Lexer {
                     }
                     if self.source[self.pos] == '\n' {
                         self.line += 1;
-                        self.column = 0; // will be incremented by advance
+                        self.column = 0; // advance() restores column to 1
                     }
                     expr.push(self.source[self.pos]);
                     self.advance();
@@ -486,7 +470,7 @@ impl Lexer {
                 if self.pos >= self.source.len() {
                     return Err(LexerError::UnterminatedString(start));
                 }
-                self.advance(); // skip closing }
+                self.advance();
                 segments.push(StringSegment::Expression(expr, expr_line, expr_col));
                 continue;
             }
@@ -504,18 +488,18 @@ impl Lexer {
         Err(LexerError::UnterminatedString(start))
     }
 
-    /// Read a raw string literal `r"..."`. No escape processing, no interpolation.
+    /// Read a raw string `r"..."`: no escape processing, no interpolation.
     fn read_raw_string(&mut self) -> Result<Token, LexerError> {
         let start_byte = self.byte_pos;
         let start = Span::with_offsets(start_byte, start_byte, self.line, self.column);
-        self.advance(); // skip 'r'
-        self.advance(); // skip opening '"'
+        self.advance();
+        self.advance();
 
         let mut value = String::new();
         while self.pos < self.source.len() {
             let ch = self.source[self.pos];
             if ch == '"' {
-                self.advance(); // skip closing "
+                self.advance();
                 return Ok(Token::with_span(
                     TokenKind::RawStringLiteral(value),
                     Span::with_offsets(start_byte, self.byte_pos, start.line, start.column),
@@ -541,9 +525,9 @@ impl Lexer {
         {
             if self.source[self.pos] == '.' {
                 if is_float {
-                    break; // second dot
+                    break;
                 }
-                // Check next char is digit (otherwise it's method access like 42.method)
+                // Disambiguate `42.method` (method access) from `42.5` (float literal).
                 if let Some(next) = self.source.get(self.pos + 1) {
                     if !next.is_ascii_digit() {
                         break;
@@ -557,7 +541,6 @@ impl Lexer {
             self.advance();
         }
 
-        // Check for duration suffix: ms, s, m, h
         if !is_float {
             if let Some(ms) = self.try_duration_suffix(&num_str) {
                 return Token::with_span(
@@ -580,7 +563,7 @@ impl Lexer {
                     Span::with_offsets(start_byte, self.byte_pos, self.line, start_col),
                 ),
                 Err(_) => {
-                    // Integer overflow: fall back to float
+                    // Integer overflow falls back to float to avoid losing magnitude.
                     let n: f64 = num_str.parse().unwrap_or(0.0);
                     Token::with_span(
                         TokenKind::FloatLiteral(n),
@@ -591,15 +574,14 @@ impl Lexer {
         }
     }
 
-    /// Try to parse a duration suffix (ms, s, m, h, d, w) after a number.
-    /// Returns the duration in milliseconds if a suffix is found.
+    /// Parse a duration suffix (ms, s, m, h, d, w) after a number, returning milliseconds.
     fn try_duration_suffix(&mut self, num_str: &str) -> Option<u64> {
         let n: u64 = num_str.parse().ok()?;
         if self.pos < self.source.len() {
             let ch = self.source[self.pos];
             if ch == 'm' && self.source.get(self.pos + 1) == Some(&'s') {
-                self.advance(); // m
-                self.advance(); // s
+                self.advance();
+                self.advance();
                 return Some(n);
             }
             if ch == 's'
@@ -608,7 +590,7 @@ impl Lexer {
                     .get(self.pos + 1)
                     .is_none_or(|c| !c.is_alphanumeric())
             {
-                self.advance(); // s
+                self.advance();
                 return Some(n * 1000);
             }
             if ch == 'm'
@@ -617,7 +599,7 @@ impl Lexer {
                     .get(self.pos + 1)
                     .is_none_or(|c| !c.is_alphanumeric() && *c != 's')
             {
-                self.advance(); // m
+                self.advance();
                 return Some(n * 60 * 1000);
             }
             if ch == 'h'
@@ -626,7 +608,7 @@ impl Lexer {
                     .get(self.pos + 1)
                     .is_none_or(|c| !c.is_alphanumeric())
             {
-                self.advance(); // h
+                self.advance();
                 return Some(n * 60 * 60 * 1000);
             }
             if ch == 'd'
@@ -635,7 +617,7 @@ impl Lexer {
                     .get(self.pos + 1)
                     .is_none_or(|c| !c.is_alphanumeric())
             {
-                self.advance(); // d
+                self.advance();
                 return Some(n * 24 * 60 * 60 * 1000);
             }
             if ch == 'w'
@@ -644,7 +626,7 @@ impl Lexer {
                     .get(self.pos + 1)
                     .is_none_or(|c| !c.is_alphanumeric())
             {
-                self.advance(); // w
+                self.advance();
                 return Some(n * 7 * 24 * 60 * 60 * 1000);
             }
         }
@@ -1024,14 +1006,13 @@ mod tests {
 
     #[test]
     fn test_backslash_continuation() {
-        // Backslash before newline joins lines — no Newline token emitted
         let mut lexer = Lexer::new("10 \\\n- 3");
         let tokens = lexer.tokenize().unwrap();
         assert_eq!(tokens[0].kind, TokenKind::IntLiteral(10));
         assert_eq!(tokens[1].kind, TokenKind::Minus);
         assert_eq!(tokens[2].kind, TokenKind::IntLiteral(3));
-        // No Newline token between 10 and -
-        assert_eq!(tokens.len(), 4); // 10, -, 3, EOF
+        // No Newline token between 10 and -: continuation joined them.
+        assert_eq!(tokens.len(), 4);
     }
 
     #[test]

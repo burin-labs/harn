@@ -11,10 +11,6 @@ use super::provider::LlmProvider;
 /// Sender for streaming text deltas from an in-flight LLM call.
 pub(crate) type DeltaSender = tokio::sync::mpsc::UnboundedSender<String>;
 
-// =============================================================================
-// LLM call options -- single struct replaces 12+ positional parameters
-// =============================================================================
-
 /// Extended thinking configuration.
 #[derive(Clone, Debug)]
 pub(crate) enum ThinkingConfig {
@@ -156,10 +152,6 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
     }
 }
 
-// =============================================================================
-// LLM response type
-// =============================================================================
-
 pub(crate) struct LlmResult {
     pub text: String,
     pub tool_calls: Vec<serde_json::Value>,
@@ -225,14 +217,10 @@ pub(crate) fn vm_build_llm_result(
         dict.insert("data".to_string(), json_val);
     }
 
-    // Run the tagged-protocol parser unconditionally so `canonical_text`,
-    // `protocol_violations`, `tool_parse_errors`, and `done_marker` are
-    // always available to callers — even when no tools were registered
-    // and the model emitted plain `<assistant_prose>...</assistant_prose>`.
-    // The parser is cheap and idempotent when the text has no tags at
-    // all. When native tool calls came back from the provider, those are
-    // authoritative and we skip text-parsed calls (but still expose the
-    // canonical prose reconstruction and sentinel surface).
+    // Always run the tagged-protocol parser so canonical_text / violations /
+    // done_marker are available even with no tool registry. It's cheap and a
+    // no-op when the text has no tags. Native provider tool calls are
+    // authoritative and take precedence over text-parsed calls.
     let tagged = Some(super::tools::parse_text_tool_calls_with_tools(
         &result.text,
         tools_val,
@@ -250,9 +238,6 @@ pub(crate) fn vm_build_llm_result(
         dict.insert("tool_calls".to_string(), VmValue::List(Rc::new(calls)));
     }
 
-    // Expose the tagged-protocol surface so one-shot callers can detect
-    // grammar violations, the `<done>` sentinel body, and the canonical
-    // reconstruction without re-running the parser themselves.
     if let Some(parse) = tagged.as_ref() {
         if !parse.violations.is_empty() {
             let violations: Vec<VmValue> = parse
@@ -288,18 +273,9 @@ pub(crate) fn vm_build_llm_result(
                 VmValue::String(Rc::from(parse.canonical.as_str())),
             );
         }
-        // `prose` is the unwrapped prose extracted from
-        // `<assistant_prose>...</assistant_prose>` blocks — the text the
-        // user would see in a chat bubble, without any protocol tags.
-        // This is usually what scripts want when they ask for "the
-        // model's answer" rather than the raw tagged wire format.
-        //
-        // Always emit this field: when the model didn't use the tagged
-        // protocol (or emitted plain text without tags) fall back to the
-        // raw text so callers have a single reliable key for "the
-        // answer". Keeping the field unconditional avoids the footgun
-        // where `.prose` silently becomes `nil` the first time a provider
-        // drifts from the protocol.
+        // Always emit `prose` (fall back to raw text) so callers have a
+        // single reliable "the answer" key regardless of whether the model
+        // used the tagged protocol.
         let prose = if parse.prose.is_empty() {
             result.text.clone()
         } else {
@@ -333,14 +309,8 @@ pub(crate) fn vm_build_llm_result(
         dict.insert("transcript".to_string(), transcript);
     }
 
-    // `visible_text` is the prose the model wrote — the same text the user
-    // would see in a chat bubble — with any fenceless TS tool-call
-    // expressions stripped out. Tool calls are structured data in the
-    // `tool_calls` field and should never appear as narration. When the
-    // caller did not supply a tool registry OR the model used provider-
-    // native tool calls (so the text contains no call expressions), this
-    // equals `text` verbatim. Agent_loop applies the same semantics on its
-    // final iteration — the two interfaces are intentionally symmetric.
+    // Prose with fenceless TS tool-call expressions stripped. Agent_loop
+    // applies the same semantics on its final iteration.
     let visible_text = if tools_val.is_some() && result.tool_calls.is_empty() {
         let parse_result = super::tools::parse_text_tool_calls_with_tools(&result.text, tools_val);
         parse_result.prose
@@ -365,15 +335,9 @@ pub(crate) fn vm_build_llm_result(
     VmValue::Dict(Rc::new(dict))
 }
 
-// =============================================================================
-// Core LLM call with all options
-// =============================================================================
-
-/// Execute an LLM call. Internally always uses the streaming path with a
-/// discarding receiver so all callers go through a single code path with
-/// consistent HTTP status handling, error detection, and provider semantics.
-/// Callers that don't care about token-level deltas just let the channel
-/// buffer and drop the receiver on return — negligible cost.
+/// Execute an LLM call. Always goes through the streaming path with a
+/// discarding receiver so all callers share one code path for status/error
+/// handling; non-streaming callers just drop the receiver.
 pub(crate) async fn vm_call_llm_full(opts: &LlmCallOptions) -> Result<LlmResult, VmError> {
     let (delta_tx, _delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     vm_call_llm_full_inner(opts, Some(delta_tx)).await
@@ -438,7 +402,6 @@ async fn vm_call_llm_full_inner_request(
     request: &LlmRequestPayload,
     delta_tx: Option<DeltaSender>,
 ) -> Result<LlmResult, VmError> {
-    // Mock provider: return deterministic response without API call.
     if request.provider == "mock" {
         let result = mock_llm_response(
             &request.messages,
@@ -456,7 +419,6 @@ async fn vm_call_llm_full_inner_request(
     let replay_mode = get_replay_mode();
     let hash = fixture_hash(&request.model, &request.messages, request.system.as_deref());
 
-    // In replay mode, return cached fixture
     if replay_mode == LlmReplayMode::Replay {
         if let Some(result) = load_fixture(&hash) {
             return Ok(result);
@@ -468,8 +430,7 @@ async fn vm_call_llm_full_inner_request(
 
     let result = vm_call_llm_api(request, delta_tx).await;
 
-    // On failure, check for provider fallback chain without carrying the VM
-    // error across the off-thread await boundary.
+    // Surface the error as a String so it can cross the off-thread await.
     let primary_message = result.as_ref().err().map(ToString::to_string);
     let result = match (result, primary_message) {
         (Ok(r), _) => r,
@@ -479,12 +440,10 @@ async fn vm_call_llm_full_inner_request(
         (Err(_), None) => unreachable!("error branch must capture a message"),
     };
 
-    // In record mode, save the fixture
     if replay_mode == LlmReplayMode::Record {
         save_fixture(&hash, &result);
     }
 
-    // Accumulate cost for budget tracking
     super::cost::accumulate_cost(&result.model, result.input_tokens, result.output_tokens)?;
 
     Ok(result)
@@ -911,10 +870,10 @@ fn normalize_openai_message_text(message: &serde_json::Value) -> (String, String
     let raw_text = extract_openai_message_field_as_text(message, &["content"]);
     let reasoning_text =
         extract_openai_message_field_as_text(message, &["reasoning", "reasoning_content"]);
-    // Split `<think>...</think>` blocks out of the content so the agent
-    // loop doesn't interpret reasoning tokens as its own output or try to
-    // parse tool calls inside them. Qwen3/Qwen3.5 emit these inline when
-    // `chat_template_kwargs.enable_thinking` is set.
+    // Qwen3/3.5 emit inline `<think>...</think>` when
+    // `chat_template_kwargs.enable_thinking` is set. Split them out so the
+    // agent loop doesn't treat reasoning as output or parse tool calls
+    // inside them.
     let (mut text, inline_thinking) = split_openai_thinking_blocks(&raw_text);
     let mut extracted_thinking = String::new();
     append_paragraph(&mut extracted_thinking, &reasoning_text);
@@ -1007,8 +966,7 @@ pub(crate) fn classify_http_error(
     retry_after: Option<&str>,
     body: &str,
 ) -> String {
-    // Patterns cover vLLM, OpenAI, Anthropic, and most OpenAI-compatible
-    // servers. Lowercased once for cheap matching.
+    // Patterns cover vLLM, OpenAI, Anthropic, and most OpenAI-compatibles.
     let body_lower = body.to_lowercase();
     let is_context_overflow = body_lower.contains("maximum context length")
         || body_lower.contains("context length")
@@ -1046,17 +1004,11 @@ async fn vm_call_llm_api(
 ) -> Result<LlmResult, VmError> {
     let provider = &opts.provider;
 
-    // Dispatch through the provider registry. The registry is populated at
-    // VM startup by `register_default_providers()`. For providers not in the
-    // registry (e.g. custom config-defined providers), we fall through to
-    // config-based resolution which determines the API style and delegates
-    // to the appropriate transport.
     if super::provider::is_provider_registered(provider) {
         return dispatch_to_registered_provider(opts, delta_tx).await;
     }
 
-    // Fallback for providers not in the registry: resolve via config and
-    // dispatch based on API style (anthropic vs openai-compatible vs ollama).
+    // Fallback for unregistered providers: dispatch by API style.
     let resolved = super::helpers::ResolvedProvider::resolve(provider);
     let is_ollama = provider == "ollama" || resolved.endpoint.contains("/api/chat");
     let is_anthropic = resolved.is_anthropic_style;
@@ -1081,13 +1033,11 @@ async fn dispatch_to_registered_provider(
     opts: &LlmRequestPayload,
     delta_tx: Option<DeltaSender>,
 ) -> Result<LlmResult, VmError> {
-    // Providers are zero-cost unit structs, so we construct them inline
-    // rather than borrowing from the registry (which would conflict with
-    // the RefCell across await points).
+    // Providers are zero-cost unit structs constructed inline to avoid
+    // RefCell-across-await conflicts on a shared registry.
     let provider = &opts.provider;
     let resolved = super::helpers::ResolvedProvider::resolve(provider);
 
-    // Build a concrete provider and dispatch via trait methods.
     let mock = super::providers::MockProvider;
     if mock.is_mock() && provider == mock.name() {
         return mock.chat_impl(opts, delta_tx).await;
@@ -1103,7 +1053,6 @@ async fn dispatch_to_registered_provider(
         return anthropic.chat_impl(opts, delta_tx).await;
     }
 
-    // Default: OpenAI-compatible
     super::providers::OpenAiCompatibleProvider::new(provider.to_string())
         .chat_impl(opts, delta_tx)
         .await
@@ -1140,7 +1089,6 @@ pub(crate) async fn vm_call_llm_api_with_body(
         wants_streaming || is_ollama
     };
 
-    // Merge provider-specific overrides
     if let Some(ref overrides) = opts.provider_overrides {
         if let Some(obj) = overrides.as_object() {
             for (k, v) in obj {
@@ -1164,14 +1112,12 @@ pub(crate) async fn vm_call_llm_api_with_body(
         }
     }
 
-    // Reuse shared clients for connection pooling and TLS session caching.
     let client = if use_stream_transport {
         super::shared_streaming_client().clone()
     } else {
         super::shared_blocking_client().clone()
     };
 
-    // Send request
     let req = client
         .post(resolved.url())
         .header("Content-Type", "application/json")
@@ -1198,7 +1144,7 @@ pub(crate) async fn vm_call_llm_api_with_body(
             } else {
                 "unknown"
             };
-            // Include Debug repr for "unknown" errors to surface the inner cause
+            // "unknown" uses Debug repr to surface the inner cause.
             let detail = if kind == "unknown" {
                 format!("{provider} stream error ({kind}): {e:?}")
             } else {
@@ -1234,11 +1180,9 @@ pub(crate) async fn vm_call_llm_api_with_body(
         ))))
     })?;
 
-    // Critical: check HTTP status BEFORE attempting to parse the body as an
-    // LLM response. Previously this path went straight to `.json().await` and
-    // silently garbled error responses — so a vLLM "prompt too long for
-    // model" 400 came back as an empty/malformed parse result and the agent
-    // loop kept retrying against the same oversized context.
+    // Check HTTP status BEFORE parsing the body as LLM response, or error
+    // responses (e.g. vLLM "prompt too long" 400) silently become malformed
+    // parse results and the agent loop retries against the same bad context.
     if !response.status().is_success() {
         let status = response.status();
         let retry_after = response
@@ -1456,8 +1400,7 @@ fn extract_cache_read_tokens(usage: &serde_json::Value) -> i64 {
     {
         return n;
     }
-    // Some OpenRouter responses nest under usage.cache_read_tokens or
-    // usage.cached_prompt_tokens — be permissive.
+    // OpenRouter variants: cache_read_tokens / cached_prompt_tokens.
     if let Some(n) = usage.get("cache_read_tokens").and_then(|v| v.as_i64()) {
         return n;
     }
@@ -1499,7 +1442,6 @@ async fn vm_call_llm_api_sse_from_response(
     let mut tool_calls: Vec<serde_json::Value> = Vec::new();
     let mut blocks: Vec<serde_json::Value> = Vec::new();
 
-    // Anthropic tool-use streaming state
     struct ToolBlock {
         id: String,
         name: String,
@@ -1512,17 +1454,14 @@ async fn vm_call_llm_api_sse_from_response(
     let mut cache_read_tokens: i64 = 0;
     let mut cache_write_tokens: i64 = 0;
 
-    // OpenAI tool-call streaming state
     let mut oai_tool_map: std::collections::HashMap<u64, (String, String, String)> =
         std::collections::HashMap::new();
-    // OpenAI-compatible inline `<think>...</think>` splitter (qwen3/qwen3.5
-    // via vLLM's chat_template_kwargs.enable_thinking). Strips thinking
-    // tokens out of the visible delta stream so downstream consumers (tool
-    // call parser, progress UI) only see the real response.
+    // Qwen3/3.5 via vLLM emit inline `<think>...</think>`. Strip these
+    // out of the visible delta stream so the tool-call parser / progress
+    // UI only see the real response.
     let mut oai_thinking_splitter = ThinkingStreamSplitter::new();
 
     while let Ok(Some(line)) = lines.next_line().await {
-        // SSE lines are prefixed with "data: "
         let data = if let Some(d) = line.strip_prefix("data: ") {
             d
         } else {
@@ -1625,7 +1564,6 @@ async fn vm_call_llm_api_sse_from_response(
                 _ => {}
             }
         } else {
-            // OpenAI-style streaming
             let choice = &json["choices"][0];
             let delta = &choice["delta"];
 
@@ -1644,16 +1582,15 @@ async fn vm_call_llm_api_sse_from_response(
                 blocks.push(serde_json::json!({"type": "reasoning", "text": reasoning_delta, "visibility": "private"}));
             }
 
-            // Capture finish_reason — only on first occurrence. OpenRouter
-            // can send duplicate finish_reason chunks (upstream bug
-            // qwen-code#2402) which truncate in-progress tool calls.
+            // Only capture finish_reason once; OpenRouter can send
+            // duplicates (qwen-code#2402) that truncate in-progress tool
+            // calls.
             if stop_reason.is_none() {
                 if let Some(fr) = choice["finish_reason"].as_str() {
                     stop_reason = Some(fr.to_string());
                 }
             }
 
-            // Tool calls
             if let Some(tcs) = delta["tool_calls"].as_array() {
                 for tc in tcs {
                     let idx = tc["index"].as_u64().unwrap_or(0);
@@ -1668,7 +1605,6 @@ async fn vm_call_llm_api_sse_from_response(
                 }
             }
 
-            // Usage in final chunk (OpenAI-style)
             if let Some(usage) = json.get("usage") {
                 if let Some(n) = usage["prompt_tokens"].as_i64() {
                     input_tokens = n;
@@ -1688,7 +1624,6 @@ async fn vm_call_llm_api_sse_from_response(
         }
     }
 
-    // Finalize OpenAI tool calls
     for (_, (id, name, args_str)) in oai_tool_map {
         let args = serde_json::from_str::<serde_json::Value>(&args_str)
             .unwrap_or(serde_json::Value::Object(Default::default()));
@@ -1698,9 +1633,6 @@ async fn vm_call_llm_api_sse_from_response(
         blocks.push(serde_json::json!({"type": "tool_call", "id": id, "name": name, "arguments": args, "visibility": "internal"}));
     }
 
-    // Flush any carried-over characters from the thinking splitter and merge
-    // its accumulated thinking into the primary thinking_text (which is used
-    // by both Anthropic and OpenAI-compatible response shapes).
     let final_visible = oai_thinking_splitter.flush();
     if !final_visible.is_empty() {
         text.push_str(&final_visible);
@@ -1747,16 +1679,10 @@ async fn vm_call_llm_api_sse_from_response(
     })
 }
 
-// =============================================================================
-// Provider context window discovery
-// =============================================================================
-//
-// Many OpenAI-compatible servers (vLLM, text-generation-inference, LocalAI,
-// llama.cpp server, etc.) expose the model's actual `max_model_len` via
-// `GET /v1/models`. Harn can query that once and use it to adapt
-// auto-compaction thresholds to the real window instead of assuming a
-// hardcoded 80K. This prevents the "server silently truncates the prompt"
-// failure mode where the agent loses older turns without knowing.
+// OpenAI-compatible servers (vLLM, text-generation-inference, LocalAI,
+// llama.cpp server) expose `max_model_len` via `GET /v1/models`. Query it
+// once so auto-compaction thresholds match the real window instead of
+// assuming 80K and letting the server silently truncate older turns.
 
 use std::collections::HashMap as StdHashMap;
 use std::sync::{Mutex as StdMutex, OnceLock as StdOnceLock};
@@ -1806,11 +1732,9 @@ pub async fn fetch_provider_max_context(
 /// provider API doesn't expose this information (Anthropic, OpenAI).
 /// Returns `None` for unknown models — callers fall through to API discovery.
 fn known_model_context_window(model: &str) -> Option<usize> {
-    // Anthropic Claude models (all current Claude 3+ models have 200K)
     if model.starts_with("claude-") {
         return Some(200_000);
     }
-    // OpenAI models
     if model.starts_with("gpt-4o") || model.starts_with("gpt-4.1") || model.starts_with("chatgpt-")
     {
         return Some(128_000);
@@ -1830,7 +1754,6 @@ fn known_model_context_window(model: &str) -> Option<usize> {
     if model.starts_with("o1") || model.starts_with("o3") || model.starts_with("o4") {
         return Some(200_000);
     }
-    // Google Gemini models
     if model.contains("gemini-2") || model.contains("gemini-1.5") {
         return Some(1_000_000);
     }
@@ -1846,8 +1769,8 @@ async fn fetch_ollama_context_window(model: &str, base_url: &str) -> Option<usiz
     let client = super::shared_utility_client();
     let url = format!("{}/api/show", base_url.trim_end_matches('/'));
     let body = serde_json::json!({"name": model});
-    // Ollama is typically local — use a tight per-request timeout so we fail
-    // fast when it isn't running, while still reusing the shared connection pool.
+    // Ollama is typically local — tight per-request timeout so we fail
+    // fast when it isn't running.
     let response = client
         .post(&url)
         .json(&body)
@@ -1859,7 +1782,6 @@ async fn fetch_ollama_context_window(model: &str, base_url: &str) -> Option<usiz
         return None;
     }
     let json: serde_json::Value = response.json().await.ok()?;
-    // Ollama returns model_info.context_length or parameters with num_ctx
     if let Some(n) = json
         .pointer("/model_info/general.context_length")
         .or_else(|| json.pointer("/model_info/context_length"))
@@ -1867,15 +1789,13 @@ async fn fetch_ollama_context_window(model: &str, base_url: &str) -> Option<usiz
     {
         return Some(n as usize);
     }
-    // Also check OLLAMA_NUM_CTX env override — user may have configured
-    // a larger context window for this Ollama instance.
+    // OLLAMA_NUM_CTX env override for a user-configured context window.
     if let Ok(val) = std::env::var("OLLAMA_NUM_CTX") {
         if let Ok(n) = val.parse::<usize>() {
             return Some(n);
         }
     }
-    // Ollama's default context is model-dependent but commonly 2048-8192.
-    // We return None to let the caller use its default threshold.
+    // Let caller use its default threshold (Ollama defaults vary 2048-8192).
     None
 }
 
@@ -1939,17 +1859,14 @@ async fn fetch_provider_max_context_uncached(
     api_key: &str,
     base_url: &str,
 ) -> Option<usize> {
-    // 1. Check hardcoded known models first (Anthropic, OpenAI, Gemini).
     if let Some(n) = known_model_context_window(model) {
         return Some(n);
     }
 
-    // 2. Ollama has its own model info endpoint.
     if provider == "ollama" {
         return fetch_ollama_context_window(model, base_url).await;
     }
 
-    // 3. OpenAI-compatible providers: query /models endpoint.
     let is_openai_compatible = matches!(
         provider,
         "local"
@@ -2004,7 +1921,7 @@ pub(crate) async fn adapt_auto_compact_to_provider(
     };
     let effective = effective_threshold_from_max_context(max_ctx);
 
-    // Tier-2 hard limit: derived from actual context window.
+    // Tier-2 hard limit comes from the actual context window.
     if !user_specified_hard_limit {
         ac.hard_limit_tokens = Some(effective);
     } else if let Some(ref mut hl) = ac.hard_limit_tokens {
@@ -2014,16 +1931,13 @@ pub(crate) async fn adapt_auto_compact_to_provider(
         }
     }
 
-    // Tier-1: keep the configured lightweight threshold, but clamp down
-    // if it exceeds the hard limit (which would make tier-1 pointless).
+    // Tier-1: clamp to the hard limit (which would make tier-1 pointless)
+    // or to 65% of max context, whichever is lower.
     if user_specified_threshold {
         if ac.token_threshold > effective {
             ac.token_threshold = effective;
         }
     } else {
-        // Default tier-1 threshold: either the configured default (48K)
-        // or 65% of max context, whichever is lower. This keeps the full
-        // conversation visible until we're genuinely running low on headroom.
         let tier1_from_context = (max_ctx * 13) / 20; // 65%
         if ac.token_threshold > tier1_from_context {
             ac.token_threshold = tier1_from_context;
@@ -2052,7 +1966,7 @@ pub(crate) fn split_openai_thinking_blocks(raw: &str) -> (String, String) {
                 thinking.push_str(&after_tag[..end]);
                 rest = &after_tag[end + "</think>".len()..];
             } else {
-                // Unclosed <think> — treat everything after as thinking and stop.
+                // Unclosed <think>: treat everything after as thinking.
                 thinking.push_str(after_tag);
                 break;
             }
@@ -2061,9 +1975,7 @@ pub(crate) fn split_openai_thinking_blocks(raw: &str) -> (String, String) {
             break;
         }
     }
-    // Trim a single leading newline from visible if we stripped a leading
-    // thinking block — the model often emits `<think>...</think>\nActual`
-    // and we don't want the blank line to linger.
+    // Models emit `<think>...</think>\nActual`; strip the blank line.
     let visible = visible.trim_start_matches('\n').to_string();
     (visible, thinking.trim().to_string())
 }
@@ -2139,8 +2051,8 @@ impl ThinkingStreamSplitter {
                         self.carry.push_str(&combined[cursor..]);
                     } else {
                         let mut split = combined.len() - hold;
-                        // Floor to the nearest char boundary so we never slice
-                        // inside a multi-byte UTF-8 codepoint (e.g. em-dash).
+                        // Floor to char boundary to avoid slicing inside a
+                        // multi-byte UTF-8 codepoint.
                         while split > cursor && !combined.is_char_boundary(split) {
                             split -= 1;
                         }
@@ -2187,7 +2099,6 @@ pub(crate) fn apply_auth_headers(
             _ => req.header("Authorization", format!("Bearer {api_key}")),
         }
     } else {
-        // Unknown provider: default to bearer
         req.header("Authorization", format!("Bearer {api_key}"))
     }
 }
@@ -2231,12 +2142,9 @@ async fn vm_call_llm_api_ndjson_from_response(
             Err(_) => continue,
         };
 
-        // Extract text delta from message.content or message.thinking.
-        // Ollama emits content and thinking as separate streaming channels
-        // for models with reasoning capability (gemma3/gemma4, qwen3, etc.)
-        // — we always set `think: true` in the request so the thinking
-        // tokens are delivered rather than silently dropped. See the
-        // `is_ollama` branch in `vm_call_llm_api` for that flag.
+        // Ollama streams content and thinking as separate channels for
+        // reasoning-capable models (gemma3/4, qwen3, etc.); we always set
+        // `think: true` so thinking tokens aren't dropped.
         let content = json["message"]["content"].as_str().unwrap_or("");
         let thinking = json["message"]["thinking"].as_str().unwrap_or("");
         if !content.is_empty() {
@@ -2257,7 +2165,6 @@ async fn vm_call_llm_api_ndjson_from_response(
             result_model = m.to_string();
         }
 
-        // Final chunk has done=true with token counts
         if json["done"].as_bool() == Some(true) {
             if let Some(n) = json["prompt_eval_count"].as_i64() {
                 input_tokens = n;
@@ -2269,7 +2176,6 @@ async fn vm_call_llm_api_ndjson_from_response(
         }
     }
 
-    // Include thinking text in the visible text if the model only produced thinking tokens
     let thinking = if thinking_text.is_empty() {
         None
     } else {
@@ -2279,14 +2185,12 @@ async fn vm_call_llm_api_ndjson_from_response(
         text = thinking_text;
     }
 
-    // Guard against upstream parser bugs that report generated tokens but
-    // deliver no visible content. Observed with `gemma4:26b` + ollama's
-    // server-side `PARSER gemma4` on tool-heavy system prompts: the server
-    // claims `eval_count` in the tens, but every streaming delta is empty
-    // and the done chunk's `message.content`/`message.thinking` are both
-    // empty strings. Silently returning an empty text turns the agent loop
-    // into a no-op that burns iterations. Surface this as a hard error so
-    // callers can decide whether to retry, switch models, or abort.
+    // Guard against upstream parser bugs reporting generated tokens with
+    // no visible content. Observed with `gemma4:26b` + ollama's
+    // server-side `PARSER gemma4` on tool-heavy prompts: eval_count is
+    // nonzero but every delta and the done chunk are empty strings.
+    // Silently returning empty text would make the agent loop burn
+    // iterations on a no-op.
     if text.is_empty() && output_tokens > 0 {
         return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
             "ollama model {model} reported eval_count={output_tokens} but delivered no content or thinking — likely a server-side parser bug; try a different model"
@@ -2382,8 +2286,7 @@ mod tests {
             thinking,
             "first\nsecond".replace('\n', "") /* joined with empty */
         );
-        // Tolerate either concatenation strategy: important invariant is
-        // neither block text leaked into visible.
+        // Invariant: neither block text leaked into visible.
         assert!(!visible.contains("first"));
         assert!(!visible.contains("second"));
     }
@@ -2407,8 +2310,6 @@ mod tests {
         assert_eq!(v1, "");
         assert_eq!(v2, "");
         assert_eq!(v3, "");
-        // Visible answer may be partially held as carry — concatenate
-        // everything plus flush to get the full output.
         let combined = format!("{}{}{}{}{}", v1, v2, v3, v4, tail);
         assert_eq!(combined, "visible answer");
         assert_eq!(s.thinking, "reasoning");
@@ -2416,7 +2317,6 @@ mod tests {
 
     #[test]
     fn thinking_stream_splitter_handles_split_tags() {
-        // `<think>` split across deltas: `<thi` + `nk>rest`
         let mut s = ThinkingStreamSplitter::new();
         let v1 = s.push("<thi");
         let v2 = s.push("nk>inside</thi");
@@ -2758,8 +2658,6 @@ mod tests {
         });
     }
 
-    // ---- HTTP error classification (v0.5.36 regression coverage) ----
-
     #[test]
     fn classify_tags_vllm_prompt_too_long_as_context_overflow() {
         let msg = classify_http_error(
@@ -2810,9 +2708,8 @@ mod tests {
 
     #[test]
     fn classify_429_with_context_body_still_prefers_context_overflow() {
-        // A provider that returns 429 for context-overflow (seen with some
-        // OpenAI-compat servers) should classify by body, not by status,
-        // because the caller's reaction differs (compact vs. back off).
+        // Some OpenAI-compat servers return 429 for context overflow;
+        // classify by body because caller reaction differs (compact vs back off).
         let msg = classify_http_error(
             "local",
             reqwest::StatusCode::TOO_MANY_REQUESTS,
@@ -2841,13 +2738,9 @@ mod tests {
             .set_nonblocking(true)
             .expect("set listener nonblocking");
         let handle = std::thread::spawn(move || {
-            // Accept window intentionally generous (was 3s and proved flaky
-            // under parallel-test load on CI / cold macOS workers — the
-            // listener would exit before reqwest established the connection
-            // so the client saw a refused connect and the assertion fired
-            // against a transport error instead of the HTTP 500 payload).
-            // 15s matches the `.config/nextest.toml` slow-test threshold
-            // and still falls well inside the 60s hard termination cap.
+            // 15s accept window: shorter windows were flaky under parallel
+            // CI load (listener exiting before reqwest connects caused
+            // transport errors instead of the tested HTTP 500 payload).
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
             let (mut stream, _) = loop {
                 match listener.accept() {
@@ -2861,8 +2754,7 @@ mod tests {
                     Err(_) => return,
                 }
             };
-            // Once we have a client, use a bounded read/write so a stuck
-            // client can't wedge the suite either.
+            // Bounded read/write so a stuck client can't wedge the suite.
             stream
                 .set_nonblocking(false)
                 .expect("restore blocking mode on accepted stream");
@@ -2909,7 +2801,6 @@ mod tests {
             local
                 .run_until(async {
                     let mut opts = base_opts("local");
-                    // Drop tools/schemas so the request body stays minimal.
                     opts.tools = None;
                     opts.native_tools = None;
                     opts.tool_choice = None;
@@ -2918,9 +2809,7 @@ mod tests {
                     opts.output_schema = None;
                     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
                     let call = tokio::time::timeout(
-                        // Must stay strictly less than the stub's 15s accept
-                        // window so we always fail with the actual HTTP 500
-                        // classification instead of a generic timeout.
+                        // Must stay under the stub's 15s accept window.
                         std::time::Duration::from_secs(12),
                         vm_call_llm_full_streaming_offthread(&opts, tx),
                     )
@@ -2937,7 +2826,6 @@ mod tests {
             Some(v) => unsafe { std::env::set_var("LOCAL_LLM_BASE_URL", v) },
             None => unsafe { std::env::remove_var("LOCAL_LLM_BASE_URL") },
         }
-        // Bounded join: the stub's internal deadline guarantees this returns.
         let _ = server.join();
         err
     }

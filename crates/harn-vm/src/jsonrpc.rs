@@ -1,7 +1,4 @@
 //! Shared JSON-RPC 2.0 message construction helpers.
-//!
-//! Used by bridge.rs, mcp_server.rs, acp.rs, and a2a.rs to avoid
-//! duplicating the `"jsonrpc": "2.0"` boilerplate (~40 call sites).
 
 /// Build a JSON-RPC 2.0 request object.
 #[inline]

@@ -81,7 +81,7 @@ impl Parser {
         self.skip_newlines();
 
         while !self.is_at_end() {
-            // Skip any stray closing braces at top level (after recovery)
+            // Recovery may leave us pointing at a stray `}` at top level; skip it.
             if self.check(&TokenKind::RBrace) {
                 self.advance();
                 self.skip_newlines();
@@ -174,8 +174,6 @@ impl Parser {
         self.parse_expression()
     }
 
-    // --- Declarations ---
-
     fn parse_pipeline_with_pub(&mut self, is_pub: bool) -> Result<SNode, ParserError> {
         let start = self.current_span();
         self.consume(&TokenKind::Pipeline, "pipeline")?;
@@ -216,9 +214,9 @@ impl Parser {
         let start = self.current_span();
         self.consume(&TokenKind::Import, "import")?;
 
-        // Check for selective import: import { foo, bar, } from "module"
+        // Selective import: `import { foo, bar } from "module"`.
         if self.check(&TokenKind::LBrace) {
-            self.advance(); // skip {
+            self.advance();
             self.skip_newlines();
             let mut names = Vec::new();
             while !self.is_at_end() && !self.check(&TokenKind::RBrace) {
@@ -257,8 +255,6 @@ impl Parser {
         }
         Err(self.error("import path string"))
     }
-
-    // --- Statements ---
 
     fn parse_block(&mut self) -> Result<Vec<SNode>, ParserError> {
         let mut stmts = Vec::new();
@@ -414,8 +410,8 @@ impl Parser {
         let start = self.current_span();
         self.consume(&TokenKind::For, "for")?;
         let pattern = if self.check(&TokenKind::LParen) {
-            // Pair destructuring: `for (a, b) in ...`
-            self.advance(); // consume (
+            // `for (a, b) in ...` pair destructuring.
+            self.advance();
             let first = self.consume_identifier("pair pattern element")?;
             self.consume(&TokenKind::Comma, ",")?;
             let second = self.consume_identifier("pair pattern element")?;
@@ -444,14 +440,11 @@ impl Parser {
     fn parse_binding_pattern(&mut self) -> Result<BindingPattern, ParserError> {
         self.skip_newlines();
         if self.check(&TokenKind::LBrace) {
-            // Dict destructuring: { key, key: alias, ...rest }
-            self.advance(); // consume {
+            self.advance();
             let mut fields = Vec::new();
             while !self.is_at_end() && !self.check(&TokenKind::RBrace) {
-                // Check for rest pattern: ...ident
                 if self.check(&TokenKind::Dot) {
-                    // Consume three dots
-                    self.advance(); // .
+                    self.advance();
                     self.consume(&TokenKind::Dot, ".")?;
                     self.consume(&TokenKind::Dot, ".")?;
                     let name = self.consume_identifier("rest variable name")?;
@@ -461,18 +454,18 @@ impl Parser {
                         is_rest: true,
                         default_value: None,
                     });
-                    // Rest must be last
+                    // Rest pattern must be the last element.
                     break;
                 }
                 let key = self.consume_identifier("field name")?;
                 let alias = if self.check(&TokenKind::Colon) {
-                    self.advance(); // consume :
+                    self.advance();
                     Some(self.consume_identifier("alias name")?)
                 } else {
                     None
                 };
                 let default_value = if self.check(&TokenKind::Assign) {
-                    self.advance(); // consume =
+                    self.advance();
                     Some(Box::new(self.parse_expression()?))
                 } else {
                     None
@@ -490,13 +483,11 @@ impl Parser {
             self.consume(&TokenKind::RBrace, "}")?;
             Ok(BindingPattern::Dict(fields))
         } else if self.check(&TokenKind::LBracket) {
-            // List destructuring: [ name, name, ...rest ]
-            self.advance(); // consume [
+            self.advance();
             let mut elements = Vec::new();
             while !self.is_at_end() && !self.check(&TokenKind::RBracket) {
-                // Check for rest pattern: ...ident
                 if self.check(&TokenKind::Dot) {
-                    self.advance(); // .
+                    self.advance();
                     self.consume(&TokenKind::Dot, ".")?;
                     self.consume(&TokenKind::Dot, ".")?;
                     let name = self.consume_identifier("rest variable name")?;
@@ -505,12 +496,11 @@ impl Parser {
                         is_rest: true,
                         default_value: None,
                     });
-                    // Rest must be last
                     break;
                 }
                 let name = self.consume_identifier("element name")?;
                 let default_value = if self.check(&TokenKind::Assign) {
-                    self.advance(); // consume =
+                    self.advance();
                     Some(Box::new(self.parse_expression()?))
                 } else {
                     None
@@ -527,7 +517,6 @@ impl Parser {
             self.consume(&TokenKind::RBracket, "]")?;
             Ok(BindingPattern::List(elements))
         } else {
-            // Simple identifier
             let name = self.consume_identifier("variable name or destructuring pattern")?;
             Ok(BindingPattern::Identifier(name))
         }
@@ -543,7 +532,6 @@ impl Parser {
         let mut arms = Vec::new();
         while !self.is_at_end() && !self.check(&TokenKind::RBrace) {
             let pattern = self.parse_expression()?;
-            // Optional guard: `pattern if condition -> { body }`
             let guard = if self.check(&TokenKind::If) {
                 self.advance();
                 Some(Box::new(self.parse_expression()?))
@@ -622,8 +610,6 @@ impl Parser {
         let start = self.current_span();
         self.consume(&TokenKind::Parallel, "parallel")?;
 
-        // Determine mode: `parallel each EXPR { ... }`, `parallel settle EXPR { ... }`,
-        // or `parallel EXPR { ... }` (count mode).
         let mode = if self.check_identifier("each") {
             self.advance();
             ParallelMode::Each
@@ -636,10 +622,8 @@ impl Parser {
 
         let expr = self.parse_expression()?;
 
-        // Optional trailing `with { max_concurrent: N, ... }` option
-        // block. Parsed before the body `{` so the two braces don't
-        // collide. Only `max_concurrent` is accepted today; unknown
-        // keys surface as a parser error.
+        // Parse the optional `with { ... }` block before the body's `{` so the
+        // two braces don't collide. Only `max_concurrent` is accepted today.
         let options = if self.check_identifier("with") {
             self.advance();
             self.consume(&TokenKind::LBrace, "{")?;
@@ -695,15 +679,14 @@ impl Parser {
 
         self.consume(&TokenKind::LBrace, "{")?;
 
-        // Optional closure parameter: { item ->
         let mut variable = None;
         self.skip_newlines();
         if let Some(tok) = self.current() {
             if let TokenKind::Identifier(name) = &tok.kind {
                 if self.peek_kind() == Some(&TokenKind::Arrow) {
                     let name = name.clone();
-                    self.advance(); // skip identifier
-                    self.advance(); // skip ->
+                    self.advance();
+                    self.advance();
                     variable = Some(name);
                 }
             }
@@ -777,12 +760,10 @@ impl Parser {
         self.consume(&TokenKind::RBrace, "}")?;
         self.skip_newlines();
 
-        // Parse optional catch block
         let has_catch = self.check(&TokenKind::Catch);
         let (error_var, error_type, catch_body) = if has_catch {
             self.advance();
             let (ev, et) = if self.check(&TokenKind::LParen) {
-                // catch (e) { ... } or catch (e: Type) { ... }
                 self.advance();
                 let name = self.consume_identifier("error variable")?;
                 let ty = self.try_parse_type_annotation()?;
@@ -792,7 +773,6 @@ impl Parser {
                 self.current().map(|t| &t.kind),
                 Some(TokenKind::Identifier(_))
             ) {
-                // catch e { ... } (no parens)
                 let name = self.consume_identifier("error variable")?;
                 (Some(name), None)
             } else {
@@ -808,7 +788,6 @@ impl Parser {
 
         self.skip_newlines();
 
-        // Parse optional finally block
         let finally_body = if self.check(&TokenKind::Finally) {
             self.advance();
             self.consume(&TokenKind::LBrace, "{")?;
@@ -819,7 +798,7 @@ impl Parser {
             None
         };
 
-        // If no catch or finally, this is a try-expression (returns Result)
+        // Bare `try { ... }` with neither catch nor finally is a try-expression returning Result.
         if !has_catch && finally_body.is_none() {
             return Ok(spanned(
                 Node::TryExpr { body },
@@ -851,7 +830,7 @@ impl Parser {
 
         while !self.is_at_end() && !self.check(&TokenKind::RBrace) {
             self.skip_newlines();
-            // Check for "timeout" (contextual keyword)
+            // `timeout` and `default` are contextual keywords (not reserved tokens).
             if let Some(tok) = self.current() {
                 if let TokenKind::Identifier(ref id) = tok.kind {
                     if id == "timeout" {
@@ -875,7 +854,6 @@ impl Parser {
                     }
                 }
             }
-            // Regular case: variable from channel { body }
             let variable = self.consume_identifier("select case variable")?;
             self.consume(&TokenKind::From, "from")?;
             let channel = self.parse_expression()?;
@@ -914,9 +892,8 @@ impl Parser {
         self.consume(&TokenKind::Fn, "fn")?;
         let name = self.consume_identifier("function name")?;
 
-        // Optional generic type parameters: fn name<T, U>(...)
         let type_params = if self.check(&TokenKind::Lt) {
-            self.advance(); // skip <
+            self.advance();
             self.parse_type_param_list()?
         } else {
             Vec::new()
@@ -925,7 +902,6 @@ impl Parser {
         self.consume(&TokenKind::LParen, "(")?;
         let params = self.parse_typed_param_list()?;
         self.consume(&TokenKind::RParen, ")")?;
-        // Optional return type: -> type
         let return_type = if self.check(&TokenKind::Arrow) {
             self.advance();
             Some(self.parse_type_expr()?)
@@ -933,7 +909,6 @@ impl Parser {
             None
         };
 
-        // Optional where clause: where T: bound, U: bound
         let where_clauses = self.parse_where_clauses()?;
 
         self.consume(&TokenKind::LBrace, "{")?;
@@ -962,7 +937,6 @@ impl Parser {
         let params = self.parse_typed_param_list()?;
         self.consume(&TokenKind::RParen, ")")?;
 
-        // Optional return type: -> type
         let return_type = if self.check(&TokenKind::Arrow) {
             self.advance();
             Some(self.parse_type_expr()?)
@@ -972,20 +946,18 @@ impl Parser {
 
         self.consume(&TokenKind::LBrace, "{")?;
 
-        // Check for optional `description "..."` metadata before the body.
+        // Optional `description "..."` metadata preceding the tool body.
         self.skip_newlines();
         let mut description = None;
         if let Some(TokenKind::Identifier(id)) = self.current_kind().cloned() {
             if id == "description" {
-                // Peek ahead to see if next non-newline token is a string literal
                 let saved_pos = self.pos;
-                self.advance(); // consume "description"
+                self.advance();
                 self.skip_newlines();
                 if let Some(TokenKind::StringLiteral(s)) = self.current_kind().cloned() {
                     description = Some(s);
-                    self.advance(); // consume the string literal
+                    self.advance();
                 } else {
-                    // Not a description metadata, rewind
                     self.pos = saved_pos;
                 }
             }
@@ -1217,7 +1189,6 @@ impl Parser {
         let start = self.current_span();
         self.consume(&TokenKind::Guard, "guard")?;
         let condition = self.parse_expression()?;
-        // Consume "else" — we reuse the Else keyword
         self.consume(&TokenKind::Else, "else")?;
         self.consume(&TokenKind::LBrace, "{")?;
         let else_body = self.parse_block()?;
@@ -1308,14 +1279,12 @@ impl Parser {
         ))
     }
 
-    // --- Expressions (precedence climbing) ---
-
     fn parse_expression_statement(&mut self) -> Result<SNode, ParserError> {
         let start = self.current_span();
         let expr = self.parse_expression()?;
 
-        // Check for assignment or compound assignment on valid targets:
-        // identifier, property access (obj.field), subscript access (obj[key])
+        // Only identifiers, property accesses, and subscript accesses are valid
+        // assignment targets.
         let is_assignable = matches!(
             expr.node,
             Node::Identifier(_) | Node::PropertyAccess { .. } | Node::SubscriptAccess { .. }
@@ -1430,13 +1399,8 @@ impl Parser {
         ))
     }
 
-    // Nil-coalescing `??` binds tighter than arithmetic and comparison
-    // operators but looser than `* / % **`. This matches the intuition users
-    // reach for when writing `xs?.count ?? 0 > 0` or `xs[xs?.count ?? 0 - 1]`
-    // — both parse as `(xs?.count ?? 0) <op> rhs`. The previous placement
-    // above `parse_logical_or` caused `?? 0 > 0` to parse as `?? (0 > 0)`
-    // which silently broke correctness in ~118 call sites in downstream
-    // pipeline libraries.
+    // `??` binds tighter than arithmetic/comparison but looser than `* / % **`,
+    // so `xs?.count ?? 0 > 0` parses as `(xs?.count ?? 0) > 0`.
     fn parse_nil_coalescing(&mut self) -> Result<SNode, ParserError> {
         let mut left = self.parse_multiplicative()?;
         while self.check(&TokenKind::NilCoal) {
@@ -1553,12 +1517,11 @@ impl Parser {
                     Span::merge(start, self.prev_span()),
                 );
             } else if self.check_identifier("not") {
-                // Look ahead for "not in"
                 let saved = self.pos;
-                self.advance(); // consume "not"
+                self.advance();
                 if self.check(&TokenKind::In) {
                     let start = left.span;
-                    self.advance(); // consume "in"
+                    self.advance();
                     let right = self.parse_additive()?;
                     left = spanned(
                         Node::BinaryOp {
@@ -1732,13 +1695,10 @@ impl Parser {
                 let start = expr.span;
                 self.advance();
 
-                // Check for slice vs subscript:
-                // [:end] — slice with no start
-                // [start:end] or [start:] — slice with start
-                // [index] — normal subscript
+                // Disambiguate `[:end]` / `[start:end]` / `[start:]` slices from
+                // `[index]` subscript access.
                 if self.check(&TokenKind::Colon) {
-                    // [:end] or [:]
-                    self.advance(); // consume ':'
+                    self.advance();
                     let end_expr = if self.check(&TokenKind::RBracket) {
                         None
                     } else {
@@ -1756,8 +1716,7 @@ impl Parser {
                 } else {
                     let index = self.parse_expression()?;
                     if self.check(&TokenKind::Colon) {
-                        // [start:end] or [start:]
-                        self.advance(); // consume ':'
+                        self.advance();
                         let end_expr = if self.check(&TokenKind::RBracket) {
                             None
                         } else {
@@ -1816,8 +1775,8 @@ impl Parser {
                     );
                 }
             } else if self.check(&TokenKind::Question) {
-                // Distinguish postfix try operator (expr?) from ternary (expr ? a : b).
-                // If the token after ? could start a ternary branch, leave it for parse_ternary.
+                // Postfix try `expr?` vs ternary `expr ? a : b`: if the next token
+                // could start a ternary branch, let parse_ternary handle the `?`.
                 let next_pos = self.pos + 1;
                 let is_ternary = self.tokens.get(next_pos).is_some_and(|t| {
                     matches!(
@@ -1842,7 +1801,7 @@ impl Parser {
                     break;
                 }
                 let start = expr.span;
-                self.advance(); // consume ?
+                self.advance();
                 expr = spanned(
                     Node::TryOperator {
                         operand: Box::new(expr),
@@ -1958,10 +1917,8 @@ impl Parser {
             TokenKind::Try => self.parse_try_catch(),
             TokenKind::Match => self.parse_match(),
             TokenKind::Fn => self.parse_fn_expr(),
-            // Heredoc-style `<<TAG ... TAG` is only valid inside LLM
-            // tool-call argument JSON (see crates/harn-vm/src/llm/tools.rs).
-            // In source-position expressions, point the author at
-            // triple-quoted `"""..."""` strings.
+            // Heredoc `<<TAG ... TAG` is only valid inside LLM tool-call JSON;
+            // in source-position expressions, redirect authors to triple-quoted strings.
             TokenKind::Lt
                 if matches!(self.peek_kind(), Some(&TokenKind::Lt))
                     && matches!(self.peek_kind_at(2), Some(TokenKind::Identifier(_))) =>
@@ -1980,9 +1937,8 @@ impl Parser {
         }
     }
 
-    /// Parse an anonymous function expression: `fn(params) { body }`
-    /// Produces a Closure node with `fn_syntax: true` so the formatter
-    /// can round-trip the original syntax.
+    /// Anonymous function `fn(params) { body }`. Sets `fn_syntax: true` on the
+    /// Closure so the formatter can round-trip the original syntax.
     fn parse_fn_expr(&mut self) -> Result<SNode, ParserError> {
         let start = self.current_span();
         self.consume(&TokenKind::Fn, "fn")?;
@@ -2021,13 +1977,12 @@ impl Parser {
         self.skip_newlines();
 
         while !self.is_at_end() && !self.check(&TokenKind::RBracket) {
-            // Check for spread: ...expr
             if self.check(&TokenKind::Dot) {
                 let saved_pos = self.pos;
-                self.advance(); // first .
+                self.advance();
                 if self.check(&TokenKind::Dot) {
-                    self.advance(); // second .
-                    self.consume(&TokenKind::Dot, ".")?; // third .
+                    self.advance();
+                    self.consume(&TokenKind::Dot, ".")?;
                     let spread_start = self.tokens[saved_pos].span;
                     let expr = self.parse_expression()?;
                     elements.push(spanned(
@@ -2035,7 +1990,6 @@ impl Parser {
                         Span::merge(spread_start, self.prev_span()),
                     ));
                 } else {
-                    // Not a spread, restore and parse as expression
                     self.pos = saved_pos;
                     elements.push(self.parse_expression()?);
                 }
@@ -2061,7 +2015,6 @@ impl Parser {
         self.consume(&TokenKind::LBrace, "{")?;
         self.skip_newlines();
 
-        // Empty dict
         if self.check(&TokenKind::RBrace) {
             self.advance();
             return Ok(spanned(
@@ -2070,7 +2023,7 @@ impl Parser {
             ));
         }
 
-        // Lookahead: scan for -> before } to disambiguate closure from dict.
+        // Scan for `->` before the closing `}` to distinguish closure from dict.
         let saved = self.pos;
         if self.is_closure_lookahead() {
             self.pos = saved;
@@ -2080,8 +2033,7 @@ impl Parser {
         self.parse_dict_literal(start)
     }
 
-    /// Scan forward to determine if this is a closure (has -> before matching }).
-    /// Does not consume tokens (caller saves/restores pos).
+    /// Caller must save/restore `pos`; this advances while scanning.
     fn is_closure_lookahead(&mut self) -> bool {
         let mut depth = 0;
         while !self.is_at_end() {
@@ -2140,14 +2092,13 @@ impl Parser {
         self.skip_newlines();
 
         while !self.is_at_end() && !self.check(&TokenKind::RBrace) {
-            // Check for spread: ...expr
             if self.check(&TokenKind::Dot) {
                 let saved_pos = self.pos;
-                self.advance(); // first .
+                self.advance();
                 if self.check(&TokenKind::Dot) {
-                    self.advance(); // second .
+                    self.advance();
                     if self.check(&TokenKind::Dot) {
-                        self.advance(); // third .
+                        self.advance();
                         let spread_start = self.tokens[saved_pos].span;
                         let expr = self.parse_expression()?;
                         entries.push(DictEntry {
@@ -2164,14 +2115,12 @@ impl Parser {
                         }
                         continue;
                     }
-                    // Not three dots — restore
                     self.pos = saved_pos;
                 } else {
                     self.pos = saved_pos;
                 }
             }
             let key = if self.check(&TokenKind::LBracket) {
-                // Computed key: [expression]
                 self.advance();
                 let k = self.parse_expression()?;
                 self.consume(&TokenKind::RBracket, "]")?;
@@ -2180,7 +2129,6 @@ impl Parser {
                 self.current().map(|t| &t.kind),
                 Some(TokenKind::StringLiteral(_))
             ) {
-                // Quoted string key: {"key": value}
                 let key_span = self.current_span();
                 let name =
                     if let Some(TokenKind::StringLiteral(s)) = self.current().map(|t| &t.kind) {
@@ -2191,7 +2139,6 @@ impl Parser {
                 self.advance();
                 spanned(Node::StringLiteral(name), key_span)
             } else {
-                // Static key: identifier or keyword -> string literal
                 let key_span = self.current_span();
                 let name = self.consume_identifier_or_keyword("dict key")?;
                 spanned(Node::StringLiteral(name), key_span)
@@ -2209,8 +2156,6 @@ impl Parser {
         self.consume(&TokenKind::RBrace, "}")?;
         Ok(entries)
     }
-
-    // --- Helpers ---
 
     /// Parse untyped parameter list (for pipelines, overrides).
     fn parse_param_list(&mut self) -> Result<Vec<String>, ParserError> {
@@ -2250,9 +2195,7 @@ impl Parser {
             } else {
                 break;
             }
-            // Check for rest parameter: ...name
             let is_rest = if self.check(&TokenKind::Dot) {
-                // Peek ahead for two more dots
                 let p1 = self.pos + 1;
                 let p2 = self.pos + 2;
                 let is_ellipsis = p1 < self.tokens.len()
@@ -2260,9 +2203,9 @@ impl Parser {
                     && self.tokens[p1].kind == TokenKind::Dot
                     && self.tokens[p2].kind == TokenKind::Dot;
                 if is_ellipsis {
-                    self.advance(); // skip .
-                    self.advance(); // skip .
-                    self.advance(); // skip .
+                    self.advance();
+                    self.advance();
+                    self.advance();
                     true
                 } else {
                     false
@@ -2325,17 +2268,14 @@ impl Parser {
     }
 
     /// Parse an optional `where T: bound, U: bound` clause.
-    /// Looks for an identifier "where" before `{`.
     fn parse_where_clauses(&mut self) -> Result<Vec<WhereClause>, ParserError> {
-        // Check if the next identifier is "where"
         if let Some(tok) = self.current() {
             if let TokenKind::Identifier(ref id) = tok.kind {
                 if id == "where" {
-                    self.advance(); // skip "where"
+                    self.advance();
                     let mut clauses = Vec::new();
                     loop {
                         self.skip_newlines();
-                        // Stop if we hit `{` or EOF
                         if self.check(&TokenKind::LBrace) || self.is_at_end() {
                             break;
                         }
@@ -2356,13 +2296,12 @@ impl Parser {
         Ok(Vec::new())
     }
 
-    /// Try to parse an optional type annotation (`: type`).
-    /// Returns None if no colon follows.
+    /// Parse an optional `: type` annotation. `None` when no colon follows.
     fn try_parse_type_annotation(&mut self) -> Result<Option<TypeExpr>, ParserError> {
         if !self.check(&TokenKind::Colon) {
             return Ok(None);
         }
-        self.advance(); // skip :
+        self.advance();
         Ok(Some(self.parse_type_expr()?))
     }
 
@@ -2371,11 +2310,10 @@ impl Parser {
         self.skip_newlines();
         let first = self.parse_type_primary()?;
 
-        // Check for union: type | type | ...
         if self.check(&TokenKind::Bar) {
             let mut types = vec![first];
             while self.check(&TokenKind::Bar) {
-                self.advance(); // skip |
+                self.advance();
                 types.push(self.parse_type_primary()?);
             }
             return Ok(TypeExpr::Union(types));
@@ -2384,14 +2322,12 @@ impl Parser {
         Ok(first)
     }
 
-    /// Parse a primary type: named type or shape type.
-    /// Accepts identifiers and certain keywords (nil, bool, etc.) as type names.
+    /// Accepts identifiers and the `nil`/`true`/`false` keywords as type names.
     fn parse_type_primary(&mut self) -> Result<TypeExpr, ParserError> {
         self.skip_newlines();
         if self.check(&TokenKind::LBrace) {
             return self.parse_shape_type();
         }
-        // Accept keyword type names: nil, true, false map to their type names
         if let Some(tok) = self.current() {
             let type_name = match &tok.kind {
                 TokenKind::Nil => {
@@ -2408,9 +2344,8 @@ impl Parser {
                 return Ok(TypeExpr::Named(name));
             }
         }
-        // Function type: fn(T, U) -> R
         if self.check(&TokenKind::Fn) {
-            self.advance(); // skip `fn`
+            self.advance();
             self.consume(&TokenKind::LParen, "(")?;
             let mut params = Vec::new();
             self.skip_newlines();
@@ -2431,13 +2366,11 @@ impl Parser {
             });
         }
         let name = self.consume_identifier("type name")?;
-        // Bottom type
         if name == "never" {
             return Ok(TypeExpr::Never);
         }
-        // Check for generic type parameters: list<int>, dict<string, int>, Result<T, E>
         if self.check(&TokenKind::Lt) {
-            self.advance(); // skip <
+            self.advance();
             let mut type_args = vec![self.parse_type_expr()?];
             while self.check(&TokenKind::Comma) {
                 self.advance();
@@ -2499,13 +2432,12 @@ impl Parser {
         self.skip_newlines();
 
         while !self.is_at_end() && !self.check(&TokenKind::RParen) {
-            // Check for spread: ...expr
             if self.check(&TokenKind::Dot) {
                 let saved_pos = self.pos;
-                self.advance(); // first .
+                self.advance();
                 if self.check(&TokenKind::Dot) {
-                    self.advance(); // second .
-                    self.consume(&TokenKind::Dot, ".")?; // third .
+                    self.advance();
+                    self.consume(&TokenKind::Dot, ".")?;
                     let spread_start = self.tokens[saved_pos].span;
                     let expr = self.parse_expression()?;
                     args.push(spanned(
@@ -2513,7 +2445,6 @@ impl Parser {
                         Span::merge(spread_start, self.prev_span()),
                     ));
                 } else {
-                    // Not a spread, restore and parse as expression
                     self.pos = saved_pos;
                     args.push(self.parse_expression()?);
                 }
@@ -2552,8 +2483,8 @@ impl Parser {
             .unwrap_or(false)
     }
 
-    /// Check for a token kind, skipping past any newlines first.
-    /// Used for binary operators like `||` and `&&` that can span lines.
+    /// Check for `kind`, skipping newlines first; used for binary operators
+    /// like `||` and `&&` that can span lines.
     fn check_skip_newlines(&mut self, kind: &TokenKind) -> bool {
         let saved = self.pos;
         self.skip_newlines();
@@ -2595,8 +2526,8 @@ impl Parser {
             self.advance();
             Ok(name)
         } else {
-            // Produce a clearer error when a reserved keyword is used where
-            // an identifier is expected (e.g. `for tool in list`).
+            // Distinguish reserved-keyword misuse (e.g. `for tool in list`) from
+            // a general unexpected token so the error is actionable.
             let kw_name = harn_lexer::KEYWORDS
                 .iter()
                 .find(|&&kw| kw == tok.kind.to_string());
@@ -2623,7 +2554,6 @@ impl Parser {
             self.advance();
             return Ok(name);
         }
-        // Accept any keyword token as an identifier
         let name = match &tok.kind {
             TokenKind::Pipeline => "pipeline",
             TokenKind::Extends => "extends",

@@ -22,10 +22,8 @@ pub(crate) fn register_crypto_builtins(vm: &mut Vm) {
         }
     });
 
-    // Fast structural hash of any VmValue. Uses a stable FNV-1a-style hash
-    // over the canonical display form so logically-equal values (per `==`)
-    // produce the same 64-bit hash. Intended for bucketing/indexing inside
-    // user code, NOT for cryptographic integrity — use sha256 for that.
+    // Stable FNV-1a over the canonical display form so logically-equal values
+    // hash identically. For bucketing/indexing only — use sha256 for integrity.
     vm.register_builtin("hash_value", |args, _out| {
         let val = args.first().unwrap_or(&VmValue::Nil);
         let key = crate::value::value_structural_hash_key(val);
@@ -53,8 +51,8 @@ pub(crate) fn register_crypto_builtins(vm: &mut Vm) {
     register_hash!(vm, "sha512", sha2::Sha512);
     register_hash!(vm, "sha512_256", sha2::Sha512_256);
 
-    // md-5 0.11 uses digest 0.11 while sha2 0.10 uses digest 0.10, so
-    // md5::Md5 cannot go through the sha2::Digest-based macro above.
+    // md-5 0.11 pins digest 0.11 and sha2 0.10 pins digest 0.10, so md5::Md5
+    // can't share the sha2::Digest-based macro above.
     vm.register_builtin("md5", |args, _out| {
         use md5::Digest as _;
         let val = args.first().map(|a| a.display()).unwrap_or_default();
@@ -125,8 +123,6 @@ mod tests {
         VmValue::String(Rc::from(v))
     }
 
-    // ---- base64 ----
-
     #[test]
     fn base64_round_trip_ascii() {
         let mut vm = vm();
@@ -155,13 +151,10 @@ mod tests {
     #[test]
     fn base64_binary_content() {
         let mut vm = vm();
-        // Encode bytes that include non-UTF8 when decoded
         let encoded = call(&mut vm, "base64_encode", vec![s("\x00\x01\x02")]).unwrap();
         let decoded = call(&mut vm, "base64_decode", vec![encoded]).unwrap();
         assert_eq!(decoded.display(), "\x00\x01\x02");
     }
-
-    // ---- URL encode/decode ----
 
     #[test]
     fn url_encode_preserves_unreserved() {
@@ -181,7 +174,6 @@ mod tests {
     fn url_encode_handles_utf8() {
         let mut vm = vm();
         let result = call(&mut vm, "url_encode", vec![s("café")]).unwrap();
-        // 'é' is 0xC3 0xA9 in UTF-8
         assert!(result.display().contains("%C3%A9"));
     }
 
@@ -203,7 +195,6 @@ mod tests {
     fn url_decode_invalid_percent_passthrough() {
         let mut vm = vm();
         let result = call(&mut vm, "url_decode", vec![s("100%ZZ")]).unwrap();
-        // Invalid %ZZ should pass through as-is
         assert_eq!(result.display(), "100%ZZ");
     }
 
@@ -213,18 +204,15 @@ mod tests {
         let original = "key=hello world&foo=bar/baz";
         let encoded = call(&mut vm, "url_encode", vec![s(original)]).unwrap();
         let decoded = call(&mut vm, "url_decode", vec![encoded]).unwrap();
-        // Note: url_encode uses %20, url_decode treats + as space,
-        // so round-trip is exact when encode produces %20.
+        // url_encode emits %20 and url_decode accepts both %20 and +, so the
+        // round-trip is exact only as long as encode produces %20.
         assert_eq!(decoded.display(), original);
     }
-
-    // ---- SHA hashes ----
 
     #[test]
     fn sha256_known_vector() {
         let mut vm = vm();
         let result = call(&mut vm, "sha256", vec![s("")]).unwrap();
-        // SHA-256 of empty string
         assert_eq!(
             result.display(),
             "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -236,28 +224,28 @@ mod tests {
     fn sha224_length() {
         let mut vm = vm();
         let result = call(&mut vm, "sha224", vec![s("test")]).unwrap();
-        assert_eq!(result.display().len(), 56); // 224 bits = 56 hex chars
+        assert_eq!(result.display().len(), 56);
     }
 
     #[test]
     fn sha384_length() {
         let mut vm = vm();
         let result = call(&mut vm, "sha384", vec![s("test")]).unwrap();
-        assert_eq!(result.display().len(), 96); // 384 bits = 96 hex chars
+        assert_eq!(result.display().len(), 96);
     }
 
     #[test]
     fn sha512_length() {
         let mut vm = vm();
         let result = call(&mut vm, "sha512", vec![s("test")]).unwrap();
-        assert_eq!(result.display().len(), 128); // 512 bits = 128 hex chars
+        assert_eq!(result.display().len(), 128);
     }
 
     #[test]
     fn sha512_256_length() {
         let mut vm = vm();
         let result = call(&mut vm, "sha512_256", vec![s("test")]).unwrap();
-        assert_eq!(result.display().len(), 64); // 256 bits = 64 hex chars
+        assert_eq!(result.display().len(), 64);
     }
 
     #[test]
@@ -283,8 +271,6 @@ mod tests {
         assert_ne!(a.display(), b.display());
     }
 
-    // ---- hash_value ----
-
     #[test]
     fn hash_value_deterministic() {
         let mut vm = vm();
@@ -305,7 +291,6 @@ mod tests {
     fn hash_value_nil() {
         let mut vm = vm();
         let result = call(&mut vm, "hash_value", vec![VmValue::Nil]).unwrap();
-        // Should not panic, should return some int
         assert!(matches!(result, VmValue::Int(_)));
     }
 }

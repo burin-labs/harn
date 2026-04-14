@@ -39,8 +39,8 @@ pub(crate) fn register_shape_builtins(vm: &mut Vm) {
         }
     });
 
-    // Runtime interface enforcement: check that a value has all required methods
-    // Args: value, param_name, interface_name, method_names_csv
+    // Runtime interface enforcement. Args: value, param_name, interface_name,
+    // method_names_csv.
     vm.register_builtin("__assert_interface", |args, _out| {
         let val = args.first().cloned().unwrap_or(VmValue::Nil);
         let param_name = args.get(1).map(|a| a.display()).unwrap_or_default();
@@ -59,18 +59,14 @@ pub(crate) fn register_shape_builtins(vm: &mut Vm) {
             }
         };
 
-        // Check that the struct has all required methods via the impl registry
-        // We can't check method presence at this level (that's VM-level state),
-        // but we validate the value is a struct instance so the VM can dispatch.
-        // The compiler already checks method satisfaction at compile time.
-        // This runtime check ensures the value is at least a struct, not a raw dict.
+        // Compiler already checks method satisfaction; this runtime guard only
+        // ensures the value is a struct instance so the VM dispatcher has
+        // something to look up (interfaces only apply to structs with impl blocks).
         if methods_csv.is_empty() {
             return Ok(VmValue::Nil);
         }
 
-        // The VM itself handles method dispatch — this just ensures the value
-        // is a struct instance (interfaces only apply to structs with impl blocks).
-        let _ = struct_name; // struct identity is enough for dispatch
+        let _ = struct_name;
         Ok(VmValue::Nil)
     });
 
@@ -194,7 +190,6 @@ fn assert_shape_fields(
         match fields.get(field_name.as_str()) {
             None => {
                 if !optional {
-                    // Look for a close match among actual keys
                     let actual_keys: Vec<&str> = fields.keys().map(|k| k.as_str()).collect();
                     let max_dist = if field_name.len() <= 4 { 1 } else { 2 };
                     let suggestion = find_closest_field(field_name, &actual_keys, max_dist);
@@ -235,7 +230,6 @@ fn assert_shape_fields(
                         }
                     }
                 } else if type_spec.contains('|') {
-                    // Union type: check if actual type matches any member
                     let actual_type = val.type_name();
                     let is_nil = matches!(val, VmValue::Nil);
                     let matches = type_spec
@@ -267,7 +261,6 @@ fn edit_distance(a: &str, b: &str) -> usize {
     let a_chars: Vec<char> = a.chars().collect();
     let b_chars: Vec<char> = b.chars().collect();
     let n = b_chars.len();
-    // Use single-row DP to avoid clippy needless_range_loop warnings.
     let mut prev = (0..=n).collect::<Vec<_>>();
     let mut curr = vec![0; n + 1];
     for (i, ac) in a_chars.iter().enumerate() {

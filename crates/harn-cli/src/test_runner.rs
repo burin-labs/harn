@@ -43,13 +43,11 @@ pub async fn run_test_file(
     let mut parser = Parser::new(tokens);
     let program = parser.parse().map_err(|e| format!("{e}"))?;
 
-    // Find all test_* pipeline names
     let test_names: Vec<String> = program
         .iter()
         .filter_map(|snode| {
             if let Node::Pipeline { name, .. } = &snode.node {
                 if name.starts_with("test_") {
-                    // Apply filter
                     if let Some(pattern) = filter {
                         if !name.contains(pattern) {
                             return None;
@@ -65,12 +63,10 @@ pub async fn run_test_file(
     let mut results = Vec::new();
 
     for test_name in &test_names {
-        // Reset thread-local state to prevent leaking between tests
         harn_vm::reset_thread_local_state();
 
         let start = Instant::now();
 
-        // Compile the test pipeline via the VM compiler
         let chunk = match harn_vm::Compiler::new().compile_named(&program, test_name) {
             Ok(c) => c,
             Err(e) => {
@@ -193,7 +189,7 @@ pub async fn run_tests(
     timeout_ms: u64,
     parallel: bool,
 ) -> TestSummary {
-    // Default LLM provider to "mock" in test mode unless explicitly set
+    // Default LLM provider to "mock" in test mode unless caller overrides.
     let prev_provider = std::env::var("HARN_LLM_PROVIDER").ok();
     if prev_provider.is_none() {
         std::env::set_var("HARN_LLM_PROVIDER", "mock");
@@ -210,7 +206,6 @@ pub async fn run_tests(
     };
 
     if parallel {
-        // Run files concurrently using spawn_local
         let local = tokio::task::LocalSet::new();
         let results = local
             .run_until(async {
@@ -265,7 +260,6 @@ pub async fn run_tests(
         }
     }
 
-    // Restore previous HARN_LLM_PROVIDER state
     match prev_provider {
         Some(val) => std::env::set_var("HARN_LLM_PROVIDER", val),
         None => std::env::remove_var("HARN_LLM_PROVIDER"),

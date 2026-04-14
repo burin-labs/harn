@@ -5,10 +5,6 @@ use tower_lsp::lsp_types::*;
 use crate::helpers::{lexer_error_to_diagnostic, parser_error_to_diagnostic, span_to_range};
 use crate::symbols::{build_symbol_table, SymbolInfo};
 
-// ---------------------------------------------------------------------------
-// Document state: caches parse results per file
-// ---------------------------------------------------------------------------
-
 pub(crate) struct DocumentState {
     pub(crate) source: String,
     pub(crate) cached_ast: Option<Vec<SNode>>,
@@ -53,7 +49,6 @@ impl DocumentState {
         self.symbols.clear();
         self.cached_ast = None;
 
-        // Lex
         let mut lexer = Lexer::new(&self.source);
         let tokens = match lexer.tokenize() {
             Ok(t) => t,
@@ -64,7 +59,7 @@ impl DocumentState {
             }
         };
 
-        // Parse (with error recovery — report all errors)
+        // Parse with recovery so every error surfaces, not just the first.
         let mut parser = Parser::new(tokens);
         let program = match parser.parse() {
             Ok(p) => p,
@@ -77,7 +72,7 @@ impl DocumentState {
             }
         };
 
-        // Type check (with source for autofix generation and inlay hints)
+        // Source is required here so the checker can emit autofix text and inlay hints.
         let (type_diags, inlay_hints) = TypeChecker::new().check_with_hints(&program, &self.source);
         self.inlay_hints = inlay_hints;
         for diag in &type_diags {
@@ -103,7 +98,6 @@ impl DocumentState {
         }
         self.type_diagnostics = type_diags;
 
-        // Lint
         let lint_diags = harn_lint::lint_with_source(&program, &self.source);
         for ld in &lint_diags {
             let severity = match ld.severity {
@@ -121,7 +115,6 @@ impl DocumentState {
         }
         self.lint_diagnostics = lint_diags;
 
-        // Build symbol table
         self.symbols = build_symbol_table(&program, &self.source);
         self.cached_ast = Some(program);
         self.dirty = false;

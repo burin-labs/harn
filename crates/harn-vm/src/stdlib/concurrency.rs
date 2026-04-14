@@ -63,8 +63,6 @@ fn try_poll_channels(channels: &[VmValue]) -> (Option<(usize, VmValue, String)>,
 }
 
 pub(crate) fn register_concurrency_builtins(vm: &mut Vm) {
-    // --- Channels ---
-
     vm.register_builtin("channel", |args, _out| {
         let name = args
             .first()
@@ -73,12 +71,9 @@ pub(crate) fn register_concurrency_builtins(vm: &mut Vm) {
         let capacity = args.get(1).and_then(|a| a.as_int()).unwrap_or(256) as usize;
         let capacity = capacity.max(1);
         let (tx, rx) = tokio::sync::mpsc::channel(capacity);
-        // Clippy warns about wrapping a non-Send/Sync type in Arc. We
-        // intentionally use Arc here for refcounted ownership within a
-        // single-threaded tokio LocalSet (the Harn VM is !Send because
-        // VmValue contains Rc). The Arc never crosses threads in
-        // practice — see the thread-local invariant documented at
-        // crate::llm::agent::emit_agent_event.
+        // Arc is deliberate: refcount ownership within a single-threaded tokio
+        // LocalSet (VmValue is !Send because it holds Rc). The Arc never crosses
+        // threads — see the thread-local invariant on crate::llm::agent::emit_agent_event.
         #[allow(clippy::arc_with_non_send_sync)]
         Ok(VmValue::Channel(VmChannelHandle {
             name,
@@ -124,8 +119,6 @@ pub(crate) fn register_concurrency_builtins(vm: &mut Vm) {
             ))))
         }
     });
-
-    // --- Atomics ---
 
     vm.register_builtin("atomic", |args, _out| {
         let initial = match args.first() {
@@ -186,8 +179,6 @@ pub(crate) fn register_concurrency_builtins(vm: &mut Vm) {
         }
         Ok(VmValue::Bool(false))
     });
-
-    // --- Async builtins ---
 
     vm.register_async_builtin("sleep", |args| async move {
         let ms = match args.first() {
@@ -354,8 +345,6 @@ pub(crate) fn register_concurrency_builtins(vm: &mut Vm) {
         }
     });
 
-    // --- Timer builtins ---
-
     vm.register_builtin("timer_start", |args, _out| {
         let name = args
             .first()
@@ -370,8 +359,6 @@ pub(crate) fn register_concurrency_builtins(vm: &mut Vm) {
         timer.insert("start_ms".to_string(), VmValue::Int(now_ms));
         Ok(VmValue::Dict(Rc::new(timer)))
     });
-
-    // --- Circuit breaker builtins ---
 
     vm.register_builtin("circuit_breaker", |args, _out| {
         let name = args
@@ -514,8 +501,6 @@ mod tests {
         VmValue::String(Rc::from(v))
     }
 
-    // ---- atomics ----
-
     #[test]
     fn atomic_default_zero() {
         let mut vm = vm();
@@ -579,7 +564,7 @@ mod tests {
         .unwrap();
         assert_eq!(ok.display(), "false");
         let cur = call(&mut vm, "atomic_get", vec![atom]).unwrap();
-        assert_eq!(cur.display(), "10"); // unchanged
+        assert_eq!(cur.display(), "10");
     }
 
     #[test]
@@ -589,8 +574,6 @@ mod tests {
         let val = call(&mut vm, "atomic_get", vec![atom]).unwrap();
         assert_eq!(val.display(), "1");
     }
-
-    // ---- circuit breaker ----
 
     #[test]
     fn circuit_breaker_starts_closed() {
@@ -614,13 +597,11 @@ mod tests {
             vec![s("test_cb2"), VmValue::Int(2)],
         )
         .unwrap();
-        // First failure
         let opened = call(&mut vm, "circuit_record_failure", vec![s("test_cb2")]).unwrap();
         assert_eq!(opened.display(), "false");
         let state = call(&mut vm, "circuit_check", vec![s("test_cb2")]).unwrap();
         assert_eq!(state.display(), "closed");
 
-        // Second failure reaches threshold
         let opened = call(&mut vm, "circuit_record_failure", vec![s("test_cb2")]).unwrap();
         assert_eq!(opened.display(), "true");
         let state = call(&mut vm, "circuit_check", vec![s("test_cb2")]).unwrap();
@@ -638,10 +619,9 @@ mod tests {
         .unwrap();
         call(&mut vm, "circuit_record_failure", vec![s("test_cb3")]).unwrap();
         call(&mut vm, "circuit_record_success", vec![s("test_cb3")]).unwrap();
-        // After success, should be closed again
         let state = call(&mut vm, "circuit_check", vec![s("test_cb3")]).unwrap();
         assert_eq!(state.display(), "closed");
-        // And counter should be reset — need 2 more failures to open
+        // Success must reset the counter — one more failure should stay closed.
         call(&mut vm, "circuit_record_failure", vec![s("test_cb3")]).unwrap();
         let state = call(&mut vm, "circuit_check", vec![s("test_cb3")]).unwrap();
         assert_eq!(state.display(), "closed");
@@ -671,8 +651,6 @@ mod tests {
         assert_eq!(state.display(), "closed");
     }
 
-    // ---- timer ----
-
     #[test]
     fn timer_start_returns_dict() {
         let mut vm = vm();
@@ -686,9 +664,7 @@ mod tests {
     fn timer_end_returns_elapsed() {
         let mut vm = vm();
         let timer = call(&mut vm, "timer_start", vec![s("t")]).unwrap();
-        // timer_end computes elapsed from start_ms
         let elapsed = call(&mut vm, "timer_end", vec![timer]).unwrap();
-        // Should be very small (< 100ms)
         assert!(elapsed.as_int().unwrap() >= 0);
         assert!(elapsed.as_int().unwrap() < 1000);
     }

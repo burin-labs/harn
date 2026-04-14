@@ -1,6 +1,4 @@
 //! Standard library builtins for the Harn VM.
-//!
-//! Each category of builtins lives in its own sub-module.
 
 mod agents;
 mod concurrency;
@@ -30,14 +28,12 @@ use crate::mcp::register_mcp_builtins;
 use crate::mcp_server::register_mcp_server_builtins;
 use crate::vm::Vm;
 
-// Re-export helpers used by other modules in harn-vm
 pub(crate) use crate::schema::{json_to_vm_value, schema_result_value};
 pub(crate) fn set_thread_source_dir(dir: &std::path::Path) {
     process::set_thread_source_dir(dir);
 }
 
-/// Register core builtins: types, math, strings, json, datetime, regex, crypto,
-/// sets, shapes, testing. These are pure/deterministic and require no I/O.
+/// Register core builtins: pure/deterministic, no I/O.
 pub fn register_core_stdlib(vm: &mut Vm) {
     types::register_type_builtins(vm);
     math::register_math_builtins(vm);
@@ -53,8 +49,7 @@ pub fn register_core_stdlib(vm: &mut Vm) {
     testing::register_testing_builtins(vm);
 }
 
-/// Register I/O builtins: filesystem, process, logging, tracing, I/O.
-/// Requires OS access (file reads, process spawning, environment vars).
+/// Register I/O builtins (requires OS access).
 pub fn register_io_stdlib(vm: &mut Vm) {
     io::register_io_builtins(vm);
     host::register_host_builtins(vm);
@@ -64,8 +59,7 @@ pub fn register_io_stdlib(vm: &mut Vm) {
     tracing::register_tracing_builtins(vm);
 }
 
-/// Register agent builtins: concurrency, tools, agents, HTTP, LLM, MCP.
-/// Requires network access and async runtime.
+/// Register agent builtins (requires network access and async runtime).
 pub fn register_agent_stdlib(vm: &mut Vm) {
     concurrency::register_concurrency_builtins(vm);
     tools::register_tool_builtins(vm);
@@ -83,21 +77,19 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
     register_agent_stdlib(vm);
 }
 
-/// Return the canonical list of all stdlib builtin names.
-/// This creates a temporary VM, registers all builtins, and collects the names.
-/// Used by harn-lint and harn-lsp to avoid hardcoded duplicate lists.
+/// Return the canonical list of all stdlib builtin names. Used by
+/// harn-lint and harn-lsp to avoid hardcoded duplicate lists.
 pub fn stdlib_builtin_names() -> Vec<String> {
     let mut vm = Vm::new();
     register_vm_stdlib(&mut vm);
-    // Register path-dependent builtins with a dummy path so we capture their names.
     let tmp = std::path::PathBuf::from("/tmp");
     crate::store::register_store_builtins(&mut vm, &tmp);
     crate::checkpoint::register_checkpoint_builtins(&mut vm, &tmp, "default");
     crate::metadata::register_metadata_builtins(&mut vm, &tmp);
     crate::metadata::register_scan_builtins(&mut vm);
     let mut names = vm.builtin_names();
-    // These are handled as special opcodes/keywords, not registered builtins,
-    // but the linter should recognize them as valid function calls.
+    // Special opcodes/keywords, not registered builtins, but linter
+    // should recognize them as valid function calls.
     for extra in [
         "spawn",
         "await",
@@ -110,7 +102,7 @@ pub fn stdlib_builtin_names() -> Vec<String> {
     names
 }
 
-/// Reset thread-local stdlib state (logging, tracing, source dir). Call between test runs.
+/// Reset thread-local stdlib state. Call between test runs.
 pub fn reset_stdlib_state() {
     logging::reset_logging_state();
     process::reset_process_state();

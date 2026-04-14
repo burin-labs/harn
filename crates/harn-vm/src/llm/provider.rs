@@ -10,20 +10,12 @@ use std::collections::HashSet;
 use super::api::{DeltaSender, LlmRequestPayload, LlmResult};
 use crate::value::VmError;
 
-// =============================================================================
-// Provider trait
-// =============================================================================
-
-/// Trait that all LLM providers implement. Each provider knows how to build
-/// a provider-specific request body and delegate to the shared transport layer.
+/// Trait that all LLM providers implement.
 ///
-/// Provider implementations live in `llm::providers::*` and are constructed
-/// as zero-cost unit structs (or small structs for parameterized providers
-/// like `OpenAiCompatibleProvider`).
-///
-/// Currently dispatch goes through concrete types in `api::dispatch_to_registered_provider`.
-/// The trait exists so that custom/external providers can be registered at runtime
-/// once we expose the `provider_register()` Harn builtin.
+/// Dispatch currently goes through concrete types in
+/// `api::dispatch_to_registered_provider`. The trait exists so that
+/// custom/external providers can be registered at runtime once the
+/// `provider_register()` Harn builtin is exposed.
 #[allow(dead_code)]
 pub(crate) trait LlmProvider {
     /// Provider name (e.g. "anthropic", "openai", "ollama", "mock").
@@ -64,11 +56,8 @@ pub(crate) trait LlmProvider {
     fn transform_request(&self, _body: &mut serde_json::Value) {}
 }
 
-/// Async chat operation. Each provider implements this to execute LLM calls.
-///
-/// Because providers are constructed on-the-fly (zero-cost unit structs), the
-/// trait uses explicit lifetime parameters to avoid issues with RefCell
-/// borrows across await points.
+/// Async chat operation. Uses explicit lifetime parameters because providers
+/// are constructed on-the-fly, to avoid RefCell-across-await issues.
 #[allow(dead_code)]
 pub(crate) trait LlmProviderChat: LlmProvider {
     /// Execute an LLM chat call, optionally streaming text deltas.
@@ -79,15 +68,9 @@ pub(crate) trait LlmProviderChat: LlmProvider {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<LlmResult, VmError>> + 'a>>;
 }
 
-// =============================================================================
-// Provider registry (thread-local for !Send VM compatibility)
-// =============================================================================
-
 thread_local! {
-    /// Set of registered provider names. The actual provider objects are
-    /// constructed on-the-fly in `api::dispatch_to_registered_provider()`
-    /// since they are zero-cost structs and this avoids RefCell-across-await
-    /// issues.
+    /// Thread-local for !Send VM compatibility. Provider objects are
+    /// constructed on-the-fly to avoid RefCell-across-await issues.
     static PROVIDER_NAMES: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
 }
 
@@ -96,13 +79,11 @@ pub(crate) fn register_default_providers() {
     PROVIDER_NAMES.with(|names| {
         let mut names = names.borrow_mut();
         if !names.is_empty() {
-            return; // Already initialized
+            return;
         }
-        // Core providers
         names.insert("mock".to_string());
         names.insert("anthropic".to_string());
         names.insert("ollama".to_string());
-        // OpenAI-compatible providers
         for name in [
             "openai",
             "openrouter",
@@ -118,8 +99,7 @@ pub(crate) fn register_default_providers() {
     });
 }
 
-/// Register a custom provider name at runtime (e.g. from Harn script via
-/// `provider_register()` builtin — not yet wired up).
+/// Register a custom provider name at runtime.
 #[allow(dead_code)]
 pub(crate) fn register_provider_name(name: &str) {
     PROVIDER_NAMES.with(|names| {

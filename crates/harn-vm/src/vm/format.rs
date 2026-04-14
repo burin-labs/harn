@@ -8,12 +8,9 @@ impl super::Vm {
         let error_msg = format!("{error}");
         let mut out = String::new();
 
-        // Error header
         out.push_str(&format!("error: {error_msg}\n"));
 
-        // Prefer captured stack trace (taken before unwinding), else use live frames.
-        // Each frame now carries its own source file so errors attribute the correct
-        // path for imported-module frames instead of the entry-point pipeline.
+        // Prefer captured stack trace (taken before unwinding); fall back to live frames.
         let frames: Vec<(String, usize, usize, Option<String>)> =
             if !self.error_stack_trace.is_empty() {
                 self.error_stack_trace
@@ -36,9 +33,8 @@ impl super::Vm {
             let line = *line;
             let col = *col;
             let filename = frame_file.as_deref().unwrap_or(entry_file);
-            // Prefer reading the frame's own source file from disk so the
-            // caret line is meaningful. Fall back to the entry-point source
-            // text if reading fails (e.g. stdlib modules).
+            // Read the frame's own source so the caret line is meaningful;
+            // fall back to entry-point source (e.g. for stdlib modules).
             let owned_source: Option<String> = frame_file
                 .as_deref()
                 .and_then(|p| std::fs::read_to_string(p).ok());
@@ -90,7 +86,7 @@ impl super::Vm {
             }
         }
 
-        // Show call stack (bottom-up, skipping top frame which is already shown).
+        // Call stack, bottom-up, skipping the top frame (already shown).
         if frames.len() > 1 {
             for (name, line, _col, frame_file) in frames.iter().rev().skip(1) {
                 let display_name = if name.is_empty() { "pipeline" } else { name };
@@ -117,14 +113,12 @@ impl super::Vm {
         }
         let first = chars[start];
         if first.is_alphanumeric() || first == '_' {
-            // Scan forward through identifier/number chars
             let mut end = start + 1;
             while end < chars.len() && (chars[end].is_alphanumeric() || chars[end] == '_') {
                 end += 1;
             }
             end - start
         } else {
-            // Operator or punctuation: just one caret
             1
         }
     }

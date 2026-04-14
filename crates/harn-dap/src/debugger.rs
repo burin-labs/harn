@@ -154,7 +154,6 @@ impl Debugger {
                 match std::fs::read_to_string(program) {
                     Ok(source) => {
                         self.source_content = Some(source.clone());
-                        // Compile and initialize the VM
                         match self.compile_program(&source) {
                             Ok(()) => {
                                 self.program_state = ProgramState::Running;
@@ -208,7 +207,6 @@ impl Debugger {
             }
         }
 
-        // Set breakpoints on the VM
         let bp_lines: Vec<usize> = self.breakpoints.iter().map(|bp| bp.line as usize).collect();
         vm.set_breakpoints(bp_lines);
         *self.latest_debug_state.borrow_mut() = None;
@@ -218,7 +216,7 @@ impl Debugger {
             DebugAction::Continue
         });
 
-        // Initialize execution (push frame) but don't run yet
+        // Push the initial frame but don't run — the first continue/step drives execution.
         vm.start(&chunk);
         *self.latest_debug_state.borrow_mut() = Some(vm.debug_state());
         self.vm = Some(vm);
@@ -254,7 +252,6 @@ impl Debugger {
             }
         }
 
-        // Update VM breakpoints if running
         if let Some(vm) = &mut self.vm {
             let bp_lines: Vec<usize> = self.breakpoints.iter().map(|bp| bp.line as usize).collect();
             vm.set_breakpoints(bp_lines);
@@ -280,7 +277,6 @@ impl Debugger {
             None,
         ));
 
-        // Run until first breakpoint or end
         responses.extend(self.run_to_breakpoint());
 
         responses
@@ -296,14 +292,14 @@ impl Debugger {
             return responses;
         }
 
-        // Snapshot breakpoint conditions to avoid borrow issues in the loop
+        // Snapshot conditions up front — `self.vm.step_execute` borrows `self` mutably
+        // inside the loop, so we can't re-borrow `self.breakpoints` there.
         let bp_conditions: Vec<(i64, Option<String>)> = self
             .breakpoints
             .iter()
             .map(|bp| (bp.line, bp.condition.clone()))
             .collect();
 
-        // Clear structured variable references from previous stop
         self.var_refs.clear();
         self.next_var_ref = 100;
 
@@ -319,20 +315,17 @@ impl Debugger {
                         let current_line = state.line as i64;
                         let vars = state.variables;
 
-                        // Check conditional breakpoints
                         let should_stop = check_condition(&bp_conditions, current_line, &vars);
 
                         if !should_stop {
                             continue;
                         }
 
-                        // Hit a breakpoint or step completed
                         self.stopped = true;
                         self.current_line = current_line;
                         self.variables = vars;
                         self.program_state = ProgramState::Stopped;
 
-                        // Flush output
                         let output = self.vm.as_ref().unwrap().output().to_string();
                         if !output.is_empty() && output != self.output {
                             let new_output = &output[self.output.len()..];
@@ -350,7 +343,6 @@ impl Debugger {
                             self.output = output;
                         }
 
-                        // Send stopped event
                         let seq = self.next_seq();
                         responses.push(DapResponse::event(
                             seq,
@@ -363,7 +355,6 @@ impl Debugger {
                         ));
                         return responses;
                     } else {
-                        // Program terminated normally
                         let _val = val;
                         let output = self.vm.as_ref().unwrap().output().to_string();
                         if !output.is_empty() && output != self.output {
@@ -387,13 +378,9 @@ impl Debugger {
                         return responses;
                     }
                 }
-                Ok(None) => {
-                    // Continue execution
-                    continue;
-                }
+                Ok(None) => continue,
                 Err(e) => {
-                    // If exception breakpoints are enabled and this is a thrown
-                    // exception, pause instead of terminating.
+                    // Exception breakpoints: pause on thrown exceptions instead of terminating.
                     if self.break_on_exceptions && matches!(&e, VmError::Thrown(_)) {
                         let error_msg = e.to_string();
                         let state = self.current_debug_state();
@@ -456,7 +443,6 @@ impl Debugger {
             Some(json!({ "allThreadsContinued": true })),
         )];
 
-        // Resume execution
         responses.extend(self.run_to_breakpoint());
         responses
     }
@@ -471,7 +457,6 @@ impl Debugger {
         let seq = self.next_seq();
         let mut responses = vec![DapResponse::success(seq, msg.seq, "next", None)];
 
-        // Resume and stop at next line
         responses.extend(self.run_to_breakpoint());
         responses
     }
@@ -674,7 +659,7 @@ impl Debugger {
             .and_then(|v| v.as_i64())
             .unwrap_or(1);
 
-        // Check structured variable references first
+        // Ref IDs ≥ 100 index `self.var_refs` (children of composite values).
         if ref_id >= 100 {
             if let Some(children) = self.var_refs.get(&ref_id).cloned() {
                 let vars: Vec<Variable> = children
@@ -691,7 +676,7 @@ impl Debugger {
             }
         }
 
-        // Scope 1 = locals
+        // Fallback: scope 1 is the locals map.
         let variable_list: Vec<(String, VmValue)> = self.variables.clone().into_iter().collect();
         let vars: Vec<Variable> = variable_list
             .iter()
@@ -715,7 +700,7 @@ impl Debugger {
             .and_then(|e| e.as_str())
             .unwrap_or("");
 
-        // context can be "watch", "repl", "hover", or "clipboard"
+        // DAP context is one of "watch", "repl", "hover", "clipboard"; we ignore it.
         let _context = msg
             .arguments
             .as_ref()
@@ -723,7 +708,6 @@ impl Debugger {
             .and_then(|c| c.as_str())
             .unwrap_or("watch");
 
-        // Resolve the expression: supports "var" and "var.field.field..." dot-access
         match self.resolve_expression(expression) {
             Some(val) => {
                 let variable = self.make_variable(expression.to_string(), &val);
@@ -740,7 +724,6 @@ impl Debugger {
                 )]
             }
             None => {
-                // Not a simple variable or dot-access lookup
                 let seq = self.next_seq();
                 vec![DapResponse {
                     seq,
@@ -765,7 +748,6 @@ impl Debugger {
     fn resolve_expression(&self, expression: &str) -> Option<VmValue> {
         let expr = expression.trim();
 
-        // Handle len(expr) and type_of(expr)
         if let Some(inner) = expr.strip_prefix("len(").and_then(|s| s.strip_suffix(')')) {
             let val = self.resolve_expression(inner)?;
             return match &val {
@@ -793,10 +775,9 @@ impl Debugger {
             return Some(VmValue::String(std::rc::Rc::from(type_name)));
         }
 
-        // Tokenize into segments: identifiers, [subscript], .field
+        // Tokenize into a path of `Field(name)` and `Index(n)` segments.
         let mut segments = Vec::new();
         let mut chars = expr.chars().peekable();
-        // First segment: variable name
         let mut name = String::new();
         while let Some(&c) = chars.peek() {
             if c.is_alphanumeric() || c == '_' {
@@ -811,7 +792,6 @@ impl Debugger {
         }
         segments.push(PathSegment::Field(name));
 
-        // Remaining: .field or [subscript]
         while let Some(&c) = chars.peek() {
             match c {
                 '.' => {
@@ -852,7 +832,6 @@ impl Debugger {
             }
         }
 
-        // Resolve
         let root_name = match &segments[0] {
             PathSegment::Field(n) => n.as_str(),
             _ => return None,
@@ -885,7 +864,6 @@ impl Debugger {
     }
 
     fn handle_set_exception_breakpoints(&mut self, msg: &DapMessage) -> Vec<DapResponse> {
-        // Check if "all" filter is in the requested filters list
         self.break_on_exceptions = msg
             .arguments
             .as_ref()
@@ -926,10 +904,10 @@ fn check_condition(
 
     let condition = match condition {
         Some(c) => c.trim(),
-        None => return true, // No condition — always stop
+        None => return true,
     };
 
-    // Simple condition evaluator: "var == val", "var != val", "var > val", "var"
+    // Minimal evaluator: `var <op> val` for comparison ops, or bare `var` for truthy.
     for op in &["==", "!=", ">=", "<=", ">", "<"] {
         if let Some((lhs, rhs)) = condition.split_once(op) {
             let lhs = lhs.trim();
@@ -947,7 +925,6 @@ fn check_condition(
         }
     }
 
-    // Just a variable name — truthy check
     if let Some(val) = variables.get(condition) {
         return val.is_truthy();
     }
@@ -1013,29 +990,23 @@ mod tests {
     fn test_launch_and_run() {
         let mut dbg = Debugger::new();
 
-        // Create a temp file
         let dir = std::env::temp_dir().join("harn_dap_test");
         std::fs::create_dir_all(&dir).ok();
         let file = dir.join("test.harn");
         std::fs::write(&file, "pipeline test(task) { log(42) }").unwrap();
 
-        // Initialize
         dbg.handle_message(make_request(1, "initialize", None));
-
-        // Launch
         dbg.handle_message(make_request(
             2,
             "launch",
             Some(json!({"program": file.to_string_lossy()})),
         ));
 
-        // Configuration done (triggers execution)
+        // configurationDone triggers execution and should produce at least
+        // configurationDone + terminated responses.
         let responses = dbg.handle_message(make_request(3, "configurationDone", None));
-
-        // Should have: configurationDone response, output event, terminated event
         assert!(responses.len() >= 2);
 
-        // Find the output event
         let output_event = responses.iter().find(|r| {
             r.event.as_deref() == Some("output")
                 && r.body
@@ -1049,13 +1020,11 @@ mod tests {
             assert!(output.contains("[harn] 42"));
         }
 
-        // Find terminated event
         let terminated = responses
             .iter()
             .find(|r| r.event.as_deref() == Some("terminated"));
         assert!(terminated.is_some());
 
-        // Cleanup
         std::fs::remove_file(&file).ok();
         std::fs::remove_dir(&dir).ok();
     }
@@ -1104,7 +1073,6 @@ mod tests {
         dbg.variables
             .insert("foo".to_string(), VmValue::Dict(Rc::new(inner)));
 
-        // "foo.bar" should resolve to 99
         let responses = dbg.handle_message(make_request(
             1,
             "evaluate",
@@ -1148,7 +1116,6 @@ mod tests {
         dbg.variables
             .insert("d".to_string(), VmValue::Dict(Rc::new(map)));
 
-        // Evaluating a dict should return a non-zero variablesReference
         let responses = dbg.handle_message(make_request(
             1,
             "evaluate",
@@ -1182,7 +1149,6 @@ mod tests {
         let mut dbg = Debugger::new();
         dbg.variables.insert("x".to_string(), VmValue::Int(7));
 
-        // All contexts (watch, repl, hover) should work the same
         for ctx in &["watch", "repl", "hover"] {
             let responses = dbg.handle_message(make_request(
                 1,
@@ -1200,7 +1166,6 @@ mod tests {
         let mut dbg = Debugger::new();
         assert!(!dbg.break_on_exceptions);
 
-        // Enable "all" exception breakpoints
         let responses = dbg.handle_message(make_request(
             1,
             "setExceptionBreakpoints",
@@ -1216,7 +1181,6 @@ mod tests {
         let mut dbg = Debugger::new();
         dbg.break_on_exceptions = true;
 
-        // Empty filters — disable
         let responses = dbg.handle_message(make_request(
             1,
             "setExceptionBreakpoints",
@@ -1284,7 +1248,6 @@ mod tests {
     fn test_breakpoint_stop() {
         let mut dbg = Debugger::new();
 
-        // Create a temp file with multiple lines
         let dir = std::env::temp_dir().join("harn_dap_bp_test");
         std::fs::create_dir_all(&dir).ok();
         let file = dir.join("test_bp.harn");
@@ -1294,10 +1257,7 @@ mod tests {
         )
         .unwrap();
 
-        // Initialize
         dbg.handle_message(make_request(1, "initialize", None));
-
-        // Set breakpoint on line 3
         dbg.handle_message(make_request(
             2,
             "setBreakpoints",
@@ -1306,18 +1266,14 @@ mod tests {
                 "breakpoints": [{"line": 3}]
             })),
         ));
-
-        // Launch
         dbg.handle_message(make_request(
             3,
             "launch",
             Some(json!({"program": file.to_string_lossy()})),
         ));
 
-        // Configuration done — should stop at breakpoint
         let responses = dbg.handle_message(make_request(4, "configurationDone", None));
 
-        // Check for stopped event OR terminated
         let has_stopped = responses
             .iter()
             .any(|r| r.event.as_deref() == Some("stopped"));
@@ -1325,10 +1281,10 @@ mod tests {
             .iter()
             .any(|r| r.event.as_deref() == Some("terminated"));
 
-        // Either stopped at breakpoint or ran to completion
+        // Either we stopped at the breakpoint or the VM raced ahead to completion;
+        // both outcomes are acceptable since execution is single-threaded here.
         assert!(has_stopped || has_terminated);
 
-        // Cleanup
         std::fs::remove_file(&file).ok();
         std::fs::remove_dir(&dir).ok();
     }

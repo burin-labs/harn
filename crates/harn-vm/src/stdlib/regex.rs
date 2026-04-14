@@ -18,7 +18,6 @@ fn get_cached_regex(pattern: &str) -> Result<regex::Regex, VmError> {
         let re = regex::Regex::new(pattern).map_err(|e| {
             VmError::Thrown(VmValue::String(Rc::from(format!("Invalid regex: {e}"))))
         })?;
-        // Evict all if cache grows too large (simple size cap)
         if cache.len() >= 128 {
             cache.clear();
         }
@@ -45,13 +44,9 @@ pub(crate) fn register_regex_builtins(vm: &mut Vm) {
         Ok(VmValue::Nil)
     });
 
-    // `regex_replace(pattern, replacement, text)` replaces *every*
-    // match. The replacement string supports the standard `$1`, `$2`,
-    // `${name}` backreferences from the `regex` crate.
-    //
-    // Scripts and docs that reach for "replace all" sometimes search
-    // for the `_all` spelling; `regex_replace_all` is a thin alias on
-    // the same implementation so both discovery paths land.
+    // Both `regex_replace` and `regex_replace_all` replace every match via the
+    // `regex` crate (supports `$1`, `${name}` backrefs). The `_all` spelling is
+    // a discoverability alias on the same implementation.
     fn replace_all_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
         if args.len() >= 3 {
             let pattern = args[0].display();
@@ -133,8 +128,6 @@ mod tests {
         }
     }
 
-    // ---- regex_match ----
-
     #[test]
     fn match_basic() {
         let mut vm = vm();
@@ -162,7 +155,7 @@ mod tests {
         let mut vm = vm();
         let result = call(&mut vm, "regex_match", vec![s(""), s("abc")]).unwrap();
         let list = unwrap_list(&result);
-        assert_eq!(list.len(), 4); // matches before a, b, c, and end
+        assert_eq!(list.len(), 4);
     }
 
     #[test]
@@ -188,8 +181,6 @@ mod tests {
         assert_eq!(list[0].display(), "café");
         assert_eq!(list[1].display(), "résumé");
     }
-
-    // ---- regex_replace ----
 
     #[test]
     fn replace_basic() {
@@ -233,8 +224,6 @@ mod tests {
         let result = call(&mut vm, "regex_replace", vec![s(r"\d+"), s("X")]).unwrap();
         assert!(matches!(result, VmValue::Nil));
     }
-
-    // ---- regex_captures ----
 
     #[test]
     fn captures_with_groups() {
@@ -294,8 +283,6 @@ mod tests {
         assert_eq!(groups[0].display(), "123");
         assert!(matches!(groups[1], VmValue::Nil));
     }
-
-    // ---- cache ----
 
     #[test]
     fn cache_returns_consistent_results() {

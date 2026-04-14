@@ -468,17 +468,15 @@ impl TypeChecker {
     }
 
     fn check_inner(mut self, program: &[SNode]) -> (Vec<TypeDiagnostic>, Vec<InlayHintInfo>) {
-        // First pass: register type and enum declarations into root scope
+        // First pass: collect declarations (type/enum/struct/interface) into scope
+        // before type-checking bodies so forward references resolve.
         Self::register_declarations_into(&mut self.scope, program);
-
-        // Also scan pipeline bodies for declarations
         for snode in program {
             if let Node::Pipeline { body, .. } = &snode.node {
                 Self::register_declarations_into(&mut self.scope, body);
             }
         }
 
-        // Check each top-level node
         for snode in program {
             match &snode.node {
                 Node::Pipeline { params, body, .. } => {
@@ -519,7 +517,7 @@ impl TypeChecker {
                 _ => {
                     let mut scope = self.scope.clone();
                     self.check_node(snode, &mut scope);
-                    // Merge any new definitions back into the top-level scope
+                    // Promote top-level definitions out of the temporary scope.
                     for (name, ty) in scope.vars {
                         self.scope.vars.entry(name).or_insert(ty);
                     }
@@ -1453,7 +1451,6 @@ impl TypeChecker {
                 }
             }
 
-            // --- Compound nodes: recurse into children ---
             Node::Ternary {
                 condition,
                 true_expr,
@@ -1619,7 +1616,6 @@ impl TypeChecker {
                 }
             }
 
-            // --- Struct construction: validate fields against declaration ---
             Node::StructConstruct {
                 struct_name,
                 fields,
@@ -1689,7 +1685,6 @@ impl TypeChecker {
                 }
             }
 
-            // --- Enum construction: validate variant exists ---
             Node::EnumConstruct {
                 enum_name,
                 variant,
@@ -1766,10 +1761,8 @@ impl TypeChecker {
                 }
             }
 
-            // --- InterpolatedString: segments are lexer-level, no SNode children ---
             Node::InterpolatedString(_) => {}
 
-            // --- Terminals: no children to check ---
             Node::StringLiteral(_)
             | Node::RawStringLiteral(_)
             | Node::IntLiteral(_)
@@ -2358,7 +2351,6 @@ impl TypeChecker {
     /// Extract bidirectional type refinements from a condition expression.
     fn extract_refinements(condition: &SNode, scope: &TypeScope) -> Refinements {
         match &condition.node {
-            // --- Nil checks and type_of checks ---
             Node::BinaryOp { op, left, right } if op == "!=" || op == "==" => {
                 let nil_ref = Self::extract_nil_refinements(op, left, right, scope);
                 if !nil_ref.truthy.is_empty() || !nil_ref.falsy.is_empty() {
@@ -2371,7 +2363,7 @@ impl TypeChecker {
                 Refinements::empty()
             }
 
-            // --- Logical AND: both must be true on truthy path ---
+            // Logical AND: both operands must be truthy, so truthy refinements compose.
             Node::BinaryOp { op, left, right } if op == "&&" => {
                 let left_ref = Self::extract_refinements(left, scope);
                 let right_ref = Self::extract_refinements(right, scope);
@@ -2383,7 +2375,7 @@ impl TypeChecker {
                 }
             }
 
-            // --- Logical OR: both must be false on falsy path ---
+            // Logical OR: both operands must be falsy for the whole to be falsy.
             Node::BinaryOp { op, left, right } if op == "||" => {
                 let left_ref = Self::extract_refinements(left, scope);
                 let right_ref = Self::extract_refinements(right, scope);
@@ -2395,12 +2387,11 @@ impl TypeChecker {
                 }
             }
 
-            // --- Negation: swap truthy/falsy ---
             Node::UnaryOp { op, operand } if op == "!" => {
                 Self::extract_refinements(operand, scope).inverted()
             }
 
-            // --- Truthiness: bare identifier in condition position ---
+            // Bare identifier in condition position: narrow `T | nil` to `T`.
             Node::Identifier(name) => {
                 if let Some(Some(TypeExpr::Union(members))) = scope.get_var(name) {
                     if members
@@ -2418,7 +2409,6 @@ impl TypeChecker {
                 Refinements::empty()
             }
 
-            // --- .has("key") on shapes ---
             Node::MethodCall {
                 object,
                 method,
@@ -4715,8 +4705,6 @@ add("hello", 2) }"#,
         assert_eq!(errs.len(), 1);
     }
 
-    // --- Exhaustiveness checking tests ---
-
     fn warnings(source: &str) -> Vec<String> {
         check_source(source)
             .into_iter()
@@ -4796,8 +4784,6 @@ add("hello", 2) }"#,
         assert!(errs.is_empty());
     }
 
-    // --- Type narrowing tests ---
-
     #[test]
     fn test_nil_coalescing_strips_nil() {
         // After ??, nil should be stripped from the type
@@ -4839,8 +4825,6 @@ add("hello", 2) }"#,
             errs[0]
         );
     }
-
-    // --- Match pattern type validation tests ---
 
     #[test]
     fn test_match_pattern_string_against_int() {
@@ -5010,8 +4994,6 @@ add("hello", 2) }"#,
             .collect();
         assert!(pattern_warns.is_empty());
     }
-
-    // --- Interface constraint type checking tests ---
 
     fn iface_errors(source: &str) -> Vec<String> {
         errors(source)
@@ -5214,8 +5196,6 @@ add("hello", 2) }"#,
             warns[0]
         );
     }
-
-    // --- Flow-sensitive type refinement tests ---
 
     #[test]
     fn test_nil_narrowing_then_branch() {
@@ -5616,8 +5596,6 @@ add("hello", 2) }"#,
         );
     }
 
-    // --- Union exhaustiveness tests ---
-
     #[test]
     fn test_union_exhaustive_match_no_warning() {
         let warns = warnings(
@@ -5656,8 +5634,6 @@ add("hello", 2) }"#,
         assert!(union_warns[0].contains("nil"));
     }
 
-    // --- Nil-coalescing type inference tests ---
-
     #[test]
     fn test_nil_coalesce_non_union_preserves_left_type() {
         // When left is a known non-nil type, ?? should preserve it
@@ -5679,8 +5655,6 @@ add("hello", 2) }"#,
         );
         assert!(errs.is_empty());
     }
-
-    // --- never type tests ---
 
     #[test]
     fn test_never_is_subtype_of_everything() {
@@ -5770,8 +5744,6 @@ add("hello", 2) }"#,
         assert!(errs.is_empty(), "unexpected errors: {errs:?}");
     }
 
-    // --- unreachable code warning tests ---
-
     #[test]
     fn test_unreachable_after_return() {
         let warns = warnings(
@@ -5836,8 +5808,6 @@ add("hello", 2) }"#,
         );
     }
 
-    // --- try/catch error typing tests ---
-
     #[test]
     fn test_catch_typed_error_variable() {
         // When catch has a type annotation, the error var should be typed
@@ -5853,8 +5823,6 @@ add("hello", 2) }"#,
         );
         assert!(errs.is_empty(), "unexpected errors: {errs:?}");
     }
-
-    // --- unreachable() builtin tests ---
 
     #[test]
     fn test_unreachable_with_never_arg_no_error() {

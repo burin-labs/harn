@@ -62,8 +62,6 @@ pub struct LintConfig {
     pub require_file_header: Option<bool>,
 }
 
-/// The parsed shape of the sections this loader cares about.  Kept private;
-/// callers get the flattened `HarnConfig` instead.
 #[derive(Debug, Default, Deserialize)]
 struct RawManifest {
     #[serde(default)]
@@ -105,9 +103,8 @@ impl std::error::Error for ConfigError {}
 /// failure so callers can surface the problem rather than silently ignore
 /// malformed config.
 pub fn load_for_path(start: &Path) -> Result<HarnConfig, ConfigError> {
-    // Normalize to an absolute path for robust upward walking. If the path
-    // is relative and doesn't exist on disk yet, fall back to using CWD as
-    // the base — the walk still terminates at the filesystem root.
+    // Normalize to an absolute path so the walk works when `start` is a
+    // non-existent relative path.
     let base = if start.is_absolute() {
         start.to_path_buf()
     } else {
@@ -116,8 +113,6 @@ pub fn load_for_path(start: &Path) -> Result<HarnConfig, ConfigError> {
             .join(start)
     };
 
-    // Walk up from the parent directory of `start` (if `start` itself is a
-    // file) or from `start` (if it's a directory).
     let mut cursor: Option<PathBuf> = if base.is_dir() {
         Some(base)
     } else {
@@ -134,10 +129,8 @@ pub fn load_for_path(start: &Path) -> Result<HarnConfig, ConfigError> {
         if candidate.is_file() {
             return parse_manifest(&candidate);
         }
-        // Stop at project roots — a `.git` directory or file (worktree
-        // link) means we've left the user's project and are about to
-        // traverse into shared/home/system territory where picking up
-        // a stray `harn.toml` would surprise the author.
+        // Stop at a `.git` boundary so a stray `harn.toml` in a parent
+        // project or in `$HOME` is never silently picked up.
         if dir.join(".git").exists() {
             break;
         }

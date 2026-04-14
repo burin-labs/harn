@@ -182,22 +182,11 @@ impl Vm {
                 }
             }
 
-            // Evaluate top-level `var` / `let` bindings of this module
-            // and route them into a shared `module_state`. Bindings are
-            // compiled+executed against a temporary child env so they
-            // do NOT leak into `module_env` (the env captured by each
-            // closure's lexical snapshot). Keeping module-level state
-            // out of the closure's env clone is what makes the
-            // GetVar/SetVar module_state fallback work correctly — if
-            // a name appeared in both places, every call's per-invocation
-            // env clone would shadow module_state, and writes would
-            // land in a per-call copy that's discarded on return.
-            //
-            // After this block:
-            //   - `self.env` still contains only the sub-module imports
-            //     (unchanged)
-            //   - `module_state` contains every top-level var / let
-            //     defined by this module's init chunk
+            // Route top-level `var`/`let` bindings into a shared
+            // `module_state` rather than `module_env`. If they appeared in
+            // `module_env` (captured by each closure's lexical snapshot),
+            // every call's per-invocation env clone would shadow them and
+            // writes would land in a per-call copy discarded on return.
             let module_state: crate::value::ModuleState = {
                 let mut init_env = self.env.clone();
                 let init_nodes: Vec<harn_parser::SNode> = program
@@ -216,10 +205,8 @@ impl Vm {
                     let init_chunk = init_compiler
                         .compile(&init_nodes)
                         .map_err(|e| VmError::Runtime(format!("Import init compile error: {e}")))?;
-                    // Swap in a fresh working env, run the init chunk
-                    // against it, then pull the mutated env back out.
-                    // Stack/frame state is saved so `run_chunk_entry`'s
-                    // top-level frame-pop doesn't restore self.env.
+                    // Save frame state so run_chunk_entry's top-level
+                    // frame-pop doesn't restore self.env.
                     let saved_env = std::mem::replace(&mut self.env, init_env);
                     let saved_frames = std::mem::take(&mut self.frames);
                     let saved_handlers = std::mem::take(&mut self.exception_handlers);
@@ -271,18 +258,12 @@ impl Vm {
                     .insert(name.clone(), Rc::clone(&closure));
                 self.env
                     .define(name, VmValue::Closure(Rc::clone(&closure)), false)?;
-                // Also publish each fn into the shared `module_state` so
-                // sibling fns can look each other up by name through the
-                // GetVar → module_state fallback. Without this, using a
-                // sibling fn as a VALUE (e.g. `{handler: other_fn}` or
-                // passing it as a callback) fails with
-                // `Undefined variable`, because every closure captured
-                // `module_env.clone()` BEFORE any fn decl was added to
-                // it — so each closure's static env only sees sub-module
-                // imports, not its own sibling fn decls. Direct calls
-                // `other_fn()` work via the `module_functions` registry
-                // late-binding path, but that path is not used when the
-                // fn is read as a value.
+                // Publish into module_state so sibling fns can be read
+                // as VALUES (e.g. `{handler: other_fn}` or as callbacks).
+                // Closures captured module_env BEFORE fn decls were added,
+                // so their static env alone can't resolve sibling fns.
+                // Direct calls use the module_functions late-binding path;
+                // value reads rely on this module_state entry.
                 module_state.borrow_mut().define(
                     name,
                     VmValue::Closure(Rc::clone(&closure)),

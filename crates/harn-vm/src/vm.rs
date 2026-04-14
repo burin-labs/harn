@@ -329,7 +329,6 @@ impl Vm {
     /// Execute one instruction, returning whether to stop (breakpoint/step).
     /// Returns Ok(None) to continue, Ok(Some(val)) on program end, Err on error.
     pub async fn step_execute(&mut self) -> Result<Option<(VmValue, bool)>, VmError> {
-        // Check if we need to stop at this line
         let current_line = self.current_line();
         let line_changed = current_line != self.last_line && current_line > 0;
 
@@ -344,28 +343,23 @@ impl Vm {
                 }
             }
 
-            // Check breakpoints
             if self.breakpoints.contains(&current_line) {
                 self.stopped = true;
-                return Ok(Some((VmValue::Nil, true))); // true = stopped
+                return Ok(Some((VmValue::Nil, true)));
             }
 
-            // Check step mode
             if self.step_mode && self.frames.len() <= self.step_frame_depth + 1 {
                 self.step_mode = false;
                 self.stopped = true;
-                return Ok(Some((VmValue::Nil, true))); // true = stopped
+                return Ok(Some((VmValue::Nil, true)));
             }
         }
 
-        // Execute one instruction cycle
         self.stopped = false;
         self.execute_one_cycle().await
     }
 
-    /// Execute a single instruction cycle.
     async fn execute_one_cycle(&mut self) -> Result<Option<(VmValue, bool)>, VmError> {
-        // Check deadline
         if let Some(&(deadline, _)) = self.deadlines.last() {
             if Instant::now() > deadline {
                 self.deadlines.pop();
@@ -378,7 +372,6 @@ impl Vm {
             }
         }
 
-        // Get current frame
         let frame = match self.frames.last_mut() {
             Some(f) => f,
             None => {
@@ -387,7 +380,6 @@ impl Vm {
             }
         };
 
-        // Check if we've reached end of chunk
         if frame.ip >= frame.chunk.code.len() {
             let val = self.stack.pop().unwrap_or(VmValue::Nil);
             let popped_frame = self.frames.pop().unwrap();
@@ -569,26 +561,23 @@ impl Vm {
 
     /// Convert a VmError into either a handled exception (returning Ok) or a propagated error.
     fn handle_error(&mut self, error: VmError) -> Result<Option<VmValue>, VmError> {
-        // Extract the thrown value from the error
         let thrown_value = match &error {
             VmError::Thrown(v) => v.clone(),
             other => VmValue::String(Rc::from(other.to_string())),
         };
 
         if let Some(handler) = self.exception_handlers.pop() {
-            // Check if this is a typed catch that doesn't match the thrown value
             if !handler.error_type.is_empty() {
+                // Typed catch: only match when the thrown enum's type equals the declared type.
                 let matches = match &thrown_value {
                     VmValue::EnumVariant { enum_name, .. } => *enum_name == handler.error_type,
                     _ => false,
                 };
                 if !matches {
-                    // This handler doesn't match — try the next one
                     return self.handle_error(error);
                 }
             }
 
-            // Unwind call frames back to the handler's frame depth
             while self.frames.len() > handler.frame_depth {
                 if let Some(frame) = self.frames.pop() {
                     if let Some(ref dir) = frame.saved_source_dir {
@@ -599,7 +588,7 @@ impl Vm {
                 }
             }
 
-            // Clean up deadlines from unwound frames
+            // Drop deadlines that belonged to unwound frames.
             while self
                 .deadlines
                 .last()
@@ -610,20 +599,16 @@ impl Vm {
 
             self.env.truncate_scopes(handler.env_scope_depth);
 
-            // Restore stack to handler's depth
             self.stack.truncate(handler.stack_depth);
-
-            // Push the error value onto the stack (catch body can access it)
             self.stack.push(thrown_value);
 
-            // Set the IP in the current frame to the catch handler
             if let Some(frame) = self.frames.last_mut() {
                 frame.ip = handler.catch_ip;
             }
 
-            Ok(None) // Continue execution
+            Ok(None)
         } else {
-            Err(error) // No handler, propagate
+            Err(error)
         }
     }
 
@@ -653,7 +638,6 @@ impl Vm {
         });
 
         loop {
-            // Check deadline before each instruction
             if let Some(&(deadline, _)) = self.deadlines.last() {
                 if Instant::now() > deadline {
                     self.deadlines.pop();
@@ -666,13 +650,11 @@ impl Vm {
                 }
             }
 
-            // Get current frame
             let frame = match self.frames.last_mut() {
                 Some(f) => f,
                 None => return Ok(self.stack.pop().unwrap_or(VmValue::Nil)),
             };
 
-            // Check if we've reached end of chunk
             if frame.ip >= frame.chunk.code.len() {
                 let val = self.stack.pop().unwrap_or(VmValue::Nil);
                 let popped_frame = self.frames.pop().unwrap();
@@ -681,10 +663,8 @@ impl Vm {
                 }
 
                 if self.frames.is_empty() {
-                    // We're done with the top-level chunk
                     return Ok(val);
                 } else {
-                    // Returning from a function call
                     self.iterators.truncate(popped_frame.saved_iterator_depth);
                     self.env = popped_frame.saved_env;
                     self.stack.truncate(popped_frame.stack_base);
@@ -700,12 +680,10 @@ impl Vm {
                 Ok(Some(val)) => return Ok(val),
                 Ok(None) => continue,
                 Err(VmError::Return(val)) => {
-                    // Pop the current frame
                     if let Some(popped_frame) = self.frames.pop() {
                         if let Some(ref dir) = popped_frame.saved_source_dir {
                             crate::stdlib::set_thread_source_dir(dir);
                         }
-                        // Clean up exception handlers from the returned frame
                         let current_depth = self.frames.len();
                         self.exception_handlers
                             .retain(|h| h.frame_depth <= current_depth);
@@ -722,14 +700,14 @@ impl Vm {
                     }
                 }
                 Err(e) => {
-                    // Capture stack trace before error handling unwinds frames
+                    // Capture stack trace before error handling unwinds frames.
                     if self.error_stack_trace.is_empty() {
                         self.error_stack_trace = self.capture_stack_trace();
                     }
                     match self.handle_error(e) {
                         Ok(None) => {
                             self.error_stack_trace.clear();
-                            continue; // Handler found, continue
+                            continue;
                         }
                         Ok(Some(val)) => return Ok(val),
                         Err(e) => return Err(self.enrich_error_with_line(e)),
@@ -1119,7 +1097,7 @@ impl Vm {
         name: &str,
         args: Vec<VmValue>,
     ) -> Result<VmValue, VmError> {
-        // Auto-trace LLM calls and tool calls
+        // Auto-trace LLM calls and tool calls.
         let span_kind = match name {
             "llm_call" | "llm_stream" | "agent_loop" => Some(crate::tracing::SpanKind::LlmCall),
             "mcp_call" => Some(crate::tracing::SpanKind::ToolCall),
@@ -1174,26 +1152,19 @@ impl Vm {
 }
 
 /// Clone the VM at the top of the async-builtin child VM stack, returning a
-/// fresh `Vm` instance that callers own and can use without coordinating
-/// with other concurrent users of the stack. This replaces the legacy
-/// `take/restore` pattern: that pattern serialized access because only one
-/// consumer could hold the single stack entry at a time, which prevented
-/// any form of concurrent tool-handler execution within a single
-/// agent_loop iteration. Cloning is cheap — the VM struct shares its
-/// heavy state (env, builtins, bridge, module_cache) via `Arc`/`Rc` — so
-/// multiple concurrent handlers can each have their own execution context.
+/// fresh `Vm` instance the caller owns. Enables concurrent tool-handler
+/// execution within a single agent_loop iteration — the VM shares its heavy
+/// state (env, builtins, bridge, module_cache) via `Arc`/`Rc`, so cloning is
+/// cheap and each handler gets its own execution context.
 ///
 /// Returns `None` if no parent VM is currently pushed on the stack.
 pub fn clone_async_builtin_child_vm() -> Option<Vm> {
     CURRENT_ASYNC_BUILTIN_CHILD_VM.with(|slot| slot.borrow().last().map(|vm| vm.child_vm()))
 }
 
-/// Legacy API preserved for backward compatibility with any out-of-tree
-/// callers. New code should use `clone_async_builtin_child_vm()` instead
-/// — `take` serializes concurrent callers because only one can hold the
-/// popped value at a time. Internally this now delegates to a clone so
-/// even legacy callers don't deadlock each other, but the name is kept
-/// until external callers migrate.
+/// Legacy API preserved for out-of-tree callers; new code should use
+/// `clone_async_builtin_child_vm()`. `take/restore` serialized concurrent
+/// callers because only one could hold the popped value at a time.
 #[deprecated(
     note = "use clone_async_builtin_child_vm() — take/restore serialized concurrent callers"
 )]
@@ -1201,16 +1172,10 @@ pub fn take_async_builtin_child_vm() -> Option<Vm> {
     clone_async_builtin_child_vm()
 }
 
-/// Legacy API — now a no-op because `take_async_builtin_child_vm` returns
-/// a clone rather than popping the stack, so there is nothing to restore.
-/// Kept for backward compatibility.
+/// Legacy no-op retained for backward compatibility.
 #[deprecated(note = "clone_async_builtin_child_vm does not need a matching restore call")]
 pub fn restore_async_builtin_child_vm(_vm: Vm) {
-    // No-op: the new clone-based API doesn't require restoration since
-    // the caller owns a fresh clone and the stack is never mutated.
     CURRENT_ASYNC_BUILTIN_CHILD_VM.with(|slot| {
-        // Intentionally ignore — kept as a syntactic no-op block so the
-        // function signature remains stable.
         let _ = slot;
     });
 }

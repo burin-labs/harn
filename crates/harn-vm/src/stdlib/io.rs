@@ -59,8 +59,6 @@ pub(crate) fn register_io_builtins(vm: &mut Vm) {
         }
     });
 
-    // --- Logging builtins ---
-
     vm.register_builtin("log_debug", |args, out| {
         vm_write_log("debug", 0, args, out);
         Ok(VmValue::Nil)
@@ -95,8 +93,8 @@ pub(crate) fn register_io_builtins(vm: &mut Vm) {
         }
     });
 
-    // progress(phase, message, progress?, total?, data?) — standalone mode writes structured log line.
-    // In bridge/ACP mode, this is overridden to emit structured notifications.
+    // Standalone mode writes a structured log line; bridge/ACP mode overrides
+    // this to emit structured notifications.
     vm.register_builtin("progress", |args, out| {
         out.push_str(&render_progress_line(args));
         Ok(VmValue::Nil)

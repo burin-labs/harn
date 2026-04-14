@@ -99,17 +99,14 @@ impl Drop for SessionSinkGuard {
 /// `_iteration_guard`. **Do not reorder** without re-auditing the push/
 /// pop lifetimes in `crate::orchestration`.
 pub(super) struct AgentLoopState {
-    // --- Config snapshot ---
     pub(super) config: AgentLoopConfig,
     pub(super) session_id: String,
 
-    // --- Prompt / contract state ---
     pub(super) tool_contract_prompt: Option<String>,
     pub(super) base_system: Option<String>,
     pub(super) persistent_system_prompt: Option<String>,
     pub(super) has_tools: bool,
 
-    // --- Conversation + transcript ---
     pub(super) visible_messages: Vec<serde_json::Value>,
     pub(super) recorded_messages: Vec<serde_json::Value>,
     pub(super) transcript_events: Vec<crate::value::VmValue>,
@@ -117,13 +114,11 @@ pub(super) struct AgentLoopState {
     pub(super) total_text: String,
     pub(super) last_iteration_text: String,
 
-    // --- Ledger + progress ---
     pub(super) task_ledger: crate::llm::ledger::TaskLedger,
     pub(super) ledger_done_rejections: usize,
     pub(super) loop_tracker: ToolCallTracker,
     pub(super) loop_detect_enabled: bool,
 
-    // --- Counters / iteration bookkeeping ---
     pub(super) total_iterations: usize,
     pub(super) resumed_iterations: usize,
     pub(super) consecutive_text_only: usize,
@@ -131,24 +126,20 @@ pub(super) struct AgentLoopState {
     pub(super) idle_backoff_ms: u64,
     pub(super) last_run_exit_code: Option<i32>,
 
-    // --- Tool usage aggregates ---
     pub(super) all_tools_used: Vec<String>,
     pub(super) successful_tools_used: Vec<String>,
     pub(super) rejected_tools: Vec<String>,
     pub(super) deferred_user_messages: Vec<String>,
 
-    // --- Daemon state ---
     pub(super) daemon_state: String,
     pub(super) daemon_snapshot_path: Option<String>,
     pub(super) daemon_watch_state: std::collections::BTreeMap<String, u64>,
 
-    // --- Final-status scratch (set only by the finalize phase) ---
+    /// Set only by the finalize phase.
     pub(super) final_status: &'static str,
 
-    // --- Loop clock ---
     pub(super) loop_start: std::time::Instant,
 
-    // --- Shared handles / config shortcuts ---
     pub(super) bridge: Option<Rc<crate::bridge::HostBridge>>,
     pub(super) tool_format: String,
     pub(super) done_sentinel: String,
@@ -164,7 +155,7 @@ pub(super) struct AgentLoopState {
     pub(super) daemon_config: DaemonLoopConfig,
     pub(super) custom_nudge: Option<String>,
 
-    // --- Drop guards (see "Drop ordering" on the struct docs). ---
+    // Drop guards: see "Drop ordering" on the struct docs.
     pub(super) _approval_guard: ApprovalPolicyGuard,
     pub(super) _policy_guard: ExecutionPolicyGuard,
     pub(super) _sink_guard: SessionSinkGuard,
@@ -174,17 +165,14 @@ pub(super) struct AgentLoopState {
 impl AgentLoopState {
     /// Build the loop state from a fresh `AgentLoopConfig`, mutating
     /// `opts` in place to normalize the native-tool channel before the
-    /// first LLM call.  Mirrors the prelude that lived at the top of
-    /// `run_agent_loop_internal` verbatim — any behavior change here is
-    /// a bug.
+    /// first LLM call.
     pub(super) fn new(
         opts: &mut crate::llm::api::LlmCallOptions,
         config: AgentLoopConfig,
     ) -> Result<Self, VmError> {
-        // Each top-level agent loop starts a fresh transcript segment.
-        // Reset the dedup state so the first call emits system_prompt +
-        // tool_schemas events and `message` events carry meaningful
-        // iteration indices.
+        // Fresh transcript segment per top-level loop: reset dedup so the
+        // first call re-emits system_prompt + tool_schemas and message
+        // events carry meaningful iteration indices.
         crate::llm::agent_observe::reset_transcript_dedup();
 
         let _iteration_guard = TranscriptIterationGuard;
@@ -213,9 +201,6 @@ impl AgentLoopState {
         let exit_when_verified = config.exit_when_verified;
         let last_run_exit_code: Option<i32> = None;
 
-        // Tool loop detection — catches stuck loops where the model
-        // calls the same tool with the same args and gets the same
-        // result repeatedly.
         let loop_detect_enabled = config.loop_detect_warn > 0;
         let loop_tracker = ToolCallTracker::new(
             config.loop_detect_warn,
@@ -225,8 +210,7 @@ impl AgentLoopState {
 
         let effective_policy = merge_agent_loop_policy(config.policy.clone())?;
 
-        // Push the loop-local policy only after intersecting it with
-        // any active outer workflow/worker ceiling so nested loops
+        // Intersect with outer workflow/worker ceiling so nested loops
         // never widen permissions.
         if let Some(ref policy) = effective_policy {
             crate::orchestration::push_execution_policy(policy.clone());
@@ -316,10 +300,8 @@ impl AgentLoopState {
         };
         let mut visible_messages = opts.messages.clone();
         let mut recorded_messages = opts.messages.clone();
-        // Emit `message` events for the initial payload so event-stream
-        // consumers (transcript replayers, LoRA corpus extractors) see
-        // the full opening context, not just messages accumulated
-        // during the loop.
+        // Emit `message` events for the initial payload so transcript
+        // replayers / LoRA corpus extractors see the opening context.
         for message in &opts.messages {
             crate::llm::agent_observe::emit_message_event(message);
         }

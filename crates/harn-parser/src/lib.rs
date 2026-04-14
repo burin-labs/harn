@@ -11,19 +11,13 @@ pub use typechecker::{
     TypeChecker, TypeDiagnostic,
 };
 
-/// Returns `true` if `name` is a builtin recognized by the parser's static
-/// analyzer. Exposed for cross-crate drift tests (see
-/// `crates/harn-vm/tests/builtin_registry_alignment.rs`) and any future
-/// tooling that needs to validate builtin references without running the
-/// VM.
+/// Returns `true` if `name` is a builtin recognized by the parser's static analyzer.
 pub fn is_known_builtin(name: &str) -> bool {
     builtin_signatures::is_builtin(name)
 }
 
-/// Iterator over every builtin name known to the parser, in alphabetical
-/// order. Enables bidirectional drift checks against the VM's runtime
-/// registry — a parser entry with no runtime counterpart means a stale
-/// signature that should be removed.
+/// Every builtin name known to the parser, alphabetically. Enables bidirectional
+/// drift checks against the VM's runtime registry.
 pub fn known_builtin_names() -> impl Iterator<Item = &'static str> {
     builtin_signatures::iter_builtin_names()
 }
@@ -32,18 +26,14 @@ pub fn known_builtin_metadata() -> impl Iterator<Item = builtin_signatures::Buil
     builtin_signatures::iter_builtin_metadata()
 }
 
-// ── Source pipeline ──────────────────────────────────────────────────
-
-/// Error from a source processing pipeline stage. Wraps the original
-/// error types without allocating a String — use `Display` when you
-/// need text.
+/// Error from a source processing pipeline stage. Wraps the inner error
+/// types so callers can dispatch on the failing stage.
 #[derive(Debug)]
 pub enum PipelineError {
     Lex(harn_lexer::LexerError),
     Parse(ParserError),
-    /// A type-checking error. Boxed to keep the enum small on the stack
-    /// (TypeDiagnostic contains Vec<FixEdit>). Carries full diagnostic
-    /// for rich error rendering (span, help text, fix edits).
+    /// Boxed to keep the enum small on the stack — TypeDiagnostic contains
+    /// a Vec<FixEdit>.
     TypeCheck(Box<TypeDiagnostic>),
 }
 
@@ -106,8 +96,6 @@ pub fn check_source(source: &str) -> Result<(Vec<SNode>, Vec<TypeDiagnostic>), P
 }
 
 /// Lex, parse, and type-check, bailing on the first type error.
-/// Returns the AST on success. Useful when callers want to proceed
-/// to compilation only if there are no type errors.
 pub fn check_source_strict(source: &str) -> Result<Vec<SNode>, PipelineError> {
     let (program, diagnostics) = check_source(source)?;
     for diag in &diagnostics {
@@ -166,14 +154,12 @@ mod pipeline_tests {
         let err = parse_source("@").unwrap_err();
         let msg = err.to_string();
         assert!(!msg.is_empty());
-        // Should not be a generic "error" — should contain specifics.
         assert!(msg.contains('@') || msg.contains("Unexpected"));
     }
 
     #[test]
     fn pipeline_error_size_is_bounded() {
-        // TypeCheck variant is boxed; Lex/Parse carry Span + strings inline.
-        // 88 bytes on 64-bit. Guard against accidental growth.
+        // TypeCheck is boxed; guard against accidental growth of the other variants.
         assert!(
             std::mem::size_of::<PipelineError>() <= 96,
             "PipelineError grew to {} bytes — consider boxing large variants",

@@ -11,26 +11,18 @@ pub(crate) use options::{
     expects_structured_output, extract_json, extract_llm_options, opt_str_list,
 };
 
-// =============================================================================
-// Provider API-key availability cache
-// =============================================================================
-
 /// Cache of provider name → whether a usable API key is available.
-/// Populated lazily on first check per provider and reused for the process
-/// lifetime (env vars don't change mid-run).
+/// Cached for process lifetime since env vars don't change mid-run.
 static PROVIDER_KEY_CACHE: OnceLock<Mutex<HashMap<String, bool>>> = OnceLock::new();
 static MODEL_TIER_WARNING_CACHE: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
-/// Check whether `provider` has a usable API key (or needs none).
-/// Results are cached so repeated resolution attempts for the same provider
-/// don't redundantly probe environment variables.
+/// Check whether `provider` has a usable API key (or needs none). Cached.
 pub(crate) fn provider_key_available(provider: &str) -> bool {
     let cache = PROVIDER_KEY_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     let mut map = cache.lock().unwrap();
     if let Some(&available) = map.get(provider) {
         return available;
     }
-    // Probe: try resolving the key — if it succeeds the provider is usable.
     let available = resolve_api_key(provider).is_ok();
     map.insert(provider.to_string(), available);
     available
@@ -47,10 +39,6 @@ pub(crate) fn reset_provider_key_cache() {
 pub(super) const TRANSCRIPT_TYPE: &str = "transcript";
 const TRANSCRIPT_ASSET_TYPE: &str = "transcript_asset";
 const TRANSCRIPT_VERSION: i64 = 2;
-
-// =============================================================================
-// Option extraction helpers
-// =============================================================================
 
 pub(crate) fn opt_str(options: &Option<BTreeMap<String, VmValue>>, key: &str) -> Option<String> {
     options.as_ref()?.get(key).map(|v| v.display())
@@ -231,18 +219,13 @@ fn resolve_available_tier_model(
     requested
 }
 
-// =============================================================================
-// Provider/model/key resolution
-// =============================================================================
-
 pub(crate) fn vm_resolve_provider(options: &Option<BTreeMap<String, VmValue>>) -> String {
     use crate::llm_config;
-    // Explicit option wins, except for the "auto" alias which means
-    // "run the normal inference chain". Treating "auto" as a literal
-    // provider name causes downstream resolve_api_key to default to
-    // anthropic and fail the moment ANTHROPIC_API_KEY is absent, which
-    // in turn breaks any sub-call (QC officer, recovery stage) that
-    // didn't have a chance to detect the env itself.
+    // Explicit option wins, except "auto" which means "run the normal
+    // inference chain". Treating "auto" as a literal provider name would
+    // make resolve_api_key default to anthropic and fail whenever
+    // ANTHROPIC_API_KEY is absent, breaking any sub-call that couldn't
+    // inspect the env itself.
     if let Some(p) = options
         .as_ref()
         .and_then(|o| o.get("provider"))
@@ -252,7 +235,6 @@ pub(crate) fn vm_resolve_provider(options: &Option<BTreeMap<String, VmValue>>) -
             return p;
         }
     }
-    // Env var next
     if let Ok(p) = std::env::var("HARN_LLM_PROVIDER") {
         return p;
     }
@@ -264,7 +246,6 @@ pub(crate) fn vm_resolve_provider(options: &Option<BTreeMap<String, VmValue>>) -
     {
         return "local".to_string();
     }
-    // Try to infer from model
     if let Some(m) = options
         .as_ref()
         .and_then(|o| o.get("model"))
@@ -284,10 +265,9 @@ pub(crate) fn vm_resolve_provider(options: &Option<BTreeMap<String, VmValue>>) -
     if let Ok(m) = std::env::var("HARN_LLM_MODEL") {
         return llm_config::infer_provider(&m);
     }
-    // Default to anthropic — but if the key is missing, try providers that
-    // don't need one (ollama, local) before giving up.  This avoids noisy
-    // "Missing API key" errors when the user is running with a local model
-    // and a sub-pipeline (e.g. enrichment) doesn't inherit the provider env.
+    // Default to anthropic, but fall back to keyless providers when its
+    // key is missing — avoids noisy errors when a sub-pipeline (e.g.
+    // enrichment) didn't inherit the provider env.
     let default = "anthropic";
     if provider_key_available(default) {
         return default.to_string();
@@ -297,8 +277,7 @@ pub(crate) fn vm_resolve_provider(options: &Option<BTreeMap<String, VmValue>>) -
             return fallback.to_string();
         }
     }
-    // No provider has a key — return the default so the caller gets the
-    // usual descriptive error from resolve_api_key.
+    // Let resolve_api_key surface its descriptive error.
     default.to_string()
 }
 
@@ -339,7 +318,6 @@ pub(crate) fn vm_resolve_model(
             return resolved;
         }
     }
-    // Default model per provider
     match provider {
         "local" => std::env::var("LOCAL_LLM_MODEL")
             .or_else(|_| std::env::var("HARN_LLM_MODEL"))
@@ -357,10 +335,7 @@ pub fn resolve_api_key(provider: &str) -> Result<String, VmError> {
         return Ok(String::new());
     }
 
-    // Build a short "why this provider?" explanation to append to error
-    // messages so the user knows where the selection came from (env vars,
-    // llm.toml, or the default fallback) and how to switch to the mock
-    // provider for offline experimentation.
+    // Explain provenance (env vs llm.toml vs default) and how to opt into mock.
     let selection_hint = {
         let config_path = llm_config::loaded_config_path()
             .map(|p| p.display().to_string())
@@ -399,17 +374,12 @@ pub fn resolve_api_key(provider: &str) -> Result<String, VmError> {
             llm_config::AuthEnv::None => return Ok(String::new()),
         }
     }
-    // Fallback for unknown providers
     std::env::var("ANTHROPIC_API_KEY").map_err(|_| {
         VmError::Thrown(VmValue::String(Rc::from(format!(
             "Missing API key: set ANTHROPIC_API_KEY environment variable{selection_hint}"
         ))))
     })
 }
-
-// =============================================================================
-// Resolved provider config (shared between api.rs and stream.rs)
-// =============================================================================
 
 pub(crate) struct ResolvedProvider<'a> {
     pub pdef: Option<&'a crate::llm_config::ProviderDef>,
@@ -462,10 +432,6 @@ impl<'a> ResolvedProvider<'a> {
     }
 }
 
-// =============================================================================
-// Convert VmValue messages to JSON for API calls
-// =============================================================================
-
 pub(crate) fn vm_messages_to_json(msg_list: &[VmValue]) -> Result<Vec<serde_json::Value>, VmError> {
     let mut messages = Vec::new();
     for msg in msg_list {
@@ -502,9 +468,9 @@ pub(crate) fn vm_messages_to_json(msg_list: &[VmValue]) -> Result<Vec<serde_json
                     }],
                 }));
             } else {
-                // Preserve the full message dict so OpenAI-compatible fields
-                // like tool_call_id, tool_calls, reasoning, and provider-
-                // specific metadata survive transcript/message round-trips.
+                // Preserve full message dict so OpenAI-style fields
+                // (tool_call_id, tool_calls, reasoning, provider metadata)
+                // survive transcript/message round-trips.
                 let mut message = vm_value_dict_to_json(d);
                 if !message
                     .get("content")
@@ -598,10 +564,9 @@ pub(crate) fn json_messages_to_vm(msg_list: &[serde_json::Value]) -> Vec<VmValue
         .filter_map(|msg| {
             let role = msg.get("role").and_then(|v| v.as_str())?;
 
-            // For OpenAI-compatible tool messages, preserve all fields so the
-            // message round-trips correctly through transcript serialization.
-            // Previously only role+content were kept, stripping tool_calls and
-            // tool_call_id which Together AI (and other strict providers) require.
+            // Preserve all fields for tool messages; strict providers
+            // (Together AI and others) reject messages missing tool_calls
+            // / tool_call_id.
             if role == "tool" || msg.get("tool_calls").is_some() {
                 return Some(crate::stdlib::json_to_vm_value(msg));
             }
@@ -840,10 +805,6 @@ pub(crate) fn is_transcript_value(value: &VmValue) -> bool {
         == Some(TRANSCRIPT_TYPE)
 }
 
-// =============================================================================
-// Helper: add a role message to a conversation list
-// =============================================================================
-
 pub(crate) fn vm_add_role_message(args: &[VmValue], role: &str) -> Result<VmValue, VmError> {
     match args.first() {
         Some(VmValue::List(list)) => {
@@ -1010,10 +971,6 @@ fn render_assetish_label(kind: &str, dict: &BTreeMap<String, VmValue>) -> String
         .unwrap_or_else(|| kind.to_string());
     format!("<{kind}:{label}>")
 }
-
-// =============================================================================
-// Convert VmValue dict to serde_json::Value for API payloads
-// =============================================================================
 
 /// Convert a VmValue dict to serde_json::Value for API payloads.
 pub(crate) fn vm_value_dict_to_json(dict: &BTreeMap<String, VmValue>) -> serde_json::Value {

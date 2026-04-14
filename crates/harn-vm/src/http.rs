@@ -5,9 +5,7 @@ use std::rc::Rc;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
-// =============================================================================
-// Mock HTTP framework (thread-local, mirrors the mock LLM pattern)
-// =============================================================================
+// Mock HTTP framework (thread-local, mirrors the mock LLM pattern).
 
 struct HttpMock {
     method: String,
@@ -43,7 +41,7 @@ fn url_matches(pattern: &str, url: &str) -> bool {
     if !pattern.contains('*') {
         return pattern == url;
     }
-    // Multi-glob: split on `*` and check that all segments appear in order
+    // Multi-glob: split on `*` and match segments in order.
     let parts: Vec<&str> = pattern.split('*').collect();
     let mut remaining = url;
     for (i, part) in parts.iter().enumerate() {
@@ -51,19 +49,16 @@ fn url_matches(pattern: &str, url: &str) -> bool {
             continue;
         }
         if i == 0 {
-            // First segment must be a prefix
             if !remaining.starts_with(part) {
                 return false;
             }
             remaining = &remaining[part.len()..];
         } else if i == parts.len() - 1 {
-            // Last segment must be a suffix
             if !remaining.ends_with(part) {
                 return false;
             }
             remaining = "";
         } else {
-            // Middle segments must appear somewhere in the remaining string
             match remaining.find(part) {
                 Some(pos) => remaining = &remaining[pos + part.len()..],
                 None => return false,
@@ -232,10 +227,6 @@ pub fn register_http_builtins(vm: &mut Vm) {
     });
 }
 
-// =============================================================================
-// HTTP request helpers
-// =============================================================================
-
 fn vm_get_int_option(options: &BTreeMap<String, VmValue>, key: &str, default: i64) -> i64 {
     options.get(key).and_then(|v| v.as_int()).unwrap_or(default)
 }
@@ -268,7 +259,6 @@ async fn vm_execute_http_request(
     });
 
     if let Some((status, body, headers)) = mock_match {
-        // Record the call
         let body_str = options.get("body").map(|v| v.display());
         HTTP_MOCK_CALLS.with(|calls| {
             calls.borrow_mut().push(HttpMockCall {
@@ -316,7 +306,6 @@ async fn vm_execute_http_request(
 
     let mut header_map = reqwest::header::HeaderMap::new();
 
-    // Apply auth
     if let Some(auth_val) = options.get("auth") {
         match auth_val {
             VmValue::String(s) => {
@@ -359,7 +348,6 @@ async fn vm_execute_http_request(
         }
     }
 
-    // Apply explicit headers
     if let Some(VmValue::Dict(hdrs)) = options.get("headers") {
         for (k, v) in hdrs.iter() {
             let name = reqwest::header::HeaderName::from_bytes(k.as_bytes()).map_err(|e| {

@@ -9,10 +9,6 @@ use uuid::Uuid;
 /// The supported A2A protocol version.
 const SUPPORTED_A2A_VERSION: &str = "1.0.0";
 
-// ---------------------------------------------------------------------------
-// Task state tracking
-// ---------------------------------------------------------------------------
-
 /// The lifecycle states of an A2A task, aligned with the A2A protocol spec v1.0.
 /// See: https://a2a-protocol.org/latest/specification/
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -229,7 +225,6 @@ async fn execute_pipeline(path: &str, task_text: &str) -> Result<String, String>
                 }
             }
 
-            // Inject the task text as the pipeline parameter
             vm.set_global(
                 "task",
                 harn_vm::VmValue::String(std::rc::Rc::from(task_owned.as_str())),
@@ -337,7 +332,6 @@ struct ParsedRequest {
 fn parse_http_request(raw: &[u8]) -> Option<ParsedRequest> {
     let text = String::from_utf8_lossy(raw);
 
-    // Split headers from body
     let (header_section, body) = if let Some(pos) = text.find("\r\n\r\n") {
         (&text[..pos], text[pos + 4..].to_string())
     } else if let Some(pos) = text.find("\n\n") {
@@ -454,7 +448,7 @@ async fn handle_connection(
     };
     buf.truncate(n);
 
-    // If headers indicate a Content-Length larger than what we read, read more.
+    // Drain the rest of the body if Content-Length exceeds the first read.
     let header_text = String::from_utf8_lossy(&buf);
     let content_length = header_text
         .lines()
@@ -463,7 +457,6 @@ async fn handle_connection(
         .and_then(|v| v.trim().parse::<usize>().ok())
         .unwrap_or(0);
 
-    // Find where the body starts
     let header_end = header_text
         .find("\r\n\r\n")
         .map(|p| p + 4)
@@ -501,11 +494,9 @@ async fn handle_connection(
     };
 
     match (req.method.as_str(), req.path.as_str()) {
-        // CORS preflight
         ("OPTIONS", _) => {
             let _ = write_http_response(&mut stream, 204, "No Content", "text/plain", b"").await;
         }
-        // Agent Card endpoint (v1.0 path)
         ("GET", "/.well-known/a2a-agent") => {
             let _ = write_http_response(
                 &mut stream,
@@ -516,9 +507,7 @@ async fn handle_connection(
             )
             .await;
         }
-        // A2A JSON-RPC endpoint
         ("POST", "/") => {
-            // Check A2A-Version header before processing
             let rpc_id = serde_json::from_str::<serde_json::Value>(&req.body)
                 .ok()
                 .and_then(|v| v.get("id").cloned())
@@ -537,7 +526,6 @@ async fn handle_connection(
                 return;
             }
 
-            // Check if this is a streaming request
             let parsed: Option<serde_json::Value> = serde_json::from_str(&req.body).ok();
             let method = parsed
                 .as_ref()
@@ -554,7 +542,6 @@ async fn handle_connection(
                     .await;
             }
         }
-        // REST-style task listing: GET /tasks
         ("GET", "/tasks") => {
             let tasks = list_tasks(store, None, None);
             let body_bytes = serde_json::to_string(&tasks).unwrap_or_default();
@@ -567,7 +554,6 @@ async fn handle_connection(
             )
             .await;
         }
-        // REST-style task retrieval: GET /tasks/:id
         ("GET", p) if p.starts_with("/tasks/") => {
             let task_id = &p["/tasks/".len()..];
             let task_json = store.lock().unwrap().get(task_id).map(|t| t.to_json());
@@ -595,7 +581,6 @@ async fn handle_connection(
                 }
             }
         }
-        // REST-style task cancellation: POST /tasks/:id/cancel
         ("POST", p) if p.starts_with("/tasks/") && p.ends_with("/cancel") => {
             let task_id = &p["/tasks/".len()..p.len() - "/cancel".len()];
             let result = cancel_task(store, task_id);
@@ -655,9 +640,8 @@ fn cancel_task(store: &TaskStore, task_id: &str) -> Result<serde_json::Value, St
     Ok(task.to_json())
 }
 
-/// List tasks with optional cursor-based pagination.
-/// `cursor` is an optional task id to start after.
-/// `limit` is the maximum number of tasks to return (default 50).
+/// List tasks with cursor-based pagination. `cursor` is the task id to
+/// start after; `limit` defaults to 50.
 fn list_tasks(store: &TaskStore, cursor: Option<&str>, limit: Option<usize>) -> serde_json::Value {
     let map = store.lock().unwrap();
     let limit = limit.unwrap_or(50);
@@ -753,18 +737,15 @@ async fn handle_jsonrpc(pipeline_path: &str, body: &str, store: &TaskStore) -> S
                     "Invalid params: no text part found in message",
                 )
             } else {
-                // Create task and track its lifecycle
                 let task_id = create_task(store, &task_text, context_id);
                 mark_task_working(store, &task_id);
 
-                // Check if cancelled before we even start execution
                 if is_task_cancelled(store, &task_id) {
                     let task_json = store.lock().unwrap().get(&task_id).unwrap().to_json();
                     task_rpc_response(&rpc_id, task_json)
                 } else {
                     match execute_pipeline(pipeline_path, &task_text).await {
                         Ok(output) => {
-                            // Check cancellation after execution too
                             if is_task_cancelled(store, &task_id) {
                                 let task_json =
                                     store.lock().unwrap().get(&task_id).unwrap().to_json();
@@ -836,8 +817,8 @@ async fn handle_jsonrpc(pipeline_path: &str, body: &str, store: &TaskStore) -> S
     serde_json::to_string(&resp).unwrap_or_default()
 }
 
-/// Handle a streaming JSON-RPC request (a2a.SendStreamingMessage).
-/// Sends SSE events for task status updates and the final message.
+/// Handle `a2a.SendStreamingMessage`, sending SSE events for task status
+/// updates and the final message.
 async fn handle_streaming_request(
     stream: &mut (impl AsyncWriteExt + AsyncReadExt + Unpin),
     pipeline_path: &str,
@@ -875,15 +856,12 @@ async fn handle_streaming_request(
         return;
     }
 
-    // Create task
     let task_id = create_task(store, &task_text, context_id);
 
-    // Start SSE stream
     if write_sse_header(stream).await.is_err() {
         return;
     }
 
-    // Send submitted status event
     let submitted_event = serde_json::json!({
         "jsonrpc": "2.0",
         "id": rpc_id,
@@ -900,7 +878,6 @@ async fn handle_streaming_request(
         return;
     }
 
-    // Transition to working
     mark_task_working(store, &task_id);
     let working_event = serde_json::json!({
         "jsonrpc": "2.0",
@@ -918,7 +895,6 @@ async fn handle_streaming_request(
         return;
     }
 
-    // Execute pipeline
     match execute_pipeline(pipeline_path, &task_text).await {
         Ok(output) => {
             if is_task_cancelled(store, &task_id) {
@@ -933,7 +909,6 @@ async fn handle_streaming_request(
                 });
                 let _ = write_sse_event(stream, "message", &cancelled_event).await;
             } else {
-                // Send the agent message
                 let message_id = Uuid::now_v7().to_string();
                 let message_event = serde_json::json!({
                     "jsonrpc": "2.0",
@@ -952,7 +927,6 @@ async fn handle_streaming_request(
 
                 complete_task(store, &task_id, &output);
 
-                // Send completed status
                 let completed_event = serde_json::json!({
                     "jsonrpc": "2.0",
                     "id": rpc_id,
@@ -984,7 +958,6 @@ async fn handle_streaming_request(
 
 /// Start the A2A server for a pipeline file.
 pub async fn run_a2a_server(pipeline_path: &str, port: u16) {
-    // Verify the pipeline file exists and is parseable before starting
     let path = Path::new(pipeline_path);
     if !path.exists() {
         eprintln!("Error: file not found: {pipeline_path}");
@@ -1015,9 +988,8 @@ pub async fn run_a2a_server(pipeline_path: &str, port: u16) {
             Ok((stream, _addr)) => {
                 let pipeline = pipeline_path.to_string();
                 let card = card_json.clone();
-                // Each connection is handled inline (not spawned) because the
-                // VM uses LocalSet and is !Send. For a simple A2A server this
-                // is fine -- requests are handled sequentially.
+                // Handled inline (not spawned): the VM is !Send because it
+                // runs on a LocalSet, so requests are serialized.
                 handle_connection(stream, &pipeline, &card, &store).await;
             }
             Err(e) => {

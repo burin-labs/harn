@@ -221,7 +221,6 @@ fn snap_to_line_end(s: &str, max_bytes: usize) -> &str {
     if max_bytes >= s.len() {
         return s;
     }
-    // Find the last newline at or before max_bytes
     let search_end = s.floor_char_boundary(max_bytes);
     match s[..search_end].rfind('\n') {
         Some(pos) => &s[..pos + 1],
@@ -566,11 +565,9 @@ pub(crate) async fn auto_compact_messages(
     }
     let original_split = messages.len().saturating_sub(config.keep_last);
     let mut split_at = original_split;
-    // Move split_at backward to the nearest user-role message boundary so
-    // the kept portion always starts at a clean turn boundary.  This
-    // prevents orphaned mid-turn messages (e.g. tool results separated from
-    // their assistant request) which OpenAI-compatible APIs reject, while
-    // preserving at least keep_last messages.
+    // Snap back to a user-role boundary so the kept suffix begins at a clean
+    // turn. OpenAI-compatible APIs reject tool results orphaned from their
+    // assistant request, so splitting mid-turn corrupts the transcript.
     while split_at > 0
         && messages[split_at]
             .get("role")
@@ -579,9 +576,8 @@ pub(crate) async fn auto_compact_messages(
     {
         split_at -= 1;
     }
-    // If no user-role boundary was found, fall back to the original split
-    // point so compaction still proceeds (e.g. tool-heavy transcripts
-    // where the only user message is at index 0).
+    // Fall back to the naive split (e.g. tool-heavy transcripts with the sole
+    // user message at index 0) rather than skipping compaction entirely.
     if split_at == 0 {
         split_at = original_split;
     }
@@ -604,7 +600,6 @@ pub(crate) async fn auto_compact_messages(
     let old_messages: Vec<_> = messages.drain(..split_at).collect();
     let archived_count = old_messages.len();
 
-    // Tier 1: lightweight compaction (with optional mask callback).
     let mut summary = apply_compaction_strategy(
         &config.compact_strategy,
         &old_messages,
@@ -615,7 +610,6 @@ pub(crate) async fn auto_compact_messages(
     )
     .await?;
 
-    // Tier 2: if hard limit set and still too large, apply aggressive strategy.
     if let Some(hard_limit) = config.hard_limit_tokens {
         let summary_msg = serde_json::json!({"role": "user", "content": &summary});
         let mut estimate_msgs = vec![summary_msg];
@@ -660,19 +654,15 @@ mod tests {
 
     #[test]
     fn microcompact_snaps_to_line_boundaries() {
-        // Build output with 10 lines, each ~20 chars
         let lines: Vec<String> = (0..20)
             .map(|i| format!("line {:02} content here", i))
             .collect();
         let output = lines.join("\n");
         let result = microcompact_tool_output(&output, 200);
-        // Head and tail should end/start at line boundaries (contain \n, not mid-line)
         assert!(result.contains("[... "), "should have snip marker");
-        // The head portion should end with a complete line (newline before the marker)
         let parts: Vec<&str> = result.split("\n\n[... ").collect();
         assert!(parts.len() >= 2, "should split at marker");
         let head = parts[0];
-        // Head should be complete lines only
         for line in head.lines() {
             assert!(
                 line.starts_with("line "),
@@ -703,7 +693,7 @@ mod tests {
     #[test]
     fn snap_to_line_end_finds_newline() {
         let s = "line1\nline2\nline3\nline4\n";
-        let head = snap_to_line_end(s, 12); // "line1\nline2\n" is 12 chars
+        let head = snap_to_line_end(s, 12);
         assert!(head.ends_with('\n'), "should end at newline");
         assert!(head.contains("line1"));
     }
@@ -712,7 +702,6 @@ mod tests {
     fn snap_to_line_start_finds_newline() {
         let s = "line1\nline2\nline3\nline4\n";
         let tail = snap_to_line_start(s, 12);
-        // Should start at the beginning of a complete line
         assert!(
             tail.starts_with("line"),
             "should start at line boundary: {tail}"

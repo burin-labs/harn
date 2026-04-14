@@ -50,12 +50,10 @@ async fn main() {
             match (args.eval.as_deref(), args.file.as_deref()) {
                 (Some(code), None) => {
                     let wrapped = format!("pipeline main(task) {{\n{code}\n}}");
-                    // `tempfile::Builder` gives us a unique filename (no
-                    // collisions between concurrent `harn run -e` invocations)
-                    // and a `Drop`-guarded cleanup path so a panic in
-                    // run_file doesn't leave the temp file behind. The
-                    // `.harn` suffix keeps tree-sitter / pipeline dispatch
-                    // matching on extension unchanged.
+                    // Unique filename avoids collisions between concurrent
+                    // `harn run -e` invocations; Drop guards cleanup on
+                    // panic. The `.harn` suffix keeps tree-sitter and
+                    // pipeline dispatch matching on extension.
                     let tmp = tempfile::Builder::new()
                         .prefix("harn-eval-")
                         .suffix(".harn")
@@ -69,8 +67,6 @@ async fn main() {
                     });
                     let tmp_str = tmp_path.to_string_lossy().into_owned();
                     commands::run::run_file(&tmp_str, args.trace, denied, args.argv.clone()).await;
-                    // tmp's Drop cleans up on all exit paths (including
-                    // panic unwind) — no explicit remove needed.
                     drop(tmp);
                 }
                 (None, Some(file)) => {
@@ -90,9 +86,6 @@ async fn main() {
             if files.is_empty() {
                 command_error("no .harn files found under the given target(s)");
             }
-            // Pre-scan: collect all selectively-imported function names so
-            // the linter can suppress false unused-function warnings for
-            // library functions consumed by other files.
             let cross_file_imports = commands::check::collect_cross_file_imports(&files);
             let mut should_fail = false;
             for file in &files {
@@ -158,9 +151,8 @@ async fn main() {
         }
         Command::Fmt(args) => {
             let targets: Vec<&str> = args.targets.iter().map(String::as_str).collect();
-            // Build a per-target FmtOptions by loading harn.toml for the
-            // first target (for directory-wide runs that's the closest we
-            // can do cheaply). CLI flags always win over config.
+            // Anchor config resolution on the first target; CLI flags
+            // always win over harn.toml values.
             let anchor = targets.first().map(Path::new).unwrap_or(Path::new("."));
             let loaded = match config::load_for_path(anchor) {
                 Ok(c) => c,
@@ -756,7 +748,6 @@ pub(crate) async fn execute(source: &str, source_path: Option<&Path>) -> Result<
     let mut parser = Parser::new(tokens);
     let program = parser.parse().map_err(|e| e.to_string())?;
 
-    // Static type checking (same as interpreter path)
     let type_diagnostics = TypeChecker::new().check(&program);
     let mut warning_lines = Vec::new();
     for diag in &type_diagnostics {

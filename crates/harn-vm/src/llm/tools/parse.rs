@@ -65,16 +65,13 @@ fn strip_thinking_tags(text: &str) -> std::borrow::Cow<'_, str> {
         return std::borrow::Cow::Borrowed(text);
     }
     let mut result = text.to_string();
-    // Remove <think>...</think> blocks entirely (leaked thinking)
     while let Some(start) = result.find("<think>") {
         if let Some(end) = result[start..].find("</think>") {
             result.replace_range(start..start + end + "</think>".len(), "");
         } else {
-            // Unclosed <think> — remove just the tag
             result.replace_range(start..start + "<think>".len(), "");
         }
     }
-    // Remove stray </think> tags
     while result.contains("</think>") {
         result = result.replace("</think>", "");
     }
@@ -93,7 +90,6 @@ pub(crate) fn parse_bare_calls_in_body(
     text: &str,
     tools_val: Option<&VmValue>,
 ) -> TextToolParseResult {
-    // Strip leaked thinking tags before any parsing
     let cleaned = strip_thinking_tags(text);
     let text = cleaned.as_ref();
 
@@ -107,46 +103,35 @@ pub(crate) fn parse_bare_calls_in_body(
         .into_iter()
         .map(|s| s.name)
         .collect();
-    // `ledger` is a runtime-owned pseudo-tool: always available during
-    // agent_loop so the agent can maintain task-wide deliverables state
-    // without each host having to register it separately. Handled inline
-    // in `agent.rs` rather than dispatched through the tool executor.
+    // `ledger` is a runtime-owned pseudo-tool (handled in `agent.rs`).
     known.insert("ledger".to_string());
     let mut calls = Vec::new();
     let mut errors = Vec::new();
-    // Byte ranges [start, end) to excise from the original text to produce
-    // the `prose` field. We collect them during the scan and apply them at
-    // the end in a single pass so the scanner's index arithmetic stays
-    // simple.
+    // Byte ranges excised from the original text to form `prose`.
     let mut call_ranges: Vec<(usize, usize)> = Vec::new();
 
     let bytes = text.as_bytes();
     let mut i = 0usize;
     let mut at_line_start = true;
     let mut in_inline_code = false;
-    // Track fence line byte ranges so we can strip them from prose when
-    // they bracket tool calls. Each entry is (fence_start, fence_end,
-    // calls_before_count). After parsing, if calls were added between a
-    // pair of fences, both fence lines are added to call_ranges.
+    // (fence_start, fence_end, calls_before_count) — fences bracketing
+    // tool calls are added to call_ranges after the scan.
     let mut fence_lines: Vec<(usize, usize, usize)> = Vec::new();
 
     while i < bytes.len() {
         if at_line_start && !in_inline_code {
-            // Skip leading whitespace on this line (for call detection).
             let mut j = i;
             while j < bytes.len() && (bytes[j] == b' ' || bytes[j] == b'\t') {
                 j += 1;
             }
-            // Skip Markdown fence lines (```lang / ```) themselves — they
-            // are never tool calls. But do NOT skip the content between
-            // fences: models routinely wrap tool calls in ```python fences,
-            // and skipping those silently drops ~24% of real calls.
+            // Skip fence lines themselves but NOT their content: models
+            // routinely wrap tool calls in ```python fences, and skipping
+            // the content silently drops ~24% of real calls.
             if bytes.get(j) == Some(&b'`')
                 && bytes.get(j + 1) == Some(&b'`')
                 && bytes.get(j + 2) == Some(&b'`')
             {
                 let fence_start = i;
-                // Consume the fence line itself.
                 while i < bytes.len() && bytes[i] != b'\n' {
                     i += 1;
                 }
@@ -158,26 +143,18 @@ pub(crate) fn parse_bare_calls_in_body(
                 continue;
             }
             {
-                // Strip common model-generated prefixes before the actual
-                // tool name.  Models sometimes emit `call:edit(...)` or
-                // `tool:read(...)` instead of bare `edit(...)`.
-                // Also strip angle brackets: `<read(...)>` — common with
-                // Qwen models that wrap tool calls in XML-like tags.
+                // Strip model-generated prefixes before the tool name:
+                // `call:`, `tool:` (Qwen also uses `<read(...)>`), and
+                // Gemma's native `tool_code:`. `python:`/`javascript:`
+                // are language-tag labels some models add when they
+                // think the runtime wants a code block.
                 let mut k = j;
-                // Strip leading angle bracket
                 if bytes.get(k) == Some(&b'<') {
                     k += 1;
-                    // Skip whitespace after <
                     while k < bytes.len() && (bytes[k] == b' ' || bytes[k] == b'\t') {
                         k += 1;
                     }
                 }
-                // Gemma-family models RL-trained for tool use fall back to
-                // their native `tool_code: fn(args)` inline prefix when text
-                // mode asks them to emit bare calls. Strip it alongside the
-                // other common labels so the call still parses. `python:` /
-                // `javascript:` / etc. are language-tag labels some models
-                // add when they think the runtime wants a code block.
                 for prefix in [
                     "tool_code:",
                     "tool_call:",
@@ -200,22 +177,11 @@ pub(crate) fn parse_bare_calls_in_body(
                         break;
                     }
                 }
-                // Near-miss detection: a line shaped like
-                // `some_label: known_tool(...)` where `some_label` isn't
-                // in our strip allowlist. Silently treating the whole line
-                // as prose gives the model no signal about its syntax
-                // mistake, so it keeps emitting the same bad form. Only
-                // fire when the SECOND identifier is a known tool name —
-                // that guard prevents false positives on incidental prose
-                // like `Tip: edit(...)` where `edit` happens to match or
-                // on arbitrary `Note: something(args)` phrasing.
-                //
-                // We only emit the diagnostic; we do NOT treat the line
-                // as a call. A false positive on an innocent prose line
-                // like "Reminder: read(src/mod.rs) carefully" would still
-                // be safe because the tool would not actually execute —
-                // the model just sees an instruction on next turn not to
-                // use that prefix.
+                // Near-miss: `some_label: known_tool(...)` where the
+                // label isn't in our strip allowlist. Emit a diagnostic
+                // (no execution) so the model self-corrects. Guarded by
+                // the SECOND identifier being a known tool to avoid
+                // false positives on prose like `Tip: edit(...)`.
                 if let Some(label_len) = ident_length(&bytes[k..]) {
                     if bytes.get(k + label_len) == Some(&b':') {
                         let mut after_colon = k + label_len + 1;
@@ -240,8 +206,6 @@ pub(crate) fn parse_bare_calls_in_body(
                                          previous line was treated as prose and no tool \
                                          ran; re-emit it without the prefix."
                                     ));
-                                    // Skip past the rest of this line without parsing it as
-                                    // a call. The model re-emits cleanly on the next turn.
                                     while i < bytes.len() && bytes[i] != b'\n' {
                                         i += 1;
                                     }
@@ -252,7 +216,6 @@ pub(crate) fn parse_bare_calls_in_body(
                     }
                 }
 
-                // Candidate tool call at line start: <ident>( directly.
                 if let Some(name_len) = ident_length(&bytes[k..]) {
                     if bytes.get(k + name_len) == Some(&b'(') {
                         let name_str = std::str::from_utf8(&bytes[k..k + name_len]).unwrap_or("");
@@ -275,11 +238,9 @@ pub(crate) fn parse_bare_calls_in_body(
                                         "name": name,
                                         "arguments": arguments,
                                     }));
-                                    // Record the call's byte range so we can
-                                    // strip it from `prose` below. Use j (original
-                                    // line start) to also excise the prefix.
-                                    // Also consume trailing `>` if the model
-                                    // wrapped the call in angle brackets.
+                                    // Use j (original line start) so the
+                                    // prefix is excised too. Consume trailing
+                                    // `>` when the call was angle-wrapped.
                                     let mut end = k + consumed;
                                     while end < bytes.len()
                                         && (bytes[end] == b' ' || bytes[end] == b'\t')
@@ -296,9 +257,6 @@ pub(crate) fn parse_bare_calls_in_body(
                                 }
                                 Err(msg) => {
                                     errors.push(msg);
-                                    // Advance past the offending `(` so we can
-                                    // keep scanning and (hopefully) find the
-                                    // next well-formed call.
                                     i = k + name_len + 1;
                                     at_line_start = false;
                                     continue;
@@ -320,8 +278,7 @@ pub(crate) fn parse_bare_calls_in_body(
             }
         }
 
-        // Inline code spans: `code`. Tool names inside backtick-wrapped
-        // prose are references, not invocations.
+        // Tool names inside inline code spans are references, not calls.
         if bytes[i] == b'`' {
             in_inline_code = !in_inline_code;
             at_line_start = false;
@@ -337,46 +294,36 @@ pub(crate) fn parse_bare_calls_in_body(
         i += 1;
     }
 
-    // Strip fence lines that bracketed tool calls. We look at consecutive
-    // fence pairs: if new calls appeared between them, both fence lines
-    // should be stripped from prose (they were just formatting wrappers).
+    // Strip fence lines bracketing tool calls (formatting wrappers).
     for pair in fence_lines.windows(2) {
         let (open_start, open_end, calls_before_open) = pair[0];
         let (_close_start, close_end, calls_before_close) = pair[1];
         if calls_before_close > calls_before_open {
-            // Calls were parsed between these fences — strip both fence lines
             call_ranges.push((open_start, open_end));
             call_ranges.push((_close_start, close_end));
         }
     }
-    // Also handle a trailing unclosed fence (model didn't close it)
+    // Handle a trailing unclosed fence.
     if fence_lines.len() % 2 == 1 {
         let (start, end, calls_before) = *fence_lines.last().unwrap();
         if calls.len() > calls_before {
             call_ranges.push((start, end));
         }
     }
-    // Sort ranges so prose-building iterates them in order
     call_ranges.sort_by_key(|r| r.0);
 
-    // Also strip empty fence pairs (```lang\n```) that don't contain calls.
-    // Models often emit these as failed tool-call attempts. If left in prose
-    // they accumulate in conversation history and cause duplication loops.
+    // Strip empty fence pairs: models emit them as failed tool-call
+    // attempts and they cause duplication loops in conversation history.
     for pair in fence_lines.windows(2) {
         let (open_start, _open_end, calls_before_open) = pair[0];
         let (_close_start, close_end, calls_before_close) = pair[1];
         if calls_before_close == calls_before_open {
-            // No calls between these fences — it's an empty block, strip both
             call_ranges.push((open_start, close_end));
         }
     }
     call_ranges.sort_by_key(|r| r.0);
-    // Deduplicate overlapping ranges
     call_ranges.dedup_by(|b, a| a.0 == b.0);
 
-    // Build `prose` by copying every byte range NOT inside a parsed-call
-    // window. Collapse runs of blank lines that form purely because a call
-    // was removed so the final prose reads naturally.
     let prose = if call_ranges.is_empty() {
         strip_empty_fences(text)
     } else {
@@ -396,12 +343,9 @@ pub(crate) fn parse_bare_calls_in_body(
             .to_string()
     };
 
-    // Fallback: if no text-format calls were found, check whether the model
-    // emitted native OpenAI-style function calling JSON as raw text. This
-    // happens when models trained on function calling ignore the text-format
-    // instructions and emit `[{"id":"call_...","function":{...}}]` instead.
-    // Rather than wasting an iteration nudging the model, parse and execute
-    // the calls directly.
+    // Fallback: some function-calling-trained models ignore text-format
+    // instructions and emit `[{"id":"call_...","function":{...}}]` raw.
+    // Parse and execute directly instead of wasting an iteration.
     if calls.is_empty() && errors.is_empty() {
         let (native_calls, native_errors) = parse_native_json_tool_calls(text, &known);
         if !native_calls.is_empty() || !native_errors.is_empty() {
@@ -465,7 +409,6 @@ pub(crate) fn parse_text_tool_calls_with_tools(
     let bytes = src.as_bytes();
 
     while cursor < bytes.len() {
-        // Skip whitespace between top-level tags.
         while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
             cursor += 1;
         }
@@ -473,11 +416,8 @@ pub(crate) fn parse_text_tool_calls_with_tools(
             break;
         }
 
-        // Collect any stray non-tag bytes up to the next `<`. A naive
-        // scan-to-next-`<` truncates bare `name({ key: <<EOF\n...\nEOF })`
-        // tool calls at the heredoc opener, leaving the salvage path with
-        // a fragment that can't parse. Skip past `<<TAG ... TAG` heredoc
-        // bodies in-line so a complete bare call survives the chunker.
+        // Skip past `<<TAG ... TAG` heredoc bodies inline so a bare
+        // `name({ key: <<EOF ... EOF })` survives the chunker.
         if bytes[cursor] != b'<' {
             let start = cursor;
             loop {
@@ -502,7 +442,6 @@ pub(crate) fn parse_text_tool_calls_with_tools(
             continue;
         }
 
-        // Try to match a known top-level tag.
         if let Some((body, after)) = match_block(src, cursor, "tool_call") {
             match parse_single_tool_call(body, tools_val) {
                 Ok(call) => {
@@ -547,13 +486,9 @@ pub(crate) fn parse_text_tool_calls_with_tools(
         } else if let Some((call, after_call)) =
             try_parse_angle_wrapped_call(src, cursor, tools_val)
         {
-            // `<name({ ... })>` — angle-bracket-wrapped tool call (Qwen
-            // family commonly falls back to this when their template puts
-            // tools inside generic XML brackets). Execute the call and
-            // record a soft violation so the model learns to use
-            // `<tool_call>` wrapping next turn. Pre-v0.5.82 the parser
-            // dropped these silently and the model spun emitting the same
-            // wrong-wrapper response indefinitely.
+            // `<name({...})>` — Qwen fallback when the chat template
+            // wraps tools in generic XML brackets. Execute + record a
+            // soft violation so the model uses `<tool_call>` next turn.
             let name = call
                 .get("name")
                 .and_then(|n| n.as_str())
@@ -576,7 +511,7 @@ pub(crate) fn parse_text_tool_calls_with_tools(
             ));
             cursor = after_call;
         } else {
-            // Unclosed or unknown tag — skip to end of line or `>` and record.
+            // Unclosed/unknown tag — skip to end of line or `>`.
             let start = cursor;
             let mut end = cursor + 1;
             while end < bytes.len() && bytes[end] != b'>' && bytes[end] != b'\n' {
@@ -603,7 +538,6 @@ pub(crate) fn parse_text_tool_calls_with_tools(
         }
     }
 
-    // Detect empty responses: nothing parseable and no violations already recorded.
     let response_is_effectively_empty = calls.is_empty()
         && prose_parts.is_empty()
         && done_marker.is_none()
@@ -787,11 +721,8 @@ fn match_block<'a>(src: &'a str, start: usize, tag: &str) -> Option<(&'a str, us
 /// Render a parsed tool call back to the bare TS syntax used inside
 /// `<tool_call>` tags. Used to build the canonical history entry.
 fn render_canonical_call(name: &str, args: &serde_json::Value) -> String {
-    // serde_json gives us valid JSON, which parses as a TS object literal
-    // under our tool-call grammar (strings become double-quoted, no
-    // trailing commas, keys quoted). That's enough for replay purposes —
-    // the next turn's parser accepts JSON-style object literals just
-    // like TS-style ones.
+    // JSON object literals are accepted by our tool-call grammar, so
+    // pretty-printed JSON is sufficient for replay.
     let rendered_args = serde_json::to_string_pretty(args).unwrap_or_else(|_| "{}".to_string());
     format!("{name}({rendered_args})")
 }
@@ -825,7 +756,6 @@ pub(crate) fn parse_native_json_tool_calls(
     let mut results = Vec::new();
     let mut errors = Vec::new();
 
-    // Find the first `[{` or `{"id":"call_` in the text
     let json_start = text
         .find("[{\"id\":")
         .or_else(|| text.find("[{\"id\":"))
@@ -835,18 +765,16 @@ pub(crate) fn parse_native_json_tool_calls(
         return (results, errors);
     };
 
-    // Try to parse as JSON array or single object
     let json_text = &text[start..];
     let parsed: Option<Vec<serde_json::Value>> = serde_json::from_str(json_text)
         .ok()
         .or_else(|| {
-            // Try single object
             serde_json::from_str::<serde_json::Value>(json_text)
                 .ok()
                 .map(|v| vec![v])
         })
         .or_else(|| {
-            // The JSON might have trailing text. Try to find the closing bracket.
+            // Salvage trailing-text JSON by scanning for a valid close.
             for end in (start + 10..text.len()).rev() {
                 let slice = &text[start..=end];
                 if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(slice) {
@@ -876,7 +804,7 @@ pub(crate) fn parse_native_json_tool_calls(
             ));
             continue;
         }
-        // Arguments may be a JSON string (OpenAI format) or an object
+        // OpenAI format encodes arguments as a JSON string; others as an object.
         let arguments = match func.get("arguments") {
             Some(serde_json::Value::String(s)) => match serde_json::from_str(s) {
                 Ok(v) => v,
@@ -929,7 +857,6 @@ fn unwrap_exact_code_wrapper(text: &str) -> Option<&str> {
 /// Models sometimes emit these as failed tool-call attempts. If left in prose
 /// they accumulate in conversation history and cause duplication loops.
 fn strip_empty_fences(text: &str) -> String {
-    // Match: optional whitespace, ```, optional lang tag, newline(s), ```, newline
     let re = regex::Regex::new(r"(?m)^[ \t]*```[^\n]*\n\s*```[ \t]*\n?").unwrap();
     re.replace_all(text, "").to_string()
 }
@@ -1076,10 +1003,8 @@ fn parse_ts_call_from(text: &str, name: String) -> Result<(serde_json::Value, us
     let consumed_in_parser = p.position();
     let total_consumed = paren_open + 1 + consumed_in_parser + 1; // +1 for the ')'
 
-    // Coerce positional / non-object calls: the tool contract is that every
-    // call takes a single object literal argument. If the model wrote a bare
-    // scalar like `lookup("README.md")`, error precisely — we do not silently
-    // promote positional args any more.
+    // Tool contract: every call takes a single object literal. Bare
+    // positional scalars error precisely rather than being promoted.
     match args_value {
         serde_json::Value::Object(map) => Ok((serde_json::Value::Object(map), total_consumed)),
         other => Err(format!(

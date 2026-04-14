@@ -83,9 +83,6 @@ impl super::Vm {
     /// - Ok(Some(val)): return this value (top-level exit)
     /// - Err(e): error occurred
     pub(super) async fn execute_op(&mut self, op: u8) -> Result<Option<VmValue>, VmError> {
-        // We need to borrow frame fields, but we also need &mut self for other ops.
-        // Strategy: read what we need from the frame first, then do the work.
-
         if op == Op::Constant as u8 {
             let frame = self.frames.last_mut().unwrap();
             let idx = frame.chunk.read_u16(frame.ip) as usize;
@@ -121,14 +118,12 @@ impl super::Vm {
                 .and_then(|f| f.module_state.as_ref())
                 .and_then(|ms| ms.borrow().get(&name))
             {
-                // Shared module-level var (top-level `var`/`let` in the
-                // closure's originating module). See VmClosure::module_state.
+                // Module-level var from the closure's originating module.
                 self.stack.push(val);
             } else if let Some(val) = self.globals.get(&name) {
                 self.stack.push(val.clone());
             } else if self.builtins.contains_key(&name) || self.async_builtins.contains_key(&name) {
-                // Allow referencing a builtin by bare name so it can be passed
-                // as a callback (e.g. `dict.rekey(snake_to_camel)`).
+                // Allow bare builtin references so they can be passed as callbacks.
                 self.stack
                     .push(VmValue::BuiltinRef(Rc::from(name.as_str())));
             } else {
@@ -136,9 +131,7 @@ impl super::Vm {
                 for (k, v) in &self.globals {
                     all_vars.entry(k.clone()).or_insert_with(|| v.clone());
                 }
-                // Include registered builtin names in the suggestion pool so
-                // typos on builtin references (e.g. `snake_too_camel`) get
-                // resolved to `snake_to_camel`.
+                // Include builtin names so typos on builtin refs get suggestions.
                 let mut candidates: Vec<String> = all_vars.keys().cloned().collect();
                 candidates.extend(self.builtins.keys().cloned());
                 candidates.extend(self.async_builtins.keys().cloned());
@@ -175,11 +168,9 @@ impl super::Vm {
             frame.ip += 2;
             let name = Self::const_string(&frame.chunk.constants[idx])?;
             let val = self.pop()?;
-            // If the name lives in a local scope, assign there. Otherwise
-            // route the write to the closure's shared module_state (for
-            // top-level `var` declared in this module). Only fall through
-            // to `env.assign` (which surfaces UndefinedVariable /
-            // ImmutableAssignment) when neither holds the name.
+            // Local scope wins; otherwise route to the closure's shared
+            // module_state. Fall through to env.assign only when neither
+            // has it, so UndefinedVariable / ImmutableAssignment surface.
             if self.env.get(&name).is_some() {
                 self.env.assign(&name, val)?;
             } else if let Some(ms) = self
@@ -191,8 +182,7 @@ impl super::Vm {
                 if ms.borrow().get(&name).is_some() {
                     ms.borrow_mut().assign(&name, val)?;
                 } else {
-                    // Neither env nor module_state has it — preserve the
-                    // original error path for suggestion / diagnostics.
+                    // Neither has it — let env.assign produce the diagnostic.
                     self.env.assign(&name, val)?;
                 }
             } else {
@@ -314,10 +304,9 @@ impl super::Vm {
             let frame = self.frames.last_mut().unwrap();
             let argc = frame.chunk.code[frame.ip] as usize;
             frame.ip += 1;
-            // Clone the functions list so we don't borrow frame across call
+            // Avoid borrowing frame across the call.
             let functions = frame.chunk.functions.clone();
 
-            // Arguments are on stack above the function name/value
             let args: Vec<VmValue> = self.stack.split_off(self.stack.len().saturating_sub(argc));
             let callee = self.pop()?;
 
@@ -351,7 +340,6 @@ impl super::Vm {
                         }
                         self.stack.push(VmValue::Nil);
                     } else if name.as_ref() == "cancel_graceful" {
-                        // Signal cancellation and wait for task to finish (with optional timeout)
                         let task_id = args.first().and_then(|a| match a {
                             VmValue::TaskHandle(id) => Some(id.clone()),
                             _ => None,
@@ -366,16 +354,13 @@ impl super::Vm {
                             .unwrap_or(5000);
                         if let Some(id) = task_id {
                             if let Some(task) = self.spawned_tasks.remove(&id) {
-                                // Signal cancellation
                                 task.cancel_token
                                     .store(true, std::sync::atomic::Ordering::SeqCst);
-                                // Wait with timeout
                                 let deadline = tokio::time::Instant::now()
                                     + tokio::time::Duration::from_millis(timeout_ms);
                                 match tokio::time::timeout_at(deadline, task.handle).await {
                                     Ok(Ok(Ok((result, output)))) => {
                                         self.output.push_str(&output);
-                                        // Return Result.Ok(value)
                                         self.stack.push(VmValue::EnumVariant {
                                             enum_name: "Result".into(),
                                             variant: "Ok".into(),
@@ -399,7 +384,6 @@ impl super::Vm {
                                         });
                                     }
                                     Err(_) => {
-                                        // Timeout: force abort
                                         self.stack.push(VmValue::EnumVariant {
                                             enum_name: "Result".into(),
                                             variant: "Err".into(),
@@ -420,7 +404,6 @@ impl super::Vm {
                             self.stack.push(VmValue::Nil);
                         }
                     } else if name.as_ref() == "is_cancelled" {
-                        // Check if the current task has been signaled for cancellation.
                         let cancelled = self
                             .cancel_token
                             .as_ref()
@@ -434,7 +417,6 @@ impl super::Vm {
                         } else {
                             self.push_closure_frame(&closure, &args, &functions)?;
                         }
-                        // Don't push result - frame will handle it on return
                     } else {
                         let result = self.call_named_builtin(&name, args).await?;
                         self.stack.push(result);
@@ -532,7 +514,6 @@ impl super::Vm {
             let args: Vec<VmValue> = self.stack.split_off(self.stack.len().saturating_sub(argc));
             let callee = self.pop()?;
 
-            // Resolve the callee to a closure (or fall through to builtin)
             let resolved_closure = match &callee {
                 VmValue::Closure(cl) => Some(Rc::clone(cl)),
                 VmValue::String(name) => self.resolve_named_closure(name),
@@ -541,25 +522,21 @@ impl super::Vm {
 
             if let Some(closure) = resolved_closure {
                 if closure.func.is_generator {
-                    // Generator functions cannot be tail-call optimized; return the generator.
+                    // Generators cannot be tail-call optimized.
                     let gen = self.create_generator(&closure, &args);
                     return Err(VmError::Return(gen));
                 }
-                // Tail call optimization: replace current frame instead of pushing.
-                // Pop the current frame and reuse its stack_base and saved_env.
+                // TCO: reuse the current frame's stack_base / saved_env.
                 let popped = self.frames.pop().unwrap();
                 let stack_base = popped.stack_base;
                 let parent_env = popped.saved_env;
 
-                // Restore the previous frame's source dir before switching
                 if let Some(ref dir) = popped.saved_source_dir {
                     crate::stdlib::set_thread_source_dir(dir);
                 }
 
-                // Clear this frame's stack data
                 self.stack.truncate(stack_base);
 
-                // If this closure has its own source_dir, switch to it
                 let saved_source_dir = if let Some(ref dir) = closure.source_dir {
                     let prev = crate::stdlib::process::VM_SOURCE_DIR.with(|sd| sd.borrow().clone());
                     crate::stdlib::set_thread_source_dir(dir);
@@ -568,9 +545,8 @@ impl super::Vm {
                     None
                 };
 
-                // Set up the callee's environment. Pass the parent env
-                // so `closure_call_env` can do the narrow closure-only
-                // merge for locally-defined recursive fns.
+                // Pass parent env so closure_call_env merges locally-defined
+                // recursive fns.
                 let mut call_env = Self::closure_call_env(&parent_env, &closure);
                 call_env.push_scope();
                 let default_start = closure
@@ -587,7 +563,6 @@ impl super::Vm {
                 }
                 self.env = call_env;
 
-                // Push replacement frame at the same stack depth
                 let argc = args.len();
                 self.frames.push(CallFrame {
                     chunk: closure.func.chunk.clone(),
@@ -601,9 +576,7 @@ impl super::Vm {
                     module_functions: closure.module_functions.clone(),
                     module_state: closure.module_state.clone(),
                 });
-                // Continue the loop — execution proceeds in the new frame
             } else {
-                // Not a closure — fall back to regular call behavior for builtins.
                 match callee {
                     VmValue::String(name) => {
                         let result = self.call_named_builtin(&name, args).await?;
@@ -616,7 +589,6 @@ impl super::Vm {
                         )));
                     }
                 }
-                // Result is on stack; the following Return opcode will return it.
             }
         } else if op == Op::Return as u8 {
             let val = self.pop().unwrap_or(VmValue::Nil);
@@ -634,9 +606,8 @@ impl super::Vm {
                     .frames
                     .last()
                     .and_then(|frame| frame.module_functions.clone()),
-                // Inline closures inherit the current frame's module state
-                // so a closure created inside a module function still sees
-                // and mutates the same module-level vars.
+                // Inherit module state so closures created inside a module
+                // function see and mutate the same module-level vars.
                 module_state: self
                     .frames
                     .last()
@@ -682,7 +653,6 @@ impl super::Vm {
                 }
                 (VmValue::Dict(map), _) => map.get(&idx.display()).cloned().unwrap_or(VmValue::Nil),
                 (VmValue::Range(r), VmValue::Int(i)) => {
-                    // Python-style: negative indices count from the end.
                     let len = r.len();
                     let pos = if *i < 0 { len + *i } else { *i };
                     match r.get(pos) {
@@ -770,8 +740,6 @@ impl super::Vm {
                     }
                 }
                 VmValue::String(s) => {
-                    // Use char_indices to find byte offsets without
-                    // allocating a Vec<char>.
                     let char_count = s.chars().count() as i64;
                     let start = match &start_val {
                         VmValue::Nil => 0i64,
@@ -808,7 +776,6 @@ impl super::Vm {
                     if start >= end {
                         VmValue::String(Rc::from(""))
                     } else {
-                        // Find byte offsets for start and end char indices
                         let start_idx = start as usize;
                         let end_idx = end as usize;
                         let byte_start = s
@@ -885,7 +852,6 @@ impl super::Vm {
             };
             self.stack.push(result);
         } else if op == Op::GetPropertyOpt as u8 {
-            // Optional chaining: obj?.property — returns nil if obj is nil
             let frame = self.frames.last_mut().unwrap();
             let idx = frame.chunk.read_u16(frame.ip) as usize;
             frame.ip += 2;
@@ -1069,7 +1035,6 @@ impl super::Vm {
                 }
             }
         } else if op == Op::TryUnwrap as u8 {
-            // Try-unwrap: if Result.Ok(v) → push v, if Result.Err(e) → return Result.Err(e)
             let val = self.pop()?;
             match &val {
                 VmValue::EnumVariant {
@@ -1081,7 +1046,6 @@ impl super::Vm {
                         self.stack
                             .push(fields.first().cloned().unwrap_or(VmValue::Nil));
                     } else {
-                        // Err variant: return it from current function
                         return Err(VmError::Return(val));
                     }
                 }
@@ -1166,16 +1130,13 @@ impl super::Vm {
                     self.iterators.push(super::IterState::Generator { gen });
                 }
                 VmValue::Range(r) => {
-                    // Lazy range: compute the stop point once (inclusive ranges
-                    // become half-open by adding 1). Empty ranges fall out
-                    // naturally because `next >= stop` on the first iter step.
                     let stop = if r.inclusive {
                         // Saturate to avoid i64 overflow on `i64::MAX to i64::MAX`.
                         r.end.saturating_add(1)
                     } else {
                         r.end
                     };
-                    // `5 to 1` is simply empty (no reverse iteration in v1).
+                    // `5 to 1` is simply empty — no reverse iteration.
                     let next = r.start;
                     self.iterators.push(super::IterState::Range { next, stop });
                 }
@@ -1193,18 +1154,15 @@ impl super::Vm {
             let frame = self.frames.last_mut().unwrap();
             let target = frame.chunk.read_u16(frame.ip) as usize;
             frame.ip += 2;
-            // VmIter path: clone the handle out first so we don't hold a
-            // borrow on self.iterators across the async next() call.
+            // Clone the handle so we don't hold a borrow on self.iterators
+            // across the async next() call.
             let vm_iter_handle = match self.iterators.last() {
                 Some(super::IterState::VmIter { handle }) => Some(handle.clone()),
                 _ => None,
             };
             if let Some(handle) = vm_iter_handle {
-                // SAFETY: we only hold the RefCell borrow for the duration
-                // of next(); inside next() the borrow is on `handle`, not
-                // on self.iterators, so recursive VM reentry via closures
-                // (future combinator variants) is safe as long as they
-                // don't re-enter the same iter.
+                // Safe for recursive VM reentry via closures as long as they
+                // don't re-enter the same iter handle.
                 let functions = self.frames.last().unwrap().chunk.functions.clone();
                 let next_val = crate::vm::iter::next_handle(&handle, self, &functions).await?;
                 match next_val {
@@ -1232,7 +1190,7 @@ impl super::Vm {
                         let rx = receiver.clone();
                         let is_closed = closed.load(std::sync::atomic::Ordering::Relaxed);
                         let mut guard = rx.lock().await;
-                        // If sender is closed, drain remaining items without blocking
+                        // Closed sender: drain without blocking.
                         let item = if is_closed {
                             guard.try_recv().ok()
                         } else {
@@ -1284,7 +1242,6 @@ impl super::Vm {
                         }
                     }
                     super::IterState::VmIter { .. } => {
-                        // Handled in the early VmIter path above; unreachable.
                         unreachable!("VmIter state handled before this match");
                     }
                 }
@@ -1301,7 +1258,6 @@ impl super::Vm {
             let frame = self.frames.last_mut().unwrap();
             let catch_offset = frame.chunk.read_u16(frame.ip) as usize;
             frame.ip += 2;
-            // Read the error type name index (extra u16)
             let type_idx = frame.chunk.read_u16(frame.ip) as usize;
             frame.ip += 2;
             let error_type = match &frame.chunk.constants[type_idx] {
@@ -1525,7 +1481,6 @@ impl super::Vm {
                 } => *en == enum_name && *vn == variant_name,
                 _ => false,
             };
-            // Push the value back (we only peeked conceptually), then push the bool
             self.stack.push(val);
             self.stack.push(VmValue::Bool(matches));
         } else if op == Op::GetArgc as u8 {
@@ -1534,14 +1489,11 @@ impl super::Vm {
         } else if op == Op::Yield as u8 {
             let val = self.pop()?;
             if let Some(sender) = &self.yield_sender {
-                // Inside a generator task: send the yielded value through the channel.
-                // If the receiver has been dropped, the generator was abandoned.
+                // Dropped receiver = generator was abandoned; ignore send error.
                 let _ = sender.send(val).await;
-                // After sending, yield to the tokio executor to let the consumer
-                // receive the value before we produce the next one.
+                // Let the consumer pull this value before we produce the next.
                 tokio::task::yield_now().await;
             }
-            // After yield, push Nil as the result of the yield expression.
             self.stack.push(VmValue::Nil);
         } else {
             return Err(VmError::InvalidInstruction(op));
@@ -1549,8 +1501,6 @@ impl super::Vm {
 
         Ok(None)
     }
-
-    // --- Arithmetic helpers ---
 
     fn add(&self, a: VmValue, b: VmValue) -> Result<VmValue, VmError> {
         match (&a, &b) {

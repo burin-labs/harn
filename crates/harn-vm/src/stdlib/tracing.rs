@@ -110,8 +110,6 @@ pub(crate) fn register_tracing_builtins(vm: &mut Vm) {
         }
     });
 
-    // --- LLM introspection ---
-
     vm.register_builtin("llm_info", |_args, _out| {
         let provider = std::env::var("HARN_LLM_PROVIDER").unwrap_or_default();
         let model = std::env::var("HARN_LLM_MODEL").unwrap_or_default();
@@ -125,8 +123,6 @@ pub(crate) fn register_tracing_builtins(vm: &mut Vm) {
         info.insert("api_key_set".to_string(), VmValue::Bool(api_key_set));
         Ok(VmValue::Dict(Rc::new(info)))
     });
-
-    // --- Pipeline observability ---
 
     vm.register_builtin("enable_tracing", |args, _out| {
         let enabled = match args.first() {

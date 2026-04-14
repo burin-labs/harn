@@ -3,10 +3,6 @@ use harn_parser::{Node, SNode};
 
 use crate::symbols::binding_pattern_names;
 
-// ---------------------------------------------------------------------------
-// Reference collection (AST-based)
-// ---------------------------------------------------------------------------
-
 /// Find all identifier references matching `target_name` in the AST.
 pub(crate) fn find_references(program: &[SNode], target_name: &str) -> Vec<Span> {
     let mut refs = Vec::new();

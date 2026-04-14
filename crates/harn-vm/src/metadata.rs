@@ -87,12 +87,10 @@ impl MetadataState {
         self.ensure_loaded();
         let mut result = DirectoryMetadata::default();
 
-        // Start with root
         if let Some(root) = self.entries.get(".").or_else(|| self.entries.get("")) {
             merge_metadata(&mut result, root);
         }
 
-        // Walk path components
         let components: Vec<&str> = directory
             .split('/')
             .filter(|c| !c.is_empty() && *c != ".")
@@ -151,8 +149,7 @@ impl MetadataState {
         let meta_dir = self.metadata_dir();
         std::fs::create_dir_all(&meta_dir).map_err(|e| format!("metadata mkdir: {e}"))?;
 
-        // Shard by simple strategy: everything in one "root" shard for now.
-        // Single shard for single-package projects.
+        // Everything goes in one shard; sufficient for single-package projects.
         let mut shard = serde_json::Map::new();
         for (dir, meta) in &self.entries {
             shard.insert(dir.clone(), serialize_directory_metadata(meta));
@@ -174,20 +171,18 @@ impl MetadataState {
     }
 }
 
+/// ISO 8601 timestamp (e.g. `2026-03-29T14:00:00Z`) without a chrono dependency.
 fn chrono_now_iso() -> String {
-    // ISO 8601 timestamp without chrono dependency
     let now = std::time::SystemTime::now();
     let secs = now
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    // Convert to ISO 8601: 2026-03-29T14:00:00Z
     let days = secs / 86400;
     let time_secs = secs % 86400;
     let hours = time_secs / 3600;
     let minutes = (time_secs % 3600) / 60;
     let seconds = time_secs % 60;
-    // Days since epoch to year/month/day (simplified, good enough for timestamps)
     let mut y = 1970i64;
     let mut remaining = days as i64;
     loop {
@@ -251,7 +246,6 @@ fn parse_directory_metadata(val: &serde_json::Value) -> DirectoryMetadata {
         Some(o) => o,
         None => return meta,
     };
-    // Parse "namespaces" key (the standard format)
     if let Some(ns_obj) = obj.get("namespaces").and_then(|n| n.as_object()) {
         for (ns_name, fields_val) in ns_obj {
             if let Some(fields) = fields_val.as_object() {
@@ -451,7 +445,7 @@ pub fn register_metadata_builtins(vm: &mut Vm, base_dir: &Path) {
                 None => Ok(VmValue::Nil),
             }
         } else {
-            // Return all namespaces flattened
+            // Return all namespaces flattened.
             let resolved = st.resolve(&dir);
             let mut m = BTreeMap::new();
             for fields in resolved.namespaces.values() {
@@ -586,7 +580,7 @@ pub fn register_metadata_builtins(vm: &mut Vm, base_dir: &Path) {
             } else {
                 base2.join(dir)
             };
-            // Tier 1: structureHash — file list + sizes
+            // Tier 1: structureHash — file list + sizes.
             if let Some(stored_hash) = meta
                 .namespaces
                 .get("classification")
@@ -596,10 +590,11 @@ pub fn register_metadata_builtins(vm: &mut Vm, base_dir: &Path) {
                 let current_hash = compute_structure_hash(&full_dir);
                 if current_hash != stored_hash {
                     tier1_stale.push(VmValue::String(Rc::from(dir.as_str())));
-                    continue; // If structure changed, skip tier2 check
+                    // Structure changed — skip the tier 2 content check.
+                    continue;
                 }
             }
-            // Tier 2: contentHash — file content digest
+            // Tier 2: contentHash — file content digest.
             if let Some(stored_hash) = meta
                 .namespaces
                 .get("classification")
@@ -725,8 +720,7 @@ pub fn register_metadata_builtins(vm: &mut Vm, base_dir: &Path) {
         Ok(VmValue::Dict(Rc::new(result)))
     });
 
-    // compute_content_hash(dir) -> string
-    // Hash of file list + sizes + mtimes in directory for staleness tracking
+    // compute_content_hash(dir) -> string of file list + sizes + mtimes for staleness tracking.
     let base = base_dir.to_path_buf();
     vm.register_builtin("compute_content_hash", move |args, _out| {
         let dir = args.first().map(|a| a.display()).unwrap_or_default();
@@ -739,10 +733,9 @@ pub fn register_metadata_builtins(vm: &mut Vm, base_dir: &Path) {
         Ok(VmValue::String(Rc::from(hash)))
     });
 
-    // invalidate_facts(dir) -> nil (no-op — facts live in metadata namespace now)
+    // invalidate_facts is a no-op: facts live in the metadata namespace.
     vm.register_builtin("invalidate_facts", |_args, _out| Ok(VmValue::Nil));
 
-    // Also register scan builtins (scan_directory)
     register_scan_builtins(vm);
 }
 
@@ -873,7 +866,6 @@ fn scan_dir_recursive(
             Err(_) => continue,
         };
         let name = entry.file_name().to_string_lossy().into_owned();
-        // Skip hidden files and .harn directory
         if !options.include_hidden && name.starts_with('.') {
             continue;
         }
@@ -883,7 +875,6 @@ fn scan_dir_recursive(
             .unwrap_or(entry.path().as_path())
             .to_string_lossy()
             .into_owned();
-        // Apply glob-like pattern filter
         if let Some(pat) = &options.pattern {
             if !glob_match(pat, &rel_path) {
                 if meta.is_dir() {

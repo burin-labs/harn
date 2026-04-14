@@ -3,7 +3,6 @@ use std::rc::Rc;
 use crate::agent_events::{self, AgentEvent};
 use crate::value::{VmError, VmValue};
 
-// Imports from extracted submodules.
 use super::agent_config::AgentLoopConfig;
 
 mod finalize;
@@ -40,10 +39,8 @@ thread_local! {
 /// builds; release builds tolerate the divergence rather than panic
 /// on a misconfigured embedding.
 async fn emit_agent_event(event: &AgentEvent) {
-    // External (Rust-side) sinks first — they're always sync.
     agent_events::emit_event(event);
 
-    // Pipeline closure subscribers — invoke via the async VM API.
     let subscribers = agent_events::closure_subscribers_for(event.session_id());
     if subscribers.is_empty() {
         return;
@@ -57,10 +54,8 @@ async fn emit_agent_event(event: &AgentEvent) {
             continue;
         };
         let arg = crate::stdlib::json_to_vm_value(&payload);
-        // Log but do not propagate subscriber errors — one misbehaving
-        // subscriber (e.g. a pipeline grounding handler with a type
-        // error) must not tear down the agent loop. Silent drops hid
-        // pipeline bugs; logging surfaces them without escalating.
+        // Log but don't propagate: one broken subscriber must not tear
+        // down the agent loop.
         if let Err(err) = vm.call_closure_pub(&closure, &[arg], &[]).await {
             crate::events::log_warn(
                 "agent.subscriber",
@@ -122,14 +117,11 @@ pub async fn run_agent_loop_internal(
 ) -> Result<serde_json::Value, VmError> {
     let mut state = state::AgentLoopState::new(opts, config)?;
 
-    // `AgentLoopState::new` already mutated `opts.native_tools` /
-    // `opts.tool_choice`; `tools_val` is a stable view for the run.
     let tools_owned = opts.tools.clone();
     let tools_val = tools_owned.as_ref();
 
-    // Snapshot config + state fields as locals so the iteration body
-    // can pass them into phase contexts without holding an immutable
-    // borrow on `state` that would conflict with `&mut state`.
+    // Snapshot config/state fields as locals so phase contexts can hold
+    // them without fighting the `&mut state` borrow in the loop body.
     let llm_retries = state.config.llm_retries;
     let llm_backoff_ms = state.config.llm_backoff_ms;
     let turn_policy = state.config.turn_policy.clone();
@@ -158,10 +150,9 @@ pub async fn run_agent_loop_internal(
     let custom_nudge = state.custom_nudge.clone();
     let session_id = state.session_id.clone();
 
-    // Validate `stop_after_successful_tools` names against the declared
-    // tool schema. Unknown names are tolerated (forward-compat with tools
-    // that may be declared dynamically later in the session) but warned
-    // — silently never stopping is the failure mode this guards against.
+    // Warn on unknown `stop_after_successful_tools` names: they're
+    // tolerated (forward-compat with late-declared tools) but silently
+    // never stopping is the failure mode to guard against.
     if let Some(stop_tools) = stop_after_successful_tools.as_ref() {
         let declared = super::tools::collect_tool_schemas(tools_val, opts.native_tools.as_deref());
         let declared_names: std::collections::BTreeSet<&str> =
@@ -275,10 +266,8 @@ pub async fn run_agent_loop_internal(
         }
     }
 
-    // If the loop fell through all iterations without any explicit
-    // break, the agent hit its max_iterations budget rather than
-    // reaching a natural terminus. Signal that distinctly so hosts can
-    // tell "finished the job" from "ran out of rope".
+    // Hit the iteration budget rather than breaking — signal distinctly
+    // so hosts can tell "done" from "ran out of rope".
     if !iteration_exited_via_break && max_iterations > 0 {
         state.final_status = "budget_exhausted";
         emit_agent_event(&AgentEvent::BudgetExhausted {

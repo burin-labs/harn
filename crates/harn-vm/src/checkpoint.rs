@@ -146,12 +146,10 @@ fn json_to_vm(jv: &serde_json::Value) -> VmValue {
 /// Sanitize a pipeline name for use as a filename.
 /// Rejects path traversal attempts and invalid characters.
 fn sanitize_pipeline_name(name: &str) -> String {
-    // Use only the filename component, stripping any directory parts
     let base = std::path::Path::new(name)
         .file_name()
         .and_then(|f| f.to_str())
         .unwrap_or("default");
-    // Reject empty or dot-only names
     if base.is_empty() || base == "." || base == ".." {
         return "default".to_string();
     }
@@ -203,8 +201,7 @@ pub fn register_checkpoint_builtins(vm: &mut Vm, base_dir: &Path, pipeline_name:
         )))
     });
 
-    // checkpoint_exists(key) -> bool
-    // Returns true if the key is present, even if its value is nil.
+    // checkpoint_exists(key): true if key is present, even if its value is nil.
     let s = Rc::clone(&state);
     vm.register_builtin("checkpoint_exists", move |args, _out| {
         let key = args.first().map(|a| a.display()).unwrap_or_default();

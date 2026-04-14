@@ -79,7 +79,7 @@ impl AnthropicProvider {
         if let Some(ref tc) = opts.tool_choice {
             body["tool_choice"] = tc.clone();
         }
-        // Structured output via tool-use constraint
+        // Anthropic structured output uses a tool-use constraint.
         if opts.response_format.as_deref() == Some("json") {
             if let Some(ref schema) = opts.json_schema {
                 body["tools"] = {
@@ -94,7 +94,6 @@ impl AnthropicProvider {
                 body["tool_choice"] = serde_json::json!({"type": "tool", "name": "json_response"});
             }
         }
-        // Thinking
         if let Some(ref thinking) = opts.thinking {
             let budget = match thinking {
                 ThinkingConfig::Enabled => 10000,
@@ -115,8 +114,6 @@ impl AnthropicProvider {
         request: &LlmRequestPayload,
         delta_tx: Option<DeltaSender>,
     ) -> Result<LlmResult, VmError> {
-        // Delegate to the shared transport layer which handles streaming,
-        // HTTP errors, etc. The body building is provider-specific.
         crate::llm::api::vm_call_llm_api_with_body(
             request,
             delta_tx,

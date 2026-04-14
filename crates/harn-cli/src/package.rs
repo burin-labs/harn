@@ -8,8 +8,6 @@ const PKG_DIR: &str = ".harn/packages";
 const MANIFEST: &str = "harn.toml";
 const LOCK_FILE: &str = "harn.lock";
 
-// --- Manifest types ---
-
 #[derive(Debug, Deserialize)]
 pub struct Manifest {
     #[allow(dead_code)]
@@ -109,8 +107,6 @@ impl Dependency {
     }
 }
 
-// --- Lock file ---
-
 #[derive(Debug, Default)]
 struct LockFile {
     entries: HashMap<String, LockEntry>,
@@ -201,8 +197,6 @@ impl LockFile {
     }
 }
 
-// --- Public API ---
-
 pub fn read_manifest() -> Manifest {
     let content = match fs::read_to_string(MANIFEST) {
         Ok(s) => s,
@@ -264,7 +258,6 @@ pub fn load_check_config(harn_file: Option<&std::path::Path>) -> CheckConfig {
             return absolutize_check_config_paths(manifest.check, manifest_dir);
         }
     }
-    // Walk up from CWD
     let mut dir = std::env::current_dir().unwrap_or_default();
     loop {
         let manifest_path = dir.join(MANIFEST);
@@ -291,7 +284,6 @@ pub fn install_packages() {
         return;
     }
 
-    // Check if any deps need git and verify it's available
     let has_git_deps = manifest
         .dependencies
         .values()
@@ -353,7 +345,6 @@ fn install_one(
     } else if let Some(local_path) = dep.local_path() {
         install_local_dep(name, local_path, &dest);
         *installed += 1;
-        // Record in lock
         lock.entries.insert(
             name.to_string(),
             LockEntry {
@@ -369,7 +360,6 @@ fn install_one(
         return;
     }
 
-    // Check for transitive dependencies
     let sub_manifest_path = dest.join("harn.toml");
     if sub_manifest_path.exists() {
         if let Ok(content) = fs::read_to_string(&sub_manifest_path) {
@@ -388,7 +378,6 @@ fn install_one(
 }
 
 fn install_git_dep(name: &str, git_url: &str, tag: Option<&str>, dest: &Path, lock: &mut LockFile) {
-    // Check if lock file has a specific commit and the dep is already installed
     if let Some(entry) = lock.entries.get(name) {
         if entry.git.as_deref() == Some(git_url)
             && entry.tag.as_deref() == tag
@@ -407,7 +396,6 @@ fn install_git_dep(name: &str, git_url: &str, tag: Option<&str>, dest: &Path, lo
         println!("  installing {name} from {git_url}");
     }
 
-    // Clone using git CLI
     let mut cmd = process::Command::new("git");
     cmd.args(["clone", "--depth", "1"]);
     if let Some(t) = tag {
@@ -420,9 +408,8 @@ fn install_git_dep(name: &str, git_url: &str, tag: Option<&str>, dest: &Path, lo
 
     match cmd.output() {
         Ok(output) if output.status.success() => {
-            // Get the commit SHA
             let commit = get_git_commit(dest);
-            // Remove .git directory to save space
+            // Drop .git to save disk space.
             let _ = fs::remove_dir_all(dest.join(".git"));
             lock.entries.insert(
                 name.to_string(),
@@ -485,7 +472,6 @@ fn install_local_dep(name: &str, source_path: &str, dest: &Path) {
             eprintln!("  failed to install {name}: {e}");
         }
     } else {
-        // Try with .harn extension
         let harn_source = PathBuf::from(format!("{source_path}.harn"));
         if harn_source.exists() {
             let dest_file = dest.with_extension("harn");
@@ -524,7 +510,6 @@ pub fn add_package(name: &str, git_url: Option<&str>, tag: Option<&str>, local_p
         process::exit(1);
     }
 
-    // Read or create harn.toml
     let manifest_path = Path::new(MANIFEST);
     let mut content = if manifest_path.exists() {
         fs::read_to_string(manifest_path).unwrap_or_default()
@@ -532,12 +517,10 @@ pub fn add_package(name: &str, git_url: Option<&str>, tag: Option<&str>, local_p
         "[package]\nname = \"my-project\"\nversion = \"0.1.0\"\n".to_string()
     };
 
-    // Ensure [dependencies] section exists
     if !content.contains("[dependencies]") {
         content.push_str("\n[dependencies]\n");
     }
 
-    // Build dependency line
     let dep_line = if let Some(url) = git_url {
         if let Some(t) = tag {
             format!("{name} = {{ git = \"{url}\", tag = \"{t}\" }}")
@@ -549,12 +532,11 @@ pub fn add_package(name: &str, git_url: Option<&str>, tag: Option<&str>, local_p
         format!("{name} = {{ path = \"{p}\" }}")
     };
 
-    // Check if dependency already exists and replace it
     let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
     let mut replaced = false;
     for line in &mut lines {
         if line.starts_with(name) && line.contains('=') {
-            // Check it's actually this dep (not a prefix match)
+            // Avoid prefix matches (e.g. `foo_bar` when looking for `foo`).
             let before_eq = line.split('=').next().unwrap_or("").trim();
             if before_eq == name {
                 *line = dep_line.clone();
@@ -565,12 +547,10 @@ pub fn add_package(name: &str, git_url: Option<&str>, tag: Option<&str>, local_p
     }
 
     if !replaced {
-        // Find [dependencies] and append after it
         let dep_idx = lines
             .iter()
             .position(|l| l.trim() == "[dependencies]")
             .unwrap_or_else(|| {
-                // Should not happen since we ensure [dependencies] exists above
                 lines.push("[dependencies]".to_string());
                 lines.len() - 1
             });

@@ -87,7 +87,6 @@ pub(crate) fn handle_tool_locally(name: &str, args: &serde_json::Value) -> Optio
                     Err(e) => Some(format!("Error: cannot list directory '{}': {}", path, e)),
                 };
             }
-            // Parse optional offset (1-based line number) and limit
             let offset = args
                 .get("offset")
                 .and_then(|v| v.as_i64())

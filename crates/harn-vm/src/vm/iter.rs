@@ -420,7 +420,6 @@ impl VmIter {
             VmIter::Windows { inner, n, buf } => {
                 let n = *n;
                 if buf.is_empty() {
-                    // First call: fill buf to exactly n.
                     while buf.len() < n {
                         let item = next_handle(inner, vm, functions).await?;
                         match item {
@@ -432,7 +431,6 @@ impl VmIter {
                         }
                     }
                 } else {
-                    // Subsequent calls: slide by one.
                     let item = next_handle(inner, vm, functions).await?;
                     match item {
                         Some(v) => {
@@ -485,8 +483,7 @@ pub async fn next_handle(
 ) -> Result<Option<VmValue>, VmError> {
     let mut state = std::mem::replace(&mut *handle.borrow_mut(), VmIter::Exhausted);
     let result = state.next(vm, functions).await;
-    // Restore the (possibly-mutated) state unless the inner call itself
-    // replaced the state with Exhausted via `*self = ...`.
+    // Restore state unless the inner call replaced it with Exhausted.
     *handle.borrow_mut() = state;
     result
 }

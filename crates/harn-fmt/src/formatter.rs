@@ -5,13 +5,7 @@ use crate::helpers::*;
 use crate::Formatter;
 
 impl Formatter {
-    // ------------------------------------------------------------------
-    // Shared helpers
-    // ------------------------------------------------------------------
-
-    /// Format a list of body statements as a string at the given indent level.
-    /// Each statement is formatted and indented; the result does NOT include
-    /// opening/closing braces — only the inner lines (each ending with `\n`).
+    /// Inner lines of a block — does NOT include opening/closing braces.
     fn format_body_string(&self, body: &[SNode], indent_level: usize) -> String {
         let mut out = String::new();
         let indent_str = "  ".repeat(indent_level);
@@ -24,7 +18,6 @@ impl Formatter {
         out
     }
 
-    /// Build `opening\n  body\nclose}` string for a simple block expression.
     fn format_block_expr(&self, opening: &str, body: &[SNode]) -> String {
         let inner = self.format_body_string(body, self.indent + 1);
         let close = "  ".repeat(self.indent);
@@ -67,9 +60,7 @@ impl Formatter {
         self.format_comma_sequence(rendered, prefix_len)
     }
 
-    /// Format selective import names, wrapping across lines when necessary.
-    /// Wrapped imports follow the same trailing-comma convention as other
-    /// multiline comma-separated forms.
+    /// Format selective import names, wrapping when they exceed `line_width`.
     fn format_selective_import_names(&self, names: &[String], path: &str) -> String {
         let mut sorted_names = names.to_vec();
         sorted_names.sort();
@@ -137,16 +128,13 @@ impl Formatter {
             } else {
                 nodes[original_index - 1].span.line + 1
             };
-            // Consecutive imports inside the sorted block stay tight: no blank
-            // line between them. `writeln` already terminates each import with
-            // a single `\n`, so we deliberately skip adding another.
+            // Imports inside a sorted block stay tight — no blank line between them.
             let _ = position;
             self.emit_comments_in_range(comment_from, node.span.line);
             self.format_node(node);
         }
     }
 
-    /// Format a function signature's parameter list with wrapping awareness.
     fn format_fn_signature(
         &self,
         pub_prefix: &str,
@@ -169,10 +157,6 @@ impl Formatter {
         format!("{pub_prefix}fn {name}{generics}({params_str}){ret}{where_str}")
     }
 
-    // ------------------------------------------------------------------
-    // Statement-level formatting (writes directly to self.output)
-    // ------------------------------------------------------------------
-
     pub(crate) fn format_program(&mut self, nodes: &[SNode]) {
         let import_count = nodes
             .iter()
@@ -185,13 +169,9 @@ impl Formatter {
         }
         for (i, node) in nodes.iter().enumerate().skip(import_count) {
             if i > 0 {
-                // Between adjacent non-import top-level items (and between the
-                // end of the import block and the first non-import item), emit
-                // exactly one blank line. `writeln` already terminated the
-                // previous line with `\n`, so pushing another `\n` here yields
-                // the blank line. Any leading comments (including doc blocks
-                // or section-header bars) are emitted AFTER the blank line so
-                // a doc comment stays glued to the item it documents.
+                // Exactly one blank line between top-level items. Leading comments
+                // (doc blocks, section headers) are emitted AFTER the blank line
+                // so a doc comment stays glued to the item it documents.
                 self.output.push('\n');
                 let prev_end = if i == import_count && import_count > 0 {
                     nodes[import_count - 1].span.line + 1
@@ -528,9 +508,6 @@ impl Formatter {
                     ParallelMode::Each => "each ",
                     ParallelMode::Settle => "settle ",
                 };
-                // Render `with { max_concurrent: N, ... }` inline. Only
-                // recognized keys are emitted — unknown keys never reach
-                // the AST (parser rejects them).
                 let options_clause = if options.is_empty() {
                     String::new()
                 } else {
@@ -620,7 +597,6 @@ impl Formatter {
                 self.dedent();
                 self.writeln("}");
             }
-            // Everything else is an expression used as a statement
             _ => {
                 let expr = self.format_expr(node);
                 self.writeln(&expr);
@@ -661,10 +637,6 @@ impl Formatter {
             }
         }
     }
-
-    // ------------------------------------------------------------------
-    // Expression-level formatting (returns String)
-    // ------------------------------------------------------------------
 
     pub(crate) fn format_expr(&self, node: &SNode) -> String {
         match &node.node {
@@ -1066,7 +1038,7 @@ impl Formatter {
                 };
                 self.format_block_expr(&opening, body)
             }
-            // Declaration nodes rendered as placeholders in expr context
+            // Declaration nodes rendered as placeholders when used in expr position.
             Node::Pipeline { name, .. } => format!("/* pipeline {name} */"),
             Node::FnDecl {
                 name,
@@ -1190,10 +1162,6 @@ impl Formatter {
         }
     }
 
-    // ------------------------------------------------------------------
-    // Closure formatting
-    // ------------------------------------------------------------------
-
     fn format_arrow_closure(&self, params: &[TypedParam], body: &[SNode]) -> String {
         let params_str = format_typed_params(params);
         if body.len() == 1 && is_simple_expr(&body[0]) {
@@ -1222,10 +1190,6 @@ impl Formatter {
             self.format_block_expr(&format!("fn({params_str}) {{"), body)
         }
     }
-
-    // ------------------------------------------------------------------
-    // Dict / struct helpers
-    // ------------------------------------------------------------------
 
     fn format_dict_key(&self, node: &SNode) -> String {
         match &node.node {
@@ -1258,13 +1222,8 @@ impl Formatter {
         self.format_comma_sequence(rendered, prefix_len)
     }
 
-    // ------------------------------------------------------------------
-    // Expression-or-statement (hybrid context for closure / block bodies)
-    // ------------------------------------------------------------------
-
-    /// Format a node as either an expression or statement string.
-    /// Only handles node types that need special multi-line treatment
-    /// different from `format_expr`; everything else delegates there.
+    /// Hybrid context (closure / block bodies): only handles node types that
+    /// need multi-line treatment different from `format_expr`.
     fn format_expr_or_stmt(&self, node: &SNode, indent_level: usize) -> String {
         match &node.node {
             Node::IfElse {
@@ -1404,16 +1363,11 @@ impl Formatter {
         }
     }
 
-    /// Helper: `opening\n  body\nclose}` at an explicit indent level.
     fn format_block_at(&self, opening: &str, body: &[SNode], indent_level: usize) -> String {
         let inner = self.format_body_string(body, indent_level + 1);
         let close = "  ".repeat(indent_level);
         format!("{opening}\n{inner}{close}}}")
     }
-
-    // ------------------------------------------------------------------
-    // Match / enum / struct field helpers
-    // ------------------------------------------------------------------
 
     fn format_match_arm(&mut self, arm: &harn_parser::MatchArm) {
         let pattern = self.format_expr(&arm.pattern);

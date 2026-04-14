@@ -25,10 +25,6 @@ pub(crate) mod ledger;
 pub(crate) mod mock;
 mod transcript_stats;
 
-// ---------------------------------------------------------------------------
-// Shared HTTP clients — reuse connections and TLS sessions across LLM calls.
-// ---------------------------------------------------------------------------
-
 use std::sync::OnceLock;
 
 /// Streaming client: no overall request timeout (per-chunk idle timeout
@@ -276,15 +272,9 @@ fn build_schema_nudge(
     }
 }
 
-// =============================================================================
-// Public re-exports (used by other crates/modules)
-// =============================================================================
-
 pub(crate) use self::agent::{current_host_bridge, run_agent_loop_internal};
 pub(crate) use self::agent_config::{agent_loop_result_from_llm, AgentLoopConfig};
 pub use self::agent_config::{register_agent_loop_with_bridge, register_llm_call_with_bridge};
-// observed_llm_call, LlmRetryConfig, build_llm_call_result are used by
-// register_llm_builtins above but accessed via the agent module path.
 pub use self::api::fetch_provider_max_context;
 pub(crate) use self::api::vm_call_llm_full;
 pub use self::cost::peek_total_cost;
@@ -312,25 +302,18 @@ pub fn register_llm_builtins(vm: &mut Vm) {
     rate_limit::init_from_config();
     agent_config::register_agent_subscribe(vm);
     agent_config::register_agent_inject_feedback(vm);
-    // =========================================================================
-    // llm_call -- core LLM request with structured output + tool use
-    // =========================================================================
     vm.register_async_builtin("llm_call", |args| async move {
         let mut opts = extract_llm_options(&args)?;
         let options = args.get(2).and_then(|a| a.as_dict()).cloned();
-        // Default `llm_retries` to 2 so a one-shot `llm_call` matches the
-        // resilience of `agent_loop` (which defaults to 4) for transient
-        // HTTP / provider failures. Scripts that want the old fail-fast
-        // behavior can pass `llm_retries: 0` explicitly. This is a
-        // breaking change relative to pre-0.6 releases.
+        // Default `llm_retries` to 2 for resilience against transient
+        // HTTP / provider failures. Pass `llm_retries: 0` to opt out.
         let retry_config = agent_observe::LlmRetryConfig {
             retries: helpers::opt_int(&options, "llm_retries").unwrap_or(2) as usize,
             backoff_ms: helpers::opt_int(&options, "llm_backoff_ms").unwrap_or(2000) as u64,
         };
-        // Schema retry loop — orthogonal to transient retries above. Each
-        // schema retry re-invokes `observed_llm_call` with a fresh
-        // transient budget. Default: 1 retry. Small/local models need the
-        // corrective nudge to reliably produce conforming JSON.
+        // Schema retry loop is orthogonal to transient retries. Each
+        // schema retry gets a fresh transient budget. Small/local models
+        // often need the corrective nudge to produce conforming JSON.
         let schema_retries = helpers::opt_int(&options, "schema_retries")
             .unwrap_or(1)
             .max(0) as usize;
@@ -349,9 +332,8 @@ pub fn register_llm_builtins(vm: &mut Vm) {
             )
             .await?;
 
-            // Output schema validation (non-bridge only; bridge path
-            // delegates to build_llm_call_result which skips validation
-            // — the host is expected to handle schema enforcement).
+            // Non-bridge path runs schema validation; bridge path
+            // delegates validation to the host.
             let mut vm_result = agent_config::build_llm_call_result(&result, &opts);
             if !helpers::expects_structured_output(&opts) {
                 return Ok(vm_result);
@@ -364,7 +346,6 @@ pub fn register_llm_builtins(vm: &mut Vm) {
             };
             let errors = compute_validation_errors(data, &opts);
             if errors.is_empty() {
-                // Passthrough — keep shape identical to pre-loop code.
                 let mut d = dict.as_ref().clone();
                 d.insert("data".to_string(), data.clone());
                 vm_result = VmValue::Dict(Rc::new(d));
@@ -380,8 +361,8 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                     errors: errors.clone(),
                     nudge_used: !nudge.is_empty(),
                 });
-                // Append the assistant's broken response and the corrective
-                // nudge so the next call has progressively richer context.
+                // Append broken response + corrective nudge so the next
+                // call has progressively richer context.
                 opts.messages.push(serde_json::json!({
                     "role": "assistant",
                     "content": result.text,
@@ -395,8 +376,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                 continue;
             }
 
-            // Attempts exhausted (or nudge disabled): honor the caller's
-            // configured `output_validation` mode.
+            // Attempts exhausted: honor the caller's output_validation mode.
             let hint = if schema_retries == 0 {
                 " (hint: set `schema_retries: N` in the llm_call options to automatically re-prompt the model with a corrective nudge)"
             } else {
@@ -420,8 +400,6 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                 _ => return Ok(vm_result),
             }
         }
-        // Unreachable: the loop always returns or continues, and
-        // `schema_retries` is usize so `0..=N` yields at least one iter.
         unreachable!("schema retry loop exited without returning");
     });
 
@@ -473,13 +451,9 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                 serde_json::json!(result.output_tokens),
             );
         }
-        // llm_completion has no tool registry: visible_text will equal text.
         Ok(vm_build_llm_result(&result, None, None, None))
     });
 
-    // =========================================================================
-    // agent_loop -- multi-turn persistent agent loop
-    // =========================================================================
     vm.register_async_builtin("agent_loop", |args| async move {
         let options = args.get(2).and_then(|a| a.as_dict()).cloned();
         let max_iterations = opt_int(&options, "max_iterations").unwrap_or(50) as usize;
@@ -588,7 +562,6 @@ pub fn register_llm_builtins(vm: &mut Vm) {
         Ok(json_to_vm_value(&result))
     });
 
-    // Remaining builtins (llm_stream, conversation management, config, cost, trace)
     register_llm_stream(vm);
     conversation::register_conversation_builtins(vm);
     config_builtins::register_config_builtins(vm);
@@ -616,10 +589,6 @@ pub fn register_llm_builtins(vm: &mut Vm) {
 fn register_llm_mock_builtins(vm: &mut Vm) {
     use mock::{get_llm_mock_calls, push_llm_mock, reset_llm_mock_state, LlmMock};
 
-    // llm_mock(response) -> nil
-    // Queues a configurable mock LLM response.
-    // response = {text?, tool_calls?, match?, input_tokens?, output_tokens?,
-    //             thinking?, stop_reason?, model?}
     vm.register_builtin("llm_mock", |args, _out| {
         let config = match args.first() {
             Some(VmValue::Dict(d)) => d,
@@ -682,7 +651,6 @@ fn register_llm_mock_builtins(vm: &mut Vm) {
         Ok(VmValue::Nil)
     });
 
-    // llm_mock_calls() -> list of {messages, system, tools}
     vm.register_builtin("llm_mock_calls", |_args, _out| {
         let calls = get_llm_mock_calls();
         let result: Vec<VmValue> = calls
@@ -714,7 +682,6 @@ fn register_llm_mock_builtins(vm: &mut Vm) {
         Ok(VmValue::List(Rc::new(result)))
     });
 
-    // llm_mock_clear() -> nil
     vm.register_builtin("llm_mock_clear", |_args, _out| {
         reset_llm_mock_state();
         Ok(VmValue::Nil)
@@ -741,7 +708,6 @@ fn register_llm_stream(vm: &mut Vm) {
         let tx_for_task = tx_arc.clone();
 
         tokio::task::spawn_local(async move {
-            // Mock provider: send deterministic chunks without API call
             if provider == "mock" {
                 let words: Vec<&str> = prompt_text.split_whitespace().collect();
                 for word in &words {

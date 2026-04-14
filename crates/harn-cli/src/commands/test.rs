@@ -60,7 +60,6 @@ fn simple_diff(expected: &str, actual: &str) -> String {
 fn error_matches(actual_error: &str, expected_spec: &str) -> bool {
     let lines: Vec<&str> = expected_spec.lines().collect();
     if lines.len() > 1 {
-        // Union: any line matching is sufficient
         return lines
             .iter()
             .any(|line| error_line_matches(actual_error, line.trim()));
@@ -82,7 +81,6 @@ fn error_line_matches(actual_error: &str, pattern: &str) -> bool {
     }
 }
 
-/// Write JUnit XML report.
 fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -215,7 +213,6 @@ pub(crate) async fn run_conformance_tests(
     let mut passed = 0;
     let mut failed = 0;
     let mut errors: Vec<String> = Vec::new();
-    // (name, passed, error_msg, duration_ms)
     let mut junit_results: Vec<(String, bool, String, u64)> = Vec::new();
 
     let harn_files =
@@ -234,18 +231,14 @@ pub(crate) async fn run_conformance_tests(
             .display()
             .to_string();
 
-        // Apply filter:
-        //   re:<regex>   — full regex match against the relative path
-        //   foo|bar      — OR of substring matches
-        //   *_runtime*   — glob-style wildcards (translated to regex)
-        //   plain        — substring match (default)
+        // Filter syntax: `re:<regex>`, `foo|bar` (OR), `*_runtime*` (glob),
+        // or plain substring match.
         if let Some(pattern) = filter {
             let matched = if let Some(re_pat) = pattern.strip_prefix("re:") {
                 Regex::new(re_pat).is_ok_and(|re| re.is_match(&rel_path))
             } else if pattern.contains('|') {
                 pattern.split('|').any(|p| rel_path.contains(p.trim()))
             } else if pattern.contains('*') || pattern.contains('?') {
-                // Convert glob to regex: * → .*, ? → ., escape the rest
                 let escaped = regex::escape(pattern)
                     .replace(r"\*", ".*")
                     .replace(r"\?", ".");
@@ -282,7 +275,6 @@ pub(crate) async fn run_conformance_tests(
                 }
             };
 
-            // Reset thread-local state between conformance tests
             harn_vm::reset_thread_local_state();
 
             let start = std::time::Instant::now();
@@ -368,7 +360,6 @@ pub(crate) async fn run_conformance_tests(
                 }
             };
 
-            // Reset thread-local state between conformance tests
             harn_vm::reset_thread_local_state();
 
             let start = std::time::Instant::now();
@@ -437,7 +428,6 @@ pub(crate) async fn run_conformance_tests(
         );
     }
 
-    // Timing summary (--timing or --verbose)
     if show_timing {
         println!();
         println!("Total time: {total_duration_ms} ms");
@@ -454,7 +444,6 @@ pub(crate) async fn run_conformance_tests(
             println!("Per-test: avg={avg} ms  p50={p50} ms  p95={p95} ms  p99={p99} ms");
         }
 
-        // Show slowest 10 tests
         let mut by_time: Vec<&(String, bool, String, u64)> = junit_results.iter().collect();
         by_time.sort_by(|a, b| b.3.cmp(&a.3));
         let top_n = by_time.len().min(10);
@@ -482,7 +471,6 @@ pub(crate) async fn run_conformance_tests(
 }
 
 fn print_test_results(summary: &test_runner::TestSummary) {
-    // Count unique files
     let file_count = summary
         .results
         .iter()
@@ -490,7 +478,6 @@ fn print_test_results(summary: &test_runner::TestSummary) {
         .collect::<std::collections::HashSet<_>>()
         .len();
 
-    // Test count header
     if summary.total > 0 {
         println!(
             "Running {} test{} from {} file{}...\n",
@@ -510,7 +497,6 @@ fn print_test_results(summary: &test_runner::TestSummary) {
         } else {
             println!("  \x1b[31mFAIL\x1b[0m  {} [{}]", result.name, result.file);
             if let Some(err) = &result.error {
-                // Indent multi-line errors
                 for line in err.lines() {
                     println!("        {line}");
                 }
@@ -570,11 +556,9 @@ pub(crate) async fn run_watch_tests(
 
     println!("Watching {path_str} for changes... (Ctrl+C to stop)\n");
 
-    // Initial run
     let summary = test_runner::run_tests(&path, filter, timeout_ms, parallel).await;
     print_test_results(&summary);
 
-    // Set up file watcher
     let (tx, rx) = mpsc::channel();
     let mut watcher = RecommendedWatcher::new(tx, Config::default()).unwrap_or_else(|e| {
         eprintln!("Failed to create file watcher: {e}");
@@ -588,10 +572,8 @@ pub(crate) async fn run_watch_tests(
         });
 
     loop {
-        // Wait for a file change event
         match rx.recv() {
             Ok(Ok(event)) => {
-                // Only re-run for .harn file modifications
                 let is_harn = event
                     .paths
                     .iter()
@@ -600,7 +582,7 @@ pub(crate) async fn run_watch_tests(
                     continue;
                 }
 
-                // Debounce: drain any queued events
+                // Debounce: drain any additional events within 100ms.
                 while rx.recv_timeout(Duration::from_millis(100)).is_ok() {}
 
                 println!("\n\x1b[2m--- file changed, re-running tests ---\x1b[0m\n");

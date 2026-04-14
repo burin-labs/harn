@@ -4,8 +4,6 @@ use std::rc::Rc;
 use crate::value::{values_equal, VmError, VmValue};
 use crate::vm::Vm;
 
-// --- Case conversion helpers ---
-
 fn split_snake(s: &str) -> Vec<&str> {
     s.split('_').filter(|p| !p.is_empty()).collect()
 }
@@ -198,10 +196,8 @@ pub(crate) fn register_string_builtins(vm: &mut Vm) {
     vm.register_builtin("format", |args, _out| {
         let template = args.first().map(|a| a.display()).unwrap_or_default();
 
-        // If the second argument is a dict, use named placeholders {key}
+        // Dict → named placeholders `{key}`. Single-pass scan avoids double-substitution.
         if let Some(dict) = args.get(1).and_then(|a| a.as_dict()) {
-            // Build result by scanning for {name} patterns and replacing them
-            // in a single pass to avoid double-substitution.
             let mut result = String::with_capacity(template.len());
             let mut rest = template.as_str();
             while let Some(open) = rest.find('{') {
@@ -211,7 +207,6 @@ pub(crate) fn register_string_builtins(vm: &mut Vm) {
                     if let Some(val) = dict.get(key) {
                         result.push_str(&val.display());
                     } else {
-                        // Keep unmatched placeholders as-is
                         result.push_str(&rest[open..open + close + 1]);
                     }
                     rest = &rest[open + close + 1..];
@@ -225,7 +220,7 @@ pub(crate) fn register_string_builtins(vm: &mut Vm) {
             return Ok(VmValue::String(Rc::from(result)));
         }
 
-        // Otherwise, use positional {} placeholders
+        // Otherwise: positional `{}` placeholders.
         let mut result = String::with_capacity(template.len());
         let mut arg_iter = args.iter().skip(1);
         let mut rest = template.as_str();
@@ -334,8 +329,6 @@ pub(crate) fn register_string_builtins(vm: &mut Vm) {
         }
     });
 
-    // --- Case conversion ---
-
     vm.register_builtin("snake_to_camel", |args, _out| {
         let s = args.first().map(|a| a.display()).unwrap_or_default();
         Ok(VmValue::String(Rc::from(words_to_camel(&split_snake(&s)))))
@@ -414,8 +407,6 @@ pub(crate) fn register_string_builtins(vm: &mut Vm) {
         Ok(VmValue::String(Rc::from(lowercase_first_str(&s))))
     });
 
-    // --- Path builtins ---
-
     vm.register_builtin("dirname", |args, _out| {
         let path = args.first().map(|a| a.display()).unwrap_or_default();
         let p = std::path::Path::new(&path);
@@ -445,8 +436,6 @@ pub(crate) fn register_string_builtins(vm: &mut Vm) {
             None => Ok(VmValue::String(Rc::from(""))),
         }
     });
-
-    // --- Template rendering ---
 
     vm.register_builtin("render", |args, _out| render_asset(args));
     vm.register_builtin("render_prompt", |args, _out| render_asset(args));

@@ -52,9 +52,8 @@ pub(super) async fn run_finalize(
     if daemon && state.final_status == "done" {
         state.final_status = "idle";
     }
-    // Capture the required-tools list before any mutation of state so the
-    // immutable borrow on `state.config` drops before we reassign
-    // `state.final_status`.
+    // Capture required-tools list before mutating state so the
+    // immutable borrow on state.config drops before we reassign final_status.
     let required_tools_failed = if state.final_status == "done" {
         match state.config.require_successful_tools.as_ref() {
             Some(required_tools) if !required_tools.is_empty() => !state
@@ -91,7 +90,6 @@ pub(super) async fn run_finalize(
             .or(state.daemon_snapshot_path.take());
     }
 
-    // Emit structured trace event for loop completion.
     crate::llm::trace::emit_agent_event(crate::llm::trace::AgentTraceEvent::LoopComplete {
         status: state.final_status.to_string(),
         iterations: state.total_iterations,
@@ -101,9 +99,8 @@ pub(super) async fn run_finalize(
     });
     let trace_summary = crate::llm::trace::agent_trace_summary();
 
-    // Serialize the final ledger state into the result so workflow post-
-    // processors (QC officer, audit pipelines) can reason over what the
-    // agent thought "done" meant.
+    // Expose final ledger state so post-processors (QC officer, audit
+    // pipelines) can reason over what the agent considered "done".
     let ledger_json = serde_json::to_value(&state.task_ledger).unwrap_or(serde_json::Value::Null);
     let ledger_done_nudge_count = state.ledger_done_rejections as i64;
     Ok(serde_json::json!({

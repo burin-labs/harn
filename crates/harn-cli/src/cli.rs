@@ -120,11 +120,8 @@ pub(crate) struct RunArgs {
     pub file: Option<String>,
     /// Positional arguments passed to the pipeline as the global `argv`
     /// list. Place them after a `--` separator: `harn run script.harn -- a b c`.
-    //
-    // NOTE: use `last = true` alone here. Combining it with
-    // `trailing_var_arg = true` panics at clap runtime (the two flags
-    // conflict). `last = true` is sufficient to route every token after
-    // `--` into `argv`.
+    // `last = true` alone routes post-`--` tokens into `argv`; combining it
+    // with `trailing_var_arg = true` panics at clap runtime.
     #[arg(last = true)]
     pub argv: Vec<String>,
 }

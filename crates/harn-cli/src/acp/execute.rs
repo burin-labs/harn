@@ -7,7 +7,6 @@ use std::time::Instant;
 
 use super::{builtins, AcpBridge};
 
-/// Compile harn source code into a bytecode chunk.
 /// Execute a compiled chunk with ACP bridge builtins.
 pub(super) async fn execute_chunk(
     chunk: harn_vm::Chunk,
@@ -20,7 +19,7 @@ pub(super) async fn execute_chunk(
     let vm_setup_started = Instant::now();
     let mut vm = harn_vm::Vm::new();
     harn_vm::register_vm_stdlib(&mut vm);
-    // Use project root (harn.toml) for metadata/store, falling back to cwd.
+    // Metadata/store rooted at harn.toml when present; cwd otherwise.
     let source_parent = source_path.and_then(|p| p.parent()).unwrap_or(cwd);
     let project_root = harn_vm::stdlib::process::find_project_root(source_parent)
         .or_else(|| harn_vm::stdlib::process::find_project_root(cwd));
@@ -50,7 +49,6 @@ pub(super) async fn execute_chunk(
         vm.set_source_dir(cwd);
     }
 
-    // Inject the prompt text as a global variable so pipelines can access it.
     vm.set_global("prompt", harn_vm::VmValue::String(Rc::from(prompt_text)));
     vm.set_global(
         "cwd",
@@ -62,22 +60,19 @@ pub(super) async fn execute_chunk(
         vm.set_global("mcp", harn_vm::VmValue::Dict(Rc::new(mcp_globals)));
     }
 
-    // Register ACP-specific builtins that delegate file I/O to the editor.
     builtins::register_acp_builtins(&mut vm, bridge.clone()).await;
 
-    // Set up bridge delegation so unknown builtins are forwarded to the ACP
-    // client as `builtin_call` JSON-RPC requests. This remains the stable ACP
-    // behavior until host-local pseudo-builtins are fully migrated to typed
-    // host capabilities and explicit Harn stdlib wrappers.
+    // Forward unknown builtins to the ACP client as `builtin_call` JSON-RPC
+    // until host-local pseudo-builtins are migrated to typed host
+    // capabilities and explicit Harn stdlib wrappers.
     host_bridge.set_script_name(pipeline_name);
     vm.set_bridge(host_bridge.clone());
 
-    // Override the native text-only agent_loop with the tool-aware version.
-    // This allows agent_loop to execute tools via the ACP bridge (delegated
-    // to the editor/CLI which has the full tool infrastructure).
+    // Replace the text-only agent_loop with a tool-aware variant that
+    // dispatches tools through the bridge.
     harn_vm::llm::register_agent_loop_with_bridge(&mut vm, host_bridge.clone());
 
-    // Override llm_call with bridge-aware version for call_start/call_end observability.
+    // Bridge-aware llm_call adds call_start/call_end observability.
     harn_vm::llm::register_llm_call_with_bridge(&mut vm, host_bridge);
 
     let vm_setup_ms = vm_setup_started.elapsed().as_millis() as u64;

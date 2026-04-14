@@ -14,7 +14,6 @@ fn assert_roundtrip(source: &str) {
     parser
         .parse()
         .unwrap_or_else(|e| panic!("Formatted output failed to parse:\n{formatted}\nError: {e}"));
-    // Format again and verify idempotence
     let formatted2 = format_source(&formatted).unwrap();
     assert_eq!(formatted, formatted2, "Formatter is not idempotent");
 }
@@ -248,8 +247,6 @@ fn test_wraps_long_enum_constructor_arguments() {
     assert!(result.contains("with_a_really_long_argument_name_four,\n"));
 }
 
-// --- New tests for line-splitting and operator fixes ---
-
 #[test]
 fn test_wraps_long_fn_decl_params() {
     let source = r#"pipeline default(task) {
@@ -370,8 +367,6 @@ fn test_subtraction_uses_backslash_continuation() {
     }
 }
 
-// --- Nested wrapping ---
-
 #[test]
 fn test_nested_function_call_wrapping() {
     let source = r#"pipeline default(task) {
@@ -388,14 +383,10 @@ fn test_nested_list_in_dict_wrapping() {
     assert_roundtrip(source);
 }
 
-// --- Operator precedence edge cases ---
-
 #[test]
 fn test_nil_coalescing_with_logical_ops() {
-    // `??` binds tighter than `||`, `&&`, comparisons, and additive ops
-    // (placed between multiplicative and additive in the parser). So
-    // `a ?? b || c` parses naturally as `(a ?? b) || c` and needs no parens.
-    // This matches the intuition `xs?.count ?? 0 > 0` → `(xs?.count ?? 0) > 0`.
+    // `??` binds tighter than `||`/`&&`/comparisons/additive, so
+    // `a ?? b || c` parses naturally as `(a ?? b) || c` (no parens needed).
     let source = r#"pipeline default(task) {
   let x = a ?? b || c
 }"#;
@@ -405,9 +396,8 @@ fn test_nil_coalescing_with_logical_ops() {
         "Expected no parens — natural precedence is (a ?? b) || c, got:\n{result}"
     );
     assert_roundtrip(source);
-    // The opposite shape `a ?? (b || c)` MUST keep its parens, because the
-    // default grouping is `(a ?? b) || c` — stripping the parens would lose
-    // the `b || c` sub-expression.
+    // The opposite shape `a ?? (b || c)` must keep its parens — stripping them
+    // would regroup to `(a ?? b) || c` and lose the `b || c` sub-expression.
     let source2 = r#"pipeline default(task) {
   let x = a ?? (b || c)
 }"#;
@@ -1057,10 +1047,6 @@ fn test_doc_comment_glued_to_item_blank_line_above() {
         "formatter is not idempotent with doc comments between items"
     );
 }
-
-// ---------------------------------------------------------------------------
-// Section-header canonicalization
-// ---------------------------------------------------------------------------
 
 fn canonical_bar() -> String {
     // Default separator_width is 80 → 77 dashes after `// `.

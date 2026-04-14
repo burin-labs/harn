@@ -62,7 +62,6 @@ pub(crate) fn check_file_inner(
     let mut has_warning = false;
     let mut diagnostic_count = 0;
 
-    // Type checking
     let type_diagnostics = TypeChecker::with_strict_types(config.strict_types).check(&program);
     for diag in &type_diagnostics {
         let severity = match diag.severity {
@@ -92,7 +91,6 @@ pub(crate) fn check_file_inner(
         }
     }
 
-    // Linting
     let lint_diagnostics = harn_lint::lint_with_cross_file_imports(
         &program,
         &config.disable_rules,
@@ -136,11 +134,10 @@ pub(crate) fn check_file_inner(
     }
 }
 
-/// Apply `[lint]` options from the nearest harn.toml onto an existing
-/// `CheckConfig`. Today this only merges the `disabled` list into
-/// `disable_rules`; the `require_file_header` flag is surfaced separately
-/// via `harn_lint_require_file_header` so it can be enabled even when a
-/// user hasn't authored a full `[check]` section.
+/// Merge `[lint].disabled` from the nearest harn.toml into `disable_rules`.
+/// The `require_file_header` flag is handled separately via
+/// [`harn_lint_require_file_header`] so it can be enabled without a full
+/// `[check]` section.
 pub(crate) fn apply_harn_lint_config(path: &Path, config: &mut CheckConfig) {
     let Ok(cfg) = harn_config::load_for_path(path) else {
         return;
@@ -215,7 +212,6 @@ pub(crate) fn lint_fix_file(
     let path_str = path.to_string_lossy().into_owned();
     let (source, program) = parse_source_file(&path_str);
 
-    // Collect lint fixes
     let options = harn_lint::LintOptions {
         file_path: Some(path),
         require_file_header,
@@ -228,11 +224,9 @@ pub(crate) fn lint_fix_file(
         &options,
     );
 
-    // Collect type-check fixes
     let type_diags =
         TypeChecker::with_strict_types(config.strict_types).check_with_source(&program, &source);
 
-    // Merge all fixable edits
     let mut edits: Vec<&harn_lexer::FixEdit> = lint_diags
         .iter()
         .filter_map(|d| d.fix.as_ref())
@@ -244,10 +238,10 @@ pub(crate) fn lint_fix_file(
         return 0;
     }
 
-    // Sort by span.start descending so we can apply in reverse order
+    // Descending by span.start so edits apply right-to-left without
+    // invalidating earlier offsets; drop overlaps in that same order.
     edits.sort_by(|a, b| b.span.start.cmp(&a.span.start));
 
-    // Filter overlapping edits (keep the first = highest offset)
     let mut accepted: Vec<&harn_lexer::FixEdit> = Vec::new();
     for edit in &edits {
         let overlaps = accepted
@@ -258,7 +252,6 @@ pub(crate) fn lint_fix_file(
         }
     }
 
-    // Apply edits in reverse order (already sorted descending)
     let mut result = source.clone();
     for edit in &accepted {
         let before = &result[..edit.span.start];
@@ -274,7 +267,6 @@ pub(crate) fn lint_fix_file(
 
     println!("{path_str}: applied {applied} fix(es)");
 
-    // Re-lint to report remaining issues
     let (source2, program2) = parse_source_file(&path_str);
     let remaining = harn_lint::lint_with_options(
         &program2,
@@ -332,10 +324,9 @@ pub(crate) fn collect_harn_targets(targets: &[&str]) -> Vec<PathBuf> {
     files
 }
 
-/// Pre-scan all files and collect every function name that appears in a
-/// selective import (`import { foo } from "..."`).  The union of these names
-/// is passed to the linter so that library functions consumed by other files
-/// are not falsely flagged as unused.
+/// Collect every function name that appears in a selective import across
+/// the given files, so the linter doesn't flag library functions consumed
+/// by other files as unused.
 pub(crate) fn collect_cross_file_imports(files: &[PathBuf]) -> std::collections::HashSet<String> {
     let mut names = std::collections::HashSet::new();
     for file in files {
@@ -417,8 +408,6 @@ fn collect_preflight_diagnostics(
         &mut diagnostics,
     );
 
-    // Import collision detection: collect all names exported by each import
-    // and flag duplicates across different modules.
     scan_import_collisions(&canonical, source, program, &mut diagnostics);
 
     diagnostics
@@ -1536,7 +1525,8 @@ fn scan_import_collisions(
                     continue;
                 }
                 let Some(import_path) = resolve_import_path(file_path, path) else {
-                    continue; // already diagnosed as unresolved
+                    // Already diagnosed as unresolved elsewhere.
+                    continue;
                 };
                 let import_str = import_path.to_string_lossy().into_owned();
                 let Ok(import_source) = std::fs::read_to_string(&import_path) else {

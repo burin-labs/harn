@@ -49,10 +49,6 @@ pub(crate) fn parse_transcript_policy(
 }
 
 pub(crate) fn register_agent_builtins(vm: &mut Vm) {
-    // ── Agent definition/config builtins ─────────────────────────────
-
-    // agent(name, config) -> agent dict
-    // config = {system, provider?, model?, tools?, max_iterations?, tool_format?}
     vm.register_builtin("agent", |args, _out| {
         let name = args.first().map(|a| a.display()).unwrap_or_default();
         let config = match args.get(1) {
@@ -72,9 +68,6 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
         Ok(VmValue::Dict(Rc::new(agent)))
     });
 
-    // agent_config(agent) -> {prompt, system, options} for passing to agent_loop
-    // Usage: let cfg = agent_config(my_agent, "Do something")
-    //        let result = agent_loop(cfg.prompt, cfg.system, cfg.options)
     vm.register_builtin("agent_config", |args, _out| {
         if args.len() < 2 {
             return Err(VmError::Thrown(VmValue::String(Rc::from(
@@ -100,7 +93,6 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
             }
         }
 
-        // Build options dict from agent config for agent_loop
         let mut options = BTreeMap::new();
         for key in [
             "provider",
@@ -129,7 +121,6 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
         Ok(VmValue::Dict(Rc::new(result)))
     });
 
-    // agent_name(agent) -> string
     vm.register_builtin("agent_name", |args, _out| {
         let agent = match args.first() {
             Some(VmValue::Dict(map)) => map,
@@ -141,8 +132,6 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
         };
         Ok(agent.get("name").cloned().unwrap_or(VmValue::Nil))
     });
-
-    // ── Worker lifecycle builtins ────────────────────────────────────
 
     vm.register_async_builtin("spawn_agent", |args| async move {
         let config = args
@@ -375,8 +364,6 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
         })?;
         Ok(VmValue::List(Rc::new(workers)))
     });
-
-    // ── Delegate to submodule registration ───────────────────────────
 
     records::register_record_builtins(vm);
     workflow::register_workflow_builtins(vm);

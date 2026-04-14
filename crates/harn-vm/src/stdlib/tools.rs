@@ -285,11 +285,8 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
         Ok(VmValue::Dict(Rc::new(schema)))
     });
 
-    // tool_define(registry, name, description, config) -> registry
-    // config is {parameters: {name: {type, description, required?, default?}}, handler: fn,
-    //            returns?: schema, annotations?: {title?, readOnlyHint?, destructiveHint?, idempotentHint?, openWorldHint?}}
-    // Unknown config keys are preserved on the tool entry verbatim so integrators
-    // can attach runtime-agnostic metadata such as policy/effect descriptors.
+    // Unknown config keys (beyond parameters/handler/returns/annotations) are
+    // preserved verbatim so integrators can attach policy/effect metadata.
     vm.register_builtin("tool_define", |args, _out| {
         if args.len() < 4 {
             return Err(VmError::Thrown(VmValue::String(Rc::from(
@@ -345,7 +342,6 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
             tool_entry.insert("outputSchema".to_string(), output_schema);
         }
 
-        // Optional MCP tool annotations (title, readOnlyHint, destructiveHint, etc.)
         if let Some(annotations) = config.get("annotations") {
             tool_entry.insert("annotations".to_string(), annotations.clone());
         }
@@ -483,10 +479,6 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
         Ok(VmValue::String(Rc::from(prompt.trim_end())))
     });
 }
-
-// =============================================================================
-// Tool registry helpers
-// =============================================================================
 
 fn vm_validate_registry(name: &str, dict: &BTreeMap<String, VmValue>) -> Result<(), VmError> {
     match dict.get("_type") {

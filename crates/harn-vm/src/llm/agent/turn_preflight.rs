@@ -54,7 +54,6 @@ pub(super) async fn run_turn_preflight(
     crate::llm::agent_observe::set_current_iteration(Some(state.total_iterations));
     state.daemon_state = "active".to_string();
 
-    // 1. Drain host-initiated immediate-delivery messages.
     let immediate_messages = inject_queued_user_messages(
         ctx.bridge.as_ref(),
         &mut state.visible_messages,
@@ -76,7 +75,6 @@ pub(super) async fn run_turn_preflight(
         state.idle_backoff_ms = 100;
     }
 
-    // 2. Compose the call payload.
     let default_system = build_agent_system_prompt(
         ctx.base_system,
         ctx.tool_contract_prompt,
@@ -85,16 +83,14 @@ pub(super) async fn run_turn_preflight(
     let mut call_messages = state.visible_messages.clone();
     let call_system = default_system;
 
-    // 3. TurnStart emit — happens before the pending-feedback drain so
-    //    subscribers that want to react to turn boundaries see the
-    //    transition before any drain-generated injections land.
+    // Emit TurnStart before draining pending feedback so subscribers
+    // see the boundary before any drain-generated injections land.
     emit_agent_event(&AgentEvent::TurnStart {
         session_id: ctx.session_id.to_string(),
         iteration: ctx.iteration,
     })
     .await;
 
-    // 4. Pending-feedback drain + per-item FeedbackInjected emit.
     for (kind, content) in drain_pending_feedback(ctx.session_id) {
         emit_agent_event(&AgentEvent::FeedbackInjected {
             session_id: ctx.session_id.to_string(),
@@ -110,7 +106,7 @@ pub(super) async fn run_turn_preflight(
         call_messages = state.visible_messages.clone();
     }
 
-    // 5. Task-ledger injection — transient, not persisted to history.
+    // Transient task-ledger injection; not persisted to history.
     let ledger_rendered = state.task_ledger.render_for_prompt();
     if !ledger_rendered.is_empty() {
         call_messages.push(serde_json::json!({
@@ -126,7 +122,6 @@ pub(super) async fn run_turn_preflight(
         &call_messages,
     );
 
-    // 6. Hand off to the LLM call phase.
     opts.messages = call_messages;
     opts.system = call_system;
     Ok(())

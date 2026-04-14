@@ -31,7 +31,6 @@ fn require_transcript<'a>(
 /// Register conversation management builtins.
 pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
     vm.register_builtin("conversation", |_args, _out| {
-        // Returns a list (messages array) -- can be passed to llm_call via options.messages
         Ok(VmValue::List(Rc::new(Vec::new())))
     });
 

@@ -1,29 +1,17 @@
-//! Centralized registry of builtin function signatures for static analysis.
+//! Single source of truth for builtin function signatures used by the parser
+//! and type checker: identifier resolution, typo suggestions, and return-type
+//! inference all consult [`BUILTIN_SIGNATURES`].
 //!
-//! The parser type checker needs to know two things about every runtime
-//! builtin:
-//!
-//! 1. whether a bare identifier is a known builtin (used for call-arity
-//!    bypass, typo suggestions, and unresolved-identifier diagnostics), and
-//! 2. what its statically-known return type is, so expressions like
-//!    `let x: string = snake_to_camel(y)` infer correctly.
-//!
-//! Historically these lived as two parallel hand-maintained match arms in
-//! `typechecker.rs`, which drifted every time a new builtin was added to
-//! the VM. This module is the single source of truth: the two old matches
-//! now delegate to a single alphabetical slice of [`BuiltinSig`] entries.
-//!
-//! Adding a new builtin is one-line: insert the entry in alphabetical order
-//! into [`BUILTIN_SIGNATURES`]. The `builtin_signatures_sorted` test enforces
-//! alphabetical order so binary search stays valid, and the cross-crate
-//! `builtin_registry_alignment` test in `harn-vm/tests/` asserts every
-//! runtime builtin has a corresponding parser entry.
+//! To add a builtin: register it in the VM stdlib, then insert a new entry
+//! here in alphabetical order. The `builtin_signatures_sorted` test enforces
+//! ordering (binary search relies on it), and
+//! `builtin_registry_alignment` in `harn-vm/tests/` asserts every runtime
+//! builtin has a matching parser entry.
 
 use crate::ast::TypeExpr;
 
 /// Statically-known return type hint for a builtin. `None` on [`BuiltinSig`]
-/// means "this is a recognized builtin, but its return type is dynamic or
-/// polymorphic at the parse site" — matches the legacy `_ => None` fallback.
+/// means "recognized builtin, return type is dynamic/polymorphic at the parse site".
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BuiltinReturn {
     /// Simple named type: `"string"`, `"int"`, `"bool"`, `"nil"`, `"list"`,
@@ -61,14 +49,8 @@ const RETURN_NIL: &[&str] = &["nil"];
 const RETURN_STRING: &[&str] = &["string"];
 
 /// Every builtin known to the parser. MUST stay alphabetically sorted by
-/// `name` — `builtin_signatures_sorted` enforces this at test time and the
-/// binary-search lookup relies on it.
-///
-/// When adding a new builtin:
-/// 1. Register it in the VM stdlib (`crates/harn-vm/src/stdlib/*`).
-/// 2. Add the entry here in the correct alphabetical position.
-/// 3. The cross-crate `builtin_registry_alignment` test in
-///    `crates/harn-vm/tests/` will fail the build if you forget step 2.
+/// `name`: `builtin_signatures_sorted` enforces this and the binary-search
+/// lookup relies on it.
 pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
     BuiltinSig {
         name: "abs",
@@ -1681,9 +1663,8 @@ pub(crate) fn is_builtin(name: &str) -> bool {
     lookup(name).is_some()
 }
 
-/// Iterator over every builtin name known to the parser, in alphabetical
-/// order. Exposed via [`crate::known_builtin_names`] for cross-crate drift
-/// testing and future completion surfaces.
+/// Every builtin name in alphabetical order, exposed via
+/// [`crate::known_builtin_names`] for cross-crate drift testing.
 pub(crate) fn iter_builtin_names() -> impl Iterator<Item = &'static str> {
     BUILTIN_SIGNATURES.iter().map(|sig| sig.name)
 }
@@ -1709,9 +1690,8 @@ pub(crate) fn iter_builtin_metadata() -> impl Iterator<Item = BuiltinMetadata> {
     })
 }
 
-/// Statically-known return type for `name`, if any. Returns `None` when
-/// the name is unknown OR when it is a builtin with a dynamic return type
-/// (e.g. `json_parse`).
+/// Statically-known return type for `name`. `None` for unknown names OR
+/// builtins with a dynamic return type (e.g. `json_parse`).
 pub(crate) fn builtin_return_type(name: &str) -> Option<TypeExpr> {
     let sig = lookup(name)?;
     match sig.return_type? {

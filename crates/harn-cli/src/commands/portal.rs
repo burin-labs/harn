@@ -1975,11 +1975,10 @@ fn discover_transcript_steps(
 }
 
 fn parse_transcript_steps(path: &Path) -> Result<Vec<PortalTranscriptStep>, String> {
-    // The transcript is an append-only event stream (agent_observe.rs
-    // writes one event per JSONL row). Reconstruct per-call steps by
-    // replaying events: system_prompt / tool_schemas / message update
-    // rolling state, and provider_call_request / provider_call_response
-    // crystallize a PortalTranscriptStep.
+    // Transcripts are an append-only JSONL event stream; reconstruct steps
+    // by replaying system_prompt / tool_schemas / message events and
+    // crystallizing one PortalTranscriptStep per provider_call_request +
+    // response pair.
     let content = fs::read_to_string(path)
         .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
     let mut steps = Vec::<PortalTranscriptStep>::new();

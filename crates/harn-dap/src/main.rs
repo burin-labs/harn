@@ -18,14 +18,12 @@ fn main() {
             continue;
         }
 
-        // Read exact body bytes
         let mut body_bytes = vec![0u8; content_length];
         if reader.read_exact(&mut body_bytes).is_err() {
             break;
         }
         let body = String::from_utf8_lossy(&body_bytes);
 
-        // Parse and handle the message
         match serde_json::from_str::<DapMessage>(&body) {
             Ok(msg) => {
                 let responses = debugger.handle_message(msg);
@@ -46,11 +44,11 @@ fn read_content_length(reader: &mut io::BufReader<io::StdinLock>) -> Option<usiz
     loop {
         let mut line = String::new();
         match reader.read_line(&mut line) {
-            Ok(0) => return None, // EOF
+            Ok(0) => return None,
             Ok(_) => {
                 let trimmed = line.trim();
                 if trimmed.is_empty() {
-                    // Empty line signals end of headers
+                    // LSP-style framing: blank line ends the header block.
                     if content_length > 0 {
                         return Some(content_length);
                     }

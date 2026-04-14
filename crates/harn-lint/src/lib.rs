@@ -39,12 +39,10 @@ struct Declaration {
     name: String,
     span: Span,
     is_mutable: bool,
-    /// True when this declaration came from a simple `let x = ...` or
-    /// `var x = ...` binding pattern. False for destructuring patterns like
-    /// `let { a, b } = ...` or `let [x, y] = ...`. The `unused-variable`
-    /// autofix only rewrites identifiers when this is true, since
-    /// destructuring renames need per-field spans that we do not currently
-    /// track.
+    /// True for simple `let x = ...` / `var x = ...` bindings, false for
+    /// destructuring patterns. The `unused-variable` autofix only rewrites
+    /// identifiers when true, since destructuring renames would need
+    /// per-field spans we don't currently track.
     is_simple_ident: bool,
 }
 
@@ -96,7 +94,7 @@ struct Linter<'a> {
     /// Track function declarations for unused-function detection.
     fn_declarations: Vec<FnDeclaration>,
     /// Track actual function usage sites (calls + value references).
-    /// Separate from `references` because FnDecl used to self-insert into `references`.
+    /// Separate from `references` so FnDecl doesn't self-count.
     function_references: HashSet<String>,
     /// Whether the current function is inside an impl block.
     in_impl_block: bool,
@@ -144,8 +142,8 @@ impl<'a> Linter<'a> {
         }
     }
 
-    /// Return set of known builtin function names.
-    /// Derived from the VM's actual stdlib registration — no hardcoded list to maintain.
+    /// Return set of known builtin function names, derived from the VM's
+    /// live stdlib registration so there is no separate list to maintain.
     fn builtin_names() -> HashSet<String> {
         harn_vm::stdlib::stdlib_builtin_names()
             .into_iter()
@@ -438,7 +436,6 @@ impl<'a> Linter<'a> {
             return;
         }
 
-        // Check same-scope redeclaration of immutable binding.
         if !is_mutable {
             if let Some(scope) = self.scopes.last() {
                 if scope.contains(name) {
@@ -458,7 +455,6 @@ impl<'a> Linter<'a> {
             }
         }
 
-        // Check shadowing against outer scopes.
         if self.scopes.len() > 1 {
             let outer = &self.scopes[..self.scopes.len() - 1];
             if outer.iter().any(|s| s.contains(name)) {
@@ -492,7 +488,6 @@ impl<'a> Linter<'a> {
             return;
         }
 
-        // Check shadowing against outer scopes (not current scope).
         if self.scopes.len() > 1 {
             let outer = &self.scopes[..self.scopes.len() - 1];
             if outer.iter().any(|s| s.contains(name)) {
@@ -614,7 +609,7 @@ impl<'a> Linter<'a> {
                 }
                 self.push_scope();
                 let saved_loop_depth = self.loop_depth;
-                self.loop_depth = 0; // Functions are a new scope
+                self.loop_depth = 0;
                 for p in params {
                     self.declare_parameter(&p.name, snode.span);
                 }
@@ -823,7 +818,6 @@ impl<'a> Linter<'a> {
             }
 
             Node::BinaryOp { op, left, right } => {
-                // Rule: comparison-to-bool
                 if op == "==" || op == "!=" {
                     let is_bool_left = matches!(left.node, Node::BoolLiteral(_));
                     let is_bool_right = matches!(right.node, Node::BoolLiteral(_));
@@ -867,13 +861,11 @@ impl<'a> Linter<'a> {
                         });
                     }
                 }
-                // Rule: invalid-binary-op-literal
                 if matches!(op.as_str(), "+" | "-" | "*" | "/" | "%") {
                     let has_bad_literal =
                         matches!(left.node, Node::BoolLiteral(_) | Node::NilLiteral)
                             || matches!(right.node, Node::BoolLiteral(_) | Node::NilLiteral);
                     if has_bad_literal {
-                        // Offer interpolation fix when op is `+` and one side is a string literal
                         let fix = if op == "+" {
                             self.source.and_then(|src| {
                                 let is_left_str = matches!(&left.node, Node::StringLiteral(_));
@@ -889,7 +881,6 @@ impl<'a> Linter<'a> {
                                 let str_text = src.get(str_node.span.start..str_node.span.end)?;
                                 let other_text =
                                     src.get(other_node.span.start..other_node.span.end)?;
-                                // Strip quotes from string literal
                                 let inner = str_text.strip_prefix('"')?.strip_suffix('"')?;
                                 let replacement = if is_left_str {
                                     format!("\"{inner}${{{other_text}}}\"")
@@ -936,19 +927,12 @@ impl<'a> Linter<'a> {
                 self.lint_node(true_expr);
                 self.lint_node(false_expr);
 
-                // Rule: redundant-nil-ternary
-                //
-                // Detect ternary fallbacks over a nil check where the
-                // non-nil branch is identical to the checked variable:
-                //
+                // Detect ternary fallbacks over a nil check where the non-nil
+                // branch is identical to the checked variable:
                 //   x == nil ? fallback : x   →   x ?? fallback
                 //   x != nil ? x : fallback   →   x ?? fallback
-                //
-                // Only fires when the checked variable is a bare identifier
-                // and appears syntactically identical on both sides, so the
-                // rewrite is always safe regardless of the ??-side being a
-                // pure value (the checked variable is evaluated exactly
-                // once in both the original and rewritten forms).
+                // Only fires when the checked variable is a bare identifier so
+                // it is evaluated exactly once in both forms.
                 if let Some((ident, fallback)) =
                     nil_fallback_ternary_parts(condition, true_expr, false_expr)
                 {
@@ -979,11 +963,10 @@ impl<'a> Linter<'a> {
                 else_body,
             } => {
                 self.lint_node(condition);
-                // Check empty then-block.
                 if then_body.is_empty() {
-                    // Only autofix when there is no `else` branch (removing
-                    // the whole if-else would silently drop the else body)
-                    // and when the condition has no observable side effects.
+                    // Skip autofix when an `else` branch exists (dropping the
+                    // whole if-else would silently drop the else body) or when
+                    // the condition has observable side effects.
                     let fix = if else_body.is_none() && is_pure_expression(&condition.node) {
                         empty_statement_removal_fix(self.source, snode.span)
                     } else {
@@ -998,7 +981,6 @@ impl<'a> Linter<'a> {
                         fix,
                     });
                 }
-                // Rule: unnecessary-else-return
                 if let Some(else_b) = else_body {
                     let then_returns = then_body
                         .last()
@@ -1007,29 +989,22 @@ impl<'a> Linter<'a> {
                         .last()
                         .is_some_and(|s| matches!(s.node, Node::ReturnStmt { .. }));
                     if then_returns && else_returns {
-                        // Build fix: replace `} else { <body> }` with `}\n<body>`
+                        // Rewrite `} else { <body> }` as `}\n<indent><body>`.
                         let fix = self.source.and_then(|src| {
                             let then_last = then_body.last()?;
                             let else_first = else_b.first()?;
                             let else_last = else_b.last()?;
-                            // Find the `} else {` region between then-body end and else-body start
                             let search_start = then_last.span.end;
-                            // The else body content in source
                             let body_text = src.get(else_first.span.start..else_last.span.end)?;
-                            // Find closing `}` of the else block (end of the whole if-else node)
                             let else_block_end = snode.span.end;
-                            // Find where `else` starts: scan backwards from else_first for `else`
                             let between = src.get(search_start..else_first.span.start)?;
                             let else_kw_off = between.find("else")?;
                             let else_start = search_start + else_kw_off;
-                            // Determine indentation from the if statement's line
                             let line_start =
                                 src[..snode.span.start].rfind('\n').map_or(0, |p| p + 1);
                             let indent = &src[line_start..snode.span.start];
-                            // Replace from `} else { ... }` to `}\n<indent><body>`
-                            // The span to replace: from the `}` before else to the final `}`
                             let close_brace = src.get(search_start..else_start)?.rfind('}')?;
-                            let replace_start = search_start + close_brace + 1; // after the `}`
+                            let replace_start = search_start + close_brace + 1;
                             Some(vec![FixEdit {
                                 span: Span::with_offsets(
                                     replace_start,
@@ -1070,9 +1045,7 @@ impl<'a> Linter<'a> {
             } => {
                 self.lint_node(iterable);
                 if body.is_empty() {
-                    // Only autofix when the iterable has no observable side
-                    // effects; a pure iterable means the whole statement is
-                    // a no-op and can be removed.
+                    // A pure iterable makes the whole loop a removable no-op.
                     let fix = if is_pure_expression(&iterable.node) {
                         empty_statement_removal_fix(self.source, snode.span)
                     } else {
@@ -1088,7 +1061,6 @@ impl<'a> Linter<'a> {
                     });
                 }
                 self.push_scope();
-                // Register all pattern variables in scope and mark as referenced
                 for name in Self::pattern_names(pattern) {
                     if let Some(scope) = self.scopes.last_mut() {
                         scope.insert(name.clone());
@@ -1164,7 +1136,6 @@ impl<'a> Linter<'a> {
 
             Node::MatchExpr { value, arms } => {
                 self.lint_node(value);
-                // Rule: duplicate-match-arm (uses PartialEq on Node)
                 for (i, arm) in arms.iter().enumerate() {
                     for earlier in &arms[..i] {
                         if arm.pattern.node == earlier.pattern.node && arm.guard == earlier.guard {
@@ -1218,7 +1189,7 @@ impl<'a> Linter<'a> {
             Node::Closure { params, body, .. } => {
                 self.push_scope();
                 let saved_loop_depth = self.loop_depth;
-                self.loop_depth = 0; // Closures are a new scope — break/continue invalid
+                self.loop_depth = 0;
                 for p in params {
                     self.declare_parameter(&p.name, snode.span);
                 }
@@ -1311,10 +1282,8 @@ impl<'a> Linter<'a> {
             Node::InterpolatedString(segments) => {
                 for seg in segments {
                     if let StringSegment::Expression(expr, _, _) = seg {
-                        // Extract the root identifier from expressions like
-                        // "name", "opts.host", "x + 1", etc.
-                        // We split on non-identifier chars and record any
-                        // leading identifier tokens as references.
+                        // Record any identifier tokens inside `${...}` as
+                        // references so lints like `unused-variable` see them.
                         for token in expr.split(|c: char| !c.is_alphanumeric() && c != '_') {
                             if !token.is_empty()
                                 && token
@@ -1470,7 +1439,6 @@ impl<'a> Linter<'a> {
                 self.record_type_expr_references(type_expr);
             }
 
-            // Leaf nodes and declarations that don't need recursion.
             Node::StringLiteral(_)
             | Node::RawStringLiteral(_)
             | Node::IntLiteral(_)
@@ -1481,7 +1449,6 @@ impl<'a> Linter<'a> {
             | Node::OverrideDecl { .. }
             | Node::BreakStmt
             | Node::ContinueStmt => {
-                // Rule: break/continue outside loop
                 if matches!(snode.node, Node::BreakStmt | Node::ContinueStmt)
                     && self.loop_depth == 0
                 {
@@ -1505,7 +1472,8 @@ impl<'a> Linter<'a> {
         }
     }
 
-    /// Lint a block of statements, checking for unreachable code.
+    /// Lint a block of statements, flagging unreachable code after a
+    /// terminator (`return`/`throw`).
     fn lint_block(&mut self, nodes: &[SNode]) {
         let mut found_terminator = false;
 
@@ -1519,7 +1487,7 @@ impl<'a> Linter<'a> {
                     suggestion: Some("remove the unreachable code".to_string()),
                     fix: None,
                 });
-                // Only report the first unreachable statement per block.
+                // Only report once per block.
                 break;
             }
 
@@ -1533,7 +1501,6 @@ impl<'a> Linter<'a> {
 
     /// Run post-walk analysis and finalize diagnostics.
     fn finalize(&mut self) {
-        // Rule: unused-variable
         for decl in &self.declarations {
             if decl.name.starts_with('_') {
                 continue;
@@ -1555,7 +1522,6 @@ impl<'a> Linter<'a> {
             }
         }
 
-        // Rule: unused-parameter
         for decl in &self.param_declarations {
             if decl.name.starts_with('_') {
                 continue;
@@ -1572,7 +1538,6 @@ impl<'a> Linter<'a> {
             }
         }
 
-        // Rule: unused-import
         for import in &self.imports {
             let unused: Vec<&String> = import
                 .names
@@ -1583,7 +1548,6 @@ impl<'a> Linter<'a> {
             for name in &unused {
                 let fix = self.source.and_then(|src| {
                     if all_unused {
-                        // Remove the entire import statement including trailing newline
                         let end = if src.get(import.span.end..import.span.end + 1) == Some("\n") {
                             import.span.end + 1
                         } else {
@@ -1599,21 +1563,18 @@ impl<'a> Linter<'a> {
                             replacement: String::new(),
                         }])
                     } else {
-                        // Remove just this name from the import list
+                        // Remove this name from the import list, plus the
+                        // adjacent comma/space so the list stays well-formed.
                         let region = src.get(import.span.start..import.span.end)?;
-                        // Find the name in the { ... } block
                         let name_pos = region.find(name.as_str())?;
                         let abs_start = import.span.start + name_pos;
                         let abs_end = abs_start + name.len();
-                        // Also remove surrounding comma and whitespace
                         let after = src.get(abs_end..import.span.end)?;
                         let before = src.get(import.span.start..abs_start)?;
                         let (rm_start, rm_end) = if after.starts_with(',') {
-                            // Remove name + comma + optional space after
                             let extra = if after.get(1..2) == Some(" ") { 2 } else { 1 };
                             (abs_start, abs_end + extra)
                         } else if before.ends_with(", ") {
-                            // Last item: remove preceding ", " + name
                             (abs_start - 2, abs_end)
                         } else if before.ends_with(',') {
                             (abs_start - 1, abs_end)
@@ -1642,7 +1603,6 @@ impl<'a> Linter<'a> {
             }
         }
 
-        // Rule: mutable-never-reassigned
         for decl in &self.declarations {
             if !decl.is_mutable {
                 continue;
@@ -1676,7 +1636,6 @@ impl<'a> Linter<'a> {
             }
         }
 
-        // Rule: unused-function
         for decl in &self.fn_declarations {
             if decl.is_pub || decl.is_method || decl.name.starts_with('_') {
                 continue;
@@ -1699,7 +1658,6 @@ impl<'a> Linter<'a> {
             }
         }
 
-        // Rule: unused-type
         for decl in &self.type_declarations {
             if decl.name.starts_with('_') {
                 continue;
@@ -1722,7 +1680,8 @@ impl<'a> Linter<'a> {
             }
         }
 
-        // Variables and parameters that could hold closures
+        // Variables and parameters may hold closures, so treat them as
+        // callable when checking for undefined functions below.
         let all_vars: HashSet<String> = self
             .declarations
             .iter()
@@ -1730,8 +1689,7 @@ impl<'a> Linter<'a> {
             .chain(self.param_declarations.iter().map(|p| p.name.clone()))
             .collect();
 
-        // Rule: undefined-function
-        // Skip entirely if the file has wildcard imports — we can't know what they provide
+        // Wildcard imports hide the real name set, so skip entirely.
         if self.has_wildcard_import {
             return;
         }
@@ -1739,11 +1697,9 @@ impl<'a> Linter<'a> {
             if self.known_functions.contains(name) {
                 continue;
             }
-            // Skip if it's a known variable (could be a closure)
             if all_vars.contains(name) {
                 continue;
             }
-            // Skip internal names starting with __
             if name.starts_with("__") {
                 continue;
             }
@@ -1766,9 +1722,8 @@ impl<'a> Linter<'a> {
     }
 }
 
-/// Return true when this node kind is a top-level item for the purposes of
-/// the `blank-line-between-items` rule. This is the slightly-broader set
-/// that includes let/var bindings at module scope.
+/// Top-level items for the `blank-line-between-items` rule. Includes
+/// module-scope let/var bindings, which the plain "decl" set excludes.
 fn is_top_level_item(node: &Node) -> bool {
     matches!(
         node,
@@ -1790,9 +1745,8 @@ fn is_import_item(node: &Node) -> bool {
     matches!(node, Node::ImportDecl { .. } | Node::SelectiveImport { .. })
 }
 
-/// Return true when this node kind participates in the `legacy-doc-comment`
-/// rule (i.e. is a documented item whose preceding comments should use the
-/// canonical `/** */` form). Mirrors the plan's whitelist.
+/// Items whose preceding comments must use the canonical `/** */` form
+/// for the `legacy-doc-comment` rule.
 fn is_documentable_item(node: &Node) -> bool {
     matches!(
         node,
@@ -1875,13 +1829,11 @@ fn collect_comment_tokens(source: &str) -> Vec<LegacyCommentTok> {
 
 /// Produce the canonical `/** */` replacement text for a run of comment
 /// tokens. `body_lines` contains one text line per collected comment (already
-/// stripped of leading `//` / `///` markers). `indent` is the column indent
-/// (in spaces) to use for continuation lines. The return value does NOT
-/// include a trailing newline — the replacement span is expected to cover
-/// exactly the original comment lines' textual range.
+/// stripped of `//` / `///` markers). The return value does NOT include a
+/// trailing newline — the replacement span covers exactly the original
+/// comment lines' textual range.
 fn canonical_doc_block(body_lines: &[String], indent: usize, line_width: usize) -> String {
     let indent_str = " ".repeat(indent);
-    // Trim leading/trailing blank lines.
     let mut start = 0;
     while start < body_lines.len() && body_lines[start].trim().is_empty() {
         start += 1;
@@ -1934,7 +1886,6 @@ fn check_legacy_doc_comments(
     if comments.is_empty() {
         return;
     }
-    // Index by starting line for fast upward walks.
     let by_line: std::collections::HashMap<usize, &LegacyCommentTok> =
         comments.iter().map(|c| (c.line, c)).collect();
 
@@ -1946,9 +1897,8 @@ fn check_legacy_doc_comments(
         diagnostics: &mut Vec<LintDiagnostic>,
         is_top_level: bool,
     ) {
-        // Eligible if: the item is documentable AND it's either top-level
-        // OR explicitly `pub`. Impl methods are only eligible when pub (since
-        // impl itself is the "top-level" container for them).
+        // Eligible only when top-level or explicitly `pub`; impl methods
+        // are documented relative to their impl block.
         if is_documentable_item(&node.node) && (is_top_level || item_is_pub(&node.node)) {
             check_one_item(node, comments, by_line, source, diagnostics);
         }
@@ -1986,16 +1936,14 @@ fn check_one_item(
     if item_line == 0 {
         return;
     }
-    // Walk upward. For each candidate previous line, require a line-comment
-    // token there. Stop at the first non-comment line.
+    // Walk upward over line comments; an existing `/** */` block stops the
+    // walk since it doesn't need rewriting.
     let mut walked: Vec<&LegacyCommentTok> = Vec::new();
     let mut cursor = item_line.saturating_sub(1);
     while cursor > 0 {
         let Some(tok) = by_line.get(&cursor) else {
             break;
         };
-        // Only `//`-style line comments participate in this heuristic. An
-        // existing `/** */` block doesn't need rewriting.
         if !tok.is_line {
             break;
         }
@@ -2005,34 +1953,25 @@ fn check_one_item(
     if walked.is_empty() {
         return;
     }
-    walked.reverse(); // now in top-to-bottom order
-                      // Any contiguous run of `//` / `///` line comments directly above the
-                      // item (no blank-line gap) is treated as a doc comment and rewritten.
-                      // This covers both design triggers:
-                      //  - entirely `///` lines (the original HarnDoc form), and
-                      //  - entirely plain `//` lines adjacent to a def,
-                      // as well as the pragmatic mixed case (legacy hand-written `//` block
-                      // followed by an auto-generated `///` stub — both are the item's doc).
+    walked.reverse();
+    // Any contiguous run of `//` / `///` comments directly above the item
+    // (no blank-line gap) is treated as its doc block.
     let any_doc = walked.iter().any(|c| c.is_doc);
     let any_plain = walked.iter().any(|c| !c.is_doc);
 
-    // Compute the byte range covering the entire comment run, including the
-    // line's leading indentation. Replacement span starts at the start of
-    // the first comment's line (so we can reset indentation).
+    // Replacement span starts at the first comment's line_start so we can
+    // reset indentation, and ends at the last comment's byte so the trailing
+    // newline is left untouched.
     let first = walked.first().unwrap();
     let last = walked.last().unwrap();
     let line_start = line_start_byte(source, first.start_byte);
     let indent_cols = first.start_byte - line_start;
-    // Build body text lines from the stripped comments.
     let mut body_lines: Vec<String> = Vec::with_capacity(walked.len());
     for c in &walked {
         let s = c.text.strip_prefix(' ').unwrap_or(&c.text);
         body_lines.push(s.trim_end().to_string());
     }
     let replacement = canonical_doc_block(&body_lines, indent_cols, 100);
-    // Find the span we're replacing: from line_start of first comment up to
-    // end of last comment byte. This preserves the trailing newline after
-    // the run (we don't consume it).
     let replace_span = Span::with_offsets(line_start, last.end_byte, first.line, 1);
     let fix = vec![FixEdit {
         span: replace_span,
@@ -2069,27 +2008,20 @@ fn line_start_byte(source: &str, offset: usize) -> usize {
 }
 
 fn extract_harndoc(source: &str, span: &Span) -> Option<String> {
-    // Recognize only canonical `/** */` doc-block comments directly above the
-    // item. The block must end on the line immediately preceding the item
-    // (no blank line between). Legacy `///` forms are NOT accepted — they're
-    // flagged by the `legacy-doc-comment` lint rule instead.
+    // Only canonical `/** */` doc blocks count here; legacy `///` forms are
+    // handled by the `legacy-doc-comment` rule instead.
     let lines: Vec<&str> = source.lines().collect();
     let def_line = span.line.saturating_sub(1);
     if def_line == 0 {
         return None;
     }
-    // `def_line` is the item's line, 0-indexed: lines[def_line - 1] is the
-    // line directly above. That line must end with `*/`.
     let above_idx = def_line - 1;
     let above = lines.get(above_idx)?.trim_end();
     if !above.ends_with("*/") {
         return None;
     }
-    // Walk upward to find the start `/**`. The opening `/**` may be on the
-    // same line (compact `/** ... */`) or on an earlier line.
     let above_trim = above.trim_start();
     if above_trim.starts_with("/**") && above_trim.ends_with("*/") && above_trim.len() >= 5 {
-        // Compact form: `/** body */`
         let inner = &above_trim[3..above_trim.len() - 2];
         let text = inner.trim();
         return Some(text.to_string());
@@ -2111,7 +2043,6 @@ fn extract_harndoc(source: &str, span: &Span) -> Option<String> {
         let stripped: &str = if i == start_idx {
             t.strip_prefix("/**").unwrap_or(t).trim_start()
         } else if i == above_idx {
-            // Strip trailing `*/` plus optional leading ` * `.
             let without_tail = t.strip_suffix("*/").unwrap_or(t).trim_end();
             let without_star = without_tail
                 .strip_prefix('*')
@@ -2172,16 +2103,14 @@ fn to_pascal_case(name: &str) -> String {
     out
 }
 
-/// Extra options for source-aware lint rules. Keeps the main entry points
-/// backward compatible while allowing callers that know about the source
-/// file's path or want opt-in rules (like `require-file-header`) to turn
-/// them on.
+/// Extra options for source-aware lint rules (path-aware rules, opt-in
+/// rules like `require-file-header`).
 #[derive(Debug, Default, Clone)]
 pub struct LintOptions<'a> {
-    /// Filesystem path of the source being linted (used by rules like
-    /// `require-file-header` to derive a title from the basename).
+    /// Filesystem path of the source being linted. Used by rules like
+    /// `require-file-header` to derive a title from the basename.
     pub file_path: Option<&'a std::path::Path>,
-    /// When true, the opt-in `require-file-header` rule runs. Default false.
+    /// When true, the opt-in `require-file-header` rule runs.
     pub require_file_header: bool,
 }
 
@@ -2215,9 +2144,9 @@ pub fn lint_with_config_and_source(
     )
 }
 
-/// Lint with cross-file import awareness.  `externally_imported_names` is the
-/// set of function names that other files import from this file — these are
-/// exempt from the unused-function lint even without local references.
+/// Lint with cross-file import awareness. Functions named in
+/// `externally_imported_names` are exempt from the unused-function lint
+/// even without local references.
 pub fn lint_with_cross_file_imports(
     program: &[SNode],
     disabled_rules: &[String],
@@ -2233,8 +2162,7 @@ pub fn lint_with_cross_file_imports(
     )
 }
 
-/// Lint with cross-file import awareness plus extra options (path-aware and
-/// opt-in rules). Thin wrapper over [`lint_full`].
+/// Lint with cross-file import awareness plus extra [`LintOptions`].
 pub fn lint_with_options(
     program: &[SNode],
     disabled_rules: &[String],
@@ -2281,8 +2209,7 @@ fn lint_full(
 }
 
 /// Extract all function names that appear in selective import statements
-/// (`import { foo, bar } from "module"`).  Used by the CLI to build a
-/// cross-file "externally imported" name set before linting.
+/// (`import { foo, bar } from "module"`).
 pub fn collect_selective_import_names(program: &[SNode]) -> HashSet<String> {
     let mut names = HashSet::new();
     for snode in program {
@@ -2296,12 +2223,9 @@ pub fn collect_selective_import_names(program: &[SNode]) -> HashSet<String> {
     names
 }
 
-/// Emit `blank-line-between-items` diagnostics: whenever two top-level
-/// items are adjacent in the source with no blank line between them, the
-/// rule fires with an autofix that inserts the blank line at the correct
-/// offset. Doc comments immediately preceding an item count as part of the
-/// item — the blank line goes above the doc block, not between doc and
-/// item.
+/// Emit `blank-line-between-items` diagnostics. Doc comments immediately
+/// preceding an item count as part of the item, so the blank line goes
+/// above the doc block rather than between doc and item.
 fn check_blank_line_between_items(
     source: &str,
     program: &[SNode],
@@ -2310,19 +2234,17 @@ fn check_blank_line_between_items(
     if program.len() < 2 {
         return;
     }
-    // Collect all comment tokens keyed by starting line (1-based).
     let comment_tokens = collect_comment_tokens(source);
     let comments_by_line: std::collections::HashMap<usize, &LegacyCommentTok> =
         comment_tokens.iter().map(|c| (c.line, c)).collect();
 
-    // Precompute line → byte offset of start of line (1-based lines).
     let line_starts = build_line_starts(source);
 
     for pair in program.windows(2) {
         let prev = &pair[0];
         let next = &pair[1];
 
-        // Skip consecutive imports: they intentionally stay tight.
+        // Consecutive imports intentionally stay tight.
         if is_import_item(&prev.node) && is_import_item(&next.node) {
             continue;
         }
@@ -2336,10 +2258,8 @@ fn check_blank_line_between_items(
             continue;
         }
 
-        // Walk upward from `next.span.line - 1` collecting contiguous
-        // comment lines (no blank line between them and the item). The
-        // "first line of the item-with-its-doc-block" is the topmost such
-        // line.
+        // Treat a contiguous comment block directly above `next` as part
+        // of the item, so the blank line belongs above the doc block.
         let mut first_line = next.span.line;
         let mut probe = next.span.line;
         while probe > 1 {
@@ -2353,13 +2273,9 @@ fn check_blank_line_between_items(
         }
 
         let prev_end_line = prev.span.end_line.max(prev.span.line);
-        // Number of source lines that sit strictly between the end of prev
-        // and the start of (next + its glued comment block). If there is
-        // at least one fully-blank line between them the rule is satisfied.
+        // Adjacent means zero blank lines between prev and the glued comment
+        // block above next; insert a blank line on the line after prev.
         if first_line <= prev_end_line + 1 {
-            // Adjacent — no blank line. Check that the line literally
-            // following prev is non-blank, otherwise we'd be flagging a
-            // case that already has blank space.
             let insert_line = prev_end_line + 1;
             let Some(&insert_offset) = line_starts.get(insert_line.saturating_sub(1)) else {
                 continue;
@@ -2393,9 +2309,6 @@ fn check_trailing_comma(source: &str, diagnostics: &mut Vec<LintDiagnostic>) {
         return;
     };
 
-    // Stack of open-bracket records. Each entry remembers the start-line of
-    // the opener, the opener's byte position, which kind it is, and whether
-    // we've seen any `,` at this depth (= "this is a comma-separated list").
     #[derive(Clone, Copy)]
     enum Opener {
         Paren,
@@ -2406,22 +2319,18 @@ fn check_trailing_comma(source: &str, diagnostics: &mut Vec<LintDiagnostic>) {
         opener: Opener,
         open_line: usize,
         saw_comma: bool,
-        /// True when we've decided this `{ ... }` is a dict/struct literal
-        /// (applies only when `opener == Brace`). For Paren/Bracket this is
-        /// always `true` — those are always comma-lists when they have
-        /// commas.
+        /// True when `{ ... }` has been identified as a dict/struct literal.
+        /// Paren/Bracket are always eligible when they contain commas.
         eligible: bool,
-        /// For `{ ... }` we need to look at the first "meaningful" token to
-        /// decide eligibility. Track whether we've made that decision yet.
+        /// For `{ ... }` we look at the first "meaningful" token to decide
+        /// eligibility. This tracks whether that decision has been made.
         decision_made: bool,
-        /// Track the first-seen identifier/string token inside, to combine
-        /// with a subsequent `:` for the dict/struct decision.
+        /// First identifier/string token inside `{ ... }`, kept so a
+        /// subsequent `:` can confirm the dict/struct decision.
         pending_key_token: bool,
     }
     let mut stack: Vec<Frame> = Vec::new();
 
-    // Helper to find the byte offset of the last non-whitespace,
-    // non-comment character strictly before `pos` in `source`.
     fn last_meaningful_byte_before(source: &str, pos: usize) -> Option<usize> {
         let bytes = source.as_bytes();
         if pos == 0 {
@@ -2434,16 +2343,14 @@ fn check_trailing_comma(source: &str, diagnostics: &mut Vec<LintDiagnostic>) {
             if matches!(b, b' ' | b'\t' | b'\n' | b'\r') {
                 continue;
             }
-            // We don't strip comments here — the FixEdit is allowed to land
-            // after the comment if a trailing comment sits above the close.
+            // Comments are intentionally not skipped — the FixEdit lands
+            // after a trailing comment sitting above the close.
             return Some(i);
         }
         None
     }
 
     for tok in &tokens {
-        // Ignore comments and newlines for the decision-making layer, but
-        // we still look at everything for bracket tracking.
         match &tok.kind {
             harn_lexer::TokenKind::LineComment { .. }
             | harn_lexer::TokenKind::BlockComment { .. }
@@ -2486,7 +2393,6 @@ fn check_trailing_comma(source: &str, diagnostics: &mut Vec<LintDiagnostic>) {
             | harn_lexer::TokenKind::RBracket
             | harn_lexer::TokenKind::RBrace => {
                 let Some(frame) = stack.pop() else { continue };
-                // Only care if opener matches (sanity check).
                 let matching = matches!(
                     (&frame.opener, &tok.kind),
                     (Opener::Paren, harn_lexer::TokenKind::RParen)
@@ -2499,7 +2405,6 @@ fn check_trailing_comma(source: &str, diagnostics: &mut Vec<LintDiagnostic>) {
                 if !frame.eligible || !frame.saw_comma {
                     continue;
                 }
-                // Must be multiline: closer on a later line than opener.
                 if tok.span.line <= frame.open_line {
                     continue;
                 }
@@ -2508,15 +2413,11 @@ fn check_trailing_comma(source: &str, diagnostics: &mut Vec<LintDiagnostic>) {
                     continue;
                 };
                 if source.as_bytes()[last_byte] == b',' {
-                    continue; // already has trailing comma
+                    continue;
                 }
-                // Don't fire on genuinely-empty containers. We already
-                // required `saw_comma == true`, so that's handled, but
-                // defensively check that there's real content.
                 let insert_pos = last_byte + 1;
-                // Report the span on the line where the insert actually lands,
-                // not on the closer's line — those can differ by many lines in
-                // a multiline literal, and editors highlight based on span.
+                // Report on the insert line, not the closer's line — editors
+                // highlight by span and the closer may be many lines away.
                 let insert_line = source[..insert_pos].bytes().filter(|b| *b == b'\n').count() + 1;
                 let span = Span::with_offsets(insert_pos, insert_pos, insert_line, 1);
                 diagnostics.push(LintDiagnostic {
@@ -2556,9 +2457,8 @@ fn check_trailing_comma(source: &str, diagnostics: &mut Vec<LintDiagnostic>) {
                 }
             }
             _ => {
-                // Any other token inside a `{ ... }` before we decided —
-                // means this isn't a dict/struct literal (probably a
-                // block). Lock the decision as ineligible.
+                // Any other token inside `{ ... }` before a decision means
+                // this is a block, not a dict/struct literal.
                 if let Some(top) = stack.last_mut() {
                     if matches!(top.opener, Opener::Brace) && !top.decision_made {
                         top.decision_made = true;
@@ -2570,17 +2470,16 @@ fn check_trailing_comma(source: &str, diagnostics: &mut Vec<LintDiagnostic>) {
     }
 }
 
-/// Emit `import-order` diagnostics when the program's import block is not
-/// in canonical order (stdlib first, alphabetical by path, selective
-/// imports after bare imports for the same path). Autofix rewrites the
-/// whole import block in canonical order.
+/// Emit `import-order` diagnostics when imports are out of canonical
+/// order (stdlib first, alphabetical by path, selective imports after
+/// bare imports for the same path).
 fn check_import_order(source: &str, program: &[SNode], diagnostics: &mut Vec<LintDiagnostic>) {
     let mut imports: Vec<&SNode> = Vec::new();
     for node in program {
         if is_import_item(&node.node) {
             imports.push(node);
         } else {
-            break; // imports live at the top of the file
+            break;
         }
     }
     if imports.len() < 2 {
@@ -2596,10 +2495,8 @@ fn check_import_order(source: &str, program: &[SNode], diagnostics: &mut Vec<Lin
         return;
     }
 
-    // Autofix: replace the span from the first import's start to the last
-    // import's end with the canonical sorted rendering. Preserve one
-    // newline between imports. The existing formatter handles exact
-    // formatting; we just need something functional.
+    // Autofix just emits each import slice joined by newlines; the
+    // formatter re-normalizes spacing in a later pass.
     let first = imports.first().unwrap();
     let last = imports.last().unwrap();
     let replacement = sorted
@@ -2652,9 +2549,7 @@ fn import_sort_key(node: &SNode) -> (u8, String, u8, String) {
     }
 }
 
-/// Slice the raw source covered by an import node's span. The formatter
-/// will re-normalize these in a subsequent pass; for the autofix we just
-/// need the existing text in the correct order.
+/// Slice the raw source covered by an import node's span.
 fn render_import_source(source: &str, node: &SNode) -> String {
     source
         .get(node.span.start..node.span.end)
@@ -2663,17 +2558,13 @@ fn render_import_source(source: &str, node: &SNode) -> String {
 }
 
 /// Emit `require-file-header` when the source does not begin with a
-/// `/** */` doc block. Autofix inserts a canonical header at byte 0 with a
-/// title derived from the filename (when a path is provided).
+/// `/** */` doc block. Plain `//` line comments and non-doc `/*` blocks
+/// both count as violations — only a `/**` block at the top satisfies it.
 fn check_require_file_header(
     source: &str,
     file_path: Option<&std::path::Path>,
     diagnostics: &mut Vec<LintDiagnostic>,
 ) {
-    // Find the first non-whitespace character in the source and verify
-    // it's the start of a `/**` block. Any other content (including plain
-    // `//` line comments, `/*` non-doc block comments, or code) is a
-    // violation.
     let bytes = source.as_bytes();
     let mut i = 0;
     while i < bytes.len() && matches!(bytes[i], b' ' | b'\t' | b'\r' | b'\n') {
@@ -2701,14 +2592,12 @@ fn check_require_file_header(
 }
 
 /// Derive the title shown inside the autofix's file-header block. Falls
-/// back to a generic "Module." when no path is available.
+/// back to a generic "Module." when no path is available. Only the first
+/// letter is capitalized — not every word — per the header style.
 pub fn derive_file_header_title(file_path: Option<&std::path::Path>) -> String {
     let stem = file_path
         .and_then(|p| p.file_stem().and_then(|s| s.to_str()))
         .unwrap_or("module");
-    // Replace `-` and `_` with spaces, then capitalize the first letter
-    // only. We intentionally do NOT title-case every word — the plan
-    // specifies "first letter capitalized" for readability.
     let mut cleaned = String::with_capacity(stem.len());
     for ch in stem.chars() {
         if ch == '-' || ch == '_' {
@@ -2717,21 +2606,17 @@ pub fn derive_file_header_title(file_path: Option<&std::path::Path>) -> String {
             cleaned.push(ch);
         }
     }
-    // Normalize whitespace: collapse internal runs of spaces.
     let collapsed = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
     let mut trimmed = collapsed.trim().to_string();
     if trimmed.is_empty() {
         trimmed.push_str("module");
     }
-    // Capitalize the very first character.
     let mut chars = trimmed.chars();
     let head = chars.next().unwrap().to_ascii_uppercase();
     let tail: String = chars.collect();
     let mut out = String::new();
     out.push(head);
     out.push_str(&tail.to_lowercase());
-    // Append a terminal period if the title does not already end in one
-    // of `.`, `!`, or `?`.
     let last = out.chars().last().unwrap_or('.');
     if !matches!(last, '.' | '!' | '?') {
         out.push('.');
@@ -2739,9 +2624,7 @@ pub fn derive_file_header_title(file_path: Option<&std::path::Path>) -> String {
     out
 }
 
-/// Build a Vec where index `i` is the byte offset of the start of line
-/// `i + 1` (1-based lines). Convenient for constructing zero-width FixEdit
-/// spans at "beginning of line N".
+/// Map 1-based line numbers to their starting byte offsets.
 fn build_line_starts(source: &str) -> Vec<usize> {
     let mut starts = Vec::new();
     starts.push(0);

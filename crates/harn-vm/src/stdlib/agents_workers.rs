@@ -996,7 +996,6 @@ pub(super) fn spawn_worker_task(state: Rc<RefCell<WorkerState>>) {
             });
         }
 
-        // Push per-worker capability and approval policies
         if let Some(ref policy) = worker_policy {
             push_execution_policy(policy.clone());
         }

@@ -186,8 +186,6 @@ pub(crate) fn register_process_builtins(vm: &mut Vm) {
         Ok(VmValue::Int(start.elapsed().as_millis() as i64))
     });
 
-    // --- System attributes for prompt building ---
-
     vm.register_builtin("username", |_args, _out| {
         let user = std::env::var("USER")
             .or_else(|_| std::env::var("USERNAME"))
@@ -236,8 +234,6 @@ pub(crate) fn register_process_builtins(vm: &mut Vm) {
     vm.register_builtin("pid", |_args, _out| {
         Ok(VmValue::Int(std::process::id() as i64))
     });
-
-    // --- Path / directory introspection ---
 
     vm.register_builtin("date_iso", |_args, _out| {
         use crate::stdlib::datetime::vm_civil_from_timestamp;

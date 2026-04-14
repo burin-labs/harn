@@ -5,10 +5,6 @@ use std::sync::OnceLock;
 static CONFIG: OnceLock<ProvidersConfig> = OnceLock::new();
 static CONFIG_PATH: OnceLock<String> = OnceLock::new();
 
-// =============================================================================
-// Config structs
-// =============================================================================
-
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct ProvidersConfig {
     #[serde(default)]
@@ -159,10 +155,6 @@ fn default_mid() -> String {
     "mid".to_string()
 }
 
-// =============================================================================
-// Config loading
-// =============================================================================
-
 /// Load and cache the providers config. Called once at VM startup.
 pub fn load_config() -> &'static ProvidersConfig {
     CONFIG.get_or_init(|| {
@@ -173,7 +165,6 @@ pub fn load_config() -> &'static ProvidersConfig {
             std::env::var("HARN_ACP_VERBOSE").ok().as_deref(),
             Some("1" | "true" | "TRUE" | "yes" | "YES")
         );
-        // Try explicit env var path first
         if let Ok(path) = std::env::var("HARN_PROVIDERS_CONFIG") {
             match std::fs::read_to_string(&path) {
                 Ok(content) => match toml::from_str::<ProvidersConfig>(&content) {
@@ -194,7 +185,6 @@ pub fn load_config() -> &'static ProvidersConfig {
                 Err(e) => eprintln!("[llm_config] Cannot read {}: {}", path, e),
             }
         }
-        // Try ~/.config/harn/providers.toml
         if let Some(home) = dirs_or_home() {
             let path = format!("{home}/.config/harn/providers.toml");
             if let Ok(content) = std::fs::read_to_string(&path) {
@@ -204,7 +194,6 @@ pub fn load_config() -> &'static ProvidersConfig {
                 }
             }
         }
-        // Fallback: built-in defaults
         default_config()
     })
 }
@@ -212,7 +201,7 @@ pub fn load_config() -> &'static ProvidersConfig {
 /// Returns the filesystem path of the currently-loaded providers config, if
 /// any. Returns `None` when built-in defaults are active.
 pub fn loaded_config_path() -> Option<std::path::PathBuf> {
-    // Trigger lazy init so CONFIG_PATH gets populated if a file was loaded.
+    // Force lazy init so CONFIG_PATH is populated if a file was loaded.
     let _ = load_config();
     CONFIG_PATH.get().map(std::path::PathBuf::from)
 }
@@ -288,7 +277,6 @@ pub fn model_tier(model_id: &str) -> String {
             }
         }
     }
-    // Fallback
     let lower = model_id.to_lowercase();
     if lower.contains("9b") || lower.contains("a3b") {
         return "small".to_string();
@@ -335,7 +323,7 @@ pub fn provider_has_feature(provider: &str, feature: &str) -> bool {
 /// Priority: alias `tool_format` (matched by model ID) > provider feature > "text".
 pub fn default_tool_format(model: &str, provider: &str) -> String {
     let config = load_config();
-    // Check aliases — match by model ID + provider, or by alias name
+    // Aliases match by model ID + provider, or by alias name.
     for (name, alias) in &config.aliases {
         let matches = (alias.id == model && alias.provider == provider) || name == model;
         if matches {
@@ -344,7 +332,6 @@ pub fn default_tool_format(model: &str, provider: &str) -> String {
             }
         }
     }
-    // Fall back to provider feature
     if provider_has_feature(provider, "native_tools") {
         "native".to_string()
     } else {
@@ -410,10 +397,6 @@ pub fn tier_candidates(target: &str) -> Vec<(String, String)> {
     candidates
 }
 
-// =============================================================================
-// Helpers
-// =============================================================================
-
 /// Simple glob matching for patterns like "claude-*", "qwen/*", "ollama:*".
 fn glob_match(pattern: &str, input: &str) -> bool {
     if let Some(prefix) = pattern.strip_suffix('*') {
@@ -451,14 +434,9 @@ pub fn resolve_base_url(pdef: &ProviderDef) -> String {
     pdef.base_url.clone()
 }
 
-// =============================================================================
-// Built-in default config (matches current hardcoded behavior)
-// =============================================================================
-
 fn default_config() -> ProvidersConfig {
     let mut config = ProvidersConfig::default();
 
-    // Anthropic
     config.providers.insert(
         "anthropic".to_string(),
         ProviderDef {
@@ -817,10 +795,6 @@ fn default_config() -> ProvidersConfig {
     config
 }
 
-// =============================================================================
-// Unit tests
-// =============================================================================
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -852,7 +826,6 @@ mod tests {
 
     #[test]
     fn test_infer_provider_from_defaults() {
-        // These test the fallback logic (after rules)
         assert_eq!(infer_provider("claude-sonnet-4-20250514"), "anthropic");
         assert_eq!(infer_provider("gpt-4o"), "openai");
         assert_eq!(infer_provider("o1-preview"), "openai");
@@ -944,7 +917,6 @@ mod tests {
     #[test]
     fn test_model_params_empty() {
         let params = model_params("claude-sonnet-4-20250514");
-        // Default config has no model_defaults, so should be empty
         assert!(params.is_empty());
     }
 }

@@ -516,10 +516,6 @@ pub(crate) const TYPE_NAMES: &[&str] = &[
     "mutex", "closure",
 ];
 
-// ---------------------------------------------------------------------------
-// Hover documentation
-// ---------------------------------------------------------------------------
-
 pub(crate) fn builtin_doc(name: &str) -> Option<String> {
     let doc = match name {
         "log" => "**log(value)** — Print value to stdout with `[harn]` prefix",

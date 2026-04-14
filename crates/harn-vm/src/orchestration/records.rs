@@ -432,7 +432,7 @@ pub(crate) fn myers_diff(a: &[&str], b: &[&str]) -> Vec<(DiffOp, usize)> {
     let offset = max_d as isize;
     let v_size = 2 * max_d + 1;
     let mut v = vec![0isize; v_size];
-    // trace[d] stores v snapshot BEFORE step d was applied.
+    // trace[d] holds the `v` snapshot BEFORE step d ran — required for backtrack.
     let mut trace: Vec<Vec<isize>> = Vec::new();
 
     'outer: for d in 0..=max_d as isize {
@@ -441,9 +441,9 @@ pub(crate) fn myers_diff(a: &[&str], b: &[&str]) -> Vec<(DiffOp, usize)> {
         for k in (-d..=d).step_by(2) {
             let ki = (k + offset) as usize;
             let mut x = if k == -d || (k != d && v[ki - 1] < v[ki + 1]) {
-                v[ki + 1] // insert (move down)
+                v[ki + 1]
             } else {
-                v[ki - 1] + 1 // delete (move right)
+                v[ki - 1] + 1
             };
             let mut y = x - k;
             while x < n && y < m && a[x as usize] == b[y as usize] {
@@ -459,7 +459,6 @@ pub(crate) fn myers_diff(a: &[&str], b: &[&str]) -> Vec<(DiffOp, usize)> {
         v = new_v;
     }
 
-    // Backtrack from (n, m) to (0, 0).
     let mut ops: Vec<(DiffOp, usize)> = Vec::new();
     let mut x = n;
     let mut y = m;
@@ -469,20 +468,18 @@ pub(crate) fn myers_diff(a: &[&str], b: &[&str]) -> Vec<(DiffOp, usize)> {
         let prev_k = if k == -d
             || (k != d && v_prev[(k - 1 + offset) as usize] < v_prev[(k + 1 + offset) as usize])
         {
-            k + 1 // came from insert
+            k + 1
         } else {
-            k - 1 // came from delete
+            k - 1
         };
         let prev_x = v_prev[(prev_k + offset) as usize];
         let prev_y = prev_x - prev_k;
 
-        // Diagonal (equal) moves
         while x > prev_x && y > prev_y {
             x -= 1;
             y -= 1;
             ops.push((DiffOp::Equal, x as usize));
         }
-        // Edit move
         if prev_k < k {
             x -= 1;
             ops.push((DiffOp::Delete, x as usize));
@@ -491,7 +488,6 @@ pub(crate) fn myers_diff(a: &[&str], b: &[&str]) -> Vec<(DiffOp, usize)> {
             ops.push((DiffOp::Insert, y as usize));
         }
     }
-    // Initial diagonal at d=0
     while x > 0 && y > 0 {
         x -= 1;
         y -= 1;
@@ -529,12 +525,12 @@ pub fn save_run_record(run: &RunRecord, path: Option<&str>) -> Result<String, Vm
     }
     let json = serde_json::to_string_pretty(run)
         .map_err(|e| VmError::Runtime(format!("failed to encode run record: {e}")))?;
-    // Atomic write: write to .tmp then rename to prevent corruption on kill.
+    // Atomic write: .tmp then rename guards against partial writes on kill.
     let tmp_path = path.with_extension("json.tmp");
     std::fs::write(&tmp_path, &json)
         .map_err(|e| VmError::Runtime(format!("failed to persist run record: {e}")))?;
     std::fs::rename(&tmp_path, &path).map_err(|e| {
-        // Fallback: if rename fails (cross-device), write directly.
+        // Cross-device renames fail on some filesystems; best-effort direct write.
         let _ = std::fs::write(&path, &json);
         VmError::Runtime(format!("failed to finalize run record: {e}"))
     })?;
@@ -749,7 +745,6 @@ pub fn diff_run_records(left: &RunRecord, right: &RunRecord) -> RunDiffReport {
         }
     }
 
-    // Tool recording diffs
     let mut tool_diffs = Vec::new();
     let left_tools: std::collections::BTreeMap<(String, String), &ToolCallRecord> = left
         .tool_recordings

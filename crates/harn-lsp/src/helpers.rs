@@ -4,10 +4,6 @@ use tower_lsp::lsp_types::*;
 
 use crate::symbols::SymbolInfo;
 
-// ---------------------------------------------------------------------------
-// Position / span utilities
-// ---------------------------------------------------------------------------
-
 /// Convert a 1-based Span to a 0-based LSP Range.
 pub(crate) fn span_to_range(span: &Span) -> Range {
     Range {
@@ -24,7 +20,6 @@ pub(crate) fn span_to_full_range(span: &Span, source: &str) -> Range {
     let start_line = span.line.saturating_sub(1) as u32;
     let start_col = span.column.saturating_sub(1) as u32;
 
-    // Calculate end position from byte offset
     let mut end_line = start_line;
     let mut end_col = start_col;
     if span.end > span.start && span.end <= source.len() {
@@ -37,7 +32,6 @@ pub(crate) fn span_to_full_range(span: &Span, source: &str) -> Range {
                 end_col += 1;
             }
         }
-        // If we only advanced columns (single line), set end_col relative to start
         if end_line == start_line {
             end_col = start_col + segment.chars().count() as u32;
         }
@@ -73,7 +67,7 @@ pub(crate) fn lsp_position_to_offset(source: &str, pos: Position) -> usize {
         if i == pos.line as usize {
             return offset + (pos.character as usize).min(line.len());
         }
-        offset += line.len() + 1; // +1 for the newline
+        offset += line.len() + 1; // account for the stripped newline
     }
     source.len()
 }
@@ -93,7 +87,6 @@ pub(crate) fn offset_to_position(source: &str, offset: usize) -> Position {
             col += 1;
         }
     }
-    // offset == source.len() (end of file)
     Position::new(line, col)
 }
 
@@ -134,7 +127,6 @@ pub(crate) fn char_before_position(source: &str, position: Position) -> Option<c
 }
 
 fn dot_receiver_identifier(source: &str, position: Position) -> Option<String> {
-    // Walk backwards from the dot to find the identifier
     let lines: Vec<&str> = source.lines().collect();
     let line = lines.get(position.line as usize)?;
     let col = position.character as usize;
@@ -143,19 +135,17 @@ fn dot_receiver_identifier(source: &str, position: Position) -> Option<String> {
     }
 
     let chars: Vec<char> = line.chars().collect();
-    // Position is after the `.`, so chars[col-1] is `.`. Walk back from col-2.
-    let mut end = col - 1; // the dot
+    // `position` is after the `.`, so chars[col - 1] is `.`. Step back past it.
+    let mut end = col - 1;
     if end == 0 {
         return None;
     }
-    end -= 1; // char before dot
+    end -= 1;
 
-    // Skip trailing whitespace (unusual but handle it)
     while end > 0 && chars[end] == ' ' {
         end -= 1;
     }
 
-    // Otherwise try to extract an identifier
     if !chars[end].is_alphanumeric() && chars[end] != '_' {
         return None;
     }
@@ -221,10 +211,6 @@ pub(crate) fn infer_dot_receiver_type(
     None
 }
 
-// ---------------------------------------------------------------------------
-// Error conversion helpers
-// ---------------------------------------------------------------------------
-
 pub(crate) fn lexer_error_to_diagnostic(err: &LexerError) -> Diagnostic {
     let (message, line, col) = match err {
         LexerError::UnexpectedCharacter(ch, span) => (
@@ -281,10 +267,6 @@ pub(crate) fn parser_error_to_diagnostic(err: &ParserError) -> Diagnostic {
         },
     }
 }
-
-// ---------------------------------------------------------------------------
-// Code action helpers
-// ---------------------------------------------------------------------------
 
 /// Extract the first backtick-quoted name from a diagnostic message.
 /// E.g., "variable `foo` is declared but never used" -> Some("foo")

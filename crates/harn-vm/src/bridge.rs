@@ -113,10 +113,10 @@ impl HostBridge {
 
                 let msg: serde_json::Value = match serde_json::from_str(&line) {
                     Ok(v) => v,
-                    Err(_) => continue, // Skip malformed lines
+                    Err(_) => continue,
                 };
 
-                // Check if this is a notification from the host (no id)
+                // Notifications have no id; responses have one.
                 if msg.get("id").is_none() {
                     if let Some(method) = msg["method"].as_str() {
                         if method == "cancel" {
@@ -150,7 +150,6 @@ impl HostBridge {
                     continue;
                 }
 
-                // This is a response — dispatch to the waiting caller
                 if let Some(id) = msg["id"].as_u64() {
                     let mut pending = pending_clone.lock().await;
                     if let Some(sender) = pending.remove(&id) {
@@ -159,7 +158,7 @@ impl HostBridge {
                 }
             }
 
-            // stdin closed — cancel any remaining pending requests by dropping senders
+            // stdin closed: drop pending senders to cancel waiters.
             let mut pending = pending_clone.lock().await;
             pending.clear();
         });
@@ -264,34 +263,29 @@ impl HostBridge {
 
         let request = crate::jsonrpc::request(id, method, params);
 
-        // Register a oneshot channel to receive the response
         let (tx, rx) = oneshot::channel();
         {
             let mut pending = self.pending.lock().await;
             pending.insert(id, tx);
         }
 
-        // Send the request (serialized through stdout mutex)
         let line = serde_json::to_string(&request)
             .map_err(|e| VmError::Runtime(format!("Bridge serialization error: {e}")))?;
         if let Err(e) = self.write_line(&line) {
-            // Clean up pending entry on write failure
             let mut pending = self.pending.lock().await;
             pending.remove(&id);
             return Err(e);
         }
 
-        // Wait for the response with timeout
         let response = match tokio::time::timeout(DEFAULT_TIMEOUT, rx).await {
             Ok(Ok(msg)) => msg,
             Ok(Err(_)) => {
-                // Sender dropped — host closed or stdin reader exited
+                // Sender dropped: host closed or stdin reader exited.
                 return Err(VmError::Runtime(
                     "Bridge: host closed connection before responding".into(),
                 ));
             }
             Err(_) => {
-                // Timeout — clean up pending entry
                 let mut pending = self.pending.lock().await;
                 pending.remove(&id);
                 return Err(VmError::Runtime(format!(
@@ -301,11 +295,10 @@ impl HostBridge {
             }
         };
 
-        // Check for JSON-RPC error
         if let Some(error) = response.get("error") {
             let message = error["message"].as_str().unwrap_or("Unknown host error");
             let code = error["code"].as_i64().unwrap_or(-1);
-            // -32001: tool rejected by host (not permitted / not in allowlist)
+            // JSON-RPC -32001 signals the host rejected the tool (not permitted / not in allowlist).
             if code == -32001 {
                 return Err(VmError::CategorizedError {
                     message: message.to_string(),

@@ -443,7 +443,6 @@ fn render_unified_diff_both_empty() {
     let diff = render_unified_diff(None, "", "");
     assert!(diff.contains("--- a/artifact"));
     assert!(diff.contains("+++ b/artifact"));
-    // No content lines
     let body: String = diff.lines().skip(2).collect();
     assert!(body.is_empty());
 }
@@ -486,7 +485,6 @@ fn render_unified_diff_default_path() {
 
 #[test]
 fn render_unified_diff_large_similar() {
-    // Test performance: 1000 lines with one change in the middle
     let mut before = Vec::new();
     let mut after = Vec::new();
     for i in 0..1000 {
@@ -500,7 +498,6 @@ fn render_unified_diff_large_similar() {
     let diff = render_unified_diff(None, &before_str, &after_str);
     assert!(diff.contains("-OLD LINE 500"));
     assert!(diff.contains("+NEW LINE 500"));
-    // Context lines should be present
     assert!(diff.contains(" line 499"));
     assert!(diff.contains(" line 501"));
 }
@@ -584,8 +581,6 @@ fn normalize_run_record_preserves_trace_spans() {
         serde_json::json!("demo")
     );
 }
-
-// ── Tool hook tests ──────────────────────────────────────────────
 
 #[test]
 fn pre_tool_hook_deny_blocks_execution() {
@@ -679,8 +674,6 @@ fn glob_match_patterns() {
     assert!(!glob_match("read_file", "write_file"));
 }
 
-// ── Auto-compaction tests ────────────────────────────────────────
-
 #[test]
 fn microcompact_snips_large_output() {
     let large = "x".repeat(50_000);
@@ -698,14 +691,11 @@ fn microcompact_preserves_small_output() {
 
 #[test]
 fn microcompact_preserves_strong_keyword_lines_without_file_line() {
-    // Regression: diagnostic extraction used to require both a
-    // file:line reference AND a keyword. Strong keywords like "FAIL"
-    // and "panic" should preserve the line on their own, because they
-    // carry signal even when they appear on narrative lines (Go's
-    // "--- FAIL: TestName", Rust's "thread '...' panicked at ...",
-    // pytest's "FAILED tests/..."). The exact patterns are language-
-    // specific and don't belong in the VM — but the generic rule
-    // "strong keywords count even without file:line" does.
+    // Strong keywords ("FAIL", "panic") must preserve the line on their own
+    // even without a file:line anchor — they appear on narrative lines (Go
+    // "--- FAIL: TestName", Rust "thread '...' panicked at ...",
+    // pytest "FAILED tests/..."). Language-specific patterns stay out of the
+    // VM; only the generic "strong keyword without file:line" rule lives here.
     let mut output = String::new();
     for i in 0..100 {
         output.push_str(&format!("verbose progress line {i}\n"));
@@ -751,7 +741,7 @@ fn auto_compact_messages_reduces_count() {
     ));
     let summary = compacted.unwrap();
     assert!(summary.is_some());
-    assert!(messages.len() <= 7); // 6 kept + 1 summary
+    assert!(messages.len() <= 7);
     assert!(messages[0]["content"]
         .as_str()
         .unwrap()
@@ -782,7 +772,6 @@ fn auto_compact_noop_when_under_threshold() {
 
 #[test]
 fn observation_mask_preserves_errors_masks_verbose_output() {
-    // Build a verbose output string (>500 chars) that should be masked
     let verbose_lines: Vec<String> = (0..60)
         .map(|i| format!("// source line {} of the generated file", i))
         .collect();
@@ -797,7 +786,6 @@ fn observation_mask_preserves_errors_masks_verbose_output() {
         serde_json::json!({"role": "user", "content": "error: cannot find module\nexit code 1\nfailed to compile"}),
         serde_json::json!({"role": "assistant", "content": "I see the issue. Let me fix it."}),
         serde_json::json!({"role": "user", "content": "File patched successfully."}),
-        // These last 2 will be kept verbatim (keep_last)
         serde_json::json!({"role": "assistant", "content": "Running tests again."}),
         serde_json::json!({"role": "user", "content": "All tests passed."}),
     ];
@@ -815,22 +803,16 @@ fn observation_mask_preserves_errors_masks_verbose_output() {
         None,
     ));
     let summary = compacted.unwrap().unwrap();
-    // Assistant messages preserved verbatim
     assert!(summary.contains("I'll create the file now."));
     assert!(summary.contains("Now let me run the tests."));
     assert!(summary.contains("I see the issue. Let me fix it."));
-    // Short error output preserved verbatim (under 500 chars)
     assert!(summary.contains("error: cannot find module"));
     assert!(summary.contains("exit code 1"));
-    // Verbose tool output masked (over 500 chars)
     assert!(summary.contains("masked]"));
     assert!(summary.contains("File created: a.go"));
-    // Short tool output in kept portion (boundary adjustment moves split_at to user msg)
     assert!(!summary.contains("File patched successfully."));
-    // Kept messages not in summary
     assert!(!summary.contains("Running tests again."));
     assert!(!summary.contains("All tests passed."));
-    // 3 kept (split moved backward to user boundary) + 1 summary = 4
     assert_eq!(messages.len(), 4);
 }
 
@@ -853,10 +835,8 @@ fn estimate_message_tokens_basic() {
         serde_json::json!({"role": "assistant", "content": "b".repeat(400)}),
     ];
     let tokens = estimate_message_tokens(&messages);
-    assert_eq!(tokens, 200); // 800 chars / 4
+    assert_eq!(tokens, 200);
 }
-
-// ── Artifact dedup and microcompaction tests ─────────────────────
 
 #[test]
 fn dedup_artifacts_removes_duplicates() {
@@ -897,8 +877,6 @@ fn microcompact_artifact_snips_oversized() {
     assert!(artifact.text.as_ref().unwrap().len() < 5_000);
     assert_eq!(artifact.estimated_tokens, Some(500));
 }
-
-// ── Tool argument constraint tests ───────────────────────────────
 
 #[test]
 fn arg_constraint_allows_matching_pattern() {
@@ -988,14 +966,10 @@ fn arg_constraint_prefers_declared_path_param_annotations() {
 
 #[test]
 fn arg_constraint_without_arg_key_or_metadata_skips_with_warning() {
-    // Bug-1 regression: the prior heuristic fallback picked the first
-    // string arg (often `action`) and produced misleading errors like
-    // "tool 'edit' argument 'exact_patch' does not match …". The new
-    // contract requires the policy author to declare either `arg_key`
-    // on the constraint or `path_params` in tool metadata. When
-    // neither is present the constraint is SKIPPED with a structured
-    // `log_warn` — the VM refuses to guess argument semantics by
-    // name.
+    // Regression: a heuristic fallback used to pick the first string arg
+    // (often `action`) and blame it for mismatches. Policy authors now must
+    // declare `arg_key` or `path_params`; otherwise the constraint is
+    // SKIPPED with a structured `log_warn`.
     let policy = CapabilityPolicy {
         tool_arg_constraints: vec![ToolArgConstraint {
             tool: "edit".to_string(),
@@ -1079,9 +1053,8 @@ fn arg_constraint_error_names_the_path_key_not_the_action_value() {
 
 #[test]
 fn arg_constraint_skips_when_no_path_key_present_in_call() {
-    // A call that has no value at the declared arg_key is outside the
-    // scope of the allow-list — skip the check instead of silently
-    // rejecting the empty string against the patterns.
+    // Absence of the declared arg_key is outside the allow-list's scope —
+    // skip rather than rejecting an empty string against the patterns.
     let policy = CapabilityPolicy {
         tool_arg_constraints: vec![ToolArgConstraint {
             tool: "edit".to_string(),
@@ -1106,18 +1079,16 @@ fn arg_constraint_skips_when_no_path_key_present_in_call() {
 
 #[test]
 fn microcompact_handles_multibyte_utf8() {
-    // Emoji are 4 bytes each — slicing at arbitrary byte offsets would panic
-    let emoji_output = "🔥".repeat(500); // 2000 bytes, 500 chars
+    // Slicing at arbitrary byte offsets would panic; these three scripts cover
+    // 4/2/3-byte sequences respectively.
+    let emoji_output = "🔥".repeat(500);
     let result = microcompact_tool_output(&emoji_output, 400);
-    // Should not panic and should contain the snip marker
     assert!(result.contains("snipped"));
 
-    // Mixed ASCII + multi-byte
     let mixed = format!("{}{}{}", "a".repeat(300), "é".repeat(500), "b".repeat(300));
     let result2 = microcompact_tool_output(&mixed, 400);
     assert!(result2.contains("snipped"));
 
-    // CJK characters (3 bytes each)
     let cjk = "中文".repeat(500);
     let result3 = microcompact_tool_output(&cjk, 400);
     assert!(result3.contains("snipped"));

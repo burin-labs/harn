@@ -1,10 +1,6 @@
 use harn_lexer::Span;
 use harn_parser::{format_type, DictEntry, Node, SNode, ShapeField, TypeExpr, TypeParam};
 
-// ---------------------------------------------------------------------------
-// Symbol table (AST-based)
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HarnSymbolKind {
     Pipeline,

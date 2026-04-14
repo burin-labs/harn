@@ -236,8 +236,6 @@ async fn failed_verify_stage_preserves_verification_artifact_and_result() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn verify_stage_preserves_input_transcript() {
-    // Build a mock transcript with conversation history, simulating what an
-    // implement stage would return after an agent loop.
     let messages = vec![
         serde_json::json!({"role": "user", "content": "implement the feature"}),
         serde_json::json!({"role": "assistant", "content": "I'll edit the file now."}),
@@ -277,7 +275,6 @@ async fn verify_stage_preserves_input_transcript() {
             .expect("stage executes");
 
     assert_eq!(executed.status, "completed");
-    // The critical check: the transcript must survive the verify stage.
     let transcript = executed
         .transcript
         .expect("verify stage must preserve input transcript");
@@ -408,8 +405,6 @@ async fn succeeding_stage_records_single_attempt() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn stage_task_reaches_execution_verbatim() {
-    // The task passed to `execute_stage_attempts` reaches the stage
-    // unmodified; no retry-suffix text is appended.
     let node = crate::orchestration::WorkflowNode {
         id: Some("verify".to_string()),
         kind: "verify".to_string(),

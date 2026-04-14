@@ -25,8 +25,6 @@ thread_local! {
     static EXECUTION_APPROVAL_POLICY_STACK: RefCell<Vec<ToolApprovalPolicy>> = const { RefCell::new(Vec::new()) };
 }
 
-// ── Execution policy stack ──────────────────────────────────────────
-
 pub fn push_execution_policy(policy: CapabilityPolicy) {
     EXECUTION_POLICY_STACK.with(|stack| stack.borrow_mut().push(policy));
 }
@@ -40,8 +38,6 @@ pub fn pop_execution_policy() {
 pub fn current_execution_policy() -> Option<CapabilityPolicy> {
     EXECUTION_POLICY_STACK.with(|stack| stack.borrow().last().cloned())
 }
-
-// ── Approval policy stack ───────────────────────────────────────────
 
 pub fn push_approval_policy(policy: ToolApprovalPolicy) {
     EXECUTION_APPROVAL_POLICY_STACK.with(|stack| stack.borrow_mut().push(policy));
@@ -399,9 +395,9 @@ pub(crate) fn apply_output_transcript_policy(
 
 pub fn builtin_ceiling() -> CapabilityPolicy {
     CapabilityPolicy {
-        // Capabilities left empty — the host capability manifest is the sole
-        // authority on which operations are available.  An explicit allowlist
-        // here would silently block any capability the host adds later.
+        // `capabilities` is intentionally empty: the host capability manifest
+        // is the sole authority, and an allowlist here would silently block
+        // any capability the host adds later.
         tools: Vec::new(),
         capabilities: BTreeMap::new(),
         workspace_roots: Vec::new(),
@@ -411,8 +407,6 @@ pub fn builtin_ceiling() -> CapabilityPolicy {
         tool_annotations: BTreeMap::new(),
     }
 }
-
-// ── Tool approval policy ─────────────────────────────────────────────
 
 /// Declarative policy for tool approval gating. Allows pipelines to
 /// specify which tools are auto-approved, auto-denied, or require
@@ -450,7 +444,7 @@ impl ToolApprovalPolicy {
     /// Evaluate whether a tool call should be approved, denied, or needs
     /// host confirmation.
     pub fn evaluate(&self, tool_name: &str, args: &serde_json::Value) -> ToolApprovalDecision {
-        // Auto-deny takes precedence.
+        // Auto-deny takes precedence over every other pattern list.
         for pattern in &self.auto_deny {
             if glob_match(pattern, tool_name) {
                 return ToolApprovalDecision::AutoDenied {
@@ -459,7 +453,6 @@ impl ToolApprovalPolicy {
             }
         }
 
-        // Check write-path allowlist for tools that declare paths.
         if !self.write_path_allowlist.is_empty() {
             let paths = super::current_tool_declared_paths(tool_name, args);
             for path in &paths {
@@ -477,21 +470,18 @@ impl ToolApprovalPolicy {
             }
         }
 
-        // Auto-approve.
         for pattern in &self.auto_approve {
             if glob_match(pattern, tool_name) {
                 return ToolApprovalDecision::AutoApproved;
             }
         }
 
-        // Require approval.
         for pattern in &self.require_approval {
             if glob_match(pattern, tool_name) {
                 return ToolApprovalDecision::RequiresHostApproval;
             }
         }
 
-        // Default: auto-approve if no pattern matched.
         ToolApprovalDecision::AutoApproved
     }
 
@@ -501,27 +491,21 @@ impl ToolApprovalPolicy {
     /// - auto_deny / require_approval: union (either policy can deny/gate)
     /// - write_path_allowlist: intersection (both must allow the path)
     pub fn intersect(&self, other: &ToolApprovalPolicy) -> ToolApprovalPolicy {
-        // auto_approve: intersection semantics — a tool should only be
-        // auto-approved if both policies agree. If one side has no patterns,
-        // defer to the other.
         let auto_approve = if self.auto_approve.is_empty() {
             other.auto_approve.clone()
         } else if other.auto_approve.is_empty() {
             self.auto_approve.clone()
         } else {
-            // Keep only patterns that appear in both lists.
             self.auto_approve
                 .iter()
                 .filter(|p| other.auto_approve.contains(p))
                 .cloned()
                 .collect()
         };
-        // auto_deny / require_approval: union (more restrictive).
         let mut auto_deny = self.auto_deny.clone();
         auto_deny.extend(other.auto_deny.iter().cloned());
         let mut require_approval = self.require_approval.clone();
         require_approval.extend(other.require_approval.iter().cloned());
-        // write_path_allowlist: intersection (both must allow the path).
         let write_path_allowlist = if self.write_path_allowlist.is_empty() {
             other.write_path_allowlist.clone()
         } else if other.write_path_allowlist.is_empty() {
@@ -628,7 +612,6 @@ mod approval_policy_tests {
             ..Default::default()
         };
         let merged = a.intersect(&b);
-        // Only "read*" is in both — "search*" and "write*" dropped.
         assert_eq!(merged.auto_approve, vec!["read*".to_string()]);
     }
 

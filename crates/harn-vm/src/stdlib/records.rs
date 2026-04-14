@@ -15,10 +15,6 @@ use crate::vm::Vm;
 
 use super::workflow::load_run_tree;
 
-// =============================================================================
-// Thread-local eval metric store
-// =============================================================================
-
 /// A named metric recorded during evaluation.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EvalMetric {
@@ -690,8 +686,6 @@ pub(crate) fn register_record_builtins(vm: &mut Vm) {
         to_vm(&evaluate_run_suite_manifest(&manifest)?)
     });
 
-    // eval_metric(name, value, metadata?) -> nil
-    // Record a named metric into the thread-local eval metric store.
     vm.register_builtin("eval_metric", |args, _out| {
         let name = args
             .first()
@@ -716,8 +710,6 @@ pub(crate) fn register_record_builtins(vm: &mut Vm) {
         Ok(VmValue::Nil)
     });
 
-    // eval_metrics() -> list of dicts
-    // Return all recorded eval metrics.
     vm.register_builtin("eval_metrics", |_args, _out| {
         let metrics = EVAL_METRICS.with(|m| m.borrow().clone());
         let list: Vec<VmValue> = metrics

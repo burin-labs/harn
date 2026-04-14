@@ -12,8 +12,6 @@ use super::reject_policy;
 use crate::tool_annotations::ToolAnnotations;
 use crate::value::{VmError, VmValue};
 
-// ── Per-agent policy with argument patterns ───────────────────────────
-
 /// Extended policy that supports argument-level constraints.
 ///
 /// `arg_key` names the argument whose string value must match one of
@@ -58,10 +56,8 @@ pub fn enforce_tool_arg_constraints(
             continue;
         }
 
-        // Prefer explicit arg_key on the constraint; fall back to
-        // declared path_params from tool annotations. Never guess by
-        // common argument names — that's a pipeline-level concern,
-        // not a VM concern.
+        // Never guess which arg the constraint targets by common names —
+        // that's a pipeline-level concern, not a VM concern.
         let declared_keys: Vec<String> = if let Some(key) = constraint.arg_key.as_ref() {
             vec![key.clone()]
         } else {
@@ -74,9 +70,8 @@ pub fn enforce_tool_arg_constraints(
 
         let (arg_key, arg_value): (String, Option<String>) = if let Some(obj) = args.as_object() {
             if declared_keys.is_empty() {
-                // No way to know which argument the constraint targets.
-                // Emit a structured warning and skip — permissive by
-                // design so missing annotations don't silently block work.
+                // Permissive by design: missing annotations warn instead of
+                // blocking, so a misconfigured policy can't silently wedge work.
                 crate::events::log_warn(
                     "policy.constraint_unresolved",
                     &format!(
@@ -95,12 +90,10 @@ pub fn enforce_tool_arg_constraints(
             }
             found
         } else {
-            // Args is a bare string — match directly.
             ("value".to_string(), args.as_str().map(|s| s.to_string()))
         };
 
-        // If the declared argument is absent on this call, the
-        // constraint does not apply — skip rather than reject.
+        // Absent arg ≠ rejection — constraint simply does not apply.
         let Some(candidate) = arg_value else {
             continue;
         };
@@ -238,7 +231,6 @@ impl CapabilityPolicy {
             (None, None) => None,
         };
 
-        // Merge arg constraints from both sides
         let mut tool_arg_constraints = self.tool_arg_constraints.clone();
         tool_arg_constraints.extend(requested.tool_arg_constraints.clone());
 

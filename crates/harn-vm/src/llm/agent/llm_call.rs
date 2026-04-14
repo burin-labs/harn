@@ -94,10 +94,6 @@ pub(super) async fn run_llm_call(
 
     let text = result.text.clone();
     state.total_text.push_str(&text);
-    // `last_iteration_text` is assigned below AFTER the tool-call parser
-    // runs, so it holds the prose (calls stripped) rather than the raw
-    // text. For the native-tool-call and no-tools branches we fall back
-    // to the raw text a few lines down.
     state.transcript_events.push(transcript_event(
         "provider_payload",
         "assistant",
@@ -124,14 +120,9 @@ pub(super) async fn run_llm_call(
     }
 
     let mut tool_parse_errors: Vec<String> = Vec::new();
-    // `text_prose` is the content of `<assistant_prose>` blocks under
-    // the tagged response protocol (concatenated with blank-line joins).
-    // Always run the tagged parser — even with no tools or native-tool
-    // provider channel — so `visible_text` is the unwrapped prose and
-    // `<done>` / `<assistant_prose>` tags never leak to callers that
-    // just want the model's answer. The tool-call gate below controls
-    // only whether parsed TS-expression calls are promoted into
-    // `tool_calls`, not whether the parser runs.
+    // Always run the tagged parser so `<assistant_prose>`/`<done>` tags
+    // never leak to callers. The tool-call gate below controls only
+    // whether parsed TS-expression calls are promoted into `tool_calls`.
     let (text_prose, protocol_violations, tagged_done_marker, canonical_history) = {
         let parse_result = parse_text_tool_calls_with_tools(&text, ctx.tools_val);
         let prose = if parse_result.prose.is_empty() {
@@ -156,16 +147,12 @@ pub(super) async fn run_llm_call(
     } else if ctx.has_tools {
         let parse_result = parse_text_tool_calls_with_tools(&text, ctx.tools_val);
         tool_parse_errors = parse_result.errors;
-        // Text-mode tool calls are the universal protocol every model is
-        // expected to follow. Honor them regardless of `tool_format` —
-        // many models served via Ollama / OpenAI-compat fall back to
-        // emitting `<tool_call>name({...})</tool_call>` in text even
-        // when the request advertised a native `tools` channel, because
-        // the model's chat template doesn't actually route through the
-        // host's native function-call surface. Discarding those would
-        // strand a legitimate tool call mid-loop. When in native mode
-        // and the model still chose text, log a hint so we can spot
-        // mis-tuned aliases later, but execute the call.
+        // Honor text-mode tool calls regardless of tool_format: models
+        // served via Ollama/OpenAI-compat often fall back to emitting
+        // `<tool_call>...</tool_call>` even when the request advertised
+        // a native `tools` channel (the model's chat template doesn't
+        // actually route through the native function-call surface).
+        // Discarding them would strand a legitimate call mid-loop.
         if ctx.tool_format == "native" && !parse_result.calls.is_empty() {
             crate::events::log_info(
                 "llm.tool",
@@ -175,14 +162,8 @@ pub(super) async fn run_llm_call(
         {
             let calls = parse_result.calls;
 
-            // Inject the specific parse error(s) into the conversation so
-            // the model knows what to fix (e.g. unescaped backtick inside
-            // a template literal). We emit feedback whenever ANY parse
-            // error is present — previously the gate was
-            // `calls.is_empty()`, which silently swallowed errors in the
-            // mixed-batch case where some calls parsed and some didn't,
-            // leaving the model no signal about the dropped call and an
-            // apparent random failure to follow instructions.
+            // Emit feedback on ANY parse error so mixed-batch cases
+            // (some calls parsed, some didn't) still signal the model.
             if !tool_parse_errors.is_empty() {
                 let error_summary = tool_parse_errors
                     .iter()
@@ -246,13 +227,8 @@ pub(super) async fn run_llm_call(
         &tool_calls,
         &tool_parse_errors,
     );
-    // Surface the prose (not the raw text) to callers that read
-    // `last_iteration_text` / `visible_text`. Tool call expressions are
-    // structured data in `tool_calls`, not something the user should
-    // see as the agent's "answer". When the model emitted a `<done>`
-    // block, append its canonical wrapper so post-turn callbacks can
-    // substring-match the configured sentinel without the UI showing
-    // it (visible-text sanitization strips `<done>` blocks downstream).
+    // Append the `<done>` wrapper so post-turn callbacks can substring-
+    // match the sentinel; visible-text sanitization strips it downstream.
     state.last_iteration_text = match tagged_done_marker.as_deref() {
         Some(body) if shaped_text_prose.trim().is_empty() => {
             format!("<done>{body}</done>")
@@ -261,12 +237,8 @@ pub(super) async fn run_llm_call(
         None => shaped_text_prose.clone(),
     };
 
-    // Inject structured feedback for any tagged-protocol violations.
-    // The response-protocol parser enforces top-level grammar; these
-    // feedbacks teach the model how to fix its shape before the next
-    // turn. Done first so protocol errors surface even when tool-call
-    // dispatch still happens (e.g. calls parsed inside tags plus stray
-    // prose outside).
+    // Teach the model to fix grammar violations. Done before tool-call
+    // dispatch so protocol errors surface even in mixed turns.
     if !protocol_violations.is_empty() && ctx.tool_format != "native" {
         let feedback = format!(
             "Your response violated the tagged response protocol. Each issue:\n- {}\n\n\
@@ -287,15 +259,13 @@ pub(super) async fn run_llm_call(
         );
     }
 
-    // Check done_sentinel on EVERY response, not just text-only ones.
-    // If present alongside tool calls, we still process the tools (so their
-    // results land in the conversation), but mark the loop to exit afterward.
+    // Check sentinel on every response; when it coexists with tool calls
+    // we still process the tools, then exit.
     let sentinel_in_text = tagged_done_marker
         .as_deref()
         .is_some_and(|body| body == ctx.done_sentinel)
-        // Native-format and no-tools paths bypass the tagged parser;
-        // fall back to substring match so their transcripts still honour
-        // the configured sentinel.
+        // Native-format and no-tools paths bypass the tagged parser —
+        // fall back to substring match.
         || (ctx.tool_format == "native" && text.contains(ctx.done_sentinel))
         || (!ctx.has_tools && text.contains(ctx.done_sentinel));
     let phase_change = ctx
@@ -318,19 +288,11 @@ pub(super) async fn run_llm_call(
             );
         }
     }
-    // When exit_when_verified is set, the sentinel is only honoured if the
-    // last run() tool call returned exit code 0.  This prevents premature
-    // exit when the model claims it's done but verification hasn't passed.
+    // exit_when_verified: honor sentinel only if the last run() exit 0.
     let verified = !ctx.exit_when_verified || state.last_run_exit_code == Some(0);
-    // Guard: the model must have made at least one tool call before the
-    // done sentinel is honoured.  This prevents premature exits where the
-    // model describes a plan and emits ##DONE## without actually acting.
+    // Guard against premature exit where the model emits done without acting.
     let has_acted = !state.all_tools_used.is_empty() || !tool_calls.is_empty();
-    // Ledger gate: if a task ledger was seeded and still has open or
-    // blocked deliverables, the done sentinel is rejected. This is
-    // the general-purpose "what does the user call done?" mechanism
-    // that replaces ad-hoc task-specific guardrails. See
-    // `llm/ledger.rs` for the structured semantics.
+    // Ledger gate: reject done while open/blocked deliverables remain.
     let ledger_blocks_done = state.task_ledger.gates_done();
     let sentinel_hit = ctx.persistent
         && ((sentinel_in_text && verified && has_acted && !ledger_blocks_done) || phase_change);
@@ -345,8 +307,6 @@ pub(super) async fn run_llm_call(
         state.ledger_done_rejections += 1;
     }
 
-    // If the model emitted the sentinel but verification hasn't passed,
-    // inject a corrective so the model knows it must keep going.
     if sentinel_in_text && !verified && ctx.persistent {
         let code_str = state
             .last_run_exit_code
@@ -362,8 +322,6 @@ pub(super) async fn run_llm_call(
             runtime_feedback_message("verification_gate", corrective),
         );
     }
-    // If the model emitted the sentinel without having made any tool
-    // calls, it's trying to declare done without doing any work.
     if sentinel_in_text && !has_acted && ctx.persistent && ctx.has_tools {
         let corrective = sentinel_without_action_nudge(ctx.tool_format, ctx.turn_policy);
         append_message_to_contexts(
@@ -373,11 +331,8 @@ pub(super) async fn run_llm_call(
         );
     }
 
-    // Intercept `ledger(...)` tool calls before the normal dispatch
-    // pipeline. The ledger tool has no host executor — it mutates
-    // runtime state (task_ledger) and emits a synthetic tool-result
-    // message. Filtering here lets the rest of the pipeline stay
-    // unaware of ledger bookkeeping.
+    // Intercept `ledger(...)` before normal dispatch — it mutates
+    // task_ledger state and has no host executor.
     let mut tool_calls: Vec<serde_json::Value> = tool_calls;
     let mut ledger_tool_results: Vec<serde_json::Value> = Vec::new();
     tool_calls.retain(|tc| {

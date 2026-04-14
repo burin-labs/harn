@@ -1,20 +1,13 @@
-//! Autofix helper functions used by the linter.
-//!
-//! These are deliberately free-standing functions over AST nodes and raw
-//! source text so they can be unit-tested in isolation and reused across
-//! multiple lint rules. None of them depend on `Linter` state.
+//! Autofix helpers shared across lint rules. Each function operates on
+//! AST nodes and raw source so it can be unit-tested without `Linter`
+//! state.
 
 use harn_lexer::{FixEdit, Span};
 use harn_parser::{Node, SNode};
 
-/// Compute a single-edit rename that prefixes a simple `let`/`var` binding
-/// identifier with an underscore. Used by the `unused-variable` autofix.
-///
-/// Returns `None` when the source is unavailable, the declaration does not
-/// start with the expected keyword, or the next token after the keyword is
-/// not a bare identifier matching `name`. All of these cases indicate either
-/// a destructuring pattern, an unusual formatting, or a name collision we
-/// do not want to touch automatically.
+/// Rename a simple `let`/`var` binding's identifier with an underscore
+/// prefix. Returns `None` for destructuring patterns, unusual formatting,
+/// or anything else where the rewrite is not unambiguously safe.
 pub(crate) fn simple_ident_rename_fix(
     source: Option<&str>,
     span: Span,
@@ -23,10 +16,7 @@ pub(crate) fn simple_ident_rename_fix(
     let src = source?;
     let region = src.get(span.start..span.end)?;
 
-    // Locate the `let`/`var` keyword at the start of the declaration. Some
-    // contexts (e.g. a `for`-loop head) do not use a keyword at all, in which
-    // case we bail — those bindings are tracked as destructuring-style by
-    // callers and should not reach this helper anyway.
+    // Bail when there is no `let`/`var` keyword (e.g. a `for`-loop head).
     let (keyword_len, after_keyword_is_boundary) = if region.starts_with("let") {
         (
             3,
@@ -44,15 +34,13 @@ pub(crate) fn simple_ident_rename_fix(
         return None;
     }
 
-    // Skip whitespace between the keyword and the identifier.
     let mut cursor = keyword_len;
     let bytes = region.as_bytes();
     while cursor < bytes.len() && matches!(bytes[cursor], b' ' | b'\t') {
         cursor += 1;
     }
 
-    // The identifier must start with a valid identifier byte and must match
-    // `name` exactly with a word boundary on the trailing side.
+    // Identifier must match `name` exactly with a word boundary after it.
     let name_bytes = name.as_bytes();
     if region.get(cursor..cursor + name_bytes.len())?.as_bytes() != name_bytes {
         return None;
@@ -73,10 +61,8 @@ pub(crate) fn simple_ident_rename_fix(
     }])
 }
 
-/// Build a FixEdit that appends `.to_list()` / `.to_set()` / `.to_dict()`
-/// (or another sink) at the end of an expression span. Used by the
-/// `eager-collection-conversion` lint rule to materialize a lazy `Iter`
-/// into the concrete collection type the surrounding context expects.
+/// Append a sink call (`.to_list()` / `.to_set()` / `.to_dict()`) to the
+/// end of an expression span.
 pub(crate) fn append_sink_fix(expr_span: Span, sink: &str) -> Vec<FixEdit> {
     let replacement = format!(".{sink}()");
     vec![FixEdit {
@@ -96,13 +82,8 @@ pub(crate) fn is_ident_byte(b: u8) -> bool {
 
 /// Match a ternary of the form `x == nil ? fallback : x` or
 /// `x != nil ? x : fallback` and return `(identifier, fallback_node)` when
-/// the shape matches. `x` must be a bare identifier and must appear
-/// identically on both the nil-comparison side and the non-fallback arm.
-///
-/// Used by the `redundant-nil-ternary` lint rule to suggest rewriting the
-/// ternary into `x ?? fallback`, which is both shorter and safer against
-/// double-evaluation when `x` is replaced with a more complex expression
-/// in the future.
+/// the shape matches. `x` must be a bare identifier on both sides so the
+/// rewrite to `x ?? fallback` is safe against double-evaluation.
 pub(crate) fn nil_fallback_ternary_parts<'a>(
     condition: &'a SNode,
     true_expr: &'a SNode,
@@ -119,7 +100,6 @@ pub(crate) fn nil_fallback_ternary_parts<'a>(
 
     let (ident_name, expected_non_nil_arm): (String, Which) = match op.as_str() {
         "==" => {
-            // x == nil ? fallback : x
             if is_nil(&right.node) {
                 (identifier(&left.node)?, Which::False)
             } else if is_nil(&left.node) {
@@ -129,7 +109,6 @@ pub(crate) fn nil_fallback_ternary_parts<'a>(
             }
         }
         "!=" => {
-            // x != nil ? x : fallback
             if is_nil(&right.node) {
                 (identifier(&left.node)?, Which::True)
             } else if is_nil(&left.node) {
@@ -156,11 +135,9 @@ pub(crate) enum Which {
     False,
 }
 
-/// Conservative side-effect analysis for lint autofixes. Returns true when
-/// the expression has no observable effect: literals, variable reads, field
-/// access, subscript, and pure operators over pure operands. Calls, awaits,
-/// spawns, assignments, and anything we cannot prove pure fall into the
-/// `false` bucket so the autofix never silently drops a side effect.
+/// Conservative side-effect analysis for lint autofixes. Returns true only
+/// when the expression has no observable effect; anything we cannot prove
+/// pure returns false so the autofix never silently drops a side effect.
 pub(crate) fn is_pure_expression(node: &Node) -> bool {
     match node {
         Node::IntLiteral(_)
@@ -208,14 +185,9 @@ pub(crate) fn is_pure_expression(node: &Node) -> bool {
     }
 }
 
-/// Build a FixEdit that removes an entire statement from the source, along
-/// with its leading indentation and trailing newline. Used by the
-/// `empty-block` autofix for effect-free empty `if` / `for` bodies.
-///
-/// Returns `None` when the source is unavailable, when the statement span
-/// is at a weird position, or when leading/trailing context cannot be
-/// located safely. In any of those cases the lint still fires; only the
-/// automatic rewrite is suppressed.
+/// Remove a whole statement including its leading indent and trailing
+/// newline. Returns `None` when the rewrite cannot be performed safely,
+/// in which case the lint still fires without an autofix.
 pub(crate) fn empty_statement_removal_fix(
     source: Option<&str>,
     span: Span,
@@ -225,8 +197,7 @@ pub(crate) fn empty_statement_removal_fix(
         return None;
     }
 
-    // Extend start backward through preceding spaces/tabs so leading indent
-    // is removed along with the statement.
+    // Swallow leading spaces/tabs so the indent goes with the statement.
     let mut start = span.start;
     let bytes = src.as_bytes();
     while start > 0 {
@@ -238,9 +209,8 @@ pub(crate) fn empty_statement_removal_fix(
         break;
     }
 
-    // Extend end forward through a trailing newline so the line disappears
-    // entirely. We only swallow ONE newline to avoid chewing through blank
-    // lines that follow the removed statement.
+    // Swallow exactly one trailing newline — more would eat blank lines
+    // that follow the removed statement.
     let mut end = span.end;
     if bytes.get(end) == Some(&b'\n') {
         end += 1;

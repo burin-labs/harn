@@ -16,10 +16,6 @@ use super::helpers::{
 };
 use super::tools::build_assistant_response_message;
 
-// ---------------------------------------------------------------------------
-// AgentLoopConfig
-// ---------------------------------------------------------------------------
-
 #[derive(Clone)]
 pub struct AgentLoopConfig {
     pub persistent: bool,
@@ -93,10 +89,6 @@ impl std::fmt::Debug for AgentLoopConfig {
             .finish_non_exhaustive()
     }
 }
-
-// ---------------------------------------------------------------------------
-// Result building
-// ---------------------------------------------------------------------------
 
 pub(crate) fn agent_loop_result_from_llm(
     result: &super::api::LlmResult,
@@ -213,10 +205,6 @@ pub(crate) fn build_llm_call_result(
 
     vm_build_llm_result(result, None, Some(transcript), opts.tools.as_ref())
 }
-
-// ---------------------------------------------------------------------------
-// Bridge-aware builtin registrations
-// ---------------------------------------------------------------------------
 
 pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::HostBridge>) {
     let b = bridge;
@@ -370,10 +358,6 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
         }
     });
 }
-
-// ---------------------------------------------------------------------------
-// agent_subscribe / agent_inject_feedback host builtins
-// ---------------------------------------------------------------------------
 
 pub fn register_agent_subscribe(vm: &mut Vm) {
     vm.register_builtin("agent_subscribe", |args, _out| {

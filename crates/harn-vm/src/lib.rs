@@ -46,8 +46,6 @@ pub use store::register_store_builtins;
 pub use value::*;
 pub use vm::*;
 
-// ── Source pipeline (compile tier) ───────────────────────────────────
-
 /// Lex, parse, type-check, and compile source to bytecode in one call.
 /// Bails on the first type error. For callers that need diagnostics
 /// rather than early exit, use `harn_parser::check_source` directly
@@ -58,7 +56,6 @@ pub fn compile_source(source: &str) -> Result<Chunk, String> {
 }
 
 /// Reset all thread-local state that can leak between test runs.
-/// Call this before each test execution for proper isolation.
 pub fn reset_thread_local_state() {
     llm::reset_llm_state();
     http::reset_http_state();

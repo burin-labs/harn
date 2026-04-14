@@ -117,8 +117,6 @@ pub(crate) fn register_math_builtins(vm: &mut Vm) {
         Ok(VmValue::Nil)
     });
 
-    // --- Trigonometric and transcendental ---
-
     register_unary_float(vm, "sin", f64::sin);
     register_unary_float(vm, "cos", f64::cos);
     register_unary_float(vm, "tan", f64::tan);
@@ -194,9 +192,8 @@ pub(crate) fn register_math_builtins(vm: &mut Vm) {
         }))
     });
 
-    // Python-compatible `range()` builtin — always half-open, for idiomatic
-    // 0-indexed iteration. The keyword form `a to b [exclusive]` is the
-    // choice when you want human-readable inclusive math.
+    // `range()` is Python-style and always half-open. Use `a to b [exclusive]`
+    // for human-readable inclusive math.
     vm.register_builtin("range", |args, _out| {
         let (start, end) = match args.len() {
             1 => {

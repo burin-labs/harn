@@ -81,14 +81,10 @@ pub struct FixEdit {
     pub replacement: String,
 }
 
-/// Canonical list of Harn language keywords.
-///
-/// This is the single source of truth for keyword tokens. The lexer's
-/// identifier-to-keyword match in `lexer.rs` must stay in sync; the unit test
-/// `test_keywords_const_covers_lexer` verifies parity between the two.
-///
-/// Tooling that needs the keyword set (syntax highlighters, the LSP, etc.)
-/// should read `KEYWORDS` rather than hard-coding a duplicate list.
+/// Canonical list of Harn language keywords. Single source of truth; the lexer's
+/// identifier-to-keyword match must stay in sync (enforced by
+/// `test_keywords_const_covers_lexer`). External tooling should consume this
+/// rather than duplicate it.
 pub const KEYWORDS: &[&str] = &[
     "break",
     "catch",
@@ -138,7 +134,6 @@ pub const KEYWORDS: &[&str] = &[
 /// Token kinds produced by the lexer.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
-    // Keywords
     Pipeline,
     Extends,
     Override,
@@ -183,7 +178,6 @@ pub enum TokenKind {
     Select,
     Impl,
 
-    // Literals
     Identifier(String),
     StringLiteral(String),
     InterpolatedString(Vec<StringSegment>),
@@ -194,7 +188,6 @@ pub enum TokenKind {
     /// Duration literal in milliseconds: 500ms, 5s, 30m, 2h, 1d, 1w
     DurationLiteral(u64),
 
-    // Two-character operators
     Eq,            // ==
     Neq,           // !=
     And,           // &&
@@ -212,7 +205,6 @@ pub enum TokenKind {
     SlashAssign,   // /=
     PercentAssign, // %=
 
-    // Single-character operators
     Assign,   // =
     Not,      // !
     Dot,      // .
@@ -226,7 +218,6 @@ pub enum TokenKind {
     Question, // ?
     Bar,      // |  (for union types)
 
-    // Delimiters
     LBrace,    // {
     RBrace,    // }
     LParen,    // (
@@ -237,7 +228,6 @@ pub enum TokenKind {
     Colon,     // :
     Semicolon, // ;
 
-    // Comments
     LineComment {
         text: String,
         is_doc: bool,
@@ -247,7 +237,6 @@ pub enum TokenKind {
         is_doc: bool,
     }, // /* text */ or /** text */
 
-    // Special
     Newline,
     Eof,
 }

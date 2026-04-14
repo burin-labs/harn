@@ -6,8 +6,6 @@ use serde::{Deserialize, Serialize};
 
 use super::{microcompact_tool_output, new_id, now_rfc3339, ContextPolicy};
 
-// ── Adaptive context assembly ─────────────────────────────────────────
-
 /// Snip an artifact's text to fit within a token budget.
 pub fn microcompact_artifact(artifact: &mut ArtifactRecord, max_tokens: usize) {
     let max_chars = max_tokens * 4;
@@ -28,7 +26,6 @@ pub fn dedup_artifacts(artifacts: &mut Vec<ArtifactRecord>) {
         if text.is_empty() {
             return true;
         }
-        // Simple hash for dedup
         let hash = {
             use std::hash::{Hash, Hasher};
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -45,16 +42,13 @@ pub fn select_artifacts_adaptive(
     mut artifacts: Vec<ArtifactRecord>,
     policy: &ContextPolicy,
 ) -> Vec<ArtifactRecord> {
-    // Phase 1: deduplicate
     dedup_artifacts(&mut artifacts);
 
-    // Phase 2: microcompact oversized artifacts relative to budget.
-    // Cap individual artifacts to a fraction of the total budget, but don't
-    // let the per-artifact cap exceed the total budget (avoid overrun).
+    // Cap individual artifacts to a fraction of the total budget, with a 500-token
+    // floor but never exceeding the total (so a single artifact can't overrun).
     if let Some(max_tokens) = policy.max_tokens {
         let count = artifacts.len().max(1);
         let per_artifact_budget = max_tokens / count;
-        // Floor of 500 tokens, but never more than total budget
         let cap = per_artifact_budget.max(500).min(max_tokens);
         for artifact in &mut artifacts {
             let est = artifact.estimated_tokens.unwrap_or(0);
@@ -64,7 +58,6 @@ pub fn select_artifacts_adaptive(
         }
     }
 
-    // Phase 3: standard selection with budget
     select_artifacts(artifacts, policy)
 }
 

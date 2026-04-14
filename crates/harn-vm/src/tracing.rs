@@ -14,10 +14,6 @@ use std::time::Instant;
 
 use crate::value::VmValue;
 
-// =============================================================================
-// Span types
-// =============================================================================
-
 /// The kind of operation a span represents.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpanKind {
@@ -66,10 +62,6 @@ struct OpenSpan {
     metadata: BTreeMap<String, serde_json::Value>,
 }
 
-// =============================================================================
-// Collector
-// =============================================================================
-
 /// Thread-local span collector. Accumulates completed spans and tracks the
 /// active span stack for automatic parent assignment.
 pub struct SpanCollector {
@@ -108,7 +100,6 @@ impl SpanCollector {
         let parent_id = self.active_stack.last().copied();
         let now = Instant::now();
 
-        // Emit structured span-start event to registered sinks.
         crate::events::emit_span_start(id, parent_id, &name, kind.as_str(), BTreeMap::new());
 
         self.open.insert(
@@ -140,7 +131,6 @@ impl SpanCollector {
             let start_ms = span.started_at.duration_since(self.epoch).as_millis() as u64;
             let duration_ms = duration.as_millis() as u64;
 
-            // Emit structured span-end event to registered sinks.
             let mut end_meta = span.metadata.clone();
             end_meta.insert(
                 "duration_ms".to_string(),
@@ -158,7 +148,6 @@ impl SpanCollector {
                 metadata: span.metadata,
             });
 
-            // Remove from active stack
             if let Some(pos) = self.active_stack.iter().rposition(|&id| id == span_id) {
                 self.active_stack.remove(pos);
             }
@@ -189,10 +178,6 @@ impl SpanCollector {
         self.epoch = Instant::now();
     }
 }
-
-// =============================================================================
-// Thread-local collector
-// =============================================================================
 
 thread_local! {
     static COLLECTOR: RefCell<SpanCollector> = RefCell::new(SpanCollector::new());
@@ -259,10 +244,6 @@ pub fn reset_tracing() {
     COLLECTOR.with(|c| c.borrow_mut().reset());
 }
 
-// =============================================================================
-// VmValue conversion
-// =============================================================================
-
 /// Convert a span to a VmValue dict for user access.
 pub fn span_to_vm_value(span: &Span) -> VmValue {
     let mut d = BTreeMap::new();
@@ -307,7 +288,6 @@ pub fn format_summary() -> String {
     lines.push(format!("Trace: {} spans, {total_ms}ms total", spans.len()));
     lines.push(String::new());
 
-    // Build tree structure
     fn print_tree(spans: &[Span], parent_id: Option<u64>, depth: usize, lines: &mut Vec<String>) {
         let children: Vec<&Span> = spans.iter().filter(|s| s.parent_id == parent_id).collect();
         for span in children {
@@ -379,6 +359,6 @@ mod tests {
         set_tracing_enabled(false);
         let id = span_start(SpanKind::Pipeline, "test".into());
         assert_eq!(id, 0);
-        span_end(id); // should not panic
+        span_end(id);
     }
 }

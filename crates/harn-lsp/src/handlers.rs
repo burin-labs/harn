@@ -161,10 +161,6 @@ fn dot_completion_items(
     items
 }
 
-// ---------------------------------------------------------------------------
-// LanguageServer trait implementation
-// ---------------------------------------------------------------------------
-
 #[tower_lsp::async_trait]
 impl tower_lsp::LanguageServer for HarnLsp {
     async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
@@ -285,9 +281,6 @@ impl tower_lsp::LanguageServer for HarnLsp {
             .remove(&params.text_document.uri);
     }
 
-    // -----------------------------------------------------------------------
-    // Completion (scope-aware + method completion)
-    // -----------------------------------------------------------------------
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         let uri = &params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
@@ -304,18 +297,15 @@ impl tower_lsp::LanguageServer for HarnLsp {
 
         let mut items = Vec::new();
 
-        // Check if this is a dot-completion
         if char_before_position(&source, position) == Some('.') {
             return Ok(Some(CompletionResponse::Array(dot_completion_items(
                 &source, position, &symbols,
             ))));
         }
 
-        // Scope-aware: find symbols visible at cursor position
+        // Symbol is visible iff it's top-level (no scope_span) or the cursor
+        // sits inside its scope_span.
         for sym in &symbols {
-            // A symbol is visible if:
-            // 1. It has no scope_span (top-level), or
-            // 2. The cursor is inside its scope_span
             let visible = match sym.scope_span {
                 None => true,
                 Some(ref scope) => position_in_span(&position, scope, &source),
@@ -340,7 +330,6 @@ impl tower_lsp::LanguageServer for HarnLsp {
             });
         }
 
-        // Add builtins
         for &(name, detail) in BUILTINS {
             items.push(CompletionItem {
                 label: name.to_string(),
@@ -350,7 +339,6 @@ impl tower_lsp::LanguageServer for HarnLsp {
             });
         }
 
-        // Add keywords
         for kw in KEYWORDS {
             items.push(CompletionItem {
                 label: kw.to_string(),
@@ -362,9 +350,6 @@ impl tower_lsp::LanguageServer for HarnLsp {
         Ok(Some(CompletionResponse::Array(items)))
     }
 
-    // -----------------------------------------------------------------------
-    // Go-to-definition (AST-based symbol table)
-    // -----------------------------------------------------------------------
     async fn goto_definition(
         &self,
         params: GotoDefinitionParams,
@@ -386,7 +371,6 @@ impl tower_lsp::LanguageServer for HarnLsp {
             None => return Ok(None),
         };
 
-        // Look up the name in the symbol table — find the first definition-like symbol
         for sym in &symbols {
             if sym.name == word
                 && matches!(
@@ -411,9 +395,6 @@ impl tower_lsp::LanguageServer for HarnLsp {
         Ok(None)
     }
 
-    // -----------------------------------------------------------------------
-    // Find references (AST-based)
-    // -----------------------------------------------------------------------
     async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
         let uri = &params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
@@ -453,9 +434,6 @@ impl tower_lsp::LanguageServer for HarnLsp {
         Ok(Some(locations))
     }
 
-    // -----------------------------------------------------------------------
-    // Document symbols (AST-based with proper spans)
-    // -----------------------------------------------------------------------
     #[allow(deprecated)]
     async fn document_symbol(
         &self,
@@ -473,7 +451,6 @@ impl tower_lsp::LanguageServer for HarnLsp {
 
         let mut doc_symbols = Vec::new();
         for sym in &symbols {
-            // Only include top-level definitions for document symbols
             let kind = match sym.kind {
                 HarnSymbolKind::Pipeline => SymbolKind::FUNCTION,
                 HarnSymbolKind::Function => SymbolKind::FUNCTION,
@@ -483,7 +460,7 @@ impl tower_lsp::LanguageServer for HarnLsp {
                 HarnSymbolKind::Interface => SymbolKind::INTERFACE,
                 HarnSymbolKind::Parameter => continue, // skip params from outline
             };
-            // Only show top-level and direct-child symbols
+            // Outline shows top-level symbols plus functions/variables one level deep.
             if sym.scope_span.is_some()
                 && !matches!(
                     sym.kind,
@@ -517,9 +494,6 @@ impl tower_lsp::LanguageServer for HarnLsp {
         Ok(Some(DocumentSymbolResponse::Nested(doc_symbols)))
     }
 
-    // -----------------------------------------------------------------------
-    // Hover (with type information)
-    // -----------------------------------------------------------------------
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
@@ -538,7 +512,6 @@ impl tower_lsp::LanguageServer for HarnLsp {
             None => return Ok(None),
         };
 
-        // Check builtins first
         if let Some(doc) = builtin_doc(&word) {
             return Ok(Some(Hover {
                 contents: HoverContents::Markup(MarkupContent {
@@ -549,7 +522,6 @@ impl tower_lsp::LanguageServer for HarnLsp {
             }));
         }
 
-        // Check keywords
         if let Some(doc) = keyword_doc(&word) {
             return Ok(Some(Hover {
                 contents: HoverContents::Markup(MarkupContent {
@@ -569,20 +541,19 @@ impl tower_lsp::LanguageServer for HarnLsp {
             if sym.name != word {
                 continue;
             }
-            // Methods inside impl blocks are globally visible (called via
-            // dot syntax), so skip the scope check for them.
+            // Impl-block methods are globally visible via dot syntax — skip scope check.
             let in_scope = if sym.impl_type.is_some() {
                 true
             } else {
                 match sym.scope_span {
                     Some(sp) => cursor_offset >= sp.start && cursor_offset <= sp.end,
-                    None => true, // top-level symbol is always visible
+                    None => true,
                 }
             };
             if !in_scope {
                 continue;
             }
-            // Prefer the symbol with the narrowest (innermost) scope.
+            // Tightest-scope wins on shadowing.
             match best {
                 None => best = Some(sym),
                 Some(prev) => {
@@ -603,9 +574,7 @@ impl tower_lsp::LanguageServer for HarnLsp {
         if let Some(sym) = best {
             let mut hover_text = String::new();
 
-            // Show signature if available (functions, pipelines, structs, enums)
             if let Some(ref sig) = sym.signature {
-                // For methods, prefix with the impl type name
                 let display_sig = if let Some(ref impl_ty) = sym.impl_type {
                     format!("impl {impl_ty}\n{sig}")
                 } else {
@@ -613,8 +582,6 @@ impl tower_lsp::LanguageServer for HarnLsp {
                 };
                 hover_text.push_str(&format!("```harn\n{display_sig}\n```\n"));
             } else {
-                // For variables/parameters, build a code-block declaration
-                // with the type annotation when known.
                 let keyword = match sym.kind {
                     HarnSymbolKind::Variable => "let",
                     HarnSymbolKind::Parameter => "param",
@@ -640,14 +607,11 @@ impl tower_lsp::LanguageServer for HarnLsp {
                 }
             }
 
-            // For functions with a return type, show it below the signature
-            // (signatures already include "-> type", so only add for
-            // variables/params where the type is a shape and worth expanding).
+            // Signatures already show `-> type`; expand only shape types for
+            // variables/params so complex shapes get a human-readable breakdown.
             if sym.signature.is_none() {
                 if let Some(ref ty) = sym.type_info {
                     if matches!(ty, harn_parser::TypeExpr::Shape(_)) {
-                        // Already shown in the code block above; add a
-                        // human-readable breakdown for complex shapes.
                         let expanded = format_shape_expanded(ty, 0);
                         if !expanded.is_empty() {
                             hover_text.push_str(&format!("\n{expanded}"));
@@ -656,7 +620,6 @@ impl tower_lsp::LanguageServer for HarnLsp {
                 }
             }
 
-            // Append doc comment if present
             if let Some(ref doc) = sym.doc_comment {
                 hover_text.push_str(&format!("\n---\n\n{doc}"));
             }
@@ -673,9 +636,6 @@ impl tower_lsp::LanguageServer for HarnLsp {
         Ok(None)
     }
 
-    // -----------------------------------------------------------------------
-    // Signature help (shows parameter info as you type)
-    // -----------------------------------------------------------------------
     async fn signature_help(&self, params: SignatureHelpParams) -> Result<Option<SignatureHelp>> {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
@@ -700,7 +660,6 @@ impl tower_lsp::LanguageServer for HarnLsp {
             line
         };
 
-        // Walk backwards to find the matching `(` and the function name
         let mut depth = 0i32;
         let mut comma_count = 0u32;
         let mut open_paren_pos = None;
@@ -724,7 +683,6 @@ impl tower_lsp::LanguageServer for HarnLsp {
             None => return Ok(None),
         };
 
-        // Extract function name before the `(`
         let before = &prefix[..paren_pos];
         let name: String = before
             .chars()
@@ -739,13 +697,12 @@ impl tower_lsp::LanguageServer for HarnLsp {
             return Ok(None);
         }
 
-        // Look up in BUILTINS
         let sig_str = match BUILTINS.iter().find(|(n, _)| *n == name.as_str()) {
             Some((_, sig)) => *sig,
             None => return Ok(None),
         };
 
-        // Parse parameters from "name(param1, param2, ...) -> ret"
+        // Extract parameter fragment from `name(p1, p2, ...) -> ret`.
         let params_str = sig_str
             .split('(')
             .nth(1)
@@ -789,9 +746,6 @@ impl tower_lsp::LanguageServer for HarnLsp {
         }))
     }
 
-    // -----------------------------------------------------------------------
-    // Workspace symbol search (cross-file pipeline/function search)
-    // -----------------------------------------------------------------------
     async fn symbol(
         &self,
         params: WorkspaceSymbolParams,
@@ -834,9 +788,6 @@ impl tower_lsp::LanguageServer for HarnLsp {
         Ok(Some(results))
     }
 
-    // -----------------------------------------------------------------------
-    // Code actions (quick-fix for lint diagnostics)
-    // -----------------------------------------------------------------------
     async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
         let uri = &params.text_document.uri;
         let mut actions = Vec::new();
@@ -854,11 +805,9 @@ impl tower_lsp::LanguageServer for HarnLsp {
             )
         };
 
-        // Build code actions from structured FixEdit data in lint diagnostics
         for diag in &params.context.diagnostics {
             let msg = &diag.message;
 
-            // Try to find a matching LintDiagnostic with a fix
             if let Some(ld) = lint_diags.iter().find(|ld| {
                 msg.contains(&format!("[{}]", ld.rule)) && span_to_range(&ld.span) == diag.range
             }) {
@@ -908,7 +857,6 @@ impl tower_lsp::LanguageServer for HarnLsp {
                 }
             }
 
-            // Check type diagnostics for fixes (e.g. string interpolation)
             if diag.source.as_deref() == Some("harn-typecheck") {
                 if let Some(td) = type_diags.iter().find(|td| {
                     td.message == *msg && td.span.as_ref().map(span_to_range) == Some(diag.range)
@@ -942,8 +890,7 @@ impl tower_lsp::LanguageServer for HarnLsp {
                 }
             }
 
-            // Fallback: manual code actions for rules without structured fixes
-            // --- [unused-variable] / [unused-parameter]: add `_` prefix ---
+            // Fallback manual code actions for rules without structured fixes.
             if msg.contains("[unused-variable]") || msg.contains("[unused-parameter]") {
                 if let Some(name) = extract_backtick_name(msg) {
                     let offset = lsp_position_to_offset(&source, diag.range.start);
@@ -988,9 +935,6 @@ impl tower_lsp::LanguageServer for HarnLsp {
         Ok(Some(actions))
     }
 
-    // -----------------------------------------------------------------------
-    // Document formatting (delegates to harn-fmt)
-    // -----------------------------------------------------------------------
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
         let uri = &params.text_document.uri;
         let source = {
@@ -1010,7 +954,6 @@ impl tower_lsp::LanguageServer for HarnLsp {
             return Ok(None);
         }
 
-        // Replace the entire document
         let line_count = source.lines().count() as u32;
         let last_line_len = source.lines().last().map_or(0, |l| l.len()) as u32;
         Ok(Some(vec![TextEdit {
@@ -1022,9 +965,6 @@ impl tower_lsp::LanguageServer for HarnLsp {
         }]))
     }
 
-    // -----------------------------------------------------------------------
-    // Rename (document-wide symbol rename)
-    // -----------------------------------------------------------------------
     async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
         let uri = &params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
@@ -1045,19 +985,16 @@ impl tower_lsp::LanguageServer for HarnLsp {
             None => return Ok(None),
         };
 
-        // Verify the name refers to a known symbol (definition or builtin).
-        // Builtins should not be renamed.
+        // Builtins must not be renamed.
         if BUILTINS.iter().any(|(n, _)| *n == old_name) {
             return Ok(None);
         }
 
-        // Check that the symbol exists in the symbol table
         let symbol_exists = symbols.iter().any(|s| s.name == old_name);
         if !symbol_exists {
             return Ok(None);
         }
 
-        // Collect all references from the AST
         let program = match ast {
             Some(p) => p,
             None => return Ok(None),
@@ -1067,19 +1004,16 @@ impl tower_lsp::LanguageServer for HarnLsp {
             return Ok(None);
         }
 
-        // For each reference span, find the exact position of the name within
-        // the span text. Definition nodes have spans covering the whole
-        // declaration, so we search within each span for the identifier token.
+        // AST reference spans cover whole declarations, so rescan the lexer
+        // tokens within each span to pin down the exact identifier position.
         let mut edits = Vec::new();
         let mut seen_offsets = std::collections::HashSet::new();
 
-        // Also scan lexer tokens for precise identifier positions
         let mut lexer = Lexer::new(&source);
         if let Ok(tokens) = lexer.tokenize() {
             for token in &tokens {
                 if let TokenKind::Identifier(ref name) = token.kind {
                     if name == &old_name && !seen_offsets.contains(&token.span.start) {
-                        // Verify this token falls within one of the reference spans
                         let in_ref = ref_spans
                             .iter()
                             .any(|rs| token.span.start >= rs.start && token.span.end <= rs.end);
@@ -1101,7 +1035,7 @@ impl tower_lsp::LanguageServer for HarnLsp {
             return Ok(None);
         }
 
-        // Sort edits by position (bottom-up) to avoid offset shifting issues
+        // Sort bottom-up so applying edits doesn't shift later offsets.
         edits.sort_by(|a, b| {
             b.range
                 .start
@@ -1119,9 +1053,6 @@ impl tower_lsp::LanguageServer for HarnLsp {
         }))
     }
 
-    // -----------------------------------------------------------------------
-    // Semantic tokens (lexer-based with symbol table enhancement)
-    // -----------------------------------------------------------------------
     async fn semantic_tokens_full(
         &self,
         params: SemanticTokensParams,
@@ -1143,10 +1074,7 @@ impl tower_lsp::LanguageServer for HarnLsp {
         let mut lexer = Lexer::new(&source);
         let tokens = match lexer.tokenize() {
             Ok(t) => t,
-            Err(_) => {
-                // On lex error, we can't produce tokens reliably
-                return Ok(None);
-            }
+            Err(_) => return Ok(None),
         };
 
         let semantic_tokens = build_semantic_tokens(&tokens, &symbols, &source);

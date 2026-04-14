@@ -74,7 +74,6 @@ pub(crate) async fn run_file(
 ) {
     let (source, program) = parse_source_file(path);
 
-    // Static type checking
     let mut had_type_error = false;
     let type_diagnostics = harn_parser::TypeChecker::new().check(&program);
     for diag in &type_diagnostics {
@@ -135,12 +134,11 @@ pub(crate) async fn run_file(
     let source_parent = std::path::Path::new(path)
         .parent()
         .unwrap_or(std::path::Path::new("."));
-    // Use project root (harn.toml) for metadata/store, falling back to source dir.
+    // Metadata/store rooted at harn.toml when present; source dir otherwise.
     let project_root = harn_vm::stdlib::process::find_project_root(source_parent);
     let store_base = project_root.as_deref().unwrap_or(source_parent);
     harn_vm::register_store_builtins(&mut vm, store_base);
     harn_vm::register_metadata_builtins(&mut vm, store_base);
-    // Register checkpoint builtins — pipeline name derived from source file.
     let pipeline_name = std::path::Path::new(path)
         .file_stem()
         .and_then(|s| s.to_str())
@@ -160,9 +158,8 @@ pub(crate) async fn run_file(
         }
     }
 
-    // Expose positional CLI args to the pipeline as `argv` (list of strings).
     // `harn run script.harn -- a b c` yields `argv == ["a", "b", "c"]`.
-    // Always set — scripts can branch on `len(argv) == 0`.
+    // Always set so scripts can rely on `len(argv)`.
     let argv_values: Vec<harn_vm::VmValue> = script_argv
         .iter()
         .map(|s| harn_vm::VmValue::String(std::rc::Rc::from(s.as_str())))
@@ -172,14 +169,13 @@ pub(crate) async fn run_file(
         harn_vm::VmValue::List(std::rc::Rc::new(argv_values)),
     );
 
-    // Auto-connect MCP servers declared in harn.toml
     if let Some(manifest) = package::try_read_manifest_for(Path::new(path)) {
         if !manifest.mcp.is_empty() {
             connect_mcp_servers(&manifest.mcp, &mut vm).await;
         }
     }
 
-    // Install signal handler for graceful shutdown: flush run records before exit.
+    // Graceful shutdown: flush run records before exit on SIGINT/SIGTERM.
     let cancelled = Arc::new(AtomicBool::new(false));
     let cancelled_clone = cancelled.clone();
     tokio::spawn(async move {
@@ -194,7 +190,6 @@ pub(crate) async fn run_file(
             }
             cancelled_clone.store(true, Ordering::SeqCst);
             eprintln!("[harn] signal received, flushing state...");
-            // Give the VM a moment to flush, then exit with timeout code.
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
             process::exit(124);
         }
@@ -313,7 +308,7 @@ fn print_trace_summary() {
         total_ms += entry.duration_ms;
     }
     let total_tokens = total_input + total_output;
-    // Rough cost estimate (Sonnet 4 pricing: $3/MTok input, $15/MTok output)
+    // Rough cost estimate using Sonnet 4 pricing ($3/MTok in, $15/MTok out).
     let cost = (total_input as f64 * 3.0 + total_output as f64 * 15.0) / 1_000_000.0;
     eprintln!(
         "  \x1b[1m{} call{}, {} tokens ({}in + {}out), {} ms, ~${:.4}\x1b[0m",
@@ -327,11 +322,8 @@ fn print_trace_summary() {
     );
 }
 
-/// Run a .harn file as an MCP server over stdio.
-///
-/// The pipeline should return a tool_registry value. The CLI then starts an
-/// MCP server loop that exposes those tools to any MCP client (Claude Desktop,
-/// Cursor, etc.).
+/// Run a .harn file as an MCP server over stdio. The pipeline must call
+/// `mcp_serve(registry)` so the CLI can expose its tools.
 pub(crate) async fn run_file_mcp_serve(path: &str) {
     let (source, program) = crate::parse_source_file(path);
 
@@ -384,7 +376,6 @@ pub(crate) async fn run_file_mcp_serve(path: &str) {
         }
     }
 
-    // Auto-connect MCP client servers declared in harn.toml
     if let Some(manifest) = package::try_read_manifest_for(Path::new(path)) {
         if !manifest.mcp.is_empty() {
             connect_mcp_servers(&manifest.mcp, &mut vm).await;
@@ -394,7 +385,6 @@ pub(crate) async fn run_file_mcp_serve(path: &str) {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            // Execute the pipeline — it should call mcp_serve(registry)
             match vm.execute(&chunk).await {
                 Ok(_) => {}
                 Err(e) => {
@@ -403,13 +393,12 @@ pub(crate) async fn run_file_mcp_serve(path: &str) {
                 }
             }
 
-            // Any print/println output goes to stderr (stdout is MCP transport)
+            // Pipeline output goes to stderr — stdout is the MCP transport.
             let output = vm.output();
             if !output.is_empty() {
                 eprint!("{output}");
             }
 
-            // Retrieve the registry that mcp_serve() captured
             let registry = match harn_vm::take_mcp_serve_registry() {
                 Some(r) => r,
                 None => {
@@ -483,7 +472,6 @@ pub(crate) async fn run_watch(path: &str, denied_builtins: HashSet<String>) {
     });
     let watch_dir = abs_path.parent().unwrap_or(Path::new("."));
 
-    // Initial run
     eprintln!("\x1b[2m[watch] running {path}...\x1b[0m");
     run_file(path, false, denied_builtins.clone(), Vec::new()).await;
 
@@ -524,10 +512,9 @@ pub(crate) async fn run_watch(path: &str, denied_builtins: HashSet<String>) {
         watch_dir.display()
     );
 
-    // Debounce: wait for events, then re-run after a short pause
     loop {
         rx.recv().await;
-        // Drain any additional events within 200ms
+        // Debounce: let bursts of events settle for 200ms before re-running.
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         while rx.try_recv().is_ok() {}
 

@@ -9,10 +9,6 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-// =============================================================================
-// Event types
-// =============================================================================
-
 /// Severity level for log events.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EventLevel {
@@ -42,10 +38,6 @@ pub struct SpanEvent {
     pub metadata: BTreeMap<String, serde_json::Value>,
 }
 
-// =============================================================================
-// EventSink trait
-// =============================================================================
-
 /// Trait for receiving structured events from the VM.
 pub trait EventSink {
     fn emit_log(&self, event: &LogEvent);
@@ -53,11 +45,7 @@ pub trait EventSink {
     fn emit_span_end(&self, span_id: u64, metadata: &BTreeMap<String, serde_json::Value>);
 }
 
-// =============================================================================
-// StderrSink — default, backward-compatible
-// =============================================================================
-
-/// Default sink that writes formatted output to stderr (preserves current behavior).
+/// Default sink that writes formatted output to stderr.
 pub struct StderrSink;
 
 impl EventSink for StderrSink {
@@ -69,8 +57,8 @@ impl EventSink for StderrSink {
             EventLevel::Warn => "WARN",
             EventLevel::Error => "ERROR",
         };
-        // Preserve the existing "[harn]" prefix style for warn/error so
-        // that downstream tooling and tests that parse stderr are unaffected.
+        // "[harn]" prefix for warn/error is relied on by downstream
+        // tooling and tests that parse stderr.
         match event.level {
             EventLevel::Warn => {
                 eprintln!("[harn] warning: {}", event.message);
@@ -88,14 +76,8 @@ impl EventSink for StderrSink {
         // Silent by default — spans are for observability backends.
     }
 
-    fn emit_span_end(&self, _span_id: u64, _metadata: &BTreeMap<String, serde_json::Value>) {
-        // Silent by default.
-    }
+    fn emit_span_end(&self, _span_id: u64, _metadata: &BTreeMap<String, serde_json::Value>) {}
 }
-
-// =============================================================================
-// CollectorSink — for testing and inspection
-// =============================================================================
 
 /// A sink that collects events for later retrieval (testing, inspection).
 pub struct CollectorSink {
@@ -127,14 +109,8 @@ impl EventSink for CollectorSink {
         self.spans.borrow_mut().push(event.clone());
     }
 
-    fn emit_span_end(&self, _span_id: u64, _metadata: &BTreeMap<String, serde_json::Value>) {
-        // Could store end events if needed; for now just track starts.
-    }
+    fn emit_span_end(&self, _span_id: u64, _metadata: &BTreeMap<String, serde_json::Value>) {}
 }
-
-// =============================================================================
-// Thread-local sink registry
-// =============================================================================
 
 thread_local! {
     static EVENT_SINKS: RefCell<Vec<Rc<dyn EventSink>>> = RefCell::new(vec![Rc::new(StderrSink)]);
@@ -158,10 +134,6 @@ pub fn reset_event_sinks() {
         s.push(Rc::new(StderrSink));
     });
 }
-
-// =============================================================================
-// Emission helpers
-// =============================================================================
 
 /// Emit a structured log event to all registered sinks.
 pub fn emit_log(
@@ -214,10 +186,6 @@ pub fn emit_span_end(span_id: u64, metadata: BTreeMap<String, serde_json::Value>
     });
 }
 
-// =============================================================================
-// Convenience functions
-// =============================================================================
-
 /// Log at Info level with no metadata.
 pub fn log_info(category: &str, message: &str) {
     emit_log(EventLevel::Info, category, message, BTreeMap::new());
@@ -247,10 +215,6 @@ pub fn log_info_meta(category: &str, message: &str, metadata: BTreeMap<String, s
 pub fn log_warn_meta(category: &str, message: &str, metadata: BTreeMap<String, serde_json::Value>) {
     emit_log(EventLevel::Warn, category, message, metadata);
 }
-
-// =============================================================================
-// OTel stub (behind feature flag)
-// =============================================================================
 
 /// OpenTelemetry exporter sink. Requires the `otel` feature flag.
 /// Forwards Harn log events and span lifecycle to OTLP collectors.
@@ -341,10 +305,6 @@ impl Drop for OtelSink {
         let _ = self.provider.shutdown();
     }
 }
-
-// =============================================================================
-// Tests
-// =============================================================================
 
 #[cfg(test)]
 mod tests {

@@ -297,23 +297,20 @@ pub(crate) async fn run_repl() {
         DefaultPromptSegment::Empty,
     );
 
-    // Accumulated REPL history. Each accepted line is appended here and the
-    // whole block is re-executed on every new input so that bindings like
-    // `let x = 5` remain visible to later expressions (simple replay model —
-    // side effects from prior lines will run again).
+    // Replay model: each accepted line is appended to `accumulated` and the
+    // whole block is re-executed on every new input so bindings persist.
+    // Side effects from prior lines run again on each cycle.
     let mut accumulated: Vec<String> = Vec::new();
-    // Top-level `fn`/`struct`/`enum`/`type` declarations must live outside the
-    // pipeline body, so track them separately and splice them into the
-    // synthetic program at emit time.
+    // Top-level `fn`/`struct`/`enum`/`type` items live outside the pipeline
+    // body, so they're tracked separately and spliced in at emit time.
     let mut top_level: Vec<String> = Vec::new();
     let mut prior_output_len: usize = 0;
-    // Counter for captured bare-expression results; bare expressions are
-    // auto-wrapped as `let _N = <expr>; println(<expr-value>)` so the result
-    // is both displayed and saved under `_1`, `_2`, etc. for later reference.
+    // Bare expressions get auto-wrapped as `let _N = <expr>` so the value
+    // is both displayed and reachable later via `_1`, `_2`, ...
     let mut result_counter: usize = 0;
 
     loop {
-        // Run reedline in spawn_blocking since it blocks on terminal input
+        // reedline blocks on terminal input, so off-thread it.
         let input = tokio::task::spawn_blocking({
             let mut editor = std::mem::replace(&mut line_editor, Reedline::create());
             let prompt = prompt.clone();
@@ -337,9 +334,8 @@ pub(crate) async fn run_repl() {
                     first_word,
                     Some("fn" | "struct" | "enum" | "type" | "pub" | "import"),
                 );
-                // Classify as a "statement" keyword if the first token is one
-                // that introduces a statement rather than an expression. Bare
-                // expressions get auto-wrapped so their value is displayed.
+                // Statement-introducing keywords skip the bare-expression
+                // auto-wrap path.
                 let is_statement_kw = matches!(
                     first_word,
                     Some(
@@ -413,9 +409,8 @@ pub(crate) async fn run_repl() {
 
                 match execute(&source, None).await {
                     Ok(output) => {
-                        // Only show output produced by the newly-evaluated
-                        // fragment — replayed side effects from prior lines
-                        // are suppressed by skipping the prior prefix.
+                        // Skip the prior prefix so replayed side effects
+                        // from earlier lines don't print again.
                         let new_portion = if output.len() > prior_output_len {
                             &output[prior_output_len..]
                         } else {

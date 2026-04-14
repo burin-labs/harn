@@ -73,7 +73,6 @@ pub enum AgentEvent {
         session_id: String,
         plan: serde_json::Value,
     },
-    // ── Internal (no direct ACP equivalent) ────────────────────────
     TurnStart {
         session_id: String,
         iteration: usize,
@@ -181,8 +180,6 @@ impl AgentEventSink for MultiSink {
     }
 }
 
-// ── Registries ──────────────────────────────────────────────────────
-
 type ExternalSinkRegistry = RwLock<HashMap<String, Vec<Arc<dyn AgentEventSink>>>>;
 
 fn external_sinks() -> &'static ExternalSinkRegistry {
@@ -200,7 +197,6 @@ thread_local! {
         RefCell::new(HashMap::new());
 }
 
-// Register an external (Rust-side) sink for a session.
 pub fn register_sink(session_id: impl Into<String>, sink: Arc<dyn AgentEventSink>) {
     let session_id = session_id.into();
     let mut reg = external_sinks().write().expect("sink registry poisoned");

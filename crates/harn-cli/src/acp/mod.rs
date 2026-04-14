@@ -69,10 +69,6 @@ fn suppress_default_info_log(message: &str) -> bool {
     .any(|prefix| message.starts_with(prefix))
 }
 
-// ---------------------------------------------------------------------------
-// Session state
-// ---------------------------------------------------------------------------
-
 struct Session {
     cwd: PathBuf,
     /// If a cancel was requested for the current prompt execution.
@@ -80,10 +76,6 @@ struct Session {
     /// Active host bridge for queued input / daemon resume while a prompt runs.
     host_bridge: Option<Rc<harn_vm::bridge::HostBridge>>,
 }
-
-// ---------------------------------------------------------------------------
-// AcpServer
-// ---------------------------------------------------------------------------
 
 /// ACP server that reads JSON-RPC requests from stdin and writes
 /// responses / notifications to stdout.
@@ -186,10 +178,6 @@ impl AcpServer {
         )
     }
 
-    // -----------------------------------------------------------------------
-    // Request handlers
-    // -----------------------------------------------------------------------
-
     fn handle_initialize(&self, id: &serde_json::Value) {
         self.send_response(
             id,
@@ -246,7 +234,6 @@ impl AcpServer {
             }
         };
 
-        // Extract the prompt text from the content blocks.
         let prompt_text = params
             .get("prompt")
             .and_then(|v| v.as_array())
@@ -265,10 +252,8 @@ impl AcpServer {
             })
             .unwrap_or_default();
 
-        // Look up the session.
         let (cwd, cancelled) = match self.sessions.get_mut(&session_id) {
             Some(s) => {
-                // Reset cancel flag for new execution.
                 s.cancelled.store(false, Ordering::SeqCst);
                 s.host_bridge = None;
                 (s.cwd.clone(), s.cancelled.clone())
@@ -283,8 +268,6 @@ impl AcpServer {
             exit_after_fatal_prompt_error(&self.stdout_lock, &session_id, id, &message)
         };
 
-        // Determine source to execute: either the configured pipeline file or
-        // the prompt text treated as inline harn source.
         let (source, source_path) = if let Some(ref pipeline_path) = self.pipeline {
             let full_path = if std::path::Path::new(pipeline_path).is_absolute() {
                 PathBuf::from(pipeline_path)
@@ -299,31 +282,24 @@ impl AcpServer {
                 )),
             }
         } else {
-            // Treat the prompt text as inline harn source code.
-            // Wrap in a pipeline so the compiler has an entry point.
+            // Wrap inline prompt source in a pipeline so the compiler has
+            // an entry point.
             let wrapped = format!("pipeline main() {{\n{prompt_text}\n}}");
             (wrapped, None)
         };
 
-        // Build shared state for bridge-style builtins.
         let stdout_lock = self.stdout_lock.clone();
         let pending = self.pending.clone();
         let next_id = &self.next_id;
         let sid = session_id.clone();
 
-        // Register a per-session AgentEventSink that translates canonical
-        // AgentEvent variants into ACP session/update notifications. The
-        // turn loop (harn-vm::llm::agent) emits ToolCall / ToolCallUpdate
-        // events around every dispatch; without this sink the ACP client
-        // wouldn't observe tool lifecycle on the wire.
+        // Translate AgentEvents into ACP session/update notifications so
+        // the client observes tool lifecycle on the wire.
         register_sink(
             session_id.clone(),
             Arc::new(AcpAgentEventSink::new(stdout_lock.clone())),
         );
 
-        // We need to construct a lightweight struct that the builtins can use
-        // to send notifications and make client requests. We package the
-        // relevant Arc/Rc references into an AcpBridge.
         let bridge = Rc::new(AcpBridge {
             session_id: sid.clone(),
             stdout_lock: stdout_lock.clone(),
@@ -362,7 +338,6 @@ impl AcpServer {
             session.host_bridge = Some(host_bridge.clone());
         }
 
-        // Execute the compiled chunk.
         let id_owned = id.clone();
         let send_lock = self.stdout_lock.clone();
         let result = execute::execute_chunk(
@@ -378,16 +353,13 @@ impl AcpServer {
             session.host_bridge = None;
         }
 
-        // Unregister the AgentEventSink so the next prompt starts clean
-        // and a subsequent session re-using this id cannot receive stale
+        // Unregister so a session reusing this id can't receive stale
         // events routed to a dropped stdout lock.
         clear_session_sinks(&session_id);
 
         match result {
             Ok(output) => {
                 if !output.is_empty() {
-                    // Send output as an update notification with cumulative
-                    // visible assistant text for host UIs.
                     bridge.send_update(&output);
                 }
                 send_json_response(
@@ -471,10 +443,6 @@ impl AcpServer {
     }
 }
 
-// ---------------------------------------------------------------------------
-// AcpBridge — lightweight handle shared with VM builtins
-// ---------------------------------------------------------------------------
-
 /// Shared state that bridge-style builtins use to communicate with the
 /// ACP client (editor) over JSON-RPC.
 pub(super) struct AcpBridge {
@@ -530,13 +498,9 @@ impl AcpBridge {
         );
     }
 
-    /// Send a structured `session/update` with progress phase, message, and data.
-    ///
-    /// `progress` is a harn vendor-extension session-update variant. The
-    /// canonical ACP `sessionUpdate` values (`agent_message_chunk`,
-    /// `agent_thought_chunk`, `tool_call`, `tool_call_update`, `plan`) do
-    /// not include a progress phase concept, so harn retains this as an
-    /// extension for pipeline-level progress reporting.
+    /// Send a structured `session/update` with progress phase, message,
+    /// and data. `progress` is a harn vendor-extension session-update
+    /// variant; canonical ACP has no progress-phase concept.
     pub(super) fn send_progress(
         &self,
         phase: &str,
@@ -568,10 +532,9 @@ impl AcpBridge {
         );
     }
 
-    /// Send a structured `session/update` with log level, message, and fields.
-    ///
-    /// `log` is a harn vendor-extension session-update variant; canonical
-    /// ACP does not define a log channel on the session-update stream.
+    /// Send a structured `session/update` with log level, message, and
+    /// fields. `log` is a harn vendor-extension; canonical ACP has no
+    /// log channel on the session-update stream.
     pub(super) fn send_log(&self, level: &str, message: &str, fields: Option<serde_json::Value>) {
         if level == "info" && suppress_default_info_log(message) {
             return;
@@ -660,11 +623,7 @@ impl AcpBridge {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Main entry point
-// ---------------------------------------------------------------------------
-
-/// Start the ACP server.  Reads JSON-RPC from stdin, writes to stdout.
+/// Start the ACP server. Reads JSON-RPC from stdin, writes to stdout.
 pub async fn run_acp_server(pipeline: Option<&str>) {
     let local = tokio::task::LocalSet::new();
     let pipeline_owned = pipeline.map(|s| s.to_string());
@@ -673,10 +632,8 @@ pub async fn run_acp_server(pipeline: Option<&str>) {
         .run_until(async move {
             let mut server = AcpServer::new(pipeline_owned);
 
-            // Spawn the stdin reader.  It dispatches:
-            //   - responses (has "id" + "result"/"error") -> pending waiters
-            //   - requests  (has "id" + "method")          -> request channel
-            //   - notifications (no "id" + "method")       -> request channel
+            // stdin dispatcher: routes responses to pending waiters, and
+            // requests/notifications onto the request channel.
             let pending_clone = server.pending.clone();
             let (request_tx, mut request_rx) =
                 tokio::sync::mpsc::unbounded_channel::<serde_json::Value>();
@@ -697,9 +654,7 @@ pub async fn run_acp_server(pipeline: Option<&str>) {
                         Err(_) => continue,
                     };
 
-                    // Is this a response to one of our outgoing requests?
                     if msg.get("method").is_none() && msg.get("id").is_some() {
-                        // It's a response.
                         if let Some(id) = msg["id"].as_u64() {
                             let mut pending = pending_clone.lock().await;
                             if let Some(sender) = pending.remove(&id) {
@@ -709,7 +664,6 @@ pub async fn run_acp_server(pipeline: Option<&str>) {
                         continue;
                     }
 
-                    // Otherwise it's a request or notification from the client.
                     let _ = request_tx.send(msg);
                 }
 
@@ -718,7 +672,6 @@ pub async fn run_acp_server(pipeline: Option<&str>) {
                 pending.clear();
             });
 
-            // Main request-processing loop.
             while let Some(msg) = request_rx.recv().await {
                 let method = match msg.get("method").and_then(|v| v.as_str()) {
                     Some(m) => m.to_string(),
@@ -750,7 +703,6 @@ pub async fn run_acp_server(pipeline: Option<&str>) {
                         server.handle_session_list(&id);
                     }
                     _ => {
-                        // Unknown method — send error if it has an id.
                         if !id.is_null() {
                             server.send_error(&id, -32601, &format!("Method not found: {method}"));
                         }

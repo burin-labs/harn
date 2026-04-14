@@ -23,8 +23,6 @@ pub(super) async fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Rc<AcpBr
         })
         .unwrap_or_else(|_| harn_vm::VmValue::Dict(Rc::new(std::collections::BTreeMap::new())));
 
-    // --- Output builtins: route through session/update ---
-
     let b = bridge.clone();
     vm.register_builtin("log", move |args, _out| {
         let msg = args.first().map(|a| a.display()).unwrap_or_default();
@@ -46,8 +44,6 @@ pub(super) async fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Rc<AcpBr
         Ok(harn_vm::VmValue::Nil)
     });
 
-    // --- Host callback — generic escape hatch ---
-
     let b = bridge.clone();
     vm.register_async_builtin("host_call", move |args| {
         let bridge = b.clone();
@@ -68,8 +64,6 @@ pub(super) async fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Rc<AcpBr
             Ok(harn_vm::bridge::json_result_to_vm_value(&result))
         }
     });
-
-    // --- Typed host capabilities ---
 
     let host_capabilities_cache = host_capability_manifest.clone();
     vm.register_builtin("host_capabilities", move |_args, _out| {
@@ -107,8 +101,7 @@ pub(super) async fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Rc<AcpBr
         Ok(harn_vm::VmValue::Bool(valid))
     });
 
-    // --- ask_user — delegate to host (IDE shows modal, CLI reads stdin) ---
-
+    // ask_user is host-delegated: IDEs show a modal, CLIs read stdin.
     let b = bridge.clone();
     vm.register_async_builtin("ask_user", move |args| {
         let bridge = b.clone();
@@ -128,15 +121,11 @@ pub(super) async fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Rc<AcpBr
         }
     });
 
-    // --- run_command — alias to exec/terminal ---
-
     let b = bridge.clone();
     vm.register_async_builtin("run_command", move |args| {
         let bridge = b.clone();
         async move { acp_terminal_exec(&bridge, &args).await }
     });
-
-    // --- Structured log builtins ---
 
     for level in ["log_debug", "log_info", "log_warn", "log_error"] {
         let b = bridge.clone();
@@ -155,22 +144,16 @@ pub(super) async fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Rc<AcpBr
         });
     }
 
-    // --- Live span streaming ---
-    //
-    // The default `trace_end` builtin writes its `span_end` line to the
-    // VM's internal `out` buffer, which only surfaces when the whole
-    // pipeline completes. In bridge mode that's too late — pipelines
-    // that get stuck in a hot loop never reach the flush point, so
-    // timing data is invisible when we need it most. Override the
-    // builtin so `span_end` events stream live via `send_log` just
-    // like `log_info`.
+    // The default `trace_end` writes to the VM's `out` buffer, which only
+    // flushes when the pipeline completes. Override it so span ends stream
+    // live — pipelines stuck in hot loops never reach the flush point and
+    // timing data would otherwise be invisible when it matters.
     let b = bridge.clone();
     vm.register_builtin("trace_end", move |args, _out| {
         let (name, trace_id, span_id, duration_ms) =
             harn_vm::stdlib::tracing::finish_span_from_args(args)?;
-        // Stamp the span name + duration into the human-readable message
-        // itself so formatters that only surface `message` (not the fields
-        // payload) still show useful timing info at the top of log lines.
+        // Stamp timing into the human-readable message so formatters that
+        // only surface `message` still show span name + duration.
         let message = format!("span_end {name} duration_ms={duration_ms}");
         let fields = serde_json::json!({
             "trace_id": trace_id,
@@ -181,8 +164,6 @@ pub(super) async fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Rc<AcpBr
         b.send_log("info", &message, Some(fields));
         Ok(harn_vm::VmValue::Nil)
     });
-
-    // --- Progress reporting ---
 
     let b = bridge.clone();
     vm.register_builtin("progress", move |args, _out| {
@@ -208,8 +189,7 @@ pub(super) async fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Rc<AcpBr
         Ok(harn_vm::VmValue::Nil)
     });
 
-    // --- Terminal: delegate exec/shell via terminal/create + wait + output + release ---
-
+    // exec/shell route through terminal/create + wait + output + release.
     for name in ["exec", "shell"] {
         vm.unregister_builtin(name);
     }
@@ -239,7 +219,6 @@ pub(super) async fn acp_terminal_exec(
         )));
     }
 
-    // 1. Create a terminal with the command.
     let create_result = bridge
         .call_client(
             "terminal/create",
@@ -298,7 +277,7 @@ pub(super) async fn acp_terminal_exec(
         return Ok(harn_vm::VmValue::Dict(Rc::new(map)));
     }
 
-    // 2. Wait for the command to finish — the result contains stdout/stderr/combined/exitCode.
+    // wait_for_exit returns the stdout/stderr/combined/exitCode payload.
     let wait_result = bridge
         .call_client(
             "terminal/wait_for_exit",
@@ -310,7 +289,7 @@ pub(super) async fn acp_terminal_exec(
         .await
         .unwrap_or(serde_json::json!({}));
 
-    // 3. Read any remaining output (usually empty since wait_for_exit reads the pipes).
+    // Usually empty since wait_for_exit already drained the pipes.
     let _output_result = bridge
         .call_client(
             "terminal/output",
@@ -322,10 +301,8 @@ pub(super) async fn acp_terminal_exec(
         .await
         .unwrap_or(serde_json::json!({}));
 
-    // Use wait_for_exit result which has the actual stdout/stderr/combined.
     let output_result = wait_result;
 
-    // 4. Release the terminal.
     let _ = bridge
         .call_client(
             "terminal/release",

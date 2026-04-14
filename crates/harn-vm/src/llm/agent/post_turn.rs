@@ -115,9 +115,6 @@ pub(super) async fn run_post_turn(
             state.consecutive_text_only = 0;
         }
 
-        // Post-turn callback: let the pipeline inspect each tool turn
-        // and optionally inject a user message (e.g. batching hints,
-        // progress tracking, adaptive instructions).
         if call_result.tool_calls.len() == 1 {
             state.consecutive_single_tool_turns += 1;
         } else {
@@ -138,10 +135,6 @@ pub(super) async fn run_post_turn(
                 state.successful_tools_used.push((*tool_name).to_string());
             }
         }
-        // Emit TurnEnd. Pipeline subscribers may react by pushing
-        // pending-feedback messages via `agent_inject_feedback`;
-        // those are drained at the top of the next iteration before
-        // the LLM is called again.
         let tool_names: Vec<&str> = call_result
             .tool_calls
             .iter()
@@ -172,11 +165,8 @@ pub(super) async fn run_post_turn(
                 return Ok(IterationOutcome::Break);
             }
         }
-        // Invoke the optional post_turn_callback. Accepts:
-        //   ""/nil: no-op
-        //   string: inject as runtime-feedback user message
-        //   bool true: stop the stage immediately
-        //   dict {message, stop}: both (optional fields)
+        // post_turn_callback returns: ""/nil (no-op), string (inject as
+        // feedback), true (stop), or {message, stop} (dict for both).
         if let Some(VmValue::Closure(closure)) = ctx.post_turn_callback.as_ref() {
             let mut cb_vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
                 VmError::Runtime(
@@ -205,9 +195,8 @@ pub(super) async fn run_post_turn(
             }
         }
 
-        // Auto-compaction check after tool processing.
-        // Include the system prompt + tool definitions in the estimate
-        // since they consume context window alongside messages.
+        // Include system prompt + tool defs in the estimate since they
+        // consume context window alongside messages.
         if let Some(ref ac) = ctx.auto_compact {
             let mut est = crate::orchestration::estimate_message_tokens(&state.visible_messages);
             if let Some(ref sys) = opts.system {
@@ -247,10 +236,8 @@ pub(super) async fn run_post_turn(
             }
         }
 
-        // Feed parse-error diagnostics back in the mixed case too, so the
-        // model can correct its syntax in the next turn (mirrors the
-        // text-only branch below). Without this, rejected calls would
-        // silently disappear from the conversation.
+        // Surface parse errors in mixed turns too; otherwise rejected
+        // calls silently vanish from the conversation.
         if !call_result.tool_parse_errors.is_empty() {
             let error_msg = call_result.tool_parse_errors.join("\n\n");
             append_message_to_contexts(
@@ -275,7 +262,6 @@ pub(super) async fn run_post_turn(
         return Ok(IterationOutcome::Continue);
     }
 
-    // Text-only branch (no tool calls).
     let assistant_content_for_history = assistant_history_text(
         call_result.canonical_history.as_deref(),
         &call_result.text,
@@ -291,13 +277,12 @@ pub(super) async fn run_post_turn(
         }),
     );
 
-    // Sentinel check for text-only responses (no tool calls).
     if call_result.sentinel_hit {
         return Ok(IterationOutcome::Break);
     }
 
-    // If the model attempted tool calls but parsing failed, send diagnostics
-    // back so it can fix its syntax instead of being silently nudged.
+    // Send parse diagnostics so the model fixes its syntax instead of
+    // being silently nudged.
     if !call_result.tool_parse_errors.is_empty() {
         let error_msg = call_result.tool_parse_errors.join("\n\n");
         append_message_to_contexts(
@@ -310,14 +295,11 @@ pub(super) async fn run_post_turn(
         return Ok(IterationOutcome::Continue);
     }
 
-    // done_sentinel already checked before tool dispatch above;
-    // this path only reached for text-only responses without sentinel.
     if !ctx.persistent && !ctx.daemon {
         return Ok(IterationOutcome::Break);
     }
 
-    // Daemon mode: if no tool calls and agent is idle, notify host and
-    // wait briefly for user messages before deciding to continue/exit.
+    // Daemon idle: notify host and wait briefly for user messages.
     if ctx.daemon && !ctx.persistent {
         state.daemon_state = "idle".to_string();
         if ctx.daemon_config.consolidate_on_idle {
@@ -510,13 +492,6 @@ pub(super) async fn run_post_turn(
         return Ok(IterationOutcome::Break);
     }
 
-    // Silent continuation for short prose: when the model emits a
-    // short text-only response (< 150 tokens, typically "thinking"
-    // statements like "Let me check..."), don't inject a nudge. Just
-    // loop back — the model sees its own text as the last assistant
-    // message and naturally continues to act. This avoids polluting
-    // context with nudge messages and the "nudge → rephrase → nudge"
-    // loop seen with chatty models.
     let nudge = action_turn_nudge(ctx.tool_format, ctx.turn_policy, call_result.prose_too_long)
         .or_else(|| ctx.custom_nudge.clone())
         .unwrap_or_else(|| "Continue — use a tool call to make progress.".to_string());

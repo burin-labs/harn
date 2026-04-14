@@ -151,10 +151,8 @@ fn parse_tool_annotations(map: &serde_json::Map<String, serde_json::Value>) -> T
         })
         .unwrap_or_default();
 
-    // Pipelines may declare arg_schema under `policy.arg_schema` as a
-    // fully structured object, or as legacy flat fields on `policy`.
-    // Prefer the structured form; fall back to the flat form for
-    // gradual migration.
+    // Accept both the structured `policy.arg_schema` object and the legacy
+    // flat fields on `policy` so pipelines can migrate gradually.
     let arg_schema = if let Some(schema) = policy.get("arg_schema") {
         serde_json::from_value::<ToolArgSchema>(schema.clone()).unwrap_or_default()
     } else {
@@ -682,7 +680,6 @@ pub async fn execute_stage_node(
         .ok()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| {
-            // Auto-detect from model/provider alias config.
             let model = std::env::var("HARN_LLM_MODEL").unwrap_or_default();
             let provider = std::env::var("HARN_LLM_PROVIDER").unwrap_or_default();
             crate::llm_config::default_tool_format(&model, &provider)
@@ -801,7 +798,6 @@ pub async fn execute_stage_node(
             let effective_policy = tool_policy
                 .intersect(&node.capability_policy)
                 .map_err(VmError::Runtime)?;
-            // Build auto-compact config from transcript_policy fields
             let auto_compact = if node.transcript_policy.auto_compact {
                 let mut ac = crate::orchestration::AutoCompactConfig::default();
                 if let Some(v) = node.transcript_policy.compact_threshold {
@@ -823,7 +819,8 @@ pub async fn execute_stage_node(
                         ac.hard_limit_strategy = s;
                     }
                 }
-                // Extract closure fields from raw transcript_policy dict
+                // Closure fields can't round-trip through serde, so extract them
+                // directly from the raw VmValue dict.
                 if let Some(ref raw_tp) = node.raw_transcript_policy {
                     if let Some(dict) = raw_tp.as_dict() {
                         if let Some(cb) = dict.get("compress_callback") {
@@ -834,7 +831,6 @@ pub async fn execute_stage_node(
                         }
                     }
                 }
-                // Adapt thresholds to provider context window
                 {
                     let user_specified_threshold =
                         node.transcript_policy.compact_threshold.is_some();
@@ -884,11 +880,9 @@ pub async fn execute_stage_node(
                         .stop_after_successful_tools
                         .clone(),
                     require_successful_tools: node.model_policy.require_successful_tools.clone(),
-                    // Honor any caller-supplied session_id on the
-                    // model_policy so pipelines that install
-                    // agent_subscribe handlers keyed on that id actually
-                    // receive events. Falls back to a freshly minted id
-                    // when the caller hasn't specified one.
+                    // Honor caller-supplied session_id so pipelines that install
+                    // agent_subscribe handlers keyed on that id actually receive
+                    // events. Falls back to a freshly minted id.
                     session_id: node
                         .raw_model_policy
                         .as_ref()
@@ -902,10 +896,9 @@ pub async fn execute_stage_node(
                         })
                         .unwrap_or_else(|| format!("workflow_stage_{}", uuid::Uuid::now_v7())),
                     event_sink: None,
-                    // Seed the ledger from the workflow stage's explicit
-                    // deliverables/ledger fields so the graph can carry a
-                    // task-wide plan down through map branches and nested
-                    // stages. Falls back to an empty ledger (no gate).
+                    // Seed from the stage's explicit deliverables/ledger so the
+                    // graph carries a task-wide plan through map branches and
+                    // nested stages. Empty ledger means no gate.
                     task_ledger: node
                         .raw_model_policy
                         .as_ref()
@@ -960,9 +953,9 @@ pub async fn execute_stage_node(
     }
 
     let visible_text = llm_result["text"].as_str().unwrap_or_default().to_string();
-    // Non-LLM stages (verify command, condition, fork, join, ...) don't
-    // produce a "transcript" field. Fall back to the stage's input transcript
-    // so the running conversation survives cross-stage transitions.
+    // Non-LLM stages (verify command, condition, fork, join, ...) don't produce
+    // a "transcript" field; fall back to the input so cross-stage conversation
+    // state survives transitions.
     let result_transcript = llm_result
         .get("transcript")
         .cloned()

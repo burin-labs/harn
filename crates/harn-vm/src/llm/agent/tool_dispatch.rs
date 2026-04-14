@@ -110,25 +110,11 @@ pub(super) async fn run_tool_dispatch(
     let mut tool_results_this_iter: Vec<serde_json::Value> = Vec::new();
     let tool_schemas = collect_tool_schemas(ctx.tools_val, opts.native_tools.as_deref());
 
-    // Parallel dispatch for read-only exploration batches. When the
-    // leading run of tool calls in this assistant response are all in
-    // the read-only set (read, lookup, search, outline, list_templates,
-    // get_template, web_search, web_fetch), we concurrently pre-fetch
-    // their execution results via join_all. This covers two cases:
-    //   (a) all tools read-only — entire turn runs in parallel latency
-    //   (b) mixed turn starting with reads — the read-only prefix
-    //       runs in parallel, then sequential dispatch handles the
-    //       non-read-only tail (edit, run, etc.) as before.
-    //
-    // The sequential loop still runs for ALL bookkeeping (policy
-    // checks, hooks, transcript events, observation appending,
-    // post-hooks, ordering) — only the actual tool-execution step is
-    // parallelized, and only for tools whose index is in the cache.
-    // Any hook denial or arg mutation falls through to the sequential
-    // path, which safely recomputes that single call.
-    // A tool is eligible for concurrent dispatch iff its declared
-    // ToolKind is read-only. Unannotated tools are conservatively
-    // treated as NOT read-only (fail-safe default).
+    // Parallel pre-fetch for a leading run of read-only tools. Sequential
+    // dispatch still runs all bookkeeping (policy, hooks, transcript,
+    // ordering) and only reuses the cached result when the hook path
+    // would have called the tool anyway. Unannotated tools are treated
+    // as NOT read-only (fail-safe).
     let ro_prefix_len: usize = tool_calls
         .iter()
         .position(|tc| {
@@ -146,13 +132,8 @@ pub(super) async fn run_tool_dispatch(
     let mut parallel_results: std::collections::HashMap<usize, Result<serde_json::Value, VmError>> =
         std::collections::HashMap::new();
     if !parallel_indices.is_empty() {
-        // Build futures for each read-only execution. We use the raw
-        // tool_args here (pre-hook); if a hook would modify or deny,
-        // the sequential loop will still run its full checks and
-        // choose to either reuse our result (if hooks are Allow with
-        // no modifications) or recompute. This is safe because we
-        // only cache results for read-only tools which have no side
-        // effects — re-running them is at worst wasted work.
+        // Use raw pre-hook tool_args; re-running a read-only tool when
+        // a hook modifies/denies is at worst wasted work.
         use futures::future::join_all;
         let futures = parallel_indices.iter().map(|&idx| {
             let tc = tool_calls[idx].clone();
@@ -185,8 +166,6 @@ pub(super) async fn run_tool_dispatch(
         let tool_name = tc["name"].as_str().unwrap_or("");
         let mut tool_args = normalize_tool_args(tool_name, &tc["arguments"]);
 
-        // Detect malformed JSON arguments that the provider returned
-        // (marked with __parse_error sentinel during response parsing).
         if let Some(parse_err) = tool_args.get("__parse_error").and_then(|v| v.as_str()) {
             let result_text = format!("ERROR: {parse_err}");
             state.transcript_events.push(transcript_event(
@@ -258,7 +237,6 @@ pub(super) async fn run_tool_dispatch(
             continue;
         }
 
-        // Declarative approval policy: auto-approve / auto-deny / require host.
         let approval_decision = crate::orchestration::current_approval_policy()
             .map(|policy| policy.evaluate(tool_name, &tool_args));
         let approval_outcome = match approval_decision {
@@ -267,10 +245,8 @@ pub(super) async fn run_tool_dispatch(
                 Err(("auto_denied", reason))
             }
             Some(crate::orchestration::ToolApprovalDecision::RequiresHostApproval) => {
-                // Canonical ACP: request permission via
-                // `session/request_permission`. Fail closed: if the
-                // host does not implement the method or returns an
-                // error, the tool is denied.
+                // ACP `session/request_permission`. Fail closed: host
+                // errors / missing method → deny.
                 if let Some(bridge) = ctx.bridge.as_ref() {
                     let mutation = crate::orchestration::current_mutation_session();
                     let payload = serde_json::json!({
@@ -405,20 +381,6 @@ pub(super) async fn run_tool_dispatch(
             }
         }
 
-        // Arg rewriting is now a pipeline concern — it happens
-        // inside the tool's handler (or via `arg_aliases` in the
-        // tool's ToolAnnotations). The VM no longer provides a
-        // pre-dispatch mutation hook.
-
-        // Bridge-level PreToolUse gate has been retired. The canonical
-        // ACP observation surface is the AgentEvent stream — external
-        // sinks (e.g. the harn-cli ACP server) receive `ToolCall`
-        // events and translate them into `session/update` with the
-        // `tool_call` variant. Hosts that need to block a call use
-        // `session/request_permission` (see the declarative approval
-        // policy above).
-        // Validate required parameters before dispatch so the LLM gets
-        // a clear error instead of a cryptic handler failure.
         if let Err(msg) = validate_tool_args(tool_name, &tool_args, &tool_schemas) {
             let result_text = format!("ERROR: {msg}");
             state.transcript_events.push(transcript_event(
@@ -463,10 +425,6 @@ pub(super) async fn run_tool_dispatch(
         } else {
             format!("tool-{tool_id}")
         };
-        // Emit a Pending ToolCall event so pipeline subscribers
-        // and the ACP server can observe the dispatch before it
-        // starts. Status transitions (InProgress, Completed,
-        // Failed) follow via ToolCallUpdate.
         let tool_kind = crate::orchestration::current_tool_annotations(tool_name).map(|a| a.kind);
         super::emit_agent_event(&AgentEvent::ToolCall {
             session_id: ctx.session_id.to_string(),
@@ -506,13 +464,7 @@ pub(super) async fn run_tool_dispatch(
             "declared_paths",
             serde_json::json!(declared_paths_current.clone()),
         );
-        // Tool-call observability is now carried by the AgentEvent
-        // stream (`ToolCall` + `ToolCallUpdate`); the ACP server
-        // consumes those via `AgentEventSink` and emits canonical
-        // `session/update` notifications. No direct bridge call here.
-
-        // Tool loop detection: check BEFORE dispatch whether this
-        // exact call has been stuck in a loop.
+        // Check BEFORE dispatch whether this call is stuck in a loop.
         let args_hash = if ctx.loop_detect_enabled {
             stable_hash(&tool_args)
         } else {
@@ -521,7 +473,6 @@ pub(super) async fn run_tool_dispatch(
         if ctx.loop_detect_enabled {
             if let LoopIntervention::Skip { count } = state.loop_tracker.check(tool_name, args_hash)
             {
-                // Skip execution entirely — the model is stuck.
                 let skip_msg =
                     loop_intervention_message(tool_name, "", &LoopIntervention::Skip { count })
                         .unwrap_or_default();
@@ -549,8 +500,6 @@ pub(super) async fn run_tool_dispatch(
                     ));
                 }
                 crate::tracing::span_end(tool_span_id);
-                // Surface the loop-skip as a ToolCallUpdate so
-                // external sinks still see a completion event.
                 super::emit_agent_event(&AgentEvent::ToolCallUpdate {
                     session_id: ctx.session_id.to_string(),
                     tool_call_id: tool_call_id.clone(),
@@ -569,8 +518,6 @@ pub(super) async fn run_tool_dispatch(
             }
         }
 
-        // Tool replay: if replay mode is active, try to use a
-        // recorded fixture instead of executing the tool.
         let replay_hit = if crate::llm::mock::get_tool_recording_mode()
             == crate::llm::mock::ToolRecordingMode::Replay
         {
@@ -583,8 +530,7 @@ pub(super) async fn run_tool_dispatch(
         let (is_rejected, result_text) = if let Some(fixture) = replay_hit {
             (fixture.is_rejected, fixture.result.clone())
         } else {
-            // Prefer a pre-computed result from the parallel pre-fetch
-            // pass above, when available.
+            // Reuse the parallel pre-fetch result when present.
             let exec_result = if let Some(cached) = parallel_results.remove(&tc_index) {
                 cached
             } else {
@@ -625,8 +571,6 @@ pub(super) async fn run_tool_dispatch(
         }
 
         // Track run() exit codes for verification-gated exit.
-        // The host bridge formats run results with "exit_code=N" or
-        // "Command succeeded"/"Command failed" markers.
         if ctx.exit_when_verified && tool_name == "run" {
             if result_text.contains("exit_code=0")
                 || result_text.contains("Command succeeded")
@@ -641,7 +585,6 @@ pub(super) async fn run_tool_dispatch(
             }
         }
 
-        // Microcompaction: compress oversized tool outputs
         let result_text = if let Some(ref ac) = ctx.auto_compact {
             if result_text.len() > ac.tool_output_max_chars {
                 if let Some(ref cb) = ac.compress_callback {
@@ -675,12 +618,8 @@ pub(super) async fn run_tool_dispatch(
             serde_json::json!(result_text.len()),
         );
 
-        // PostToolUse hooks (in-process)
         let result_text = crate::orchestration::run_post_tool_hooks(tool_name, &result_text);
 
-        // Emit a final ToolCallUpdate with the execution outcome
-        // so pipeline subscribers can lint, audit, or inject
-        // feedback. Result mutation is now a pipeline concern.
         super::emit_agent_event(&AgentEvent::ToolCallUpdate {
             session_id: ctx.session_id.to_string(),
             tool_call_id: tool_call_id.clone(),
@@ -702,17 +641,8 @@ pub(super) async fn run_tool_dispatch(
         })
         .await;
 
-        // Bridge-level PostToolUse gate has been retired. Hosts that
-        // need to observe or mutate a tool result subscribe to the
-        // AgentEvent stream — `ToolCallUpdate` events carry the
-        // outcome. Pipeline-side closure subscribers can still
-        // inject feedback via `agent_inject_feedback`.
-        // The terminal ToolCallUpdate event above already carries
-        // the final status; no direct bridge.send_call_end is
-        // needed. Sinks consume the event stream instead.
         crate::tracing::span_end(tool_span_id);
 
-        // Record tool call result if recording mode is active.
         if crate::llm::mock::get_tool_recording_mode()
             == crate::llm::mock::ToolRecordingMode::Record
         {
@@ -728,9 +658,6 @@ pub(super) async fn run_tool_dispatch(
             });
         }
 
-        // Tool loop detection: record the result and check for
-        // repeated identical outcomes.  If we detect a loop,
-        // append a redirection hint or replace the result.
         let result_text = if ctx.loop_detect_enabled && !is_rejected {
             let result_hash = stable_hash_str(&result_text);
             let intervention = state.loop_tracker.record(tool_name, args_hash, result_hash);
@@ -750,14 +677,8 @@ pub(super) async fn run_tool_dispatch(
                     },
                 );
                 match intervention {
-                    LoopIntervention::Warn { .. } => {
-                        // Append hint after the real result
-                        format!("{result_text}{msg}")
-                    }
-                    LoopIntervention::Block { .. } => {
-                        // Replace the result entirely with the redirect
-                        msg
-                    }
+                    LoopIntervention::Warn { .. } => format!("{result_text}{msg}"),
+                    LoopIntervention::Block { .. } => msg,
                     _ => result_text,
                 }
             } else {

@@ -18,9 +18,6 @@ impl super::Vm {
         functions: &'a [CompiledFunction],
     ) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + 'a>> {
         Box::pin(async move {
-            // Universal `.iter()` lift for any iterable source into VmValue::Iter.
-            // Applied before type-specific method dispatch so every iterable
-            // source gets the explicit lift.
             if method == "iter"
                 && matches!(
                     &obj,
@@ -445,7 +442,6 @@ impl super::Vm {
                         new_list.pop();
                         Ok(VmValue::List(Rc::new(new_list)))
                     }
-                    // --- Ruby-inspired additions ---
                     "none" | "none?" => {
                         if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v))
                         {
@@ -459,7 +455,6 @@ impl super::Vm {
                             }
                             Ok(VmValue::Bool(true))
                         } else {
-                            // No predicate: check if list is empty
                             Ok(VmValue::Bool(items.is_empty()))
                         }
                     }
@@ -929,22 +924,17 @@ impl super::Vm {
                     "first" => Ok(r.first().map(VmValue::Int).unwrap_or(VmValue::Nil)),
                     "last" => Ok(r.last().map(VmValue::Int).unwrap_or(VmValue::Nil)),
                     "to_string" => Ok(VmValue::String(Rc::from(obj.display()))),
-                    // Everything else routes through the unified lazy iter
-                    // protocol: lift the Range into a VmValue::Iter (which
-                    // preserves laziness via VmIter::Range) and delegate.
-                    // `.map/.filter/.take/...` stay lazy; sinks like
-                    // `.to_list/.sum/.reduce` materialize only on demand.
+                    // Lift into VmValue::Iter so combinators stay lazy and
+                    // sinks materialize only on demand.
                     _ => {
                         let lifted = iter_from_value(obj.clone())?;
                         self.call_method(lifted, method, args, functions).await
                     }
                 },
                 VmValue::StructInstance { struct_name, .. } => {
-                    // Look up __impl_TypeName in env for impl block methods
                     let impl_key = format!("__impl_{}", struct_name);
                     if let Some(VmValue::Dict(impl_dict)) = self.env.get(&impl_key) {
                         if let Some(VmValue::Closure(closure)) = impl_dict.get(method) {
-                            // Call method with self (the struct) as first argument
                             let mut full_args = vec![obj.clone()];
                             full_args.extend_from_slice(args);
                             return self.call_closure(closure, &full_args, functions).await;

@@ -56,17 +56,10 @@ pub(crate) fn register_testing_builtins(vm: &mut Vm) {
         }
     });
 
-    // --- Structured error builtins ---
-
-    // error_category(err_value) -> string
-    // Extract the error category from a caught error value.
-    // Returns: "timeout", "auth", "rate_limit", "tool_error", "cancelled",
-    //          "not_found", "circuit_open", or "generic"
     vm.register_builtin("error_category", |args, _out| {
         let val = args.first().unwrap_or(&VmValue::Nil);
         match val {
             VmValue::Dict(d) => {
-                // Check for category field
                 let cat = d
                     .get("category")
                     .map(|v| v.display())
@@ -74,7 +67,6 @@ pub(crate) fn register_testing_builtins(vm: &mut Vm) {
                 Ok(VmValue::String(Rc::from(cat)))
             }
             VmValue::String(s) => {
-                // Infer category from error message text
                 let err = VmError::Runtime(s.to_string());
                 Ok(VmValue::String(Rc::from(error_to_category(&err).as_str())))
             }
@@ -82,8 +74,6 @@ pub(crate) fn register_testing_builtins(vm: &mut Vm) {
         }
     });
 
-    // throw_error(message, category) -> never
-    // Throw a categorized error that can be matched with error_category().
     vm.register_builtin("throw_error", |args, _out| {
         let message = args.first().map(|a| a.display()).unwrap_or_default();
         let category = args
@@ -91,7 +81,6 @@ pub(crate) fn register_testing_builtins(vm: &mut Vm) {
             .map(|a| ErrorCategory::parse(&a.display()))
             .unwrap_or(ErrorCategory::Generic);
 
-        // Throw as a dict with category and message fields for pattern matching
         let mut err_dict = BTreeMap::new();
         err_dict.insert(
             "message".to_string(),
@@ -104,7 +93,6 @@ pub(crate) fn register_testing_builtins(vm: &mut Vm) {
         Err(VmError::Thrown(VmValue::Dict(Rc::new(err_dict))))
     });
 
-    // is_timeout(err) -> bool
     vm.register_builtin("is_timeout", |args, _out| {
         Ok(VmValue::Bool(check_error_category(
             args.first().unwrap_or(&VmValue::Nil),
@@ -113,7 +101,6 @@ pub(crate) fn register_testing_builtins(vm: &mut Vm) {
         )))
     });
 
-    // is_rate_limited(err) -> bool
     vm.register_builtin("is_rate_limited", |args, _out| {
         Ok(VmValue::Bool(check_error_category(
             args.first().unwrap_or(&VmValue::Nil),

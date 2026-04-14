@@ -19,8 +19,6 @@ pub enum ToolRecordingMode {
     Replay,
 }
 
-// ── Configurable LLM mock responses ─────────────────────────────────
-
 pub(crate) struct LlmMock {
     pub text: String,
     pub tool_calls: Vec<serde_json::Value>,
@@ -80,7 +78,6 @@ fn record_llm_mock_call(
 fn build_mock_result(mock: &LlmMock, last_msg_len: usize) -> LlmResult {
     let mut blocks = Vec::new();
 
-    // Add text block if present
     if !mock.text.is_empty() {
         blocks.push(serde_json::json!({
             "type": "output_text",
@@ -89,7 +86,6 @@ fn build_mock_result(mock: &LlmMock, last_msg_len: usize) -> LlmResult {
         }));
     }
 
-    // Build tool_calls with auto-generated IDs
     let mut tool_calls = Vec::new();
     for (i, tc) in mock.tool_calls.iter().enumerate() {
         let id = format!("mock_call_{}", i + 1);
@@ -169,13 +165,13 @@ fn try_match_mock(last_msg: &str) -> Option<LlmResult> {
     LLM_MOCKS.with(|mocks| {
         let mut mocks = mocks.borrow_mut();
 
-        // 1. FIFO: first mock without a match pattern (consumed)
+        // FIFO: first mock without a match pattern (consumed on use).
         if let Some(idx) = mocks.iter().position(|m| m.match_pattern.is_none()) {
             let mock = mocks.remove(idx);
             return Some(build_mock_result(&mock, last_msg.len()));
         }
 
-        // 2. Pattern match: scan in reverse (last registered wins)
+        // Pattern match (last registered wins).
         for mock in mocks.iter().rev() {
             if let Some(ref pattern) = mock.match_pattern {
                 if mock_glob_match(pattern, last_msg) {
@@ -211,7 +207,7 @@ pub(crate) fn fixture_hash(
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     model.hash(&mut hasher);
-    // Use canonical JSON string (not Debug format) for stable hashing
+    // Canonical JSON hashing is stable across Debug-format changes.
     serde_json::to_string(messages)
         .unwrap_or_default()
         .hash(&mut hasher);
@@ -325,24 +321,20 @@ pub(crate) fn mock_llm_response(
     system: Option<&str>,
     native_tools: Option<&[serde_json::Value]>,
 ) -> LlmResult {
-    // Always record the call for inspection via llm_mock_calls().
     record_llm_mock_call(messages, system, native_tools);
 
-    // Extract the last user message for generating a deterministic response.
     let last_msg = messages
         .last()
         .and_then(|m| m.get("content"))
         .and_then(|c| c.as_str())
         .unwrap_or("");
 
-    // Check configurable mocks first.
     if let Some(result) = try_match_mock(last_msg) {
         return result;
     }
 
-    // If tools are provided, generate a mock tool call for the first tool.
-    // Fill required parameters with placeholder values so mock calls pass
-    // schema validation the same way a real model would.
+    // Generate a mock tool call for the first tool, filling required
+    // params with placeholders so the call passes schema validation.
     if let Some(tools) = native_tools {
         if let Some(first_tool) = tools.first() {
             let tool_name = first_tool
@@ -378,9 +370,8 @@ pub(crate) fn mock_llm_response(
         }
     }
 
-    // Generate response under the tagged response protocol. Wrap prose in
-    // <assistant_prose> and emit a <done> block when the host system prompt
-    // advertises the sentinel (agent_loop compatibility).
+    // Tagged response: <assistant_prose> + <done> when the system
+    // prompt advertises the sentinel (agent_loop compatibility).
     let done_block = if system.is_some_and(|s| s.contains("##DONE##")) {
         "\n<done>##DONE##</done>"
     } else {
@@ -416,8 +407,6 @@ pub(crate) fn mock_llm_response(
         })],
     }
 }
-
-// ── Tool recording/replay ────────────────────────────────────────────
 
 pub fn set_tool_recording_mode(mode: ToolRecordingMode) {
     TOOL_RECORDING_MODE.with(|v| *v.borrow_mut() = mode);

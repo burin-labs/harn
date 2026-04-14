@@ -31,11 +31,9 @@ impl OllamaProvider {
     /// Build the Ollama-specific request body. Ollama uses OpenAI-style messages
     /// but with additional options and NDJSON streaming.
     pub(crate) fn build_request_body(opts: &LlmRequestPayload) -> serde_json::Value {
-        // Start from OpenAI-compatible body (with force_string_content=true for Ollama)
         let mut body =
             crate::llm::providers::OpenAiCompatibleProvider::build_request_body(opts, true);
 
-        // Ollama-specific tuning
         if body["options"].get("num_ctx").is_none() {
             if let Some(num_ctx) = crate::llm::api::ollama_num_ctx_override() {
                 body["options"]["num_ctx"] = serde_json::json!(num_ctx);
@@ -44,7 +42,6 @@ impl OllamaProvider {
         if let Some(keep_alive) = crate::llm::api::ollama_keep_alive_override() {
             body["keep_alive"] = keep_alive;
         }
-        // Coding agent tuning defaults
         if body["options"].get("min_p").is_none() {
             body["options"]["min_p"] = serde_json::json!(0.05);
         }
@@ -54,17 +51,12 @@ impl OllamaProvider {
         if body["options"].get("num_predict").is_none() && opts.max_tokens > 0 {
             body["options"]["num_predict"] = serde_json::json!(opts.max_tokens);
         }
-        // Thinking control: Ollama's chat templates (e.g. qwen3:30b-a3b)
-        // gate `<think>` emission on the Go-template booleans `$.IsThinkSet`
-        // and `.Thinking`, which are populated from the top-level `think`
-        // field — NOT from `chat_template_kwargs.enable_thinking`. Even
-        // when we drive Ollama through `/v1/chat/completions`, the OpenAI-
-        // compat shim passes the `think` extension through to the same
-        // template context. Default to `false` so an agent loop turn is
-        // fast and tool-call-shaped; callers that want extended reasoning
-        // set `thinking` explicitly. (`chat_template_kwargs` is still set
-        // by the OpenAI-compat builder for vLLM/SGLang hosts that key off
-        // it instead.)
+        // Ollama templates (qwen3:30b-a3b etc.) gate `<think>` emission
+        // on the top-level `think` field, NOT
+        // `chat_template_kwargs.enable_thinking`. The OpenAI-compat shim
+        // passes `think` through to the same template context. Default
+        // false for fast tool-call-shaped turns; callers who want
+        // reasoning set `thinking` explicitly.
         body["think"] = match opts.thinking {
             Some(ThinkingConfig::Enabled) | Some(ThinkingConfig::WithBudget(_)) => {
                 serde_json::json!(true)

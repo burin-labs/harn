@@ -273,9 +273,8 @@ fn vm_value_to_data_value(value: &VmValue) -> serde_json::Value {
                 .map(|(key, value)| (key.clone(), vm_value_to_data_value(value)))
                 .collect(),
         ),
-        // Ranges stringify as their source-shaped form (`"1 to 5"` /
-        // `"0 to 3 exclusive"`), matching Display. Use `.to_list()` in
-        // Harn to get an array of ints.
+        // Ranges stringify like Display (`"1 to 5"`); use `.to_list()` in Harn
+        // to materialise an int array.
         VmValue::Range(_) => serde_json::json!(value.display()),
         _ => serde_json::json!(value.display()),
     }
@@ -316,7 +315,6 @@ fn write_vm_value_to_json(val: &VmValue, out: &mut String) {
             }
             out.push('}');
         }
-        // Range stringifies as its source-shaped form, for parity with Display.
         VmValue::Range(_) => out.push_str(&escape_json_string_vm(&val.display())),
         _ => out.push_str("null"),
     }

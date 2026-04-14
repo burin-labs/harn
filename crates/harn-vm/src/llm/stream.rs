@@ -5,10 +5,6 @@ use crate::value::{VmError, VmValue};
 use super::api::LlmCallOptions;
 use super::helpers::ResolvedProvider;
 
-// =============================================================================
-// Streaming
-// =============================================================================
-
 pub(crate) async fn vm_stream_llm(
     opts: &LlmCallOptions,
     tx: &tokio::sync::mpsc::Sender<VmValue>,
@@ -73,12 +69,9 @@ pub(crate) async fn vm_stream_llm(
     });
     let idle_dur = std::time::Duration::from_secs(idle_timeout_secs);
 
-    // Overall streaming deadline. Without this, a pathological provider
-    // that dribbles bytes just fast enough to reset the idle timer could
-    // hold the stream open forever. Default: the caller's `timeout`
-    // option if set, otherwise 30 minutes — long enough to accommodate
-    // legitimate thinking-heavy responses, short enough to bound a stuck
-    // connection.
+    // Bound total stream duration: a provider that dribbles bytes fast
+    // enough to keep resetting the idle timer would otherwise hold the
+    // stream open forever.
     let overall_budget_secs = opts.timeout.unwrap_or(30 * 60);
     let overall_dur = std::time::Duration::from_secs(overall_budget_secs);
     let stream_start = std::time::Instant::now();
@@ -97,10 +90,7 @@ pub(crate) async fn vm_stream_llm(
             Ok(None) => break,
             Err(_) => {
                 es.close();
-                // Distinguish idle-timeout from overall-deadline even
-                // when they happen to fire simultaneously: the overall
-                // branch at the top of the loop will catch the next
-                // iteration. Here, report the idle budget the user sees.
+                // Report as idle-timeout; overall-deadline is caught at loop top.
                 return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
                     "stream idle timeout: no data received for {idle_timeout_secs}s"
                 )))));

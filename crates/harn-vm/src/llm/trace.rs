@@ -1,9 +1,5 @@
 use std::cell::RefCell;
 
-// =============================================================================
-// LLM trace log (thread-local for async-safe access)
-// =============================================================================
-
 /// A single LLM call trace entry.
 #[derive(Debug, Clone)]
 pub struct LlmTraceEntry {
@@ -63,10 +59,6 @@ pub(crate) fn trace_llm_call(entry: LlmTraceEntry) {
         }
     });
 }
-
-// =============================================================================
-// Structured agent trace events
-// =============================================================================
 
 /// Fine-grained event emitted during agent loop execution. Captures tool
 /// calls, LLM calls, interventions, compaction, and phase changes so

@@ -331,7 +331,6 @@ impl VmEnv {
     }
 }
 
-/// VM runtime errors.
 /// Compute Levenshtein edit distance between two strings.
 fn levenshtein(a: &str, b: &str) -> usize {
     let a: Vec<char> = a.chars().collect();

@@ -6,10 +6,6 @@ use std::rc::Rc;
 
 use crate::value::{ErrorCategory, VmClosure, VmError, VmValue};
 
-// ---------------------------------------------------------------------------
-// Tool loop detection
-// ---------------------------------------------------------------------------
-
 /// Hash a serde_json::Value deterministically for dedup purposes.
 pub(super) fn stable_hash(val: &serde_json::Value) -> u64 {
     use std::hash::{Hash, Hasher};
@@ -191,10 +187,6 @@ pub(super) fn next_call_id() -> String {
     uuid::Uuid::now_v7().to_string()
 }
 
-// ---------------------------------------------------------------------------
-// Tool format normalization
-// ---------------------------------------------------------------------------
-
 pub(super) fn normalize_native_tools_for_format(
     tool_format: &str,
     native_tools: Option<Vec<serde_json::Value>>,
@@ -210,11 +202,8 @@ pub(super) fn normalize_tool_examples_for_format(
     _tool_format: &str,
     tool_examples: Option<String>,
 ) -> Option<String> {
-    // Pass examples through in both modes. In native mode they serve as a
-    // fallback that lets the model hand-write `<tool_call>` blocks when the
-    // host's chat template strips the native `tools` parameter. The
-    // downstream parser accepts either channel, so showing both in the
-    // contract prompt costs tokens but never causes confusion.
+    // Native mode still shows text-mode examples: they're a fallback
+    // when the host's chat template strips the native `tools` param.
     tool_examples.and_then(|examples| {
         let trimmed = examples.trim();
         if trimmed.is_empty() {
@@ -254,15 +243,6 @@ pub(super) fn normalize_tool_choice_for_format(
     }
     None
 }
-
-// `native_protocol_violation_nudge` removed in v0.5.82: native-mode stages
-// now accept text-mode tool calls as a fallback, so chastising the model
-// for using text when its host stripped the native channel is incorrect
-// behavior. The tool-format hint already lives in the contract prompt.
-
-// ---------------------------------------------------------------------------
-// Tool dispatch
-// ---------------------------------------------------------------------------
 
 /// Dispatch a single tool invocation to its execution backend.
 pub(super) async fn dispatch_tool_execution(
@@ -368,10 +348,6 @@ pub(super) fn find_tool_handler(
     }
     None
 }
-
-// ---------------------------------------------------------------------------
-// Orchestration helpers
-// ---------------------------------------------------------------------------
 
 pub(super) fn classify_tool_mutation(tool_name: &str) -> String {
     crate::orchestration::current_tool_mutation_classification(tool_name)

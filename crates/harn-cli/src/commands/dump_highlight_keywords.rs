@@ -27,9 +27,8 @@ use harn_lexer::KEYWORDS;
 use harn_vm::stdlib::stdlib_builtin_names;
 
 /// Literals that render as `hljs-literal` rather than `hljs-keyword`.
-/// Kept in sync with `KEYWORDS` by hand — these three are a closed set in
-/// Harn and unlikely to change. If a new literal keyword (e.g. `undefined`)
-/// is ever added, update both here and the test below.
+/// Hand-maintained against `KEYWORDS`; update both this list and the test
+/// below if a new literal keyword is added.
 const LITERALS: &[&str] = &["true", "false", "nil"];
 
 pub(crate) fn run(output_path: &str, check_only: bool) {
@@ -69,34 +68,26 @@ pub(crate) fn run(output_path: &str, check_only: bool) {
     println!("wrote {}", path.display());
 }
 
-/// Build the full file contents. Pure function — no I/O, easy to unit-test.
+/// Build the full file contents. Pure so it's easy to unit-test.
 fn generate_file() -> String {
     let literals: BTreeSet<&str> = LITERALS.iter().copied().collect();
 
-    // Keywords: everything in KEYWORDS minus the literal set.
     let keywords: Vec<&str> = KEYWORDS
         .iter()
         .copied()
         .filter(|k| !literals.contains(k))
         .collect();
 
-    // Builtins: everything registered on a fully-initialized VM. This includes
-    // opcode-level pseudo-builtins (spawn/await/cancel) appended by
-    // `stdlib_builtin_names`. Filter out any name that also appears as a
-    // keyword — highlight.js should treat those as keywords, not builtins.
+    // Builtins: names registered on a fully-initialized VM, minus anything
+    // that's already a keyword (highlight.js treats those as keywords) and
+    // compiler-internal `__*` names users never call directly.
     let keyword_set: BTreeSet<&str> = KEYWORDS.iter().copied().collect();
     let builtin_owned: Vec<String> = stdlib_builtin_names()
         .into_iter()
-        // Skip compiler-internal names (destructuring helpers, range sugar,
-        // etc.). These are prefixed with `__` and users never call them
-        // directly; including them in the highlighter would just create
-        // false positives on variables that happen to share the prefix.
         .filter(|name| !name.starts_with("__"))
         .filter(|name| !keyword_set.contains(name.as_str()))
         .collect();
     let mut builtins: BTreeSet<&str> = builtin_owned.iter().map(String::as_str).collect();
-    // De-duplicate defensively in case register_vm_stdlib ever registers the
-    // same name twice (BTreeSet handles dedup + sort).
     builtins.remove("");
 
     let keyword_line = keywords.join(" ");
@@ -139,7 +130,6 @@ mod tests {
     #[test]
     fn generated_file_contains_known_builtins() {
         let out = generate_file();
-        // Globally available — must be in built_in.
         for name in &["println", "read_file", "llm_call", "http_get"] {
             assert!(
                 out.contains(name),
@@ -148,12 +138,8 @@ mod tests {
         }
     }
 
-    /// CI backstop for highlighter drift.
-    ///
-    /// `--check` mode catches drift when someone runs the binary; this test
-    /// catches it under `cargo test --workspace`, so any PR that changes a
-    /// keyword or stdlib builtin name without regenerating
-    /// `docs/theme/harn-keywords.js` fails `make test`. Belt + suspenders.
+    /// CI backstop so PRs that change a keyword or stdlib builtin name
+    /// without regenerating `docs/theme/harn-keywords.js` fail `make test`.
     #[test]
     fn committed_keyword_file_matches_generator() {
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
@@ -181,9 +167,8 @@ mod tests {
     #[test]
     fn literals_are_not_also_keywords() {
         let out = generate_file();
-        // `true`/`false`/`nil` should appear in literal, not in the keyword
-        // segment. We can't easily parse the JS here, but we can check that
-        // the keyword line (which excludes literals) does not contain " true".
+        // Literals must live in the literal field, not bleed into the
+        // keyword string.
         let keyword_section_start = out.find("keyword: \"").expect("keyword field");
         let keyword_section_end = out[keyword_section_start..]
             .find('"')

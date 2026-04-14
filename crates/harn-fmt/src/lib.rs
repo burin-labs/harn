@@ -42,11 +42,10 @@ pub fn format_source(source: &str) -> Result<String, String> {
 
 /// Format Harn source code with explicit options.
 pub fn format_source_opts(source: &str, opts: &FmtOptions) -> Result<String, String> {
-    // Lex once with comments, then partition
+    // Lex with comments preserved, then split into (comments by line, parser tokens).
     let mut lexer = Lexer::new(source);
     let all_tokens = lexer.tokenize_with_comments().map_err(|e| e.to_string())?;
 
-    // Extract comments by source line, and filter to parser tokens
     let mut comments: BTreeMap<usize, Vec<Comment>> = BTreeMap::new();
     let mut parser_tokens = Vec::with_capacity(all_tokens.len());
     for tok in all_tokens {
@@ -105,7 +104,6 @@ impl Formatter {
     }
 
     pub(crate) fn finish(mut self) -> String {
-        // Trim trailing whitespace from each line, ensure single newline at end
         let trimmed: Vec<&str> = self.output.lines().map(|l| l.trim_end()).collect();
         self.output = trimmed.join("\n");
         if !self.output.ends_with('\n') {
@@ -149,10 +147,9 @@ impl Formatter {
         };
         let first_is_doc = comments.first().is_some_and(|c| c.is_doc);
         if first_is_doc {
-            // Try to consume a contiguous run of doc comments starting at `line`.
-            // A run is contiguous if every subsequent line that contains any
-            // comment is immediately next (line + 1, line + 2, ...) AND each
-            // of those comments is itself a doc comment.
+            // Coalesce a contiguous run of doc comments into a single canonical
+            // block. A run is contiguous when subsequent commented lines sit
+            // immediately below (line+1, line+2, ...) and every one is a doc.
             let mut run_lines: Vec<usize> = vec![line];
             let mut cursor = line + 1;
             while let Some(next_comments) = self.comments.get(&cursor) {
@@ -165,8 +162,8 @@ impl Formatter {
                 run_lines.push(cursor);
                 cursor += 1;
             }
-            // Gather the textual lines of the block. A block doc comment may
-            // already be multi-line; split its text on `\n`.
+            // Flatten each run element into plain body lines; pre-existing
+            // block doc comments may already span multiple lines.
             let mut body_lines: Vec<String> = Vec::new();
             for l in &run_lines {
                 if let Some(cs) = self.comments.get(l) {
@@ -175,9 +172,8 @@ impl Formatter {
                             continue;
                         }
                         if c.is_block {
-                            // Strip the leading/trailing artifacts of the prior
-                            // canonical block: leading ` *` on each interior
-                            // line, surrounding blank lines.
+                            // Strip the leading ` *` gutter on interior lines and
+                            // any surrounding blank lines left from a previous render.
                             let raw = &c.text;
                             let mut first = true;
                             for raw_line in raw.split('\n') {
@@ -197,13 +193,11 @@ impl Formatter {
                                     .unwrap_or(trimmed);
                                 body_lines.push(stripped.to_string());
                             }
-                            // Drop trailing all-empty lines
                             while body_lines.last().is_some_and(|s| s.is_empty()) {
                                 body_lines.pop();
                             }
                         } else {
-                            // Line doc comment: text is everything after `///`.
-                            // Trim a single leading space for canonical shape.
+                            // `///` line doc: trim one leading space for canonical shape.
                             let t = c.text.strip_prefix(' ').unwrap_or(&c.text);
                             body_lines.push(t.trim_end().to_string());
                         }
@@ -231,7 +225,6 @@ impl Formatter {
     /// within `line_width`, emit `<indent>/** <text> */`. Otherwise emit the
     /// multi-line JSDoc-style form with vertical-aligned stars.
     pub(crate) fn emit_doc_block(&mut self, body_lines: &[String]) {
-        // Drop leading empty lines.
         let mut start = 0;
         while start < body_lines.len() && body_lines[start].trim().is_empty() {
             start += 1;
@@ -242,7 +235,6 @@ impl Formatter {
         }
         let trimmed: Vec<String> = body_lines[start..end].to_vec();
         if trimmed.is_empty() {
-            // Empty doc comment — emit minimal compact form.
             self.writeln("/** */");
             return;
         }
@@ -255,7 +247,6 @@ impl Formatter {
                 return;
             }
         }
-        // Multi-line canonical form.
         self.writeln("/**");
         for line in &trimmed {
             if line.trim().is_empty() {
@@ -288,7 +279,6 @@ impl Formatter {
     /// range — callers use this to ensure exactly one blank line follows the
     /// last header before the next item.
     pub(crate) fn emit_top_level_comments_in_range(&mut self, from: usize, to: usize) -> bool {
-        // Collect candidate lines in order.
         let lines: Vec<usize> = self
             .comments
             .keys()
@@ -303,8 +293,7 @@ impl Formatter {
                 idx += 1;
                 continue;
             }
-            // Pull this line's comments — section headers are always
-            // single-line standalone comments (one `//` per line).
+            // Section headers are always single-line standalone `//` comments.
             let here = match self.comments.get(&line).cloned() {
                 Some(cs) if cs.len() == 1 && !cs[0].is_block && !cs[0].is_doc => cs,
                 _ => {
@@ -314,11 +303,8 @@ impl Formatter {
                 }
             };
             let here_text = &here[0].text;
-            // Try to match a three-line section header:
-            //   // ----
-            //   // <title>
-            //   // ----
-            // The two surrounding lines must be bars (≥4 dashes).
+            // Three-line section header: `// ----` / `// <title>` / `// ----`
+            // with bars of ≥4 dashes surrounding the title.
             if idx + 2 < lines.len()
                 && lines[idx + 1] == line + 1
                 && lines[idx + 2] == line + 2
@@ -350,7 +336,7 @@ impl Formatter {
                     }
                 }
             }
-            // Single-line bar: `// ----` optionally with inline text `// ---- Title ----`.
+            // Single-line bar: `// ----` or `// ---- Title ----`.
             if let Some(kind) = classify_bar_line(here_text) {
                 self.ensure_blank_line_above();
                 match kind {
@@ -369,15 +355,9 @@ impl Formatter {
         any_section_header
     }
 
-    /// Ensure `self.output` ends with exactly `\n\n` so the next emission
-    /// is preceded by a blank line. Trims any trailing horizontal
-    /// whitespace on the final (unterminated) line first, then tops up or
-    /// truncates the trailing newline run.
-    ///
-    /// This is the single source of truth for section-header padding:
-    /// both the "above" and "below" cases collapse to the same
-    /// normalize-to-`\n\n` operation, so splitting them into two helpers
-    /// just invited drift.
+    /// Normalize `self.output` to end in exactly `\n\n`, trimming trailing
+    /// horizontal whitespace first. Single source of truth for section-header
+    /// padding on both sides of a header.
     fn ensure_trailing_blank_line(&mut self) {
         while self.output.ends_with(' ') || self.output.ends_with('\t') {
             self.output.pop();
@@ -416,11 +396,8 @@ impl Formatter {
     }
 }
 
-/// Returns true if `text` (the raw text following `//`, with the leading
-/// space not yet trimmed) is a dash-only separator bar with ≥4 dashes.
-///
-/// Thin wrapper over `classify_bar_line` so the two helpers can't drift
-/// out of sync on what counts as a "bar".
+/// True iff `text` (raw body after `//`, untrimmed) is a dash-only bar with
+/// ≥4 dashes. Delegates to `classify_bar_line` so the two stay in sync.
 fn is_bar_only_line(text: &str) -> bool {
     matches!(classify_bar_line(text), Some(BarKind::PureBar))
 }
@@ -437,12 +414,10 @@ fn classify_bar_line(text: &str) -> Option<BarKind> {
     if t.is_empty() {
         return None;
     }
-    // Pure bar: 4+ dashes only.
     if t.len() >= 4 && t.chars().all(|c| c == '-') {
         return Some(BarKind::PureBar);
     }
-    // Inline-titled bar: starts with ≥4 dashes, then whitespace, then title,
-    // optionally ending with whitespace + ≥4 dashes.
+    // Inline-titled: ≥4 dashes, title, optional ≥4-dash trailer.
     let chars: Vec<char> = t.chars().collect();
     let lead_dashes = chars.iter().take_while(|c| **c == '-').count();
     if lead_dashes < 4 {
@@ -451,9 +426,8 @@ fn classify_bar_line(text: &str) -> Option<BarKind> {
     let remaining: String = chars[lead_dashes..].iter().collect();
     let remaining = remaining.trim();
     if remaining.is_empty() {
-        return None; // already handled as PureBar above
+        return None;
     }
-    // Strip a trailing run of ≥4 dashes (optionally).
     let rchars: Vec<char> = remaining.chars().collect();
     let trail_dashes = rchars.iter().rev().take_while(|c| **c == '-').count();
     let title = if trail_dashes >= 4 {
