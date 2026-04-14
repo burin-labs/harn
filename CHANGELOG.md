@@ -7,6 +7,46 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## v0.6.1
+
+Patch release. Completes the WS-6 agent/mod.rs modularization started in
+the 0.6.0 line: `llm/agent/mod.rs` was a 1734-LOC hub carrying most of
+the per-iteration turn loop inline. This release finishes the split
+along phase seams so the orchestrator reads top-to-bottom as four named
+phases.
+
+### Internal
+
+- **`llm/agent/mod.rs` is now a ~260-LOC thin orchestrator.** The turn
+  loop body expands to four phase calls — `turn_preflight`, `llm_call`,
+  `tool_dispatch`, `post_turn` — with an `IterationOutcome::{Continue,
+  Break}` match returned by `post_turn` to drive outer-loop control
+  flow.
+- **`agent/llm_call.rs`** (new, ~410 LOC) owns the provider call,
+  tagged-prose parsing, parse/protocol/sentinel feedback injection, and
+  ledger-tool interception.
+- **`agent/tool_dispatch.rs`** (new, ~840 LOC) owns the assistant-turn
+  history append, read-only parallel pre-fetch, and the per-tool
+  dispatch pipeline (parse-error rejection, policy enforcement,
+  declarative + host approval via `session/request_permission`,
+  pre/post hooks, arg validation, loop-detect, replay/cached/fresh
+  dispatch, tracing spans, `ToolCall` / `ToolCallUpdate` events,
+  transcript events, tool-result message append).
+- **`agent/post_turn.rs`** (new, ~490 LOC) owns both the tool-call
+  post-processing path (finish_step_messages, consecutive_single_tool,
+  successful_tools_used, `TurnEnd` emit, `stop_after_successful_tools`,
+  optional `post_turn_callback`, auto-compaction, parse_error feedback,
+  sentinel_hit break) and the text-only path (assistant-history append,
+  sentinel break, parse_error continue, daemon idle-wait with
+  message/resume/watch/timer wake sources, max_nudges stuck detection,
+  action-turn nudge).
+- **Dead code swept.** `ToolDispatchResult.rejection_followups` was
+  never pushed to; dropped the field and its dead-branch guard in the
+  orchestrator.
+
+No behavior change: harn-vm lib 530/530, harn-cli 124/124 green at
+every commit.
+
 ## v0.6.0
 
 Major release that establishes Harn's **lazy iterator protocol** as a

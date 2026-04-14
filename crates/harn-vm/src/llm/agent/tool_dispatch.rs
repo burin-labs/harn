@@ -9,32 +9,26 @@
 //!   2. Builds a parallel-dispatch cache for the leading read-only
 //!      prefix of tool calls via `join_all`, so read/lookup/search
 //!      batches finish in parallel-latency time.
-//!   3. For each tool call, sequentially:
-//!        a. detects `__parse_error` sentinels from malformed provider
-//!           arguments and rejects,
-//!        b. enforces the current execution policy + arg constraints,
-//!        c. runs the declarative approval policy (auto-approve /
-//!           auto-deny / `session/request_permission` host bridge),
-//!        d. runs in-process PreToolUse hooks (Allow / Deny / Modify),
-//!        e. validates required arguments,
-//!        f. emits `tool_intent` + `ToolCall` (Pending/InProgress)
-//!           events and a `tool_call` tracing span,
-//!        g. runs the loop-detect check (skip if stuck),
-//!        h. dispatches the tool (replay fixture, parallel cache, or
-//!           a fresh `dispatch_tool_execution`),
-//!        i. tracks `run` exit codes for the verification gate,
-//!        j. microcompacts oversized tool output,
-//!        k. runs in-process PostToolUse hooks,
-//!        l. emits a final `ToolCallUpdate` event + tracing span close,
-//!        m. records to the tool-recording mock when active,
-//!        n. runs loop-detect `record()` and optionally appends or
-//!           replaces the result with a redirect hint,
-//!        o. appends `tool_execution` transcript events and tool-result
-//!           messages (or an observation line for text-mode).
+//!   3. For each tool call, sequentially: detect `__parse_error`
+//!      sentinels from malformed provider arguments and reject;
+//!      enforce the current execution policy + arg constraints; run
+//!      the declarative approval policy (auto-approve / auto-deny /
+//!      `session/request_permission` host bridge); run in-process
+//!      PreToolUse hooks (Allow / Deny / Modify); validate required
+//!      arguments; emit `tool_intent` + `ToolCall` (Pending /
+//!      InProgress) events and a `tool_call` tracing span; run the
+//!      loop-detect check (skip if stuck); dispatch the tool (replay
+//!      fixture, parallel cache, or a fresh `dispatch_tool_execution`);
+//!      track `run` exit codes for the verification gate; microcompact
+//!      oversized tool output; run in-process PostToolUse hooks; emit
+//!      a final `ToolCallUpdate` event and close the tracing span;
+//!      record to the tool-recording mock when active; run loop-detect
+//!      `record()` and optionally append or replace the result with a
+//!      redirect hint; append the `tool_execution` transcript event
+//!      and tool-result message (or an observation line for text-mode).
 //!   4. Returns `ToolDispatchResult` carrying `tools_used_this_iter`,
-//!      `tool_results_this_iter`, the accumulated `observations`
-//!      string, and the (currently unused) `rejection_followups`
-//!      vector — the post-turn phase flushes these into the
+//!      `tool_results_this_iter`, and the accumulated `observations`
+//!      string — the post-turn phase flushes these into the
 //!      conversation before the next LLM call.
 
 use std::rc::Rc;
