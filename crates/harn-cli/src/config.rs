@@ -27,6 +27,15 @@ use serde::Deserialize;
 
 const MANIFEST: &str = "harn.toml";
 
+/// Hard cap on how many parent directories the loader will inspect.
+///
+/// The walk also stops early at a `.git` boundary (the first directory
+/// containing a `.git` child is treated as the project root). The cap
+/// exists to defend against pathological paths, symlink loops, and
+/// accidental pickup of a stray `harn.toml` high up the filesystem
+/// (e.g. a user's home directory or `/tmp`).
+const MAX_PARENT_DIRS: usize = 16;
+
 /// Combined `harn.toml` view used by `harn fmt` and `harn lint`.
 #[derive(Debug, Default, Clone)]
 pub struct HarnConfig {
@@ -109,10 +118,22 @@ pub fn load_for_path(start: &Path) -> Result<HarnConfig, ConfigError> {
         base.parent().map(Path::to_path_buf)
     };
 
+    let mut steps = 0usize;
     while let Some(dir) = cursor {
+        if steps >= MAX_PARENT_DIRS {
+            break;
+        }
+        steps += 1;
         let candidate = dir.join(MANIFEST);
         if candidate.is_file() {
             return parse_manifest(&candidate);
+        }
+        // Stop at project roots — a `.git` directory or file (worktree
+        // link) means we've left the user's project and are about to
+        // traverse into shared/home/system territory where picking up
+        // a stray `harn.toml` would surprise the author.
+        if dir.join(".git").exists() {
+            break;
         }
         cursor = dir.parent().map(Path::to_path_buf);
     }
@@ -240,6 +261,55 @@ separator_width = 42
         let harn_file = write_file(&sub, "main.harn", "pipeline default(t) {}\n");
         let cfg = load_for_path(&harn_file).expect("load");
         assert_eq!(cfg.fmt.separator_width, Some(42));
+    }
+
+    #[test]
+    fn walk_stops_at_git_boundary() {
+        // An ancestor `harn.toml` sits above a `.git` dir; the loader
+        // must NOT pick it up — that manifest lives in a different
+        // project (or the user's home) and silently applying its
+        // `[fmt]` / `[lint]` settings would surprise authors.
+        let tmp = tempfile::tempdir().unwrap();
+        let outer = tmp.path();
+        write_file(
+            outer,
+            "harn.toml",
+            r#"
+[fmt]
+line_width = 999
+"#,
+        );
+        let project = outer.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::create_dir_all(project.join(".git")).unwrap();
+        let inner = project.join("src");
+        std::fs::create_dir_all(&inner).unwrap();
+        let harn_file = write_file(&inner, "main.harn", "pipeline default(t) {}\n");
+        let cfg = load_for_path(&harn_file).expect("load");
+        assert!(
+            cfg.fmt.line_width.is_none(),
+            "must not pick up harn.toml from above the .git boundary: got {:?}",
+            cfg.fmt.line_width,
+        );
+    }
+
+    #[test]
+    fn walk_stops_at_max_depth() {
+        // Build > MAX_PARENT_DIRS of nested directories with no
+        // harn.toml and no .git. The loader should terminate without
+        // recursing all the way to the filesystem root.
+        let tmp = tempfile::tempdir().unwrap();
+        let mut dir = tmp.path().to_path_buf();
+        for i in 0..(MAX_PARENT_DIRS + 4) {
+            dir = dir.join(format!("lvl{i}"));
+        }
+        std::fs::create_dir_all(&dir).unwrap();
+        let harn_file = write_file(&dir, "main.harn", "pipeline default(t) {}\n");
+        // The walk must not panic, must not hang, and must return
+        // defaults even though a theoretical `harn.toml` could be found
+        // higher up on some systems.
+        let cfg = load_for_path(&harn_file).expect("load");
+        assert!(cfg.fmt.line_width.is_none());
     }
 
     #[test]
