@@ -28,7 +28,7 @@ fn detect_watch_changes_reports_modified_files() {
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("watched.txt");
     std::fs::write(&path, "one").unwrap();
-    let paths = vec![path.to_string_lossy().to_string()];
+    let paths = vec![path.to_string_lossy().into_owned()];
     let mut state = watch_state(&paths);
     std::thread::sleep(std::time::Duration::from_secs(1));
     std::fs::write(&path, "two").unwrap();

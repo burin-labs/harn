@@ -61,7 +61,7 @@ fn load_run_tree_recurses_into_child_runs() {
             worker_id: "worker_1".to_string(),
             worker_name: "worker".to_string(),
             run_id: Some("child".to_string()),
-            run_path: Some(child_path.to_string_lossy().to_string()),
+            run_path: Some(child_path.to_string_lossy().into_owned()),
             ..Default::default()
         }],
         ..Default::default()

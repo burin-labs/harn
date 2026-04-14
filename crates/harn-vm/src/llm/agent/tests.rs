@@ -685,7 +685,10 @@ async fn observed_llm_call_transcript_deduplicates_system_and_tool_schemas() {
     ));
     std::fs::create_dir_all(&dir).unwrap();
     let old_dir = std::env::var("HARN_LLM_TRANSCRIPT_DIR").ok();
-    std::env::set_var("HARN_LLM_TRANSCRIPT_DIR", dir.to_string_lossy().to_string());
+    std::env::set_var(
+        "HARN_LLM_TRANSCRIPT_DIR",
+        dir.to_string_lossy().into_owned(),
+    );
     super::super::agent_observe::reset_transcript_dedup();
 
     let mut opts = base_opts(vec![serde_json::json!({"role": "user", "content": "ping"})]);
@@ -769,7 +772,10 @@ async fn observed_llm_call_transcript_uses_explicit_tool_format() {
     let dir = std::env::temp_dir().join(format!("harn-llm-transcript-{}", uuid::Uuid::now_v7()));
     std::fs::create_dir_all(&dir).unwrap();
     let old_dir = std::env::var("HARN_LLM_TRANSCRIPT_DIR").ok();
-    std::env::set_var("HARN_LLM_TRANSCRIPT_DIR", dir.to_string_lossy().to_string());
+    std::env::set_var(
+        "HARN_LLM_TRANSCRIPT_DIR",
+        dir.to_string_lossy().into_owned(),
+    );
 
     let opts = base_opts(vec![serde_json::json!({
         "role": "user",
@@ -910,7 +916,7 @@ async fn daemon_timer_wake_persists_snapshot_and_compacts_on_idle() {
     config.max_iterations = 2;
     config.daemon = true;
     config.daemon_config = DaemonLoopConfig {
-        persist_path: Some(snapshot_path.to_string_lossy().to_string()),
+        persist_path: Some(snapshot_path.to_string_lossy().into_owned()),
         wake_interval_ms: Some(1),
         consolidate_on_idle: true,
         ..Default::default()
@@ -922,8 +928,11 @@ async fn daemon_timer_wake_persists_snapshot_and_compacts_on_idle() {
     });
 
     let result = run_agent_loop_internal(&mut opts, config).await.unwrap();
-    assert_eq!(result["status"], "idle");
-    assert_eq!(result["daemon_state"], "idle");
+    // The daemon exhausted max_iterations (2) without any natural
+    // terminal condition firing, so the loop now reports
+    // budget_exhausted rather than the ambiguous "idle" it used to.
+    assert_eq!(result["status"], "budget_exhausted");
+    assert_eq!(result["daemon_state"], "budget_exhausted");
     assert_eq!(result["iterations"].as_u64(), Some(2));
     assert_eq!(
         result["daemon_snapshot_path"].as_str(),
@@ -931,7 +940,7 @@ async fn daemon_timer_wake_persists_snapshot_and_compacts_on_idle() {
     );
 
     let snapshot = super::super::daemon::load_snapshot(snapshot_path.to_str().unwrap()).unwrap();
-    assert_eq!(snapshot.daemon_state, "idle");
+    assert_eq!(snapshot.daemon_state, "budget_exhausted");
     assert_eq!(snapshot.total_iterations, 2);
     assert!(snapshot.transcript_summary.is_some());
 
@@ -978,7 +987,7 @@ async fn daemon_resume_path_restores_prior_session_state() {
     let mut config = base_agent_config();
     config.daemon = true;
     config.daemon_config = DaemonLoopConfig {
-        resume_path: Some(snapshot_path.to_string_lossy().to_string()),
+        resume_path: Some(snapshot_path.to_string_lossy().into_owned()),
         ..Default::default()
     };
 

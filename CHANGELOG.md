@@ -7,6 +7,123 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## v0.6.2
+
+Polish patch focused on **agent-loop correctness and error-handling
+depth**. Restructures error classification end-to-end (new
+`ErrorCategory` variants, HTTP-status mapping fixes, category-first
+retry classifier, RFC-compliant retry-after parsing), fixes several
+silent-failure modes in the agent loop, hardens the streaming
+transport against pathological slow-drip providers, and unifies a
+handful of CLI and observability rough edges. Conformance suite goes
+from 418 → 419 tests; Rust tests from 530 → 546.
+
+### Breaking
+
+- **`ErrorCategory` gains 4 variants** — `Overloaded`, `ServerError`,
+  `TransientNetwork`, `SchemaValidation`. Non-exhaustive matches on
+  `ErrorCategory` at the FFI/host-consumer boundary must handle the
+  new variants (or add a wildcard arm). In-tree exhaustive sites were
+  updated in this commit.
+- **HTTP status → category mapping corrected.** 503 is now
+  `Overloaded` (not `RateLimit` — 503 is an overload/shedding signal,
+  not a quota hit). 500 and 502 are now `ServerError` (were falling
+  through to `Generic`). 529 is `Overloaded`. 504 stays `Timeout`.
+  Hosts that pattern-match on `rate_limit` will no longer see 503s
+  there; match on `overloaded` or use `ErrorCategory::is_transient()`
+  for a retry decision.
+- **Anthropic `overloaded_error` string matches `Overloaded`**, not
+  `RateLimit`. Same rationale as the status-code fix.
+- **`agent_loop` terminal `status` distinguishes budget exhaustion.**
+  When the loop completes `max_iterations` without any natural break,
+  `status` is now `"budget_exhausted"` (previously the same `"done"`
+  used for natural termination). Daemon loops in the same condition
+  report `"budget_exhausted"` instead of being silently relabeled as
+  `"idle"`. The conformance `agent_daemon_mode` fixture was updated
+  to assert the new shape; host consumers that keyed off `"done"` to
+  detect "agent is finished" should add `"budget_exhausted"` to the
+  list (the loop ran out of rope, not out of work).
+
+### Added
+
+- **`ErrorCategory::is_transient()`** — authoritative retry-worthy
+  predicate. Returns true for `Timeout | RateLimit | Overloaded |
+  ServerError | TransientNetwork`.
+- **`idle_watchdog_attempts` agent_loop option** — opt-in watchdog
+  that terminates a daemon with `status = "watchdog"` after N
+  consecutive idle ticks returning no wake reason. Guards against a
+  misconfigured daemon (bridge never signals, no timer, no watch
+  paths) hanging the session silently.
+- **Three internal `AgentEvent` variants** — `BudgetExhausted`,
+  `LoopStuck`, `DaemonWatchdogTripped`. Hosts subscribing to the
+  event stream get parity with other loop-terminal signals.
+- **`cache_hit` boolean in provider-response transcript entries** so
+  consumers don't reverse-engineer it from `cache_read_tokens`.
+- **RFC 7231 HTTP-date support in retry-after parsing.** The previous
+  implementation only handled integer-seconds form and silently
+  ignored the date form that major providers emit. Numeric seconds
+  are clamped to `[0, 60_000]` ms so a misbehaving provider asking
+  for a 10-minute sleep doesn't freeze the caller.
+- **Streaming overall deadline.** `vm_stream_llm` now enforces a
+  30-minute default overall budget (or the caller's `timeout`) in
+  addition to the per-chunk idle timeout, so a provider dribbling
+  bytes just under the idle threshold can't hold a stream open
+  forever.
+- **16 new unit tests** for retry classification and retry-after
+  parsing; one new conformance case (`agent_budget_exhausted`).
+
+### Fixed
+
+- **Partial tool-call parse-error feedback was silently swallowed**
+  when a batch mixed valid and malformed calls. The feedback gate
+  was `calls.is_empty() && !tool_parse_errors.is_empty()`; it is now
+  `!tool_parse_errors.is_empty()` with a clarifying note that the
+  other calls in the turn dispatched successfully. Previously the
+  model saw an apparent random failure to follow instructions.
+- **`-e` eval leaked / raced on the temp file.** Fixed path was
+  `$TMPDIR/__harn_eval__.harn`, so concurrent invocations clobbered
+  each other and a panic in `run_file` left the file behind. Now
+  uses `tempfile::NamedTempFile` with Drop-guarded cleanup.
+- **`retry-after: <seconds>` with awkward type ascription cleaned up**
+  (stylistic; no behavior change on that path).
+- **`stop_after_successful_tools` unknown names are now flagged.** A
+  warning names the unknown tool(s) at loop start; the option is
+  still tolerated (forward-compat) but the user sees why their stop
+  condition never fires.
+- **Schema-validation error message now includes an actionable hint.**
+  If `schema_retries` was 0, the error points at the option; if it
+  was > 0 and got exhausted, the error says so plainly. The error is
+  also now a `CategorizedError { category: SchemaValidation, .. }`
+  rather than an opaque `Thrown(String)`.
+
+### Changed
+
+- **`is_retryable_llm_error` is category-first.** Structured
+  `CategorizedError`s route through `is_transient()`. String-shaped
+  errors first consult the shared `classify_error_message` machinery
+  in `value.rs` so HTTP status codes and well-known provider
+  identifiers are interpreted consistently with the rest of the VM,
+  then fall back to a small substring list for shapes that carry no
+  status (network failure phrases).
+- **Micro-allocations swept:** `.to_string_lossy().to_string()` →
+  `.to_string_lossy().into_owned()` across 14 files. Identical
+  semantics, one fewer allocation on the owned variant.
+
+### Internal
+
+- **Dead-code/lint sweep.** The `#[allow(clippy::
+  arc_with_non_send_sync)]` in `stdlib/concurrency.rs` gains a
+  why-comment anchoring it to the documented single-threaded
+  LocalSet invariant. The `MultiSink::handle_event` clone-then-
+  iterate pattern is now documented as deliberate deadlock
+  avoidance rather than an obvious "optimization" candidate.
+- **Docs reconciled.** `docs/src/llm-and-agents.md` now lists the
+  full `status` state space and documents the new
+  `idle_watchdog_attempts` option.
+
+Rust tests: harn-vm lib 546/546, harn-cli 124/124.
+Conformance: 419/419.
+
 ## v0.6.1
 
 Patch release. Completes the WS-6 agent/mod.rs modularization started in

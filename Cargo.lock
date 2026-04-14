@@ -768,6 +768,7 @@ dependencies = [
  "futures",
  "harn-lexer",
  "harn-parser",
+ "httpdate",
  "md-5",
  "opentelemetry",
  "opentelemetry-otlp",

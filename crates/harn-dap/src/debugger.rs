@@ -532,7 +532,7 @@ impl Debugger {
                     source: self.source_path.as_ref().map(|p| Source {
                         name: std::path::Path::new(p)
                             .file_name()
-                            .map(|f| f.to_string_lossy().to_string()),
+                            .map(|f| f.to_string_lossy().into_owned()),
                         path: Some(p.clone()),
                     }),
                 })
@@ -546,7 +546,7 @@ impl Debugger {
                 source: self.source_path.as_ref().map(|p| Source {
                     name: std::path::Path::new(p)
                         .file_name()
-                        .map(|f| f.to_string_lossy().to_string()),
+                        .map(|f| f.to_string_lossy().into_owned()),
                     path: Some(p.clone()),
                 }),
             }]

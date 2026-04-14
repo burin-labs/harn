@@ -133,7 +133,7 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
         for entry in entries {
             let entry =
                 entry.map_err(|e| VmError::Thrown(VmValue::String(Rc::from(e.to_string()))))?;
-            let name = entry.file_name().to_string_lossy().to_string();
+            let name = entry.file_name().to_string_lossy().into_owned();
             result.push(VmValue::String(Rc::from(name)));
         }
         result.sort_by_key(|a| a.display());
@@ -158,7 +158,7 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
             path.push(arg.display());
         }
         Ok(VmValue::String(Rc::from(
-            path.to_string_lossy().to_string().as_str(),
+            path.to_string_lossy().into_owned().as_str(),
         )))
     });
 
@@ -184,7 +184,7 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
 
     vm.register_builtin("temp_dir", |_args, _out| {
         Ok(VmValue::String(Rc::from(
-            std::env::temp_dir().to_string_lossy().to_string().as_str(),
+            std::env::temp_dir().to_string_lossy().into_owned().as_str(),
         )))
     });
 

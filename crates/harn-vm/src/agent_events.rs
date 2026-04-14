@@ -88,6 +88,31 @@ pub enum AgentEvent {
         kind: String,
         content: String,
     },
+    /// Emitted when the agent loop exhausts `max_iterations` without any
+    /// explicit break condition firing. Distinct from a natural "done" or
+    /// a "stuck" nudge-exhaustion: this is strictly a budget cap.
+    BudgetExhausted {
+        session_id: String,
+        max_iterations: usize,
+    },
+    /// Emitted when the loop breaks because consecutive text-only turns
+    /// hit `max_nudges`. Parity with `BudgetExhausted` / `TurnEnd` for
+    /// hosts that key off agent-terminal events.
+    LoopStuck {
+        session_id: String,
+        max_nudges: usize,
+        last_iteration: usize,
+        tail_excerpt: String,
+    },
+    /// Emitted when the daemon idle-wait loop trips its watchdog because
+    /// every configured wake source returned `None` for N consecutive
+    /// attempts. Exists so a broken daemon doesn't hang the session
+    /// silently.
+    DaemonWatchdogTripped {
+        session_id: String,
+        attempts: usize,
+        elapsed_ms: u64,
+    },
 }
 
 impl AgentEvent {
@@ -100,7 +125,10 @@ impl AgentEvent {
             | Self::Plan { session_id, .. }
             | Self::TurnStart { session_id, .. }
             | Self::TurnEnd { session_id, .. }
-            | Self::FeedbackInjected { session_id, .. } => session_id,
+            | Self::FeedbackInjected { session_id, .. }
+            | Self::BudgetExhausted { session_id, .. }
+            | Self::LoopStuck { session_id, .. }
+            | Self::DaemonWatchdogTripped { session_id, .. } => session_id,
         }
     }
 }
@@ -141,6 +169,11 @@ impl Default for MultiSink {
 
 impl AgentEventSink for MultiSink {
     fn handle_event(&self, event: &AgentEvent) {
+        // Deliberate: snapshot then release the lock before invoking sink
+        // callbacks. Sinks can re-enter the event system (e.g. a host
+        // sink that logs to another AgentEvent path), so holding the
+        // mutex across the callback would risk self-deadlock. Arc clones
+        // are refcount bumps — cheap.
         let sinks = self.sinks.lock().expect("sink mutex poisoned").clone();
         for sink in sinks {
             sink.handle_event(event);

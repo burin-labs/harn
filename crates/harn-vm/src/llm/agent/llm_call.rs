@@ -175,12 +175,15 @@ pub(super) async fn run_llm_call(
         {
             let calls = parse_result.calls;
 
-            // When the parser found tool-call-looking text but couldn't
-            // parse it, inject the specific parse error into the conversation
-            // so the model knows what to fix (e.g. unescaped backtick inside
-            // a template literal). Without this, the generic nudge gives the
-            // model no signal about what was wrong.
-            if calls.is_empty() && !tool_parse_errors.is_empty() {
+            // Inject the specific parse error(s) into the conversation so
+            // the model knows what to fix (e.g. unescaped backtick inside
+            // a template literal). We emit feedback whenever ANY parse
+            // error is present — previously the gate was
+            // `calls.is_empty()`, which silently swallowed errors in the
+            // mixed-batch case where some calls parsed and some didn't,
+            // leaving the model no signal about the dropped call and an
+            // apparent random failure to follow instructions.
+            if !tool_parse_errors.is_empty() {
                 let error_summary = tool_parse_errors
                     .iter()
                     .take(2)
@@ -190,13 +193,24 @@ pub(super) async fn run_llm_call(
                 crate::events::log_warn(
                     "llm.tool",
                     &format!(
-                        "{} tool-call parse error(s): {}",
+                        "{} tool-call parse error(s): {} (parsed_calls={})",
                         tool_parse_errors.len(),
-                        &error_summary[..error_summary.len().min(200)]
+                        &error_summary[..error_summary.len().min(200)],
+                        calls.len(),
                     ),
                 );
+                let partial_note = if calls.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        "\n\n(The other {} tool call(s) in this turn parsed \
+                         successfully and were dispatched; the errors above \
+                         describe only the malformed ones, which were dropped.)",
+                        calls.len()
+                    )
+                };
                 let feedback = format!(
-                    "Your tool call could not be parsed: {error_summary}\n\n\
+                    "Your tool call could not be parsed: {error_summary}{partial_note}\n\n\
                      Use heredoc syntax for multiline content — it requires NO escaping:\n\
                      edit({{\n\
                          action: \"create\",\n\

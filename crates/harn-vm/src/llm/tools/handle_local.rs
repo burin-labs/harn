@@ -73,7 +73,7 @@ pub(crate) fn handle_tool_locally(name: &str, args: &serde_json::Value) -> Optio
                         let mut names: Vec<String> = entries
                             .filter_map(|e| e.ok())
                             .map(|e| {
-                                let name = e.file_name().to_string_lossy().to_string();
+                                let name = e.file_name().to_string_lossy().into_owned();
                                 if e.path().is_dir() {
                                     format!("{}/", name)
                                 } else {
@@ -130,7 +130,7 @@ pub(crate) fn handle_tool_locally(name: &str, args: &serde_json::Value) -> Optio
                     let mut names: Vec<String> = entries
                         .filter_map(|e| e.ok())
                         .map(|e| {
-                            let name = e.file_name().to_string_lossy().to_string();
+                            let name = e.file_name().to_string_lossy().into_owned();
                             if e.path().is_dir() {
                                 format!("{}/", name)
                             } else {

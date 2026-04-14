@@ -158,6 +158,31 @@ pub async fn run_agent_loop_internal(
     let custom_nudge = state.custom_nudge.clone();
     let session_id = state.session_id.clone();
 
+    // Validate `stop_after_successful_tools` names against the declared
+    // tool schema. Unknown names are tolerated (forward-compat with tools
+    // that may be declared dynamically later in the session) but warned
+    // — silently never stopping is the failure mode this guards against.
+    if let Some(stop_tools) = stop_after_successful_tools.as_ref() {
+        let declared = super::tools::collect_tool_schemas(tools_val, opts.native_tools.as_deref());
+        let declared_names: std::collections::BTreeSet<&str> =
+            declared.iter().map(|schema| schema.name.as_str()).collect();
+        let unknown: Vec<&str> = stop_tools
+            .iter()
+            .filter(|name| !declared_names.contains(name.as_str()))
+            .map(String::as_str)
+            .collect();
+        if !unknown.is_empty() {
+            crate::events::log_warn(
+                "agent.stop_after_successful_tools",
+                &format!(
+                    "name(s) not in declared tool schema: {} — will never trigger a stop unless declared later",
+                    unknown.join(", ")
+                ),
+            );
+        }
+    }
+
+    let mut iteration_exited_via_break = false;
     for iteration in 0..max_iterations {
         turn_preflight::run_turn_preflight(
             &mut state,
@@ -243,8 +268,24 @@ pub async fn run_agent_loop_internal(
         .await?
         {
             post_turn::IterationOutcome::Continue => continue,
-            post_turn::IterationOutcome::Break => break,
+            post_turn::IterationOutcome::Break => {
+                iteration_exited_via_break = true;
+                break;
+            }
         }
+    }
+
+    // If the loop fell through all iterations without any explicit
+    // break, the agent hit its max_iterations budget rather than
+    // reaching a natural terminus. Signal that distinctly so hosts can
+    // tell "finished the job" from "ran out of rope".
+    if !iteration_exited_via_break && max_iterations > 0 {
+        state.final_status = "budget_exhausted";
+        emit_agent_event(&AgentEvent::BudgetExhausted {
+            session_id: session_id.clone(),
+            max_iterations,
+        })
+        .await;
     }
 
     finalize::run_finalize(

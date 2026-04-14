@@ -55,7 +55,7 @@ pub(crate) fn check_file_inner(
     config: &CheckConfig,
     externally_imported_names: &std::collections::HashSet<String>,
 ) -> CommandOutcome {
-    let path_str = path.to_string_lossy().to_string();
+    let path_str = path.to_string_lossy().into_owned();
     let (source, program) = parse_source_file(&path_str);
 
     let mut has_error = false;
@@ -173,7 +173,7 @@ pub(crate) fn lint_file_inner(
     externally_imported_names: &std::collections::HashSet<String>,
     require_file_header: bool,
 ) -> CommandOutcome {
-    let path_str = path.to_string_lossy().to_string();
+    let path_str = path.to_string_lossy().into_owned();
     let (source, program) = parse_source_file(&path_str);
 
     let options = harn_lint::LintOptions {
@@ -212,7 +212,7 @@ pub(crate) fn lint_fix_file(
     externally_imported_names: &HashSet<String>,
     require_file_header: bool,
 ) -> usize {
-    let path_str = path.to_string_lossy().to_string();
+    let path_str = path.to_string_lossy().into_owned();
     let (source, program) = parse_source_file(&path_str);
 
     // Collect lint fixes
@@ -339,7 +339,7 @@ pub(crate) fn collect_harn_targets(targets: &[&str]) -> Vec<PathBuf> {
 pub(crate) fn collect_cross_file_imports(files: &[PathBuf]) -> std::collections::HashSet<String> {
     let mut names = std::collections::HashSet::new();
     for file in files {
-        let path_str = file.to_string_lossy().to_string();
+        let path_str = file.to_string_lossy().into_owned();
         let (_, program) = parse_source_file(&path_str);
         names.extend(harn_lint::collect_selective_import_names(&program));
     }
@@ -642,7 +642,7 @@ fn scan_node_bundle(
                 return;
             }
             if let Some(import_path) = resolve_import_path(file_path, path) {
-                let import_str = import_path.to_string_lossy().to_string();
+                let import_str = import_path.to_string_lossy().into_owned();
                 let (_, import_program) = parse_source_file(&import_str);
                 manifest.add_module(&import_path, "import");
                 manifest.add_import_edge(file_path, &import_path);
@@ -938,7 +938,7 @@ pub(crate) fn build_bundle_manifest(
             .canonicalize()
             .unwrap_or_else(|_| target.to_path_buf());
         manifest.add_module(&canonical, "entry");
-        let target_str = canonical.to_string_lossy().to_string();
+        let target_str = canonical.to_string_lossy().into_owned();
         let (source, program) = parse_source_file(&target_str);
         let _ = source;
         scan_program_bundle(&canonical, &program, config, &mut visited, &mut manifest);
@@ -999,7 +999,7 @@ fn collect_mock_host_capabilities_from_node(
             let Some(import_path) = resolve_import_path(file_path, path) else {
                 return;
             };
-            let import_str = import_path.to_string_lossy().to_string();
+            let import_str = import_path.to_string_lossy().into_owned();
             let (import_source, import_program) = parse_source_file(&import_str);
             collect_mock_host_capabilities(
                 &import_path,
@@ -1538,7 +1538,7 @@ fn scan_import_collisions(
                 let Some(import_path) = resolve_import_path(file_path, path) else {
                     continue; // already diagnosed as unresolved
                 };
-                let import_str = import_path.to_string_lossy().to_string();
+                let import_str = import_path.to_string_lossy().into_owned();
                 let Ok(import_source) = std::fs::read_to_string(&import_path) else {
                     continue;
                 };
@@ -1574,7 +1574,7 @@ fn scan_import_collisions(
                     continue;
                 }
                 let module_path = resolve_import_path(file_path, path)
-                    .map(|p| p.to_string_lossy().to_string())
+                    .map(|p| p.to_string_lossy().into_owned())
                     .unwrap_or_else(|| path.clone());
                 for name in names {
                     if let Some(existing) = imported_names.get(name) {
@@ -1682,7 +1682,7 @@ fn scan_node_preflight(
             }
             match resolve_import_path(file_path, path) {
                 Some(import_path) => {
-                    let import_str = import_path.to_string_lossy().to_string();
+                    let import_str = import_path.to_string_lossy().into_owned();
                     let (import_source, import_program) = parse_source_file(&import_str);
                     scan_program_preflight(
                         &import_path,

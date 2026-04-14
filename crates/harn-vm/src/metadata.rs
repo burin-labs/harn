@@ -752,7 +752,7 @@ fn compute_structure_hash(dir: &Path) -> String {
     if let Ok(rd) = std::fs::read_dir(dir) {
         for entry in rd.flatten() {
             if let Ok(meta) = entry.metadata() {
-                let name = entry.file_name().to_string_lossy().to_string();
+                let name = entry.file_name().to_string_lossy().into_owned();
                 entries.push(format!("{}:{}", name, meta.len()));
             }
         }
@@ -768,7 +768,7 @@ fn compute_content_hash_for_dir(dir: &Path) -> String {
     if let Ok(rd) = std::fs::read_dir(dir) {
         for entry in rd.flatten() {
             if let Ok(meta) = entry.metadata() {
-                let name = entry.file_name().to_string_lossy().to_string();
+                let name = entry.file_name().to_string_lossy().into_owned();
                 let mtime = meta
                     .modified()
                     .ok()
@@ -872,7 +872,7 @@ fn scan_dir_recursive(
             Ok(m) => m,
             Err(_) => continue,
         };
-        let name = entry.file_name().to_string_lossy().to_string();
+        let name = entry.file_name().to_string_lossy().into_owned();
         // Skip hidden files and .harn directory
         if !options.include_hidden && name.starts_with('.') {
             continue;
@@ -882,7 +882,7 @@ fn scan_dir_recursive(
             .strip_prefix(base)
             .unwrap_or(entry.path().as_path())
             .to_string_lossy()
-            .to_string();
+            .into_owned();
         // Apply glob-like pattern filter
         if let Some(pat) = &options.pattern {
             if !glob_match(pat, &rel_path) {

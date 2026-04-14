@@ -207,7 +207,7 @@ pub(super) fn worker_snapshot_path(worker_id: &str) -> String {
     worker_state_dir()
         .join(format!("{worker_id}.json"))
         .to_string_lossy()
-        .to_string()
+        .into_owned()
 }
 
 fn worker_config_to_json(config: &WorkerConfig) -> serde_json::Value {
@@ -465,7 +465,7 @@ pub(super) fn load_worker_state_snapshot(target: &str) -> Result<WorkerState, Vm
             .map(|value| value.to_string()),
         carry_policy,
         execution,
-        snapshot_path: path.to_string_lossy().to_string(),
+        snapshot_path: path.to_string_lossy().into_owned(),
         audit: audit.normalize(),
     })
 }

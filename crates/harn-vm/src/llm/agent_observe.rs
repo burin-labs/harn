@@ -95,51 +95,99 @@ fn current_iteration() -> Option<usize> {
 // Retryable error classification
 // ---------------------------------------------------------------------------
 
-/// Classify whether a VmError from an LLM call is transient and worth retrying.
+/// Classify whether a VmError from an LLM call is transient and worth
+/// retrying.
+///
+/// Priority:
+/// 1. `CategorizedError` → consult `ErrorCategory::is_transient()` for the
+///    authoritative, structured answer.
+/// 2. `Thrown(String)` / `Runtime(String)` → first try to *derive* a
+///    category via the shared `classify_error_message` machinery (so
+///    HTTP-status patterns and well-known provider identifiers stay in
+///    one place), then fall back to a small substring list for error
+///    shapes that don't carry a status code (network failure phrases).
 pub(super) fn is_retryable_llm_error(err: &VmError) -> bool {
+    use crate::value::{classify_error_message, ErrorCategory};
     let msg = match err {
-        VmError::Thrown(crate::value::VmValue::String(s)) => s.to_lowercase(),
-        VmError::CategorizedError { category, .. } => {
-            return matches!(
-                category,
-                crate::value::ErrorCategory::RateLimit | crate::value::ErrorCategory::Timeout
-            );
-        }
-        VmError::Runtime(s) => s.to_lowercase(),
+        VmError::CategorizedError { category, .. } => return category.is_transient(),
+        VmError::Thrown(crate::value::VmValue::String(s)) => s.as_ref(),
+        VmError::Runtime(s) => s.as_str(),
         _ => return false,
     };
-    msg.contains("http 429")
-        || msg.contains("http 500")
-        || msg.contains("http 502")
-        || msg.contains("http 503")
-        || msg.contains("http 529")
-        || msg.contains("overloaded")
-        || msg.contains("rate limit")
-        || msg.contains("too many requests")
-        || msg.contains("stream error")
-        || msg.contains("connection")
-        || msg.contains("timed out")
-        || msg.contains("timeout")
-        || msg.contains("delivered no content")
-        || msg.contains("eof")
+    let derived = classify_error_message(msg);
+    if derived != ErrorCategory::Generic {
+        return derived.is_transient();
+    }
+    // String-level fallback for retryable shapes without a status code.
+    let lower = msg.to_lowercase();
+    lower.contains("too many requests")
+        || lower.contains("rate limit")
+        || lower.contains("overloaded")
+        || lower.contains("service unavailable")
+        || lower.contains("bad gateway")
+        || lower.contains("gateway timeout")
+        || lower.contains("timed out")
+        || lower.contains("timeout")
+        || lower.contains("delivered no content")
+        || lower.contains("eof")
 }
 
-/// Extract retry-after delay from error message if present.
+/// Extract retry-after delay from an error message if present.
+///
+/// Supports both forms defined by RFC 7231 §7.1.3:
+/// - delta-seconds (integer or fractional)
+/// - HTTP-date (IMF-fixdate)
+///
+/// Returns `None` if no recognizable `retry-after:` header is embedded.
+/// HTTP-date values in the past are normalized to 0 ms. Values above
+/// `60_000` ms are clamped — callers combine the hint with their own
+/// exponential backoff rather than honoring huge provider-requested
+/// sleeps verbatim.
 pub(super) fn extract_retry_after_ms(err: &VmError) -> Option<u64> {
     let msg = match err {
         VmError::Thrown(crate::value::VmValue::String(s)) => s.as_ref(),
+        VmError::CategorizedError { message, .. } => message.as_str(),
         VmError::Runtime(s) => s.as_str(),
         _ => return None,
     };
+    parse_retry_after(msg)
+}
+
+/// Parse the value of a `retry-after:` header embedded anywhere in `msg`.
+///
+/// Exposed for unit tests; the public entry point is
+/// `extract_retry_after_ms`.
+pub(crate) fn parse_retry_after(msg: &str) -> Option<u64> {
+    const MAX_MS: u64 = 60_000;
     let lower = msg.to_lowercase();
-    if let Some(pos) = lower.find("retry-after:") {
-        let after = &msg[pos + "retry-after:".len()..];
-        let trimmed = after.trim_start();
-        if let Some(num_str) = trimmed.split_whitespace().next() {
-            if let Ok(secs) = num_str.parse::<f64>() as Result<f64, _> {
-                return Some((secs * 1000.0) as u64);
+    let pos = lower.find("retry-after:")?;
+    let after = &msg[pos + "retry-after:".len()..];
+    // The header value ends at the next CRLF or end-of-string. Also cap
+    // at the next obvious header boundary so we don't grab a neighboring
+    // field.
+    let end = after.find(['\r', '\n']).unwrap_or(after.len());
+    let value = after[..end].trim();
+    if value.is_empty() {
+        return None;
+    }
+    // Try numeric seconds first (integer or fractional).
+    if let Some(num_str) = value.split_whitespace().next() {
+        if let Ok(secs) = num_str.parse::<f64>() {
+            if !secs.is_finite() || secs < 0.0 {
+                return Some(0);
             }
+            let ms = (secs * 1000.0) as u64;
+            return Some(ms.min(MAX_MS));
         }
+    }
+    // Otherwise try HTTP-date (IMF-fixdate, RFC 7231).
+    if let Ok(target) = httpdate::parse_http_date(value) {
+        let now = std::time::SystemTime::now();
+        let delta = target
+            .duration_since(now)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        return Some(delta.min(MAX_MS));
     }
     None
 }
@@ -298,6 +346,10 @@ pub(super) fn dump_llm_response(
         "output_tokens": result.output_tokens,
         "cache_read_tokens": result.cache_read_tokens,
         "cache_write_tokens": result.cache_write_tokens,
+        // Explicit boolean so consumers don't need to re-compute it from
+        // the token counts; also makes cache-behavior regressions easier
+        // to spot in transcript tailing.
+        "cache_hit": result.cache_read_tokens > 0,
         "thinking": result.thinking,
         "response_ms": response_ms,
     }));
@@ -560,5 +612,119 @@ pub(crate) async fn observed_llm_call(
                 tokio::time::sleep(std::time::Duration::from_millis(backoff)).await;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod retry_tests {
+    use super::*;
+    use crate::value::{ErrorCategory, VmError, VmValue};
+    use std::rc::Rc;
+
+    fn thrown(s: &str) -> VmError {
+        VmError::Thrown(VmValue::String(Rc::from(s)))
+    }
+
+    fn categorized(msg: &str, category: ErrorCategory) -> VmError {
+        VmError::CategorizedError {
+            message: msg.to_string(),
+            category,
+        }
+    }
+
+    #[test]
+    fn categorized_overloaded_is_retryable() {
+        assert!(is_retryable_llm_error(&categorized(
+            "upstream overloaded",
+            ErrorCategory::Overloaded
+        )));
+    }
+
+    #[test]
+    fn categorized_server_error_is_retryable() {
+        assert!(is_retryable_llm_error(&categorized(
+            "500 internal",
+            ErrorCategory::ServerError
+        )));
+    }
+
+    #[test]
+    fn categorized_transient_network_is_retryable() {
+        assert!(is_retryable_llm_error(&categorized(
+            "reset",
+            ErrorCategory::TransientNetwork
+        )));
+    }
+
+    #[test]
+    fn categorized_auth_not_retryable() {
+        assert!(!is_retryable_llm_error(&categorized(
+            "invalid key",
+            ErrorCategory::Auth
+        )));
+    }
+
+    #[test]
+    fn http_503_is_retryable_via_classifier() {
+        // 503 used to be miscategorized as RateLimit; regression test.
+        assert!(is_retryable_llm_error(&thrown(
+            "HTTP 503 Service Unavailable"
+        )));
+    }
+
+    #[test]
+    fn http_504_is_retryable() {
+        assert!(is_retryable_llm_error(&thrown("HTTP 504 Gateway Timeout")));
+    }
+
+    #[test]
+    fn http_529_is_retryable() {
+        assert!(is_retryable_llm_error(&thrown("HTTP 529 overloaded_error")));
+    }
+
+    #[test]
+    fn bad_gateway_string_is_retryable() {
+        assert!(is_retryable_llm_error(&thrown("bad gateway response")));
+    }
+
+    #[test]
+    fn service_unavailable_string_is_retryable() {
+        assert!(is_retryable_llm_error(&thrown("service unavailable")));
+    }
+
+    #[test]
+    fn auth_error_not_retryable() {
+        assert!(!is_retryable_llm_error(&thrown("HTTP 401 Unauthorized")));
+    }
+
+    #[test]
+    fn retry_after_integer_seconds() {
+        assert_eq!(parse_retry_after("err: retry-after: 5"), Some(5_000));
+    }
+
+    #[test]
+    fn retry_after_fractional_seconds() {
+        assert_eq!(parse_retry_after("retry-after: 2.5"), Some(2_500));
+    }
+
+    #[test]
+    fn retry_after_clamped_to_cap() {
+        assert_eq!(parse_retry_after("retry-after: 600"), Some(60_000));
+    }
+
+    #[test]
+    fn retry_after_http_date_past_is_zero() {
+        let past = "retry-after: Mon, 01 Jan 1990 00:00:00 GMT";
+        assert_eq!(parse_retry_after(past), Some(0));
+    }
+
+    #[test]
+    fn retry_after_missing_returns_none() {
+        assert_eq!(parse_retry_after("nothing here"), None);
+    }
+
+    #[test]
+    fn retry_after_malformed_returns_none() {
+        assert_eq!(parse_retry_after("retry-after: soon-ish"), None);
     }
 }

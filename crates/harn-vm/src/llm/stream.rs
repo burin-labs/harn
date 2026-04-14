@@ -73,12 +73,34 @@ pub(crate) async fn vm_stream_llm(
     });
     let idle_dur = std::time::Duration::from_secs(idle_timeout_secs);
 
+    // Overall streaming deadline. Without this, a pathological provider
+    // that dribbles bytes just fast enough to reset the idle timer could
+    // hold the stream open forever. Default: the caller's `timeout`
+    // option if set, otherwise 30 minutes — long enough to accommodate
+    // legitimate thinking-heavy responses, short enough to bound a stuck
+    // connection.
+    let overall_budget_secs = opts.timeout.unwrap_or(30 * 60);
+    let overall_dur = std::time::Duration::from_secs(overall_budget_secs);
+    let stream_start = std::time::Instant::now();
+
     loop {
-        let event = match tokio::time::timeout(idle_dur, es.next()).await {
+        if stream_start.elapsed() >= overall_dur {
+            es.close();
+            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                "stream overall deadline exceeded: {overall_budget_secs}s budget reached before stream completed"
+            )))));
+        }
+        let remaining_overall = overall_dur.saturating_sub(stream_start.elapsed());
+        let wait = idle_dur.min(remaining_overall);
+        let event = match tokio::time::timeout(wait, es.next()).await {
             Ok(Some(event)) => event,
             Ok(None) => break,
             Err(_) => {
                 es.close();
+                // Distinguish idle-timeout from overall-deadline even
+                // when they happen to fire simultaneously: the overall
+                // branch at the top of the loop will catch the next
+                // iteration. Here, report the idle budget the user sees.
                 return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
                     "stream idle timeout: no data received for {idle_timeout_secs}s"
                 )))));

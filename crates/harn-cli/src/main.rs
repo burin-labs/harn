@@ -50,15 +50,28 @@ async fn main() {
             match (args.eval.as_deref(), args.file.as_deref()) {
                 (Some(code), None) => {
                     let wrapped = format!("pipeline main(task) {{\n{code}\n}}");
-                    let tmp_dir = std::env::temp_dir();
-                    let tmp_path = tmp_dir.join("__harn_eval__.harn");
+                    // `tempfile::Builder` gives us a unique filename (no
+                    // collisions between concurrent `harn run -e` invocations)
+                    // and a `Drop`-guarded cleanup path so a panic in
+                    // run_file doesn't leave the temp file behind. The
+                    // `.harn` suffix keeps tree-sitter / pipeline dispatch
+                    // matching on extension unchanged.
+                    let tmp = tempfile::Builder::new()
+                        .prefix("harn-eval-")
+                        .suffix(".harn")
+                        .tempfile()
+                        .unwrap_or_else(|e| {
+                            command_error(&format!("failed to create temp file for -e: {e}"))
+                        });
+                    let tmp_path: PathBuf = tmp.path().to_path_buf();
                     fs::write(&tmp_path, &wrapped).unwrap_or_else(|e| {
-                        eprintln!("error: failed to write temp file: {e}");
-                        process::exit(1);
+                        command_error(&format!("failed to write temp file for -e: {e}"))
                     });
-                    let tmp_str = tmp_path.to_string_lossy().to_string();
+                    let tmp_str = tmp_path.to_string_lossy().into_owned();
                     commands::run::run_file(&tmp_str, args.trace, denied, args.argv.clone()).await;
-                    let _ = fs::remove_file(&tmp_path);
+                    // tmp's Drop cleans up on all exit paths (including
+                    // panic unwind) — no explicit remove needed.
+                    drop(tmp);
                 }
                 (None, Some(file)) => {
                     commands::run::run_file(file, args.trace, denied, args.argv.clone()).await
@@ -75,8 +88,7 @@ async fn main() {
             let targets: Vec<&str> = args.targets.iter().map(String::as_str).collect();
             let files = commands::check::collect_harn_targets(&targets);
             if files.is_empty() {
-                eprintln!("No .harn files found");
-                process::exit(1);
+                command_error("no .harn files found under the given target(s)");
             }
             // Pre-scan: collect all selectively-imported function names so
             // the linter can suppress false unused-function warnings for
@@ -108,8 +120,7 @@ async fn main() {
             let targets: Vec<&str> = args.targets.iter().map(String::as_str).collect();
             let files = commands::check::collect_harn_targets(&targets);
             if files.is_empty() {
-                eprintln!("No .harn files found");
-                process::exit(1);
+                command_error("no .harn files found under the given target(s)");
             }
             let cross_file_imports = commands::check::collect_cross_file_imports(&files);
             if args.fix {
@@ -774,8 +785,8 @@ pub(crate) async fn execute(source: &str, source_path: Option<&Path>) -> Result<
             let execution_cwd = std::env::current_dir()
                 .unwrap_or_else(|_| std::path::PathBuf::from("."))
                 .to_string_lossy()
-                .to_string();
-            let source_dir = source_parent.to_string_lossy().to_string();
+                .into_owned();
+            let source_dir = source_parent.to_string_lossy().into_owned();
             harn_vm::register_store_builtins(&mut vm, store_base);
             harn_vm::register_metadata_builtins(&mut vm, store_base);
             let pipeline_name = source_path

@@ -138,12 +138,17 @@ impl AgentEventSink for AcpAgentEventSink {
                     },
                 }));
             }
-            // Internal variants (TurnStart/TurnEnd/FeedbackInjected) are
-            // pipeline-loop milestones and have no canonical ACP mapping;
-            // we deliberately do not forward them as session/update.
+            // Internal variants (loop lifecycle: TurnStart/TurnEnd/
+            // FeedbackInjected, plus BudgetExhausted/LoopStuck/
+            // DaemonWatchdogTripped) are pipeline-loop milestones and
+            // have no canonical ACP session/update mapping; deliberately
+            // not forwarded.
             AgentEvent::TurnStart { .. }
             | AgentEvent::TurnEnd { .. }
-            | AgentEvent::FeedbackInjected { .. } => {}
+            | AgentEvent::FeedbackInjected { .. }
+            | AgentEvent::BudgetExhausted { .. }
+            | AgentEvent::LoopStuck { .. }
+            | AgentEvent::DaemonWatchdogTripped { .. } => {}
         }
     }
 }

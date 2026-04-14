@@ -352,6 +352,9 @@ pub(super) async fn run_post_turn(
             state.final_status = "idle";
             return Ok(IterationOutcome::Break);
         }
+        let watchdog_limit = ctx.daemon_config.idle_watchdog_attempts;
+        let watchdog_started = std::time::Instant::now();
+        let mut idle_null_attempts: usize = 0;
         loop {
             if let Some(bridge) = ctx.bridge.as_ref() {
                 bridge.notify(
@@ -443,6 +446,20 @@ pub(super) async fn run_post_turn(
                 state.idle_backoff_ms = 100;
                 break;
             }
+            idle_null_attempts += 1;
+            if let Some(limit) = watchdog_limit {
+                if idle_null_attempts >= limit {
+                    let elapsed_ms = watchdog_started.elapsed().as_millis() as u64;
+                    super::emit_agent_event(&AgentEvent::DaemonWatchdogTripped {
+                        session_id: ctx.session_id.to_string(),
+                        attempts: idle_null_attempts,
+                        elapsed_ms,
+                    })
+                    .await;
+                    state.final_status = "watchdog";
+                    return Ok(IterationOutcome::Break);
+                }
+            }
             ctx.daemon_config
                 .update_idle_backoff(&mut state.idle_backoff_ms);
         }
@@ -474,6 +491,22 @@ pub(super) async fn run_post_turn(
     state.consecutive_text_only += 1;
     if state.consecutive_text_only > ctx.max_nudges {
         state.final_status = "stuck";
+        let tail_excerpt = {
+            let raw = call_result.text.trim();
+            if raw.chars().count() > 240 {
+                let truncated: String = raw.chars().take(240).collect();
+                format!("{truncated}…")
+            } else {
+                raw.to_string()
+            }
+        };
+        super::emit_agent_event(&AgentEvent::LoopStuck {
+            session_id: ctx.session_id.to_string(),
+            max_nudges: ctx.max_nudges,
+            last_iteration: iteration,
+            tail_excerpt,
+        })
+        .await;
         return Ok(IterationOutcome::Break);
     }
 

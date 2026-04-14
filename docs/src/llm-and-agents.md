@@ -153,7 +153,7 @@ let result = agent_loop(
   {persistent: true}
 )
 println(result.text)       // the accumulated output
-println(result.status)     // "done" or "stuck"
+println(result.status)     // "done", "stuck", "budget_exhausted", "idle", "watchdog", or "failed"
 println(result.iterations) // number of LLM round-trips
 ```
 
@@ -174,7 +174,7 @@ println(result.iterations) // number of LLM round-trips
 
 | Field | Type | Description |
 |---|---|---|
-| `status` | string | `"done"`, `"stuck"`, or `"idle"` for daemon loops that yielded while waiting |
+| `status` | string | Terminal state: `"done"` (natural completion), `"stuck"` (exceeded `max_nudges` consecutive text-only turns), `"budget_exhausted"` (hit `max_iterations` without any explicit break), `"idle"` (daemon yielded with no remaining wake source), `"watchdog"` (daemon idle-wait tripped the `idle_watchdog_attempts` limit), or `"failed"` (`require_successful_tools` not satisfied). |
 | `text` | string | Accumulated text output from all iterations |
 | `visible_text` | string | Human-visible accumulated output |
 | `iterations` | int | Number of LLM round-trips |
@@ -182,7 +182,7 @@ println(result.iterations) // number of LLM round-trips
 | `tools_used` | list | Names of tools that were called |
 | `rejected_tools` | list | Tools rejected by policy/host ceiling |
 | `deferred_user_messages` | list | Queued human messages deferred until agent yield/completion |
-| `daemon_state` | string | Final daemon lifecycle state (`"done"`, `"stuck"`, or `"idle"`) |
+| `daemon_state` | string | Final daemon lifecycle state; mirrors `status` for daemon loops. |
 | `daemon_snapshot_path` | string or nil | Persisted snapshot path when daemon persistence is enabled |
 | `transcript` | dict | Transcript of the full conversation state |
 
@@ -205,6 +205,7 @@ Same as `llm_call`, plus additional options:
 | `wake_interval_ms` | int | nil | Fixed timer wake interval for daemon loops |
 | `watch_paths` | list/string | nil | Files to poll for mtime changes while idle |
 | `consolidate_on_idle` | bool | `false` | Run transcript auto-compaction before persisting an idle daemon snapshot |
+| `idle_watchdog_attempts` | int | nil (disabled) | Max consecutive idle-wait ticks that may return no wake reason before the daemon terminates with `status = "watchdog"`. Guards against a misconfigured daemon (e.g. bridge never signals, no timer, no watch paths) hanging the session silently |
 | `context_callback` | closure | nil | Per-turn hook that can rewrite prompt-visible `messages` and/or the effective `system` prompt before the next LLM call |
 | `context_filter` | closure | nil | Alias for `context_callback` |
 | `post_turn_callback` | closure | nil | Hook called after each tool turn. Receives turn metadata and may inject a message, request an immediate stage stop, or both |

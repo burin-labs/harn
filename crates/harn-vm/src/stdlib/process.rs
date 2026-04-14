@@ -258,7 +258,7 @@ pub(crate) fn register_process_builtins(vm: &mut Vm) {
             .or_else(|| {
                 std::env::current_dir()
                     .ok()
-                    .map(|p| p.to_string_lossy().to_string())
+                    .map(|p| p.to_string_lossy().into_owned())
             })
             .unwrap_or_default();
         Ok(VmValue::String(Rc::from(dir)))
@@ -266,13 +266,13 @@ pub(crate) fn register_process_builtins(vm: &mut Vm) {
 
     vm.register_builtin("execution_root", |_args, _out| {
         Ok(VmValue::String(Rc::from(
-            execution_root_path().to_string_lossy().to_string(),
+            execution_root_path().to_string_lossy().into_owned(),
         )))
     });
 
     vm.register_builtin("asset_root", |_args, _out| {
         Ok(VmValue::String(Rc::from(
-            asset_root_path().to_string_lossy().to_string(),
+            asset_root_path().to_string_lossy().into_owned(),
         )))
     });
 
@@ -282,19 +282,19 @@ pub(crate) fn register_process_builtins(vm: &mut Vm) {
         paths.insert(
             "execution_root".to_string(),
             VmValue::String(Rc::from(
-                execution_root_path().to_string_lossy().to_string(),
+                execution_root_path().to_string_lossy().into_owned(),
             )),
         );
         paths.insert(
             "asset_root".to_string(),
-            VmValue::String(Rc::from(asset_root_path().to_string_lossy().to_string())),
+            VmValue::String(Rc::from(asset_root_path().to_string_lossy().into_owned())),
         );
         paths.insert(
             "state_root".to_string(),
             VmValue::String(Rc::from(
                 crate::runtime_paths::state_root(&runtime_base)
                     .to_string_lossy()
-                    .to_string(),
+                    .into_owned(),
             )),
         );
         paths.insert(
@@ -302,7 +302,7 @@ pub(crate) fn register_process_builtins(vm: &mut Vm) {
             VmValue::String(Rc::from(
                 crate::runtime_paths::run_root(&runtime_base)
                     .to_string_lossy()
-                    .to_string(),
+                    .into_owned(),
             )),
         );
         paths.insert(
@@ -310,7 +310,7 @@ pub(crate) fn register_process_builtins(vm: &mut Vm) {
             VmValue::String(Rc::from(
                 crate::runtime_paths::worktree_root(&runtime_base)
                     .to_string_lossy()
-                    .to_string(),
+                    .into_owned(),
             )),
         );
         Ok(VmValue::Dict(Rc::new(paths)))
@@ -335,10 +335,10 @@ pub(crate) fn register_path_builtins(vm: &mut Vm) {
     vm.register_builtin("source_dir", |_args, _out| {
         let dir = VM_SOURCE_DIR.with(|sd| sd.borrow().clone());
         match dir {
-            Some(d) => Ok(VmValue::String(Rc::from(d.to_string_lossy().to_string()))),
+            Some(d) => Ok(VmValue::String(Rc::from(d.to_string_lossy().into_owned()))),
             None => {
                 let cwd = std::env::current_dir()
-                    .map(|p| p.to_string_lossy().to_string())
+                    .map(|p| p.to_string_lossy().into_owned())
                     .unwrap_or_default();
                 Ok(VmValue::String(Rc::from(cwd)))
             }
@@ -353,7 +353,7 @@ pub(crate) fn register_path_builtins(vm: &mut Vm) {
             .unwrap_or_else(|| PathBuf::from("."));
         match find_project_root(&base) {
             Some(root) => Ok(VmValue::String(Rc::from(
-                root.to_string_lossy().to_string(),
+                root.to_string_lossy().into_owned(),
             ))),
             None => Ok(VmValue::Nil),
         }
@@ -460,8 +460,8 @@ mod tests {
         std::fs::create_dir_all(&source_dir).unwrap();
         set_thread_source_dir(&source_dir);
         set_thread_execution_context(Some(crate::orchestration::RunExecutionRecord {
-            cwd: Some(cwd.to_string_lossy().to_string()),
-            source_dir: Some(source_dir.to_string_lossy().to_string()),
+            cwd: Some(cwd.to_string_lossy().into_owned()),
+            source_dir: Some(source_dir.to_string_lossy().into_owned()),
             env: BTreeMap::new(),
             adapter: None,
             repo_path: None,
@@ -486,8 +486,8 @@ mod tests {
         std::fs::create_dir_all(&source_dir).unwrap();
         set_thread_source_dir(&source_dir);
         set_thread_execution_context(Some(crate::orchestration::RunExecutionRecord {
-            cwd: Some(cwd.to_string_lossy().to_string()),
-            source_dir: Some(source_dir.to_string_lossy().to_string()),
+            cwd: Some(cwd.to_string_lossy().into_owned()),
+            source_dir: Some(source_dir.to_string_lossy().into_owned()),
             env: BTreeMap::new(),
             adapter: None,
             repo_path: None,
@@ -509,7 +509,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("marker.txt"), "ok").unwrap();
         set_thread_execution_context(Some(RunExecutionRecord {
-            cwd: Some(dir.to_string_lossy().to_string()),
+            cwd: Some(dir.to_string_lossy().into_owned()),
             env: BTreeMap::from([("HARN_PROCESS_TEST".to_string(), "present".to_string())]),
             ..Default::default()
         }));
@@ -532,7 +532,7 @@ mod tests {
         std::fs::create_dir_all(dir.join("nested")).unwrap();
         std::fs::write(dir.join("nested").join("marker.txt"), "ok").unwrap();
         set_thread_execution_context(Some(RunExecutionRecord {
-            cwd: Some(dir.to_string_lossy().to_string()),
+            cwd: Some(dir.to_string_lossy().into_owned()),
             ..Default::default()
         }));
         let output = exec_shell(Some("nested"), "sh", "-c", "test -f marker.txt").unwrap();
@@ -553,7 +553,7 @@ mod tests {
             ".custom-worktrees",
         );
         set_thread_execution_context(Some(RunExecutionRecord {
-            cwd: Some(base.to_string_lossy().to_string()),
+            cwd: Some(base.to_string_lossy().into_owned()),
             ..Default::default()
         }));
 

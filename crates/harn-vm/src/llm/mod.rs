@@ -397,12 +397,21 @@ pub fn register_llm_builtins(vm: &mut Vm) {
 
             // Attempts exhausted (or nudge disabled): honor the caller's
             // configured `output_validation` mode.
-            let message = format!("LLM output failed schema validation: {}", errors.join("; "));
+            let hint = if schema_retries == 0 {
+                " (hint: set `schema_retries: N` in the llm_call options to automatically re-prompt the model with a corrective nudge)"
+            } else {
+                " (hint: schema_retries budget exhausted — the model did not produce conforming output after the configured retries; consider raising `schema_retries` or relaxing the schema)"
+            };
+            let message = format!(
+                "LLM output failed schema validation: {}{hint}",
+                errors.join("; ")
+            );
             match output_validation_mode(&opts) {
                 "error" => {
-                    return Err(crate::value::VmError::Thrown(VmValue::String(Rc::from(
+                    return Err(crate::value::VmError::CategorizedError {
                         message,
-                    ))));
+                        category: crate::value::ErrorCategory::SchemaValidation,
+                    });
                 }
                 "warn" => {
                     crate::events::log_warn("llm", &message);

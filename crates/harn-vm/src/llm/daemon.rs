@@ -13,6 +13,12 @@ pub(crate) struct DaemonLoopConfig {
     pub wake_interval_ms: Option<u64>,
     pub watch_paths: Vec<String>,
     pub consolidate_on_idle: bool,
+    /// Maximum number of consecutive idle-wait attempts that can return
+    /// `None` (no wake reason) before the daemon watchdog trips. A bridge
+    /// that never signals, an empty watch-path set, and no wake_interval
+    /// would otherwise leave the daemon blocked forever. `None` disables
+    /// the watchdog; `Some(0)` trips on the first idle attempt.
+    pub idle_watchdog_attempts: Option<usize>,
 }
 
 impl DaemonLoopConfig {
@@ -178,6 +184,10 @@ pub(crate) fn parse_daemon_loop_config(
         consolidate_on_idle: options
             .get("consolidate_on_idle")
             .is_some_and(|value| matches!(value, VmValue::Bool(true))),
+        idle_watchdog_attempts: options
+            .get("idle_watchdog_attempts")
+            .and_then(|value| value.as_int())
+            .and_then(|value| usize::try_from(value).ok()),
     }
 }
 

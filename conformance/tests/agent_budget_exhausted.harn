@@ -1,0 +1,16 @@
+pipeline test(task) {
+  // Run a persistent agent loop against the mock provider with a small
+  // max_iterations budget. The mock never emits the ##DONE## sentinel
+  // for this prompt, so the loop will exhaust its iteration budget
+  // rather than finishing naturally — and that distinction is now
+  // surfaced as `status = "budget_exhausted"` (previously the loop
+  // returned `status = "done"` even when it hit the ceiling).
+  let result = agent_loop(
+    "Just keep replying",
+    "You are helpful",
+    {provider: "mock", persistent: true, max_iterations: 1, max_nudges: 5},
+  )
+  println(result.status)
+  assert(result.status == "budget_exhausted", "status should be budget_exhausted")
+  assert(result.iterations >= 1, "should have run at least one iteration")
+}

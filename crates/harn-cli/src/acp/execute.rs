@@ -91,10 +91,10 @@ pub(super) async fn execute_chunk(
     );
 
     let execution = harn_vm::orchestration::RunExecutionRecord {
-        cwd: Some(cwd.to_string_lossy().to_string()),
+        cwd: Some(cwd.to_string_lossy().into_owned()),
         source_dir: source_path
             .and_then(|p| p.parent())
-            .map(|p| p.to_string_lossy().to_string()),
+            .map(|p| p.to_string_lossy().into_owned()),
         ..Default::default()
     };
     harn_vm::stdlib::process::set_thread_execution_context(Some(execution));

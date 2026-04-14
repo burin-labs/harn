@@ -538,7 +538,7 @@ pub fn save_run_record(run: &RunRecord, path: Option<&str>) -> Result<String, Vm
         let _ = std::fs::write(&path, &json);
         VmError::Runtime(format!("failed to finalize run record: {e}"))
     })?;
-    Ok(path.to_string_lossy().to_string())
+    Ok(path.to_string_lossy().into_owned())
 }
 
 pub fn load_run_record(path: &Path) -> Result<RunRecord, VmError> {

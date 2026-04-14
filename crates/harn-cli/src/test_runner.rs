@@ -109,7 +109,7 @@ pub async fn run_test_file(
                 let project_root = harn_vm::stdlib::process::find_project_root(source_parent);
                 let store_base = project_root.as_deref().unwrap_or(source_parent);
                 let execution_cwd = test_execution_cwd();
-                let source_dir = source_parent.to_string_lossy().to_string();
+                let source_dir = source_parent.to_string_lossy().into_owned();
                 harn_vm::register_store_builtins(&mut vm, store_base);
                 harn_vm::register_metadata_builtins(&mut vm, store_base);
                 let pipeline_name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("test");
@@ -117,7 +117,7 @@ pub async fn run_test_file(
                 vm.set_source_info(&path_str, &source);
                 harn_vm::stdlib::process::set_thread_execution_context(Some(
                     harn_vm::orchestration::RunExecutionRecord {
-                        cwd: Some(execution_cwd.to_string_lossy().to_string()),
+                        cwd: Some(execution_cwd.to_string_lossy().into_owned()),
                         source_dir: Some(source_dir),
                         env: std::collections::BTreeMap::new(),
                         adapter: None,

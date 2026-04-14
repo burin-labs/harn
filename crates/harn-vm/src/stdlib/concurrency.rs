@@ -73,6 +73,12 @@ pub(crate) fn register_concurrency_builtins(vm: &mut Vm) {
         let capacity = args.get(1).and_then(|a| a.as_int()).unwrap_or(256) as usize;
         let capacity = capacity.max(1);
         let (tx, rx) = tokio::sync::mpsc::channel(capacity);
+        // Clippy warns about wrapping a non-Send/Sync type in Arc. We
+        // intentionally use Arc here for refcounted ownership within a
+        // single-threaded tokio LocalSet (the Harn VM is !Send because
+        // VmValue contains Rc). The Arc never crosses threads in
+        // practice — see the thread-local invariant documented at
+        // crate::llm::agent::emit_agent_event.
         #[allow(clippy::arc_with_non_send_sync)]
         Ok(VmValue::Channel(VmChannelHandle {
             name,
