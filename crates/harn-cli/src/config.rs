@@ -45,14 +45,23 @@ pub struct HarnConfig {
 
 #[derive(Debug, Default, Clone, Deserialize)]
 pub struct FmtConfig {
+    #[serde(default, alias = "line-width")]
     pub line_width: Option<usize>,
+    #[serde(default, alias = "separator-width")]
     pub separator_width: Option<usize>,
+    #[serde(default, alias = "auto-insert-separators")]
     pub auto_insert_separators: Option<bool>,
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]
 pub struct LintConfig {
+    #[serde(default)]
     pub disabled: Option<Vec<String>>,
+    /// Opt-in file-header requirement. Accept both snake_case (canonical,
+    /// Cargo-style) and kebab-case (rule-name style) so authors who copy
+    /// the rule's diagnostic name into their TOML don't silently get
+    /// `false`.
+    #[serde(default, alias = "require-file-header")]
     pub require_file_header: Option<bool>,
 }
 
@@ -261,6 +270,33 @@ separator_width = 42
         let harn_file = write_file(&sub, "main.harn", "pipeline default(t) {}\n");
         let cfg = load_for_path(&harn_file).expect("load");
         assert_eq!(cfg.fmt.separator_width, Some(42));
+    }
+
+    #[test]
+    fn kebab_case_keys_are_accepted() {
+        // Rule and CLI flag names use kebab-case (e.g. `require-file-header`,
+        // `--auto-separators`), so users sensibly reach for dashes in their
+        // harn.toml too. The loader must accept both spellings.
+        let tmp = tempfile::tempdir().unwrap();
+        write_file(
+            tmp.path(),
+            "harn.toml",
+            r#"
+[fmt]
+line-width = 110
+separator-width = 72
+auto-insert-separators = true
+
+[lint]
+require-file-header = true
+"#,
+        );
+        let harn_file = write_file(tmp.path(), "main.harn", "pipeline default(t) {}\n");
+        let cfg = load_for_path(&harn_file).expect("load");
+        assert_eq!(cfg.fmt.line_width, Some(110));
+        assert_eq!(cfg.fmt.separator_width, Some(72));
+        assert_eq!(cfg.fmt.auto_insert_separators, Some(true));
+        assert_eq!(cfg.lint.require_file_header, Some(true));
     }
 
     #[test]
