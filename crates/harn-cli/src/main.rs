@@ -165,20 +165,11 @@ async fn main() {
             if let Some(w) = loaded.fmt.separator_width {
                 opts.separator_width = w;
             }
-            if let Some(b) = loaded.fmt.auto_insert_separators {
-                opts.auto_insert_separators = b;
-            }
             if let Some(w) = args.line_width {
                 opts.line_width = w;
             }
             if let Some(w) = args.separator_width {
                 opts.separator_width = w;
-            }
-            if args.auto_separators {
-                opts.auto_insert_separators = true;
-            }
-            if args.no_auto_separators {
-                opts.auto_insert_separators = false;
             }
             commands::check::fmt_targets(&targets, args.check, &opts);
         }

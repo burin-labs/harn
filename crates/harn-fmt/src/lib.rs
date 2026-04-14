@@ -24,16 +24,6 @@ pub struct FmtOptions {
     /// Total width of `// ----` separator bars rendered by the formatter
     /// when it normalizes section-header comment blocks (default: 80).
     pub separator_width: usize,
-    /// When true, the formatter is allowed to *introduce* section-header
-    /// separator bars between logically distinct groups of top-level items
-    /// that were not already separated by one. Default: false.
-    ///
-    /// This is threaded through from `harn.toml` (`[fmt]
-    /// auto_insert_separators = true`) so config can be plumbed today while
-    /// the actual insertion heuristic is wired up separately. Today this
-    /// flag is stored but has no behavioral effect — existing separator
-    /// preservation/normalization remains unchanged.
-    pub auto_insert_separators: bool,
 }
 
 impl Default for FmtOptions {
@@ -41,7 +31,6 @@ impl Default for FmtOptions {
         Self {
             line_width: 100,
             separator_width: 80,
-            auto_insert_separators: false,
         }
     }
 }

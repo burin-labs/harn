@@ -221,12 +221,6 @@ pub(crate) struct FmtArgs {
     /// Total width of `// ----` separator bars. Overrides `[fmt] separator_width`.
     #[arg(long = "separator-width")]
     pub separator_width: Option<usize>,
-    /// Allow the formatter to auto-insert separator bars (no-op today; reserved).
-    #[arg(long = "auto-separators", conflicts_with = "no_auto_separators")]
-    pub auto_separators: bool,
-    /// Force-disable auto-inserted separator bars.
-    #[arg(long = "no-auto-separators")]
-    pub no_auto_separators: bool,
     /// One or more .harn files or directories.
     #[arg(required = true)]
     pub targets: Vec<String>,

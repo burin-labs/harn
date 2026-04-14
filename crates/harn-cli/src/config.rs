@@ -12,7 +12,6 @@
 //! [fmt]
 //! line_width = 100
 //! separator_width = 80
-//! auto_insert_separators = false
 //!
 //! [lint]
 //! disabled = ["unused-import"]
@@ -49,8 +48,6 @@ pub struct FmtConfig {
     pub line_width: Option<usize>,
     #[serde(default, alias = "separator-width")]
     pub separator_width: Option<usize>,
-    #[serde(default, alias = "auto-insert-separators")]
-    pub auto_insert_separators: Option<bool>,
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]
@@ -185,7 +182,6 @@ mod tests {
         let cfg = load_for_path(&harn_file).expect("load");
         assert!(cfg.fmt.line_width.is_none());
         assert!(cfg.fmt.separator_width.is_none());
-        assert!(cfg.fmt.auto_insert_separators.is_none());
         assert!(cfg.lint.disabled.is_none());
         assert!(cfg.lint.require_file_header.is_none());
     }
@@ -200,7 +196,6 @@ mod tests {
 [fmt]
 line_width = 120
 separator_width = 60
-auto_insert_separators = true
 
 [lint]
 disabled = ["unused-import", "missing-harndoc"]
@@ -211,7 +206,6 @@ require_file_header = true
         let cfg = load_for_path(&harn_file).expect("load");
         assert_eq!(cfg.fmt.line_width, Some(120));
         assert_eq!(cfg.fmt.separator_width, Some(60));
-        assert_eq!(cfg.fmt.auto_insert_separators, Some(true));
         assert_eq!(
             cfg.lint.disabled.as_deref(),
             Some(["unused-import".to_string(), "missing-harndoc".to_string()].as_slice())
@@ -234,7 +228,6 @@ line_width = 80
         let cfg = load_for_path(&harn_file).expect("load");
         assert_eq!(cfg.fmt.line_width, Some(80));
         assert!(cfg.fmt.separator_width.is_none());
-        assert!(cfg.fmt.auto_insert_separators.is_none());
         assert!(cfg.lint.disabled.is_none());
     }
 
@@ -274,9 +267,9 @@ separator_width = 42
 
     #[test]
     fn kebab_case_keys_are_accepted() {
-        // Rule and CLI flag names use kebab-case (e.g. `require-file-header`,
-        // `--auto-separators`), so users sensibly reach for dashes in their
-        // harn.toml too. The loader must accept both spellings.
+        // Rule and CLI flag names use kebab-case (e.g. `require-file-header`),
+        // so users sensibly reach for dashes in their harn.toml too. The loader
+        // must accept both spellings.
         let tmp = tempfile::tempdir().unwrap();
         write_file(
             tmp.path(),
@@ -285,7 +278,6 @@ separator_width = 42
 [fmt]
 line-width = 110
 separator-width = 72
-auto-insert-separators = true
 
 [lint]
 require-file-header = true
@@ -295,7 +287,6 @@ require-file-header = true
         let cfg = load_for_path(&harn_file).expect("load");
         assert_eq!(cfg.fmt.line_width, Some(110));
         assert_eq!(cfg.fmt.separator_width, Some(72));
-        assert_eq!(cfg.fmt.auto_insert_separators, Some(true));
         assert_eq!(cfg.lint.require_file_header, Some(true));
     }
 
