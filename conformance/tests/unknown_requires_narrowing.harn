@@ -1,0 +1,7 @@
+// Using an `unknown` value directly as a concrete type must be a type error —
+// this is the whole point of `unknown` vs `any`.
+pipeline test(task) {
+  let u: unknown = "hello"
+  let s: string = u
+  log(s)
+}

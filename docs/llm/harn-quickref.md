@@ -125,6 +125,30 @@ Top-level mutable `var` cross-fn mutation is not fully supported yet
 shared mutable state across functions, use atomics (`atomic(0)`,
 `atomic_add`, `atomic_get`) or a channel.
 
+## Typing: `any` vs `unknown` vs no annotation
+
+Harn is gradually typed. Three levels of "I don't know the type yet":
+
+| Annotation | Accepts any value in | Flows out to concrete types | Use when |
+|---|---|---|---|
+| *(omitted)* | yes | yes | Internal, unstable code you haven't typed yet. |
+| `unknown` | yes | **no** — must narrow first | Untrusted boundaries: LLM responses, parsed JSON, dynamic dicts. |
+| `any` | yes | yes (escape hatch) | Last resort. Prefer `unknown` unless you have a specific reason to defeat checking. |
+
+Narrow `unknown` with `type_of(x) == "T"` or `schema_is(x, Shape)`:
+
+```harn
+fn handle(v: unknown) -> string {
+  if type_of(v) == "string" { return "str:${v.upper()}" }  // v: string here
+  if schema_is(v, MyShape) { return "shape:${v.name}" }    // v: MyShape here
+  return "other"
+}
+```
+
+`never` is the bottom type — expressions like `throw`, `return`,
+`unreachable()`, and blocks that always exit infer to `never`. It's a
+subtype of every type.
+
 ## Results and errors
 
 `try { ... }` returns a `Result.Ok(value)` on success or

@@ -1,0 +1,24 @@
+// `unknown` is a safe top — anything flows in, but values must be
+// narrowed before flowing back out to a concrete type.
+pipeline test(task) {
+  // Every concrete type is assignable to `unknown`.
+  let u1: unknown = 42
+  let u2: unknown = "hello"
+  let u3: unknown = nil
+  let u4: unknown = [1, 2, 3]
+  // Reading `type_of` on an unknown is fine.
+  log(type_of(u1))
+  log(type_of(u2))
+  log(type_of(u3))
+  log(type_of(u4))
+  // unknown → unknown (identity through a function) is allowed.
+  fn echo(x: unknown) -> unknown {
+    return x
+  }
+  log(type_of(echo(9)))
+  // unknown is assignable to `any` (escape hatch upward).
+  fn into_any(x: unknown) -> any {
+    return x
+  }
+  log(into_any("explicit"))
+}

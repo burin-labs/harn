@@ -1,0 +1,31 @@
+// `unknown` narrows via the same flow-sensitive refinement that works on
+// union types: `type_of(x) == "T"` in an if-condition narrows the truthy
+// branch to `T`.
+pipeline test(task) {
+  fn describe(v: unknown) -> string {
+    if type_of(v) == "string" {
+      // v: string here — concrete methods available.
+      return "string:${v.upper()}"
+    }
+    if type_of(v) == "int" {
+      return "int:${v + 1}"
+    }
+    if type_of(v) == "nil" {
+      return "nil"
+    }
+    return "other"
+  }
+  log(describe("hi"))
+  log(describe(41))
+  log(describe(nil))
+  log(describe([1, 2]))
+  // Guard-based narrowing applies too.
+  fn must_be_string(v: unknown) -> string {
+    guard type_of(v) == "string" else {
+      return "not-string"
+    }
+    return "ok:${v}"
+  }
+  log(must_be_string("x"))
+  log(must_be_string(7))
+}

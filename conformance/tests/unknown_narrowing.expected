@@ -1,0 +1,6 @@
+[harn] string:HI
+[harn] int:42
+[harn] nil
+[harn] other
+[harn] ok:x
+[harn] not-string

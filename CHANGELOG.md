@@ -7,6 +7,29 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## v0.7.3
+
+### Added
+
+- **`any` is now a true top type; `unknown` added as the safe top.**
+  Previously `any` behaved like a plain named type that only matched
+  itself — assigning `nil` to an `any`-typed slot raised
+  `'x' declared as any, but assigned nil`. With this release, `any`
+  accepts every concrete type and flows back out to every concrete
+  type with no narrowing required (the explicit escape hatch). A new
+  `unknown` type fills the TypeScript-style "safe top" role: every
+  value is assignable to `unknown`, but `unknown` is not assignable
+  back to any concrete type without narrowing via
+  `type_of(x) == "..."` or `schema_is(x, Shape)`. `unknown` is the
+  preferred annotation for values arriving from untrusted boundaries
+  (parsed JSON, LLM responses, dynamic dicts). `unknown` interoperates
+  with `any` in both directions. See the new `### The any type` and
+  `### The unknown type` sections in `spec/HARN_SPEC.md`, and the
+  `Typing: any vs unknown vs no annotation` block in
+  `docs/llm/harn-quickref.md`. Conformance coverage lives in
+  `conformance/tests/any_top_type.*`, `unknown_safe_top.*`,
+  `unknown_requires_narrowing.*`, and `unknown_narrowing.*`.
+
 ## v0.7.2
 
 ### Added

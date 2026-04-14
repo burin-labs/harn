@@ -1731,6 +1731,80 @@ fn always_throws() -> never {
 }
 ```
 
+### The `any` type
+
+`any` is the top type and the explicit escape hatch. Every concrete
+type is assignable to `any`, and `any` is assignable back to every
+concrete type without narrowing. `any` disables type checking in both
+directions for the values it flows through.
+
+```harn
+fn passthrough(x: any) -> any {
+  return x
+}
+
+let s: string = passthrough("hello")  // any → string, no narrowing required
+let n: int    = passthrough(42)
+```
+
+Use `any` deliberately, when you want to opt out of checking — for
+example, a generic dispatcher that forwards values through a runtime
+protocol you don't want to describe statically. Prefer `unknown` (see
+below) for values from untrusted boundaries where callers should be
+forced to narrow.
+
+### The `unknown` type
+
+`unknown` is the safe top type. Every concrete type is assignable to
+`unknown`, but an `unknown` value is **not** assignable to any
+concrete type without narrowing. This is the correct annotation for
+values arriving from untrusted boundaries (parsed JSON, LLM responses,
+dynamic dicts) where callers should be forced to validate the shape
+before use.
+
+```harn
+fn describe(v: unknown) -> string {
+  // Direct use of `v` as a concrete type is a compile-time error.
+  // Narrow via type_of/schema_is first.
+  if type_of(v) == "string" {
+    return "string: ${v.upper()}"
+  }
+  if type_of(v) == "int" {
+    return "int: ${v + 1}"
+  }
+  return "other"
+}
+```
+
+Narrowing rules for `unknown`:
+
+- `type_of(x) == "T"` narrows `x` to `T` on the truthy branch (where
+  `T` is one of the type-of protocol names: `string`, `int`, `float`,
+  `bool`, `nil`, `list`, `dict`, `closure`).
+- `schema_is(x, Shape)` narrows `x` to `Shape` on the truthy branch.
+- `guard type_of(x) == "T" else { ... }` narrows `x` to `T` in the
+  surrounding scope after the guard.
+- The falsy branch keeps `unknown` — subtracting one concrete type
+  from an open top still leaves an open top.
+
+Interop between `any` and `unknown`:
+
+- `unknown` is assignable to `any` (upward to the full escape hatch).
+- `any` is assignable to `unknown` (downward — the `any` escape hatch
+  lets it flow into anything, including `unknown`).
+
+**When to pick which:**
+
+- **No annotation** — "I haven't annotated this." Callers get no
+  checking. Use for internal, unstable code.
+- **`unknown`** — "this value could be anything; narrow before use."
+  Use at untrusted boundaries and in APIs that hand back open-ended
+  data. This is the preferred annotation for LLM / JSON / dynamic
+  dict values.
+- **`any`** — "stop checking." A last-resort escape hatch. Prefer
+  `unknown` unless you have a specific reason to defeat checking
+  bidirectionally.
+
 ### Union types
 
 ```harn

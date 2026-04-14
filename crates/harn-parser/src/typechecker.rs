@@ -2536,6 +2536,20 @@ impl TypeChecker {
                     eq_refs.inverted()
                 };
             }
+            Some(TypeExpr::Named(ref n)) if n == "unknown" => {
+                // `unknown` narrows to the tested concrete type on the truthy
+                // branch. The falsy branch keeps `unknown` — subtracting one
+                // concrete type from an open top still leaves an open top.
+                let eq_refs = Refinements {
+                    truthy: vec![(var_name.clone(), Some(TypeExpr::Named(type_name)))],
+                    falsy: vec![],
+                };
+                return if op == "==" {
+                    eq_refs
+                } else {
+                    eq_refs.inverted()
+                };
+            }
             _ => {}
         }
         Refinements::empty()
@@ -3524,6 +3538,17 @@ impl TypeChecker {
             (_, TypeExpr::Never) => true,
             // Nothing is assignable to never (except never itself, handled above).
             (TypeExpr::Never, _) => false,
+            // `any` is the top type (escape hatch): every type flows into `any`,
+            // and `any` flows back out to any concrete type with no narrowing required.
+            (TypeExpr::Named(n), _) if n == "any" => true,
+            (_, TypeExpr::Named(n)) if n == "any" => true,
+            // `unknown` is the safe top: every type flows into `unknown`, but
+            // `unknown` only flows back out to `unknown` itself (or `any`, via the
+            // arm above). Concrete uses require narrowing via `type_of` / `schema_is`.
+            (TypeExpr::Named(n), _) if n == "unknown" => true,
+            // Reverse direction: `unknown` is not assignable to anything concrete.
+            // The `(_, Named("unknown"))` arm deliberately falls through to `=> false`
+            // below, producing a "expected T, got unknown" diagnostic.
             (TypeExpr::Named(a), TypeExpr::Named(b)) => a == b || (a == "float" && b == "int"),
             (TypeExpr::Named(a), TypeExpr::Applied { name: b, .. })
             | (TypeExpr::Applied { name: a, .. }, TypeExpr::Named(b)) => a == b,
@@ -5685,6 +5710,84 @@ add("hello", 2) }"#,
         let tc = TypeChecker::new();
         let scope = TypeScope::new();
         assert!(tc.types_compatible(&TypeExpr::Never, &TypeExpr::Never, &scope));
+    }
+
+    #[test]
+    fn test_any_is_top_type_bidirectional() {
+        let tc = TypeChecker::new();
+        let scope = TypeScope::new();
+        let any = TypeExpr::Named("any".into());
+        // Every concrete type flows into any.
+        assert!(tc.types_compatible(&any, &TypeExpr::Named("string".into()), &scope));
+        assert!(tc.types_compatible(&any, &TypeExpr::Named("int".into()), &scope));
+        assert!(tc.types_compatible(&any, &TypeExpr::Named("nil".into()), &scope));
+        assert!(tc.types_compatible(
+            &any,
+            &TypeExpr::List(Box::new(TypeExpr::Named("int".into()))),
+            &scope
+        ));
+        // any flows back out to every concrete type (escape hatch).
+        assert!(tc.types_compatible(&TypeExpr::Named("string".into()), &any, &scope));
+        assert!(tc.types_compatible(&TypeExpr::Named("nil".into()), &any, &scope));
+    }
+
+    #[test]
+    fn test_unknown_is_safe_top_one_way() {
+        let tc = TypeChecker::new();
+        let scope = TypeScope::new();
+        let unknown = TypeExpr::Named("unknown".into());
+        // Every concrete type flows into unknown.
+        assert!(tc.types_compatible(&unknown, &TypeExpr::Named("string".into()), &scope));
+        assert!(tc.types_compatible(&unknown, &TypeExpr::Named("nil".into()), &scope));
+        assert!(tc.types_compatible(
+            &unknown,
+            &TypeExpr::List(Box::new(TypeExpr::Named("int".into()))),
+            &scope
+        ));
+        // unknown does NOT flow back out to concrete types without narrowing.
+        assert!(!tc.types_compatible(&TypeExpr::Named("string".into()), &unknown, &scope));
+        assert!(!tc.types_compatible(&TypeExpr::Named("int".into()), &unknown, &scope));
+        // unknown is compatible with itself.
+        assert!(tc.types_compatible(&unknown, &unknown, &scope));
+        // unknown flows into any (any accepts everything).
+        assert!(tc.types_compatible(&TypeExpr::Named("any".into()), &unknown, &scope));
+    }
+
+    #[test]
+    fn test_unknown_narrows_via_type_of() {
+        // Concrete narrowing behavior is covered end-to-end by the conformance
+        // test `unknown_narrowing.harn`; this unit test guards against the
+        // refinement path silently regressing to "no narrowing" for named
+        // unknown types.
+        let errs = errors(
+            r#"pipeline t(task) {
+  fn f(v: unknown) -> string {
+    if type_of(v) == "string" {
+      return v
+    }
+    return "other"
+  }
+  log(f("hi"))
+}"#,
+        );
+        assert!(
+            errs.is_empty(),
+            "unknown should narrow to string inside type_of guard: {errs:?}"
+        );
+    }
+
+    #[test]
+    fn test_unknown_without_narrowing_errors() {
+        let errs = errors(
+            r#"pipeline t(task) {
+  let u: unknown = "hello"
+  let s: string = u
+}"#,
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("unknown")),
+            "expected an error mentioning unknown, got: {errs:?}"
+        );
     }
 
     #[test]

@@ -1,0 +1,32 @@
+// `any` is a true top type — everything flows in, everything flows out.
+pipeline test(task) {
+  // Every concrete type is assignable to `any`.
+  let a1: any = 42
+  let a2: any = "hello"
+  let a3: any = nil
+  let a4: any = [1, 2, 3]
+  let a5: any = {k: "v"}
+  let a6: any = true
+  log(a1)
+  log(a2)
+  log(a3)
+  log(a4)
+  log(a5)
+  log(a6)
+  // `any` flows back out to concrete types (escape hatch — no narrowing required).
+  let s: string = a2
+  log(s)
+  // Function with untyped/any parameter and return.
+  fn passthrough(x: any) -> any {
+    return x
+  }
+  log(passthrough(7))
+  log(passthrough("world"))
+  log(passthrough(nil))
+  // `any | nil` is still legal — union with top is equivalent to `any`,
+  // but explicit unions remain valid annotations.
+  fn maybe() -> any | nil {
+    return nil
+  }
+  log(maybe())
+}
