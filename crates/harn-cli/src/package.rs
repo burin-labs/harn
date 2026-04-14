@@ -18,6 +18,31 @@ pub struct Manifest {
     pub mcp: Vec<McpServerConfig>,
     #[serde(default)]
     pub check: CheckConfig,
+    #[serde(default)]
+    pub workspace: WorkspaceConfig,
+}
+
+/// Severity override for preflight diagnostics. `error` (default) fails
+/// `harn check`; `warning` reports but does not fail; `off` suppresses
+/// entirely. Accepted via `[check].preflight_severity` in harn.toml so
+/// repos with hosts that do not expose every capability statically can
+/// keep the checker running on genuine type errors.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum PreflightSeverity {
+    #[default]
+    Error,
+    Warning,
+    Off,
+}
+
+impl PreflightSeverity {
+    pub fn from_opt(raw: Option<&str>) -> Self {
+        match raw.map(|s| s.to_ascii_lowercase()) {
+            Some(v) if v == "warning" || v == "warn" => Self::Warning,
+            Some(v) if v == "off" || v == "allow" || v == "silent" => Self::Off,
+            _ => Self::Error,
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]
@@ -34,6 +59,23 @@ pub struct CheckConfig {
     pub host_capabilities_path: Option<String>,
     #[serde(default)]
     pub bundle_root: Option<String>,
+    /// Downgrade or suppress preflight diagnostics. See
+    /// [`PreflightSeverity`].
+    #[serde(default, alias = "preflight-severity")]
+    pub preflight_severity: Option<String>,
+    /// List of `"capability.operation"` strings that should be accepted
+    /// by preflight without emitting a diagnostic, even if the operation
+    /// is not in the default or loaded capability manifest.
+    #[serde(default, alias = "preflight-allow")]
+    pub preflight_allow: Vec<String>,
+}
+
+#[derive(Debug, Default, Clone, Deserialize)]
+pub struct WorkspaceConfig {
+    /// Directory or file globs (repo-relative) that `harn check --workspace`
+    /// walks to collect the full pipeline tree in one invocation.
+    #[serde(default)]
+    pub pipelines: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -248,31 +290,73 @@ fn absolutize_check_config_paths(mut config: CheckConfig, manifest_dir: &Path) -
     config
 }
 
-/// Load the `[check]` config from the nearest `harn.toml`.
-/// First checks the directory of the given harn file (if any),
-/// then walks up from the current working directory.
-pub fn load_check_config(harn_file: Option<&std::path::Path>) -> CheckConfig {
-    if let Some(path) = harn_file {
-        let manifest_dir = path.parent().unwrap_or(Path::new("."));
-        if let Some(manifest) = try_read_manifest_for(path) {
-            return absolutize_check_config_paths(manifest.check, manifest_dir);
+/// Walk upward from `start` (or its parent if it's a file path that
+/// does not yet exist) looking for the nearest `harn.toml`. Stops at
+/// a `.git` boundary so a stray manifest in `$HOME` or a parent
+/// project is never silently picked up. Returns `(manifest, manifest_dir)`
+/// when found.
+fn find_nearest_manifest(start: &Path) -> Option<(Manifest, PathBuf)> {
+    const MAX_PARENT_DIRS: usize = 16;
+    let base = if start.is_absolute() {
+        start.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(start)
+    };
+    let mut cursor: Option<PathBuf> = if base.is_dir() {
+        Some(base)
+    } else {
+        base.parent().map(Path::to_path_buf)
+    };
+    let mut steps = 0usize;
+    while let Some(dir) = cursor {
+        if steps >= MAX_PARENT_DIRS {
+            break;
         }
-    }
-    let mut dir = std::env::current_dir().unwrap_or_default();
-    loop {
-        let manifest_path = dir.join(MANIFEST);
-        if manifest_path.exists() {
-            if let Ok(content) = fs::read_to_string(&manifest_path) {
-                if let Ok(manifest) = toml::from_str::<Manifest>(&content) {
-                    return absolutize_check_config_paths(manifest.check, &dir);
+        steps += 1;
+        let candidate = dir.join(MANIFEST);
+        if candidate.is_file() {
+            if let Ok(content) = fs::read_to_string(&candidate) {
+                match toml::from_str::<Manifest>(&content) {
+                    Ok(manifest) => return Some((manifest, dir)),
+                    Err(e) => {
+                        eprintln!("warning: failed to parse {}: {e}", candidate.display());
+                        return None;
+                    }
                 }
             }
         }
-        if !dir.pop() {
+        if dir.join(".git").exists() {
             break;
         }
+        cursor = dir.parent().map(Path::to_path_buf);
+    }
+    None
+}
+
+/// Load the `[check]` config from the nearest `harn.toml`.
+/// Walks up from the given file (or from cwd if no file is given),
+/// stopping at a `.git` boundary.
+pub fn load_check_config(harn_file: Option<&std::path::Path>) -> CheckConfig {
+    let anchor = harn_file
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    if let Some((manifest, dir)) = find_nearest_manifest(&anchor) {
+        return absolutize_check_config_paths(manifest.check, &dir);
     }
     CheckConfig::default()
+}
+
+/// Load the `[workspace]` config and the directory of the `harn.toml`
+/// it came from. Paths in the returned config are left as-is (callers
+/// resolve them against the returned `manifest_dir`).
+pub fn load_workspace_config(anchor: Option<&Path>) -> Option<(WorkspaceConfig, PathBuf)> {
+    let anchor = anchor
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let (manifest, dir) = find_nearest_manifest(&anchor)?;
+    Some((manifest.workspace, dir))
 }
 
 /// `harn install` — install all dependencies from harn.toml.
@@ -565,4 +649,102 @@ pub fn add_package(name: &str, git_url: Option<&str>, tag: Option<&str>, local_p
 
     println!("Added {name} to harn.toml");
     println!("Run `harn install` to fetch the package.");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preflight_severity_parsing_accepts_synonyms() {
+        assert_eq!(
+            PreflightSeverity::from_opt(Some("warning")),
+            PreflightSeverity::Warning
+        );
+        assert_eq!(
+            PreflightSeverity::from_opt(Some("WARN")),
+            PreflightSeverity::Warning
+        );
+        assert_eq!(
+            PreflightSeverity::from_opt(Some("off")),
+            PreflightSeverity::Off
+        );
+        assert_eq!(
+            PreflightSeverity::from_opt(Some("allow")),
+            PreflightSeverity::Off
+        );
+        assert_eq!(
+            PreflightSeverity::from_opt(Some("error")),
+            PreflightSeverity::Error
+        );
+        assert_eq!(PreflightSeverity::from_opt(None), PreflightSeverity::Error);
+        // Unknown values fall back to the safe default (error).
+        assert_eq!(
+            PreflightSeverity::from_opt(Some("bogus")),
+            PreflightSeverity::Error
+        );
+    }
+
+    #[test]
+    fn load_check_config_walks_up_from_nested_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        // Mark root as project boundary so walk-up terminates here.
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        fs::write(
+            root.join(MANIFEST),
+            r#"
+[check]
+preflight_severity = "warning"
+preflight_allow = ["custom.scan", "runtime.*"]
+host_capabilities_path = "./schemas/host-caps.json"
+
+[workspace]
+pipelines = ["pipelines", "scripts"]
+"#,
+        )
+        .unwrap();
+        let nested = root.join("src").join("deep");
+        std::fs::create_dir_all(&nested).unwrap();
+        let harn_file = nested.join("pipeline.harn");
+        fs::write(&harn_file, "pipeline main() {}\n").unwrap();
+
+        let cfg = load_check_config(Some(&harn_file));
+        assert_eq!(cfg.preflight_severity.as_deref(), Some("warning"));
+        assert_eq!(cfg.preflight_allow, vec!["custom.scan", "runtime.*"]);
+        let caps_path = cfg.host_capabilities_path.expect("host caps path");
+        assert!(
+            caps_path.ends_with("schemas/host-caps.json")
+                || caps_path.ends_with("schemas\\host-caps.json"),
+            "unexpected absolutized path: {caps_path}"
+        );
+
+        let (workspace, manifest_dir) =
+            load_workspace_config(Some(&harn_file)).expect("workspace manifest");
+        assert_eq!(workspace.pipelines, vec!["pipelines", "scripts"]);
+        // Walk-up lands on the directory containing the harn.toml.
+        assert_eq!(manifest_dir, root);
+    }
+
+    #[test]
+    fn load_check_config_stops_at_git_boundary() {
+        let tmp = tempfile::tempdir().unwrap();
+        // An ancestor harn.toml above .git must NOT be picked up.
+        fs::write(
+            tmp.path().join(MANIFEST),
+            "[check]\npreflight_severity = \"off\"\n",
+        )
+        .unwrap();
+        let project = tmp.path().join("project");
+        std::fs::create_dir_all(project.join(".git")).unwrap();
+        let inner = project.join("src");
+        std::fs::create_dir_all(&inner).unwrap();
+        let harn_file = inner.join("main.harn");
+        fs::write(&harn_file, "pipeline main() {}\n").unwrap();
+        let cfg = load_check_config(Some(&harn_file));
+        assert!(
+            cfg.preflight_severity.is_none(),
+            "must not inherit harn.toml from outside the .git boundary"
+        );
+    }
 }

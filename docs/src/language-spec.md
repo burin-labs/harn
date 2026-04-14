@@ -2436,6 +2436,62 @@ the project root (where `harn.toml` lives), or relative to the source file
 directory if no project root is found. Files are plain JSON and can be copied
 between machines to migrate pipeline state.
 
+## Workspace manifest (`harn.toml`)
+
+Harn projects declare a workspace manifest at the project root named
+`harn.toml`. Tooling walks upward from a target `.harn` file looking
+for the nearest ancestor manifest and stops at a `.git` boundary so a
+stray manifest in a parent project or `$HOME` is never silently picked
+up.
+
+### `[check]` — type-checker and preflight
+
+```toml
+[check]
+host_capabilities_path = "./schemas/host-capabilities.json"
+preflight_severity = "warning"          # "error" (default), "warning", "off"
+preflight_allow = ["mystery.*", "runtime.task"]
+
+[check.host_capabilities]
+project = ["ensure_enriched", "enrich"]
+workspace = ["read_text", "write_text"]
+```
+
+- `host_capabilities_path` and `[check.host_capabilities]` declare the
+  host-call surface that the preflight pass is allowed to assume exists
+  at runtime. The CLI flag `--host-capabilities <file>` takes precedence
+  for a single invocation. The external file is JSON or TOML with the
+  namespaced shape `{ capability: [op, ...], ... }`; nested
+  `{ capabilities: { ... } }` wrappers and per-op metadata dictionaries
+  are accepted.
+- `preflight_severity` downgrades preflight diagnostics to warnings or
+  suppresses them entirely. Type-checker and lint diagnostics are
+  unaffected — preflight failures are reported under the `preflight`
+  category so IDEs and CI filters can route them separately.
+- `preflight_allow` suppresses preflight diagnostics tagged with a
+  specific host capability. Entries match an exact `capability.operation`
+  pair, a `capability.*` wildcard, a bare `capability` name, or a
+  blanket `*`.
+
+Preflight capabilities in this section are a **static check surface**
+for the Harn type-checker only. They are not the same thing as ACP's
+agent/client capability handshake (`agentCapabilities` /
+`clientCapabilities`), which is runtime protocol-level negotiation and
+lives outside `harn.toml`.
+
+### `[workspace]` — multi-file targets
+
+```toml
+[workspace]
+pipelines = ["Sources/BurinCore/Resources/pipelines", "scripts"]
+```
+
+`harn check --workspace` resolves each path in `pipelines` relative to
+the manifest directory and recursively checks every `.harn` file under
+each. Positional targets remain additive. The manifest is discovered by
+walking upward from the first positional target (or the current working
+directory when none is supplied).
+
 ## Sandbox mode
 
 The `harn run` command supports sandbox flags that restrict which builtins

@@ -7,7 +7,7 @@ use harn_lint::LintSeverity;
 use harn_parser::{DiagnosticSeverity, Node, SNode, TypeChecker};
 
 use crate::config as harn_config;
-use crate::package::CheckConfig;
+use crate::package::{CheckConfig, PreflightSeverity};
 use crate::parse_source_file;
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -109,19 +109,33 @@ pub(crate) fn check_file_inner(
     }
 
     let preflight_diagnostics = collect_preflight_diagnostics(path, &source, &program, config);
-    for diag in &preflight_diagnostics {
-        has_error = true;
-        diagnostic_count += 1;
-        let rendered = harn_parser::diagnostic::render_diagnostic(
-            &diag.source,
-            &diag.path,
-            &diag.span,
-            "error",
-            &diag.message,
-            Some("preflight failure"),
-            diag.help.as_deref(),
-        );
-        eprint!("{rendered}");
+    let preflight_severity = PreflightSeverity::from_opt(config.preflight_severity.as_deref());
+    if preflight_severity != PreflightSeverity::Off {
+        let (severity_label, category) = match preflight_severity {
+            PreflightSeverity::Warning => ("warning", "preflight"),
+            _ => ("error", "preflight"),
+        };
+        for diag in &preflight_diagnostics {
+            if is_preflight_allowed(&diag.tags, &config.preflight_allow) {
+                continue;
+            }
+            match preflight_severity {
+                PreflightSeverity::Warning => has_warning = true,
+                PreflightSeverity::Error => has_error = true,
+                PreflightSeverity::Off => unreachable!(),
+            }
+            diagnostic_count += 1;
+            let rendered = harn_parser::diagnostic::render_diagnostic(
+                &diag.source,
+                &diag.path,
+                &diag.span,
+                severity_label,
+                &diag.message,
+                Some(category),
+                diag.help.as_deref(),
+            );
+            eprint!("{rendered}");
+        }
     }
 
     if diagnostic_count == 0 {
@@ -378,6 +392,29 @@ struct PreflightDiagnostic {
     span: harn_lexer::Span,
     message: String,
     help: Option<String>,
+    /// Optional `"capability.operation"` tag used for per-capability
+    /// suppression via `[check].preflight_allow`. `None` means this
+    /// diagnostic is not scoped to a single host capability.
+    tags: Option<String>,
+}
+
+/// Returns `true` when `tag` matches any entry in `allow`. Entries may
+/// be exact (`project.scan`), capability wildcards (`project.*` or
+/// just `project`), or a literal `*` to suppress every preflight
+/// diagnostic that carries a tag.
+fn is_preflight_allowed(tag: &Option<String>, allow: &[String]) -> bool {
+    let Some(tag) = tag else { return false };
+    let (cap, _) = tag.split_once('.').unwrap_or((tag.as_str(), ""));
+    allow.iter().any(|entry| {
+        let entry = entry.trim();
+        if entry == "*" || entry == tag {
+            return true;
+        }
+        if let Some(prefix) = entry.strip_suffix(".*") {
+            return prefix == cap;
+        }
+        entry == cap
+    })
 }
 
 fn collect_preflight_diagnostics(
@@ -1547,6 +1584,7 @@ fn scan_import_collisions(
                                 help: Some(format!(
                                     "use selective imports to disambiguate: import {{ {name} }} from \"...\""
                                 )),
+                                tags: None,
                             });
                         }
                     } else {
@@ -1581,6 +1619,7 @@ fn scan_import_collisions(
                                     "rename one of the imported modules or avoid importing conflicting names"
                                         .to_string(),
                                 ),
+                                tags: None,
                             });
                         }
                     } else {
@@ -1690,6 +1729,7 @@ fn scan_node_preflight(
                     span: node.span,
                     message: format!("preflight: unresolved import '{path}'"),
                     help: Some("verify the import path and packaged module layout".to_string()),
+                    tags: None,
                 }),
             }
         }
@@ -1712,6 +1752,7 @@ fn scan_node_preflight(
                                     "see docs/src/prompt-templating.md for supported directives"
                                         .to_string(),
                                 ),
+                                tags: None,
                             });
                         }
                     }
@@ -1729,6 +1770,7 @@ fn scan_node_preflight(
                             "keep template paths relative to the pipeline source file, or set [check].bundle_root / --bundle-root for bundled layouts"
                                 .to_string(),
                         ),
+                        tags: None,
                     });
                 }
             }
@@ -1750,6 +1792,7 @@ fn scan_node_preflight(
                             "use a source-relative directory that exists at preflight time, or create it before execution"
                                 .to_string(),
                         ),
+                        tags: None,
                     });
                 }
             }
@@ -1778,6 +1821,7 @@ fn scan_node_preflight(
                     "replace host_invoke(\"project\", \"scan\", {}) with host_call(\"project.scan\", {})"
                         .to_string(),
                 ),
+                tags: None,
             });
             scan_children(
                 args,
@@ -1800,9 +1844,10 @@ fn scan_node_preflight(
                             "preflight: unknown host capability/operation '{cap}.{op}'"
                         ),
                         help: Some(
-                            "declare additional host capabilities in [check].host_capabilities, [check].host_capabilities_path, or --host-capabilities"
+                            "declare additional host capabilities in [check].host_capabilities, [check].host_capabilities_path, --host-capabilities, or suppress via [check].preflight_allow"
                                 .to_string(),
                         ),
+                        tags: Some(format!("{cap}.{op}")),
                     });
                 }
                 if cap == "template" && op == "render" {
@@ -1822,6 +1867,7 @@ fn scan_node_preflight(
                                     "verify the template path, or set [check].bundle_root / --bundle-root when validating bundled layouts"
                                         .to_string(),
                                 ),
+                                tags: None,
                             });
                         }
                     }
@@ -1836,6 +1882,7 @@ fn scan_node_preflight(
                         "use a string literal like host_call(\"project.scan\", {}) so preflight can validate the capability contract"
                             .to_string(),
                     ),
+                    tags: None,
                 });
             }
             scan_children(
@@ -2827,6 +2874,7 @@ fn scan_spawn_agent_preflight(
                     "keep literal worker cwd paths source-relative and valid, or switch to a worktree adapter"
                         .to_string(),
                 ),
+                tags: None,
             });
         }
     }
@@ -2849,6 +2897,7 @@ fn scan_spawn_agent_preflight(
                     "point worktree.repo at a real git checkout so isolated execution can be prepared"
                         .to_string(),
                 ),
+                tags: None,
             });
         }
     }
@@ -3344,6 +3393,55 @@ pipeline main() {
             .iter()
             .any(|entry| entry.as_str().is_some_and(|value| value.ends_with("/repo"))));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn unknown_host_capability_diagnostic_carries_tag() {
+        let dir = unique_temp_dir("harn-check-host-tag");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("main.harn");
+        let source = r#"
+pipeline main() {
+  host_call("custom_cap.do_thing", {})
+}
+"#;
+        let program = parse_program(source);
+        let diagnostics =
+            collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.tags.as_deref() == Some("custom_cap.do_thing")),
+            "expected tagged diagnostic, got: {:?}",
+            diagnostics
+                .iter()
+                .map(|d| (d.message.clone(), d.tags.clone()))
+                .collect::<Vec<_>>()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn preflight_allow_matches_exact_wildcard_and_capability_scope() {
+        let exact = Some("project.scan".to_string());
+        let other_op = Some("project.refresh".to_string());
+        let other_cap = Some("editor.get_selection".to_string());
+
+        // Exact match
+        assert!(is_preflight_allowed(&exact, &["project.scan".to_string()]));
+        // `project.*` wildcard matches any op in the project capability
+        assert!(is_preflight_allowed(&other_op, &["project.*".to_string()]));
+        // Bare capability name also matches any op in that capability
+        assert!(is_preflight_allowed(&other_op, &["project".to_string()]));
+        // `*` blanket match
+        assert!(is_preflight_allowed(&exact, &["*".to_string()]));
+        // No match when capability differs
+        assert!(!is_preflight_allowed(
+            &other_cap,
+            &["project.*".to_string()]
+        ));
+        // Untagged diagnostics never match
+        assert!(!is_preflight_allowed(&None, &["*".to_string()]));
     }
 
     #[test]

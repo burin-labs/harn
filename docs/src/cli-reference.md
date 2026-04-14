@@ -170,12 +170,55 @@ harn check main.harn
 harn check src/ tests/
 harn check --host-capabilities host-capabilities.json main.harn
 harn check --bundle-root .bundle main.harn
+harn check --workspace
+harn check --preflight warning src/
 ```
 
 | Flag | Description |
 |---|---|
-| `--host-capabilities <file>` | Load a host capability manifest for preflight validation. Supports plain `{capability: [ops...]}` objects, nested `{capabilities: ...}` wrappers, and per-op metadata dictionaries. |
+| `--host-capabilities <file>` | Load a host capability manifest for preflight validation. Supports plain `{capability: [ops...]}` objects, nested `{capabilities: ...}` wrappers, and per-op metadata dictionaries. Overrides `[check].host_capabilities_path` in `harn.toml`. |
 | `--bundle-root <dir>` | Validate `render(...)`, `render_prompt(...)`, and template paths against an alternate bundled layout root |
+| `--workspace` | Walk every path listed in `[workspace].pipelines` of the nearest `harn.toml`. Positional targets remain additive. |
+| `--preflight <severity>` | Override preflight diagnostic severity: `error` (default, fails the check), `warning` (reports but does not fail), or `off` (suppresses all preflight diagnostics). Overrides `[check].preflight_severity`. |
+| `--strict-types` | Flag unvalidated boundary-API values used in field access. |
+
+### harn.toml — `[check]` and `[workspace]` sections
+
+`harn check` walks upward from the target file (stopping at the first `.git`
+directory) to find the nearest `harn.toml`. The following keys are honored:
+
+```toml
+[check]
+# Load an external capability manifest. Path is resolved relative to
+# harn.toml. Accepts JSON or TOML with the namespaced shape
+# { workspace = [...], process = [...], project = [...], ... }.
+host_capabilities_path = "./schemas/host-capabilities.json"
+
+# Or declare inline:
+[check.host_capabilities]
+project = ["ensure_enriched", "enrich"]
+workspace = ["read_text", "write_text"]
+
+[check]
+# Downgrade preflight errors to warnings (or suppress entirely with "off").
+# Keeps type diagnostics visible while an external capability schema is
+# still catching up to a host's live surface.
+preflight_severity = "warning"
+
+# Suppress preflight diagnostics for specific capabilities/operations.
+# Entries match either an exact "capability.operation" pair, a
+# "capability.*" wildcard, a bare "capability" name, or a blanket "*".
+preflight_allow = ["mystery.*", "runtime.task"]
+
+[workspace]
+# Directories or files checked by `harn check --workspace`. Paths are
+# resolved relative to harn.toml.
+pipelines = ["Sources/BurinCore/Resources/pipelines", "scripts"]
+```
+
+Preflight diagnostics are reported under the `preflight` category so they
+can be distinguished from type-checker errors in IDE output streams and
+CI log filters.
 
 ## harn contracts
 

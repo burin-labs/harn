@@ -81,7 +81,35 @@ async fn main() {
             }
         }
         Command::Check(args) => {
-            let targets: Vec<&str> = args.targets.iter().map(String::as_str).collect();
+            let mut target_strings: Vec<String> = args.targets.clone();
+            if args.workspace {
+                let anchor = target_strings.first().map(Path::new);
+                match package::load_workspace_config(anchor) {
+                    Some((workspace, manifest_dir)) if !workspace.pipelines.is_empty() => {
+                        for pipeline in &workspace.pipelines {
+                            let candidate = Path::new(pipeline);
+                            let resolved = if candidate.is_absolute() {
+                                candidate.to_path_buf()
+                            } else {
+                                manifest_dir.join(candidate)
+                            };
+                            target_strings.push(resolved.to_string_lossy().into_owned());
+                        }
+                    }
+                    Some(_) => command_error(
+                        "--workspace requires `[workspace].pipelines` in the nearest harn.toml",
+                    ),
+                    None => command_error(
+                        "--workspace could not find a harn.toml walking up from the target(s)",
+                    ),
+                }
+            }
+            if target_strings.is_empty() {
+                command_error(
+                    "`harn check` requires at least one target path, or `--workspace` with `[workspace].pipelines`",
+                );
+            }
+            let targets: Vec<&str> = target_strings.iter().map(String::as_str).collect();
             let files = commands::check::collect_harn_targets(&targets);
             if files.is_empty() {
                 command_error("no .harn files found under the given target(s)");
@@ -98,6 +126,9 @@ async fn main() {
                 }
                 if args.strict_types {
                     config.strict_types = true;
+                }
+                if let Some(sev) = args.preflight.as_deref() {
+                    config.preflight_severity = Some(sev.to_string());
                 }
                 let outcome = commands::check::check_file_inner(file, &config, &cross_file_imports);
                 should_fail |= outcome.should_fail(config.strict);

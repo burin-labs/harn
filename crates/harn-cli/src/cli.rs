@@ -137,8 +137,17 @@ pub(crate) struct CheckArgs {
     /// Flag unvalidated boundary-API values used in field access.
     #[arg(long = "strict-types")]
     pub strict_types: bool,
-    /// One or more .harn files or directories.
-    #[arg(required = true)]
+    /// Check every `.harn` file under `[workspace].pipelines` in the
+    /// nearest `harn.toml`. Positional targets are additive.
+    #[arg(long = "workspace")]
+    pub workspace: bool,
+    /// Downgrade preflight diagnostics to warnings (or suppress them
+    /// entirely with `off`). Overrides `[check].preflight_severity`.
+    /// Accepted values: `error` (default), `warning`, `off`.
+    #[arg(long = "preflight", value_name = "SEVERITY")]
+    pub preflight: Option<String>,
+    /// One or more .harn files or directories. Optional when `--workspace`
+    /// is set.
     pub targets: Vec<String>,
 }
 

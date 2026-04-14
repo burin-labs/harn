@@ -7,6 +7,28 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## Unreleased
+
+### Added
+
+- **`harn check` workspace manifest (`[workspace].pipelines`).** The CLI now
+  walks upward from a target file (stopping at the first `.git` boundary) to
+  find the nearest `harn.toml` and honors a new `[workspace]` section. Run
+  `harn check --workspace` to type-check every `.harn` file under the listed
+  pipeline roots in a single invocation without threading per-file
+  `--host-capabilities` flags. See `spec/HARN_SPEC.md` → "Workspace manifest
+  (`harn.toml`)" and `docs/src/cli-reference.md` for the schema.
+- **Preflight diagnostics separated from type errors.** Preflight diagnostics
+  from `harn check` are now reported under a distinct `preflight` category so
+  IDE filters and CI log scrapers can route them separately from type-checker
+  output. Two new knobs control them: `[check].preflight_severity = "error"
+  | "warning" | "off"` (overridable with the new `--preflight <severity>`
+  flag), and `[check].preflight_allow = ["capability.operation", ...]` which
+  accepts exact matches, `capability.*` wildcards, bare capability names, or
+  a blanket `*`. The existing `--host-capabilities` flag continues to work as
+  a per-invocation override of `[check].host_capabilities_path`. Resolves
+  [#24](https://github.com/burin-labs/harn/issues/24).
+
 ## v0.7.3
 
 ### Added
