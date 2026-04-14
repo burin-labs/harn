@@ -36,30 +36,22 @@ pub(crate) fn register_crypto_builtins(vm: &mut Vm) {
     });
 
     macro_rules! register_hash {
-        ($vm:expr, $name:expr, $hasher:ty) => {
+        ($vm:expr, $name:expr, $digest:path, $hasher:ty) => {
             $vm.register_builtin($name, |args, _out| {
-                use sha2::Digest as _;
+                use $digest as _;
                 let val = args.first().map(|a| a.display()).unwrap_or_default();
                 let hash = <$hasher>::digest(val.as_bytes());
-                Ok(VmValue::String(Rc::from(format!("{hash:x}"))))
+                let hex: String = hash.iter().map(|b| format!("{b:02x}")).collect();
+                Ok(VmValue::String(Rc::from(hex)))
             });
         };
     }
-    register_hash!(vm, "sha256", sha2::Sha256);
-    register_hash!(vm, "sha224", sha2::Sha224);
-    register_hash!(vm, "sha384", sha2::Sha384);
-    register_hash!(vm, "sha512", sha2::Sha512);
-    register_hash!(vm, "sha512_256", sha2::Sha512_256);
-
-    // md-5 0.11 pins digest 0.11 and sha2 0.10 pins digest 0.10, so md5::Md5
-    // can't share the sha2::Digest-based macro above.
-    vm.register_builtin("md5", |args, _out| {
-        use md5::Digest as _;
-        let val = args.first().map(|a| a.display()).unwrap_or_default();
-        let hash = md5::Md5::digest(val.as_bytes());
-        let hex: String = hash.iter().map(|b| format!("{b:02x}")).collect();
-        Ok(VmValue::String(Rc::from(hex)))
-    });
+    register_hash!(vm, "sha256", sha2::Digest, sha2::Sha256);
+    register_hash!(vm, "sha224", sha2::Digest, sha2::Sha224);
+    register_hash!(vm, "sha384", sha2::Digest, sha2::Sha384);
+    register_hash!(vm, "sha512", sha2::Digest, sha2::Sha512);
+    register_hash!(vm, "sha512_256", sha2::Digest, sha2::Sha512_256);
+    register_hash!(vm, "md5", md5::Digest, md5::Md5);
 
     vm.register_builtin("url_encode", |args, _out| {
         let val = args.first().map(|a| a.display()).unwrap_or_default();

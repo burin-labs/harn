@@ -100,7 +100,7 @@ pub(crate) fn register_math_builtins(vm: &mut Vm) {
 
     vm.register_builtin("random", |_args, _out| {
         use rand::Rng;
-        let val: f64 = rand::thread_rng().gen();
+        let val: f64 = rand::rng().random();
         Ok(VmValue::Float(val))
     });
 
@@ -110,7 +110,7 @@ pub(crate) fn register_math_builtins(vm: &mut Vm) {
             let min = args[0].as_int().unwrap_or(0);
             let max = args[1].as_int().unwrap_or(0);
             if min <= max {
-                let val = rand::thread_rng().gen_range(min..=max);
+                let val = rand::rng().random_range(min..=max);
                 return Ok(VmValue::Int(val));
             }
         }

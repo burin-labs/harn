@@ -59,12 +59,12 @@ pub(crate) fn register_tracing_builtins(vm: &mut Vm) {
                 .last()
                 .map(|t| t.trace_id.clone())
                 .unwrap_or_else(|| {
-                    let val: u32 = rand::thread_rng().gen();
+                    let val: u32 = rand::rng().random();
                     format!("{val:08x}")
                 })
         });
         let span_id = {
-            let val: u32 = rand::thread_rng().gen();
+            let val: u32 = rand::rng().random();
             format!("{val:08x}")
         };
         let start_ms = std::time::SystemTime::now()
