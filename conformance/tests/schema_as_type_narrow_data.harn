@@ -1,0 +1,16 @@
+type GraderOut = {verdict: "pass" | "fail", summary: string}
+
+pipeline default() {
+  llm_mock({text: "{\"verdict\": \"pass\", \"summary\": \"ok\"}"})
+  let r = llm_call(
+    "Grade this",
+    nil,
+    {provider: "mock", output_schema: GraderOut, output_validation: "error", response_format: "json"},
+  )
+  // r.data is statically typed as GraderOut here — these accesses
+  // type-check without an explicit schema_is guard.
+  let v: "pass" | "fail" = r.data.verdict
+  let s: string = r.data.summary
+  println(v)
+  println(s)
+}
