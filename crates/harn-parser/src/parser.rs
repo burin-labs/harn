@@ -2458,6 +2458,8 @@ impl Parser {
                     Box::new(type_args.remove(0)),
                     Box::new(type_args.remove(0)),
                 ));
+            } else if (name == "iter" || name == "Iter") && type_args.len() == 1 {
+                return Ok(TypeExpr::Iter(Box::new(type_args.remove(0))));
             }
             return Ok(TypeExpr::Applied {
                 name,

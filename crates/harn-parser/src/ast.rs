@@ -376,6 +376,9 @@ pub enum TypeExpr {
     List(Box<TypeExpr>),
     /// A dict type with key and value types: `dict<string, int>`.
     DictType(Box<TypeExpr>, Box<TypeExpr>),
+    /// A lazy iterator type: `iter<int>`. Yields values of the inner type
+    /// via the combinator/sink protocol (`VmValue::Iter` at runtime).
+    Iter(Box<TypeExpr>),
     /// A generic type application: `Option<int>`, `Result<string, int>`.
     Applied { name: String, args: Vec<TypeExpr> },
     /// A function type: `fn(int, string) -> bool`.

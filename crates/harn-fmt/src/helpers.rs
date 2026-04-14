@@ -196,6 +196,9 @@ pub(crate) fn format_type_expr(te: &TypeExpr) -> String {
         TypeExpr::List(inner) => {
             format!("list<{}>", format_type_expr(inner))
         }
+        TypeExpr::Iter(inner) => {
+            format!("iter<{}>", format_type_expr(inner))
+        }
         TypeExpr::DictType(k, v) => {
             format!("dict<{}, {}>", format_type_expr(k), format_type_expr(v))
         }

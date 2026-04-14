@@ -239,6 +239,7 @@ impl<'a> Linter<'a> {
                 }
             }
             TypeExpr::List(inner) => self.record_type_expr_references(inner),
+            TypeExpr::Iter(inner) => self.record_type_expr_references(inner),
             TypeExpr::DictType(key, value) => {
                 self.record_type_expr_references(key);
                 self.record_type_expr_references(value);

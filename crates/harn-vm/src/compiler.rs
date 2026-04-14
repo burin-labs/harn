@@ -368,6 +368,7 @@ impl Compiler {
                 )]))))
             }
             harn_parser::TypeExpr::Applied { .. } => None,
+            harn_parser::TypeExpr::Iter(_) => None,
             harn_parser::TypeExpr::Never => None,
         }
     }
