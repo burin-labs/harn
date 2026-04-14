@@ -74,7 +74,6 @@ pub(super) struct ToolDispatchResult {
     pub tools_used_this_iter: Vec<String>,
     pub tool_results_this_iter: Vec<serde_json::Value>,
     pub observations: String,
-    pub rejection_followups: Vec<String>,
 }
 
 pub(super) async fn run_tool_dispatch(
@@ -115,7 +114,6 @@ pub(super) async fn run_tool_dispatch(
     let mut observations = String::new();
     let mut tools_used_this_iter: Vec<String> = Vec::new();
     let mut tool_results_this_iter: Vec<serde_json::Value> = Vec::new();
-    let rejection_followups: Vec<String> = Vec::new();
     let tool_schemas = collect_tool_schemas(ctx.tools_val, opts.native_tools.as_deref());
 
     // Parallel dispatch for read-only exploration batches. When the
@@ -836,6 +834,5 @@ pub(super) async fn run_tool_dispatch(
         tools_used_this_iter,
         tool_results_this_iter,
         observations,
-        rejection_followups,
     })
 }
