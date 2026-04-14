@@ -43,3 +43,7 @@
 - [Debugging agent runs](./debugging.md)
 - [Editor integration](./editor-integration.md)
 - [Testing](./testing.md)
+
+# Migrations
+
+- [0.6.x → 0.7.0](./migrations/v0.7.md)

@@ -210,8 +210,9 @@ fn build_compact_config(
 ) -> Result<crate::orchestration::AutoCompactConfig, VmError> {
     for key in opts.keys() {
         if !COMPACT_OPT_KEYS.contains(&key.as_str()) {
+            let expected = COMPACT_OPT_KEYS.join(", ");
             return Err(err(format!(
-                "agent_session_compact: unknown option key '{key}' (expected one of {COMPACT_OPT_KEYS:?})"
+                "agent_session_compact: unknown option key '{key}' (expected one of: {expected})"
             )));
         }
     }

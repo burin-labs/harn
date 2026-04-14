@@ -345,6 +345,37 @@ prose with tool calls stripped), `iterations`, `duration_ms`,
 `llm_retries` / `llm_backoff_ms` options plus its own `tool_retries`,
 `max_iterations`, `max_nudges`.
 
+### Sessions (persistent conversations)
+
+Pass `session_id` to `agent_loop` to resume a multi-turn conversation:
+prior messages are loaded as a prefix before the call runs, and the
+final transcript is persisted back under the same id on exit. Calls
+without a `session_id` (or with an empty string) mint an anonymous id
+and never touch the store — the one-shot call shape is preserved.
+
+```harn
+let s = agent_session_open()                       // mint UUIDv7
+agent_session_inject(s, {role: "user", content: "hi"})
+let a = agent_loop("continue", nil, {session_id: s, provider: "mock"})
+let b = agent_loop("remember me?", nil, {session_id: s, provider: "mock"})
+let branch = agent_session_fork(s)                 // counterfactual
+agent_session_close(branch)
+```
+
+Lifecycle builtins (all hard-error on unknown ids except `exists`,
+`open`, `snapshot`):
+
+- `agent_session_open(id?)` / `_close(id)` / `_exists(id)`
+- `agent_session_reset(id)` / `_fork(src, dst?)` / `_trim(id, keep_last)`
+- `agent_session_inject(id, {role, content, …})` — missing `role` errors.
+- `agent_session_compact(id, opts)` — unknown keys in `opts` error.
+- `agent_session_length(id)` / `_snapshot(id)` for read-only inspection.
+
+Workflow stages pick up a session id from `model_policy.session_id`;
+two stages sharing an id share their conversation automatically. The
+pre-0.7 `transcript_policy` dict (with `mode: "reset" | "fork"`) was
+removed — call the lifecycle verbs explicitly.
+
 ## Rate limiting
 
 Per-provider RPM limiting is built in:

@@ -1,0 +1,28 @@
+// Counterfactual session fork
+//
+// Demonstrates agent_session_fork for exploring a conversation branch
+// without mutating the original. Both branches share the seeded prefix
+// and then evolve independently.
+//
+// Run with: cargo run --bin harn -- run examples/session-fork.harn
+pipeline main(task) {
+  let base = agent_session_open()
+  agent_session_inject(base, {role: "user", content: "Plan a weekend in Kyoto."})
+  agent_session_inject(base, {role: "assistant", content: "Day 1: Fushimi Inari. Day 2: Arashiyama."})
+  // Fork two counterfactual branches from the same starting point.
+  let rainy = agent_session_fork(base)
+  let sunny = agent_session_fork(base)
+  agent_session_inject(rainy, {role: "user", content: "What if it rains the whole weekend?"})
+  agent_session_inject(sunny, {role: "user", content: "What if the weather is perfect?"})
+  log("base len=${agent_session_length(base)}")
+  log("rainy len=${agent_session_length(rainy)} id=${rainy}")
+  log("sunny len=${agent_session_length(sunny)} id=${sunny}")
+  // Keep the original clean; release the branches.
+  agent_session_close(rainy)
+  agent_session_close(sunny)
+  if agent_session_length(base) == 2 {
+    log("fork branches did not leak into base")
+  } else {
+    log("warning: base was mutated by a branch — session_fork should not share state")
+  }
+}

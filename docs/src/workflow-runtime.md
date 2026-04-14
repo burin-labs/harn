@@ -228,24 +228,29 @@ used to tie tool gates, workers, and artifacts back to one mutation boundary:
 This is not an editor undo stack. It is the runtime-side provenance contract
 that hosts can map onto their own approval and undo/redo UX.
 
-## Transcript policy
+## Transcripts and sessions
 
-Each node can attach transcript policy:
+Stage transcripts are owned by the [session store](./sessions.md), not by
+a per-node `transcript_policy` dict. Each node picks up a session id from
+`model_policy.session_id`; two nodes that share an id share their
+conversation automatically. Unset ids get a stable stage-scoped default.
 
-```harn
-{
-  mode: "continue",    // or "reset" / "fork"
-  visibility: "public",
-  compact: true,
-  keep_last: 6
-}
-```
+To shape transcript behavior on a node, use the dedicated workflow
+setters plus the lifecycle builtins:
 
-Harn applies transcript policy inside the runtime:
+- `workflow_set_auto_compact(graph, node_id, policy)` — sets
+  `auto_compact`, `compact_threshold`, `tool_output_max_chars`,
+  `compact_strategy`, `hard_limit_tokens`, `hard_limit_strategy`.
+- `workflow_set_output_visibility(graph, node_id, visibility)` —
+  `"public" | "private" | nil`.
+- `agent_session_reset(id)`, `agent_session_fork(src, dst?)`,
+  `agent_session_trim(id, keep_last)`, `agent_session_compact(id, opts)`
+  — call these in the pipeline before `workflow_execute` to branch,
+  reset, or compact a stage's conversation explicitly.
 
-- reset or fork transcript state at stage boundaries
-- compact transcripts before or after a stage
-- redact public-only transcript views when requested
+The old `transcript_policy` dict (with `mode: "continue" | "reset" |
+"fork"`) was removed in 0.7.0; see [Sessions](./sessions.md) for
+migration.
 
 ## Meta-orchestration builtins
 

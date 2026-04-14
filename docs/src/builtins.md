@@ -1376,7 +1376,33 @@ Core artifact kinds commonly used by the runtime include `resource`,
 `apply_intent`, `test_result`, `verification_result`, `command_result`,
 and `plan`.
 
+### Sessions
+
+Sessions are the first-class resource for agent-loop conversations.
+They own a transcript history, closure subscribers, and a lifecycle.
+See the [Sessions](./sessions.md) chapter for the full model.
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `agent_session_open(id?)` | id: string or nil | string | Idempotent open; `nil` mints a UUIDv7 |
+| `agent_session_exists(id)` | id | bool | Safe on unknown ids |
+| `agent_session_length(id)` | id | int | Message count; errors on unknown id |
+| `agent_session_snapshot(id)` | id | dict or nil | Read-only deep copy of the transcript |
+| `agent_session_reset(id)` | id | nil | Wipes history; preserves id and subscribers |
+| `agent_session_fork(src, dst?)` | src, dst | string | Copies transcript; subscribers are not copied |
+| `agent_session_trim(id, keep_last)` | id, keep_last: int | int | Retain last `keep_last` messages; returns kept count |
+| `agent_session_compact(id, opts)` | id, opts: dict | int | Runs the LLM/truncate/observation-mask compactor |
+| `agent_session_inject(id, message)` | id, message: dict | nil | Appends `{role, content, …}`; missing `role` errors |
+| `agent_session_close(id)` | id | nil | Evicts immediately regardless of LRU cap |
+
+Pair with `agent_loop(..., {session_id: id, ...})`: prior messages load
+as prefix and the final transcript is persisted back on exit.
+
 ### Transcript lifecycle
+
+Lower-level transcript primitives. Most callers should prefer sessions;
+these remain useful for building synthetic transcripts, replay fixtures,
+and offline analysis.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
