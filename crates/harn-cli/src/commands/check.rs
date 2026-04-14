@@ -865,7 +865,8 @@ fn node_children_bundle(node: &SNode) -> Vec<&SNode> {
         }
         | Node::ThrowStmt { value: object }
         | Node::Spread(object)
-        | Node::TryOperator { operand: object } => vec![object.as_ref()],
+        | Node::TryOperator { operand: object }
+        | Node::TryStar { operand: object } => vec![object.as_ref()],
         Node::SubscriptAccess { object, index } => vec![object.as_ref(), index.as_ref()],
         Node::SliceAccess { object, start, end } => {
             let mut children = vec![object.as_ref()];
@@ -1340,7 +1341,8 @@ fn collect_mock_host_capabilities_from_node(
             operand: object, ..
         }
         | Node::Spread(object)
-        | Node::TryOperator { operand: object } => {
+        | Node::TryOperator { operand: object }
+        | Node::TryStar { operand: object } => {
             collect_mock_host_capabilities_from_node(
                 object,
                 file_path,
@@ -2499,7 +2501,9 @@ fn scan_node_preflight(
                 diagnostics,
             );
         }
-        Node::Spread(expr) | Node::TryOperator { operand: expr } => {
+        Node::Spread(expr)
+        | Node::TryOperator { operand: expr }
+        | Node::TryStar { operand: expr } => {
             scan_node_preflight(
                 expr,
                 file_path,

@@ -1,0 +1,3 @@
+[harn] finally_only: caught:x counter=1
+[harn] catch_finally: handled:x counter=1
+[harn] nested_outer_finally: inner:x counter=1

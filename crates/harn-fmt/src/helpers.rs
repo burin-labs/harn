@@ -348,6 +348,7 @@ pub(crate) fn is_simple_expr(node: &SNode) -> bool {
             | Node::RangeExpr { .. }
             | Node::EnumConstruct { .. }
             | Node::TryOperator { .. }
+            | Node::TryStar { .. }
             | Node::ReturnStmt { .. }
             | Node::BreakStmt
             | Node::ContinueStmt

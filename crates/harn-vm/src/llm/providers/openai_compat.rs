@@ -59,6 +59,12 @@ impl OpenAiCompatibleProvider {
             msgs.push(serde_json::json!({"role": "system", "content": sys}));
         }
         msgs.extend(opts.messages.iter().cloned());
+        if let Some(ref prefill) = opts.prefill {
+            msgs.push(serde_json::json!({
+                "role": "assistant",
+                "content": prefill,
+            }));
+        }
         msgs = crate::llm::api::normalize_openai_style_messages(msgs, force_string_content);
 
         let mut body = serde_json::json!({
@@ -111,9 +117,17 @@ impl OpenAiCompatibleProvider {
         // Always set explicitly: Qwen templates default enabled when
         // absent, making fast tool-call turns waste budget on thinking.
         // OpenRouter / Anthropic-routed strip it via transform_request().
-        body["chat_template_kwargs"] = serde_json::json!({
+        // When prefill is present we also set `add_generation_prompt:
+        // false` so vLLM continues the final assistant message instead
+        // of starting a fresh assistant turn after it.
+        let mut chat_template_kwargs = serde_json::json!({
             "enable_thinking": opts.thinking.is_some(),
         });
+        if opts.prefill.is_some() {
+            chat_template_kwargs["add_generation_prompt"] = serde_json::json!(false);
+            chat_template_kwargs["continue_final_message"] = serde_json::json!(true);
+        }
+        body["chat_template_kwargs"] = chat_template_kwargs;
         body
     }
 

@@ -73,6 +73,14 @@ pub(crate) struct LlmCallOptions {
 
     // --- Provider-specific overrides ---
     pub provider_overrides: Option<serde_json::Value>,
+
+    // --- Assistant prefill ---
+    /// Optional prefill string. When set, providers append a final
+    /// `role: "assistant"` message with this content so the model
+    /// continues from there. Cleared by the agent loop after each turn.
+    /// See `llm::providers::anthropic` and `llm::providers::openai_compat`
+    /// for provider-specific plumbing.
+    pub prefill: Option<String>,
 }
 
 /// Resolve effective request timeout: explicit value > `HARN_LLM_TIMEOUT` env > 120s default.
@@ -116,6 +124,7 @@ pub(crate) struct LlmRequestPayload {
     pub timeout: Option<u64>,
     pub stream: bool,
     pub provider_overrides: Option<serde_json::Value>,
+    pub prefill: Option<String>,
 }
 
 impl LlmRequestPayload {
@@ -149,6 +158,7 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             timeout: opts.timeout,
             stream: opts.stream,
             provider_overrides: opts.provider_overrides.clone(),
+            prefill: opts.prefill.clone(),
         }
     }
 }
@@ -2396,6 +2406,7 @@ mod tests {
             timeout: Some(5),
             idle_timeout: None,
             provider_overrides: Some(serde_json::json!({"custom_flag": true})),
+            prefill: None,
         }
     }
 
@@ -2413,6 +2424,70 @@ mod tests {
             payload.provider_overrides,
             Some(serde_json::json!({"custom_flag": true}))
         );
+    }
+
+    #[test]
+    fn openai_compat_prefill_appends_assistant_and_sets_chat_template_kwargs() {
+        use crate::llm::providers::OpenAiCompatibleProvider;
+
+        let mut opts = base_opts("openai");
+        opts.prefill = Some("<done>##DONE##</done>".to_string());
+        let payload = LlmRequestPayload::from(&opts);
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+
+        let messages = body["messages"].as_array().expect("messages array");
+        let last = messages.last().expect("at least one message");
+        assert_eq!(last["role"].as_str(), Some("assistant"));
+        assert_eq!(last["content"].as_str(), Some("<done>##DONE##</done>"));
+
+        let kw = &body["chat_template_kwargs"];
+        assert_eq!(kw["add_generation_prompt"].as_bool(), Some(false));
+        assert_eq!(kw["continue_final_message"].as_bool(), Some(true));
+    }
+
+    #[test]
+    fn openai_compat_without_prefill_omits_continue_flags() {
+        use crate::llm::providers::OpenAiCompatibleProvider;
+
+        let opts = base_opts("openai");
+        let payload = LlmRequestPayload::from(&opts);
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+
+        let kw = &body["chat_template_kwargs"];
+        assert!(kw.get("add_generation_prompt").is_none());
+        assert!(kw.get("continue_final_message").is_none());
+    }
+
+    #[test]
+    fn anthropic_prefill_appends_assistant_for_legacy_model() {
+        use crate::llm::providers::AnthropicProvider;
+
+        let mut opts = base_opts("anthropic");
+        opts.model = "claude-sonnet-4-20250514".to_string();
+        opts.prefill = Some("<done>##DONE##</done>".to_string());
+        let payload = LlmRequestPayload::from(&opts);
+        let body = AnthropicProvider::build_request_body(&payload);
+
+        let messages = body["messages"].as_array().expect("messages array");
+        let last = messages.last().expect("at least one message");
+        assert_eq!(last["role"].as_str(), Some("assistant"));
+        assert_eq!(last["content"].as_str(), Some("<done>##DONE##</done>"));
+    }
+
+    #[test]
+    fn anthropic_prefill_skipped_for_deprecated_4_6_model() {
+        use crate::llm::providers::AnthropicProvider;
+
+        let mut opts = base_opts("anthropic");
+        opts.model = "claude-opus-4-6".to_string();
+        opts.prefill = Some("<done>##DONE##</done>".to_string());
+        let payload = LlmRequestPayload::from(&opts);
+        let body = AnthropicProvider::build_request_body(&payload);
+
+        let messages = body["messages"].as_array().expect("messages array");
+        // User message only; prefill dropped silently.
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0]["role"].as_str(), Some("user"));
     }
 
     /// Accept a single connection with a bounded deadline so a buggy client

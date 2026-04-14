@@ -1,0 +1,52 @@
+// `try*` rethrows must run pending `finally` blocks between the
+// rethrow site and the enclosing catch — exactly once each. This
+// mirrors the exactly-once guarantee documented in
+// `finally_runs_once.harn` for plain `throw`.
+pipeline test(task) {
+  fn boom() {
+    throw "x"
+  }
+  // --- try* inside try/finally (no catch): the outer try/finally must
+  //     run finally once, then the throw escapes past it. We wrap in
+  //     an outer try/catch so the throw is observable as a value. ---
+  var counter_a = 0
+  let r_a = try {
+    try {
+      let _ = try* boom()
+      "u1"
+    } finally {
+      counter_a = counter_a + 1
+    }
+  } catch (e) {
+    "caught:${e}"
+  }
+  log("finally_only: ${r_a} counter=${counter_a}")
+  // --- try* inside try/catch/finally where the catch handles the
+  //     rethrown error: finally must fire exactly once. ---
+  var counter_b = 0
+  let r_b = try {
+    let _ = try* boom()
+    "u2"
+  } catch (e) {
+    "handled:${e}"
+  } finally {
+    counter_b = counter_b + 1
+  }
+  log("catch_finally: ${r_b} counter=${counter_b}")
+  // --- Nested: outer try/finally wraps inner try/catch where the
+  //     catch catches the try* rethrow. Outer finally must NOT fire
+  //     (no throw escapes the inner catch); inner has no finally. ---
+  var counter_c = 0
+  let r_c = try {
+    let inner = try {
+    let _ = try* boom()
+    "u3"
+  } catch (e) {
+    "inner:${e}"
+  }
+    inner
+  } finally {
+    counter_c = counter_c + 1
+  }
+  log("nested_outer_finally: ${r_c} counter=${counter_c}")
+}

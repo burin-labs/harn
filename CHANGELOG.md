@@ -11,6 +11,25 @@ granular archaeology.
 
 ### Added
 
+- **`try*` finally-pop fix.** Compiler now unconditionally pops the
+  one-value-per-block leftover after a finally body, so a `finally`
+  ending in a non-value statement (e.g. `x = x + 1`) no longer leaks
+  a stray `nil` onto the stack of the surrounding expression. This
+  was latent in `try { ... } finally { x = x + 1 }` used in
+  expression position; surfaced while wiring the new `try*` operator.
+- **`try* EXPR` — rethrow-into-catch operator.** Replaces the
+  `try { foo() } / guard is_ok else / unwrap` boilerplate with a
+  one-token prefix form. `try* EXPR` evaluates `EXPR` and, on a thrown
+  error, runs every `finally` block between the rethrow site and the
+  innermost catch handler exactly once before rethrowing the original
+  value into that handler. On success it evaluates to `EXPR`'s value
+  with no `Result` wrapping. `try*` requires an enclosing function
+  (`fn`, `tool`, or `pipeline`) — using it at module top level is a
+  compile error. Distinct from postfix `?` (which early-returns
+  `Result.Err(...)` from a Result-returning function); use `try*` when
+  you want a thrown error to land in an enclosing `try { ... } catch`
+  rather than be returned as a Result. Resolves
+  [#26](https://github.com/burin-labs/harn/issues/26).
 - **Schema-as-type: unified `type` aliases with `output_schema` /
   `schema_*` builtins.** A `type` alias can now drive both static
   type-checking and runtime schema validation from a single source of

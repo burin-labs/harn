@@ -91,6 +91,11 @@ pub(super) async fn run_turn_preflight(
     })
     .await;
 
+    // Prefill injections are pulled off the pending-feedback queue and
+    // assigned to `opts.prefill` instead of appended as a user-role
+    // runtime-feedback message. The llm-call phase consumes and clears
+    // `opts.prefill` each turn so injections apply once per turn.
+    opts.prefill = None;
     for (kind, content) in drain_pending_feedback(ctx.session_id) {
         emit_agent_event(&AgentEvent::FeedbackInjected {
             session_id: ctx.session_id.to_string(),
@@ -98,6 +103,10 @@ pub(super) async fn run_turn_preflight(
             content: content.clone(),
         })
         .await;
+        if kind == "prefill_assistant" {
+            opts.prefill = Some(content);
+            continue;
+        }
         append_message_to_contexts(
             &mut state.visible_messages,
             &mut state.recorded_messages,

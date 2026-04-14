@@ -418,6 +418,7 @@ fn summarize_node(node: &SNode) -> String {
         Node::DictLiteral(entries) => format!("{{{} fields}}", entries.len()),
         Node::Spread(value) => format!("...{}", inline_label(value)),
         Node::TryOperator { operand } => format!("{}?", inline_label(operand)),
+        Node::TryStar { operand } => format!("try* {}", inline_label(operand)),
         Node::Closure { params, .. } => format!("closure ({})", params.len()),
         Node::DurationLiteral(value) => format!("{value}ms"),
         Node::RangeExpr {
@@ -528,6 +529,7 @@ fn inline_label(node: &SNode) -> String {
         Node::ListLiteral(values) => format!("[{} items]", values.len()),
         Node::DictLiteral(entries) => format!("{{{} fields}}", entries.len()),
         Node::TryOperator { operand } => format!("{}?", inline_label(operand)),
+        Node::TryStar { operand } => format!("try* {}", inline_label(operand)),
         Node::RangeExpr {
             start,
             end,

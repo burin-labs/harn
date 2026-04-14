@@ -1,0 +1,6 @@
+[harn] ok: 42
+[harn] caught: caught:kaboom
+[harn] nested: nested-catch:kaboom
+[harn] composed: value=42
+[harn] composed_err: composed-err:kaboom
+[harn] targets-inner: inner:kaboom

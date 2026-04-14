@@ -755,6 +755,16 @@ impl Parser {
     fn parse_try_catch(&mut self) -> Result<SNode, ParserError> {
         let start = self.current_span();
         self.consume(&TokenKind::Try, "try")?;
+        if self.check(&TokenKind::Star) {
+            self.advance();
+            let operand = self.parse_unary()?;
+            return Ok(spanned(
+                Node::TryStar {
+                    operand: Box::new(operand),
+                },
+                Span::merge(start, self.prev_span()),
+            ));
+        }
         self.consume(&TokenKind::LBrace, "{")?;
         let body = self.parse_block()?;
         self.consume(&TokenKind::RBrace, "}")?;

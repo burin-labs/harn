@@ -92,7 +92,19 @@ pub(super) async fn run_llm_call(
     )
     .await?;
 
-    let text = result.text.clone();
+    // Consume the prefill after the call. The provider appended it to
+    // the outgoing request as a final `role: "assistant"` message; the
+    // returned `text` is only the model's continuation, so we prepend
+    // the prefill here before downstream parsing so the logical
+    // assistant turn is whole. Clearing `opts.prefill` after the call
+    // keeps the injection scoped to exactly one turn.
+    let prefill = opts.prefill.take();
+    let text = match prefill.as_ref() {
+        Some(prefix) if !result.text.starts_with(prefix.as_str()) => {
+            format!("{prefix}{}", result.text)
+        }
+        _ => result.text.clone(),
+    };
     state.total_text.push_str(&text);
     state.transcript_events.push(transcript_event(
         "provider_payload",

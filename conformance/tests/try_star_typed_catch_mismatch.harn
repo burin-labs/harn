@@ -1,0 +1,20 @@
+// A typed catch that does not match the rethrown value's type lets the
+// throw propagate past it — the rethrown enum keeps its original type.
+pipeline test(task) {
+  enum AppError {
+    NotFound(msg)
+  }
+  enum OtherError {
+    Kind(msg)
+  }
+  fn find_missing() {
+    throw AppError.NotFound("user")
+  }
+  let _ = try {
+    let _ = try* find_missing()
+    "unreachable"
+  } catch (e: OtherError) {
+    "wont-fire"
+  }
+  log("unreachable")
+}

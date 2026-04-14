@@ -1,0 +1,65 @@
+// `try* EXPR` evaluates EXPR. If EXPR throws, the throw is rethrown
+// (running pending finally blocks between the rethrow and the
+// enclosing catch). Otherwise `try* EXPR` evaluates to EXPR's value.
+//
+// Per issue #26, the desugaring is:
+//   try* EXPR  ===  { let _r = try { EXPR }
+//                      guard is_ok(_r) else { throw unwrap_err(_r) }
+//                      unwrap(_r) }
+pipeline test(task) {
+  fn ok() {
+    return 42
+  }
+  fn boom() {
+    throw "kaboom"
+  }
+  // --- Success path: try* returns the operand's value. ---
+  let v = try* ok()
+  log("ok: ${v}")
+  // --- Error path: try* rethrows; outer try/catch catches it. ---
+  let caught = try {
+    let _ = try* boom()
+    "unreachable"
+  } catch (e) {
+    "caught:${e}"
+  }
+  log("caught: ${caught}")
+  // --- Nested try* inside a try/catch expression: the inner throw
+  //     short-circuits the let and lands in the outer catch with the
+  //     original thrown value. ---
+  let nested: string = try {
+    let v = try* boom()
+    "got:${v}"
+  } catch (e) {
+    "nested-catch:${e}"
+  }
+  log("nested: ${nested}")
+  // --- try* on an expression embedded mid-expression: error path
+  //     short-circuits before the surrounding expression evaluates. ---
+  let composed = try {
+    "value=${try* ok()}"
+  } catch (e) {
+    "composed-ok"
+  }
+  log("composed: ${composed}")
+  let composed_err = try {
+    "value=${try* boom()}"
+  } catch (e) {
+    "composed-err:${e}"
+  }
+  log("composed_err: ${composed_err}")
+  // --- Rethrow targets the *innermost* enclosing catch; outer is not
+  //     touched when inner handles the rethrow. ---
+  let outer_untouched = try {
+    let inner = try {
+    let _ = try* boom()
+    "u1"
+  } catch (e) {
+    "inner:${e}"
+  }
+    inner
+  } catch (e) {
+    "outer:${e}"
+  }
+  log("targets-inner: ${outer_untouched}")
+}

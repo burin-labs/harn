@@ -461,6 +461,7 @@ module.exports = grammar({
         $.parenthesized_expression,
         $.spawn_expression,
         $.try_expression,
+        $.try_star_expression,
         $.deadline_block,
         $.parallel_expression,
         $.parallel_each_expression,
@@ -590,6 +591,14 @@ module.exports = grammar({
           optional(seq("finally", field("finalizer", $.block)))
         )
       ),
+
+    // try* EXPR — rethrow-into-catch operator (issue #26). Distinct from
+    // try { ... } / try { ... } catch above; binds tighter than `try`'s
+    // block form because the operand is an expression, not a block.
+    // Whitespace between `try` and `*` is allowed but not required —
+    // matching the runtime parser, which treats `try*` as a token pair.
+    try_star_expression: ($) =>
+      prec.right(20, seq("try", "*", field("operand", $._expression))),
 
     parallel_options: ($) =>
       seq(

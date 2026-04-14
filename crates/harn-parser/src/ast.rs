@@ -289,6 +289,16 @@ pub enum Node {
     TryOperator {
         operand: Box<SNode>,
     },
+    /// Try-star operator: `try* EXPR` — evaluates EXPR; on throw, runs
+    /// pending finally blocks up to the enclosing catch and rethrows
+    /// the original value. On success, evaluates to EXPR's value.
+    /// Lowered per spec/HARN_SPEC.md as:
+    ///   { let _r = try { EXPR }
+    ///     guard is_ok(_r) else { throw unwrap_err(_r) }
+    ///     unwrap(_r) }
+    TryStar {
+        operand: Box<SNode>,
+    },
 
     Block(Vec<SNode>),
     Closure {

@@ -140,6 +140,22 @@ pub(crate) fn extract_llm_options(
         .and_then(|v| v.as_dict())
         .map(vm_value_dict_to_json);
 
+    let prefill = options
+        .as_ref()
+        .and_then(|o| o.get("prefill"))
+        .and_then(|v| {
+            if matches!(v, VmValue::Nil) {
+                None
+            } else {
+                let s = v.display();
+                if s.is_empty() {
+                    None
+                } else {
+                    Some(s)
+                }
+            }
+        });
+
     let opts = LlmCallOptions {
         provider,
         model,
@@ -168,6 +184,7 @@ pub(crate) fn extract_llm_options(
         idle_timeout,
         stream,
         provider_overrides,
+        prefill,
     };
 
     validate_options(&opts);

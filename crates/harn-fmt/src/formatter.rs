@@ -729,6 +729,14 @@ impl Formatter {
                     format!("{expr}?")
                 }
             }
+            Node::TryStar { operand } => {
+                let expr = self.format_expr(operand);
+                if needs_parens_as_unary_operand(&operand.node) {
+                    format!("try* ({expr})")
+                } else {
+                    format!("try* {expr}")
+                }
+            }
             Node::FunctionCall { name, args } => {
                 let args_str = self.format_call_args(args, name.len() + 1);
                 format!("{name}({args_str})")

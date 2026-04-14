@@ -79,6 +79,12 @@ pub struct Compiler {
     /// Top-level `type` aliases, used to lower `schema_of(T)` and
     /// `output_schema: T` into constant JSON-Schema dicts at compile time.
     type_aliases: std::collections::HashMap<String, TypeExpr>,
+    /// True when this compiler is emitting code outside any function-like
+    /// scope (module top-level statements). `try*` is rejected here
+    /// because the rethrow has no enclosing function to live in.
+    /// Pipeline bodies and nested `Compiler::new()` instances (fn,
+    /// closure, tool, etc.) flip this to false before compiling.
+    module_level: bool,
 }
 
 impl Compiler {
@@ -95,7 +101,17 @@ impl Compiler {
             temp_counter: 0,
             scope_depth: 0,
             type_aliases: std::collections::HashMap::new(),
+            module_level: true,
         }
+    }
+
+    /// Compiler instance for a nested function-like body (fn, closure,
+    /// tool, parallel arm, etc.). Differs from `new()` only in that
+    /// `module_level` starts false — `try*` is allowed inside.
+    fn for_nested_body() -> Self {
+        let mut c = Self::new();
+        c.module_level = false;
+        c
     }
 
     /// Populate `type_aliases` from a program's top-level `type T = ...`
@@ -223,7 +239,9 @@ impl Compiler {
                 if let Some(parent_name) = extends {
                     self.compile_parent_pipeline(program, parent_name)?;
                 }
+                let saved = std::mem::replace(&mut self.module_level, false);
                 self.compile_block(body)?;
+                self.module_level = saved;
             }
         } else {
             // Script mode: no pipeline found, treat top-level as implicit entry.
@@ -280,7 +298,9 @@ impl Compiler {
                 if let Some(parent_name) = extends {
                     self.compile_parent_pipeline(program, parent_name)?;
                 }
+                let saved = std::mem::replace(&mut self.module_level, false);
                 self.compile_block(body)?;
+                self.module_level = saved;
             }
         }
 
@@ -591,12 +611,15 @@ impl Compiler {
     }
 
     /// Compile finally body inline, discarding its result value.
+    /// `compile_scoped_block` always leaves exactly one value on the stack
+    /// (Nil for non-value tail statements), so the trailing Pop is
+    /// unconditional — otherwise a finally ending in e.g. `x = x + 1`
+    /// would leave a stray Nil that corrupts the surrounding expression
+    /// when the enclosing try/finally is used in expression position.
     fn compile_finally_inline(&mut self, finally_body: &[SNode]) -> Result<(), CompileError> {
         if !finally_body.is_empty() {
             self.compile_scoped_block(finally_body)?;
-            if Self::produces_value(&finally_body.last().unwrap().node) {
-                self.chunk.emit(Op::Pop, self.line);
-            }
+            self.chunk.emit(Op::Pop, self.line);
         }
         Ok(())
     }
@@ -1489,7 +1512,7 @@ impl Compiler {
             Node::FnDecl {
                 name, params, body, ..
             } => {
-                let mut fn_compiler = Compiler::new();
+                let mut fn_compiler = Compiler::for_nested_body();
                 fn_compiler.enum_names = self.enum_names.clone();
                 fn_compiler.emit_default_preamble(params)?;
                 fn_compiler.emit_type_checks(params);
@@ -1527,7 +1550,7 @@ impl Compiler {
                 ..
             } => {
                 // Compile the body as a closure, then call `tool_define(registry, name, description, config)`.
-                let mut fn_compiler = Compiler::new();
+                let mut fn_compiler = Compiler::for_nested_body();
                 fn_compiler.enum_names = self.enum_names.clone();
                 fn_compiler.emit_default_preamble(params)?;
                 fn_compiler.emit_type_checks(params);
@@ -1660,7 +1683,7 @@ impl Compiler {
             }
 
             Node::Closure { params, body, .. } => {
-                let mut fn_compiler = Compiler::new();
+                let mut fn_compiler = Compiler::for_nested_body();
                 fn_compiler.enum_names = self.enum_names.clone();
                 fn_compiler.emit_default_preamble(params)?;
                 fn_compiler.emit_type_checks(params);
@@ -2357,6 +2380,62 @@ impl Compiler {
                 self.chunk.emit(Op::TryUnwrap, self.line);
             }
 
+            // `try* EXPR`: evaluate EXPR; on throw, run pending finally
+            // blocks up to the innermost catch barrier and rethrow the
+            // original value. On success, leave EXPR's value on the stack.
+            //
+            // Per the issue-#26 desugaring:
+            //   { let _r = try { EXPR }
+            //     guard is_ok(_r) else { throw unwrap_err(_r) }
+            //     unwrap(_r) }
+            //
+            // The bytecode realizes this directly: install a try handler
+            // around EXPR so a throw lands in our catch path, where we
+            // pre-run pending finallys and re-emit `Throw`. Skipping the
+            // intermediate Result.Ok/Err wrapping that `TryExpr` does
+            // keeps the success path a no-op (operand value passes through
+            // as-is).
+            Node::TryStar { operand } => {
+                if self.module_level {
+                    return Err(CompileError {
+                        message: "try* requires an enclosing function (fn, tool, or pipeline) so the rethrow has a target".into(),
+                        line: self.line,
+                    });
+                }
+                self.handler_depth += 1;
+                let catch_jump = self.chunk.emit_jump(Op::TryCatchSetup, self.line);
+                let empty_type = self.chunk.add_constant(Constant::String(String::new()));
+                self.emit_type_name_extra(empty_type);
+
+                self.compile_node(operand)?;
+
+                self.handler_depth -= 1;
+                self.chunk.emit(Op::PopHandler, self.line);
+                let end_jump = self.chunk.emit_jump(Op::Jump, self.line);
+
+                // Catch path: thrown value is on the stack. Pre-run any
+                // finallys between us and the innermost catch barrier
+                // (mirrors `Node::ThrowStmt` lowering), then rethrow.
+                self.chunk.patch_jump(catch_jump);
+                let pending = self.pending_finallys_until_barrier();
+                if pending.is_empty() {
+                    self.chunk.emit(Op::Throw, self.line);
+                } else {
+                    self.temp_counter += 1;
+                    let temp_name = format!("__try_star_err_{}__", self.temp_counter);
+                    let save_idx = self.chunk.add_constant(Constant::String(temp_name.clone()));
+                    self.chunk.emit_u16(Op::DefVar, save_idx, self.line);
+                    for fb in &pending {
+                        self.compile_finally_inline(fb)?;
+                    }
+                    let restore_idx = self.chunk.add_constant(Constant::String(temp_name));
+                    self.chunk.emit_u16(Op::GetVar, restore_idx, self.line);
+                    self.chunk.emit(Op::Throw, self.line);
+                }
+
+                self.chunk.patch_jump(end_jump);
+            }
+
             Node::ImplBlock { type_name, methods } => {
                 // Lower into a `__impl_TypeName` dict of name -> closure.
                 for method_sn in methods {
@@ -2367,7 +2446,7 @@ impl Compiler {
                         let key_idx = self.chunk.add_constant(Constant::String(name.clone()));
                         self.chunk.emit_u16(Op::Constant, key_idx, self.line);
 
-                        let mut fn_compiler = Compiler::new();
+                        let mut fn_compiler = Compiler::for_nested_body();
                         fn_compiler.enum_names = self.enum_names.clone();
                         fn_compiler.emit_default_preamble(params)?;
                         fn_compiler.emit_type_checks(params);
@@ -2401,7 +2480,7 @@ impl Compiler {
 
             Node::StructDecl { name, .. } => {
                 // Emit a constructor: StructName({field: val, ...}) -> StructInstance.
-                let mut fn_compiler = Compiler::new();
+                let mut fn_compiler = Compiler::for_nested_body();
                 fn_compiler.enum_names = self.enum_names.clone();
                 let params = vec![TypedParam::untyped("__fields")];
                 fn_compiler.emit_default_preamble(&params)?;
@@ -2705,7 +2784,7 @@ impl Compiler {
                     self.chunk.emit_u16(Op::Constant, zero_idx, self.line);
                 }
                 self.compile_node(expr)?;
-                let mut fn_compiler = Compiler::new();
+                let mut fn_compiler = Compiler::for_nested_body();
                 fn_compiler.enum_names = self.enum_names.clone();
                 fn_compiler.compile_block(body)?;
                 fn_compiler.chunk.emit(Op::Return, self.line);
@@ -2743,7 +2822,7 @@ impl Compiler {
             }
 
             Node::SpawnExpr { body } => {
-                let mut fn_compiler = Compiler::new();
+                let mut fn_compiler = Compiler::for_nested_body();
                 fn_compiler.enum_names = self.enum_names.clone();
                 fn_compiler.compile_block(body)?;
                 fn_compiler.chunk.emit(Op::Return, self.line);
@@ -3062,7 +3141,7 @@ impl Compiler {
         body: &[SNode],
         source_file: Option<String>,
     ) -> Result<CompiledFunction, CompileError> {
-        let mut fn_compiler = Compiler::new();
+        let mut fn_compiler = Compiler::for_nested_body();
         fn_compiler.enum_names = self.enum_names.clone();
         fn_compiler.emit_default_preamble(params)?;
         fn_compiler.emit_type_checks(params);

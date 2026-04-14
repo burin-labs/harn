@@ -1,8 +1,43 @@
 //! Anthropic Messages API provider (Claude models).
 
+use std::cell::RefCell;
+use std::collections::HashSet;
+
 use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult, ThinkingConfig};
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
 use crate::value::VmError;
+
+thread_local! {
+    static ANTHROPIC_PREFILL_WARN_ONCE: RefCell<HashSet<String>> =
+        RefCell::new(HashSet::new());
+}
+
+/// Anthropic deprecated the assistant-prefill feature starting with
+/// Claude 4.6. Any model name containing `claude-opus-4-6`,
+/// `claude-sonnet-4-6`, or any future `claude-*-4-6[+]` variant drops
+/// the prefill to avoid HTTP 400s.
+fn model_supports_anthropic_prefill(model: &str) -> bool {
+    let lower = model.to_lowercase();
+    !(lower.contains("claude-opus-4-6")
+        || lower.contains("claude-sonnet-4-6")
+        || lower.contains("claude-haiku-4-6")
+        || lower.contains("-4.6"))
+}
+
+fn warn_anthropic_prefill_skipped(model: &str) {
+    ANTHROPIC_PREFILL_WARN_ONCE.with(|seen| {
+        let mut seen = seen.borrow_mut();
+        if seen.insert(model.to_string()) {
+            crate::events::log_warn(
+                "llm.prefill",
+                &format!(
+                    "assistant prefill requested for {model}, but Anthropic 4.6+ \
+                     deprecated prefill; sending without it",
+                ),
+            );
+        }
+    });
+}
 
 /// Zero-cost unit struct for the Anthropic provider.
 pub(crate) struct AnthropicProvider;
@@ -43,9 +78,24 @@ impl AnthropicProvider {
         } else {
             8192
         };
+        let mut messages = opts.messages.clone();
+        if let Some(ref prefill) = opts.prefill {
+            // Claude 4.6+ deprecated the assistant-prefill feature and
+            // returns HTTP 400 when the final message is role=assistant.
+            // Skip the prefill for those models with a one-time warning
+            // rather than fighting the deprecation.
+            if model_supports_anthropic_prefill(&opts.model) {
+                messages.push(serde_json::json!({
+                    "role": "assistant",
+                    "content": prefill,
+                }));
+            } else {
+                warn_anthropic_prefill_skipped(&opts.model);
+            }
+        }
         let mut body = serde_json::json!({
             "model": opts.model,
-            "messages": opts.messages,
+            "messages": messages,
             "max_tokens": anthropic_max,
         });
         if let Some(ref sys) = opts.system {

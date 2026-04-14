@@ -1366,7 +1366,7 @@ impl<'a> Linter<'a> {
                 self.lint_node(inner);
             }
 
-            Node::TryOperator { operand } => {
+            Node::TryOperator { operand } | Node::TryStar { operand } => {
                 self.lint_node(operand);
             }
 

@@ -382,6 +382,7 @@ try_catch          ::= 'try' '{' block '}'
                        ['catch' [('(' IDENTIFIER [':' type_expr] ')') | IDENTIFIER]
                          '{' block '}']
                        ['finally' '{' block '}']
+try_star_expr      ::= 'try' '*' unary_expr
 guard_stmt         ::= 'guard' expression 'else' '{' block '}'
 require_stmt       ::= 'require' expression [',' expression]
 deadline_block     ::= 'deadline' primary '{' block '}'
@@ -1212,6 +1213,48 @@ without needing to restructure through `Result` helpers. When a typed catch
 throw propagates past the expression unchanged — the surrounding `let` never
 binds. See the [Try-expression](#try-expression) section below for the
 `Result`-wrapping behavior when `catch` is omitted.
+
+### try* (rethrow-into-catch)
+
+`try* EXPR` is a prefix operator that evaluates `EXPR` and rethrows any
+thrown error so an enclosing `try { ... } catch (e) { ... }` can handle
+it, instead of forcing the caller to manually convert thrown errors
+into a `Result` and then `guard is_ok / unwrap`. The lowered form is:
+
+```harn,ignore
+{ let _r = try { EXPR }
+  guard is_ok(_r) else { throw unwrap_err(_r) }
+  unwrap(_r) }
+```
+
+On success `try* EXPR` evaluates to `EXPR`'s value with no `Result`
+wrapping. The rethrow runs every `finally` block between the rethrow
+site and the innermost catch handler exactly once, matching the
+`finally` exactly-once guarantee for plain `throw`.
+
+```harn,ignore
+fn fetch(prompt) {
+  // Without try*: try { llm_call(prompt) } / guard is_ok / unwrap
+  let response = try* llm_call(prompt)
+  return parse(response)
+}
+
+let outcome = try {
+  let result = fetch(prompt)
+  Ok(result)
+} catch (e: ApiError) {
+  Err(e.code)
+}
+```
+
+`try*` requires an enclosing function (`fn`, `tool`, or `pipeline`) so
+the rethrow has a body to live in — using it at module top level is a
+compile error. The operand is parsed at unary-prefix precedence, so
+`try* foo.bar(1)` parses as `try* (foo.bar(1))` and `try* a + b` parses
+as `(try* a) + b`. Use parentheses to combine `try*` with binary
+operators on its operand. `try*` is distinct from the postfix `?`
+operator: `?` early-returns `Result.Err(...)` from a `Result`-returning
+function, while `try*` rethrows a thrown value into an enclosing catch.
 
 ### finally
 

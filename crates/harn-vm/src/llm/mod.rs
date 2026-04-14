@@ -780,6 +780,7 @@ mod tests {
             timeout: None,
             idle_timeout: None,
             provider_overrides: None,
+            prefill: None,
         }
     }
 

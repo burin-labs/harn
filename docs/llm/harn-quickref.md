@@ -173,6 +173,30 @@ trailing `finally { ... }` runs once for effect only.
 let parsed = try { json_parse(raw) } catch (e) { default_config() }
 ```
 
+`try* EXPR` (prefix) evaluates `EXPR` and rethrows any throw so an
+enclosing `try { ... } catch (e) { ... }` sees it. Use it instead of
+the verbose `try { foo() } / guard is_ok else / unwrap` boilerplate:
+
+```harn
+fn fetch(prompt) {
+  // Without try*: try { llm_call(prompt) } / guard is_ok / unwrap
+  let response = try* llm_call(prompt)
+  return parse(response)
+}
+
+let outcome = try {
+  fetch(user_prompt)
+} catch (e: ApiError) {
+  fallback(e)
+}
+```
+
+`try*` requires an enclosing function (`fn`, `tool`, or `pipeline`) so
+the rethrow has somewhere to live; it's a compile error at the module
+top level. It's distinct from postfix `?`: `?` early-returns
+`Result.Err(...)` from a `Result`-returning function, while `try*`
+rethrows a thrown value into an enclosing catch.
+
 ## Concurrency
 
 ```harn

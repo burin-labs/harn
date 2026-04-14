@@ -339,6 +339,9 @@ pub struct TypeChecker {
     hints: Vec<InlayHintInfo>,
     /// When true, flag unvalidated boundary-API values used in field access.
     strict_types: bool,
+    /// Lexical depth of enclosing function-like bodies (fn/tool/pipeline/closure).
+    /// `try*` requires `fn_depth > 0` so the rethrow has a body to live in.
+    fn_depth: usize,
 }
 
 impl TypeChecker {
@@ -365,6 +368,7 @@ impl TypeChecker {
             source: None,
             hints: Vec::new(),
             strict_types: false,
+            fn_depth: 0,
         }
     }
 
@@ -377,6 +381,7 @@ impl TypeChecker {
             source: None,
             hints: Vec::new(),
             strict_types: strict,
+            fn_depth: 0,
         }
     }
 
@@ -484,7 +489,9 @@ impl TypeChecker {
                     for p in params {
                         child.define_var(p, None);
                     }
+                    self.fn_depth += 1;
                     self.check_block(body, &mut child);
+                    self.fn_depth -= 1;
                 }
                 Node::FnDecl {
                     name,
@@ -1021,6 +1028,16 @@ impl TypeChecker {
             Node::TryExpr { body } => {
                 let mut try_scope = scope.child();
                 self.check_block(body, &mut try_scope);
+            }
+
+            Node::TryStar { operand } => {
+                if self.fn_depth == 0 {
+                    self.error_at(
+                        "try* requires an enclosing function (fn, tool, or pipeline) so the rethrow has a target".to_string(),
+                        span,
+                    );
+                }
+                self.check_node(operand, scope);
             }
 
             Node::ReturnStmt {
@@ -1580,7 +1597,9 @@ impl TypeChecker {
                 for p in params {
                     closure_scope.define_var(&p.name, p.type_expr.clone());
                 }
+                self.fn_depth += 1;
                 self.check_block(body, &mut closure_scope);
+                self.fn_depth -= 1;
             }
 
             Node::ListLiteral(elements) => {
@@ -1781,12 +1800,27 @@ impl TypeChecker {
             // that have no meaningful type-check behavior.
             Node::Pipeline { body, .. } | Node::OverrideDecl { body, .. } => {
                 let mut decl_scope = scope.child();
+                self.fn_depth += 1;
                 self.check_block(body, &mut decl_scope);
+                self.fn_depth -= 1;
             }
         }
     }
 
     fn check_fn_body(
+        &mut self,
+        type_params: &[TypeParam],
+        params: &[TypedParam],
+        return_type: &Option<TypeExpr>,
+        body: &[SNode],
+        where_clauses: &[WhereClause],
+    ) {
+        self.fn_depth += 1;
+        self.check_fn_body_inner(type_params, params, return_type, body, where_clauses);
+        self.fn_depth -= 1;
+    }
+
+    fn check_fn_body_inner(
         &mut self,
         type_params: &[TypeParam],
         params: &[TypedParam],
@@ -3474,6 +3508,10 @@ impl TypeChecker {
                     args: vec![ok_type, err_type],
                 })
             }
+
+            // `try* EXPR` evaluates to EXPR's value on success; rethrow on
+            // error never returns. Type is therefore EXPR's inferred type.
+            Node::TryStar { operand } => self.infer_type(operand, scope),
 
             Node::StructConstruct {
                 struct_name,

@@ -154,3 +154,26 @@ pipeline test(task) {
             (expression_statement
               (call_expression
                 function: (identifier)))))))))
+
+==================
+Try Star Expression
+==================
+
+pipeline test(task) {
+  let v = try* risky()
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (parameter_list
+      (typed_parameter
+        name: (identifier)))
+    (block
+      (let_binding
+        name: (identifier)
+        value: (try_star_expression
+          operand: (call_expression
+            function: (identifier)))))))

@@ -54,6 +54,7 @@ fn base_opts(messages: Vec<serde_json::Value>) -> LlmCallOptions {
         idle_timeout: None,
         stream: true,
         provider_overrides: None,
+        prefill: None,
     }
 }
 
