@@ -11,11 +11,11 @@ name = "harn"
 path = "src/main.rs"
 
 [dependencies]
-harn-lexer = { path = "../harn-lexer", version = "0.5" }
-harn-parser = { path = "../harn-parser", version = "0.5" }
-harn-vm = { path = "../harn-vm", version = "0.5" }
-harn-lint = { path = "../harn-lint", version = "0.5" }
-harn-fmt = { path = "../harn-fmt", version = "0.5" }
+harn-lexer = { path = "../harn-lexer", version = "0.6" }
+harn-parser = { path = "../harn-parser", version = "0.6" }
+harn-vm = { path = "../harn-vm", version = "0.6" }
+harn-lint = { path = "../harn-lint", version = "0.6" }
+harn-fmt = { path = "../harn-fmt", version = "0.6" }
 axum = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "signal", "time"] }
 serde_json = "1"

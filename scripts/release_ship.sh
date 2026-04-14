@@ -119,7 +119,7 @@ if [[ "$NEXT_VERSION" == "$PREVIOUS_VERSION" ]]; then
   exit 1
 fi
 
-git add Cargo.toml Cargo.lock
+git add Cargo.toml Cargo.lock crates/*/Cargo.toml
 git commit -m "Bump version to $NEXT_VERSION"
 
 TAG="v$NEXT_VERSION"

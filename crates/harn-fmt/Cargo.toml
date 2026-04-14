@@ -7,5 +7,5 @@ repository.workspace = true
 description = "Code formatter for the Harn programming language"
 
 [dependencies]
-harn-lexer = { path = "../harn-lexer", version = "0.5" }
-harn-parser = { path = "../harn-parser", version = "0.5" }
+harn-lexer = { path = "../harn-lexer", version = "0.6" }
+harn-parser = { path = "../harn-parser", version = "0.6" }
