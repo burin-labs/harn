@@ -99,6 +99,26 @@ pub(super) fn drain_pending_feedback(session_id: &str) -> Vec<(String, String)> 
     })
 }
 
+/// RAII guard that binds the agent loop's tool registry as the thread's
+/// current registry (for `tool_ref` / `tool_def` lookups) and restores
+/// the previous binding on drop.
+struct ToolRegistryGuard {
+    previous: Option<VmValue>,
+}
+
+impl ToolRegistryGuard {
+    fn install(registry: Option<VmValue>) -> Self {
+        let previous = crate::stdlib::tools::install_current_tool_registry(registry);
+        Self { previous }
+    }
+}
+
+impl Drop for ToolRegistryGuard {
+    fn drop(&mut self) {
+        crate::stdlib::tools::install_current_tool_registry(self.previous.take());
+    }
+}
+
 pub(crate) fn install_current_host_bridge(bridge: Rc<crate::bridge::HostBridge>) {
     CURRENT_HOST_BRIDGE.with(|slot| {
         *slot.borrow_mut() = Some(bridge);
@@ -117,6 +137,8 @@ pub async fn run_agent_loop_internal(
 
     let tools_owned = opts.tools.clone();
     let tools_val = tools_owned.as_ref();
+
+    let _tool_registry_guard = ToolRegistryGuard::install(tools_owned.clone());
 
     // Snapshot config/state fields as locals so phase contexts can hold
     // them without fighting the `&mut state` borrow in the loop body.

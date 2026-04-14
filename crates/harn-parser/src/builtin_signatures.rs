@@ -1406,8 +1406,16 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("string")),
     },
     BuiltinSig {
+        name: "tool_bind",
+        return_type: None,
+    },
+    BuiltinSig {
         name: "tool_count",
         return_type: Some(BuiltinReturn::Named("int")),
+    },
+    BuiltinSig {
+        name: "tool_def",
+        return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
         name: "tool_define",
@@ -1435,6 +1443,10 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
     },
     BuiltinSig {
         name: "tool_prompt",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
+        name: "tool_ref",
         return_type: Some(BuiltinReturn::Named("string")),
     },
     BuiltinSig {

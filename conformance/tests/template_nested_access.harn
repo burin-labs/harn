@@ -1,0 +1,4 @@
+pipeline default() {
+  let u = {name: "Alice", email: "a@example.com", tags: ["admin", "dev", "ops"]}
+  println(render("fixtures/template/nested.prompt", {user: u}))
+}

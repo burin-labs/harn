@@ -1,0 +1,3 @@
+pipeline default() {
+  render("fixtures/template/cycle_a.prompt", {})
+}

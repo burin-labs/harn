@@ -1,0 +1,6 @@
+pipeline default() {
+  // Original pre-v2 syntax must still work unchanged.
+  println(render("fixtures/template/backcompat.prompt", {name: "Alice", greeting: "howdy"}))
+  println("---")
+  println(render("fixtures/template/backcompat.prompt", {name: "Bob"}))
+}

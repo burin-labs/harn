@@ -24,6 +24,11 @@
         "aliases": ["Harn", "harn"],
         "extensions": [".harn"],
         "configuration": "./language-configuration.json"
+      },
+      {
+        "id": "harn-prompt",
+        "aliases": ["Harn Prompt", "harn-prompt"],
+        "extensions": [".harn.prompt", ".prompt"]
       }
     ],
     "grammars": [
@@ -31,6 +36,11 @@
         "language": "harn",
         "scopeName": "source.harn",
         "path": "./syntaxes/harn.tmLanguage.json"
+      },
+      {
+        "language": "harn-prompt",
+        "scopeName": "text.harn.prompt",
+        "path": "./syntaxes/harn-prompt.tmLanguage.json"
       }
     ],
     "snippets": [

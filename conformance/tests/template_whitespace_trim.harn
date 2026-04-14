@@ -1,0 +1,3 @@
+pipeline default() {
+  println(render("fixtures/template/whitespace_trim.prompt", {xs: ["a", "b", "c"]}))
+}

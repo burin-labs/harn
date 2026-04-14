@@ -175,15 +175,9 @@ fn render_template(
             resolved.display()
         ))))
     })?;
-    if let Some(bindings) = bindings {
-        let mut result = template;
-        for (key, val) in bindings {
-            result = result.replace(&format!("{{{{{key}}}}}"), &val.display());
-        }
-        Ok(result)
-    } else {
-        Ok(template)
-    }
+    let base = resolved.parent();
+    crate::stdlib::template::render_template_result(&template, bindings, base, Some(&resolved))
+        .map_err(VmError::from)
 }
 
 fn params_match(

@@ -1,0 +1,11 @@
+upper: {{name | upper}}
+lower: {{NAME | lower}}
+default: {{missing | default: "anon"}}
+join: {{items | join: ", "}}
+length: {{items | length}}
+first: {{items | first}}
+last: {{items | last}}
+title: {{phrase | title}}
+json: {{obj | json}}
+indent:
+{{block | indent: 2}}

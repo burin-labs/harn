@@ -1,0 +1,31 @@
+pipeline main(task) {
+  var r = tool_registry()
+  r = tool_define(r, "edit", "Edit a file in place", {parameters: {path: "string"}})
+  r = tool_define(r, "search", "Search the codebase", {parameters: {query: "string"}})
+  tool_bind(r)
+  assert(tool_ref("edit") == "edit", "tool_ref returns the name when registered")
+  assert(tool_ref("search") == "search", "tool_ref resolves another registered tool")
+  let def = tool_def("edit")
+  assert(def.name == "edit", "tool_def returns the registered name")
+  assert(def.description == "Edit a file in place", "tool_def returns the registered description")
+  let unknown = try {
+    tool_ref("nonexistent")
+  }
+  assert(is_err(unknown), "tool_ref throws on unknown name")
+  let unknown_msg = unwrap_err(unknown)
+  assert(unknown_msg.contains("nonexistent"), "thrown message mentions the unknown name")
+  let unknown_def = try {
+    tool_def("nonexistent")
+  }
+  assert(is_err(unknown_def), "tool_def throws on unknown name")
+  tool_bind(nil)
+  let unbound = try {
+    tool_ref("edit")
+  }
+  assert(is_err(unbound), "tool_ref throws when no registry is bound")
+  assert(
+    unwrap_err(unbound).contains("no tool registry bound"),
+    "unbound error mentions missing registry",
+  )
+  log("tool_ref tests passed")
+}

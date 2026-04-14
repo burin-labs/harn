@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
@@ -5,6 +6,82 @@ use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 use crate::schema::json_to_vm_value;
+
+thread_local! {
+    /// The tool registry bound to the current execution scope. Populated
+    /// by `agent_loop` at the start of its run and cleared on exit, or by
+    /// `tool_bind(registry)` in tests and prompt-building code. Consumed
+    /// by `tool_ref` / `tool_def` to resolve tool-name references without
+    /// threading the registry through every call site.
+    static CURRENT_TOOL_REGISTRY: RefCell<Option<VmValue>> = const { RefCell::new(None) };
+}
+
+/// Install a registry as the current tool registry for this thread.
+/// Returns the previous binding so callers can restore it (RAII-style).
+pub fn install_current_tool_registry(registry: Option<VmValue>) -> Option<VmValue> {
+    CURRENT_TOOL_REGISTRY.with(|slot| slot.replace(registry))
+}
+
+/// Read the currently-bound tool registry, if any.
+pub fn current_tool_registry() -> Option<VmValue> {
+    CURRENT_TOOL_REGISTRY.with(|slot| slot.borrow().clone())
+}
+
+/// Clear the thread-local tool registry. Used to reset state between
+/// tests.
+pub fn clear_current_tool_registry() {
+    CURRENT_TOOL_REGISTRY.with(|slot| *slot.borrow_mut() = None);
+}
+
+fn vm_find_tool_entry<'a>(
+    registry: &'a BTreeMap<String, VmValue>,
+    name: &str,
+) -> Option<&'a BTreeMap<String, VmValue>> {
+    let tools = vm_get_tools(registry);
+    for tool in tools {
+        if let VmValue::Dict(entry) = tool {
+            if let Some(VmValue::String(entry_name)) = entry.get("name") {
+                if &**entry_name == name {
+                    return Some(entry);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn vm_registered_names(registry: &BTreeMap<String, VmValue>) -> Vec<String> {
+    let mut names: Vec<String> = vm_get_tools(registry)
+        .iter()
+        .filter_map(|tool| match tool {
+            VmValue::Dict(entry) => entry.get("name").and_then(|v| match v {
+                VmValue::String(s) => Some(s.to_string()),
+                _ => None,
+            }),
+            _ => None,
+        })
+        .collect();
+    names.sort();
+    names
+}
+
+fn vm_current_registry_dict(builtin: &str) -> Result<VmValue, VmError> {
+    match current_tool_registry() {
+        Some(value) => match &value {
+            VmValue::Dict(map) => {
+                vm_validate_registry(builtin, map)?;
+                Ok(value)
+            }
+            _ => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                "{builtin}: bound tool registry is not a dict"
+            ))))),
+        },
+        None => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+            "{builtin}: no tool registry bound to this scope. \
+             Call tool_bind(registry) first, or invoke inside an agent_loop."
+        ))))),
+    }
+}
 
 pub(crate) fn register_tool_builtins(vm: &mut Vm) {
     vm.register_builtin("tool_registry", |_args, _out| {
@@ -477,6 +554,93 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
         }
 
         Ok(VmValue::String(Rc::from(prompt.trim_end())))
+    });
+
+    vm.register_builtin("tool_bind", |args, _out| {
+        let registry = match args.first() {
+            Some(VmValue::Dict(map)) => {
+                vm_validate_registry("tool_bind", map)?;
+                VmValue::Dict(map.clone())
+            }
+            Some(VmValue::Nil) | None => {
+                install_current_tool_registry(None);
+                return Ok(VmValue::Nil);
+            }
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "tool_bind: argument must be a tool registry or nil",
+                ))));
+            }
+        };
+        install_current_tool_registry(Some(registry.clone()));
+        Ok(registry)
+    });
+
+    vm.register_builtin("tool_ref", |args, _out| {
+        let name = match args.first() {
+            Some(VmValue::String(s)) => s.to_string(),
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "tool_ref: name must be a string literal",
+                ))));
+            }
+        };
+
+        let registry_value = vm_current_registry_dict("tool_ref")?;
+        let VmValue::Dict(registry) = &registry_value else {
+            unreachable!("vm_current_registry_dict returns Dict or errors");
+        };
+
+        if vm_find_tool_entry(registry, &name).is_some() {
+            return Ok(VmValue::String(Rc::from(name.as_str())));
+        }
+
+        let registered = vm_registered_names(registry);
+        let listed = if registered.is_empty() {
+            "(none registered)".to_string()
+        } else {
+            registered.join(", ")
+        };
+        Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+            "tool_ref: unknown tool {name:?}. Registered tools: {listed}"
+        )))))
+    });
+
+    vm.register_builtin("tool_def", |args, _out| {
+        let name = match args.first() {
+            Some(VmValue::String(s)) => s.to_string(),
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "tool_def: name must be a string literal",
+                ))));
+            }
+        };
+
+        let registry_value = vm_current_registry_dict("tool_def")?;
+        let VmValue::Dict(registry) = &registry_value else {
+            unreachable!("vm_current_registry_dict returns Dict or errors");
+        };
+
+        if let Some(entry) = vm_find_tool_entry(registry, &name) {
+            let mut desc = BTreeMap::new();
+            for (key, value) in entry.iter() {
+                if key == "handler" {
+                    continue;
+                }
+                desc.insert(key.clone(), value.clone());
+            }
+            return Ok(VmValue::Dict(Rc::new(desc)));
+        }
+
+        let registered = vm_registered_names(registry);
+        let listed = if registered.is_empty() {
+            "(none registered)".to_string()
+        } else {
+            registered.join(", ")
+        };
+        Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+            "tool_def: unknown tool {name:?}. Registered tools: {listed}"
+        )))))
     });
 }
 

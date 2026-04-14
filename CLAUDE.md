@@ -52,6 +52,23 @@ at `.claude/skills/harn-scripting/SKILL.md`.
 - `tree-sitter-harn/`: tree-sitter grammar and tests.
 - `editors/vscode/`: VS Code extension.
 
+## Prompt template engine
+
+- The `.harn.prompt` / `.prompt` template language used by `render(...)` /
+  `render_prompt(...)` / the `template.render` host capability lives in
+  **one** file: `crates/harn-vm/src/stdlib/template.rs`. Never add a second
+  parser/evaluator — both host-call and script-call paths route through
+  `render_template_result` in that module, and they must stay
+  behavior-identical.
+- Full reference: `docs/src/prompt-templating.md`. Condensed quickref
+  (autoloaded by the `harn-scripting` skill): the "Prompt templates"
+  section of `docs/llm/harn-quickref.md`.
+- Back-compat contract: pre-v2 `{{name}}` silent-passthrough on a missing
+  bare identifier is preserved. Existing templates render byte-for-byte
+  identically. Only the new constructs (`if`/`elif`/`else`, `for`,
+  `include`, filters, `{{# #}}`, `{{ raw }}`, `{{- -}}`) raise parse
+  errors.
+
 ## Core Commands
 
 - Build: `cargo build`
@@ -102,6 +119,11 @@ at `.claude/skills/harn-scripting/SKILL.md`.
 - When public CLI commands, builtins, or host capability behavior changes, update the user-facing docs
   and help text along with the implementation.
 - Conformance tests are the main executable spec for user-visible language and runtime behavior.
+- Changes to `.harn.prompt` template syntax require coordinated updates to
+  `crates/harn-vm/src/stdlib/template.rs`, `docs/src/prompt-templating.md`,
+  `docs/llm/harn-quickref.md`, the VS Code grammar at
+  `editors/vscode/syntaxes/harn-prompt.tmLanguage.json`, conformance fixtures
+  under `conformance/tests/template_*`, and `CHANGELOG.md`.
 
 ## Trust Boundary
 

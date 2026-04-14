@@ -1,0 +1,3 @@
+items:
+{{for x in xs}}- {{loop.index}}. {{x}}{{if !loop.last}}
+{{end}}{{end}}

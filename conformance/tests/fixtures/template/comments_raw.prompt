@@ -1,0 +1,3 @@
+Before{{# this is a comment that should vanish #}}After
+Raw: {{ raw }}{{ not_a_directive }} {{if x}}...{{ endraw }}
+After raw.

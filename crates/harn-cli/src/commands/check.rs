@@ -1693,10 +1693,29 @@ fn scan_node_preflight(
                 }),
             }
         }
-        Node::FunctionCall { name, args } if name == "render" => {
+        Node::FunctionCall { name, args } if name == "render" || name == "render_prompt" => {
             if let Some(Node::StringLiteral(template_path)) = args.first().map(|arg| &arg.node) {
                 let resolved = resolve_preflight_target(file_path, template_path, config);
-                if !resolved.iter().any(|path| path.exists()) {
+                if let Some(existing) = resolved.iter().find(|path| path.exists()) {
+                    if let Ok(body) = std::fs::read_to_string(existing) {
+                        if let Err(err) = harn_vm::stdlib::template::validate_template_syntax(&body)
+                        {
+                            diagnostics.push(PreflightDiagnostic {
+                                path: file_path.display().to_string(),
+                                source: source.to_string(),
+                                span: args[0].span,
+                                message: format!(
+                                    "preflight: template '{}' has a syntax error: {err}",
+                                    template_path
+                                ),
+                                help: Some(
+                                    "see docs/src/prompt-templating.md for supported directives"
+                                        .to_string(),
+                                ),
+                            });
+                        }
+                    }
+                } else {
                     diagnostics.push(PreflightDiagnostic {
                         path: file_path.display().to_string(),
                         source: source.to_string(),
@@ -2855,6 +2874,32 @@ mod tests {
             .unwrap()
             .as_nanos();
         std::env::temp_dir().join(format!("{prefix}-{nanos}"))
+    }
+
+    #[test]
+    fn preflight_reports_template_syntax_error() {
+        let dir = unique_temp_dir("harn-check-tpl");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("main.harn");
+        // Unterminated `{{ for }}` block.
+        std::fs::write(dir.join("broken.prompt"), "{{ for x in xs }}oops\n").unwrap();
+        let source = r#"
+pipeline main() {
+  let text = render("broken.prompt")
+  println(text)
+}
+"#;
+        let program = parse_program(source);
+        let diagnostics =
+            collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+        assert!(
+            diagnostics.iter().any(|d| d
+                .message
+                .contains("template 'broken.prompt' has a syntax error")),
+            "expected template-syntax diagnostic, got {} messages",
+            diagnostics.len()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

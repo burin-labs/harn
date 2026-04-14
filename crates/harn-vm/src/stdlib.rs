@@ -18,8 +18,9 @@ mod regex;
 mod sets;
 mod shapes;
 mod strings;
+pub mod template;
 mod testing;
-mod tools;
+pub(crate) mod tools;
 pub mod tracing;
 mod types;
 
@@ -112,4 +113,5 @@ pub fn reset_stdlib_state() {
     json::reset_json_state();
     host::reset_host_state();
     agents::records::reset_eval_metrics();
+    tools::clear_current_tool_registry();
 }

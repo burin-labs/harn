@@ -7,6 +7,48 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## v0.7.1
+
+### Added
+
+- **Prompt template engine v2.** `render(...)` / `render_prompt(...)` /
+  the `template.render` host capability now support `{{ if }} / {{ elif }} /
+  {{ else }} / {{ end }}` branching, `{{ for item in xs }} ... {{ else }} ...
+  {{ end }}` loops with `{{ loop.index }}`, `.index0`, `.first`, `.last`,
+  `.length`, dict iteration (`{{ for k, v in dict }}`), nested path access
+  (`{{ user.tags[0] }}`), full boolean and comparison operators in
+  conditions, a filter pipeline (`{{ name | upper | default: "anon" }}`)
+  with built-in filters (`upper`, `lower`, `title`, `trim`, `capitalize`,
+  `length`, `first`, `last`, `reverse`, `join`, `default`, `json`,
+  `indent`, `lines`, `escape_md`, `replace`), `{{ include "partial.prompt"
+  }}` with optional `with { ... }` scoping and cycle detection,
+  `{{# comments #}}`, `{{ raw }} ... {{ endraw }}` verbatim blocks, and
+  `{{- trim whitespace -}}` markers. Existing templates remain
+  byte-for-byte compatible — pre-v2 `{{ name }}` and `{{ if key }} ...
+  {{ end }}` syntax is a strict subset. The duplicate
+  `replace()`-based implementation that used to back the
+  `("template", "render")` host capability has been removed; host-call
+  and script rendering now share the single canonical engine. See
+  `docs/src/prompt-templating.md` and
+  `docs/src/migrations/template-engine-v2.md`.
+- **Preflight template-parse validation.** `harn check` now parses every
+  template referenced by a literal `render(...)` or `render_prompt(...)`
+  argument and surfaces syntax errors (e.g. unterminated `{{ for }}` block)
+  before the pipeline runs.
+- **VS Code: `.harn.prompt` / `.prompt` syntax highlighting.** A new
+  TextMate grammar ships with the extension.
+- **`tool_ref(name)` and `tool_def(name)` stdlib builtins.** Resolve a
+  tool-name reference against the currently-bound tool registry, so
+  prompt strings and host-bridge code can interpolate canonical tool
+  names (and descriptions) instead of hand-typed string literals that
+  silently rot on rename. Both builtins throw with the list of
+  registered tools when the name is unknown or no registry is bound.
+- **`tool_bind(registry)` stdlib builtin.** Installs a tool registry as
+  the current thread's active binding, so `tool_ref` / `tool_def` can
+  resolve names without plumbing the registry through every call site.
+  Pass `nil` to clear the binding. `agent_loop` installs its own tools
+  registry automatically for the duration of the run.
+
 ## v0.7.0
 
 **First-class sessions.** The old `transcript_policy` config pattern is gone.

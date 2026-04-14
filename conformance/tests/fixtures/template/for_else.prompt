@@ -1,0 +1,2 @@
+{{for x in xs}}* {{x}}
+{{else}}(no items){{end}}

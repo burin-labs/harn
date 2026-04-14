@@ -417,6 +417,31 @@ in-flight work. Use both when batching LLM calls at scale.
   3. `output_validation: "error"` + `schema_retries: 2`.
   4. Generous `maxLength` / `maxItems` bounds in the schema.
 
+## Prompt templates (`.harn.prompt` / `.prompt`)
+
+Load via `render("path.prompt", bindings)` or `render_prompt(...)`. Paths
+resolve relative to the calling module's directory.
+
+- `{{ name }}` — interpolation; nested with `{{ a.b[0] }}`.
+- `{{ if expr }}..{{ elif expr }}..{{ else }}..{{ end }}` — expression
+  operators: `==`, `!=`, `<`, `<=`, `>`, `>=`, `and`/`&&`, `or`/`||`,
+  `not`/`!`.
+- `{{ for x in xs }}..{{ else }}..{{ end }}` — `else` renders when empty.
+  Inside: `{{ loop.index }}`, `.index0`, `.first`, `.last`, `.length`.
+  Dict iteration: `{{ for k, v in dict }}..{{ end }}`.
+- `{{ include "partial.prompt" }}` or `{{ include "..." with { x: y } }}`
+  — resolves relative to the including file; cycle detection is built in.
+- Filters: `{{ name | upper | default: "anon" }}`. Built-ins: `upper`,
+  `lower`, `title`, `trim`, `capitalize`, `length`, `first`, `last`,
+  `reverse`, `join:sep`, `default:fallback`, `json`, `indent:n`, `lines`,
+  `escape_md`, `replace:from,to`.
+- `{{# comments stripped at parse #}}`,
+  `{{ raw }}..literal {{braces}}..{{ endraw }}`,
+  `{{- trim whitespace + one newline -}}`.
+- Missing *bare* `{{ident}}` passes through the literal source (back-compat).
+  New constructs raise `template at L:C: ...` errors.
+- Full reference: `docs/src/prompt-templating.md`.
+
 ## Discovery
 
 - Human cheatsheet: `docs/src/scripting-cheatsheet.md`.

@@ -39,6 +39,7 @@
 
 - [CLI reference](./cli-reference.md)
 - [Builtin functions](./builtins.md)
+- [Prompt templating](./prompt-templating.md)
 - [Configuring LLM providers](./providers.md)
 - [Debugging agent runs](./debugging.md)
 - [Editor integration](./editor-integration.md)
@@ -47,3 +48,4 @@
 # Migrations
 
 - [0.6.x → 0.7.0](./migrations/v0.7.md)
+- [Prompt templates: v2](./migrations/template-engine-v2.md)

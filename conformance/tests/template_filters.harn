@@ -1,0 +1,11 @@
+pipeline default() {
+  let data = {
+    name: "alice",
+    NAME: "BOB",
+    items: ["x", "y", "z"],
+    phrase: "hello world",
+    obj: {a: 1, b: 2},
+    block: "line1\nline2\nline3",
+  }
+  println(render("fixtures/template/filters.prompt", data))
+}

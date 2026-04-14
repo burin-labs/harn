@@ -1,0 +1,3 @@
+pipeline default() {
+  println(render("fixtures/template/include_parent.prompt", {name: "Alice"}))
+}

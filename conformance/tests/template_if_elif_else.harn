@@ -1,0 +1,6 @@
+pipeline default() {
+  println(render("fixtures/template/if_elif_else.prompt", {n: 1}))
+  println(render("fixtures/template/if_elif_else.prompt", {n: 2}))
+  println(render("fixtures/template/if_elif_else.prompt", {n: 3}))
+  println(render("fixtures/template/if_elif_else.prompt", {n: 99}))
+}
