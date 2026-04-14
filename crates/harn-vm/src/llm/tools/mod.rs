@@ -1,5 +1,6 @@
 mod handle_local;
 mod parse;
+mod ts_value_parser;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
