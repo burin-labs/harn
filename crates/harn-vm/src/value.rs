@@ -59,17 +59,25 @@ pub struct VmRange {
 
 impl VmRange {
     /// Number of elements this range yields.
+    ///
+    /// Uses saturating arithmetic so that pathological ranges near
+    /// `i64::MAX`/`i64::MIN` do not panic on overflow. Because a range's
+    /// element count must fit in `i64` the returned length saturates at
+    /// `i64::MAX` for ranges whose width exceeds that (e.g. `i64::MIN to
+    /// i64::MAX` inclusive). Callers that later narrow to `usize` for
+    /// allocation should still guard against huge lengths — see
+    /// `to_vec` / `get` for the indexable-range invariants.
     pub fn len(&self) -> i64 {
         if self.inclusive {
             if self.start > self.end {
                 0
             } else {
-                (self.end - self.start) + 1
+                self.end.saturating_sub(self.start).saturating_add(1)
             }
         } else if self.start >= self.end {
             0
         } else {
-            self.end - self.start
+            self.end.saturating_sub(self.start)
         }
     }
 
@@ -78,12 +86,13 @@ impl VmRange {
     }
 
     /// Element at the given 0-based index, bounds-checked.
-    /// Returns `None` when out of bounds.
+    /// Returns `None` when out of bounds or when `start + idx` would
+    /// overflow (which can only happen when `len()` saturated).
     pub fn get(&self, idx: i64) -> Option<i64> {
         if idx < 0 || idx >= self.len() {
             None
         } else {
-            Some(self.start + idx)
+            self.start.checked_add(idx)
         }
     }
 
@@ -120,14 +129,23 @@ impl VmRange {
     }
 
     /// Materialize to a `Vec<VmValue>` — the explicit escape hatch.
+    ///
+    /// Uses `checked_add` on the per-element index so a range near
+    /// `i64::MAX` stops at the representable bound instead of panicking.
+    /// Callers should still treat a very long range as unwise to
+    /// materialize (the whole point of `VmRange` is to avoid this).
     pub fn to_vec(&self) -> Vec<VmValue> {
         let len = self.len();
         if len <= 0 {
             return Vec::new();
         }
-        let mut out = Vec::with_capacity(len as usize);
+        let cap = len as usize;
+        let mut out = Vec::with_capacity(cap);
         for i in 0..len {
-            out.push(VmValue::Int(self.start + i));
+            match self.start.checked_add(i) {
+                Some(v) => out.push(VmValue::Int(v)),
+                None => break,
+            }
         }
         out
     }
@@ -1083,6 +1101,111 @@ mod tests {
         assert_ne!(
             value_structural_hash_key(&d1),
             value_structural_hash_key(&d2)
+        );
+    }
+
+    // --- VmRange arithmetic safety at i64 boundaries ---
+    //
+    // These guard the saturating/checked arithmetic in `VmRange::len` and
+    // `VmRange::get` / `VmRange::to_vec`. Before the saturating rewrite the
+    // inclusive `i64::MIN to 0` case panicked in debug builds on
+    // `(end - start) + 1`.
+
+    #[test]
+    fn vm_range_len_inclusive_saturates_at_i64_max() {
+        let r = VmRange {
+            start: i64::MIN,
+            end: 0,
+            inclusive: true,
+        };
+        // True width overflows i64; saturating at i64::MAX keeps this total.
+        assert_eq!(r.len(), i64::MAX);
+    }
+
+    #[test]
+    fn vm_range_len_exclusive_full_range_saturates() {
+        let r = VmRange {
+            start: i64::MIN,
+            end: i64::MAX,
+            inclusive: false,
+        };
+        assert_eq!(r.len(), i64::MAX);
+    }
+
+    #[test]
+    fn vm_range_len_inclusive_full_range_saturates() {
+        let r = VmRange {
+            start: i64::MIN,
+            end: i64::MAX,
+            inclusive: true,
+        };
+        assert_eq!(r.len(), i64::MAX);
+    }
+
+    #[test]
+    fn vm_range_get_near_max_does_not_overflow() {
+        let r = VmRange {
+            start: i64::MAX - 2,
+            end: i64::MAX,
+            inclusive: true,
+        };
+        assert_eq!(r.len(), 3);
+        assert_eq!(r.get(0), Some(i64::MAX - 2));
+        assert_eq!(r.get(2), Some(i64::MAX));
+        assert_eq!(r.get(3), None);
+    }
+
+    #[test]
+    fn vm_range_reversed_is_empty() {
+        let r = VmRange {
+            start: 5,
+            end: 1,
+            inclusive: true,
+        };
+        assert!(r.is_empty());
+        assert_eq!(r.len(), 0);
+        assert_eq!(r.first(), None);
+        assert_eq!(r.last(), None);
+    }
+
+    #[test]
+    fn vm_range_contains_near_bounds() {
+        let r = VmRange {
+            start: 1,
+            end: 5,
+            inclusive: true,
+        };
+        assert!(r.contains(1));
+        assert!(r.contains(5));
+        assert!(!r.contains(0));
+        assert!(!r.contains(6));
+        let r = VmRange {
+            start: 1,
+            end: 5,
+            inclusive: false,
+        };
+        assert!(r.contains(1));
+        assert!(r.contains(4));
+        assert!(!r.contains(5));
+    }
+
+    #[test]
+    fn vm_range_to_vec_matches_direct_iteration() {
+        let r = VmRange {
+            start: -2,
+            end: 2,
+            inclusive: true,
+        };
+        let v = r.to_vec();
+        assert_eq!(v.len(), 5);
+        assert_eq!(
+            v.iter()
+                .map(|x| match x {
+                    VmValue::Int(n) => *n,
+                    _ => panic!("non-int in range"),
+                })
+                .collect::<Vec<_>>(),
+            vec![-2, -1, 0, 1, 2]
         );
     }
 }
