@@ -380,17 +380,22 @@ impl Formatter {
         any_section_header
     }
 
-    fn ensure_blank_line_above(&mut self) {
-        // Output should end with exactly `\n\n` to yield one blank line above
-        // the next emission. Strip trailing whitespace on the current line,
-        // then ensure exactly two trailing newlines.
+    /// Ensure `self.output` ends with exactly `\n\n` so the next emission
+    /// is preceded by a blank line. Trims any trailing horizontal
+    /// whitespace on the final (unterminated) line first, then tops up or
+    /// truncates the trailing newline run.
+    ///
+    /// This is the single source of truth for section-header padding:
+    /// both the "above" and "below" cases collapse to the same
+    /// normalize-to-`\n\n` operation, so splitting them into two helpers
+    /// just invited drift.
+    fn ensure_trailing_blank_line(&mut self) {
         while self.output.ends_with(' ') || self.output.ends_with('\t') {
             self.output.pop();
         }
         if self.output.is_empty() {
             return;
         }
-        // Count trailing newlines.
         let trailing = self.output.chars().rev().take_while(|c| *c == '\n').count();
         match trailing {
             0 => self.output.push_str("\n\n"),
@@ -399,16 +404,12 @@ impl Formatter {
         }
     }
 
+    fn ensure_blank_line_above(&mut self) {
+        self.ensure_trailing_blank_line();
+    }
+
     fn ensure_blank_line_below(&mut self) {
-        // After emitting a section header (which ends with `\n`), we want
-        // subsequent emissions to be preceded by exactly one blank line.
-        // The simplest way: ensure the output currently ends with `\n\n`.
-        let trailing = self.output.chars().rev().take_while(|c| *c == '\n').count();
-        match trailing {
-            0 => self.output.push_str("\n\n"),
-            1 => self.output.push('\n'),
-            _ => {}
-        }
+        self.ensure_trailing_blank_line();
     }
 
     fn emit_separator_bar(&mut self) {
