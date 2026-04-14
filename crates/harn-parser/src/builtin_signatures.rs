@@ -38,6 +38,7 @@ pub(crate) struct BuiltinSig {
 }
 
 const UNION_STRING_NIL: &[&str] = &["string", "nil"];
+const UNION_DICT_NIL: &[&str] = &["dict", "nil"];
 const EMPTY_RETURN_TYPES: &[&str] = &[];
 const RETURN_BOOL: &[&str] = &["bool"];
 const RETURN_DICT: &[&str] = &["dict"];
@@ -103,6 +104,46 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
     BuiltinSig {
         name: "agent_name",
         return_type: None,
+    },
+    BuiltinSig {
+        name: "agent_session_close",
+        return_type: Some(BuiltinReturn::Named("nil")),
+    },
+    BuiltinSig {
+        name: "agent_session_compact",
+        return_type: Some(BuiltinReturn::Named("int")),
+    },
+    BuiltinSig {
+        name: "agent_session_exists",
+        return_type: Some(BuiltinReturn::Named("bool")),
+    },
+    BuiltinSig {
+        name: "agent_session_fork",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
+        name: "agent_session_inject",
+        return_type: Some(BuiltinReturn::Named("nil")),
+    },
+    BuiltinSig {
+        name: "agent_session_length",
+        return_type: Some(BuiltinReturn::Named("int")),
+    },
+    BuiltinSig {
+        name: "agent_session_open",
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
+        name: "agent_session_reset",
+        return_type: Some(BuiltinReturn::Named("nil")),
+    },
+    BuiltinSig {
+        name: "agent_session_snapshot",
+        return_type: Some(BuiltinReturn::Union(UNION_DICT_NIL)),
+    },
+    BuiltinSig {
+        name: "agent_session_trim",
+        return_type: Some(BuiltinReturn::Named("int")),
     },
     BuiltinSig {
         name: "agent_subscribe",
@@ -1621,6 +1662,10 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
+        name: "workflow_set_auto_compact",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
         name: "workflow_set_context_policy",
         return_type: Some(BuiltinReturn::Named("dict")),
     },
@@ -1629,7 +1674,7 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
-        name: "workflow_set_transcript_policy",
+        name: "workflow_set_output_visibility",
         return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {

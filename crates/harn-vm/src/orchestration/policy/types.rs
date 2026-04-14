@@ -363,18 +363,18 @@ impl<T> std::ops::Deref for EqIgnored<T> {
     }
 }
 
+/// Per-call auto-compaction settings. First-class replacement for
+/// what used to live on `TranscriptPolicy` — the mode/fork/compact
+/// lifecycle fields are gone; lifecycle is driven by explicit
+/// `agent_session_*` builtins. Only the per-call tuning for how the
+/// agent loop manages its context window survives.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct TranscriptPolicy {
-    pub mode: Option<String>,
-    pub visibility: Option<String>,
-    pub summarize: bool,
-    pub compact: bool,
-    pub keep_last: Option<usize>,
+pub struct AutoCompactPolicy {
     /// Enable per-turn auto-compaction within agent loops.
-    pub auto_compact: bool,
+    pub enabled: bool,
     /// Token threshold for tier-1 compaction.
-    pub compact_threshold: Option<usize>,
+    pub token_threshold: Option<usize>,
     /// Max chars per tool result before compression.
     pub tool_output_max_chars: Option<usize>,
     /// Tier-1 compaction strategy name (e.g., "observation_mask", "llm").

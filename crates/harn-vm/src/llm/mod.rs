@@ -464,8 +464,10 @@ pub fn register_llm_builtins(vm: &mut Vm) {
         let tool_backoff_ms = opt_int(&options, "tool_backoff_ms").unwrap_or(1000) as u64;
         let tool_format = opt_str(&options, "tool_format").unwrap_or_else(|| "text".to_string());
         let daemon = opt_bool(&options, "daemon");
-        let session_id = opt_str(&options, "session_id")
-            .unwrap_or_else(|| format!("agent_session_{}", uuid::Uuid::now_v7()));
+        // Empty string means "mint an anonymous session" (state.rs handles
+        // this path and does not persist). A caller-provided id flows
+        // through as the session's persistent identity.
+        let session_id = opt_str(&options, "session_id").unwrap_or_default();
         let auto_compact = if opt_bool(&options, "auto_compact") {
             let mut ac = crate::orchestration::AutoCompactConfig::default();
             if let Some(v) = opt_int(&options, "compact_threshold") {
@@ -751,9 +753,7 @@ mod tests {
             api_key: String::new(),
             messages: Vec::new(),
             system: None,
-            transcript_id: None,
             transcript_summary: None,
-            transcript_metadata: None,
             max_tokens: 128,
             temperature: None,
             top_p: None,

@@ -1245,7 +1245,8 @@ These builtins expose Harn's typed orchestration runtime.
 | `workflow_rewire(graph, from, to, branch?)` | graph, from, to, branch | workflow graph | Rewire an edge |
 | `workflow_set_model_policy(graph, node_id, policy)` | graph, node_id, policy | workflow graph | Set per-node model policy |
 | `workflow_set_context_policy(graph, node_id, policy)` | graph, node_id, policy | workflow graph | Set per-node context policy |
-| `workflow_set_transcript_policy(graph, node_id, policy)` | graph, node_id, policy | workflow graph | Set per-node transcript policy |
+| `workflow_set_auto_compact(graph, node_id, policy)` | graph, node_id, policy | workflow graph | Set per-node auto-compaction policy |
+| `workflow_set_output_visibility(graph, node_id, visibility)` | graph, node_id, visibility | workflow graph | Set per-node output-visibility filter (`"public"`/`"public_only"`/nil) |
 | `workflow_policy_report(graph, ceiling?)` | graph, ceiling: dict (optional) | dict | Inspect workflow/node policies against an explicit or builtin ceiling |
 | `workflow_diff(left, right)` | left, right | dict | Compare two workflow graphs |
 | `workflow_commit(graph, reason?)` | graph, reason | workflow graph | Validate and append a commit audit entry |
@@ -1332,8 +1333,13 @@ These builtins expose Harn's typed orchestration runtime.
 Worker configs may also include `carry` to control continuation behavior:
 
 - `carry: {artifacts: "inherit" | "none" | <context_policy>}`
-- `carry: {transcript: "inherit" | "reset" | "fork" | <transcript_policy>}`
 - `carry: {resume_workflow?: bool, persist_state?: bool}`
+
+To give a spawned worker prior conversation context, open a session
+before spawning and set `model_policy.session_id` on the worker's node.
+Use `agent_session_fork(parent)` if the worker should start from a
+branch of an existing conversation; `agent_session_reset(id)` before
+the call if you want a fresh run with the same id.
 
 Workers return handle dicts with an `id`, lifecycle timestamps, `status`,
 `mode`, result/error fields, transcript presence, produced artifact count,

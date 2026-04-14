@@ -85,12 +85,18 @@ impl DaemonSnapshot {
     }
 }
 
+/// Snapshot a file's mtime as nanoseconds since the Unix epoch.
+/// Nanosecond precision avoids a second-boundary race: two edits to
+/// the same path less than a full second apart would both read the
+/// same `as_secs()` value and be reported as unchanged, which has
+/// bitten the watch test on coarser-resolution filesystems. u64
+/// covers nanos-since-epoch through year 2554.
 fn file_stamp(path: &str) -> u64 {
     std::fs::metadata(path)
         .ok()
         .and_then(|metadata| metadata.modified().ok())
         .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|duration| duration.as_secs())
+        .and_then(|duration| u64::try_from(duration.as_nanos()).ok())
         .unwrap_or(0)
 }
 

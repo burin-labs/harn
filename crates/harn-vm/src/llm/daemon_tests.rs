@@ -30,10 +30,22 @@ fn detect_watch_changes_reports_modified_files() {
     std::fs::write(&path, "one").unwrap();
     let paths = vec![path.to_string_lossy().into_owned()];
     let mut state = watch_state(&paths);
-    std::thread::sleep(std::time::Duration::from_secs(1));
-    std::fs::write(&path, "two").unwrap();
-    let changed = detect_watch_changes(&paths, &mut state);
-    assert_eq!(changed, paths);
+    // `file_stamp` snaps mtime to nanoseconds, so any non-zero sleep
+    // crosses the resolution of every filesystem Harn targets. Keep a
+    // modest 50ms pause so the OS has time to flush metadata on slow
+    // CI hosts without inflating test runtime. Loop the "modify +
+    // detect" cycle up to 20 times (~1s cap) so a quantized mtime on
+    // WSL/network filesystems gets a second chance before failing.
+    let mut changed = Vec::new();
+    for attempt in 0..20 {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        std::fs::write(&path, format!("two-{attempt}")).unwrap();
+        changed = detect_watch_changes(&paths, &mut state);
+        if !changed.is_empty() {
+            break;
+        }
+    }
+    assert_eq!(changed, paths, "watched file mtime never advanced");
     let _ = std::fs::remove_dir_all(dir);
 }
 

@@ -259,7 +259,8 @@ audited and validated against the workflow IR:
 - `workflow_rewire(...)`
 - `workflow_set_model_policy(...)`
 - `workflow_set_context_policy(...)`
-- `workflow_set_transcript_policy(...)`
+- `workflow_set_auto_compact(...)`
+- `workflow_set_output_visibility(...)`
 - `workflow_diff(...)`
 - `workflow_validate(..., ceiling?)`
 - `workflow_policy_report(..., ceiling?)`

@@ -101,6 +101,10 @@ impl Drop for SessionSinkGuard {
 pub(super) struct AgentLoopState {
     pub(super) config: AgentLoopConfig,
     pub(super) session_id: String,
+    /// True when the loop minted its own session id because no caller
+    /// passed one in. Anonymous sessions are not persisted in the
+    /// session store — the transcript lives only in this loop's state.
+    pub(super) anonymous_session: bool,
 
     pub(super) tool_contract_prompt: Option<String>,
     pub(super) base_system: Option<String>,
@@ -190,7 +194,20 @@ impl AgentLoopState {
         let tool_retries = config.tool_retries;
         let tool_backoff_ms = config.tool_backoff_ms;
         let tool_format = config.tool_format.clone();
-        let session_id = config.session_id.clone();
+        let (session_id, anonymous_session) = if config.session_id.trim().is_empty() {
+            (format!("agent_session_{}", uuid::Uuid::now_v7()), true)
+        } else {
+            let resolved = crate::agent_sessions::open_or_create(Some(config.session_id.clone()));
+            (resolved, false)
+        };
+        if !anonymous_session {
+            let prior = crate::agent_sessions::messages_json(&session_id);
+            if !prior.is_empty() {
+                let caller_msgs = std::mem::take(&mut opts.messages);
+                opts.messages = prior;
+                opts.messages.extend(caller_msgs);
+            }
+        }
         let _sink_guard = SessionSinkGuard {
             session_id: session_id.clone(),
         };
@@ -367,6 +384,7 @@ impl AgentLoopState {
         Ok(Self {
             config,
             session_id,
+            anonymous_session,
             tool_contract_prompt,
             base_system,
             persistent_system_prompt,

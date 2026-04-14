@@ -1,0 +1,348 @@
+//! First-class session storage.
+//!
+//! A session owns three things:
+//!
+//! 1. A transcript dict (messages, events, summary, metadata, …).
+//! 2. Closure subscribers that fire on agent-loop events for this session.
+//! 3. Its own lifecycle (open, reset, fork, trim, compact, close).
+//!
+//! Storage is thread-local because `VmValue` contains `Rc`, which is
+//! neither `Send` nor `Sync`. The agent loop runs on a tokio
+//! current-thread worker, so all session reads and writes happen on the
+//! same thread. The closure-subscribers register, fire, and unregister
+//! on that same thread.
+//!
+//! Lifecycle is explicit. Builtins (`agent_session_open`,
+//! `_reset`, `_fork`, `_close`, `_trim`, `_compact`, `_inject`,
+//! `_exists`, `_length`, `_snapshot`) drive the store directly — there
+//! is no "policy" config dict that performs lifecycle as a side effect.
+
+use std::cell::{Cell, RefCell};
+use std::collections::{BTreeMap, HashMap};
+use std::rc::Rc;
+use std::time::Instant;
+
+use crate::value::VmValue;
+
+/// Default cap on concurrent sessions per VM thread. Beyond this the
+/// least-recently-accessed session is evicted on the next `open`.
+pub const DEFAULT_SESSION_CAP: usize = 128;
+
+pub struct SessionState {
+    pub id: String,
+    pub transcript: VmValue,
+    pub subscribers: Vec<VmValue>,
+    pub created_at: Instant,
+    pub last_accessed: Instant,
+}
+
+impl SessionState {
+    fn new(id: String) -> Self {
+        let now = Instant::now();
+        let transcript = empty_transcript(&id);
+        Self {
+            id,
+            transcript,
+            subscribers: Vec::new(),
+            created_at: now,
+            last_accessed: now,
+        }
+    }
+}
+
+thread_local! {
+    static SESSIONS: RefCell<HashMap<String, SessionState>> = RefCell::new(HashMap::new());
+    static SESSION_CAP: Cell<usize> = const { Cell::new(DEFAULT_SESSION_CAP) };
+}
+
+/// Set the per-thread session cap. Primarily for tests; production VMs
+/// inherit the default.
+pub fn set_session_cap(cap: usize) {
+    SESSION_CAP.with(|c| c.set(cap.max(1)));
+}
+
+pub fn session_cap() -> usize {
+    SESSION_CAP.with(|c| c.get())
+}
+
+/// Clear the session store. Wired into `reset_llm_state` for test isolation.
+pub fn reset_session_store() {
+    SESSIONS.with(|s| s.borrow_mut().clear());
+}
+
+pub fn exists(id: &str) -> bool {
+    SESSIONS.with(|s| s.borrow().contains_key(id))
+}
+
+pub fn length(id: &str) -> Option<usize> {
+    SESSIONS.with(|s| {
+        s.borrow().get(id).map(|state| {
+            state
+                .transcript
+                .as_dict()
+                .and_then(|d| d.get("messages"))
+                .and_then(|v| match v {
+                    VmValue::List(list) => Some(list.len()),
+                    _ => None,
+                })
+                .unwrap_or(0)
+        })
+    })
+}
+
+pub fn snapshot(id: &str) -> Option<VmValue> {
+    SESSIONS.with(|s| s.borrow().get(id).map(|state| state.transcript.clone()))
+}
+
+/// Open a session, or create it if missing. Returns the resolved id.
+pub fn open_or_create(id: Option<String>) -> String {
+    let resolved = id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
+    SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        if let Some(state) = map.get_mut(&resolved) {
+            state.last_accessed = Instant::now();
+            return;
+        }
+        let cap = SESSION_CAP.with(|c| c.get());
+        if map.len() >= cap {
+            if let Some(victim) = map
+                .iter()
+                .min_by_key(|(_, state)| state.last_accessed)
+                .map(|(id, _)| id.clone())
+            {
+                map.remove(&victim);
+            }
+        }
+        map.insert(resolved.clone(), SessionState::new(resolved.clone()));
+    });
+    resolved
+}
+
+pub fn close(id: &str) {
+    SESSIONS.with(|s| {
+        s.borrow_mut().remove(id);
+    });
+}
+
+pub fn reset_transcript(id: &str) -> bool {
+    SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        let Some(state) = map.get_mut(id) else {
+            return false;
+        };
+        state.transcript = empty_transcript(id);
+        state.last_accessed = Instant::now();
+        true
+    })
+}
+
+/// Copy `src`'s transcript into a new session id. Subscribers are NOT
+/// copied — a fork is a conversation branch, not an event fanout.
+///
+/// Touches `src`'s `last_accessed` before evicting, so the fork
+/// operation itself can't make `src` look stale and kick it out of
+/// the LRU just to make room for the new fork.
+pub fn fork(src_id: &str, dst_id: Option<String>) -> Option<String> {
+    let (src_transcript, dst) = SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        let src = map.get_mut(src_id)?;
+        src.last_accessed = Instant::now();
+        let dst = dst_id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
+        let forked_transcript = clone_transcript_with_id(&src.transcript, &dst);
+        Some((forked_transcript, dst))
+    })?;
+    // Ensure cap is respected when inserting the fork.
+    open_or_create(Some(dst.clone()));
+    SESSIONS.with(|s| {
+        if let Some(state) = s.borrow_mut().get_mut(&dst) {
+            state.transcript = src_transcript;
+            state.last_accessed = Instant::now();
+        }
+    });
+    // open_or_create evicts BEFORE inserting, so the dst slot is
+    // guaranteed once we get here. The existence check is cheap
+    // insurance against a future refactor that breaks that invariant.
+    if exists(&dst) {
+        Some(dst)
+    } else {
+        None
+    }
+}
+
+/// Retain only the last `keep_last` messages in the session transcript.
+/// Returns the kept count (<= keep_last).
+pub fn trim(id: &str, keep_last: usize) -> Option<usize> {
+    SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        let state = map.get_mut(id)?;
+        let dict = state.transcript.as_dict()?.clone();
+        let messages: Vec<VmValue> = match dict.get("messages") {
+            Some(VmValue::List(list)) => list.iter().cloned().collect(),
+            _ => Vec::new(),
+        };
+        let start = messages.len().saturating_sub(keep_last);
+        let retained: Vec<VmValue> = messages.into_iter().skip(start).collect();
+        let kept = retained.len();
+        let mut next = dict;
+        next.insert(
+            "events".to_string(),
+            VmValue::List(Rc::new(
+                crate::llm::helpers::transcript_events_from_messages(&retained),
+            )),
+        );
+        next.insert("messages".to_string(), VmValue::List(Rc::new(retained)));
+        state.transcript = VmValue::Dict(Rc::new(next));
+        state.last_accessed = Instant::now();
+        Some(kept)
+    })
+}
+
+/// Append a message dict to the session transcript. The message must
+/// have at least a string `role`; anything else is merged verbatim.
+pub fn inject_message(id: &str, message: VmValue) -> Result<(), String> {
+    let Some(msg_dict) = message.as_dict().cloned() else {
+        return Err("agent_session_inject: message must be a dict".into());
+    };
+    let role_ok = matches!(msg_dict.get("role"), Some(VmValue::String(_)));
+    if !role_ok {
+        return Err(
+            "agent_session_inject: message must have a string `role` (user|assistant|tool_result|system)"
+                .into(),
+        );
+    }
+    SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        let Some(state) = map.get_mut(id) else {
+            return Err(format!("agent_session_inject: unknown session id '{id}'"));
+        };
+        let dict = state
+            .transcript
+            .as_dict()
+            .cloned()
+            .unwrap_or_else(BTreeMap::new);
+        let mut messages: Vec<VmValue> = match dict.get("messages") {
+            Some(VmValue::List(list)) => list.iter().cloned().collect(),
+            _ => Vec::new(),
+        };
+        messages.push(VmValue::Dict(Rc::new(msg_dict)));
+        let mut next = dict;
+        next.insert(
+            "events".to_string(),
+            VmValue::List(Rc::new(
+                crate::llm::helpers::transcript_events_from_messages(&messages),
+            )),
+        );
+        next.insert("messages".to_string(), VmValue::List(Rc::new(messages)));
+        state.transcript = VmValue::Dict(Rc::new(next));
+        state.last_accessed = Instant::now();
+        Ok(())
+    })
+}
+
+/// Load the messages vec (as JSON) for this session, for use as prefix
+/// to an agent_loop run. Returns an empty vec if the session doesn't
+/// exist or has no messages.
+pub fn messages_json(id: &str) -> Vec<serde_json::Value> {
+    SESSIONS.with(|s| {
+        let map = s.borrow();
+        let Some(state) = map.get(id) else {
+            return Vec::new();
+        };
+        let Some(dict) = state.transcript.as_dict() else {
+            return Vec::new();
+        };
+        match dict.get("messages") {
+            Some(VmValue::List(list)) => list
+                .iter()
+                .map(crate::llm::helpers::vm_value_to_json)
+                .collect(),
+            _ => Vec::new(),
+        }
+    })
+}
+
+/// Overwrite the transcript for this session. Used by `agent_loop` on
+/// exit to persist the synthesized transcript.
+pub fn store_transcript(id: &str, transcript: VmValue) {
+    SESSIONS.with(|s| {
+        if let Some(state) = s.borrow_mut().get_mut(id) {
+            state.transcript = transcript;
+            state.last_accessed = Instant::now();
+        }
+    });
+}
+
+/// Replace the transcript's message list wholesale. Used by the
+/// in-loop compaction path, which operates on JSON messages.
+pub fn replace_messages(id: &str, messages: &[serde_json::Value]) {
+    SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        let Some(state) = map.get_mut(id) else {
+            return;
+        };
+        let dict = state
+            .transcript
+            .as_dict()
+            .cloned()
+            .unwrap_or_else(BTreeMap::new);
+        let vm_messages: Vec<VmValue> = messages
+            .iter()
+            .map(crate::stdlib::json_to_vm_value)
+            .collect();
+        let mut next = dict;
+        next.insert(
+            "events".to_string(),
+            VmValue::List(Rc::new(
+                crate::llm::helpers::transcript_events_from_messages(&vm_messages),
+            )),
+        );
+        next.insert("messages".to_string(), VmValue::List(Rc::new(vm_messages)));
+        state.transcript = VmValue::Dict(Rc::new(next));
+        state.last_accessed = Instant::now();
+    });
+}
+
+pub fn append_subscriber(id: &str, callback: VmValue) {
+    open_or_create(Some(id.to_string()));
+    SESSIONS.with(|s| {
+        if let Some(state) = s.borrow_mut().get_mut(id) {
+            state.subscribers.push(callback);
+            state.last_accessed = Instant::now();
+        }
+    });
+}
+
+pub fn subscribers_for(id: &str) -> Vec<VmValue> {
+    SESSIONS.with(|s| {
+        s.borrow()
+            .get(id)
+            .map(|state| state.subscribers.clone())
+            .unwrap_or_default()
+    })
+}
+
+pub fn subscriber_count(id: &str) -> usize {
+    SESSIONS.with(|s| {
+        s.borrow()
+            .get(id)
+            .map(|state| state.subscribers.len())
+            .unwrap_or(0)
+    })
+}
+
+fn empty_transcript(id: &str) -> VmValue {
+    use crate::llm::helpers::new_transcript_with;
+    new_transcript_with(Some(id.to_string()), Vec::new(), None, None)
+}
+
+fn clone_transcript_with_id(transcript: &VmValue, new_id: &str) -> VmValue {
+    let Some(dict) = transcript.as_dict() else {
+        return empty_transcript(new_id);
+    };
+    let mut next = dict.clone();
+    next.insert(
+        "id".to_string(),
+        VmValue::String(Rc::from(new_id.to_string())),
+    );
+    VmValue::Dict(Rc::new(next))
+}

@@ -103,6 +103,26 @@ pub(super) async fn run_finalize(
     // pipelines) can reason over what the agent considered "done".
     let ledger_json = serde_json::to_value(&state.task_ledger).unwrap_or(serde_json::Value::Null);
     let ledger_done_nudge_count = state.ledger_done_rejections as i64;
+
+    let _ = opts;
+    let transcript_vm = transcript_to_vm_with_events(
+        Some(state.session_id.clone()),
+        state.transcript_summary.clone(),
+        None,
+        &state.recorded_messages,
+        state.transcript_events.clone(),
+        Vec::new(),
+        Some(if state.final_status == "done" {
+            "active"
+        } else {
+            "paused"
+        }),
+    );
+    if !state.anonymous_session {
+        crate::agent_sessions::store_transcript(&state.session_id, transcript_vm.clone());
+    }
+    let transcript_json = crate::llm::helpers::vm_value_to_json(&transcript_vm);
+
     Ok(serde_json::json!({
         "status": state.final_status,
         "daemon_state": state.daemon_state,
@@ -119,14 +139,6 @@ pub(super) async fn run_finalize(
         "task_ledger": ledger_json,
         "ledger_done_rejections": ledger_done_nudge_count,
         "trace": trace_summary,
-        "transcript": crate::llm::helpers::vm_value_to_json(&transcript_to_vm_with_events(
-            opts.transcript_id.clone(),
-            state.transcript_summary.clone(),
-            opts.transcript_metadata.clone(),
-            &state.recorded_messages,
-            state.transcript_events.clone(),
-            Vec::new(),
-            Some(if state.final_status == "done" { "active" } else { "paused" }),
-        )),
+        "transcript": transcript_json,
     }))
 }

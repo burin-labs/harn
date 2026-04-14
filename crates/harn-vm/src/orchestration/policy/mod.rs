@@ -9,15 +9,15 @@ use std::thread_local;
 
 use serde::{Deserialize, Serialize};
 
-use super::{glob_match, new_id};
+use super::glob_match;
 use crate::tool_annotations::{SideEffectLevel, ToolAnnotations};
 use crate::value::{VmError, VmValue};
 
 pub use crate::tool_annotations::{ToolArgSchema, ToolKind};
 pub use types::{
-    enforce_tool_arg_constraints, BranchSemantics, CapabilityPolicy, ContextPolicy, EqIgnored,
-    EscalationPolicy, JoinPolicy, MapPolicy, ModelPolicy, ReducePolicy, RetryPolicy, StageContract,
-    ToolArgConstraint, TranscriptPolicy, TurnPolicy,
+    enforce_tool_arg_constraints, AutoCompactPolicy, BranchSemantics, CapabilityPolicy,
+    ContextPolicy, EqIgnored, EscalationPolicy, JoinPolicy, MapPolicy, ModelPolicy, ReducePolicy,
+    RetryPolicy, StageContract, ToolArgConstraint, TurnPolicy,
 };
 
 thread_local! {
@@ -278,37 +278,21 @@ pub fn enforce_current_policy_for_tool(tool_name: &str) -> Result<(), VmError> {
     Ok(())
 }
 
-// ── Transcript policy helpers ───────────────────────────────────────
+// ── Output visibility redaction ─────────────────────────────────────
+//
+// Transcript lifecycle (reset, fork, trim, compact) now lives on
+// `crate::agent_sessions` as explicit imperative builtins. All that
+// remains here is the per-call visibility filter, which is
+// output-shaping (not lifecycle).
 
-fn compact_transcript(transcript: &VmValue, keep_last: usize) -> Option<VmValue> {
-    let dict = transcript.as_dict()?;
-    let messages = match dict.get("messages") {
-        Some(VmValue::List(list)) => list.iter().cloned().collect::<Vec<_>>(),
-        _ => Vec::new(),
-    };
-    let retained = messages
-        .into_iter()
-        .rev()
-        .take(keep_last)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect::<Vec<_>>();
-    let mut compacted = dict.clone();
-    compacted.insert(
-        "messages".to_string(),
-        VmValue::List(Rc::new(retained.clone())),
-    );
-    compacted.insert(
-        "events".to_string(),
-        VmValue::List(Rc::new(
-            crate::llm::helpers::transcript_events_from_messages(&retained),
-        )),
-    );
-    Some(VmValue::Dict(Rc::new(compacted)))
-}
-
-fn redact_transcript_visibility(transcript: &VmValue, visibility: Option<&str>) -> Option<VmValue> {
+/// Filter a transcript dict down to the caller-visible subset, based
+/// on the `output_visibility` node option. `None` or any unknown
+/// visibility returns the transcript unchanged — callers are expected
+/// to validate the string against a known set upstream.
+pub fn redact_transcript_visibility(
+    transcript: &VmValue,
+    visibility: Option<&str>,
+) -> Option<VmValue> {
     let Some(visibility) = visibility else {
         return Some(transcript.clone());
     };
@@ -353,44 +337,6 @@ fn redact_transcript_visibility(transcript: &VmValue, visibility: Option<&str>) 
     );
     redacted.insert("events".to_string(), VmValue::List(Rc::new(public_events)));
     Some(VmValue::Dict(Rc::new(redacted)))
-}
-
-pub(crate) fn apply_input_transcript_policy(
-    transcript: Option<VmValue>,
-    policy: &TranscriptPolicy,
-) -> Option<VmValue> {
-    let mut transcript = transcript;
-    match policy.mode.as_deref() {
-        Some("reset") => return None,
-        Some("fork") => {
-            if let Some(VmValue::Dict(dict)) = transcript.as_ref() {
-                let mut forked = dict.as_ref().clone();
-                forked.insert(
-                    "id".to_string(),
-                    VmValue::String(Rc::from(new_id("transcript"))),
-                );
-                transcript = Some(VmValue::Dict(Rc::new(forked)));
-            }
-        }
-        _ => {}
-    }
-    if policy.compact {
-        let keep_last = policy.keep_last.unwrap_or(6);
-        transcript = transcript.and_then(|value| compact_transcript(&value, keep_last));
-    }
-    transcript
-}
-
-pub(crate) fn apply_output_transcript_policy(
-    transcript: Option<VmValue>,
-    policy: &TranscriptPolicy,
-) -> Option<VmValue> {
-    let mut transcript = transcript;
-    if policy.compact {
-        let keep_last = policy.keep_last.unwrap_or(6);
-        transcript = transcript.and_then(|value| compact_transcript(&value, keep_last));
-    }
-    transcript.and_then(|value| redact_transcript_visibility(&value, policy.visibility.as_deref()))
 }
 
 pub fn builtin_ceiling() -> CapabilityPolicy {
@@ -665,17 +611,16 @@ mod turn_policy_tests {
 }
 
 #[cfg(test)]
-mod transcript_policy_tests {
+mod visibility_redaction_tests {
     use super::*;
     use crate::value::VmValue;
 
-    fn mock_transcript(message_count: usize) -> VmValue {
-        let messages: Vec<serde_json::Value> = (0..message_count)
-            .map(|i| {
-                let role = if i % 2 == 0 { "user" } else { "assistant" };
-                serde_json::json!({"role": role, "content": format!("message {i}")})
-            })
-            .collect();
+    fn mock_transcript() -> VmValue {
+        let messages = vec![
+            serde_json::json!({"role": "user", "content": "hi"}),
+            serde_json::json!({"role": "assistant", "content": "hello"}),
+            serde_json::json!({"role": "tool_result", "content": "internal tool output"}),
+        ];
         crate::llm::helpers::transcript_to_vm_with_events(
             Some("test-id".to_string()),
             None,
@@ -699,64 +644,23 @@ mod transcript_policy_tests {
     }
 
     #[test]
-    fn continue_mode_passes_transcript_through() {
-        let transcript = mock_transcript(4);
-        let policy = TranscriptPolicy {
-            mode: Some("continue".to_string()),
-            ..Default::default()
-        };
-        let result = apply_input_transcript_policy(Some(transcript), &policy);
-        assert!(result.is_some());
-        assert_eq!(message_count(&result.unwrap()), 4);
+    fn visibility_none_returns_unchanged() {
+        let t = mock_transcript();
+        let result = redact_transcript_visibility(&t, None).unwrap();
+        assert_eq!(message_count(&result), 3);
     }
 
     #[test]
-    fn default_mode_passes_transcript_through() {
-        let transcript = mock_transcript(3);
-        let policy = TranscriptPolicy::default();
-        let result = apply_input_transcript_policy(Some(transcript), &policy);
-        assert!(result.is_some());
-        assert_eq!(message_count(&result.unwrap()), 3);
+    fn visibility_public_drops_tool_results() {
+        let t = mock_transcript();
+        let result = redact_transcript_visibility(&t, Some("public")).unwrap();
+        assert_eq!(message_count(&result), 2);
     }
 
     #[test]
-    fn reset_mode_clears_transcript() {
-        let transcript = mock_transcript(4);
-        let policy = TranscriptPolicy {
-            mode: Some("reset".to_string()),
-            ..Default::default()
-        };
-        let result = apply_input_transcript_policy(Some(transcript), &policy);
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn fork_mode_assigns_new_id() {
-        let transcript = mock_transcript(3);
-        let policy = TranscriptPolicy {
-            mode: Some("fork".to_string()),
-            ..Default::default()
-        };
-        let result = apply_input_transcript_policy(Some(transcript), &policy);
-        let result = result.expect("fork should return a transcript");
-        let dict = result.as_dict().expect("must be a dict");
-        let id = dict.get("id").map(|v| v.display()).unwrap_or_default();
-        assert_ne!(id, "test-id", "fork should assign a new transcript ID");
-        assert_eq!(message_count(&result), 3, "fork should preserve messages");
-    }
-
-    #[test]
-    fn none_input_stays_none_for_all_modes() {
-        for mode in &["continue", "reset", "fork"] {
-            let policy = TranscriptPolicy {
-                mode: Some(mode.to_string()),
-                ..Default::default()
-            };
-            let result = apply_input_transcript_policy(None, &policy);
-            assert!(
-                result.is_none(),
-                "mode {mode} with None input should return None"
-            );
-        }
+    fn visibility_unknown_string_is_pass_through() {
+        let t = mock_transcript();
+        let result = redact_transcript_visibility(&t, Some("internal")).unwrap();
+        assert_eq!(message_count(&result), 3);
     }
 }

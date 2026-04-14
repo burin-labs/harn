@@ -1,5 +1,6 @@
 //! Standard library builtins for the Harn VM.
 
+mod agent_sessions;
 mod agents;
 mod concurrency;
 mod crypto;
@@ -64,6 +65,7 @@ pub fn register_agent_stdlib(vm: &mut Vm) {
     concurrency::register_concurrency_builtins(vm);
     tools::register_tool_builtins(vm);
     agents::register_agent_builtins(vm);
+    agent_sessions::register_agent_session_builtins(vm);
     register_http_builtins(vm);
     register_llm_builtins(vm);
     register_mcp_builtins(vm);

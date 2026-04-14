@@ -40,22 +40,14 @@ pipeline main() {
     entry: "act",
     persistent: true,
     nodes: {
-    act: {
-    kind: "stage",
-    mode: "llm",
-    model_policy: {provider: "mock"},
-    transcript_policy: {mode: "continue"},
-  },
-    review: {
-    kind: "stage",
-    mode: "llm",
-    model_policy: {provider: "mock"},
-    transcript_policy: {mode: "continue"},
-  },
+    act: {kind: "stage", mode: "llm", model_policy: {provider: "mock", session_id: "transcript-stats-demo"}},
+    review: {kind: "stage", mode: "llm", model_policy: {provider: "mock", session_id: "transcript-stats-demo"}},
   },
     edges: [{from: "act", to: "review"}],
   },
   )
+  // Both stages share a session id, so their transcripts
+  // automatically flow together via the session store.
   let result = workflow_execute("Write a note", flow, [], {max_steps: 4})
   println(result?.status == "completed")
   let stage_act = result?.run?.stages[0]

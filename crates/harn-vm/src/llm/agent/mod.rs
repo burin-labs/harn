@@ -27,21 +27,19 @@ thread_local! {
 /// subscribers (async, via the agent-loop's VM context). Called by the
 /// turn loop at every phase.
 ///
-/// **Thread-local invariant.** Pipeline closure subscribers are stored
-/// in a `thread_local!` registry in `agent_events.rs` because
-/// `VmValue` wraps `Rc` and can't cross threads. The agent loop itself
-/// runs on a tokio `LocalSet`-pinned task, and `agent_subscribe`
-/// (the host builtin that populates the registry) runs on that same
-/// task, so the invariant holds. If a future VM embedder runs the
-/// loop from a multi-thread runtime without a `LocalSet`, closure
-/// subscribers will silently decouple from their emit site. The
-/// `debug_assert!` below catches that invariant violation in debug
-/// builds; release builds tolerate the divergence rather than panic
-/// on a misconfigured embedding.
+/// **Thread-local invariant.** Pipeline closure subscribers live on the
+/// session's `SessionState.subscribers` in `crate::agent_sessions`,
+/// which is a `thread_local!` because `VmValue` wraps `Rc` and can't
+/// cross threads. The agent loop runs on a tokio `LocalSet`-pinned
+/// task, and `agent_subscribe` (the host builtin that appends to the
+/// session) runs on that same task, so the invariant holds. If a
+/// future VM embedder runs the loop from a multi-thread runtime
+/// without a `LocalSet`, closure subscribers will silently decouple
+/// from their emit site.
 async fn emit_agent_event(event: &AgentEvent) {
     agent_events::emit_event(event);
 
-    let subscribers = agent_events::closure_subscribers_for(event.session_id());
+    let subscribers = crate::agent_sessions::subscribers_for(event.session_id());
     if subscribers.is_empty() {
         return;
     }

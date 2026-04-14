@@ -532,15 +532,6 @@ pub(crate) fn transcript_id(transcript: &BTreeMap<String, VmValue>) -> Option<St
     transcript_string_field(transcript, "id")
 }
 
-pub(crate) fn transcript_metadata(
-    transcript: &BTreeMap<String, VmValue>,
-) -> Option<serde_json::Value> {
-    transcript
-        .get("metadata")
-        .and_then(|v| v.as_dict())
-        .map(vm_value_dict_to_json)
-}
-
 pub(crate) fn vm_message(role: &str, content: &str) -> VmValue {
     vm_message_value(role, VmValue::String(Rc::from(content)))
 }
@@ -550,12 +541,6 @@ pub(crate) fn vm_message_value(role: &str, content: VmValue) -> VmValue {
     msg.insert("role".to_string(), VmValue::String(Rc::from(role)));
     msg.insert("content".to_string(), content);
     VmValue::Dict(Rc::new(msg))
-}
-
-pub(crate) fn vm_message_list_to_json(
-    msg_list: &[VmValue],
-) -> Result<Vec<serde_json::Value>, VmError> {
-    vm_messages_to_json(msg_list)
 }
 
 pub(crate) fn json_messages_to_vm(msg_list: &[serde_json::Value]) -> Vec<VmValue> {
@@ -1064,7 +1049,7 @@ mod tests {
     }
 
     #[test]
-    fn extract_llm_options_preserves_transcript_tool_fields() {
+    fn extract_llm_options_rejects_removed_transcript_key() {
         let _guard = crate::llm::env_lock().lock().expect("env lock");
         let prev_harn_provider = std::env::var("HARN_LLM_PROVIDER").ok();
         let prev_harn_model = std::env::var("HARN_LLM_MODEL").ok();
@@ -1073,46 +1058,22 @@ mod tests {
             std::env::remove_var("HARN_LLM_MODEL");
         }
 
-        let transcript = new_transcript_with(
-            None,
-            vec![
-                crate::stdlib::json_to_vm_value(&serde_json::json!({
-                    "role": "assistant",
-                    "content": "",
-                    "tool_calls": [{
-                        "id": "call_123",
-                        "type": "function",
-                        "function": {
-                            "name": "read",
-                            "arguments": "{\"path\":\"foo.rs\"}",
-                        }
-                    }],
-                    "reasoning": "need to inspect the file first",
-                })),
-                crate::stdlib::json_to_vm_value(&serde_json::json!({
-                    "role": "tool",
-                    "tool_call_id": "call_123",
-                    "content": "file contents",
-                })),
-            ],
-            None,
-            None,
-        );
+        let transcript = new_transcript_with(None, Vec::new(), None, None);
         let options = VmValue::Dict(Rc::new(BTreeMap::from([(
             "transcript".to_string(),
             transcript,
         )])));
-
-        let opts = extract_llm_options(&[VmValue::String(Rc::from("")), VmValue::Nil, options])
-            .expect("llm options");
-
-        assert_eq!(opts.messages.len(), 2);
-        assert_eq!(opts.messages[0]["tool_calls"][0]["id"], "call_123");
-        assert_eq!(
-            opts.messages[0]["reasoning"],
-            "need to inspect the file first"
+        let err = extract_llm_options(&[VmValue::String(Rc::from("")), VmValue::Nil, options])
+            .err()
+            .expect("transcript option is rejected");
+        let msg = match err {
+            crate::value::VmError::Thrown(VmValue::String(s)) => s.to_string(),
+            other => panic!("unexpected error: {other:?}"),
+        };
+        assert!(
+            msg.contains("transcript") && msg.contains("session_id"),
+            "got: {msg}"
         );
-        assert_eq!(opts.messages[1]["tool_call_id"], "call_123");
 
         unsafe {
             match prev_harn_provider {

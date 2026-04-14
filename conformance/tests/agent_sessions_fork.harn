@@ -1,0 +1,13 @@
+pipeline main(task) {
+  let src = agent_session_open()
+  agent_session_inject(src, {role: "user", content: "shared"})
+  let dst = agent_session_fork(src)
+  assert(src != dst, "fork mints a new id")
+  assert(agent_session_length(dst) == 1, "fork copies transcript")
+  agent_session_inject(src, {role: "user", content: "src-only"})
+  agent_session_inject(dst, {role: "user", content: "dst-only-1"})
+  agent_session_inject(dst, {role: "user", content: "dst-only-2"})
+  assert(agent_session_length(src) == 2, "src branch evolves independently")
+  assert(agent_session_length(dst) == 3, "dst branch evolves independently")
+  log("agent_sessions fork tests passed")
+}

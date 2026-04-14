@@ -11,20 +11,19 @@
 //!
 //! 1. **External sinks** (`AgentEventSink` trait) — Rust-side consumers
 //!    like the harn-cli ACP server. Invoked synchronously by the loop.
+//!    Stored in a global `OnceLock<RwLock<HashMap<...>>>` here.
 //! 2. **Closure subscribers** — `.harn` closures registered via the
-//!    `agent_subscribe(session_id, callback)` host builtin. Stored as
-//!    raw `VmValue`s and invoked by the agent loop in its async VM
-//!    context (the sink trait can't easily await, so this path
-//!    intentionally bypasses it).
+//!    `agent_subscribe(session_id, callback)` host builtin. These live
+//!    on the session's `SessionState.subscribers` in
+//!    `crate::agent_sessions`, because sessions are the single source
+//!    of truth for session-scoped VM state.
 
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use serde::{Deserialize, Serialize};
 
 use crate::tool_annotations::ToolKind;
-use crate::value::VmValue;
 
 /// Status of a tool call. Mirrors ACP's `toolCallStatus`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
@@ -187,44 +186,20 @@ fn external_sinks() -> &'static ExternalSinkRegistry {
     REGISTRY.get_or_init(|| RwLock::new(HashMap::new()))
 }
 
-// Closure subscribers are stored thread-local because `VmValue`
-// contains `Rc`, which is neither `Send` nor `Sync`. The agent loop
-// runs on a single tokio current-thread worker, so all subscribe /
-// emit calls happen on the same thread — thread-local storage is
-// correct here.
-thread_local! {
-    static CLOSURE_SUBSCRIBERS: RefCell<HashMap<String, Vec<VmValue>>> =
-        RefCell::new(HashMap::new());
-}
-
 pub fn register_sink(session_id: impl Into<String>, sink: Arc<dyn AgentEventSink>) {
     let session_id = session_id.into();
     let mut reg = external_sinks().write().expect("sink registry poisoned");
     reg.entry(session_id).or_default().push(sink);
 }
 
-pub fn register_closure_subscriber(session_id: impl Into<String>, closure: VmValue) {
-    let session_id = session_id.into();
-    CLOSURE_SUBSCRIBERS.with(|reg| {
-        reg.borrow_mut()
-            .entry(session_id)
-            .or_default()
-            .push(closure);
-    });
-}
-
-pub fn closure_subscribers_for(session_id: &str) -> Vec<VmValue> {
-    CLOSURE_SUBSCRIBERS.with(|reg| reg.borrow().get(session_id).cloned().unwrap_or_default())
-}
-
+/// Remove all external sinks registered for `session_id`. Does NOT
+/// close the session itself — subscribers and transcript survive, so a
+/// later `agent_loop` call with the same id continues the conversation.
 pub fn clear_session_sinks(session_id: &str) {
     external_sinks()
         .write()
         .expect("sink registry poisoned")
         .remove(session_id);
-    CLOSURE_SUBSCRIBERS.with(|reg| {
-        reg.borrow_mut().remove(session_id);
-    });
 }
 
 pub fn reset_all_sinks() {
@@ -232,9 +207,7 @@ pub fn reset_all_sinks() {
         .write()
         .expect("sink registry poisoned")
         .clear();
-    CLOSURE_SUBSCRIBERS.with(|reg| {
-        reg.borrow_mut().clear();
-    });
+    crate::agent_sessions::reset_session_store();
 }
 
 /// Emit an event to external sinks registered for this session. Pipeline
@@ -260,7 +233,7 @@ pub fn session_external_sink_count(session_id: &str) -> usize {
 }
 
 pub fn session_closure_subscriber_count(session_id: &str) -> usize {
-    CLOSURE_SUBSCRIBERS.with(|reg| reg.borrow().get(session_id).map(|v| v.len()).unwrap_or(0))
+    crate::agent_sessions::subscriber_count(session_id)
 }
 
 #[cfg(test)]

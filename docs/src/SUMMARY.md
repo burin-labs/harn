@@ -19,6 +19,7 @@
 # Agents and workflows
 
 - [LLM calls and agent loops](./llm-and-agents.md)
+- [Sessions](./sessions.md)
 - [Transcript architecture](./transcript-architecture.md)
 - [Workflow runtime](./workflow-runtime.md)
 - [Cookbook](./cookbook.md)

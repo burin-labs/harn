@@ -345,9 +345,7 @@ async fn llm_compaction_summary(
     let mut compact_opts = llm_opts.clone();
     let formatted = format_compaction_messages(old_messages);
     compact_opts.system = None;
-    compact_opts.transcript_id = None;
     compact_opts.transcript_summary = None;
-    compact_opts.transcript_metadata = None;
     compact_opts.native_tools = None;
     compact_opts.tool_choice = None;
     compact_opts.response_format = None;

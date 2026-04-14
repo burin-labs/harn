@@ -7,6 +7,85 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## v0.7.0
+
+**First-class sessions.** The old `transcript_policy` config pattern is gone.
+Session lifecycle — open, reset, fork, trim, compact, inject, snapshot, close —
+is now driven by explicit imperative builtins. Unknown inputs are hard errors
+instead of silent no-ops. The session store is the single source of truth for
+session-scoped VM state: transcript history and closure subscribers both live
+on the session now.
+
+This is a semver-minor in the 0.x series. It is a breaking change: pipelines
+that relied on `transcript_policy` dict semantics, `transcript_id` /
+`transcript_metadata` on `llm_call` options, or the opaque `transcript`
+option key must migrate.
+
+### Breaking
+
+- **`transcript_policy` removed everywhere it lived.** Deleted on workflow
+  graph nodes, worker carry policies, and the `TranscriptPolicy` struct
+  itself. The auto-compaction fields that used to live on it (`auto_compact`,
+  `compact_threshold`, `tool_output_max_chars`, `compact_strategy`,
+  `hard_limit_tokens`, `hard_limit_strategy`) moved to a dedicated
+  `AutoCompactPolicy` struct under `node.auto_compact`. The `visibility`
+  field was split out to a direct `node.output_visibility: string | nil`.
+- **`workflow_set_transcript_policy` removed.** Replaced by
+  `workflow_set_auto_compact` and `workflow_set_output_visibility`.
+- **`mode: "reset" | "fork"` lifecycle dict is gone.** Call
+  `agent_session_reset(id)` or `agent_session_fork(src)` explicitly.
+- **`transcript` option key on `llm_call` / `agent_loop` now hard-errors.**
+  Pass `session_id: id` — the loop loads prior messages from the session
+  store as a prefix, and persists the final transcript back on exit.
+- **`LlmCallOptions::transcript_id` and `transcript_metadata` removed.**
+  Session id subsumes both. `transcript_summary` stays (per-call summary
+  injection for mid-loop compaction output).
+- **`CLOSURE_SUBSCRIBERS` thread-local in `agent_events.rs` removed.**
+  Subscribers now live on `SessionState.subscribers` in
+  `crate::agent_sessions`. `agent_subscribe(id, cb)` opens the session
+  lazily and appends. `clear_session_sinks` no longer evicts the session
+  itself — it only clears external ACP-style sinks.
+- **`execute_stage_node` no longer takes a `transcript: Option<VmValue>`
+  param.** Stages read prior transcripts from the session store instead,
+  via the stage's resolved `session_id`.
+- **Unknown `agent_session_compact` option keys, a missing `role` on
+  `agent_session_inject`, a negative `keep_last`, and lifecycle verbs
+  called against an unknown id all raise** `VmError::Thrown`. Previously
+  many of these were silent pass-throughs.
+- **Workflow `input_contract.require_transcript` now checks the session
+  store** (via the stage's `model_policy.session_id`) rather than the
+  ambient threaded transcript dict.
+
+### Added
+
+- **Ten new builtins** in `crate::stdlib::agent_sessions`:
+  `agent_session_open`, `_exists`, `_length`, `_snapshot`, `_reset`,
+  `_fork`, `_close`, `_trim`, `_compact`, `_inject`. Fully documented in
+  `docs/src/sessions.md`, exercised by new conformance tests
+  `agent_sessions_basic.harn` and `agent_sessions_fork.harn`, and
+  covered by 12 Rust integration tests in
+  `crates/harn-vm/tests/agent_sessions.rs`.
+- **`workflow_set_auto_compact(graph, node_id, policy)`** and
+  **`workflow_set_output_visibility(graph, node_id, visibility)`** replace
+  the single `workflow_set_transcript_policy`.
+- **`crate::agent_sessions` module** — public per-thread session store with
+  LRU eviction (default 128 sessions per VM), subscriber fanout, transcript
+  round-trip for the agent loop.
+- **`redact_transcript_visibility`** lifted to a public helper in
+  `crate::orchestration::policy`, reusable from workflow stages and any
+  embedder that wants to filter a transcript by visibility.
+
+### Changed
+
+- `agent_loop` with a caller-supplied `session_id` now loads prior
+  messages from the session store as a prefix before running, and
+  persists the final transcript back on exit. Calls without a
+  `session_id` (or with an empty string) mint an anonymous id and do
+  not touch the store — preserving the one-shot call shape.
+- Workflow stage execution derives its `session_id` from the node's
+  `model_policy.session_id`; two stages sharing an id share a
+  conversation automatically.
+
 ## v0.6.3
 
 Maintenance release focused on **comment hygiene and dependency freshness**.

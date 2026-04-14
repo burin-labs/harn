@@ -17,17 +17,21 @@ pipeline main(task) {
     {name: "summarizer", prompt: "Write a one-sentence summary of Rust for CLI tools."},
   ]
 
-  // Spawn a worker agent for each subtask
+  // Spawn a worker agent for each subtask.
+  // Each worker gets its own branched session forked from the parent,
+  // so its transcript starts with the parent context but evolves
+  // independently.
+  let parent_session = agent_session_open()
   let workers = []
   for sub in subtasks {
+    let worker_session = agent_session_fork(parent_session)
     let worker = spawn_agent({
       name: sub.name,
       task: sub.prompt,
       node: {
         kind: "subagent",
         mode: "llm",
-        model_policy: {provider: "mock"},
-        transcript_policy: {mode: "fork", compact: true, keep_last: 2},
+        model_policy: {provider: "mock", session_id: worker_session},
         output_contract: {output_kinds: ["summary"]},
       },
     })

@@ -1,6 +1,7 @@
 #![allow(clippy::result_large_err, clippy::cloned_ref_to_slice_refs)]
 
 pub mod agent_events;
+pub mod agent_sessions;
 pub mod bridge;
 pub mod checkpoint;
 mod chunk;
@@ -62,4 +63,5 @@ pub fn reset_thread_local_state() {
     stdlib::reset_stdlib_state();
     events::reset_event_sinks();
     agent_events::reset_all_sinks();
+    agent_sessions::reset_session_store();
 }

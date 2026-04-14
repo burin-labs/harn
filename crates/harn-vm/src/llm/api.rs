@@ -31,9 +31,10 @@ pub(crate) struct LlmCallOptions {
     // --- Conversation ---
     pub messages: Vec<serde_json::Value>,
     pub system: Option<String>,
-    pub transcript_id: Option<String>,
+    /// Optional short summary string prepended to the system prompt.
+    /// Populated by auto-compaction at mid-loop boundaries; callers
+    /// typically leave this `None`.
     pub transcript_summary: Option<String>,
-    pub transcript_metadata: Option<serde_json::Value>,
 
     // --- Generation ---
     pub max_tokens: i64,
@@ -2368,9 +2369,7 @@ mod tests {
             api_key: String::new(),
             messages: vec![serde_json::json!({"role": "user", "content": "hello"})],
             system: None,
-            transcript_id: Some("tx-1".to_string()),
             transcript_summary: Some("summary".to_string()),
-            transcript_metadata: Some(serde_json::json!({"scope": "test"})),
             max_tokens: 64,
             temperature: Some(0.2),
             top_p: Some(0.8),

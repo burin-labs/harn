@@ -72,7 +72,6 @@ pipeline main() {
     kind: "stage",
     mode: "llm",
     model_policy: {provider: "mock"},
-    transcript_policy: {mode: "fork", compact: true, keep_last: 2},
     retry_policy: {max_attempts: 2},
     context_policy: {include_kinds: ["summary"]},
   },

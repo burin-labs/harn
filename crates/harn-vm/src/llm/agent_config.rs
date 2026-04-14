@@ -4,7 +4,7 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
-use crate::agent_events::{self, AgentEventSink};
+use crate::agent_events::AgentEventSink;
 use crate::value::VmValue;
 use crate::vm::Vm;
 
@@ -134,9 +134,9 @@ pub(crate) fn agent_loop_result_from_llm(
         "duration_ms": 0,
         "tools_used": [],
         "transcript": super::helpers::vm_value_to_json(&transcript_to_vm_with_events(
-            opts.transcript_id,
+            None,
             opts.transcript_summary,
-            opts.transcript_metadata,
+            None,
             &transcript_messages,
             events,
             Vec::new(),
@@ -186,9 +186,9 @@ pub(crate) fn build_llm_call_result(
         }
     }
     let transcript = transcript_to_vm_with_events(
-        opts.transcript_id.clone(),
+        None,
         opts.transcript_summary.clone(),
-        opts.transcript_metadata.clone(),
+        None,
         &transcript_messages,
         extra_events,
         Vec::new(),
@@ -379,7 +379,7 @@ pub fn register_agent_subscribe(vm: &mut Vm) {
                 "agent_subscribe(session_id, callback): callback must be a closure".into(),
             ));
         }
-        agent_events::register_closure_subscriber(session_id, callback);
+        crate::agent_sessions::append_subscriber(&session_id, callback);
         Ok(VmValue::Nil)
     });
 }

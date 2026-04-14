@@ -6,9 +6,9 @@ use std::rc::Rc;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    apply_input_transcript_policy, apply_output_transcript_policy, new_id, now_rfc3339,
-    ArtifactRecord, BranchSemantics, CapabilityPolicy, ContextPolicy, EscalationPolicy, JoinPolicy,
-    MapPolicy, ModelPolicy, ReducePolicy, RetryPolicy, StageContract, TranscriptPolicy,
+    new_id, now_rfc3339, redact_transcript_visibility, ArtifactRecord, AutoCompactPolicy,
+    BranchSemantics, CapabilityPolicy, ContextPolicy, EscalationPolicy, JoinPolicy, MapPolicy,
+    ModelPolicy, ReducePolicy, RetryPolicy, StageContract,
 };
 use crate::llm::{extract_llm_options, vm_call_llm_full, vm_value_to_json};
 use crate::tool_annotations::{SideEffectLevel, ToolAnnotations, ToolArgSchema, ToolKind};
@@ -26,7 +26,17 @@ pub struct WorkflowNode {
     pub done_sentinel: Option<String>,
     pub tools: serde_json::Value,
     pub model_policy: ModelPolicy,
-    pub transcript_policy: TranscriptPolicy,
+    /// Per-stage auto-compaction settings for the agent loop's context
+    /// window. Lifecycle operations (reset, fork, trim, compact) are NOT
+    /// expressible here — call the `agent_session_*` builtins before the
+    /// stage or in a prior stage.
+    pub auto_compact: AutoCompactPolicy,
+    /// Output visibility filter applied to the transcript after the
+    /// stage's agent loop exits. `"public"` / `"public_only"` drops
+    /// `tool_result` messages and non-public events. `None` or any
+    /// unknown string is a no-op.
+    #[serde(default)]
+    pub output_visibility: Option<String>,
     pub context_policy: ContextPolicy,
     pub retry_policy: RetryPolicy,
     pub capability_policy: CapabilityPolicy,
@@ -48,10 +58,11 @@ pub struct WorkflowNode {
     pub metadata: BTreeMap<String, serde_json::Value>,
     #[serde(skip)]
     pub raw_tools: Option<VmValue>,
-    /// Raw transcript_policy VmValue dict — preserved for extracting closure
-    /// fields (compress_callback, mask_callback) that can't go through serde.
+    /// Raw auto_compact VmValue dict — preserved for extracting closure
+    /// fields (compress_callback, mask_callback, custom_compactor) that
+    /// can't go through serde.
     #[serde(skip)]
-    pub raw_transcript_policy: Option<VmValue>,
+    pub raw_auto_compact: Option<VmValue>,
     /// Raw model_policy VmValue dict — preserved for extracting closure
     /// fields (post_turn_callback) that can't go through serde.
     #[serde(skip)]
@@ -322,7 +333,7 @@ pub fn parse_workflow_node_value(value: &VmValue, label: &str) -> Result<Workflo
     let mut node: WorkflowNode = super::parse_json_payload(vm_value_to_json(value), label)?;
     let dict = value.as_dict();
     node.raw_tools = dict.and_then(|d| d.get("tools")).cloned();
-    node.raw_transcript_policy = dict.and_then(|d| d.get("transcript_policy")).cloned();
+    node.raw_auto_compact = dict.and_then(|d| d.get("auto_compact")).cloned();
     node.raw_model_policy = dict.and_then(|d| d.get("model_policy")).cloned();
     Ok(node)
 }
@@ -641,12 +652,32 @@ fn reachable_nodes(graph: &WorkflowGraph) -> BTreeSet<String> {
     seen
 }
 
+/// Pick the session id a stage should run under. Prefers an explicit
+/// `session_id` on the node's `model_policy` dict (so pipelines with
+/// `agent_session_open` / `agent_session_fork` flowing through a graph
+/// line up); falls back to a stable, node-derived id so multi-stage
+/// graphs with no explicit session share a conversation across stages.
+fn resolve_node_session_id(node: &WorkflowNode) -> String {
+    if let Some(explicit) = node
+        .raw_model_policy
+        .as_ref()
+        .and_then(|v| v.as_dict())
+        .and_then(|d| d.get("session_id"))
+        .and_then(|v| match v {
+            VmValue::String(s) if !s.trim().is_empty() => Some(s.to_string()),
+            _ => None,
+        })
+    {
+        return explicit;
+    }
+    format!("workflow_stage_{}", uuid::Uuid::now_v7())
+}
+
 pub async fn execute_stage_node(
     node_id: &str,
     node: &WorkflowNode,
     task: &str,
     artifacts: &[ArtifactRecord],
-    transcript: Option<VmValue>,
 ) -> Result<(serde_json::Value, Vec<ArtifactRecord>, Option<VmValue>), VmError> {
     let mut selection_policy = node.context_policy.clone();
     if selection_policy.include_kinds.is_empty() && !node.input_contract.input_kinds.is_empty() {
@@ -654,10 +685,12 @@ pub async fn execute_stage_node(
     }
     let selected = super::select_artifacts_adaptive(artifacts.to_vec(), &selection_policy);
     let rendered_context = super::render_artifacts_context(&selected, &node.context_policy);
-    let input_transcript = apply_input_transcript_policy(transcript, &node.transcript_policy);
-    if node.input_contract.require_transcript && input_transcript.is_none() {
+    let stage_session_id = resolve_node_session_id(node);
+    if node.input_contract.require_transcript && !crate::agent_sessions::exists(&stage_session_id) {
         return Err(VmError::Runtime(format!(
-            "workflow stage {node_id} requires transcript input"
+            "workflow stage {node_id} requires an existing session \
+             (call agent_session_open and feed session_id through model_policy \
+             before entering this stage)"
         )));
     }
     if let Some(min_inputs) = node.input_contract.min_inputs {
@@ -779,9 +812,10 @@ pub async fn execute_stage_node(
         if tools_value.is_some() && !tool_names.is_empty() {
             options.insert("tools".to_string(), tools_value.unwrap_or(VmValue::Nil));
         }
-        if let Some(transcript) = input_transcript.clone() {
-            options.insert("transcript".to_string(), transcript);
-        }
+        options.insert(
+            "session_id".to_string(),
+            VmValue::String(Rc::from(stage_session_id.clone())),
+        );
 
         let args = vec![
             VmValue::String(Rc::from(prompt.clone())),
@@ -798,44 +832,45 @@ pub async fn execute_stage_node(
             let effective_policy = tool_policy
                 .intersect(&node.capability_policy)
                 .map_err(VmError::Runtime)?;
-            let auto_compact = if node.transcript_policy.auto_compact {
+            let auto_compact = if node.auto_compact.enabled {
                 let mut ac = crate::orchestration::AutoCompactConfig::default();
-                if let Some(v) = node.transcript_policy.compact_threshold {
+                if let Some(v) = node.auto_compact.token_threshold {
                     ac.token_threshold = v;
                 }
-                if let Some(v) = node.transcript_policy.tool_output_max_chars {
+                if let Some(v) = node.auto_compact.tool_output_max_chars {
                     ac.tool_output_max_chars = v;
                 }
-                if let Some(ref strategy) = node.transcript_policy.compact_strategy {
+                if let Some(ref strategy) = node.auto_compact.compact_strategy {
                     if let Ok(s) = crate::orchestration::parse_compact_strategy(strategy) {
                         ac.compact_strategy = s;
                     }
                 }
-                if let Some(v) = node.transcript_policy.hard_limit_tokens {
+                if let Some(v) = node.auto_compact.hard_limit_tokens {
                     ac.hard_limit_tokens = Some(v);
                 }
-                if let Some(ref strategy) = node.transcript_policy.hard_limit_strategy {
+                if let Some(ref strategy) = node.auto_compact.hard_limit_strategy {
                     if let Ok(s) = crate::orchestration::parse_compact_strategy(strategy) {
                         ac.hard_limit_strategy = s;
                     }
                 }
                 // Closure fields can't round-trip through serde, so extract them
                 // directly from the raw VmValue dict.
-                if let Some(ref raw_tp) = node.raw_transcript_policy {
-                    if let Some(dict) = raw_tp.as_dict() {
+                if let Some(ref raw_ac) = node.raw_auto_compact {
+                    if let Some(dict) = raw_ac.as_dict() {
                         if let Some(cb) = dict.get("compress_callback") {
                             ac.compress_callback = Some(cb.clone());
                         }
                         if let Some(cb) = dict.get("mask_callback") {
                             ac.mask_callback = Some(cb.clone());
                         }
+                        if let Some(cb) = dict.get("custom_compactor") {
+                            ac.custom_compactor = Some(cb.clone());
+                        }
                     }
                 }
                 {
-                    let user_specified_threshold =
-                        node.transcript_policy.compact_threshold.is_some();
-                    let user_specified_hard_limit =
-                        node.transcript_policy.hard_limit_tokens.is_some();
+                    let user_specified_threshold = node.auto_compact.token_threshold.is_some();
+                    let user_specified_hard_limit = node.auto_compact.hard_limit_tokens.is_some();
                     crate::llm::api::adapt_auto_compact_to_provider(
                         &mut ac,
                         user_specified_threshold,
@@ -880,21 +915,10 @@ pub async fn execute_stage_node(
                         .stop_after_successful_tools
                         .clone(),
                     require_successful_tools: node.model_policy.require_successful_tools.clone(),
-                    // Honor caller-supplied session_id so pipelines that install
-                    // agent_subscribe handlers keyed on that id actually receive
-                    // events. Falls back to a freshly minted id.
-                    session_id: node
-                        .raw_model_policy
-                        .as_ref()
-                        .and_then(|v| v.as_dict())
-                        .and_then(|d| d.get("session_id"))
-                        .and_then(|v| match v {
-                            crate::value::VmValue::String(s) if !s.trim().is_empty() => {
-                                Some(s.to_string())
-                            }
-                            _ => None,
-                        })
-                        .unwrap_or_else(|| format!("workflow_stage_{}", uuid::Uuid::now_v7())),
+                    // Use the same session id resolved for the stage so
+                    // agent_subscribe handlers keyed on it, and session
+                    // storage lookups in the agent loop, stay consistent.
+                    session_id: stage_session_id.clone(),
                     event_sink: None,
                     // Seed from the stage's explicit deliverables/ledger so the
                     // graph carries a task-wide plan through map branches and
@@ -960,10 +984,10 @@ pub async fn execute_stage_node(
         .get("transcript")
         .cloned()
         .map(|value| crate::stdlib::json_to_vm_value(&value));
-    let transcript = apply_output_transcript_policy(
-        result_transcript.or(input_transcript),
-        &node.transcript_policy,
-    );
+    let session_transcript = crate::agent_sessions::snapshot(&stage_session_id);
+    let transcript = result_transcript
+        .or(session_transcript)
+        .and_then(|value| redact_transcript_visibility(&value, node.output_visibility.as_deref()));
     let output_kind = node
         .output_contract
         .output_kinds

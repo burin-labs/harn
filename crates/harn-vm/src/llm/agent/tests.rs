@@ -32,9 +32,7 @@ fn base_opts(messages: Vec<serde_json::Value>) -> LlmCallOptions {
         api_key: String::new(),
         messages,
         system: None,
-        transcript_id: None,
         transcript_summary: None,
-        transcript_metadata: None,
         max_tokens: 128,
         temperature: None,
         top_p: None,
@@ -1158,4 +1156,155 @@ fn workflow_stage_extracts_session_id_from_raw_model_policy() {
             });
         assert_eq!(got, None, "value {:?} must not extract as session_id", bad);
     }
+}
+
+/// Two sequential `agent_loop` calls with the same `session_id`
+/// produce a coherent conversation: the second call sees the first
+/// call's assistant reply as prior history. This is the core
+/// persistence invariant for first-class sessions.
+#[tokio::test(flavor = "current_thread")]
+async fn agent_loop_session_id_persists_across_calls() {
+    crate::reset_thread_local_state();
+    let session_id = format!("session-persistence-{}", uuid::Uuid::now_v7());
+
+    // First call: single user message.
+    let mut opts_a = base_opts(vec![serde_json::json!({
+        "role": "user",
+        "content": "first-turn-prompt",
+    })]);
+    let mut config_a = base_agent_config();
+    config_a.session_id = session_id.clone();
+    let result_a = run_agent_loop_internal(&mut opts_a, config_a)
+        .await
+        .expect("first call");
+    let messages_a = result_a["transcript"]["messages"]
+        .as_array()
+        .expect("transcript.messages is a list");
+    assert!(
+        messages_a.len() >= 2,
+        "first call should have at least user+assistant, got {}",
+        messages_a.len()
+    );
+
+    // Snapshot the mock call count before the second call.
+    let calls_before = get_llm_mock_calls().len();
+
+    // Second call with the SAME session_id: only one new user message.
+    let mut opts_b = base_opts(vec![serde_json::json!({
+        "role": "user",
+        "content": "second-turn-prompt",
+    })]);
+    let mut config_b = base_agent_config();
+    config_b.session_id = session_id.clone();
+    let result_b = run_agent_loop_internal(&mut opts_b, config_b)
+        .await
+        .expect("second call");
+
+    // The second call's transcript must include the first call's
+    // prior messages plus the new turn — so it is strictly longer.
+    let messages_b = result_b["transcript"]["messages"]
+        .as_array()
+        .expect("transcript.messages is a list");
+    assert!(
+        messages_b.len() > messages_a.len(),
+        "second call transcript must extend first ({}→{})",
+        messages_a.len(),
+        messages_b.len()
+    );
+
+    // Verify the mock actually SAW the prefix on its first call of the
+    // second loop — not just that the transcript was assembled in the
+    // finalize step. This is the real test of "session prefix load".
+    let calls = get_llm_mock_calls();
+    let second_loop_first_call = calls
+        .get(calls_before)
+        .expect("second loop issued at least one call");
+    let sent = &second_loop_first_call.messages;
+    assert!(
+        sent.iter()
+            .any(|m| m.get("content").and_then(|c| c.as_str()) == Some("first-turn-prompt")),
+        "prefix from session store missing; sent messages were {sent:?}"
+    );
+    assert!(
+        sent.iter()
+            .any(|m| m.get("content").and_then(|c| c.as_str()) == Some("second-turn-prompt")),
+        "caller's new message missing; sent messages were {sent:?}"
+    );
+
+    // Cleanup: close the session so later tests on the same thread
+    // don't inherit state.
+    crate::agent_sessions::close(&session_id);
+}
+
+/// `agent_session_reset` on a session clears the prior prefix before
+/// the next `agent_loop` sees it.
+#[tokio::test(flavor = "current_thread")]
+async fn agent_session_reset_drops_prefix_for_next_loop() {
+    crate::reset_thread_local_state();
+    let session_id = format!("session-reset-{}", uuid::Uuid::now_v7());
+
+    let mut opts = base_opts(vec![serde_json::json!({
+        "role": "user",
+        "content": "seed-prompt",
+    })]);
+    let mut config = base_agent_config();
+    config.session_id = session_id.clone();
+    let _ = run_agent_loop_internal(&mut opts, config)
+        .await
+        .expect("seed call");
+
+    // Reset, then run again. The mock should see ONLY the new prompt.
+    assert!(crate::agent_sessions::reset_transcript(&session_id));
+
+    let calls_before = get_llm_mock_calls().len();
+    let mut opts_after = base_opts(vec![serde_json::json!({
+        "role": "user",
+        "content": "post-reset-prompt",
+    })]);
+    let mut config_after = base_agent_config();
+    config_after.session_id = session_id.clone();
+    let _ = run_agent_loop_internal(&mut opts_after, config_after)
+        .await
+        .expect("post-reset call");
+
+    let calls = get_llm_mock_calls();
+    let first_post_reset = calls
+        .get(calls_before)
+        .expect("post-reset loop issued a call");
+    assert!(
+        !first_post_reset
+            .messages
+            .iter()
+            .any(|m| m.get("content").and_then(|c| c.as_str()) == Some("seed-prompt")),
+        "reset should drop the prior prefix, got {:?}",
+        first_post_reset.messages
+    );
+
+    crate::agent_sessions::close(&session_id);
+}
+
+/// An `agent_loop` call without a `session_id` does NOT persist any
+/// transcript — subsequent calls with the same (anonymous) minted id
+/// can't see it because each call mints its own fresh id.
+#[tokio::test(flavor = "current_thread")]
+async fn agent_loop_without_session_id_does_not_persist() {
+    crate::reset_thread_local_state();
+
+    let mut opts = base_opts(vec![serde_json::json!({
+        "role": "user",
+        "content": "anonymous-prompt",
+    })]);
+    let mut config = base_agent_config();
+    config.session_id = String::new(); // anonymous
+    let result = run_agent_loop_internal(&mut opts, config)
+        .await
+        .expect("anonymous call");
+    let minted_id = result["transcript"]["id"]
+        .as_str()
+        .expect("transcript.id")
+        .to_string();
+    assert!(
+        !crate::agent_sessions::exists(&minted_id),
+        "anonymous call must not leave its minted id in the session store"
+    );
 }

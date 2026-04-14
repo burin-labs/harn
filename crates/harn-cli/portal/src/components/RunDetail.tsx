@@ -750,7 +750,8 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
                     <StageDetail label="Input contract" value={stage.debug.input_contract} />
                     <StageDetail label="Output contract" value={stage.debug.output_contract} />
                     <StageDetail label="Model policy" value={stage.debug.model_policy} />
-                    <StageDetail label="Transcript policy" value={stage.debug.transcript_policy} />
+                    <StageDetail label="Auto compact" value={stage.debug.auto_compact} />
+                    <StageDetail label="Output visibility" value={stage.debug.output_visibility} />
                     <StageDetail label="Context policy" value={stage.debug.context_policy} />
                     <StageDetail label="Retry policy" value={stage.debug.retry_policy} />
                     <StageDetail label="Prompt" value={stage.debug.prompt} />

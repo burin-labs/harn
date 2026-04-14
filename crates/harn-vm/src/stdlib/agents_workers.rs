@@ -33,7 +33,6 @@ pub(super) struct WorkerExecutionResult {
 pub(super) struct WorkerCarryPolicy {
     pub(super) artifact_mode: String,
     pub(super) context_policy: ContextPolicy,
-    pub(super) transcript_policy: TranscriptPolicy,
     pub(super) resume_workflow: bool,
     pub(super) persist_state: bool,
     /// Capability policy scoped to this worker. Pushed onto the policy stack
@@ -314,7 +313,6 @@ pub(super) fn persist_worker_state_snapshot(state: &WorkerState) -> Result<(), V
         "carry_policy": {
             "artifact_mode": state.carry_policy.artifact_mode,
             "context_policy": state.carry_policy.context_policy,
-            "transcript_policy": state.carry_policy.transcript_policy,
             "resume_workflow": state.carry_policy.resume_workflow,
             "persist_state": state.carry_policy.persist_state,
             "policy": state.carry_policy.policy,
@@ -356,7 +354,6 @@ pub(super) fn load_worker_state_snapshot(target: &str) -> Result<WorkerState, Vm
         WorkerCarryPolicy {
             artifact_mode,
             context_policy: parse_context_policy(dict.get("context_policy"))?,
-            transcript_policy: parse_transcript_policy(dict.get("transcript_policy"))?,
             resume_workflow: !matches!(dict.get("resume_workflow"), Some(VmValue::Bool(false))),
             persist_state: !matches!(dict.get("persist_state"), Some(VmValue::Bool(false))),
             policy: worker_policy_value(dict.get("policy"))
@@ -507,23 +504,10 @@ pub(super) fn parse_worker_carry_policy(
             .get("artifacts")
             .filter(|value| value.as_dict().is_some())
     }))?;
-    let mut transcript_policy =
-        parse_transcript_policy(carry.get("transcript_policy").or_else(|| {
-            carry
-                .get("transcript")
-                .filter(|value| value.as_dict().is_some())
-        }))?;
-    if transcript_policy.mode.is_none() {
-        transcript_policy.mode = carry
-            .get("transcript")
-            .map(|value| value.display())
-            .filter(|value| matches!(value.as_str(), "inherit" | "reset" | "fork"));
-    }
 
     Ok(WorkerCarryPolicy {
         artifact_mode,
         context_policy,
-        transcript_policy,
         resume_workflow: !matches!(carry.get("resume_workflow"), Some(VmValue::Bool(false))),
         persist_state: !matches!(carry.get("persist_state"), Some(VmValue::Bool(false))),
         policy: None,
@@ -669,13 +653,6 @@ fn parse_execution_profile_json(
             .map_err(|e| VmError::Runtime(format!("worker execution parse error: {e}"))),
         None => Ok(WorkerExecutionProfile::default()),
     }
-}
-
-pub(super) fn apply_worker_transcript_policy(
-    transcript: Option<VmValue>,
-    policy: &TranscriptPolicy,
-) -> Option<VmValue> {
-    crate::orchestration::apply_input_transcript_policy(transcript, policy)
 }
 
 pub(super) fn apply_worker_artifact_policy(
@@ -932,12 +909,12 @@ async fn execute_worker_config(
             artifacts,
             transcript,
         } => {
+            let _ = transcript;
             let result = crate::orchestration::execute_stage_node(
                 "delegated_worker",
                 &node,
                 &task,
                 &artifacts,
-                transcript,
             )
             .await;
             crate::stdlib::process::set_thread_execution_context(None);
@@ -1155,7 +1132,6 @@ pub(super) async fn execute_delegated_stage(
         carry_policy: WorkerCarryPolicy {
             artifact_mode: "inherit".to_string(),
             context_policy: ContextPolicy::default(),
-            transcript_policy: TranscriptPolicy::default(),
             resume_workflow: true,
             persist_state: true,
             policy: crate::orchestration::current_execution_policy(),
@@ -1283,10 +1259,6 @@ mod tests {
             carry_policy: WorkerCarryPolicy {
                 artifact_mode: "none".to_string(),
                 context_policy: ContextPolicy::default(),
-                transcript_policy: TranscriptPolicy {
-                    mode: Some("reset".to_string()),
-                    ..Default::default()
-                },
                 resume_workflow: false,
                 persist_state: true,
                 policy: Some(CapabilityPolicy {
@@ -1319,10 +1291,6 @@ mod tests {
         );
         assert_eq!(loaded.carry_policy.artifact_mode, "none");
         assert!(!loaded.carry_policy.resume_workflow);
-        assert_eq!(
-            loaded.carry_policy.transcript_policy.mode.as_deref(),
-            Some("reset")
-        );
         assert_eq!(
             loaded.carry_policy.policy,
             Some(CapabilityPolicy {

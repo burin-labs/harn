@@ -1,7 +1,12 @@
 pipeline default() {
   let result = llm_call("hello world", nil, {provider: "mock"})
   println(result?.transcript?._type)
-  let resumed = llm_call("follow up", nil, {provider: "mock", transcript: result?.transcript})
+  // Session-based continuation: open a session, let the first call
+  // seed it, then pass the same session_id to the follow-up so the
+  // agent loop automatically loads prior messages as prefix.
+  let s = agent_session_open()
+  let first = agent_loop("hello world", nil, {provider: "mock", session_id: s, max_iterations: 1})
+  let resumed = agent_loop("follow up", nil, {provider: "mock", session_id: s, max_iterations: 1})
   println(len(transcript_messages(resumed?.transcript)))
   let compacted = transcript_compact(resumed?.transcript, {keep_last: 1, summary: "summary"})
   println(transcript_summary(compacted))

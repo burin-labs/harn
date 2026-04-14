@@ -7,10 +7,8 @@ use std::collections::BTreeMap;
 use crate::value::{VmError, VmValue};
 
 use super::{
-    opt_bool, opt_float, opt_int, opt_str, resolve_api_key, transcript_id, transcript_message_list,
-    transcript_metadata, transcript_summary_text, vm_message_list_to_json, vm_messages_to_json,
-    vm_resolve_model, vm_resolve_provider, vm_value_dict_to_json, vm_value_to_json,
-    TRANSCRIPT_TYPE,
+    opt_bool, opt_float, opt_int, opt_str, resolve_api_key, vm_messages_to_json, vm_resolve_model,
+    vm_resolve_provider, vm_value_dict_to_json, vm_value_to_json,
 };
 
 pub(crate) fn extract_json(text: &str) -> String {
@@ -104,39 +102,24 @@ pub(crate) fn extract_llm_options(
         .and_then(|v| v.as_dict())
         .map(vm_value_dict_to_json);
 
-    let transcript_val = options.as_ref().and_then(|o| o.get("transcript")).cloned();
-    let transcript_dict = transcript_val
-        .as_ref()
-        .and_then(|v| v.as_dict())
-        .filter(|d| d.get("_type").map(|v| v.display()).as_deref() == Some(TRANSCRIPT_TYPE));
-    let transcript_id = transcript_dict.and_then(transcript_id);
-    let transcript_summary = transcript_dict.and_then(transcript_summary_text);
-    let transcript_metadata = transcript_dict.and_then(transcript_metadata);
+    // Reject the deprecated `transcript` option key. Conversation
+    // lifecycle is expressed through `session_id` + the explicit
+    // `agent_session_*` builtins; there is no opaque transcript dict to
+    // pass around anymore.
+    if options.as_ref().and_then(|o| o.get("transcript")).is_some() {
+        return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+            "llm_call / agent_loop: the `transcript` option was removed. \
+                 Open or open-and-resume a session with agent_session_open(id) \
+                 and pass `session_id: id` instead.",
+        ))));
+    }
 
-    // Message source precedence: options.messages > transcript > prompt.
+    // Message source precedence: options.messages > prompt.
     let messages_val = options.as_ref().and_then(|o| o.get("messages")).cloned();
     let messages = if let Some(VmValue::List(msg_list)) = &messages_val {
         vm_messages_to_json(msg_list)?
-    } else if let Some(transcript) = transcript_dict {
-        let mut messages = vm_message_list_to_json(&transcript_message_list(transcript)?)?;
-        if !prompt.is_empty() {
-            messages.push(serde_json::json!({
-                "role": "user",
-                "content": prompt,
-            }));
-        }
-        messages
     } else {
         vec![serde_json::json!({"role": "user", "content": prompt})]
-    };
-
-    let system = match (system, transcript_summary.clone()) {
-        (Some(system), Some(summary)) => {
-            Some(format!("{system}\n\nConversation summary:\n{summary}"))
-        }
-        (Some(system), None) => Some(system),
-        (None, Some(summary)) => Some(format!("Conversation summary:\n{summary}")),
-        (None, None) => None,
     };
 
     let tools_val = options.as_ref().and_then(|o| o.get("tools")).cloned();
@@ -163,9 +146,7 @@ pub(crate) fn extract_llm_options(
         api_key,
         messages,
         system,
-        transcript_id,
-        transcript_summary,
-        transcript_metadata,
+        transcript_summary: None,
         max_tokens,
         temperature,
         top_p,

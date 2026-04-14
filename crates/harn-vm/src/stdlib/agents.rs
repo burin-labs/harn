@@ -18,15 +18,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use self::agents_workers::{
-    apply_worker_artifact_policy, apply_worker_transcript_policy, emit_worker_event,
-    load_worker_state_snapshot, next_worker_id, parse_worker_config, persist_worker_state_snapshot,
-    spawn_worker_task, with_worker_state, worker_id_from_value, worker_snapshot_path,
-    worker_summary, WorkerConfig, WorkerState, WORKER_REGISTRY,
+    apply_worker_artifact_policy, emit_worker_event, load_worker_state_snapshot, next_worker_id,
+    parse_worker_config, persist_worker_state_snapshot, spawn_worker_task, with_worker_state,
+    worker_id_from_value, worker_snapshot_path, worker_summary, WorkerConfig, WorkerState,
+    WORKER_REGISTRY,
 };
 use crate::orchestration::{
     normalize_workflow_value, pop_execution_policy, push_execution_policy, select_artifacts,
-    ArtifactRecord, CapabilityPolicy, ContextPolicy, MutationSessionRecord, TranscriptPolicy,
-    WorkflowGraph,
+    ArtifactRecord, CapabilityPolicy, ContextPolicy, MutationSessionRecord, WorkflowGraph,
 };
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -36,16 +35,6 @@ fn to_vm<T: serde::Serialize>(value: &T) -> Result<VmValue, VmError> {
     let json = serde_json::to_value(value)
         .map_err(|e| VmError::Runtime(format!("agents encode error: {e}")))?;
     Ok(crate::stdlib::json_to_vm_value(&json))
-}
-
-pub(crate) fn parse_transcript_policy(
-    value: Option<&VmValue>,
-) -> Result<TranscriptPolicy, VmError> {
-    match value {
-        Some(value) => serde_json::from_value(crate::llm::vm_value_to_json(value))
-            .map_err(|e| VmError::Runtime(format!("transcript policy parse error: {e}"))),
-        None => Ok(TranscriptPolicy::default()),
-    }
 }
 
 pub(crate) fn register_agent_builtins(vm: &mut Vm) {
@@ -230,10 +219,10 @@ pub(crate) fn register_agent_builtins(vm: &mut Vm) {
             worker.latest_payload = None;
             let next_artifacts =
                 apply_worker_artifact_policy(&worker.artifacts, &worker.carry_policy);
-            let next_transcript = apply_worker_transcript_policy(
-                worker.transcript.clone(),
-                &worker.carry_policy.transcript_policy,
-            );
+            // Session continuity is expressed explicitly via `agent_session_fork`
+            // / `agent_session_reset` at the call site, so the worker's next
+            // transcript is simply whatever the session store holds for its id.
+            let next_transcript = worker.transcript.clone();
             let worker_parent = worker.id.clone();
             let resume_workflow = worker.carry_policy.resume_workflow;
             let child_run_path = worker.child_run_path.clone();

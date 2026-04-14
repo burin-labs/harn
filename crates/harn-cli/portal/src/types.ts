@@ -88,7 +88,8 @@ export type PortalStageDebug = {
   worker_id: string | null
   error: string | null
   model_policy: string | null
-  transcript_policy: string | null
+  auto_compact: string | null
+  output_visibility: string | null
   context_policy: string | null
   retry_policy: string | null
   capability_policy: string | null

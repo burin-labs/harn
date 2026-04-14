@@ -1234,7 +1234,6 @@ async fn execute_stage_attempts(
                     node,
                     &attempt_task,
                     artifacts,
-                    transcript.clone(),
                 )
                 .await?;
                 let verification = evaluate_verification(node, &result);
@@ -1668,9 +1667,15 @@ pub(in crate::stdlib) async fn execute_workflow(
             serde_json::to_value(&node.model_policy).unwrap_or_default(),
         );
         stage_metadata.insert(
-            "transcript_policy".to_string(),
-            serde_json::to_value(&node.transcript_policy).unwrap_or_default(),
+            "auto_compact".to_string(),
+            serde_json::to_value(&node.auto_compact).unwrap_or_default(),
         );
+        if let Some(ref visibility) = node.output_visibility {
+            stage_metadata.insert(
+                "output_visibility".to_string(),
+                serde_json::Value::String(visibility.clone()),
+            );
+        }
         stage_metadata.insert(
             "context_policy".to_string(),
             serde_json::to_value(&node.context_policy).unwrap_or_default(),
@@ -1999,10 +2004,25 @@ pub(crate) fn register_workflow_builtins(vm: &mut Vm) {
         })
     });
 
-    vm.register_builtin("workflow_set_transcript_policy", |args, _out| {
+    vm.register_builtin("workflow_set_auto_compact", |args, _out| {
         set_node_policy(args, |node, policy| {
-            node.transcript_policy = serde_json::from_value(policy)
-                .map_err(|e| VmError::Runtime(format!("workflow_set_transcript_policy: {e}")))?;
+            node.auto_compact = serde_json::from_value(policy)
+                .map_err(|e| VmError::Runtime(format!("workflow_set_auto_compact: {e}")))?;
+            Ok(())
+        })
+    });
+
+    vm.register_builtin("workflow_set_output_visibility", |args, _out| {
+        set_node_policy(args, |node, policy| {
+            node.output_visibility = match policy {
+                serde_json::Value::Null => None,
+                serde_json::Value::String(s) => Some(s),
+                _ => {
+                    return Err(VmError::Runtime(
+                        "workflow_set_output_visibility: value must be a string or nil".into(),
+                    ))
+                }
+            };
             Ok(())
         })
     });
