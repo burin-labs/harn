@@ -73,6 +73,37 @@ let body = if len(content) > 2400 {
 let grade = if score >= 90 { "A" } else if score >= 80 { "B" } else { "C" }
 ```
 
+## Iteration
+
+Harn loops are `for x in <iterable>`. Reach for destructuring and
+stdlib helpers instead of integer-indexed loops — they read better and
+avoid off-by-one bugs.
+
+```harn
+for x in items { ... }
+
+// enumerate: yields a list of {index, value} dicts.
+for {index, value} in items.enumerate() {
+  log("${index}: ${value}")
+}
+
+// zip: yields [a, b] pairs — destructure with list pattern.
+for [a, b] in xs.zip(ys) { ... }
+
+// dict iteration: entries() yields [{key, value}, ...].
+for {key, value} in my_dict.entries() { ... }
+
+// Ranges:
+let first_5 = range(5)         // [0, 1, 2, 3, 4] — half-open, Python-style
+let middle  = range(3, 7)      // [3, 4, 5, 6]
+let inc     = 1 to 5            // [1, 2, 3, 4, 5] — inclusive default
+let exc     = 1 to 5 exclusive  // [1, 2, 3, 4]    — half-open
+```
+
+Note: `for (a, b) in ...` with parentheses is NOT supported — only list
+patterns `[a, b]` and dict patterns `{name1, name2}`. Use `enumerate()`
+/ `entries()` (dict-shaped) or `zip()` (list-shaped) accordingly.
+
 ## Module scope
 
 Top-level `let` / `var` and `fn` declarations are visible inside

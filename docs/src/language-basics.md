@@ -399,6 +399,43 @@ for i in 0 to 3 exclusive {    // half-open: 0, 1, 2
 }
 ```
 
+For Python-compatible 0-indexed iteration there is also a `range()` stdlib
+builtin. `range(n)` is equivalent to `0 to n exclusive`; `range(a, b)` is
+`a to b exclusive`. Both forms always produce half-open integer ranges.
+
+```harn
+for i in range(5) { println(i) }        // 0, 1, 2, 3, 4
+for i in range(3, 7) { println(i) }      // 3, 4, 5, 6
+```
+
+### Iteration patterns
+
+Prefer destructuring and stdlib helpers over integer-indexed loops — they
+read better and avoid off-by-one bugs.
+
+```harn
+// enumerate(): yields a list of {index, value} dicts.
+for {index, value} in ["a", "b", "c"].enumerate() {
+  println("${index}: ${value}")
+}
+
+// zip(): yields [a, b] pairs — use list destructuring.
+for [name, score] in names.zip(scores) {
+  println("${name}: ${score}")
+}
+
+// Dict iteration yields {key, value} entries sorted by key.
+for {key, value} in {a: 1, b: 2}.entries() {
+  println("${key} -> ${value}")
+}
+```
+
+`for` heads currently accept a bare name, a list pattern `[a, b]`, or a dict
+pattern `{name1, name2}`. Tuple patterns written with parentheses
+(`for (a, b) in ...`) are not yet supported — use the list pattern when the
+iterable yields pair-lists (`zip`), and the dict pattern when the iterable
+yields shaped dicts (`enumerate`, `entries`).
+
 ## Functions and closures
 
 ### Named functions
