@@ -7,6 +7,32 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## v0.6.3
+
+Maintenance release focused on **comment hygiene and dependency freshness**.
+No user-visible language or runtime changes — behavior, builtins, and the
+conformance suite are unchanged (still 419 tests, 546 Rust tests).
+
+### Changed
+
+- **Comment cleanup across the workspace** — 114 files, ~2,100 net lines
+  removed. Pruned section-header banners, drift narration from prior
+  refactors, step-by-step breadcrumbs that paraphrased function bodies, and
+  doc comments that just restated signatures. Preserved comments that document
+  non-obvious invariants, protocol/spec compliance (JSON-RPC, MCP, ACP),
+  provider-specific quirks (Anthropic, OpenAI, Google, Ollama, Together,
+  OpenRouter), and real footguns.
+- **`rand` upgraded from 0.8 to 0.9** — migrated deprecated
+  `thread_rng`/`gen`/`gen_range` call sites to the renamed `rng`/`random`/
+  `random_range` APIs.
+- **`sha2` upgraded from 0.10 to 0.11** — unified the `sha2::*` and `md5`
+  hash builtins under a single hex-encoding macro now that both pin
+  `digest 0.11`.
+- **`futures` pin relaxed** from the exact `0.3.32` to the semver-compatible
+  `0.3`, matching the rest of the workspace's version-range style.
+- `cargo update` brought patch bumps for tokio, rustls, hashbrown, indexmap,
+  wasm-bindgen, and several transitive deps.
+
 ## v0.6.2
 
 Polish patch focused on **agent-loop correctness and error-handling
