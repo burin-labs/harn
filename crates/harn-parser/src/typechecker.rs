@@ -700,7 +700,7 @@ impl TypeChecker {
                         if let Some(actual) = &inferred {
                             if !self.types_compatible(expected, actual, scope) {
                                 let mut msg = format!(
-                                    "Type mismatch: '{}' declared as {}, but assigned {}",
+                                    "'{}' declared as {}, but assigned {}",
                                     name,
                                     format_type(expected),
                                     format_type(actual)
@@ -755,7 +755,7 @@ impl TypeChecker {
                         if let Some(actual) = &inferred {
                             if !self.types_compatible(expected, actual, scope) {
                                 let mut msg = format!(
-                                    "Type mismatch: '{}' declared as {}, but assigned {}",
+                                    "'{}' declared as {}, but assigned {}",
                                     name,
                                     format_type(expected),
                                     format_type(actual)
@@ -1020,7 +1020,7 @@ impl TypeChecker {
                             if !self.types_compatible(check_type, actual, scope) {
                                 self.error_at(
                                     format!(
-                                        "Type mismatch: cannot assign {} to '{}' (declared as {})",
+                                        "can't assign {} to '{}' (declared as {})",
                                         format_type(actual),
                                         name,
                                         format_type(check_type)
@@ -1218,7 +1218,7 @@ impl TypeChecker {
                             if !numeric.contains(&l.as_str()) || !numeric.contains(&r.as_str()) {
                                 self.error_at(
                                     format!(
-                                        "Operator '{}' requires numeric operands, got {} and {}",
+                                        "can't use '{}' on {} and {} (needs numeric operands)",
                                         op, l, r
                                     ),
                                     span,
@@ -1234,7 +1234,7 @@ impl TypeChecker {
                             if !is_numeric && !is_string_repeat {
                                 self.error_at(
                                     format!(
-                                        "Operator '*' requires numeric operands or string * int, got {} and {}",
+                                        "can't multiply {} and {} (try string * int)",
                                         l, r
                                     ),
                                     span,
@@ -1251,7 +1251,7 @@ impl TypeChecker {
                             );
                             if !valid {
                                 let msg =
-                                    format!("Operator '+' is not valid for types {} and {}", l, r);
+                                    format!("can't add {} and {}", l, r);
                                 // Offer interpolation fix when one side is string
                                 let fix = if l == "string" || r == "string" {
                                     self.build_interpolation_fix(left, right, l == "string", span)
@@ -1672,7 +1672,7 @@ impl TypeChecker {
                     if args.len() != enum_variant.fields.len() {
                         self.warning_at(
                             format!(
-                                "Variant '{}.{}' expects {} argument(s), got {}",
+                                "{}.{} expects {} argument(s), got {}",
                                 enum_name,
                                 variant,
                                 enum_variant.fields.len(),
@@ -1700,7 +1700,7 @@ impl TypeChecker {
                             self.error_at(message, arg.span);
                         }
                     }
-                    for (index, (field, arg)) in
+                    for (_index, (field, arg)) in
                         enum_variant.fields.iter().zip(args.iter()).enumerate()
                     {
                         let Some(expected_type) = &field.type_expr else {
@@ -1713,10 +1713,9 @@ impl TypeChecker {
                         if !self.types_compatible(&expected, &actual_type, scope) {
                             self.error_at(
                                 format!(
-                                    "Variant '{}.{}' argument {} ('{}') expects {}, got {}",
+                                    "{}.{} expects {}: {}, got {}",
                                     enum_name,
                                     variant,
-                                    index + 1,
                                     field.name,
                                     format_type(&expected),
                                     format_type(&actual_type)
@@ -1809,7 +1808,7 @@ impl TypeChecker {
                     if !self.types_compatible(expected, actual, scope) {
                         self.error_at(
                             format!(
-                                "Return type mismatch: expected {}, got {}",
+                                "return type doesn't match: expected {}, got {}",
                                 format_type(expected),
                                 format_type(actual)
                             ),
@@ -3620,7 +3619,7 @@ impl TypeChecker {
                             );
                             if !valid {
                                 let msg =
-                                    format!("Operator '+' is not valid for types {} and {}", l, r);
+                                    format!("can't add {} and {}", l, r);
                                 let fix = if l == "string" || r == "string" {
                                     self.build_interpolation_fix(left, right, l == "string", span)
                                 } else {
@@ -3638,7 +3637,7 @@ impl TypeChecker {
                             if !numeric.contains(&l.as_str()) || !numeric.contains(&r.as_str()) {
                                 self.error_at(
                                     format!(
-                                        "Operator '{}' requires numeric operands, got {} and {}",
+                                        "can't use '{}' on {} and {} (needs numeric operands)",
                                         op, l, r
                                     ),
                                     span,
@@ -3654,7 +3653,7 @@ impl TypeChecker {
                             if !is_numeric && !is_string_repeat {
                                 self.error_at(
                                     format!(
-                                        "Operator '*' requires numeric operands or string * int, got {} and {}",
+                                        "can't multiply {} and {} (try string * int)",
                                         l, r
                                     ),
                                     span,
@@ -4259,9 +4258,8 @@ mod tests {
     fn test_type_mismatch_let() {
         let errs = errors(r#"pipeline t(task) { let x: int = "hello" }"#);
         assert_eq!(errs.len(), 1);
-        assert!(errs[0].contains("Type mismatch"));
-        assert!(errs[0].contains("int"));
-        assert!(errs[0].contains("string"));
+        assert!(errs[0].contains("declared as int"));
+        assert!(errs[0].contains("assigned string"));
     }
 
     #[test]
@@ -4287,7 +4285,7 @@ add("hello", 2) }"#,
     fn test_return_type_mismatch() {
         let errs = errors(r#"pipeline t(task) { fn get() -> int { return "hello" } }"#);
         assert_eq!(errs.len(), 1);
-        assert!(errs[0].contains("Return type mismatch"));
+        assert!(errs[0].contains("return type doesn't match"));
     }
 
     #[test]
@@ -4300,7 +4298,7 @@ add("hello", 2) }"#,
     fn test_union_type_mismatch() {
         let errs = errors(r#"pipeline t(task) { let x: string | nil = 42 }"#);
         assert_eq!(errs.len(), 1);
-        assert!(errs[0].contains("Type mismatch"));
+        assert!(errs[0].contains("declared as"));
     }
 
     #[test]
@@ -4312,7 +4310,7 @@ add("hello", 2) }"#,
 }"#,
         );
         assert_eq!(errs.len(), 1);
-        assert!(errs[0].contains("Type mismatch"));
+        assert!(errs[0].contains("declared as"));
         assert!(errs[0].contains("string"));
         assert!(errs[0].contains("int"));
     }
@@ -4494,7 +4492,7 @@ add("hello", 2) }"#,
         let errs = errors(r#"pipeline t(task) { let x = "nope" ** 2 }"#);
         assert!(
             errs.iter()
-                .any(|err| err.contains("Operator '**' requires numeric operands")),
+                .any(|err| err.contains("can't use '**'")),
             "missing exponentiation type error: {errs:?}"
         );
     }
@@ -4556,7 +4554,7 @@ add("hello", 2) }"#,
 }"#,
         );
         assert_eq!(errs.len(), 1);
-        assert!(errs[0].contains("cannot assign string"));
+        assert!(errs[0].contains("can't assign string"));
     }
 
     #[test]
@@ -5339,7 +5337,7 @@ add("hello", 2) }"#,
         // s2 should fail because y was reassigned, invalidating the narrowing
         assert_eq!(errs.len(), 1, "expected 1 error, got: {:?}", errs);
         assert!(
-            errs[0].contains("Type mismatch"),
+            errs[0].contains("declared as"),
             "expected type mismatch, got: {}",
             errs[0]
         );
