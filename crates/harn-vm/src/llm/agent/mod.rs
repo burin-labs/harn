@@ -22,11 +22,12 @@ use super::agent_tools::{
 mod finalize;
 mod helpers;
 mod state;
+mod turn_preflight;
 
 use helpers::{
-    append_host_messages_to_recorded, append_message_to_contexts, build_agent_system_prompt,
-    daemon_snapshot_from_state, inject_queued_user_messages, maybe_auto_compact_agent_messages,
-    maybe_persist_daemon_snapshot, runtime_feedback_message,
+    append_host_messages_to_recorded, append_message_to_contexts, daemon_snapshot_from_state,
+    inject_queued_user_messages, maybe_auto_compact_agent_messages, maybe_persist_daemon_snapshot,
+    runtime_feedback_message,
 };
 
 // Re-export items used by the agent loop orchestrator and by
@@ -163,8 +164,15 @@ pub async fn run_agent_loop_internal(
     let tools_owned = opts.tools.clone();
     let tools_val = tools_owned.as_ref();
 
-    // Alias `state.config` back as the short `config` the loop body reads.
-    let config = &state.config;
+    // Snapshot the config fields the iteration loop reads as locals so
+    // we don't hold an immutable borrow on `state.config` across the
+    // loop body (which would conflict with the `&mut state` phase
+    // methods take). `config.turn_policy` is `Option<TurnPolicy>`;
+    // clone it once here rather than `.as_ref()`-ing through a borrow.
+    let llm_retries: usize = state.config.llm_retries;
+    let llm_backoff_ms: u64 = state.config.llm_backoff_ms;
+    let turn_policy = state.config.turn_policy.clone();
+    let stop_after_successful_tools = state.config.stop_after_successful_tools.clone();
 
     // Copy/clone bindings for identifiers that collide with argument
     // names, module paths, or pattern bindings (so renaming `state.foo`
@@ -195,90 +203,27 @@ pub async fn run_agent_loop_internal(
     let session_id = state.session_id.clone();
 
     for iteration in 0..max_iterations {
-        state.total_iterations = resumed_iterations + iteration + 1;
-        super::agent_observe::set_current_iteration(Some(state.total_iterations));
-        state.daemon_state = "active".to_string();
-        let immediate_messages = inject_queued_user_messages(
-            bridge.as_ref(),
-            &mut state.visible_messages,
-            crate::bridge::DeliveryCheckpoint::InterruptImmediate,
+        turn_preflight::run_turn_preflight(
+            &mut state,
+            opts,
+            turn_preflight::PreflightContext {
+                bridge: &bridge,
+                session_id: &session_id,
+                resumed_iterations,
+                iteration,
+                base_system: base_system.as_deref(),
+                tool_contract_prompt: tool_contract_prompt.as_deref(),
+                persistent_system_prompt: persistent_system_prompt.as_deref(),
+            },
         )
         .await?;
-        append_host_messages_to_recorded(&mut state.recorded_messages, &immediate_messages);
-        for message in &immediate_messages {
-            state.transcript_events.push(transcript_event(
-                "host_input",
-                "user",
-                "public",
-                &message.content,
-                Some(serde_json::json!({"delivery": format!("{:?}", message.mode)})),
-            ));
-        }
-        if !immediate_messages.is_empty() {
-            state.consecutive_text_only = 0;
-            state.idle_backoff_ms = 100;
-        }
-        let default_system = build_agent_system_prompt(
-            base_system.as_deref(),
-            tool_contract_prompt.as_deref(),
-            persistent_system_prompt.as_deref(),
-        );
-        let mut call_messages = state.visible_messages.clone();
-        let call_system = default_system;
-
-        // Emit a TurnStart event so pipeline subscribers (grounding,
-        // telemetry, etc.) can run per-turn setup. Happens before any
-        // pending-feedback drain so injections land before the LLM call.
-        emit_agent_event(&AgentEvent::TurnStart {
-            session_id: session_id.clone(),
-            iteration,
-        })
-        .await;
-
-        // Drain any feedback pushed by event subscribers since the last
-        // turn boundary; append each as a runtime-feedback message.
-        for (kind, content) in drain_pending_feedback(&session_id) {
-            emit_agent_event(&AgentEvent::FeedbackInjected {
-                session_id: session_id.clone(),
-                kind: kind.clone(),
-                content: content.clone(),
-            })
-            .await;
-            append_message_to_contexts(
-                &mut state.visible_messages,
-                &mut state.recorded_messages,
-                runtime_feedback_message(&kind, content),
-            );
-            call_messages = state.visible_messages.clone();
-        }
-        // Inject the task ledger as a transient user-role message at the
-        // tail of the call payload. Not added to visible/recorded history
-        // so the prompt cache stays stable between turns and the
-        // conversation record isn't polluted with repeated ledger echoes.
-        // The ledger IS reflected in history indirectly via the
-        // `ledger(...)` tool calls the agent emits to mutate it.
-        let ledger_rendered = state.task_ledger.render_for_prompt();
-        if !ledger_rendered.is_empty() {
-            call_messages.push(serde_json::json!({
-                "role": "user",
-                "content": format!(
-                    "<runtime_injection kind=\"task_ledger\">\n{ledger_rendered}\n</runtime_injection>"
-                ),
-            }));
-        }
-        crate::llm::api::debug_log_message_shapes(
-            &format!("agent iteration={iteration} preflight"),
-            &call_messages,
-        );
-        opts.messages = call_messages;
-        opts.system = call_system;
         let result = observed_llm_call(
             opts,
             Some(&tool_format),
             bridge.as_ref(),
             &LlmRetryConfig {
-                retries: config.llm_retries,
-                backoff_ms: config.llm_backoff_ms,
+                retries: llm_retries,
+                backoff_ms: llm_backoff_ms,
             },
             Some(iteration),
             true,
@@ -415,8 +360,8 @@ pub async fn run_agent_loop_internal(
         } else {
             Vec::new()
         };
-        let prose_too_long = prose_exceeds_budget(&text_prose, config.turn_policy.as_ref());
-        let shaped_text_prose = trim_prose_for_history(&text_prose, config.turn_policy.as_ref());
+        let prose_too_long = prose_exceeds_budget(&text_prose, turn_policy.as_ref());
+        let shaped_text_prose = trim_prose_for_history(&text_prose, turn_policy.as_ref());
         let interpreted_call_id = format!("iteration-{iteration}");
         dump_llm_interpreted_response(
             iteration,
@@ -541,7 +486,7 @@ pub async fn run_agent_loop_internal(
         // calls, it's trying to declare done without doing any work.
         if sentinel_in_text && !has_acted && persistent && has_tools {
             let corrective =
-                sentinel_without_action_nudge(&tool_format, config.turn_policy.as_ref());
+                sentinel_without_action_nudge(&tool_format, turn_policy.as_ref());
             append_message_to_contexts(
                 &mut state.visible_messages,
                 &mut state.recorded_messages,
@@ -1444,7 +1389,7 @@ pub async fn run_agent_loop_internal(
                 })
                 .await;
             }
-            if let Some(stop_tools) = config.stop_after_successful_tools.as_ref() {
+            if let Some(stop_tools) = stop_after_successful_tools.as_ref() {
                 if should_stop_after_successful_tools(&tool_results_this_iter, stop_tools) {
                     crate::events::log_debug(
                         "agent.stop_after_successful_tools",
@@ -1730,7 +1675,7 @@ pub async fn run_agent_loop_internal(
         // context with nudge messages and the "nudge → rephrase → nudge"
         // loop seen with chatty models.
         //
-        let nudge = action_turn_nudge(&tool_format, config.turn_policy.as_ref(), prose_too_long)
+        let nudge = action_turn_nudge(&tool_format, turn_policy.as_ref(), prose_too_long)
             .or_else(|| custom_nudge.clone())
             .unwrap_or_else(|| "Continue — use a tool call to make progress.".to_string());
         append_message_to_contexts(
