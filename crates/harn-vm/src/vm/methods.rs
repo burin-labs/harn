@@ -894,6 +894,31 @@ impl super::Vm {
                     }
                     _ => Ok(VmValue::Nil),
                 },
+                VmValue::Range(r) => match method {
+                    // O(1) core methods — no materialization.
+                    "len" | "count" => Ok(VmValue::Int(r.len())),
+                    "empty" => Ok(VmValue::Bool(r.is_empty())),
+                    "contains" => {
+                        let needle = args.first().unwrap_or(&VmValue::Nil);
+                        let result = match needle {
+                            VmValue::Int(n) => r.contains(*n),
+                            _ => false,
+                        };
+                        Ok(VmValue::Bool(result))
+                    }
+                    "first" => Ok(r.first().map(VmValue::Int).unwrap_or(VmValue::Nil)),
+                    "last" => Ok(r.last().map(VmValue::Int).unwrap_or(VmValue::Nil)),
+                    "to_list" => Ok(VmValue::List(Rc::new(r.to_vec()))),
+                    "to_string" => Ok(VmValue::String(Rc::from(obj.display()))),
+                    // Delegate any other method to the materialized list. This
+                    // covers `.map`, `.filter`, `.enumerate`, `.zip`, `.sort`,
+                    // etc. v1 shortcut — a proper lazy iterator-protocol
+                    // redesign is tracked as a follow-up.
+                    _ => {
+                        let materialized = VmValue::List(Rc::new(r.to_vec()));
+                        self.call_method(materialized, method, args, functions).await
+                    }
+                },
                 VmValue::StructInstance { struct_name, .. } => {
                     // Look up __impl_TypeName in env for impl block methods
                     let impl_key = format!("__impl_{}", struct_name);

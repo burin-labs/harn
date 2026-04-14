@@ -103,6 +103,13 @@ pub(crate) enum IterState {
     Generator {
         gen: crate::value::VmGenerator,
     },
+    /// Step through a lazy range without materializing a Vec.
+    /// `next` holds the value to emit on the next IterNext; `stop` is
+    /// the first value that terminates the iteration (one past the end).
+    Range {
+        next: i64,
+        stop: i64,
+    },
 }
 
 #[derive(Clone)]

@@ -1,4 +1,4 @@
-use crate::value::{VmError, VmValue};
+use crate::value::{VmError, VmRange, VmValue};
 use crate::vm::Vm;
 
 pub(crate) fn register_math_builtins(vm: &mut Vm) {
@@ -187,12 +187,11 @@ pub(crate) fn register_math_builtins(vm: &mut Vm) {
         let start = args.first().and_then(|a| a.as_int()).unwrap_or(0);
         let end = args.get(1).and_then(|a| a.as_int()).unwrap_or(0);
         let inclusive = args.get(2).map(|a| a.is_truthy()).unwrap_or(false);
-        let items: Vec<VmValue> = if inclusive {
-            (start..=end).map(VmValue::Int).collect()
-        } else {
-            (start..end).map(VmValue::Int).collect()
-        };
-        Ok(VmValue::List(std::rc::Rc::new(items)))
+        Ok(VmValue::Range(VmRange {
+            start,
+            end,
+            inclusive,
+        }))
     });
 
     // Python-compatible `range()` builtin — always half-open, for idiomatic
@@ -227,8 +226,11 @@ pub(crate) fn register_math_builtins(vm: &mut Vm) {
                 )));
             }
         };
-        let items: Vec<VmValue> = (start..end).map(VmValue::Int).collect();
-        Ok(VmValue::List(std::rc::Rc::new(items)))
+        Ok(VmValue::Range(VmRange {
+            start,
+            end,
+            inclusive: false,
+        }))
     });
 }
 

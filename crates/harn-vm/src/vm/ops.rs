@@ -268,6 +268,10 @@ impl super::Vm {
                     map.contains_key(&key)
                 }
                 VmValue::Set(items) => items.iter().any(|v| values_equal(v, &item)),
+                VmValue::Range(r) => match &item {
+                    VmValue::Int(n) => r.contains(*n),
+                    _ => false,
+                },
                 VmValue::String(s) => {
                     if let VmValue::String(substr) = &item {
                         s.contains(&**substr)
@@ -677,6 +681,19 @@ impl super::Vm {
                     }
                 }
                 (VmValue::Dict(map), _) => map.get(&idx.display()).cloned().unwrap_or(VmValue::Nil),
+                (VmValue::Range(r), VmValue::Int(i)) => {
+                    // Python-style: negative indices count from the end.
+                    let len = r.len();
+                    let pos = if *i < 0 { len + *i } else { *i };
+                    match r.get(pos) {
+                        Some(v) => VmValue::Int(v),
+                        None => {
+                            return Err(VmError::Runtime(format!(
+                                "range index out of range: index {i} for range of length {len}",
+                            )));
+                        }
+                    }
+                }
                 (VmValue::String(s), VmValue::Int(i)) => {
                     if *i < 0 {
                         let count = s.chars().count() as i64;
@@ -1134,6 +1151,21 @@ impl super::Vm {
                 VmValue::Generator(gen) => {
                     self.iterators.push(super::IterState::Generator { gen });
                 }
+                VmValue::Range(r) => {
+                    // Lazy range: compute the stop point once (inclusive ranges
+                    // become half-open by adding 1). Empty ranges fall out
+                    // naturally because `next >= stop` on the first iter step.
+                    let stop = if r.inclusive {
+                        // Saturate to avoid i64 overflow on `i64::MAX to i64::MAX`.
+                        r.end.saturating_add(1)
+                    } else {
+                        r.end
+                    };
+                    // `5 to 1` is simply empty (no reverse iteration in v1).
+                    let next = r.start;
+                    self.iterators
+                        .push(super::IterState::Range { next, stop });
+                }
                 _ => {
                     self.iterators.push(super::IterState::Vec {
                         items: Vec::new(),
@@ -1178,6 +1210,17 @@ impl super::Vm {
                                 let frame = self.frames.last_mut().unwrap();
                                 frame.ip = target;
                             }
+                        }
+                    }
+                    super::IterState::Range { next, stop } => {
+                        if *next < *stop {
+                            let v = *next;
+                            *next += 1;
+                            self.stack.push(VmValue::Int(v));
+                        } else {
+                            self.iterators.pop();
+                            let frame = self.frames.last_mut().unwrap();
+                            frame.ip = target;
                         }
                     }
                     super::IterState::Generator { gen } => {

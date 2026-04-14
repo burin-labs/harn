@@ -1,0 +1,9 @@
+pipeline test(task) {
+  // A million-element range must cost O(1) memory (no list allocation).
+  // If this were eager the test would OOM or be extremely slow.
+  let r = 1 to 1000000
+  log(r.len())
+  // `range(n)` is also lazy.
+  let r2 = range(1000000)
+  log(r2.len())
+}

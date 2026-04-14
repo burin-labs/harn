@@ -925,6 +925,10 @@ impl TypeChecker {
                         Some(TypeExpr::Named(n)) if n == "string" => {
                             Some(TypeExpr::Named("string".into()))
                         }
+                        // Iterating a range always yields ints.
+                        Some(TypeExpr::Named(n)) if n == "range" => {
+                            Some(TypeExpr::Named("int".into()))
+                        }
                         _ => None,
                     };
                     loop_scope.define_var(variable, elem_type);
@@ -2894,6 +2898,10 @@ impl TypeChecker {
             Node::BoolLiteral(_) => Some(TypeExpr::Named("bool".into())),
             Node::NilLiteral => Some(TypeExpr::Named("nil".into())),
             Node::ListLiteral(items) => Some(self.infer_list_literal_type(items, scope)),
+            // `a to b` (and `a to b exclusive`) produce a lazy Range value.
+            // Expose it as a named `range` type; for-in and method resolution
+            // special-case this type where needed.
+            Node::RangeExpr { .. } => Some(TypeExpr::Named("range".into())),
             Node::DictLiteral(entries) => {
                 // Infer shape type when all keys are string literals
                 let mut fields = Vec::new();

@@ -39,6 +39,100 @@ pub struct VmAtomicHandle {
     pub value: Arc<AtomicI64>,
 }
 
+/// A lazy integer range — Python-style. Stores only `(start, end, inclusive)`
+/// so the in-memory footprint is O(1) regardless of the range's length.
+/// `len()`, indexing (`r[k]`), `.contains(x)`, `.first()`, `.last()` are all
+/// O(1); direct iteration walks step-by-step without materializing a list.
+///
+/// Empty-range convention (Python-consistent):
+/// - Inclusive empty when `start > end`.
+/// - Exclusive empty when `start >= end`.
+///
+/// Negative / reversed ranges are NOT supported in v1: `5 to 1` is simply
+/// empty. Authors who want reverse iteration should call `.to_list().reverse()`.
+#[derive(Debug, Clone, Copy)]
+pub struct VmRange {
+    pub start: i64,
+    pub end: i64,
+    pub inclusive: bool,
+}
+
+impl VmRange {
+    /// Number of elements this range yields.
+    pub fn len(&self) -> i64 {
+        if self.inclusive {
+            if self.start > self.end {
+                0
+            } else {
+                (self.end - self.start) + 1
+            }
+        } else if self.start >= self.end {
+            0
+        } else {
+            self.end - self.start
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Element at the given 0-based index, bounds-checked.
+    /// Returns `None` when out of bounds.
+    pub fn get(&self, idx: i64) -> Option<i64> {
+        if idx < 0 || idx >= self.len() {
+            None
+        } else {
+            Some(self.start + idx)
+        }
+    }
+
+    /// First element or `None` when empty.
+    pub fn first(&self) -> Option<i64> {
+        if self.is_empty() {
+            None
+        } else {
+            Some(self.start)
+        }
+    }
+
+    /// Last element or `None` when empty.
+    pub fn last(&self) -> Option<i64> {
+        if self.is_empty() {
+            None
+        } else if self.inclusive {
+            Some(self.end)
+        } else {
+            Some(self.end - 1)
+        }
+    }
+
+    /// Whether `v` falls inside the range (O(1)).
+    pub fn contains(&self, v: i64) -> bool {
+        if self.is_empty() {
+            return false;
+        }
+        if self.inclusive {
+            v >= self.start && v <= self.end
+        } else {
+            v >= self.start && v < self.end
+        }
+    }
+
+    /// Materialize to a `Vec<VmValue>` — the explicit escape hatch.
+    pub fn to_vec(&self) -> Vec<VmValue> {
+        let len = self.len();
+        if len <= 0 {
+            return Vec::new();
+        }
+        let mut out = Vec::with_capacity(len as usize);
+        for i in 0..len {
+            out.push(VmValue::Int(self.start + i));
+        }
+        out
+    }
+}
+
 /// A generator object: lazily produces values via yield.
 /// The generator body runs as a spawned task that sends values through a channel.
 #[derive(Debug, Clone)]
@@ -82,6 +176,7 @@ pub enum VmValue {
     McpClient(VmMcpClientHandle),
     Set(Rc<Vec<VmValue>>),
     Generator(VmGenerator),
+    Range(VmRange),
 }
 
 /// A compiled closure value.
@@ -478,6 +573,9 @@ impl VmValue {
             VmValue::McpClient(_) => true,
             VmValue::Set(s) => !s.is_empty(),
             VmValue::Generator(_) => true,
+            // Match Python semantics: range objects are always truthy,
+            // even the empty range (analogous to generators / iterators).
+            VmValue::Range(_) => true,
         }
     }
 
@@ -501,6 +599,7 @@ impl VmValue {
             VmValue::McpClient(_) => "mcp_client",
             VmValue::Set(_) => "set",
             VmValue::Generator(_) => "generator",
+            VmValue::Range(_) => "range",
         }
     }
 
@@ -627,6 +726,14 @@ impl VmValue {
                     out.push_str("<generator (done)>");
                 } else {
                     out.push_str("<generator>");
+                }
+            }
+            // Print form mirrors source syntax: `1 to 5` / `0 to 3 exclusive`.
+            // `.to_list()` is the explicit path to materialize for display.
+            VmValue::Range(r) => {
+                let _ = write!(out, "{} to {}", r.start, r.end);
+                if !r.inclusive {
+                    out.push_str(" exclusive");
                 }
             }
         }
@@ -835,6 +942,9 @@ pub fn values_equal(a: &VmValue, b: &VmValue) -> bool {
             a.len() == b.len() && a.iter().all(|x| b.iter().any(|y| values_equal(x, y)))
         }
         (VmValue::Generator(_), VmValue::Generator(_)) => false, // generators are never equal
+        (VmValue::Range(a), VmValue::Range(b)) => {
+            a.start == b.start && a.end == b.end && a.inclusive == b.inclusive
+        }
         _ => false,
     }
 }
