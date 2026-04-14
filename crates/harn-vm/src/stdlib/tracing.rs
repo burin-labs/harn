@@ -51,7 +51,7 @@ pub fn finish_span_from_args(args: &[VmValue]) -> Result<(String, String, String
 
 pub(crate) fn register_tracing_builtins(vm: &mut Vm) {
     vm.register_builtin("trace_start", |args, _out| {
-        use rand::Rng;
+        use rand::RngExt;
         let name = args.first().map(|a| a.display()).unwrap_or_default();
         let trace_id = VM_TRACE_STACK.with(|stack| {
             stack

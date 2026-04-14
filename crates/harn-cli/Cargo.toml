@@ -30,7 +30,7 @@ base64 = "0.22"
 url = "2"
 webbrowser = "1"
 keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native"] }
-rand = "0.9"
+rand = "0.10"
 regex = "1"
 clap = { version = "4", features = ["derive"] }
 tower = { version = "0.5", features = ["util"] }
