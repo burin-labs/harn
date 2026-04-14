@@ -7,5 +7,5 @@ repository.workspace = true
 description = "Parser, AST, and type checker for the Harn programming language"
 
 [dependencies]
-harn-lexer = { path = "../harn-lexer", version = "0.6" }
+harn-lexer = { path = "../harn-lexer", version = "0.7" }
 yansi = "1"

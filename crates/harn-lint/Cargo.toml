@@ -7,6 +7,6 @@ repository.workspace = true
 description = "Linter for the Harn programming language"
 
 [dependencies]
-harn-lexer = { path = "../harn-lexer", version = "0.6" }
-harn-parser = { path = "../harn-parser", version = "0.6" }
-harn-vm = { path = "../harn-vm", version = "0.6" }
+harn-lexer = { path = "../harn-lexer", version = "0.7" }
+harn-parser = { path = "../harn-parser", version = "0.7" }
+harn-vm = { path = "../harn-vm", version = "0.7" }
