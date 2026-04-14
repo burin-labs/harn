@@ -161,20 +161,21 @@ pub(crate) fn escape_string(s: &str) -> String {
 /// after a round-trip is identical.
 pub(crate) fn format_multiline_triple_quoted(body: &str, indent: usize) -> String {
     let pad = "  ".repeat(indent + 1);
-    let indented: String = if body.is_empty() {
-        String::new()
-    } else {
-        body.split('\n')
-            .map(|l| {
-                if l.is_empty() {
-                    String::new()
-                } else {
-                    format!("{pad}{l}")
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
+    // Empty body: collapse to `"""\n{pad}"""` rather than `"""\n\n{pad}"""`.
+    if body.is_empty() {
+        return format!("\"\"\"\n{pad}\"\"\"");
+    }
+    let indented: String = body
+        .split('\n')
+        .map(|l| {
+            if l.is_empty() {
+                String::new()
+            } else {
+                format!("{pad}{l}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
     format!("\"\"\"\n{indented}\n{pad}\"\"\"")
 }
 

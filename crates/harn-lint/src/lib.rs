@@ -2514,7 +2514,11 @@ fn check_trailing_comma(source: &str, diagnostics: &mut Vec<LintDiagnostic>) {
                 // required `saw_comma == true`, so that's handled, but
                 // defensively check that there's real content.
                 let insert_pos = last_byte + 1;
-                let span = Span::with_offsets(insert_pos, insert_pos, tok.span.line, 1);
+                // Report the span on the line where the insert actually lands,
+                // not on the closer's line — those can differ by many lines in
+                // a multiline literal, and editors highlight based on span.
+                let insert_line = source[..insert_pos].bytes().filter(|b| *b == b'\n').count() + 1;
+                let span = Span::with_offsets(insert_pos, insert_pos, insert_line, 1);
                 diagnostics.push(LintDiagnostic {
                     rule: "trailing-comma",
                     message: "multiline comma-separated list is missing a trailing comma"

@@ -418,9 +418,11 @@ impl Formatter {
 
 /// Returns true if `text` (the raw text following `//`, with the leading
 /// space not yet trimmed) is a dash-only separator bar with ≥4 dashes.
+///
+/// Thin wrapper over `classify_bar_line` so the two helpers can't drift
+/// out of sync on what counts as a "bar".
 fn is_bar_only_line(text: &str) -> bool {
-    let t = text.trim();
-    t.len() >= 4 && t.chars().all(|c| c == '-')
+    matches!(classify_bar_line(text), Some(BarKind::PureBar))
 }
 
 enum BarKind {
