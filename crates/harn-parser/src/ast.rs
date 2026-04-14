@@ -149,7 +149,7 @@ pub enum Node {
     },
     /// Duration literal: 500ms, 5s, 30m, 2h, 1d, 1w
     DurationLiteral(u64),
-    /// Range expression: start upto end (exclusive) or start thru end (inclusive)
+    /// Range expression: `start to end` (inclusive) or `start to end exclusive` (half-open)
     RangeExpr {
         start: Box<SNode>,
         end: Box<SNode>,

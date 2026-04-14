@@ -385,12 +385,16 @@ guard x > 0 else {
 
 ### Ranges
 
+Harn has a single range keyword: `to`. Ranges are **inclusive by default** —
+`1 to 5` is `[1, 2, 3, 4, 5]` — because that matches how the expression reads
+aloud. Add the trailing `exclusive` modifier when you want the half-open form.
+
 ```harn
-for i in 1 thru 5 {   // inclusive: 1, 2, 3, 4, 5
+for i in 1 to 5 {              // inclusive: 1, 2, 3, 4, 5
   println(i)
 }
 
-for i in 0 upto 3 {   // exclusive: 0, 1, 2
+for i in 0 to 3 exclusive {    // half-open: 0, 1, 2
   println(i)
 }
 ```

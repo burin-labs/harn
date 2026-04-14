@@ -866,8 +866,11 @@ impl Formatter {
             } => {
                 let s = self.format_expr(start);
                 let e = self.format_expr(end);
-                let kw = if *inclusive { "thru" } else { "upto" };
-                format!("{s} {kw} {e}")
+                if *inclusive {
+                    format!("{s} to {e}")
+                } else {
+                    format!("{s} to {e} exclusive")
+                }
             }
             Node::Closure {
                 params,

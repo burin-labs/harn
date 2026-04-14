@@ -80,9 +80,9 @@ fn token_kind_to_semantic(kind: &TokenKind) -> Option<u32> {
         | TokenKind::Impl
         | TokenKind::Pub
         | TokenKind::From
-        | TokenKind::Thru
+        | TokenKind::To
         | TokenKind::Tool
-        | TokenKind::Upto
+        | TokenKind::Exclusive
         | TokenKind::Guard
         | TokenKind::Require
         | TokenKind::Deadline

@@ -84,9 +84,9 @@ The following identifiers are reserved:
 | `interface` | `.interface` |
 | `pub` | `.pub` |
 | `from` | `.from` |
-| `thru` | `.thru` |
+| `to` | `.to` |
 | `tool` | `.tool` |
-| `upto` | `.upto` |
+| `exclusive` | `.exclusive` |
 | `guard` | `.guard` |
 | `require` | `.require` |
 | `each` | `.each` |
@@ -455,7 +455,7 @@ followed by `=`.
 ```ebnf
 expression         ::= pipe_expr
 pipe_expr          ::= range_expr ('|>' range_expr)*
-range_expr         ::= ternary_expr [('thru' | 'upto') ternary_expr]
+range_expr         ::= ternary_expr ['to' ternary_expr ['exclusive']]
 ternary_expr       ::= logical_or ['?' logical_or ':' logical_or]
 logical_or         ::= logical_and ('||' logical_and)*
 logical_and        ::= equality ('&&' equality)*
@@ -900,6 +900,25 @@ multiplicative operators, so `xs?.count ?? 0 > 0` parses as
 
 `condition ? trueExpr : falseExpr` evaluates `condition`, then evaluates and returns
 either `trueExpr` (if truthy) or `falseExpr`.
+
+### Ranges (`to`, `to … exclusive`)
+
+`a to b` evaluates `a` and `b` (both must be integers) and produces a list of
+consecutive integers. The form is **inclusive** by default — `1 to 5` is
+`[1, 2, 3, 4, 5]` — because that matches how the expression reads aloud.
+
+Add the trailing modifier `exclusive` to get the half-open form:
+`1 to 5 exclusive` is `[1, 2, 3, 4]`.
+
+| Expression           | Value               | Shape      |
+|----------------------|---------------------|------------|
+| `1 to 5`             | `[1, 2, 3, 4, 5]`   | `[a, b]`   |
+| `1 to 5 exclusive`   | `[1, 2, 3, 4]`      | `[a, b)`   |
+| `0 to 3`             | `[0, 1, 2, 3]`      | `[a, b]`   |
+| `0 to 3 exclusive`   | `[0, 1, 2]`         | `[a, b)`   |
+
+If `b < a`, the result is the empty list. The `range(n)` / `range(a, b)` stdlib
+builtins always produce the half-open form, for Python-compatible indexing.
 
 ## Control flow
 

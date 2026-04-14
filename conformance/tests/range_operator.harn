@@ -1,0 +1,16 @@
+pipeline test(task) {
+  // `to` creates an inclusive range
+  let r = 1 to 5
+  log(r)
+  // `to` in a for loop
+  var sum = 0
+  for i in 1 to 4 {
+    sum += i
+  }
+  log(sum)
+  // compare with the trailing `exclusive` modifier
+  let inc = 1 to 3
+  let exc = 1 to 3 exclusive
+  log(len(inc))
+  log(len(exc))
+}

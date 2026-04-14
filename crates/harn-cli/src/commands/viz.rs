@@ -424,12 +424,13 @@ fn summarize_node(node: &SNode) -> String {
             start,
             end,
             inclusive,
-        } => format!(
-            "{} {} {}",
-            inline_label(start),
-            if *inclusive { "thru" } else { "upto" },
-            inline_label(end)
-        ),
+        } => {
+            if *inclusive {
+                format!("{} to {}", inline_label(start), inline_label(end))
+            } else {
+                format!("{} to {} exclusive", inline_label(start), inline_label(end))
+            }
+        }
         Node::Pipeline { name, .. } => format!("pipeline {name}"),
         Node::FnDecl { name, .. } => format!("fn {name}"),
         Node::ToolDecl { name, .. } => format!("tool {name}"),
@@ -530,12 +531,13 @@ fn inline_label(node: &SNode) -> String {
             start,
             end,
             inclusive,
-        } => format!(
-            "{} {} {}",
-            inline_label(start),
-            if *inclusive { "thru" } else { "upto" },
-            inline_label(end)
-        ),
+        } => {
+            if *inclusive {
+                format!("{} to {}", inline_label(start), inline_label(end))
+            } else {
+                format!("{} to {} exclusive", inline_label(start), inline_label(end))
+            }
+        }
         _ => summarize_node(node),
     }
 }
