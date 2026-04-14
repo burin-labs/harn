@@ -3,12 +3,11 @@ use std::rc::Rc;
 use crate::agent_events::{self, AgentEvent, ToolCallStatus};
 use crate::value::{ErrorCategory, VmError, VmValue};
 
-use super::daemon::{detect_watch_changes, load_snapshot, watch_state};
+use super::daemon::detect_watch_changes;
 use super::helpers::{transcript_event, transcript_to_vm_with_events};
 use super::tools::{
-    build_assistant_tool_message, build_tool_calling_contract_prompt, build_tool_result_message,
-    collect_tool_schemas, normalize_tool_args, parse_text_tool_calls_with_tools,
-    validate_tool_args,
+    build_assistant_tool_message, build_tool_result_message, collect_tool_schemas,
+    normalize_tool_args, parse_text_tool_calls_with_tools, validate_tool_args,
 };
 
 // Imports from extracted submodules.
@@ -16,13 +15,12 @@ use super::agent_config::AgentLoopConfig;
 use super::agent_observe::{dump_llm_interpreted_response, observed_llm_call, LlmRetryConfig};
 use super::agent_tools::{
     classify_tool_mutation, declared_paths, denied_tool_result, dispatch_tool_execution,
-    is_denied_tool_result, loop_intervention_message, merge_agent_loop_approval_policy,
-    merge_agent_loop_policy, normalize_native_tools_for_format, normalize_tool_choice_for_format,
-    normalize_tool_examples_for_format, render_tool_result, stable_hash, stable_hash_str,
-    LoopIntervention, ToolCallTracker,
+    is_denied_tool_result, loop_intervention_message, render_tool_result, stable_hash,
+    stable_hash_str, LoopIntervention,
 };
 
 mod helpers;
+mod state;
 
 use helpers::{
     append_host_messages_to_recorded, append_message_to_contexts, build_agent_system_prompt,
@@ -45,7 +43,10 @@ pub(super) use super::agent_config::build_llm_call_result;
 #[cfg(test)]
 pub(super) use super::agent_observe::extract_retry_after_ms;
 #[cfg(test)]
-pub(super) use super::agent_tools::required_tool_choice_for_provider;
+pub(super) use super::agent_tools::{
+    merge_agent_loop_policy, normalize_native_tools_for_format, normalize_tool_choice_for_format,
+    normalize_tool_examples_for_format, required_tool_choice_for_provider,
+};
 
 thread_local! {
     static CURRENT_HOST_BRIDGE: std::cell::RefCell<Option<Rc<crate::bridge::HostBridge>>> = const { std::cell::RefCell::new(None) };
@@ -150,277 +151,61 @@ pub async fn run_agent_loop_internal(
     opts: &mut super::api::LlmCallOptions,
     config: AgentLoopConfig,
 ) -> Result<serde_json::Value, VmError> {
-    // Each top-level agent loop starts a fresh transcript segment. Reset
-    // the dedup state so the first call emits system_prompt + tool_schemas
-    // events and `message` events carry meaningful iteration indices.
-    super::agent_observe::reset_transcript_dedup();
+    // Build the long-lived loop state (drop guards, prelude computations,
+    // daemon snapshot resume). The original inline prelude now lives on
+    // `AgentLoopState::new` — behavior must be identical.
+    let mut state = state::AgentLoopState::new(opts, config)?;
 
-    struct TranscriptIterationGuard;
-    impl Drop for TranscriptIterationGuard {
-        fn drop(&mut self) {
-            super::agent_observe::set_current_iteration(None);
-        }
-    }
-    let _iteration_guard = TranscriptIterationGuard;
-
-    struct ExecutionPolicyGuard {
-        active: bool,
-    }
-
-    impl Drop for ExecutionPolicyGuard {
-        fn drop(&mut self) {
-            if self.active {
-                crate::orchestration::pop_execution_policy();
-            }
-        }
-    }
-
-    struct ApprovalPolicyGuard {
-        active: bool,
-    }
-
-    impl Drop for ApprovalPolicyGuard {
-        fn drop(&mut self) {
-            if self.active {
-                crate::orchestration::pop_approval_policy();
-            }
-        }
-    }
-
-    /// Drops every external sink and closure subscriber registered
-    /// against this loop's session_id when the loop exits (success or
-    /// error). Without this, pipeline `agent_subscribe` closures would
-    /// accumulate across workflow stages — each stage builder calls
-    /// `agent_subscribe` exactly once for its own session_id, but the
-    /// registry only cleared when the ACP server explicitly tore a
-    /// session down. CLI / non-ACP embeddings leaked monotonically.
-    struct SessionSinkGuard {
-        session_id: String,
-    }
-
-    impl Drop for SessionSinkGuard {
-        fn drop(&mut self) {
-            if !self.session_id.is_empty() {
-                crate::agent_events::clear_session_sinks(&self.session_id);
-            }
-        }
-    }
-
-    let bridge = current_host_bridge();
-    let max_iterations = config.max_iterations;
-    let persistent = config.persistent;
-    let max_nudges = config.max_nudges;
-    let custom_nudge = config.nudge;
-    let done_sentinel = config
-        .done_sentinel
-        .clone()
-        .unwrap_or_else(|| "##DONE##".to_string());
-    let break_unless_phase = config.break_unless_phase.clone();
-    let tool_retries = config.tool_retries;
-    let tool_backoff_ms = config.tool_backoff_ms;
-    let tool_format = config.tool_format;
-    let session_id = config.session_id.clone();
-    let _sink_guard = SessionSinkGuard {
-        session_id: session_id.clone(),
-    };
-
-    let auto_compact = config.auto_compact.clone();
-    let daemon = config.daemon;
-    let daemon_config = config.daemon_config.clone();
-    let exit_when_verified = config.exit_when_verified;
-    let mut last_run_exit_code: Option<i32> = None;
-
-    // Tool loop detection — catches stuck loops where the model calls the
-    // same tool with the same args and gets the same result repeatedly.
-    let loop_detect_enabled = config.loop_detect_warn > 0;
-    let mut loop_tracker = ToolCallTracker::new(
-        config.loop_detect_warn,
-        config.loop_detect_block,
-        config.loop_detect_skip,
-    );
-
-    let effective_policy = merge_agent_loop_policy(config.policy.clone())?;
-
-    // Push the loop-local policy only after intersecting it with any active
-    // outer workflow/worker ceiling so nested loops never widen permissions.
-    if let Some(ref policy) = effective_policy {
-        crate::orchestration::push_execution_policy(policy.clone());
-    }
-    let _policy_guard = ExecutionPolicyGuard {
-        active: effective_policy.is_some(),
-    };
-
-    let effective_approval_policy =
-        merge_agent_loop_approval_policy(config.approval_policy.clone());
-    if let Some(ref policy) = effective_approval_policy {
-        crate::orchestration::push_approval_policy(policy.clone());
-    }
-    let _approval_guard = ApprovalPolicyGuard {
-        active: effective_approval_policy.is_some(),
-    };
-
+    // Rebuild the `tools` borrow the loop body reads. `AgentLoopState::new`
+    // already mutated `opts.native_tools` and `opts.tool_choice` so these
+    // views are stable for the rest of the run.
     let tools_owned = opts.tools.clone();
     let tools_val = tools_owned.as_ref();
-    opts.native_tools = normalize_native_tools_for_format(&tool_format, opts.native_tools.clone());
-    opts.tool_choice = normalize_tool_choice_for_format(
-        &opts.provider,
-        &tool_format,
-        opts.native_tools.as_deref(),
-        opts.tool_choice.clone(),
-        config.turn_policy.as_ref(),
-    );
-    let native_tools_for_prompt = opts.native_tools.clone();
-    let rendered_schemas =
-        crate::llm::tools::collect_tool_schemas(tools_val, native_tools_for_prompt.as_deref());
-    let has_tools = !rendered_schemas.is_empty();
-    let base_system = opts.system.clone();
-    let tool_examples =
-        normalize_tool_examples_for_format(&tool_format, config.tool_examples.clone());
-    let tool_contract_prompt = if has_tools {
-        Some(build_tool_calling_contract_prompt(
-            tools_val,
-            native_tools_for_prompt.as_deref(),
-            &tool_format,
-            config
-                .turn_policy
-                .as_ref()
-                .is_some_and(|policy| policy.require_action_or_yield),
-            tool_examples.as_deref(),
-        ))
-    } else {
-        None
-    };
 
-    let allow_done_sentinel = config
-        .turn_policy
-        .as_ref()
-        .map(|policy| policy.allow_done_sentinel)
-        .unwrap_or(true);
-    let persistent_system_prompt = if persistent {
-        if exit_when_verified {
-            if allow_done_sentinel {
-                Some(format!(
-                    "\n\nKeep working until the task is complete. Take action with tool calls — \
-                     do not stop to explain. Emit `<done>{done_sentinel}</done>` only after a \
-                     passing verification run."
-                ))
-            } else {
-                Some(
-                    "\n\nKeep working until the task is complete. Take action with tool calls — \
-                     do not stop to explain."
-                        .to_string(),
-                )
-            }
-        } else if allow_done_sentinel {
-            Some(format!(
-                "\n\nIMPORTANT: You MUST keep working until the task is complete. \
-                 Do NOT stop to explain or summarize — take action with tool calls. \
-                 When the requested work is complete, emit `<done>{done_sentinel}</done>` \
-                 as its own top-level block."
-            ))
-        } else {
-            Some(
-                "\n\nIMPORTANT: You MUST keep working until the task is complete. \
-                 Do NOT stop to explain or summarize — take action with tool calls."
-                    .to_string(),
-            )
-        }
-    } else {
-        None
-    };
-    let mut visible_messages = opts.messages.clone();
-    let mut recorded_messages = opts.messages.clone();
-    // Emit `message` events for the initial payload so event-stream
-    // consumers (transcript replayers, LoRA corpus extractors) see the
-    // full opening context, not just messages accumulated during the loop.
-    for message in &opts.messages {
-        super::agent_observe::emit_message_event(message);
-    }
+    // Alias `state.config` back as the short `config` the loop body reads.
+    let config = &state.config;
 
-    // `total_text` is the concatenation of every iteration's assistant text.
-    // It is the raw transcript the reflector/meta-analysis callers want to
-    // see end-to-end. It is NOT suitable as "the agent's answer" because
-    // exploration turns and tool-call expressions from mid-run bleed into
-    // it. Callers wanting "what the user should see" should use the
-    // `visible_text` field instead, which is the LAST iteration's text
-    // alone — see the Ok(json!) block at the end of this function.
-    let mut total_text = String::new();
-    let mut last_iteration_text = String::new();
-    let mut consecutive_text_only = 0usize;
-    let mut consecutive_single_tool_turns = 0usize;
-    // Task ledger: durable task-wide state (root task + deliverables +
-    // rationale) that persists across turns and gates `<done>`. Seeded
-    // from `config.task_ledger`; mutated via `ledger(...)` tool calls.
-    // See `llm/ledger.rs` for shape, semantics, and the `<done>` gate.
-    let mut task_ledger = config.task_ledger.clone();
-    // Whether the agent has already been nudged about a `<done>`
-    // rejected by the ledger gate. Used to escalate the nudge if the
-    // agent keeps trying to emit `<done>` without resolving items.
-    let mut ledger_done_rejections = 0usize;
-    let mut all_tools_used: Vec<String> = Vec::new();
-    let mut successful_tools_used: Vec<String> = Vec::new();
-    let mut rejected_tools: Vec<String> = Vec::new();
-    let mut deferred_user_messages: Vec<String> = Vec::new();
-    let mut total_iterations = 0usize;
-    let mut final_status = "done";
-    let mut transcript_summary = opts.transcript_summary.clone();
-    let loop_start = std::time::Instant::now();
-    let mut transcript_events = Vec::new();
-    let mut idle_backoff_ms = 100u64;
-    let mut daemon_state = if daemon {
-        "active".to_string()
-    } else {
-        "done".to_string()
-    };
-    let mut daemon_snapshot_path: Option<String> = None;
-    let mut daemon_watch_state = watch_state(&daemon_config.watch_paths);
-    let mut resumed_iterations = 0usize;
-
-    if daemon {
-        if let Some(path) = daemon_config.resume_path.as_deref() {
-            let snapshot = load_snapshot(path)?;
-            daemon_state = snapshot.daemon_state.clone();
-            visible_messages = snapshot.visible_messages;
-            recorded_messages = snapshot.recorded_messages;
-            transcript_summary = snapshot.transcript_summary;
-            transcript_events = snapshot
-                .transcript_events
-                .iter()
-                .map(crate::stdlib::json_to_vm_value)
-                .collect();
-            total_text = snapshot.total_text;
-            last_iteration_text = snapshot.last_iteration_text;
-            all_tools_used = snapshot.all_tools_used;
-            rejected_tools = snapshot.rejected_tools;
-            deferred_user_messages = snapshot.deferred_user_messages;
-            resumed_iterations = snapshot.total_iterations;
-            total_iterations = resumed_iterations;
-            idle_backoff_ms = snapshot.idle_backoff_ms.max(1);
-            last_run_exit_code = snapshot.last_run_exit_code;
-            daemon_watch_state = if snapshot.watch_state.is_empty() {
-                watch_state(&daemon_config.watch_paths)
-            } else {
-                snapshot.watch_state
-            };
-            daemon_snapshot_path = Some(path.to_string());
-        } else if let Some(path) = daemon_config.effective_persist_path() {
-            daemon_snapshot_path = Some(path.to_string());
-        }
-    }
+    // Copy/clone bindings for identifiers that collide with argument
+    // names, module paths, or pattern bindings (so renaming `state.foo`
+    // at every callsite would be brittle). `bridge` is an `Option<Rc>`,
+    // cheap to clone; the rest are small scalars or already-cloned
+    // owned values.
+    let bridge = state.bridge.clone();
+    let max_iterations: usize = state.max_iterations;
+    let max_nudges: usize = state.max_nudges;
+    let tool_retries: usize = state.tool_retries;
+    let tool_backoff_ms: u64 = state.tool_backoff_ms;
+    let exit_when_verified: bool = state.exit_when_verified;
+    let persistent: bool = state.persistent;
+    let daemon: bool = state.daemon;
+    let has_tools: bool = state.has_tools;
+    let loop_detect_enabled: bool = state.loop_detect_enabled;
+    let resumed_iterations: usize = state.resumed_iterations;
+    let tool_format = state.tool_format.clone();
+    let done_sentinel = state.done_sentinel.clone();
+    let break_unless_phase = state.break_unless_phase.clone();
+    let loop_start = state.loop_start;
+    let tool_contract_prompt = state.tool_contract_prompt.clone();
+    let base_system = state.base_system.clone();
+    let persistent_system_prompt = state.persistent_system_prompt.clone();
+    let auto_compact = state.auto_compact.clone();
+    let daemon_config = state.daemon_config.clone();
+    let custom_nudge = state.custom_nudge.clone();
+    let session_id = state.session_id.clone();
 
     for iteration in 0..max_iterations {
-        total_iterations = resumed_iterations + iteration + 1;
-        super::agent_observe::set_current_iteration(Some(total_iterations));
-        daemon_state = "active".to_string();
+        state.total_iterations = resumed_iterations + iteration + 1;
+        super::agent_observe::set_current_iteration(Some(state.total_iterations));
+        state.daemon_state = "active".to_string();
         let immediate_messages = inject_queued_user_messages(
             bridge.as_ref(),
-            &mut visible_messages,
+            &mut state.visible_messages,
             crate::bridge::DeliveryCheckpoint::InterruptImmediate,
         )
         .await?;
-        append_host_messages_to_recorded(&mut recorded_messages, &immediate_messages);
+        append_host_messages_to_recorded(&mut state.recorded_messages, &immediate_messages);
         for message in &immediate_messages {
-            transcript_events.push(transcript_event(
+            state.transcript_events.push(transcript_event(
                 "host_input",
                 "user",
                 "public",
@@ -429,15 +214,15 @@ pub async fn run_agent_loop_internal(
             ));
         }
         if !immediate_messages.is_empty() {
-            consecutive_text_only = 0;
-            idle_backoff_ms = 100;
+            state.consecutive_text_only = 0;
+            state.idle_backoff_ms = 100;
         }
         let default_system = build_agent_system_prompt(
             base_system.as_deref(),
             tool_contract_prompt.as_deref(),
             persistent_system_prompt.as_deref(),
         );
-        let mut call_messages = visible_messages.clone();
+        let mut call_messages = state.visible_messages.clone();
         let call_system = default_system;
 
         // Emit a TurnStart event so pipeline subscribers (grounding,
@@ -459,11 +244,11 @@ pub async fn run_agent_loop_internal(
             })
             .await;
             append_message_to_contexts(
-                &mut visible_messages,
-                &mut recorded_messages,
+                &mut state.visible_messages,
+                &mut state.recorded_messages,
                 runtime_feedback_message(&kind, content),
             );
-            call_messages = visible_messages.clone();
+            call_messages = state.visible_messages.clone();
         }
         // Inject the task ledger as a transient user-role message at the
         // tail of the call payload. Not added to visible/recorded history
@@ -471,7 +256,7 @@ pub async fn run_agent_loop_internal(
         // conversation record isn't polluted with repeated ledger echoes.
         // The ledger IS reflected in history indirectly via the
         // `ledger(...)` tool calls the agent emits to mutate it.
-        let ledger_rendered = task_ledger.render_for_prompt();
+        let ledger_rendered = state.task_ledger.render_for_prompt();
         if !ledger_rendered.is_empty() {
             call_messages.push(serde_json::json!({
                 "role": "user",
@@ -501,12 +286,12 @@ pub async fn run_agent_loop_internal(
         .await?;
 
         let text = result.text.clone();
-        total_text.push_str(&text);
+        state.total_text.push_str(&text);
         // `last_iteration_text` is assigned below AFTER the tool-call parser
         // runs, so it holds the prose (calls stripped) rather than the raw
         // text. For the native-tool-call and no-tools branches we fall back
         // to the raw text a few lines down.
-        transcript_events.push(transcript_event(
+        state.transcript_events.push(transcript_event(
             "provider_payload",
             "assistant",
             "internal",
@@ -521,7 +306,7 @@ pub async fn run_agent_loop_internal(
         ));
         if let Some(thinking) = result.thinking.clone() {
             if !thinking.is_empty() {
-                transcript_events.push(transcript_event(
+                state.transcript_events.push(transcript_event(
                     "private_reasoning",
                     "assistant",
                     "private",
@@ -619,8 +404,8 @@ pub async fn run_agent_loop_internal(
                          Heredoc avoids all escaping issues."
                     );
                     append_message_to_contexts(
-                        &mut visible_messages,
-                        &mut recorded_messages,
+                        &mut state.visible_messages,
+                        &mut state.recorded_messages,
                         runtime_feedback_message("parse_guidance", feedback),
                     );
                 }
@@ -647,7 +432,7 @@ pub async fn run_agent_loop_internal(
         // block, append its canonical wrapper so post-turn callbacks can
         // substring-match the configured sentinel without the UI showing
         // it (visible-text sanitization strips `<done>` blocks downstream).
-        last_iteration_text = match tagged_done_marker.as_deref() {
+        state.last_iteration_text = match tagged_done_marker.as_deref() {
             Some(body) if shaped_text_prose.trim().is_empty() => {
                 format!("<done>{body}</done>")
             }
@@ -674,8 +459,8 @@ pub async fn run_agent_loop_internal(
                 protocol_violations.join("\n- "),
             );
             append_message_to_contexts(
-                &mut visible_messages,
-                &mut recorded_messages,
+                &mut state.visible_messages,
+                &mut state.recorded_messages,
                 runtime_feedback_message("protocol_violation", feedback),
             );
         }
@@ -712,42 +497,42 @@ pub async fn run_agent_loop_internal(
         // When exit_when_verified is set, the sentinel is only honoured if the
         // last run() tool call returned exit code 0.  This prevents premature
         // exit when the model claims it's done but verification hasn't passed.
-        let verified = !exit_when_verified || last_run_exit_code == Some(0);
+        let verified = !exit_when_verified || state.last_run_exit_code == Some(0);
         // Guard: the model must have made at least one tool call before the
         // done sentinel is honoured.  This prevents premature exits where the
         // model describes a plan and emits ##DONE## without actually acting.
-        let has_acted = !all_tools_used.is_empty() || !tool_calls.is_empty();
+        let has_acted = !state.all_tools_used.is_empty() || !tool_calls.is_empty();
         // Ledger gate: if a task ledger was seeded and still has open or
         // blocked deliverables, the done sentinel is rejected. This is
         // the general-purpose "what does the user call done?" mechanism
         // that replaces ad-hoc task-specific guardrails. See
         // `llm/ledger.rs` for the structured semantics.
-        let ledger_blocks_done = task_ledger.gates_done();
+        let ledger_blocks_done = state.task_ledger.gates_done();
         let sentinel_hit = persistent
             && ((sentinel_in_text && verified && has_acted && !ledger_blocks_done) || phase_change);
 
         if sentinel_in_text && ledger_blocks_done && persistent {
-            let corrective = task_ledger.done_gate_feedback();
+            let corrective = state.task_ledger.done_gate_feedback();
             append_message_to_contexts(
-                &mut visible_messages,
-                &mut recorded_messages,
+                &mut state.visible_messages,
+                &mut state.recorded_messages,
                 runtime_feedback_message("ledger_not_satisfied", corrective),
             );
-            ledger_done_rejections += 1;
+            state.ledger_done_rejections += 1;
         }
 
         // If the model emitted the sentinel but verification hasn't passed,
         // inject a corrective so the model knows it must keep going.
         if sentinel_in_text && !verified && persistent {
-            let code_str = last_run_exit_code.map_or("none".to_string(), |c| c.to_string());
+            let code_str = state.last_run_exit_code.map_or("none".to_string(), |c| c.to_string());
             let corrective = format!(
                 "You emitted the done sentinel but verification has not passed \
                  (last run exit code: {code_str}). The loop will continue. \
                  Run the verification command and fix any failures before finishing."
             );
             append_message_to_contexts(
-                &mut visible_messages,
-                &mut recorded_messages,
+                &mut state.visible_messages,
+                &mut state.recorded_messages,
                 runtime_feedback_message("verification_gate", corrective),
             );
         }
@@ -757,8 +542,8 @@ pub async fn run_agent_loop_internal(
             let corrective =
                 sentinel_without_action_nudge(&tool_format, config.turn_policy.as_ref());
             append_message_to_contexts(
-                &mut visible_messages,
-                &mut recorded_messages,
+                &mut state.visible_messages,
+                &mut state.recorded_messages,
                 runtime_feedback_message("sentinel_without_action", corrective),
             );
         }
@@ -783,10 +568,10 @@ pub async fn run_agent_loop_internal(
                 .get("arguments")
                 .cloned()
                 .unwrap_or(serde_json::json!({}));
-            let result_text = match task_ledger.apply(&args) {
+            let result_text = match state.task_ledger.apply(&args) {
                 Ok(summary) => {
-                    all_tools_used.push("ledger".to_string());
-                    successful_tools_used.push("ledger".to_string());
+                    state.all_tools_used.push("ledger".to_string());
+                    state.successful_tools_used.push("ledger".to_string());
                     format!("<tool_result>ledger: {summary}</tool_result>")
                 }
                 Err(err) => format!("<tool_result>ledger error: {err}</tool_result>"),
@@ -802,16 +587,16 @@ pub async fn run_agent_loop_internal(
             false
         });
         for message in ledger_tool_results.drain(..) {
-            append_message_to_contexts(&mut visible_messages, &mut recorded_messages, message);
+            append_message_to_contexts(&mut state.visible_messages, &mut state.recorded_messages, message);
         }
 
         if !tool_calls.is_empty() {
-            consecutive_text_only = 0;
-            idle_backoff_ms = 100;
+            state.consecutive_text_only = 0;
+            state.idle_backoff_ms = 100;
             if tool_format == "native" {
                 append_message_to_contexts(
-                    &mut visible_messages,
-                    &mut recorded_messages,
+                    &mut state.visible_messages,
+                    &mut state.recorded_messages,
                     build_assistant_tool_message(&text, &tool_calls, &opts.provider),
                 );
             } else {
@@ -822,8 +607,8 @@ pub async fn run_agent_loop_internal(
                     &tool_calls,
                 );
                 append_message_to_contexts(
-                    &mut visible_messages,
-                    &mut recorded_messages,
+                    &mut state.visible_messages,
+                    &mut state.recorded_messages,
                     serde_json::json!({
                         "role": "assistant",
                         "content": assistant_content_for_history,
@@ -918,7 +703,7 @@ pub async fn run_agent_loop_internal(
                 // (marked with __parse_error sentinel during response parsing).
                 if let Some(parse_err) = tool_args.get("__parse_error").and_then(|v| v.as_str()) {
                     let result_text = format!("ERROR: {parse_err}");
-                    transcript_events.push(transcript_event(
+                    state.transcript_events.push(transcript_event(
                         "tool_execution",
                         "tool",
                         "internal",
@@ -931,8 +716,8 @@ pub async fn run_agent_loop_internal(
                     ));
                     if tool_format == "native" {
                         append_message_to_contexts(
-                            &mut visible_messages,
-                            &mut recorded_messages,
+                            &mut state.visible_messages,
+                            &mut state.recorded_messages,
                             build_tool_result_message(tool_id, &result_text, &opts.provider),
                         );
                     } else {
@@ -960,10 +745,10 @@ pub async fn run_agent_loop_internal(
                             "{error}. Use one of the declared tools exactly as named and put extra fields inside that tool's arguments."
                         ),
                     ));
-                    if !rejected_tools.contains(&tool_name.to_string()) {
-                        rejected_tools.push(tool_name.to_string());
+                    if !state.rejected_tools.contains(&tool_name.to_string()) {
+                        state.rejected_tools.push(tool_name.to_string());
                     }
-                    transcript_events.push(transcript_event(
+                    state.transcript_events.push(transcript_event(
                         "tool_execution",
                         "tool",
                         "internal",
@@ -977,8 +762,8 @@ pub async fn run_agent_loop_internal(
                     ));
                     if tool_format == "native" {
                         append_message_to_contexts(
-                            &mut visible_messages,
-                            &mut recorded_messages,
+                            &mut state.visible_messages,
+                            &mut state.recorded_messages,
                             build_tool_result_message(tool_id, &result_text, &opts.provider),
                         );
                     } else {
@@ -1062,10 +847,10 @@ pub async fn run_agent_loop_internal(
                 };
                 if let Err((approval_status, reason)) = approval_outcome {
                     let result_text = render_tool_result(&denied_tool_result(tool_name, reason));
-                    if !rejected_tools.contains(&tool_name.to_string()) {
-                        rejected_tools.push(tool_name.to_string());
+                    if !state.rejected_tools.contains(&tool_name.to_string()) {
+                        state.rejected_tools.push(tool_name.to_string());
                     }
-                    transcript_events.push(transcript_event(
+                    state.transcript_events.push(transcript_event(
                         "tool_execution",
                         "tool",
                         "internal",
@@ -1080,8 +865,8 @@ pub async fn run_agent_loop_internal(
                     ));
                     if tool_format == "native" {
                         append_message_to_contexts(
-                            &mut visible_messages,
-                            &mut recorded_messages,
+                            &mut state.visible_messages,
+                            &mut state.recorded_messages,
                             build_tool_result_message(tool_id, &result_text, &opts.provider),
                         );
                     } else {
@@ -1092,7 +877,7 @@ pub async fn run_agent_loop_internal(
                     continue;
                 }
                 if let Ok(Some(approval_status)) = approval_outcome {
-                    transcript_events.push(transcript_event(
+                    state.transcript_events.push(transcript_event(
                         "tool_execution",
                         "tool",
                         "internal",
@@ -1111,17 +896,17 @@ pub async fn run_agent_loop_internal(
                     crate::orchestration::PreToolAction::Deny(reason) => {
                         let result_text =
                             render_tool_result(&denied_tool_result(tool_name, reason));
-                        if !rejected_tools.contains(&tool_name.to_string()) {
-                            rejected_tools.push(tool_name.to_string());
+                        if !state.rejected_tools.contains(&tool_name.to_string()) {
+                            state.rejected_tools.push(tool_name.to_string());
                         }
-                        transcript_events.push(transcript_event(
+                        state.transcript_events.push(transcript_event(
                             "tool_execution", "tool", "internal", &result_text,
                             Some(serde_json::json!({"tool_name": tool_name, "tool_use_id": tool_id, "rejected": true})),
                         ));
                         if tool_format == "native" {
                             append_message_to_contexts(
-                                &mut visible_messages,
-                                &mut recorded_messages,
+                                &mut state.visible_messages,
+                                &mut state.recorded_messages,
                                 build_tool_result_message(tool_id, &result_text, &opts.provider),
                             );
                         } else {
@@ -1152,7 +937,7 @@ pub async fn run_agent_loop_internal(
                 // a clear error instead of a cryptic handler failure.
                 if let Err(msg) = validate_tool_args(tool_name, &tool_args, &tool_schemas) {
                     let result_text = format!("ERROR: {msg}");
-                    transcript_events.push(transcript_event(
+                    state.transcript_events.push(transcript_event(
                         "tool_execution",
                         "tool",
                         "internal",
@@ -1166,8 +951,8 @@ pub async fn run_agent_loop_internal(
                     ));
                     if tool_format == "native" {
                         append_message_to_contexts(
-                            &mut visible_messages,
-                            &mut recorded_messages,
+                            &mut state.visible_messages,
+                            &mut state.recorded_messages,
                             build_tool_result_message(tool_id, &result_text, &opts.provider),
                         );
                     } else {
@@ -1178,7 +963,7 @@ pub async fn run_agent_loop_internal(
                     continue;
                 }
 
-                transcript_events.push(transcript_event(
+                state.transcript_events.push(transcript_event(
                     "tool_intent",
                     "assistant",
                     "internal",
@@ -1268,7 +1053,7 @@ pub async fn run_agent_loop_internal(
                 };
                 if loop_detect_enabled {
                     if let LoopIntervention::Skip { count } =
-                        loop_tracker.check(tool_name, args_hash)
+                        state.loop_tracker.check(tool_name, args_hash)
                     {
                         // Skip execution entirely — the model is stuck.
                         let skip_msg = loop_intervention_message(
@@ -1277,7 +1062,7 @@ pub async fn run_agent_loop_internal(
                             &LoopIntervention::Skip { count },
                         )
                         .unwrap_or_default();
-                        transcript_events.push(transcript_event(
+                        state.transcript_events.push(transcript_event(
                             "tool_execution",
                             "tool",
                             "internal",
@@ -1291,8 +1076,8 @@ pub async fn run_agent_loop_internal(
                         ));
                         if tool_format == "native" {
                             append_message_to_contexts(
-                                &mut visible_messages,
-                                &mut recorded_messages,
+                                &mut state.visible_messages,
+                                &mut state.recorded_messages,
                                 build_tool_result_message(tool_id, &skip_msg, &opts.provider),
                             );
                         } else {
@@ -1371,8 +1156,8 @@ pub async fn run_agent_loop_internal(
                     (rejected, text)
                 };
 
-                if is_rejected && !rejected_tools.contains(&tool_name.to_string()) {
-                    rejected_tools.push(tool_name.to_string());
+                if is_rejected && !state.rejected_tools.contains(&tool_name.to_string()) {
+                    state.rejected_tools.push(tool_name.to_string());
                 }
 
                 // Track run() exit codes for verification-gated exit.
@@ -1383,12 +1168,12 @@ pub async fn run_agent_loop_internal(
                         || result_text.contains("Command succeeded")
                         || result_text.contains("success=true")
                     {
-                        last_run_exit_code = Some(0);
+                        state.last_run_exit_code = Some(0);
                     } else if result_text.contains("Command failed")
                         || result_text.contains("success=false")
                         || result_text.contains("exit_code=")
                     {
-                        last_run_exit_code = Some(1);
+                        state.last_run_exit_code = Some(1);
                     }
                 }
 
@@ -1485,7 +1270,7 @@ pub async fn run_agent_loop_internal(
                 // append a redirection hint or replace the result.
                 let result_text = if loop_detect_enabled && !is_rejected {
                     let result_hash = stable_hash_str(&result_text);
-                    let intervention = loop_tracker.record(tool_name, args_hash, result_hash);
+                    let intervention = state.loop_tracker.record(tool_name, args_hash, result_hash);
                     if let Some(msg) =
                         loop_intervention_message(tool_name, &result_text, &intervention)
                     {
@@ -1534,7 +1319,7 @@ pub async fn run_agent_loop_internal(
                     "rejected": is_rejected,
                 }));
 
-                transcript_events.push(transcript_event(
+                state.transcript_events.push(transcript_event(
                     "tool_execution",
                     "tool",
                     "internal",
@@ -1565,8 +1350,8 @@ pub async fn run_agent_loop_internal(
 
                 if tool_format == "native" {
                     append_message_to_contexts(
-                        &mut visible_messages,
-                        &mut recorded_messages,
+                        &mut state.visible_messages,
+                        &mut state.recorded_messages,
                         build_tool_result_message(tool_id, &result_text, &opts.provider),
                     );
                 } else {
@@ -1576,30 +1361,30 @@ pub async fn run_agent_loop_internal(
                 }
             }
 
-            all_tools_used.extend(tools_used_this_iter);
+            state.all_tools_used.extend(tools_used_this_iter);
             if tool_format != "native" && !observations.is_empty() {
                 append_message_to_contexts(
-                    &mut visible_messages,
-                    &mut recorded_messages,
+                    &mut state.visible_messages,
+                    &mut state.recorded_messages,
                     runtime_feedback_message("tool_results", observations.trim_end()),
                 );
             }
             if !rejection_followups.is_empty() {
                 append_message_to_contexts(
-                    &mut visible_messages,
-                    &mut recorded_messages,
+                    &mut state.visible_messages,
+                    &mut state.recorded_messages,
                     runtime_feedback_message("tool_rejection", rejection_followups.join("\n\n")),
                 );
             }
             let finish_step_messages = inject_queued_user_messages(
                 bridge.as_ref(),
-                &mut visible_messages,
+                &mut state.visible_messages,
                 crate::bridge::DeliveryCheckpoint::AfterCurrentOperation,
             )
             .await?;
-            append_host_messages_to_recorded(&mut recorded_messages, &finish_step_messages);
+            append_host_messages_to_recorded(&mut state.recorded_messages, &finish_step_messages);
             for message in &finish_step_messages {
-                transcript_events.push(transcript_event(
+                state.transcript_events.push(transcript_event(
                     "host_input",
                     "user",
                     "public",
@@ -1608,16 +1393,16 @@ pub async fn run_agent_loop_internal(
                 ));
             }
             if !finish_step_messages.is_empty() {
-                consecutive_text_only = 0;
+                state.consecutive_text_only = 0;
             }
 
             // Post-turn callback: let the pipeline inspect each tool turn
             // and optionally inject a user message (e.g. batching hints,
             // progress tracking, adaptive instructions).
             if tool_calls.len() == 1 {
-                consecutive_single_tool_turns += 1;
+                state.consecutive_single_tool_turns += 1;
             } else {
-                consecutive_single_tool_turns = 0;
+                state.consecutive_single_tool_turns = 0;
             }
             let successful_tool_names: Vec<&str> = tool_results_this_iter
                 .iter()
@@ -1625,11 +1410,11 @@ pub async fn run_agent_loop_internal(
                 .filter_map(|result| result["tool_name"].as_str())
                 .collect();
             for tool_name in &successful_tool_names {
-                if !successful_tools_used
+                if !state.successful_tools_used
                     .iter()
                     .any(|existing| existing == tool_name)
                 {
-                    successful_tools_used.push((*tool_name).to_string());
+                    state.successful_tools_used.push((*tool_name).to_string());
                 }
             }
             // Emit TurnEnd. Pipeline subscribers may react by pushing
@@ -1647,9 +1432,9 @@ pub async fn run_agent_loop_internal(
                     "successful_tool_names": successful_tool_names,
                     "tool_count": tool_calls.len(),
                     "iteration": iteration,
-                    "consecutive_single_tool_turns": consecutive_single_tool_turns,
-                    "session_tools_used": all_tools_used,
-                    "session_successful_tools": successful_tools_used,
+                    "consecutive_single_tool_turns": state.consecutive_single_tool_turns,
+                    "session_tools_used": state.all_tools_used,
+                    "session_successful_tools": state.successful_tools_used,
                 });
                 emit_agent_event(&AgentEvent::TurnEnd {
                     session_id: session_id.clone(),
@@ -1674,15 +1459,15 @@ pub async fn run_agent_loop_internal(
             // Include the system prompt + tool definitions in the estimate
             // since they consume context window alongside messages.
             if let Some(ref ac) = auto_compact {
-                let mut est = crate::orchestration::estimate_message_tokens(&visible_messages);
+                let mut est = crate::orchestration::estimate_message_tokens(&state.visible_messages);
                 if let Some(ref sys) = opts.system {
                     est += sys.len() / 4;
                 }
                 if est > ac.token_threshold {
                     let mut compact_opts = opts.clone();
-                    compact_opts.messages = visible_messages.clone();
+                    compact_opts.messages = state.visible_messages.clone();
                     if let Some(summary) = crate::orchestration::auto_compact_messages(
-                        &mut visible_messages,
+                        &mut state.visible_messages,
                         ac,
                         Some(&compact_opts),
                     )
@@ -1692,14 +1477,14 @@ pub async fn run_agent_loop_internal(
                             super::trace::AgentTraceEvent::ContextCompaction {
                                 archived_messages: est.saturating_sub(
                                     crate::orchestration::estimate_message_tokens(
-                                        &visible_messages,
+                                        &state.visible_messages,
                                     ),
                                 ),
                                 new_summary_len: summary.len(),
                                 iteration,
                             },
                         );
-                        let merged = match transcript_summary.take() {
+                        let merged = match state.transcript_summary.take() {
                             Some(existing)
                                 if !existing.trim().is_empty()
                                     && existing.trim() != summary.trim() =>
@@ -1708,7 +1493,7 @@ pub async fn run_agent_loop_internal(
                             }
                             Some(_) | None => summary,
                         };
-                        transcript_summary = Some(merged);
+                        state.transcript_summary = Some(merged);
                     }
                 }
             }
@@ -1720,8 +1505,8 @@ pub async fn run_agent_loop_internal(
             if !tool_parse_errors.is_empty() {
                 let error_msg = tool_parse_errors.join("\n\n");
                 append_message_to_contexts(
-                    &mut visible_messages,
-                    &mut recorded_messages,
+                    &mut state.visible_messages,
+                    &mut state.recorded_messages,
                     runtime_feedback_message("parse_error", error_msg),
                 );
             }
@@ -1748,8 +1533,8 @@ pub async fn run_agent_loop_internal(
             &tool_calls,
         );
         append_message_to_contexts(
-            &mut visible_messages,
-            &mut recorded_messages,
+            &mut state.visible_messages,
+            &mut state.recorded_messages,
             serde_json::json!({
                 "role": "assistant",
                 "content": assistant_content_for_history,
@@ -1766,12 +1551,12 @@ pub async fn run_agent_loop_internal(
         if !tool_parse_errors.is_empty() {
             let error_msg = tool_parse_errors.join("\n\n");
             append_message_to_contexts(
-                &mut visible_messages,
-                &mut recorded_messages,
+                &mut state.visible_messages,
+                &mut state.recorded_messages,
                 runtime_feedback_message("parse_error", error_msg),
             );
             tool_parse_errors.clear();
-            consecutive_text_only = 0;
+            state.consecutive_text_only = 0;
             continue;
         }
 
@@ -1784,36 +1569,36 @@ pub async fn run_agent_loop_internal(
         // Daemon mode: if no tool calls and agent is idle, notify host and
         // wait briefly for user messages before deciding to continue/exit.
         if daemon && !persistent {
-            daemon_state = "idle".to_string();
+            state.daemon_state = "idle".to_string();
             if daemon_config.consolidate_on_idle {
                 maybe_auto_compact_agent_messages(
                     opts,
                     &auto_compact,
-                    &mut visible_messages,
-                    &mut transcript_summary,
+                    &mut state.visible_messages,
+                    &mut state.transcript_summary,
                 )
                 .await?;
             }
             let idle_snapshot = daemon_snapshot_from_state(
-                &daemon_state,
-                &visible_messages,
-                &recorded_messages,
-                &transcript_summary,
-                &transcript_events,
-                &total_text,
-                &last_iteration_text,
-                &all_tools_used,
-                &rejected_tools,
-                &deferred_user_messages,
-                total_iterations,
-                idle_backoff_ms,
-                last_run_exit_code,
-                &daemon_watch_state,
+                &state.daemon_state,
+                &state.visible_messages,
+                &state.recorded_messages,
+                &state.transcript_summary,
+                &state.transcript_events,
+                &state.total_text,
+                &state.last_iteration_text,
+                &state.all_tools_used,
+                &state.rejected_tools,
+                &state.deferred_user_messages,
+                state.total_iterations,
+                state.idle_backoff_ms,
+                state.last_run_exit_code,
+                &state.daemon_watch_state,
             );
-            daemon_snapshot_path = maybe_persist_daemon_snapshot(&daemon_config, &idle_snapshot)?
-                .or(daemon_snapshot_path);
+            state.daemon_snapshot_path = maybe_persist_daemon_snapshot(&daemon_config, &idle_snapshot)?
+                .or(state.daemon_snapshot_path);
             if !daemon_config.has_wake_source(bridge.is_some()) {
-                final_status = "idle";
+                state.final_status = "idle";
                 break;
             }
             loop {
@@ -1821,15 +1606,15 @@ pub async fn run_agent_loop_internal(
                     bridge.notify(
                         "agent/idle",
                         serde_json::json!({
-                            "iteration": total_iterations,
-                            "backoff_ms": idle_backoff_ms,
-                            "persist_path": daemon_snapshot_path,
+                            "iteration": state.total_iterations,
+                            "backoff_ms": state.idle_backoff_ms,
+                            "persist_path": state.daemon_snapshot_path,
                             "watch_paths": daemon_config.watch_paths,
                         }),
                     );
                 }
                 tokio::time::sleep(tokio::time::Duration::from_millis(
-                    daemon_config.idle_wait_ms(idle_backoff_ms),
+                    daemon_config.idle_wait_ms(state.idle_backoff_ms),
                 ))
                 .await;
                 let resumed = bridge
@@ -1837,18 +1622,18 @@ pub async fn run_agent_loop_internal(
                     .is_some_and(|bridge| bridge.take_resume_signal());
                 let idle_messages = inject_queued_user_messages(
                     bridge.as_ref(),
-                    &mut visible_messages,
+                    &mut state.visible_messages,
                     crate::bridge::DeliveryCheckpoint::InterruptImmediate,
                 )
                 .await?;
-                append_host_messages_to_recorded(&mut recorded_messages, &idle_messages);
+                append_host_messages_to_recorded(&mut state.recorded_messages, &idle_messages);
                 let changed_paths = if daemon_config.watch_paths.is_empty() {
                     Vec::new()
                 } else {
-                    detect_watch_changes(&daemon_config.watch_paths, &mut daemon_watch_state)
+                    detect_watch_changes(&daemon_config.watch_paths, &mut state.daemon_watch_state)
                 };
                 for message in &idle_messages {
-                    transcript_events.push(transcript_event(
+                    state.transcript_events.push(transcript_event(
                         "host_input",
                         "user",
                         "public",
@@ -1882,12 +1667,12 @@ pub async fn run_agent_loop_internal(
                 if let Some((reason, wake_message)) = wake_reason {
                     if let Some(message) = wake_message {
                         append_message_to_contexts(
-                            &mut visible_messages,
-                            &mut recorded_messages,
+                            &mut state.visible_messages,
+                            &mut state.recorded_messages,
                             runtime_feedback_message(reason, message),
                         );
                     }
-                    transcript_events.push(transcript_event(
+                    state.transcript_events.push(transcript_event(
                         "daemon_wake",
                         "system",
                         "internal",
@@ -1898,25 +1683,25 @@ pub async fn run_agent_loop_internal(
                             "resumed": resumed,
                         })),
                     ));
-                    daemon_state = "active".to_string();
-                    consecutive_text_only = 0;
-                    idle_backoff_ms = 100;
+                    state.daemon_state = "active".to_string();
+                    state.consecutive_text_only = 0;
+                    state.idle_backoff_ms = 100;
                     break;
                 }
-                daemon_config.update_idle_backoff(&mut idle_backoff_ms);
+                daemon_config.update_idle_backoff(&mut state.idle_backoff_ms);
             }
             continue;
         }
 
         let finish_step_messages = inject_queued_user_messages(
             bridge.as_ref(),
-            &mut visible_messages,
+            &mut state.visible_messages,
             crate::bridge::DeliveryCheckpoint::AfterCurrentOperation,
         )
         .await?;
-        append_host_messages_to_recorded(&mut recorded_messages, &finish_step_messages);
+        append_host_messages_to_recorded(&mut state.recorded_messages, &finish_step_messages);
         for message in &finish_step_messages {
-            transcript_events.push(transcript_event(
+            state.transcript_events.push(transcript_event(
                 "host_input",
                 "user",
                 "public",
@@ -1925,14 +1710,14 @@ pub async fn run_agent_loop_internal(
             ));
         }
         if !finish_step_messages.is_empty() {
-            consecutive_text_only = 0;
-            idle_backoff_ms = 100;
+            state.consecutive_text_only = 0;
+            state.idle_backoff_ms = 100;
             continue;
         }
 
-        consecutive_text_only += 1;
-        if consecutive_text_only > max_nudges {
-            final_status = "stuck";
+        state.consecutive_text_only += 1;
+        if state.consecutive_text_only > max_nudges {
+            state.final_status = "stuck";
             break;
         }
 
@@ -1948,16 +1733,16 @@ pub async fn run_agent_loop_internal(
             .or_else(|| custom_nudge.clone())
             .unwrap_or_else(|| "Continue — use a tool call to make progress.".to_string());
         append_message_to_contexts(
-            &mut visible_messages,
-            &mut recorded_messages,
+            &mut state.visible_messages,
+            &mut state.recorded_messages,
             runtime_feedback_message("nudge", nudge),
         );
     }
 
-    deferred_user_messages.extend(
+    state.deferred_user_messages.extend(
         inject_queued_user_messages(
             bridge.as_ref(),
-            &mut visible_messages,
+            &mut state.visible_messages,
             crate::bridge::DeliveryCheckpoint::EndOfInteraction,
         )
         .await?
@@ -1965,81 +1750,81 @@ pub async fn run_agent_loop_internal(
         .map(|message| message.content),
     );
 
-    if daemon && final_status == "done" {
-        final_status = "idle";
+    if daemon && state.final_status == "done" {
+        state.final_status = "idle";
     }
-    if final_status == "done" {
+    if state.final_status == "done" {
         if let Some(required_tools) = config.require_successful_tools.as_ref() {
             if !required_tools.is_empty()
-                && !successful_tools_used
+                && !state.successful_tools_used
                     .iter()
                     .any(|tool_name| required_tools.iter().any(|wanted| wanted == tool_name))
             {
-                final_status = "failed";
+                state.final_status = "failed";
             }
         }
     }
     if daemon {
-        daemon_state = final_status.to_string();
+        state.daemon_state = state.final_status.to_string();
         let final_snapshot = daemon_snapshot_from_state(
-            &daemon_state,
-            &visible_messages,
-            &recorded_messages,
-            &transcript_summary,
-            &transcript_events,
-            &total_text,
-            &last_iteration_text,
-            &all_tools_used,
-            &rejected_tools,
-            &deferred_user_messages,
-            total_iterations,
-            idle_backoff_ms,
-            last_run_exit_code,
-            &daemon_watch_state,
+            &state.daemon_state,
+            &state.visible_messages,
+            &state.recorded_messages,
+            &state.transcript_summary,
+            &state.transcript_events,
+            &state.total_text,
+            &state.last_iteration_text,
+            &state.all_tools_used,
+            &state.rejected_tools,
+            &state.deferred_user_messages,
+            state.total_iterations,
+            state.idle_backoff_ms,
+            state.last_run_exit_code,
+            &state.daemon_watch_state,
         );
-        daemon_snapshot_path = maybe_persist_daemon_snapshot(&daemon_config, &final_snapshot)?
-            .or(daemon_snapshot_path);
+        state.daemon_snapshot_path = maybe_persist_daemon_snapshot(&daemon_config, &final_snapshot)?
+            .or(state.daemon_snapshot_path);
     }
 
     // Emit structured trace event for loop completion.
     super::trace::emit_agent_event(super::trace::AgentTraceEvent::LoopComplete {
-        status: final_status.to_string(),
-        iterations: total_iterations,
+        status: state.final_status.to_string(),
+        iterations: state.total_iterations,
         total_duration_ms: loop_start.elapsed().as_millis() as u64,
-        tools_used: all_tools_used.clone(),
-        successful_tools: successful_tools_used.clone(),
+        tools_used: state.all_tools_used.clone(),
+        successful_tools: state.successful_tools_used.clone(),
     });
     let trace_summary = super::trace::agent_trace_summary();
 
     // Serialize the final ledger state into the result so workflow post-
     // processors (QC officer, audit pipelines) can reason over what the
     // agent thought "done" meant.
-    let ledger_json = serde_json::to_value(&task_ledger).unwrap_or(serde_json::Value::Null);
-    let ledger_done_nudge_count = ledger_done_rejections as i64;
+    let ledger_json = serde_json::to_value(&state.task_ledger).unwrap_or(serde_json::Value::Null);
+    let ledger_done_nudge_count = state.ledger_done_rejections as i64;
     Ok(serde_json::json!({
-        "status": final_status,
-        "daemon_state": daemon_state,
-        "daemon_snapshot_path": daemon_snapshot_path,
-        "text": total_text,
-        "visible_text": last_iteration_text,
-        "iterations": total_iterations,
+        "status": state.final_status,
+        "daemon_state": state.daemon_state,
+        "daemon_snapshot_path": state.daemon_snapshot_path,
+        "text": state.total_text,
+        "visible_text": state.last_iteration_text,
+        "iterations": state.total_iterations,
         "duration_ms": loop_start.elapsed().as_millis() as i64,
-        "tools_used": all_tools_used,
-        "successful_tools": successful_tools_used,
-        "rejected_tools": rejected_tools,
+        "tools_used": state.all_tools_used,
+        "successful_tools": state.successful_tools_used,
+        "rejected_tools": state.rejected_tools,
         "tool_calling_mode": tool_format,
-        "deferred_user_messages": deferred_user_messages,
+        "deferred_user_messages": state.deferred_user_messages,
         "task_ledger": ledger_json,
         "ledger_done_rejections": ledger_done_nudge_count,
         "trace": trace_summary,
         "transcript": super::helpers::vm_value_to_json(&transcript_to_vm_with_events(
             opts.transcript_id.clone(),
-            transcript_summary,
+            state.transcript_summary,
             opts.transcript_metadata.clone(),
-            &recorded_messages,
-            transcript_events,
+            &state.recorded_messages,
+            state.transcript_events,
             Vec::new(),
-            Some(if final_status == "done" { "active" } else { "paused" }),
+            Some(if state.final_status == "done" { "active" } else { "paused" }),
         )),
     }))
 }
