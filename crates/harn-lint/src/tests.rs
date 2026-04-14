@@ -1669,3 +1669,76 @@ pipeline default(task) {
         "llm_call direct access should trigger rule, got: {diags:?}"
     );
 }
+
+// -----------------------------------------------------------------------
+// eager-collection-conversion
+// -----------------------------------------------------------------------
+
+#[test]
+fn test_eager_collection_conversion_let_list() {
+    let source = r#"pipeline default(task) {
+  let xs: list<int> = iter([1, 2, 3]).map(fn(x) { return x + 1 })
+  log(xs)
+}
+"#;
+    let diags = lint_source(source);
+    assert_eq!(
+        count_rule(&diags, "eager-collection-conversion"),
+        1,
+        "expected exactly one eager-collection-conversion diagnostic, got: {diags:?}"
+    );
+    let fixed = apply_fixes(source, &diags);
+    assert!(
+        fixed.contains(".to_list()"),
+        "expected autofix to append .to_list(), got: {fixed}"
+    );
+}
+
+#[test]
+fn test_eager_collection_conversion_no_flag_when_already_to_list() {
+    let source = r#"pipeline default(task) {
+  let xs: list<int> = iter([1, 2, 3]).map(fn(x) { return x + 1 }).to_list()
+  log(xs)
+}
+"#;
+    let diags = lint_source(source);
+    assert_eq!(
+        count_rule(&diags, "eager-collection-conversion"),
+        0,
+        "should not flag already-materialized chains, got: {diags:?}"
+    );
+}
+
+#[test]
+fn test_eager_collection_conversion_return_stmt() {
+    let source = r#"fn build() -> list<int> {
+  return iter([1, 2, 3]).filter(fn(x) { return x > 0 })
+}
+"#;
+    let diags = lint_source(source);
+    assert_eq!(
+        count_rule(&diags, "eager-collection-conversion"),
+        1,
+        "expected eager-collection-conversion on return, got: {diags:?}"
+    );
+    let fixed = apply_fixes(source, &diags);
+    assert!(
+        fixed.contains(".to_list()"),
+        "expected autofix to append .to_list(), got: {fixed}"
+    );
+}
+
+#[test]
+fn test_eager_collection_conversion_ignores_iter_annotation() {
+    let source = r#"pipeline default(task) {
+  let xs: Iter<int> = iter([1, 2, 3]).map(fn(x) { return x + 1 })
+  log(xs)
+}
+"#;
+    let diags = lint_source(source);
+    assert_eq!(
+        count_rule(&diags, "eager-collection-conversion"),
+        0,
+        "Iter<T> annotation should not trigger rule, got: {diags:?}"
+    );
+}

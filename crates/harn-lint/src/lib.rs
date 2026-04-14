@@ -11,7 +11,7 @@ mod tests;
 
 use complexity::cyclomatic_complexity;
 use fixes::{
-    empty_statement_removal_fix, is_pure_expression, nil_fallback_ternary_parts,
+    append_sink_fix, empty_statement_removal_fix, is_pure_expression, nil_fallback_ternary_parts,
     simple_ident_rename_fix,
 };
 
@@ -111,6 +111,11 @@ struct Linter<'a> {
     type_declarations: Vec<TypeDeclaration>,
     /// Track type names referenced anywhere in the file.
     type_references: HashSet<String>,
+    /// Stack of declared return types for the current function nesting.
+    /// Used by the `eager-collection-conversion` lint rule to flag
+    /// `return <iter-chain>` inside a function declared to return a
+    /// concrete collection.
+    return_type_stack: Vec<Option<TypeExpr>>,
 }
 
 impl<'a> Linter<'a> {
@@ -135,6 +140,7 @@ impl<'a> Linter<'a> {
             test_pipeline_depth: 0,
             type_declarations: Vec::new(),
             type_references: HashSet::new(),
+            return_type_stack: Vec::new(),
         }
     }
 
@@ -261,6 +267,91 @@ impl<'a> Linter<'a> {
             }
             TypeExpr::Never => {}
         }
+    }
+
+    /// Map a type annotation to the matching iterator sink method name when
+    /// the annotation is a concrete collection type. Returns `None` for
+    /// non-collection annotations (including `Iter<T>` itself, which is
+    /// already the expression's inferred shape).
+    fn expected_collection_sink(type_expr: &TypeExpr) -> Option<&'static str> {
+        match type_expr {
+            TypeExpr::List(_) => Some("to_list"),
+            TypeExpr::DictType(_, _) => Some("to_dict"),
+            TypeExpr::Applied { name, .. } => match name.as_str() {
+                "list" => Some("to_list"),
+                "set" => Some("to_set"),
+                "dict" => Some("to_dict"),
+                _ => None,
+            },
+            TypeExpr::Named(name) => match name.as_str() {
+                "list" => Some("to_list"),
+                "set" => Some("to_set"),
+                "dict" => Some("to_dict"),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// Heuristic: does this expression look like a lazy iterator chain that
+    /// would yield an `Iter<T>` rather than a concrete collection? We flag
+    /// method calls whose outermost (tail) method is a known lazy
+    /// combinator or `iter` lift. Sink-terminated chains (e.g.
+    /// `...to_list()`) return false.
+    fn expr_yields_iter(node: &Node) -> bool {
+        match node {
+            Node::MethodCall { method, .. } | Node::OptionalMethodCall { method, .. } => {
+                matches!(
+                    method.as_str(),
+                    "iter"
+                        | "map"
+                        | "filter"
+                        | "flat_map"
+                        | "take"
+                        | "skip"
+                        | "take_while"
+                        | "skip_while"
+                        | "zip"
+                        | "enumerate"
+                        | "chain"
+                        | "chunks"
+                        | "windows"
+                )
+            }
+            Node::FunctionCall { name, .. } => {
+                matches!(name.as_str(), "iter")
+            }
+            _ => false,
+        }
+    }
+
+    fn check_eager_collection_conversion(&mut self, expected: &TypeExpr, value: &SNode) {
+        let Some(sink) = Self::expected_collection_sink(expected) else {
+            return;
+        };
+        if !Self::expr_yields_iter(&value.node) {
+            return;
+        }
+        let (kind_word, collection_label) = match sink {
+            "to_list" => ("list", "list"),
+            "to_set" => ("set", "set"),
+            "to_dict" => ("dict", "dict"),
+            _ => return,
+        };
+        let _ = kind_word;
+        let message = format!(
+            "expression is an iterator; expected {collection_label}. \
+             Add .{sink}() to materialize."
+        );
+        let fix = append_sink_fix(value.span, sink);
+        self.diagnostics.push(LintDiagnostic {
+            rule: "eager-collection-conversion",
+            message,
+            span: value.span,
+            severity: LintSeverity::Warning,
+            suggestion: Some(format!("append `.{sink}()` to materialize the iterator")),
+            fix: Some(fix),
+        });
     }
 
     fn record_param_type_references(&mut self, params: &[TypedParam]) {
@@ -519,7 +610,9 @@ impl<'a> Linter<'a> {
                 for p in params {
                     self.declare_parameter(&p.name, snode.span);
                 }
+                self.return_type_stack.push(return_type.clone());
                 self.lint_block(body);
+                self.return_type_stack.pop();
                 self.loop_depth = saved_loop_depth;
                 self.pop_scope();
             }
@@ -566,7 +659,9 @@ impl<'a> Linter<'a> {
                 for p in params {
                     self.declare_parameter(&p.name, snode.span);
                 }
+                self.return_type_stack.push(return_type.clone());
                 self.lint_block(body);
+                self.return_type_stack.pop();
                 self.loop_depth = saved_loop_depth;
                 self.pop_scope();
             }
@@ -581,13 +676,27 @@ impl<'a> Linter<'a> {
                 self.in_impl_block = saved;
             }
 
-            Node::LetBinding { pattern, value, .. } => {
+            Node::LetBinding {
+                pattern,
+                type_ann,
+                value,
+            } => {
                 self.lint_node(value);
+                if let Some(ann) = type_ann {
+                    self.check_eager_collection_conversion(ann, value);
+                }
                 self.declare_pattern_variables(pattern, snode.span, false);
             }
 
-            Node::VarBinding { pattern, value, .. } => {
+            Node::VarBinding {
+                pattern,
+                type_ann,
+                value,
+            } => {
                 self.lint_node(value);
+                if let Some(ann) = type_ann {
+                    self.check_eager_collection_conversion(ann, value);
+                }
                 self.declare_pattern_variables(pattern, snode.span, true);
             }
 
@@ -1082,6 +1191,9 @@ impl<'a> Linter<'a> {
             Node::ReturnStmt { value } => {
                 if let Some(v) = value {
                     self.lint_node(v);
+                    if let Some(Some(ret_ty)) = self.return_type_stack.last().cloned() {
+                        self.check_eager_collection_conversion(&ret_ty, v);
+                    }
                 }
             }
 
