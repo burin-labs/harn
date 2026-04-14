@@ -3,9 +3,7 @@ use std::rc::Rc;
 use crate::agent_events::{self, AgentEvent, ToolCallStatus};
 use crate::value::{ErrorCategory, VmError, VmValue};
 
-use super::daemon::{
-    detect_watch_changes, load_snapshot, persist_snapshot, watch_state, DaemonSnapshot,
-};
+use super::daemon::{detect_watch_changes, load_snapshot, watch_state};
 use super::helpers::{transcript_event, transcript_to_vm_with_events};
 use super::tools::{
     build_assistant_tool_message, build_tool_calling_contract_prompt, build_tool_result_message,
@@ -23,7 +21,23 @@ use super::agent_tools::{
     normalize_tool_examples_for_format, render_tool_result, stable_hash, stable_hash_str,
     LoopIntervention, ToolCallTracker,
 };
-use super::daemon::DaemonLoopConfig;
+
+mod helpers;
+
+use helpers::{
+    append_host_messages_to_recorded, append_message_to_contexts, build_agent_system_prompt,
+    daemon_snapshot_from_state, inject_queued_user_messages, maybe_auto_compact_agent_messages,
+    maybe_persist_daemon_snapshot, runtime_feedback_message,
+};
+
+// Re-export items used by the agent loop orchestrator and by
+// `agent_tests.rs` via its `use super::{...}` import.
+#[allow(unused_imports)]
+pub(super) use helpers::{
+    action_turn_nudge, assistant_history_text, has_successful_tools,
+    loop_state_requests_phase_change, prose_exceeds_budget, sentinel_without_action_nudge,
+    should_stop_after_successful_tools, trim_prose_for_history,
+};
 
 // Re-export items that moved to submodules so agent_tests.rs can use `super::`.
 #[cfg(test)]
@@ -122,185 +136,6 @@ pub(super) fn drain_pending_feedback(session_id: &str) -> Vec<(String, String)> 
     })
 }
 
-fn loop_state_requests_phase_change(text: &str, current_phase: &str) -> bool {
-    if current_phase.trim().is_empty() {
-        return false;
-    }
-
-    let current_phase = current_phase.trim();
-    let mut last_next_phase: Option<&str> = None;
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix("next_phase:") {
-            let phase = rest.trim();
-            if !phase.is_empty() {
-                last_next_phase = Some(phase);
-            }
-        }
-    }
-
-    last_next_phase.is_some_and(|phase| phase != current_phase)
-}
-
-fn should_stop_after_successful_tools(
-    tool_results: &[serde_json::Value],
-    stop_tools: &[String],
-) -> bool {
-    has_successful_tools(tool_results, stop_tools)
-}
-
-fn has_successful_tools(tool_results: &[serde_json::Value], tool_names: &[String]) -> bool {
-    tool_results
-        .iter()
-        .filter(|result| result["status"].as_str() == Some("ok"))
-        .filter_map(|result| result["tool_name"].as_str())
-        .any(|tool_name| tool_names.iter().any(|wanted| wanted == tool_name))
-}
-
-fn prose_char_len(text: &str) -> usize {
-    text.trim().chars().count()
-}
-
-fn prose_exceeds_budget(
-    prose: &str,
-    turn_policy: Option<&crate::orchestration::TurnPolicy>,
-) -> bool {
-    let Some(limit) = turn_policy.and_then(|policy| policy.max_prose_chars) else {
-        return false;
-    };
-    prose_char_len(prose) > limit
-}
-
-fn trim_prose_for_history(
-    prose: &str,
-    turn_policy: Option<&crate::orchestration::TurnPolicy>,
-) -> String {
-    let trimmed = prose.trim();
-    let Some(limit) = turn_policy.and_then(|policy| policy.max_prose_chars) else {
-        return trimmed.to_string();
-    };
-    let chars: Vec<char> = trimmed.chars().collect();
-    if chars.len() <= limit {
-        return trimmed.to_string();
-    }
-    let kept: String = chars.into_iter().take(limit).collect();
-    format!("{kept}\n\n<assistant prose truncated by turn policy; keep prose brief and act>")
-}
-
-/// Hard cap on a single assistant turn replayed in history, measured in
-/// characters. Large enough that typical edit heredocs, long reasoning, and
-/// bundled tool calls all fit verbatim. Only truly pathological runaway
-/// responses exceed this. A LOW cap would thrash provider prompt caches as
-/// different turns land on different sides of the threshold; keep it high
-/// so the cap is effectively dormant under normal operation.
-const ASSISTANT_HISTORY_HARD_CAP_CHARS: usize = 131_072;
-
-/// Content to replay for an assistant turn in conversation history.
-///
-/// Under the tagged response protocol, `canonical` is the parser's
-/// well-formed reconstruction of the turn (tool calls wrapped in
-/// `<tool_call>`, prose in `<assistant_prose>`, etc). Replaying the
-/// canonical form rather than the raw provider bytes closes the
-/// self-poison loop where a turn with leading raw code becomes "what
-/// the agent said" on the next turn, teaching the model to repeat the
-/// bad shape.
-///
-/// When canonical is missing (native-format path, no tools, or the
-/// response contained nothing parseable), fall back to the raw text.
-/// When tool parsing failed, replay a compact placeholder instead —
-/// otherwise the next iteration sees its own broken syntax and mutates
-/// it further.
-///
-/// Truncation is deterministic and bounded only by
-/// `ASSISTANT_HISTORY_HARD_CAP_CHARS`, keeping prompt-cache prefixes
-/// stable across turns.
-fn assistant_history_text(
-    canonical: Option<&str>,
-    raw_text: &str,
-    tool_parse_errors: usize,
-    tool_calls: &[serde_json::Value],
-) -> String {
-    if tool_parse_errors > 0 {
-        let names: Vec<&str> = tool_calls
-            .iter()
-            .filter_map(|c| c.get("name").and_then(|n| n.as_str()))
-            .collect();
-        return format!(
-            "<assistant turn partially elided: {} tool call(s) executed successfully ({}), \
-             {} malformed tool call(s) rejected. See tool results and parse errors that follow.>",
-            tool_calls.len(),
-            names.join(", "),
-            tool_parse_errors,
-        );
-    }
-    let source = canonical
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| raw_text.trim());
-    let chars: Vec<char> = source.chars().collect();
-    let total = chars.len();
-    if total <= ASSISTANT_HISTORY_HARD_CAP_CHARS {
-        return source.to_string();
-    }
-    let kept: String = chars
-        .into_iter()
-        .take(ASSISTANT_HISTORY_HARD_CAP_CHARS)
-        .collect();
-    format!(
-        "{kept}\n\n<assistant turn truncated: raw length {total} chars exceeded history cap ({ASSISTANT_HISTORY_HARD_CAP_CHARS})>"
-    )
-}
-
-pub(super) fn action_turn_nudge(
-    tool_format: &str,
-    turn_policy: Option<&crate::orchestration::TurnPolicy>,
-    prose_too_long: bool,
-) -> Option<String> {
-    let policy = turn_policy?;
-    if !policy.require_action_or_yield {
-        return None;
-    }
-    let prose_clause = if let Some(limit) = policy.max_prose_chars {
-        format!("Keep prose to at most {limit} visible characters, then")
-    } else {
-        "Keep prose brief, then".to_string()
-    };
-    let emphasis = if prose_too_long {
-        " Your last response spent too much budget on prose."
-    } else {
-        ""
-    };
-    let completion_clause = if policy.allow_done_sentinel {
-        "either make concrete progress with a well-formed <tool_call> block, switch phase, or emit a <done> block if the task is genuinely complete."
-    } else {
-        "either make concrete progress with a well-formed <tool_call> block or switch phase if the workflow allows it."
-    };
-    let mode_clause = if tool_format == "native" {
-        " Use the provider tool channel only; handwritten tool-call text is invalid in this transcript."
-    } else {
-        ""
-    };
-    Some(format!(
-        "{prose_clause} {completion_clause}{emphasis}{mode_clause}"
-    ))
-}
-
-fn sentinel_without_action_nudge(
-    tool_format: &str,
-    turn_policy: Option<&crate::orchestration::TurnPolicy>,
-) -> String {
-    let mut message = if turn_policy.is_some_and(|policy| !policy.allow_done_sentinel) {
-        "You emitted a <done> block in a workflow-owned action stage. The task is not complete yet. Make concrete progress with an available tool now, or switch phase if the workflow allows it. Do not output a <done> block in this stage.".to_string()
-    } else {
-        "You emitted a <done> block without taking any tool action. The task is not complete yet. Make concrete progress with an available tool now, or switch phase if the workflow allows it. Do not emit <done> again until you have acted.".to_string()
-    };
-    if let Some(nudge) = action_turn_nudge(tool_format, turn_policy, false) {
-        message.push(' ');
-        message.push_str(&nudge);
-    }
-    message
-}
-
 pub(crate) fn install_current_host_bridge(bridge: Rc<crate::bridge::HostBridge>) {
     CURRENT_HOST_BRIDGE.with(|slot| {
         *slot.borrow_mut() = Some(bridge);
@@ -309,176 +144,6 @@ pub(crate) fn install_current_host_bridge(bridge: Rc<crate::bridge::HostBridge>)
 
 pub(crate) fn current_host_bridge() -> Option<Rc<crate::bridge::HostBridge>> {
     CURRENT_HOST_BRIDGE.with(|slot| slot.borrow().clone())
-}
-
-async fn inject_queued_user_messages(
-    bridge: Option<&Rc<crate::bridge::HostBridge>>,
-    messages: &mut Vec<serde_json::Value>,
-    checkpoint: crate::bridge::DeliveryCheckpoint,
-) -> Result<Vec<crate::bridge::QueuedUserMessage>, VmError> {
-    let Some(bridge) = bridge else {
-        return Ok(Vec::new());
-    };
-    let queued = bridge.take_queued_user_messages_for(checkpoint).await;
-    for message in &queued {
-        messages.push(serde_json::json!({
-            "role": "user",
-            "content": message.content.clone(),
-        }));
-    }
-    Ok(queued)
-}
-
-fn append_message_to_contexts(
-    visible_messages: &mut Vec<serde_json::Value>,
-    recorded_messages: &mut Vec<serde_json::Value>,
-    message: serde_json::Value,
-) {
-    super::agent_observe::emit_message_event(&message);
-    visible_messages.push(message.clone());
-    recorded_messages.push(message);
-}
-
-fn append_host_messages_to_recorded(
-    recorded_messages: &mut Vec<serde_json::Value>,
-    queued_messages: &[crate::bridge::QueuedUserMessage],
-) {
-    for message in queued_messages {
-        recorded_messages.push(serde_json::json!({
-            "role": "user",
-            "content": message.content.clone(),
-        }));
-    }
-}
-
-fn runtime_feedback_message(kind: &str, content: impl Into<String>) -> serde_json::Value {
-    let content = content.into();
-    serde_json::json!({
-        "role": "user",
-        "content": format!(
-            "<runtime_feedback kind=\"{}\">\n{}\n</runtime_feedback>",
-            escape_runtime_feedback_kind(kind),
-            content.trim(),
-        ),
-    })
-}
-
-fn escape_runtime_feedback_kind(kind: &str) -> String {
-    kind.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-}
-
-fn build_agent_system_prompt(
-    base_system: Option<&str>,
-    tool_prompt: Option<&str>,
-    persistent_prompt: Option<&str>,
-) -> Option<String> {
-    let mut parts = Vec::new();
-    if let Some(base) = base_system {
-        let trimmed = base.trim();
-        if !trimmed.is_empty() {
-            parts.push(trimmed.to_string());
-        }
-    }
-    if let Some(tool_prompt) = tool_prompt {
-        let trimmed = tool_prompt.trim();
-        if !trimmed.is_empty() {
-            parts.push(trimmed.to_string());
-        }
-    }
-    if let Some(persistent_prompt) = persistent_prompt {
-        let trimmed = persistent_prompt.trim();
-        if !trimmed.is_empty() {
-            parts.push(trimmed.to_string());
-        }
-    }
-    if parts.is_empty() {
-        None
-    } else {
-        Some(parts.join("\n\n"))
-    }
-}
-
-async fn maybe_auto_compact_agent_messages(
-    opts: &super::api::LlmCallOptions,
-    auto_compact: &Option<crate::orchestration::AutoCompactConfig>,
-    visible_messages: &mut Vec<serde_json::Value>,
-    transcript_summary: &mut Option<String>,
-) -> Result<(), VmError> {
-    if let Some(ac) = auto_compact {
-        let approx_tokens = crate::orchestration::estimate_message_tokens(visible_messages);
-        if approx_tokens >= ac.token_threshold {
-            let mut compact_opts = opts.clone();
-            compact_opts.messages = visible_messages.clone();
-            if let Some(summary) = crate::orchestration::auto_compact_messages(
-                visible_messages,
-                ac,
-                Some(&compact_opts),
-            )
-            .await?
-            {
-                let merged = match transcript_summary.take() {
-                    Some(existing) if !existing.is_empty() => {
-                        format!("{existing}\n\n{summary}")
-                    }
-                    _ => summary,
-                };
-                *transcript_summary = Some(merged);
-            }
-        }
-    }
-    Ok(())
-}
-
-#[allow(clippy::too_many_arguments)]
-fn daemon_snapshot_from_state(
-    daemon_state: &str,
-    visible_messages: &[serde_json::Value],
-    recorded_messages: &[serde_json::Value],
-    transcript_summary: &Option<String>,
-    transcript_events: &[VmValue],
-    total_text: &str,
-    last_iteration_text: &str,
-    all_tools_used: &[String],
-    rejected_tools: &[String],
-    deferred_user_messages: &[String],
-    total_iterations: usize,
-    idle_backoff_ms: u64,
-    last_run_exit_code: Option<i32>,
-    watch_state_map: &std::collections::BTreeMap<String, u64>,
-) -> DaemonSnapshot {
-    DaemonSnapshot {
-        daemon_state: daemon_state.to_string(),
-        visible_messages: visible_messages.to_vec(),
-        recorded_messages: recorded_messages.to_vec(),
-        transcript_summary: transcript_summary.clone(),
-        transcript_events: transcript_events
-            .iter()
-            .map(crate::llm::helpers::vm_value_to_json)
-            .collect(),
-        total_text: total_text.to_string(),
-        last_iteration_text: last_iteration_text.to_string(),
-        all_tools_used: all_tools_used.to_vec(),
-        rejected_tools: rejected_tools.to_vec(),
-        deferred_user_messages: deferred_user_messages.to_vec(),
-        total_iterations,
-        idle_backoff_ms,
-        last_run_exit_code,
-        watch_state: watch_state_map.clone(),
-        ..Default::default()
-    }
-}
-
-fn maybe_persist_daemon_snapshot(
-    config: &DaemonLoopConfig,
-    snapshot: &DaemonSnapshot,
-) -> Result<Option<String>, VmError> {
-    let Some(path) = config.effective_persist_path() else {
-        return Ok(None);
-    };
-    persist_snapshot(path, snapshot).map(Some)
 }
 
 pub async fn run_agent_loop_internal(
