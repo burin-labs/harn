@@ -1,10 +1,17 @@
-use super::{
-    action_turn_nudge, assistant_history_text, build_llm_call_result, extract_retry_after_ms,
-    has_successful_tools, loop_state_requests_phase_change, merge_agent_loop_policy,
-    normalize_native_tools_for_format, normalize_tool_choice_for_format,
-    normalize_tool_examples_for_format, observed_llm_call, prose_exceeds_budget,
-    required_tool_choice_for_provider, run_agent_loop_internal, sentinel_without_action_nudge,
-    should_stop_after_successful_tools, trim_prose_for_history, AgentLoopConfig, LlmRetryConfig,
+// Direct-path imports: tests name symbols at the submodule that
+// actually defines them. No re-export shim in `super::` (the
+// `agent/mod.rs` orchestrator) is required.
+use super::helpers::{
+    action_turn_nudge, assistant_history_text, has_successful_tools,
+    loop_state_requests_phase_change, prose_exceeds_budget, sentinel_without_action_nudge,
+    should_stop_after_successful_tools, trim_prose_for_history,
+};
+use super::run_agent_loop_internal;
+use crate::llm::agent_config::{build_llm_call_result, AgentLoopConfig};
+use crate::llm::agent_observe::{extract_retry_after_ms, observed_llm_call, LlmRetryConfig};
+use crate::llm::agent_tools::{
+    merge_agent_loop_policy, normalize_native_tools_for_format, normalize_tool_choice_for_format,
+    normalize_tool_examples_for_format, required_tool_choice_for_provider,
 };
 use crate::bridge::HostBridge;
 use crate::llm::api::{LlmCallOptions, LlmResult};

@@ -25,30 +25,14 @@ mod state;
 mod turn_preflight;
 
 use helpers::{
-    append_host_messages_to_recorded, append_message_to_contexts, daemon_snapshot_from_state,
-    inject_queued_user_messages, maybe_auto_compact_agent_messages, maybe_persist_daemon_snapshot,
-    runtime_feedback_message,
+    action_turn_nudge, append_host_messages_to_recorded, append_message_to_contexts,
+    assistant_history_text, daemon_snapshot_from_state, has_successful_tools,
+    inject_queued_user_messages, loop_state_requests_phase_change,
+    maybe_auto_compact_agent_messages, maybe_persist_daemon_snapshot, prose_exceeds_budget,
+    runtime_feedback_message, sentinel_without_action_nudge, should_stop_after_successful_tools,
+    trim_prose_for_history,
 };
 
-// Re-export items used by the agent loop orchestrator and by
-// `agent_tests.rs` via its `use super::{...}` import.
-#[allow(unused_imports)]
-pub(super) use helpers::{
-    action_turn_nudge, assistant_history_text, has_successful_tools,
-    loop_state_requests_phase_change, prose_exceeds_budget, sentinel_without_action_nudge,
-    should_stop_after_successful_tools, trim_prose_for_history,
-};
-
-// Re-export items that moved to submodules so agent_tests.rs can use `super::`.
-#[cfg(test)]
-pub(super) use super::agent_config::build_llm_call_result;
-#[cfg(test)]
-pub(super) use super::agent_observe::extract_retry_after_ms;
-#[cfg(test)]
-pub(super) use super::agent_tools::{
-    merge_agent_loop_policy, normalize_native_tools_for_format, normalize_tool_choice_for_format,
-    normalize_tool_examples_for_format, required_tool_choice_for_provider,
-};
 
 thread_local! {
     static CURRENT_HOST_BRIDGE: std::cell::RefCell<Option<Rc<crate::bridge::HostBridge>>> = const { std::cell::RefCell::new(None) };
@@ -1697,11 +1681,5 @@ pub async fn run_agent_loop_internal(
     .await
 }
 
-/// Register a tool-aware `agent_loop` that uses a bridge for tool execution.
-/// This overrides the native text-only agent_loop with one that can:
-/// 1. Pass tool definitions to the LLM
-/// 2. Execute tool calls via the bridge (delegated to host)
-/// 3. Feed tool results back into the conversation
 #[cfg(test)]
-#[path = "../agent_tests.rs"]
 mod tests;
