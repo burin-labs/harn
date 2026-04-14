@@ -1,0 +1,5 @@
+pipeline test(task) {
+  let xs = [1, 2, 3, 4, 5]
+  let result = iter(xs).filter({ x -> x % 2 == 0 }).map({ x -> x * 10 }).to_list()
+  log(result)
+}

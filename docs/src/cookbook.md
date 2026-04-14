@@ -100,7 +100,7 @@ pipeline default(task) {
     )
   }
 
-  for i in 0 upto files.count {
+  for i in 0 to files.count exclusive {
     println("=== ${files[i]} ===")
     println(reviews[i])
   }

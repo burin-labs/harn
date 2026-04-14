@@ -1,4 +1,4 @@
-/// load_greeting.
+/** load_greeting. */
 pub fn load_greeting() {
   return render("greeting.txt")
 }

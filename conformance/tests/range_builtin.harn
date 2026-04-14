@@ -1,0 +1,18 @@
+pipeline test(task) {
+  // range(n) is half-open, 0-indexed. Ranges are lazy; printing them
+  // mirrors the source form (half-open is always printed as `exclusive`).
+  let xs = range(5)
+  log(xs)
+  // range(a, b) is half-open — use .to_list() to materialize for display
+  let ys = range(3, 7)
+  log(ys.to_list())
+  // works in iteration with sum
+  var total = 0
+  for i in range(10) {
+    total += i
+  }
+  log(total)
+  // empty when b <= a
+  log(len(range(5, 5)))
+  log(len(range(0)))
+}

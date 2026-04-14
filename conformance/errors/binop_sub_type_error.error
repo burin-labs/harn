@@ -1,1 +1,1 @@
-re:Operator '-' requires numeric operands, got \w+ and \w+
+re:can't use '-' on \w+ and \w+ \(needs numeric operands\)

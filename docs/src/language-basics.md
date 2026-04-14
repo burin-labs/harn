@@ -385,15 +385,56 @@ guard x > 0 else {
 
 ### Ranges
 
+Harn has a single range keyword: `to`. Ranges are **inclusive by default** —
+`1 to 5` is `[1, 2, 3, 4, 5]` — because that matches how the expression reads
+aloud. Add the trailing `exclusive` modifier when you want the half-open form.
+
 ```harn
-for i in 1 thru 5 {   // inclusive: 1, 2, 3, 4, 5
+for i in 1 to 5 {              // inclusive: 1, 2, 3, 4, 5
   println(i)
 }
 
-for i in 0 upto 3 {   // exclusive: 0, 1, 2
+for i in 0 to 3 exclusive {    // half-open: 0, 1, 2
   println(i)
 }
 ```
+
+For Python-compatible 0-indexed iteration there is also a `range()` stdlib
+builtin. `range(n)` is equivalent to `0 to n exclusive`; `range(a, b)` is
+`a to b exclusive`. Both forms always produce half-open integer ranges.
+
+```harn
+for i in range(5) { println(i) }        // 0, 1, 2, 3, 4
+for i in range(3, 7) { println(i) }      // 3, 4, 5, 6
+```
+
+### Iteration patterns
+
+Prefer destructuring and stdlib helpers over integer-indexed loops — they
+read better and avoid off-by-one bugs.
+
+```harn
+// enumerate(): yields a list of {index, value} dicts.
+for {index, value} in ["a", "b", "c"].enumerate() {
+  println("${index}: ${value}")
+}
+
+// zip(): yields [a, b] pairs — use list destructuring.
+for [name, score] in names.zip(scores) {
+  println("${name}: ${score}")
+}
+
+// Dict iteration yields {key, value} entries sorted by key.
+for {key, value} in {a: 1, b: 2}.entries() {
+  println("${key} -> ${value}")
+}
+```
+
+`for` heads currently accept a bare name, a list pattern `[a, b]`, or a dict
+pattern `{name1, name2}`. Tuple patterns written with parentheses
+(`for (a, b) in ...`) are not yet supported — use the list pattern when the
+iterable yields pair-lists (`zip`), and the dict pattern when the iterable
+yields shaped dicts (`enumerate`, `entries`).
 
 ## Functions and closures
 
@@ -526,10 +567,13 @@ exhausted. Iteration takes a **snapshot** of the backing collection,
 so mutating the source after `.iter()` does not affect the iter.
 Printing an iter renders `<iter>` without draining it.
 
-One current limitation: numeric ranges like `(1 to 1_000_000)`
-materialize as a list before iter combinators can chain on them. Use
-`.take(n)` after `.iter()` as the first combinator to cap the
-in-memory size until lazy ranges land.
+Numeric ranges (`a to b`, `range(n)`) participate in the lazy iter
+protocol directly: `.map / .filter / .take / .zip / .enumerate / ...`
+on a Range return a lazy iter with no upfront allocation, so
+`(1 to 10_000_000).map(fn(x) { return x * 2 }).take(5).to_list()`
+finishes instantly. Range still keeps its O(1) fast paths for
+`.len / .first / .last / .contains(x)` and `r[k]` subscript — those
+don't round-trip through iter.
 
 ## Pipe operator
 
@@ -1089,8 +1133,8 @@ println("Hello, ${name}!")
 ```harn
 // Line comment
 
-/// HarnDoc comment for a public API
-/// Use contiguous `///` lines directly above `pub fn`
+/** HarnDoc comment for a public API.
+    Use a `/** ... */` block directly above `pub fn`. */
 pub fn greet(name: string) -> string {
   return "Hello, ${name}"
 }

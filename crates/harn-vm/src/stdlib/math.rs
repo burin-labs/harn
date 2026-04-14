@@ -1,4 +1,4 @@
-use crate::value::VmValue;
+use crate::value::{VmError, VmRange, VmValue};
 use crate::vm::Vm;
 
 pub(crate) fn register_math_builtins(vm: &mut Vm) {
@@ -187,12 +187,44 @@ pub(crate) fn register_math_builtins(vm: &mut Vm) {
         let start = args.first().and_then(|a| a.as_int()).unwrap_or(0);
         let end = args.get(1).and_then(|a| a.as_int()).unwrap_or(0);
         let inclusive = args.get(2).map(|a| a.is_truthy()).unwrap_or(false);
-        let items: Vec<VmValue> = if inclusive {
-            (start..=end).map(VmValue::Int).collect()
-        } else {
-            (start..end).map(VmValue::Int).collect()
+        Ok(VmValue::Range(VmRange {
+            start,
+            end,
+            inclusive,
+        }))
+    });
+
+    // Python-compatible `range()` builtin — always half-open, for idiomatic
+    // 0-indexed iteration. The keyword form `a to b [exclusive]` is the
+    // choice when you want human-readable inclusive math.
+    vm.register_builtin("range", |args, _out| {
+        let (start, end) = match args.len() {
+            1 => {
+                let n = args[0].as_int().ok_or_else(|| {
+                    VmError::TypeError("range(n): expected integer argument".to_string())
+                })?;
+                (0, n)
+            }
+            2 => {
+                let a = args[0].as_int().ok_or_else(|| {
+                    VmError::TypeError("range(a, b): expected integer arguments".to_string())
+                })?;
+                let b = args[1].as_int().ok_or_else(|| {
+                    VmError::TypeError("range(a, b): expected integer arguments".to_string())
+                })?;
+                (a, b)
+            }
+            n => {
+                return Err(VmError::TypeError(format!(
+                    "range expects 1 or 2 integer arguments, got {n}"
+                )));
+            }
         };
-        Ok(VmValue::List(std::rc::Rc::new(items)))
+        Ok(VmValue::Range(VmRange {
+            start,
+            end,
+            inclusive: false,
+        }))
     });
 }
 

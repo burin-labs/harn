@@ -1,1 +1,1 @@
-re:Operator '\*' requires numeric operands or string \* int, got \w+ and \w+
+re:can't multiply \w+ and \w+ \(try string \* int\)

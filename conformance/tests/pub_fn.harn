@@ -1,6 +1,6 @@
 pipeline default() {
   // pub fn is parsed and works
-  /// multiply.
+  /** multiply. */
   pub fn multiply(a, b) {
     return a * b
   }

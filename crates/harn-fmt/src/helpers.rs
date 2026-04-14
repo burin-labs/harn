@@ -7,7 +7,7 @@ use crate::Formatter;
 /// Format a default-value expression in a destructuring pattern.
 /// Creates a temporary formatter to render the expression.
 fn format_default_expr(node: &SNode) -> String {
-    let fmt = Formatter::new(BTreeMap::new(), 100);
+    let fmt = Formatter::new(BTreeMap::new(), 100, 80);
     fmt.format_expr(node)
 }
 
@@ -142,6 +142,7 @@ pub(crate) fn format_pattern(pattern: &BindingPattern) -> String {
                 .collect();
             format!("[{}]", parts.join(", "))
         }
+        BindingPattern::Pair(a, b) => format!("({}, {})", a, b),
     }
 }
 
@@ -151,6 +152,31 @@ pub(crate) fn escape_string(s: &str) -> String {
         .replace('"', "\\\"")
         .replace('\n', "\\n")
         .replace('\t', "\\t")
+}
+
+/// Reconstruct a multi-line `"""..."""` string with body and closing
+/// delimiter indented one level deeper than the surrounding statement.
+/// The lexer already strips common leading indent from the body, so
+/// re-indenting here only affects source aesthetics — the lexed value
+/// after a round-trip is identical.
+pub(crate) fn format_multiline_triple_quoted(body: &str, indent: usize) -> String {
+    let pad = "  ".repeat(indent + 1);
+    // Empty body: collapse to `"""\n{pad}"""` rather than `"""\n\n{pad}"""`.
+    if body.is_empty() {
+        return format!("\"\"\"\n{pad}\"\"\"");
+    }
+    let indented: String = body
+        .split('\n')
+        .map(|l| {
+            if l.is_empty() {
+                String::new()
+            } else {
+                format!("{pad}{l}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!("\"\"\"\n{indented}\n{pad}\"\"\"")
 }
 
 /// Format the `(error_var: Type)` portion of a catch clause.
@@ -194,6 +220,9 @@ pub(crate) fn format_type_expr(te: &TypeExpr) -> String {
         }
         TypeExpr::List(inner) => {
             format!("list<{}>", format_type_expr(inner))
+        }
+        TypeExpr::Iter(inner) => {
+            format!("iter<{}>", format_type_expr(inner))
         }
         TypeExpr::DictType(k, v) => {
             format!("dict<{}, {}>", format_type_expr(k), format_type_expr(v))
@@ -244,7 +273,7 @@ pub(crate) fn format_where_clauses(clauses: &[WhereClause]) -> String {
 
 /// Format an expression inline for use in parameter defaults.
 pub(crate) fn format_inline_expr(node: &SNode) -> String {
-    let fmt = Formatter::new(BTreeMap::new(), 100);
+    let fmt = Formatter::new(BTreeMap::new(), 100, 80);
     fmt.format_expr(node)
 }
 

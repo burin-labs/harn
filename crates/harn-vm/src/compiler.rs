@@ -368,6 +368,7 @@ impl Compiler {
                 )]))))
             }
             harn_parser::TypeExpr::Applied { .. } => None,
+            harn_parser::TypeExpr::Iter(_) => None,
             harn_parser::TypeExpr::Never => None,
         }
     }
@@ -2817,6 +2818,34 @@ impl Compiler {
                     // Pop the source dict
                     self.chunk.emit(Op::Pop, self.line);
                 }
+            }
+            BindingPattern::Pair(first_name, second_name) => {
+                // Stack has the pair value. Extract `.first` and `.second`
+                // via GetProperty, defining two locals.
+                self.chunk.emit(Op::Dup, self.line);
+                let first_key_idx = self
+                    .chunk
+                    .add_constant(Constant::String("first".to_string()));
+                self.chunk
+                    .emit_u16(Op::GetProperty, first_key_idx, self.line);
+                let first_name_idx = self
+                    .chunk
+                    .add_constant(Constant::String(first_name.clone()));
+                self.chunk.emit_u16(def_op, first_name_idx, self.line);
+
+                // Source pair still on stack.
+                let second_key_idx = self
+                    .chunk
+                    .add_constant(Constant::String("second".to_string()));
+                self.chunk
+                    .emit_u16(Op::GetProperty, second_key_idx, self.line);
+                let second_name_idx = self
+                    .chunk
+                    .add_constant(Constant::String(second_name.clone()));
+                self.chunk.emit_u16(def_op, second_name_idx, self.line);
+                // Note: source pair was popped by the final GetProperty's
+                // semantics (GetProperty pops the object and pushes the field),
+                // so no trailing Pop needed.
             }
             BindingPattern::List(elements) => {
                 // Stack has the list value.

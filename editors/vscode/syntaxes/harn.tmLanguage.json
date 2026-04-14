@@ -73,7 +73,7 @@
       "patterns": [
         {
           "name": "keyword.control.harn",
-          "match": "\\b(if|else|for|in|while|match|return|break|continue|try|catch|throw|import|from|spawn|await|cancel|parallel|each|settle|defer|retry|guard|deadline)\\b"
+          "match": "\\b(if|else|for|in|while|match|return|break|continue|try|catch|throw|import|from|spawn|await|cancel|parallel|each|settle|defer|retry|guard|deadline|to|exclusive)\\b"
         },
         {
           "name": "keyword.declaration.harn",

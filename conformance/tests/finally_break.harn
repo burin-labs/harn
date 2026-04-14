@@ -1,6 +1,6 @@
 pipeline test(task) {
   var cleanup_count = 0
-  for i in 0 upto 5 {
+  for i in 0 to 5 exclusive {
     try {
       if i == 2 {
         break

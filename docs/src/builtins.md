@@ -839,7 +839,7 @@ Example:
 ```harn
 circuit_breaker("api", 3, 10000)
 
-for i in 0 upto 5 {
+for i in 0 to 5 exclusive {
   if circuit_check("api") == "open" {
     println("circuit open, skipping call")
   } else {

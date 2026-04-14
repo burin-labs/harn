@@ -268,6 +268,10 @@ impl super::Vm {
                     map.contains_key(&key)
                 }
                 VmValue::Set(items) => items.iter().any(|v| values_equal(v, &item)),
+                VmValue::Range(r) => match &item {
+                    VmValue::Int(n) => r.contains(*n),
+                    _ => false,
+                },
                 VmValue::String(s) => {
                     if let VmValue::String(substr) = &item {
                         s.contains(&**substr)
@@ -677,6 +681,19 @@ impl super::Vm {
                     }
                 }
                 (VmValue::Dict(map), _) => map.get(&idx.display()).cloned().unwrap_or(VmValue::Nil),
+                (VmValue::Range(r), VmValue::Int(i)) => {
+                    // Python-style: negative indices count from the end.
+                    let len = r.len();
+                    let pos = if *i < 0 { len + *i } else { *i };
+                    match r.get(pos) {
+                        Some(v) => VmValue::Int(v),
+                        None => {
+                            return Err(VmError::Runtime(format!(
+                                "range index out of range: index {i} for range of length {len}",
+                            )));
+                        }
+                    }
+                }
                 (VmValue::String(s), VmValue::Int(i)) => {
                     if *i < 0 {
                         let count = s.chars().count() as i64;
@@ -845,6 +862,15 @@ impl super::Vm {
                 VmValue::StructInstance { fields, .. } => {
                     fields.get(&name).cloned().unwrap_or(VmValue::Nil)
                 }
+                VmValue::Pair(p) => match name.as_str() {
+                    "first" => p.0.clone(),
+                    "second" => p.1.clone(),
+                    _ => {
+                        return Err(VmError::TypeError(format!(
+                            "cannot access property `{name}` on pair (expected `first` or `second`)"
+                        )));
+                    }
+                },
                 VmValue::Nil => {
                     return Err(VmError::TypeError(format!(
                         "cannot access property `{name}` on nil"
@@ -890,6 +916,11 @@ impl super::Vm {
                 VmValue::StructInstance { fields, .. } => {
                     fields.get(&name).cloned().unwrap_or(VmValue::Nil)
                 }
+                VmValue::Pair(p) => match name.as_str() {
+                    "first" => p.0.clone(),
+                    "second" => p.1.clone(),
+                    _ => VmValue::Nil,
+                },
                 _ => VmValue::Nil,
             };
             self.stack.push(result);
@@ -1134,6 +1165,23 @@ impl super::Vm {
                 VmValue::Generator(gen) => {
                     self.iterators.push(super::IterState::Generator { gen });
                 }
+                VmValue::Range(r) => {
+                    // Lazy range: compute the stop point once (inclusive ranges
+                    // become half-open by adding 1). Empty ranges fall out
+                    // naturally because `next >= stop` on the first iter step.
+                    let stop = if r.inclusive {
+                        // Saturate to avoid i64 overflow on `i64::MAX to i64::MAX`.
+                        r.end.saturating_add(1)
+                    } else {
+                        r.end
+                    };
+                    // `5 to 1` is simply empty (no reverse iteration in v1).
+                    let next = r.start;
+                    self.iterators.push(super::IterState::Range { next, stop });
+                }
+                VmValue::Iter(handle) => {
+                    self.iterators.push(super::IterState::VmIter { handle });
+                }
                 _ => {
                     self.iterators.push(super::IterState::Vec {
                         items: Vec::new(),
@@ -1145,7 +1193,29 @@ impl super::Vm {
             let frame = self.frames.last_mut().unwrap();
             let target = frame.chunk.read_u16(frame.ip) as usize;
             frame.ip += 2;
-            if let Some(state) = self.iterators.last_mut() {
+            // VmIter path: clone the handle out first so we don't hold a
+            // borrow on self.iterators across the async next() call.
+            let vm_iter_handle = match self.iterators.last() {
+                Some(super::IterState::VmIter { handle }) => Some(handle.clone()),
+                _ => None,
+            };
+            if let Some(handle) = vm_iter_handle {
+                // SAFETY: we only hold the RefCell borrow for the duration
+                // of next(); inside next() the borrow is on `handle`, not
+                // on self.iterators, so recursive VM reentry via closures
+                // (future combinator variants) is safe as long as they
+                // don't re-enter the same iter.
+                let functions = self.frames.last().unwrap().chunk.functions.clone();
+                let next_val = crate::vm::iter::next_handle(&handle, self, &functions).await?;
+                match next_val {
+                    Some(v) => self.stack.push(v),
+                    None => {
+                        self.iterators.pop();
+                        let frame = self.frames.last_mut().unwrap();
+                        frame.ip = target;
+                    }
+                }
+            } else if let Some(state) = self.iterators.last_mut() {
                 match state {
                     super::IterState::Vec { items, idx } => {
                         if *idx < items.len() {
@@ -1180,6 +1250,17 @@ impl super::Vm {
                             }
                         }
                     }
+                    super::IterState::Range { next, stop } => {
+                        if *next < *stop {
+                            let v = *next;
+                            *next += 1;
+                            self.stack.push(VmValue::Int(v));
+                        } else {
+                            self.iterators.pop();
+                            let frame = self.frames.last_mut().unwrap();
+                            frame.ip = target;
+                        }
+                    }
                     super::IterState::Generator { gen } => {
                         if gen.done.get() {
                             self.iterators.pop();
@@ -1201,6 +1282,10 @@ impl super::Vm {
                                 }
                             }
                         }
+                    }
+                    super::IterState::VmIter { .. } => {
+                        // Handled in the early VmIter path above; unreachable.
+                        unreachable!("VmIter state handled before this match");
                     }
                 }
             } else {

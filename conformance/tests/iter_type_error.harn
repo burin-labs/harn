@@ -1,0 +1,5 @@
+pipeline test(task) {
+  // RHS is iter<int>, annotation demands list<int>. Must fail.
+  let xs: list<int> = iter([1, 2, 3]).map(fn(x) { return x + 1 })
+  log(xs)
+}

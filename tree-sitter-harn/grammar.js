@@ -517,7 +517,7 @@ module.exports = grammar({
       ),
 
     range_expression: ($) =>
-      prec.left(7, seq($._expression, choice("upto", "thru"), $._expression)),
+      prec.left(7, seq($._expression, "to", $._expression, optional("exclusive"))),
 
     unary_expression: ($) =>
       prec.right(10, seq(choice("!", "-"), $._expression)),

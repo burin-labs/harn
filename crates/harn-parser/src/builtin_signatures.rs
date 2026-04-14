@@ -607,6 +607,10 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("bool")),
     },
     BuiltinSig {
+        name: "iter",
+        return_type: Some(BuiltinReturn::Named("iter")),
+    },
+    BuiltinSig {
         name: "join",
         return_type: Some(BuiltinReturn::Named("string")),
     },
@@ -895,6 +899,10 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("nil")),
     },
     BuiltinSig {
+        name: "pair",
+        return_type: Some(BuiltinReturn::Named("pair")),
+    },
+    BuiltinSig {
         name: "pascal_to_camel",
         return_type: Some(BuiltinReturn::Named("string")),
     },
@@ -1009,6 +1017,10 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
     BuiltinSig {
         name: "random_int",
         return_type: None,
+    },
+    BuiltinSig {
+        name: "range",
+        return_type: Some(BuiltinReturn::Named("list")),
     },
     BuiltinSig {
         name: "read_file",

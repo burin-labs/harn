@@ -11,7 +11,7 @@ mod tests;
 
 use complexity::cyclomatic_complexity;
 use fixes::{
-    empty_statement_removal_fix, is_pure_expression, nil_fallback_ternary_parts,
+    append_sink_fix, empty_statement_removal_fix, is_pure_expression, nil_fallback_ternary_parts,
     simple_ident_rename_fix,
 };
 
@@ -111,6 +111,11 @@ struct Linter<'a> {
     type_declarations: Vec<TypeDeclaration>,
     /// Track type names referenced anywhere in the file.
     type_references: HashSet<String>,
+    /// Stack of declared return types for the current function nesting.
+    /// Used by the `eager-collection-conversion` lint rule to flag
+    /// `return <iter-chain>` inside a function declared to return a
+    /// concrete collection.
+    return_type_stack: Vec<Option<TypeExpr>>,
 }
 
 impl<'a> Linter<'a> {
@@ -135,6 +140,7 @@ impl<'a> Linter<'a> {
             test_pipeline_depth: 0,
             type_declarations: Vec::new(),
             type_references: HashSet::new(),
+            return_type_stack: Vec::new(),
         }
     }
 
@@ -239,6 +245,7 @@ impl<'a> Linter<'a> {
                 }
             }
             TypeExpr::List(inner) => self.record_type_expr_references(inner),
+            TypeExpr::Iter(inner) => self.record_type_expr_references(inner),
             TypeExpr::DictType(key, value) => {
                 self.record_type_expr_references(key);
                 self.record_type_expr_references(value);
@@ -260,6 +267,91 @@ impl<'a> Linter<'a> {
             }
             TypeExpr::Never => {}
         }
+    }
+
+    /// Map a type annotation to the matching iterator sink method name when
+    /// the annotation is a concrete collection type. Returns `None` for
+    /// non-collection annotations (including `Iter<T>` itself, which is
+    /// already the expression's inferred shape).
+    fn expected_collection_sink(type_expr: &TypeExpr) -> Option<&'static str> {
+        match type_expr {
+            TypeExpr::List(_) => Some("to_list"),
+            TypeExpr::DictType(_, _) => Some("to_dict"),
+            TypeExpr::Applied { name, .. } => match name.as_str() {
+                "list" => Some("to_list"),
+                "set" => Some("to_set"),
+                "dict" => Some("to_dict"),
+                _ => None,
+            },
+            TypeExpr::Named(name) => match name.as_str() {
+                "list" => Some("to_list"),
+                "set" => Some("to_set"),
+                "dict" => Some("to_dict"),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// Heuristic: does this expression look like a lazy iterator chain that
+    /// would yield an `Iter<T>` rather than a concrete collection? We flag
+    /// method calls whose outermost (tail) method is a known lazy
+    /// combinator or `iter` lift. Sink-terminated chains (e.g.
+    /// `...to_list()`) return false.
+    fn expr_yields_iter(node: &Node) -> bool {
+        match node {
+            Node::MethodCall { method, .. } | Node::OptionalMethodCall { method, .. } => {
+                matches!(
+                    method.as_str(),
+                    "iter"
+                        | "map"
+                        | "filter"
+                        | "flat_map"
+                        | "take"
+                        | "skip"
+                        | "take_while"
+                        | "skip_while"
+                        | "zip"
+                        | "enumerate"
+                        | "chain"
+                        | "chunks"
+                        | "windows"
+                )
+            }
+            Node::FunctionCall { name, .. } => {
+                matches!(name.as_str(), "iter")
+            }
+            _ => false,
+        }
+    }
+
+    fn check_eager_collection_conversion(&mut self, expected: &TypeExpr, value: &SNode) {
+        let Some(sink) = Self::expected_collection_sink(expected) else {
+            return;
+        };
+        if !Self::expr_yields_iter(&value.node) {
+            return;
+        }
+        let (kind_word, collection_label) = match sink {
+            "to_list" => ("list", "list"),
+            "to_set" => ("set", "set"),
+            "to_dict" => ("dict", "dict"),
+            _ => return,
+        };
+        let _ = kind_word;
+        let message = format!(
+            "expression is an iterator; expected {collection_label}. \
+             Add .{sink}() to materialize."
+        );
+        let fix = append_sink_fix(value.span, sink);
+        self.diagnostics.push(LintDiagnostic {
+            rule: "eager-collection-conversion",
+            message,
+            span: value.span,
+            severity: LintSeverity::Warning,
+            suggestion: Some(format!("append `.{sink}()` to materialize the iterator")),
+            fix: Some(fix),
+        });
     }
 
     fn record_param_type_references(&mut self, params: &[TypedParam]) {
@@ -317,6 +409,7 @@ impl<'a> Linter<'a> {
                 .map(|f| f.alias.as_deref().unwrap_or(&f.key).to_string())
                 .collect(),
             BindingPattern::List(elements) => elements.iter().map(|e| e.name.clone()).collect(),
+            BindingPattern::Pair(a, b) => vec![a.clone(), b.clone()],
         }
     }
 
@@ -425,6 +518,12 @@ impl<'a> Linter<'a> {
     }
 
     fn lint_program(&mut self, nodes: &[SNode]) {
+        if let Some(src) = self.source {
+            check_legacy_doc_comments(src, nodes, &mut self.diagnostics);
+            check_blank_line_between_items(src, nodes, &mut self.diagnostics);
+            check_trailing_comma(src, &mut self.diagnostics);
+            check_import_order(src, nodes, &mut self.diagnostics);
+        }
         for node in nodes {
             self.lint_node(node);
         }
@@ -479,11 +578,13 @@ impl<'a> Linter<'a> {
                 {
                     self.diagnostics.push(LintDiagnostic {
                         rule: "missing-harndoc",
-                        message: format!("public function `{name}` is missing a `///` doc comment"),
+                        message: format!(
+                            "public function `{name}` is missing a `/** */` doc comment"
+                        ),
                         span: snode.span,
                         severity: LintSeverity::Warning,
                         suggestion: Some(format!(
-                            "add a contiguous `///` HarnDoc block above `pub fn {name}`"
+                            "add a `/** ... */` HarnDoc block directly above `pub fn {name}`"
                         )),
                         fix: None,
                     });
@@ -517,7 +618,9 @@ impl<'a> Linter<'a> {
                 for p in params {
                     self.declare_parameter(&p.name, snode.span);
                 }
+                self.return_type_stack.push(return_type.clone());
                 self.lint_block(body);
+                self.return_type_stack.pop();
                 self.loop_depth = saved_loop_depth;
                 self.pop_scope();
             }
@@ -564,7 +667,9 @@ impl<'a> Linter<'a> {
                 for p in params {
                     self.declare_parameter(&p.name, snode.span);
                 }
+                self.return_type_stack.push(return_type.clone());
                 self.lint_block(body);
+                self.return_type_stack.pop();
                 self.loop_depth = saved_loop_depth;
                 self.pop_scope();
             }
@@ -579,13 +684,27 @@ impl<'a> Linter<'a> {
                 self.in_impl_block = saved;
             }
 
-            Node::LetBinding { pattern, value, .. } => {
+            Node::LetBinding {
+                pattern,
+                type_ann,
+                value,
+            } => {
                 self.lint_node(value);
+                if let Some(ann) = type_ann {
+                    self.check_eager_collection_conversion(ann, value);
+                }
                 self.declare_pattern_variables(pattern, snode.span, false);
             }
 
-            Node::VarBinding { pattern, value, .. } => {
+            Node::VarBinding {
+                pattern,
+                type_ann,
+                value,
+            } => {
                 self.lint_node(value);
+                if let Some(ann) = type_ann {
+                    self.check_eager_collection_conversion(ann, value);
+                }
                 self.declare_pattern_variables(pattern, snode.span, true);
             }
 
@@ -1080,6 +1199,9 @@ impl<'a> Linter<'a> {
             Node::ReturnStmt { value } => {
                 if let Some(v) = value {
                     self.lint_node(v);
+                    if let Some(Some(ret_ty)) = self.return_type_stack.last().cloned() {
+                        self.check_eager_collection_conversion(&ret_ty, v);
+                    }
                 }
             }
 
@@ -1644,32 +1766,376 @@ impl<'a> Linter<'a> {
     }
 }
 
+/// Return true when this node kind is a top-level item for the purposes of
+/// the `blank-line-between-items` rule. This is the slightly-broader set
+/// that includes let/var bindings at module scope.
+fn is_top_level_item(node: &Node) -> bool {
+    matches!(
+        node,
+        Node::FnDecl { .. }
+            | Node::Pipeline { .. }
+            | Node::StructDecl { .. }
+            | Node::EnumDecl { .. }
+            | Node::InterfaceDecl { .. }
+            | Node::TypeDecl { .. }
+            | Node::ToolDecl { .. }
+            | Node::ImplBlock { .. }
+            | Node::OverrideDecl { .. }
+            | Node::LetBinding { .. }
+            | Node::VarBinding { .. }
+    )
+}
+
+fn is_import_item(node: &Node) -> bool {
+    matches!(node, Node::ImportDecl { .. } | Node::SelectiveImport { .. })
+}
+
+/// Return true when this node kind participates in the `legacy-doc-comment`
+/// rule (i.e. is a documented item whose preceding comments should use the
+/// canonical `/** */` form). Mirrors the plan's whitelist.
+fn is_documentable_item(node: &Node) -> bool {
+    matches!(
+        node,
+        Node::FnDecl { .. }
+            | Node::Pipeline { .. }
+            | Node::StructDecl { .. }
+            | Node::EnumDecl { .. }
+            | Node::InterfaceDecl { .. }
+            | Node::TypeDecl { .. }
+            | Node::ToolDecl { .. }
+            | Node::ImplBlock { .. }
+            | Node::OverrideDecl { .. }
+    )
+}
+
+fn item_is_pub(node: &Node) -> bool {
+    match node {
+        Node::FnDecl { is_pub, .. }
+        | Node::Pipeline { is_pub, .. }
+        | Node::StructDecl { is_pub, .. }
+        | Node::EnumDecl { is_pub, .. }
+        | Node::ToolDecl { is_pub, .. } => *is_pub,
+        // InterfaceDecl / ImplBlock / TypeDecl / OverrideDecl have no
+        // is_pub flag — treat them as always-eligible when they appear at
+        // the top level.
+        Node::InterfaceDecl { .. }
+        | Node::ImplBlock { .. }
+        | Node::TypeDecl { .. }
+        | Node::OverrideDecl { .. } => true,
+        _ => false,
+    }
+}
+
+/// A comment token recovered from a re-lex of the source.
+#[derive(Clone)]
+struct LegacyCommentTok {
+    line: usize,
+    start_byte: usize,
+    end_byte: usize,
+    is_line: bool,
+    is_doc: bool,
+    text: String,
+}
+
+/// Walk the source with the lexer and return a vector of line-comment and
+/// block-comment tokens, in source order.
+fn collect_comment_tokens(source: &str) -> Vec<LegacyCommentTok> {
+    let mut lexer = harn_lexer::Lexer::new(source);
+    let Ok(tokens) = lexer.tokenize_with_comments() else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for tok in tokens {
+        match tok.kind {
+            harn_lexer::TokenKind::LineComment { text, is_doc } => {
+                out.push(LegacyCommentTok {
+                    line: tok.span.line,
+                    start_byte: tok.span.start,
+                    end_byte: tok.span.end,
+                    is_line: true,
+                    is_doc,
+                    text,
+                });
+            }
+            harn_lexer::TokenKind::BlockComment { text, is_doc } => {
+                out.push(LegacyCommentTok {
+                    line: tok.span.line,
+                    start_byte: tok.span.start,
+                    end_byte: tok.span.end,
+                    is_line: false,
+                    is_doc,
+                    text,
+                });
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Produce the canonical `/** */` replacement text for a run of comment
+/// tokens. `body_lines` contains one text line per collected comment (already
+/// stripped of leading `//` / `///` markers). `indent` is the column indent
+/// (in spaces) to use for continuation lines. The return value does NOT
+/// include a trailing newline — the replacement span is expected to cover
+/// exactly the original comment lines' textual range.
+fn canonical_doc_block(body_lines: &[String], indent: usize, line_width: usize) -> String {
+    let indent_str = " ".repeat(indent);
+    // Trim leading/trailing blank lines.
+    let mut start = 0;
+    while start < body_lines.len() && body_lines[start].trim().is_empty() {
+        start += 1;
+    }
+    let mut end = body_lines.len();
+    while end > start && body_lines[end - 1].trim().is_empty() {
+        end -= 1;
+    }
+    let body = &body_lines[start..end];
+    if body.is_empty() {
+        return format!("{indent_str}/** */");
+    }
+    if body.len() == 1 {
+        let only = body[0].trim();
+        let compact = format!("{indent_str}/** {only} */");
+        if compact.len() <= line_width {
+            return compact;
+        }
+    }
+    let mut out = String::new();
+    out.push_str(&indent_str);
+    out.push_str("/**");
+    for line in body {
+        out.push('\n');
+        if line.trim().is_empty() {
+            out.push_str(&indent_str);
+            out.push_str(" *");
+        } else {
+            out.push_str(&indent_str);
+            out.push_str(" * ");
+            out.push_str(line.trim_end());
+        }
+    }
+    out.push('\n');
+    out.push_str(&indent_str);
+    out.push_str(" */");
+    out
+}
+
+/// Collect and emit `legacy-doc-comment` diagnostics. Walks top-level items
+/// plus `pub` methods inside `impl` blocks, looks for a contiguous run of
+/// `///` lines (or `//` lines with no blank line between the run and the
+/// item), and produces an autofix replacement with the canonical form.
+fn check_legacy_doc_comments(
+    source: &str,
+    program: &[SNode],
+    diagnostics: &mut Vec<LintDiagnostic>,
+) {
+    let comments = collect_comment_tokens(source);
+    if comments.is_empty() {
+        return;
+    }
+    // Index by starting line for fast upward walks.
+    let by_line: std::collections::HashMap<usize, &LegacyCommentTok> =
+        comments.iter().map(|c| (c.line, c)).collect();
+
+    fn visit(
+        node: &SNode,
+        comments: &[LegacyCommentTok],
+        by_line: &std::collections::HashMap<usize, &LegacyCommentTok>,
+        source: &str,
+        diagnostics: &mut Vec<LintDiagnostic>,
+        is_top_level: bool,
+    ) {
+        // Eligible if: the item is documentable AND it's either top-level
+        // OR explicitly `pub`. Impl methods are only eligible when pub (since
+        // impl itself is the "top-level" container for them).
+        if is_documentable_item(&node.node) && (is_top_level || item_is_pub(&node.node)) {
+            check_one_item(node, comments, by_line, source, diagnostics);
+        }
+        match &node.node {
+            Node::Pipeline { body, .. }
+            | Node::FnDecl { body, .. }
+            | Node::ToolDecl { body, .. }
+            | Node::OverrideDecl { body, .. } => {
+                for child in body {
+                    visit(child, comments, by_line, source, diagnostics, false);
+                }
+            }
+            Node::ImplBlock { methods, .. } => {
+                for m in methods {
+                    visit(m, comments, by_line, source, diagnostics, false);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    for node in program {
+        visit(node, &comments, &by_line, source, diagnostics, true);
+    }
+}
+
+fn check_one_item(
+    node: &SNode,
+    _comments: &[LegacyCommentTok],
+    by_line: &std::collections::HashMap<usize, &LegacyCommentTok>,
+    source: &str,
+    diagnostics: &mut Vec<LintDiagnostic>,
+) {
+    let item_line = node.span.line;
+    if item_line == 0 {
+        return;
+    }
+    // Walk upward. For each candidate previous line, require a line-comment
+    // token there. Stop at the first non-comment line.
+    let mut walked: Vec<&LegacyCommentTok> = Vec::new();
+    let mut cursor = item_line.saturating_sub(1);
+    while cursor > 0 {
+        let Some(tok) = by_line.get(&cursor) else {
+            break;
+        };
+        // Only `//`-style line comments participate in this heuristic. An
+        // existing `/** */` block doesn't need rewriting.
+        if !tok.is_line {
+            break;
+        }
+        walked.push(*tok);
+        cursor -= 1;
+    }
+    if walked.is_empty() {
+        return;
+    }
+    walked.reverse(); // now in top-to-bottom order
+                      // Any contiguous run of `//` / `///` line comments directly above the
+                      // item (no blank-line gap) is treated as a doc comment and rewritten.
+                      // This covers both design triggers:
+                      //  - entirely `///` lines (the original HarnDoc form), and
+                      //  - entirely plain `//` lines adjacent to a def,
+                      // as well as the pragmatic mixed case (legacy hand-written `//` block
+                      // followed by an auto-generated `///` stub — both are the item's doc).
+    let any_doc = walked.iter().any(|c| c.is_doc);
+    let any_plain = walked.iter().any(|c| !c.is_doc);
+
+    // Compute the byte range covering the entire comment run, including the
+    // line's leading indentation. Replacement span starts at the start of
+    // the first comment's line (so we can reset indentation).
+    let first = walked.first().unwrap();
+    let last = walked.last().unwrap();
+    let line_start = line_start_byte(source, first.start_byte);
+    let indent_cols = first.start_byte - line_start;
+    // Build body text lines from the stripped comments.
+    let mut body_lines: Vec<String> = Vec::with_capacity(walked.len());
+    for c in &walked {
+        let s = c.text.strip_prefix(' ').unwrap_or(&c.text);
+        body_lines.push(s.trim_end().to_string());
+    }
+    let replacement = canonical_doc_block(&body_lines, indent_cols, 100);
+    // Find the span we're replacing: from line_start of first comment up to
+    // end of last comment byte. This preserves the trailing newline after
+    // the run (we don't consume it).
+    let replace_span = Span::with_offsets(line_start, last.end_byte, first.line, 1);
+    let fix = vec![FixEdit {
+        span: replace_span,
+        replacement,
+    }];
+    let (prefix, suggestion_form): (&str, &str) = match (any_doc, any_plain) {
+        (true, false) => ("`///`", "/// lines"),
+        (false, true) => ("plain `//`", "// lines adjacent to the definition"),
+        _ => (
+            "adjacent `//` / `///`",
+            "line-comment block adjacent to the definition",
+        ),
+    };
+    diagnostics.push(LintDiagnostic {
+        rule: "legacy-doc-comment",
+        message: format!("{prefix} doc comment(s) above this item should use `/** */` form"),
+        span: Span::with_offsets(first.start_byte, last.end_byte, first.line, 1),
+        severity: LintSeverity::Warning,
+        suggestion: Some(format!(
+            "rewrite the {suggestion_form} as a canonical `/** ... */` block"
+        )),
+        fix: Some(fix),
+    });
+}
+
+/// Given a byte offset, walk backward to find the start-of-line byte.
+fn line_start_byte(source: &str, offset: usize) -> usize {
+    let bytes = source.as_bytes();
+    let mut i = offset;
+    while i > 0 && bytes[i - 1] != b'\n' {
+        i -= 1;
+    }
+    i
+}
+
 fn extract_harndoc(source: &str, span: &Span) -> Option<String> {
+    // Recognize only canonical `/** */` doc-block comments directly above the
+    // item. The block must end on the line immediately preceding the item
+    // (no blank line between). Legacy `///` forms are NOT accepted — they're
+    // flagged by the `legacy-doc-comment` lint rule instead.
     let lines: Vec<&str> = source.lines().collect();
     let def_line = span.line.saturating_sub(1);
     if def_line == 0 {
         return None;
     }
-    let mut comment_lines = Vec::new();
-    let mut line_idx = def_line - 1;
-    loop {
-        let line = lines.get(line_idx)?;
-        let trimmed = line.trim();
-        if trimmed.starts_with("///") {
-            comment_lines.push(trimmed.trim_start_matches("///").trim_start().to_string());
-        } else {
-            break;
-        }
-        if line_idx == 0 {
-            break;
-        }
-        line_idx -= 1;
+    // `def_line` is the item's line, 0-indexed: lines[def_line - 1] is the
+    // line directly above. That line must end with `*/`.
+    let above_idx = def_line - 1;
+    let above = lines.get(above_idx)?.trim_end();
+    if !above.ends_with("*/") {
+        return None;
     }
-    if comment_lines.is_empty() {
+    // Walk upward to find the start `/**`. The opening `/**` may be on the
+    // same line (compact `/** ... */`) or on an earlier line.
+    let above_trim = above.trim_start();
+    if above_trim.starts_with("/**") && above_trim.ends_with("*/") && above_trim.len() >= 5 {
+        // Compact form: `/** body */`
+        let inner = &above_trim[3..above_trim.len() - 2];
+        let text = inner.trim();
+        return Some(text.to_string());
+    }
+    let mut start_idx = above_idx;
+    loop {
+        let cur = lines.get(start_idx)?.trim_start();
+        if cur.starts_with("/**") {
+            break;
+        }
+        if start_idx == 0 {
+            return None;
+        }
+        start_idx -= 1;
+    }
+    let mut body = Vec::new();
+    for (i, line) in lines.iter().enumerate().take(above_idx + 1).skip(start_idx) {
+        let t = line.trim();
+        let stripped: &str = if i == start_idx {
+            t.strip_prefix("/**").unwrap_or(t).trim_start()
+        } else if i == above_idx {
+            // Strip trailing `*/` plus optional leading ` * `.
+            let without_tail = t.strip_suffix("*/").unwrap_or(t).trim_end();
+            let without_star = without_tail
+                .strip_prefix('*')
+                .map(|s| s.strip_prefix(' ').unwrap_or(s))
+                .unwrap_or(without_tail);
+            without_star
+        } else {
+            t.strip_prefix('*')
+                .map(|s| s.strip_prefix(' ').unwrap_or(s))
+                .unwrap_or(t)
+        };
+        body.push(stripped.trim_end().to_string());
+    }
+    // Trim leading/trailing empty lines.
+    while body.first().is_some_and(|s| s.is_empty()) {
+        body.remove(0);
+    }
+    while body.last().is_some_and(|s| s.is_empty()) {
+        body.pop();
+    }
+    if body.is_empty() {
         None
     } else {
-        comment_lines.reverse();
-        Some(comment_lines.join("\n"))
+        Some(body.join("\n"))
     }
 }
 
@@ -1706,6 +2172,19 @@ fn to_pascal_case(name: &str) -> String {
     out
 }
 
+/// Extra options for source-aware lint rules. Keeps the main entry points
+/// backward compatible while allowing callers that know about the source
+/// file's path or want opt-in rules (like `require-file-header`) to turn
+/// them on.
+#[derive(Debug, Default, Clone)]
+pub struct LintOptions<'a> {
+    /// Filesystem path of the source being linted (used by rules like
+    /// `require-file-header` to derive a title from the basename).
+    pub file_path: Option<&'a std::path::Path>,
+    /// When true, the opt-in `require-file-header` rule runs. Default false.
+    pub require_file_header: bool,
+}
+
 /// Lint an AST program and return all diagnostics.
 pub fn lint(program: &[SNode]) -> Vec<LintDiagnostic> {
     lint_with_config_and_source(program, &[], None)
@@ -1727,7 +2206,13 @@ pub fn lint_with_config_and_source(
     disabled_rules: &[String],
     source: Option<&str>,
 ) -> Vec<LintDiagnostic> {
-    lint_full(program, disabled_rules, source, &HashSet::new())
+    lint_full(
+        program,
+        disabled_rules,
+        source,
+        &HashSet::new(),
+        &LintOptions::default(),
+    )
 }
 
 /// Lint with cross-file import awareness.  `externally_imported_names` is the
@@ -1739,7 +2224,31 @@ pub fn lint_with_cross_file_imports(
     source: Option<&str>,
     externally_imported_names: &HashSet<String>,
 ) -> Vec<LintDiagnostic> {
-    lint_full(program, disabled_rules, source, externally_imported_names)
+    lint_full(
+        program,
+        disabled_rules,
+        source,
+        externally_imported_names,
+        &LintOptions::default(),
+    )
+}
+
+/// Lint with cross-file import awareness plus extra options (path-aware and
+/// opt-in rules). Thin wrapper over [`lint_full`].
+pub fn lint_with_options(
+    program: &[SNode],
+    disabled_rules: &[String],
+    source: Option<&str>,
+    externally_imported_names: &HashSet<String>,
+    options: &LintOptions<'_>,
+) -> Vec<LintDiagnostic> {
+    lint_full(
+        program,
+        disabled_rules,
+        source,
+        externally_imported_names,
+        options,
+    )
 }
 
 fn lint_full(
@@ -1747,12 +2256,18 @@ fn lint_full(
     disabled_rules: &[String],
     source: Option<&str>,
     externally_imported_names: &HashSet<String>,
+    options: &LintOptions<'_>,
 ) -> Vec<LintDiagnostic> {
     let mut linter = Linter::new(source);
     linter
         .externally_imported_names
         .clone_from(externally_imported_names);
     linter.lint_program(program);
+    if let Some(src) = source {
+        if options.require_file_header {
+            check_require_file_header(src, options.file_path, &mut linter.diagnostics);
+        }
+    }
     linter.finalize();
     if disabled_rules.is_empty() {
         linter.diagnostics
@@ -1779,6 +2294,463 @@ pub fn collect_selective_import_names(program: &[SNode]) -> HashSet<String> {
         }
     }
     names
+}
+
+/// Emit `blank-line-between-items` diagnostics: whenever two top-level
+/// items are adjacent in the source with no blank line between them, the
+/// rule fires with an autofix that inserts the blank line at the correct
+/// offset. Doc comments immediately preceding an item count as part of the
+/// item — the blank line goes above the doc block, not between doc and
+/// item.
+fn check_blank_line_between_items(
+    source: &str,
+    program: &[SNode],
+    diagnostics: &mut Vec<LintDiagnostic>,
+) {
+    if program.len() < 2 {
+        return;
+    }
+    // Collect all comment tokens keyed by starting line (1-based).
+    let comment_tokens = collect_comment_tokens(source);
+    let comments_by_line: std::collections::HashMap<usize, &LegacyCommentTok> =
+        comment_tokens.iter().map(|c| (c.line, c)).collect();
+
+    // Precompute line → byte offset of start of line (1-based lines).
+    let line_starts = build_line_starts(source);
+
+    for pair in program.windows(2) {
+        let prev = &pair[0];
+        let next = &pair[1];
+
+        // Skip consecutive imports: they intentionally stay tight.
+        if is_import_item(&prev.node) && is_import_item(&next.node) {
+            continue;
+        }
+        if !is_top_level_item(&prev.node) && !is_import_item(&prev.node) {
+            continue;
+        }
+        if !is_top_level_item(&next.node) && !is_import_item(&next.node) {
+            continue;
+        }
+        if prev.span.line == 0 || next.span.line == 0 {
+            continue;
+        }
+
+        // Walk upward from `next.span.line - 1` collecting contiguous
+        // comment lines (no blank line between them and the item). The
+        // "first line of the item-with-its-doc-block" is the topmost such
+        // line.
+        let mut first_line = next.span.line;
+        let mut probe = next.span.line;
+        while probe > 1 {
+            let above = probe - 1;
+            if comments_by_line.contains_key(&above) {
+                first_line = above;
+                probe = above;
+                continue;
+            }
+            break;
+        }
+
+        let prev_end_line = prev.span.end_line.max(prev.span.line);
+        // Number of source lines that sit strictly between the end of prev
+        // and the start of (next + its glued comment block). If there is
+        // at least one fully-blank line between them the rule is satisfied.
+        if first_line <= prev_end_line + 1 {
+            // Adjacent — no blank line. Check that the line literally
+            // following prev is non-blank, otherwise we'd be flagging a
+            // case that already has blank space.
+            let insert_line = prev_end_line + 1;
+            let Some(&insert_offset) = line_starts.get(insert_line.saturating_sub(1)) else {
+                continue;
+            };
+            let span = Span::with_offsets(insert_offset, insert_offset, insert_line, 1);
+            diagnostics.push(LintDiagnostic {
+                rule: "blank-line-between-items",
+                message: "top-level items should be separated by a blank line".to_string(),
+                span,
+                severity: LintSeverity::Warning,
+                suggestion: Some(
+                    "insert a blank line above the next item (doc comments \
+                     stay glued to the item they describe)"
+                        .to_string(),
+                ),
+                fix: Some(vec![FixEdit {
+                    span,
+                    replacement: "\n".to_string(),
+                }]),
+            });
+        }
+    }
+}
+
+/// Emit `trailing-comma` diagnostics by scanning the source's tokens for
+/// multiline comma-separated lists that lack a trailing comma. Autofix
+/// inserts a `,` at the byte offset immediately after the last item.
+fn check_trailing_comma(source: &str, diagnostics: &mut Vec<LintDiagnostic>) {
+    let mut lexer = harn_lexer::Lexer::new(source);
+    let Ok(tokens) = lexer.tokenize_with_comments() else {
+        return;
+    };
+
+    // Stack of open-bracket records. Each entry remembers the start-line of
+    // the opener, the opener's byte position, which kind it is, and whether
+    // we've seen any `,` at this depth (= "this is a comma-separated list").
+    #[derive(Clone, Copy)]
+    enum Opener {
+        Paren,
+        Bracket,
+        Brace,
+    }
+    struct Frame {
+        opener: Opener,
+        open_line: usize,
+        saw_comma: bool,
+        /// True when we've decided this `{ ... }` is a dict/struct literal
+        /// (applies only when `opener == Brace`). For Paren/Bracket this is
+        /// always `true` — those are always comma-lists when they have
+        /// commas.
+        eligible: bool,
+        /// For `{ ... }` we need to look at the first "meaningful" token to
+        /// decide eligibility. Track whether we've made that decision yet.
+        decision_made: bool,
+        /// Track the first-seen identifier/string token inside, to combine
+        /// with a subsequent `:` for the dict/struct decision.
+        pending_key_token: bool,
+    }
+    let mut stack: Vec<Frame> = Vec::new();
+
+    // Helper to find the byte offset of the last non-whitespace,
+    // non-comment character strictly before `pos` in `source`.
+    fn last_meaningful_byte_before(source: &str, pos: usize) -> Option<usize> {
+        let bytes = source.as_bytes();
+        if pos == 0 {
+            return None;
+        }
+        let mut i = pos;
+        while i > 0 {
+            i -= 1;
+            let b = bytes[i];
+            if matches!(b, b' ' | b'\t' | b'\n' | b'\r') {
+                continue;
+            }
+            // We don't strip comments here — the FixEdit is allowed to land
+            // after the comment if a trailing comment sits above the close.
+            return Some(i);
+        }
+        None
+    }
+
+    for tok in &tokens {
+        // Ignore comments and newlines for the decision-making layer, but
+        // we still look at everything for bracket tracking.
+        match &tok.kind {
+            harn_lexer::TokenKind::LineComment { .. }
+            | harn_lexer::TokenKind::BlockComment { .. }
+            | harn_lexer::TokenKind::Newline => continue,
+            _ => {}
+        }
+
+        match &tok.kind {
+            harn_lexer::TokenKind::LParen => {
+                stack.push(Frame {
+                    opener: Opener::Paren,
+                    open_line: tok.span.line,
+                    saw_comma: false,
+                    eligible: true,
+                    decision_made: true,
+                    pending_key_token: false,
+                });
+            }
+            harn_lexer::TokenKind::LBracket => {
+                stack.push(Frame {
+                    opener: Opener::Bracket,
+                    open_line: tok.span.line,
+                    saw_comma: false,
+                    eligible: true,
+                    decision_made: true,
+                    pending_key_token: false,
+                });
+            }
+            harn_lexer::TokenKind::LBrace => {
+                stack.push(Frame {
+                    opener: Opener::Brace,
+                    open_line: tok.span.line,
+                    saw_comma: false,
+                    eligible: false,
+                    decision_made: false,
+                    pending_key_token: false,
+                });
+            }
+            harn_lexer::TokenKind::RParen
+            | harn_lexer::TokenKind::RBracket
+            | harn_lexer::TokenKind::RBrace => {
+                let Some(frame) = stack.pop() else { continue };
+                // Only care if opener matches (sanity check).
+                let matching = matches!(
+                    (&frame.opener, &tok.kind),
+                    (Opener::Paren, harn_lexer::TokenKind::RParen)
+                        | (Opener::Bracket, harn_lexer::TokenKind::RBracket)
+                        | (Opener::Brace, harn_lexer::TokenKind::RBrace)
+                );
+                if !matching {
+                    continue;
+                }
+                if !frame.eligible || !frame.saw_comma {
+                    continue;
+                }
+                // Must be multiline: closer on a later line than opener.
+                if tok.span.line <= frame.open_line {
+                    continue;
+                }
+                let close_pos = tok.span.start;
+                let Some(last_byte) = last_meaningful_byte_before(source, close_pos) else {
+                    continue;
+                };
+                if source.as_bytes()[last_byte] == b',' {
+                    continue; // already has trailing comma
+                }
+                // Don't fire on genuinely-empty containers. We already
+                // required `saw_comma == true`, so that's handled, but
+                // defensively check that there's real content.
+                let insert_pos = last_byte + 1;
+                // Report the span on the line where the insert actually lands,
+                // not on the closer's line — those can differ by many lines in
+                // a multiline literal, and editors highlight based on span.
+                let insert_line = source[..insert_pos].bytes().filter(|b| *b == b'\n').count() + 1;
+                let span = Span::with_offsets(insert_pos, insert_pos, insert_line, 1);
+                diagnostics.push(LintDiagnostic {
+                    rule: "trailing-comma",
+                    message: "multiline comma-separated list is missing a trailing comma"
+                        .to_string(),
+                    span,
+                    severity: LintSeverity::Warning,
+                    suggestion: Some("add a trailing comma after the last item".to_string()),
+                    fix: Some(vec![FixEdit {
+                        span,
+                        replacement: ",".to_string(),
+                    }]),
+                });
+            }
+            harn_lexer::TokenKind::Comma => {
+                if let Some(top) = stack.last_mut() {
+                    top.saw_comma = true;
+                }
+            }
+            harn_lexer::TokenKind::Colon => {
+                if let Some(top) = stack.last_mut() {
+                    if matches!(top.opener, Opener::Brace)
+                        && !top.decision_made
+                        && top.pending_key_token
+                    {
+                        top.eligible = true;
+                        top.decision_made = true;
+                    }
+                }
+            }
+            harn_lexer::TokenKind::Identifier(_) | harn_lexer::TokenKind::StringLiteral(_) => {
+                if let Some(top) = stack.last_mut() {
+                    if matches!(top.opener, Opener::Brace) && !top.decision_made {
+                        top.pending_key_token = true;
+                    }
+                }
+            }
+            _ => {
+                // Any other token inside a `{ ... }` before we decided —
+                // means this isn't a dict/struct literal (probably a
+                // block). Lock the decision as ineligible.
+                if let Some(top) = stack.last_mut() {
+                    if matches!(top.opener, Opener::Brace) && !top.decision_made {
+                        top.decision_made = true;
+                        top.eligible = false;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Emit `import-order` diagnostics when the program's import block is not
+/// in canonical order (stdlib first, alphabetical by path, selective
+/// imports after bare imports for the same path). Autofix rewrites the
+/// whole import block in canonical order.
+fn check_import_order(source: &str, program: &[SNode], diagnostics: &mut Vec<LintDiagnostic>) {
+    let mut imports: Vec<&SNode> = Vec::new();
+    for node in program {
+        if is_import_item(&node.node) {
+            imports.push(node);
+        } else {
+            break; // imports live at the top of the file
+        }
+    }
+    if imports.len() < 2 {
+        return;
+    }
+    let mut sorted = imports.clone();
+    sorted.sort_by_key(|a| import_sort_key(a));
+    let already_sorted = imports
+        .iter()
+        .zip(sorted.iter())
+        .all(|(a, b)| std::ptr::eq(*a, *b));
+    if already_sorted {
+        return;
+    }
+
+    // Autofix: replace the span from the first import's start to the last
+    // import's end with the canonical sorted rendering. Preserve one
+    // newline between imports. The existing formatter handles exact
+    // formatting; we just need something functional.
+    let first = imports.first().unwrap();
+    let last = imports.last().unwrap();
+    let replacement = sorted
+        .iter()
+        .map(|n| render_import_source(source, n))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let replace_span = Span::with_offsets(
+        first.span.start,
+        last.span.end,
+        first.span.line,
+        first.span.column,
+    );
+    diagnostics.push(LintDiagnostic {
+        rule: "import-order",
+        message: "imports are not in canonical order (stdlib first, then alphabetical by path)"
+            .to_string(),
+        span: replace_span,
+        severity: LintSeverity::Warning,
+        suggestion: Some(
+            "reorder imports: std/ first, then third-party and local paths alphabetically"
+                .to_string(),
+        ),
+        fix: Some(vec![FixEdit {
+            span: replace_span,
+            replacement,
+        }]),
+    });
+}
+
+fn import_sort_key(node: &SNode) -> (u8, String, u8, String) {
+    match &node.node {
+        Node::ImportDecl { path } => (
+            u8::from(!path.starts_with("std/")),
+            path.clone(),
+            0,
+            String::new(),
+        ),
+        Node::SelectiveImport { names, path } => {
+            let mut sorted_names = names.clone();
+            sorted_names.sort();
+            (
+                u8::from(!path.starts_with("std/")),
+                path.clone(),
+                1,
+                sorted_names.join(","),
+            )
+        }
+        _ => (2, String::new(), 2, String::new()),
+    }
+}
+
+/// Slice the raw source covered by an import node's span. The formatter
+/// will re-normalize these in a subsequent pass; for the autofix we just
+/// need the existing text in the correct order.
+fn render_import_source(source: &str, node: &SNode) -> String {
+    source
+        .get(node.span.start..node.span.end)
+        .unwrap_or("")
+        .to_string()
+}
+
+/// Emit `require-file-header` when the source does not begin with a
+/// `/** */` doc block. Autofix inserts a canonical header at byte 0 with a
+/// title derived from the filename (when a path is provided).
+fn check_require_file_header(
+    source: &str,
+    file_path: Option<&std::path::Path>,
+    diagnostics: &mut Vec<LintDiagnostic>,
+) {
+    // Find the first non-whitespace character in the source and verify
+    // it's the start of a `/**` block. Any other content (including plain
+    // `//` line comments, `/*` non-doc block comments, or code) is a
+    // violation.
+    let bytes = source.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() && matches!(bytes[i], b' ' | b'\t' | b'\r' | b'\n') {
+        i += 1;
+    }
+    if i + 2 < bytes.len() && &bytes[i..i + 3] == b"/**" {
+        return;
+    }
+    let title = derive_file_header_title(file_path);
+    let header = format!("/**\n * {title}\n */\n\n");
+    let span = Span::with_offsets(0, 0, 1, 1);
+    diagnostics.push(LintDiagnostic {
+        rule: "require-file-header",
+        message: "file is missing a `/** */` header doc block".to_string(),
+        span,
+        severity: LintSeverity::Warning,
+        suggestion: Some(format!(
+            "add a `/** <title> */` block at the top of the file (e.g. `{title}`)"
+        )),
+        fix: Some(vec![FixEdit {
+            span,
+            replacement: header,
+        }]),
+    });
+}
+
+/// Derive the title shown inside the autofix's file-header block. Falls
+/// back to a generic "Module." when no path is available.
+pub fn derive_file_header_title(file_path: Option<&std::path::Path>) -> String {
+    let stem = file_path
+        .and_then(|p| p.file_stem().and_then(|s| s.to_str()))
+        .unwrap_or("module");
+    // Replace `-` and `_` with spaces, then capitalize the first letter
+    // only. We intentionally do NOT title-case every word — the plan
+    // specifies "first letter capitalized" for readability.
+    let mut cleaned = String::with_capacity(stem.len());
+    for ch in stem.chars() {
+        if ch == '-' || ch == '_' {
+            cleaned.push(' ');
+        } else {
+            cleaned.push(ch);
+        }
+    }
+    // Normalize whitespace: collapse internal runs of spaces.
+    let collapsed = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut trimmed = collapsed.trim().to_string();
+    if trimmed.is_empty() {
+        trimmed.push_str("module");
+    }
+    // Capitalize the very first character.
+    let mut chars = trimmed.chars();
+    let head = chars.next().unwrap().to_ascii_uppercase();
+    let tail: String = chars.collect();
+    let mut out = String::new();
+    out.push(head);
+    out.push_str(&tail.to_lowercase());
+    // Append a terminal period if the title does not already end in one
+    // of `.`, `!`, or `?`.
+    let last = out.chars().last().unwrap_or('.');
+    if !matches!(last, '.' | '!' | '?') {
+        out.push('.');
+    }
+    out
+}
+
+/// Build a Vec where index `i` is the byte offset of the start of line
+/// `i + 1` (1-based lines). Convenient for constructing zero-width FixEdit
+/// spans at "beginning of line N".
+fn build_line_starts(source: &str) -> Vec<usize> {
+    let mut starts = Vec::new();
+    starts.push(0);
+    for (idx, ch) in source.char_indices() {
+        if ch == '\n' {
+            starts.push(idx + 1);
+        }
+    }
+    starts
 }
 
 /// Simplify a boolean comparison expression like `x == true` → `x`.

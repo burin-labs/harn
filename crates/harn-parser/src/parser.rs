@@ -413,7 +413,17 @@ impl Parser {
     fn parse_for_in(&mut self) -> Result<SNode, ParserError> {
         let start = self.current_span();
         self.consume(&TokenKind::For, "for")?;
-        let pattern = self.parse_binding_pattern()?;
+        let pattern = if self.check(&TokenKind::LParen) {
+            // Pair destructuring: `for (a, b) in ...`
+            self.advance(); // consume (
+            let first = self.consume_identifier("pair pattern element")?;
+            self.consume(&TokenKind::Comma, ",")?;
+            let second = self.consume_identifier("pair pattern element")?;
+            self.consume(&TokenKind::RParen, ")")?;
+            BindingPattern::Pair(first, second)
+        } else {
+            self.parse_binding_pattern()?
+        };
         self.consume(&TokenKind::In, "in")?;
         let iterable = self.parse_expression()?;
         self.consume(&TokenKind::LBrace, "{")?;
@@ -1378,28 +1388,21 @@ impl Parser {
 
     fn parse_range(&mut self) -> Result<SNode, ParserError> {
         let left = self.parse_ternary()?;
-        if self.check(&TokenKind::Thru) {
+        if self.check(&TokenKind::To) {
             let start = left.span;
             self.advance();
             let right = self.parse_ternary()?;
+            let inclusive = if self.check(&TokenKind::Exclusive) {
+                self.advance();
+                false
+            } else {
+                true
+            };
             return Ok(spanned(
                 Node::RangeExpr {
                     start: Box::new(left),
                     end: Box::new(right),
-                    inclusive: true,
-                },
-                Span::merge(start, self.prev_span()),
-            ));
-        }
-        if self.check(&TokenKind::Upto) {
-            let start = left.span;
-            self.advance();
-            let right = self.parse_ternary()?;
-            return Ok(spanned(
-                Node::RangeExpr {
-                    start: Box::new(left),
-                    end: Box::new(right),
-                    inclusive: false,
+                    inclusive,
                 },
                 Span::merge(start, self.prev_span()),
             ));
@@ -2448,6 +2451,8 @@ impl Parser {
                     Box::new(type_args.remove(0)),
                     Box::new(type_args.remove(0)),
                 ));
+            } else if (name == "iter" || name == "Iter") && type_args.len() == 1 {
+                return Ok(TypeExpr::Iter(Box::new(type_args.remove(0))));
             }
             return Ok(TypeExpr::Applied {
                 name,
@@ -2649,9 +2654,9 @@ impl Parser {
             TokenKind::Interface => "interface",
             TokenKind::Pub => "pub",
             TokenKind::From => "from",
-            TokenKind::Thru => "thru",
+            TokenKind::To => "to",
             TokenKind::Tool => "tool",
-            TokenKind::Upto => "upto",
+            TokenKind::Exclusive => "exclusive",
             TokenKind::Guard => "guard",
             TokenKind::Deadline => "deadline",
             TokenKind::Defer => "defer",

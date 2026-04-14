@@ -1,1 +1,1 @@
-re:Operator '\+' is not valid for types \w+ and \w+
+re:can't add \w+ and \w+

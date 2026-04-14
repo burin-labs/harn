@@ -1,0 +1,15 @@
+[harn] list:1
+[harn] list:2
+[harn] list:3
+[harn] dict_pair:a=1
+[harn] dict_pair:b=2
+[harn] dict_des:a=1
+[harn] dict_des:b=2
+[harn] set:10
+[harn] set:20
+[harn] set:30
+[harn] str:a
+[harn] str:b
+[harn] str:c
+[harn] gen:100
+[harn] gen:200

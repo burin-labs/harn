@@ -1,0 +1,3 @@
+pipeline test(task) {
+  log(iter([1, 2, 3, 4, 1]).take_while({ x -> x < 3 }).to_list())
+}

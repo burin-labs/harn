@@ -111,13 +111,110 @@ require task != nil, "task is required"
 fn test_public_function_with_harndoc_is_clean() {
     let diags = lint_source(
         r#"
-/// Explain the public API.
+/** Explain the public API. */
 pub fn exposed() -> string {
   return "x"
 }
 "#,
     );
     assert!(!has_rule(&diags, "missing-harndoc"));
+}
+
+#[test]
+fn test_public_function_with_multiline_harndoc_is_clean() {
+    let diags = lint_source(
+        r#"
+/**
+ * Explain the public API.
+ * Across multiple lines.
+ */
+pub fn exposed() -> string {
+  return "x"
+}
+"#,
+    );
+    assert!(!has_rule(&diags, "missing-harndoc"));
+}
+
+#[test]
+fn test_legacy_triple_slash_above_pub_fn_fires() {
+    let diags = lint_source(
+        r#"
+/// Old-style doc.
+pub fn exposed() -> string {
+  return "x"
+}
+"#,
+    );
+    assert!(
+        has_rule(&diags, "legacy-doc-comment"),
+        "expected legacy-doc-comment, got: {diags:?}"
+    );
+    // And the autofix should produce a canonical /** */ block.
+    let fix = diags
+        .iter()
+        .find(|d| d.rule == "legacy-doc-comment")
+        .and_then(|d| d.fix.as_ref())
+        .expect("legacy-doc-comment must carry an autofix");
+    assert_eq!(fix.len(), 1);
+    assert!(
+        fix[0].replacement.contains("/**") && fix[0].replacement.contains("*/"),
+        "replacement should be a canonical /** */ block: {:?}",
+        fix[0].replacement
+    );
+}
+
+#[test]
+fn test_plain_double_slash_adjacent_to_pub_fn_fires() {
+    let diags = lint_source(
+        r#"
+// Doc-by-adjacency.
+pub fn exposed() -> string {
+  return "x"
+}
+"#,
+    );
+    assert!(
+        has_rule(&diags, "legacy-doc-comment"),
+        "expected legacy-doc-comment for // adjacent to def, got: {diags:?}"
+    );
+}
+
+#[test]
+fn test_plain_double_slash_with_blank_line_does_not_fire() {
+    let diags = lint_source(
+        r#"
+// unrelated comment
+
+pub fn exposed() -> string {
+  return "x"
+}
+"#,
+    );
+    assert!(
+        !has_rule(&diags, "legacy-doc-comment"),
+        "// with blank-line gap should not be treated as doc: {diags:?}"
+    );
+}
+
+#[test]
+fn test_existing_block_doc_does_not_fire_legacy() {
+    let diags = lint_source(
+        r#"
+/** Already canonical. */
+pub fn exposed() -> string {
+  return "x"
+}
+"#,
+    );
+    assert!(
+        !has_rule(&diags, "legacy-doc-comment"),
+        "/** */ block should not trigger legacy rule: {diags:?}"
+    );
+    assert!(
+        !has_rule(&diags, "missing-harndoc"),
+        "/** */ block should satisfy missing-harndoc: {diags:?}"
+    );
 }
 
 #[test]
@@ -1667,5 +1764,342 @@ pipeline default(task) {
     assert!(
         has_rule(&diags, "untyped-dict-access"),
         "llm_call direct access should trigger rule, got: {diags:?}"
+    );
+}
+
+// --- blank-line-between-items ---
+
+#[test]
+fn test_blank_line_between_items_fires_for_two_adjacent_fns() {
+    let source = "fn a() -> int {\n  return 1\n}\nfn b() -> int {\n  return 2\n}\n";
+    let diags = lint_source(source);
+    assert!(
+        has_rule(&diags, "blank-line-between-items"),
+        "expected blank-line-between-items, got: {diags:?}"
+    );
+}
+
+#[test]
+fn test_blank_line_between_items_ok_when_blank_present() {
+    let source = "fn a() -> int {\n  return 1\n}\n\nfn b() -> int {\n  return 2\n}\n";
+    let diags = lint_source(source);
+    assert!(
+        !has_rule(&diags, "blank-line-between-items"),
+        "should not fire with blank line present, got: {diags:?}"
+    );
+}
+
+#[test]
+fn test_blank_line_between_items_ok_with_doc_block_and_blank_above() {
+    // Blank line above the doc block — doc block is glued to fn b.
+    let source =
+        "fn a() -> int {\n  return 1\n}\n\n/** Describes b. */\nfn b() -> int {\n  return 2\n}\n";
+    let diags = lint_source(source);
+    assert!(
+        !has_rule(&diags, "blank-line-between-items"),
+        "blank line above doc block should satisfy the rule, got: {diags:?}"
+    );
+}
+
+// -----------------------------------------------------------------------
+// eager-collection-conversion
+// -----------------------------------------------------------------------
+
+#[test]
+fn test_eager_collection_conversion_let_list() {
+    let source = r#"pipeline default(task) {
+  let xs: list<int> = iter([1, 2, 3]).map(fn(x) { return x + 1 })
+  log(xs)
+}
+"#;
+    let diags = lint_source(source);
+    assert_eq!(
+        count_rule(&diags, "eager-collection-conversion"),
+        1,
+        "expected exactly one eager-collection-conversion diagnostic, got: {diags:?}"
+    );
+    let fixed = apply_fixes(source, &diags);
+    assert!(
+        fixed.contains(".to_list()"),
+        "expected autofix to append .to_list(), got: {fixed}"
+    );
+}
+
+#[test]
+fn test_eager_collection_conversion_no_flag_when_already_to_list() {
+    let source = r#"pipeline default(task) {
+  let xs: list<int> = iter([1, 2, 3]).map(fn(x) { return x + 1 }).to_list()
+  log(xs)
+}
+"#;
+    let diags = lint_source(source);
+    assert_eq!(
+        count_rule(&diags, "eager-collection-conversion"),
+        0,
+        "should not flag already-materialized chains, got: {diags:?}"
+    );
+}
+
+#[test]
+fn test_eager_collection_conversion_return_stmt() {
+    let source = r#"fn build() -> list<int> {
+  return iter([1, 2, 3]).filter(fn(x) { return x > 0 })
+}
+"#;
+    let diags = lint_source(source);
+    assert_eq!(
+        count_rule(&diags, "eager-collection-conversion"),
+        1,
+        "expected eager-collection-conversion on return, got: {diags:?}"
+    );
+    let fixed = apply_fixes(source, &diags);
+    assert!(
+        fixed.contains(".to_list()"),
+        "expected autofix to append .to_list(), got: {fixed}"
+    );
+}
+
+#[test]
+fn test_blank_line_between_items_fires_when_doc_has_no_blank_above() {
+    // No blank line above the doc block — the rule fires.
+    let source =
+        "fn a() -> int {\n  return 1\n}\n/** Describes b. */\nfn b() -> int {\n  return 2\n}\n";
+    let diags = lint_source(source);
+    let hit = diags
+        .iter()
+        .find(|d| d.rule == "blank-line-between-items")
+        .expect("expected blank-line-between-items to fire");
+    // Autofix should insert a newline at the start of the doc comment's
+    // line (line 4) — the "\n" replacement lives above the doc block.
+    let fix = hit.fix.as_ref().expect("autofix expected");
+    assert_eq!(fix.len(), 1);
+    assert_eq!(fix[0].replacement, "\n");
+}
+
+#[test]
+fn test_blank_line_between_items_does_not_fire_between_imports() {
+    let source = "import \"std/strings\"\nimport \"std/io\"\n\nfn a() -> int { return 1 }\n";
+    let diags = lint_source(source);
+    assert!(
+        !has_rule(&diags, "blank-line-between-items"),
+        "consecutive imports are intentionally tight, got: {diags:?}"
+    );
+}
+
+// --- trailing-comma ---
+
+#[test]
+fn test_trailing_comma_fires_on_multiline_list() {
+    let source =
+        "pipeline default(task) {\n  let xs = [\n    1,\n    2,\n    3\n  ]\n  log(xs[0])\n}\n";
+    let diags = lint_source(source);
+    assert!(
+        has_rule(&diags, "trailing-comma"),
+        "expected trailing-comma on multiline list, got: {diags:?}"
+    );
+}
+
+#[test]
+fn test_trailing_comma_ok_when_present() {
+    let source =
+        "pipeline default(task) {\n  let xs = [\n    1,\n    2,\n    3,\n  ]\n  log(xs[0])\n}\n";
+    let diags = lint_source(source);
+    assert!(
+        !has_rule(&diags, "trailing-comma"),
+        "should not fire when comma already present, got: {diags:?}"
+    );
+}
+
+#[test]
+fn test_trailing_comma_ignores_single_line_list() {
+    let source = "pipeline default(task) {\n  let xs = [1, 2, 3]\n  log(xs[0])\n}\n";
+    let diags = lint_source(source);
+    assert!(
+        !has_rule(&diags, "trailing-comma"),
+        "single-line list should not fire, got: {diags:?}"
+    );
+}
+
+#[test]
+fn test_trailing_comma_ignores_fn_body_block() {
+    // fn body is `{ ... }` but not a dict/struct — must not fire.
+    let source = "fn x() -> int {\n  let y = 1\n  return y\n}\n";
+    let diags = lint_source(source);
+    assert!(
+        !has_rule(&diags, "trailing-comma"),
+        "fn body block should not fire, got: {diags:?}"
+    );
+}
+
+#[test]
+fn test_trailing_comma_fires_on_dict_literal() {
+    let source =
+        "pipeline default(task) {\n  let d = {\n    \"a\": 1,\n    \"b\": 2\n  }\n  log(d)\n}\n";
+    let diags = lint_source(source);
+    assert!(
+        has_rule(&diags, "trailing-comma"),
+        "expected trailing-comma on multiline dict, got: {diags:?}"
+    );
+}
+
+#[test]
+fn test_trailing_comma_fires_on_fn_call_args() {
+    let source = "pipeline default(task) {\n  log(\n    \"first\",\n    \"second\"\n  )\n}\n";
+    let diags = lint_source(source);
+    assert!(
+        has_rule(&diags, "trailing-comma"),
+        "expected trailing-comma on multiline call args, got: {diags:?}"
+    );
+}
+
+// --- import-order ---
+
+#[test]
+fn test_import_order_fires_when_out_of_order() {
+    let source = "import \"std/io\"\nimport \"std/fs\"\n\nfn a() -> int { return 1 }\n";
+    let diags = lint_source(source);
+    assert!(
+        has_rule(&diags, "import-order"),
+        "expected import-order when out of order, got: {diags:?}"
+    );
+}
+
+#[test]
+fn test_import_order_canonical_does_not_fire() {
+    let source = "import \"std/fs\"\nimport \"std/io\"\n\nfn a() -> int { return 1 }\n";
+    let diags = lint_source(source);
+    assert!(
+        !has_rule(&diags, "import-order"),
+        "canonical order should not fire, got: {diags:?}"
+    );
+}
+
+#[test]
+fn test_import_order_single_import_does_not_fire() {
+    let source = "import \"std/io\"\n\nfn a() -> int { return 1 }\n";
+    let diags = lint_source(source);
+    assert!(
+        !has_rule(&diags, "import-order"),
+        "single import should not fire, got: {diags:?}"
+    );
+}
+
+#[test]
+fn test_import_order_stdlib_before_third_party() {
+    let source = "import \"mypkg/util\"\nimport \"std/io\"\n\nfn a() -> int { return 1 }\n";
+    let diags = lint_source(source);
+    assert!(
+        has_rule(&diags, "import-order"),
+        "stdlib should come before third-party, got: {diags:?}"
+    );
+}
+
+// --- require-file-header ---
+
+fn lint_with_require_header(source: &str, path: Option<&std::path::Path>) -> Vec<LintDiagnostic> {
+    let mut lexer = Lexer::new(source);
+    let tokens = lexer.tokenize().unwrap();
+    let mut parser = Parser::new(tokens);
+    let program = parser.parse().unwrap();
+    let options = LintOptions {
+        file_path: path,
+        require_file_header: true,
+    };
+    lint_with_options(
+        &program,
+        &[],
+        Some(source),
+        &std::collections::HashSet::new(),
+        &options,
+    )
+}
+
+#[test]
+fn test_require_file_header_fires_when_missing() {
+    let path = std::path::PathBuf::from("foo.harn");
+    let source = "fn main() -> int {\n  return 0\n}\n";
+    let diags = lint_with_require_header(source, Some(&path));
+    let hit = diags
+        .iter()
+        .find(|d| d.rule == "require-file-header")
+        .expect("expected require-file-header");
+    let fix = hit.fix.as_ref().expect("autofix expected");
+    assert_eq!(fix.len(), 1);
+    assert!(
+        fix[0].replacement.starts_with("/**\n * Foo."),
+        "expected 'Foo.' title, got: {:?}",
+        fix[0].replacement
+    );
+}
+
+#[test]
+fn test_require_file_header_ok_when_present() {
+    let path = std::path::PathBuf::from("foo.harn");
+    let source = "/**\n * Some header.\n */\nfn main() -> int {\n  return 0\n}\n";
+    let diags = lint_with_require_header(source, Some(&path));
+    assert!(
+        !has_rule(&diags, "require-file-header"),
+        "should not fire when header present, got: {diags:?}"
+    );
+}
+
+#[test]
+fn test_require_file_header_fires_when_only_line_comment() {
+    let path = std::path::PathBuf::from("foo.harn");
+    let source = "// not a header\nfn main() -> int {\n  return 0\n}\n";
+    let diags = lint_with_require_header(source, Some(&path));
+    assert!(
+        has_rule(&diags, "require-file-header"),
+        "// comment does not count as header, got: {diags:?}"
+    );
+}
+
+#[test]
+fn test_require_file_header_off_by_default() {
+    // Without LintOptions { require_file_header: true }, the rule must
+    // not fire — this protects the existing repo from sudden regressions.
+    let diags = lint_source("fn main() -> int {\n  return 0\n}\n");
+    assert!(
+        !has_rule(&diags, "require-file-header"),
+        "rule should be opt-in, got: {diags:?}"
+    );
+}
+
+#[test]
+fn test_derive_file_header_title_cases() {
+    use std::path::PathBuf;
+    let cases = [
+        ("foo.harn", "Foo."),
+        ("foo_bar.harn", "Foo bar."),
+        ("foo-bar.harn", "Foo bar."),
+        ("Foo.harn", "Foo."),
+        ("data_pipeline.harn", "Data pipeline."),
+        ("llm-cost.harn", "Llm cost."),
+    ];
+    for (name, expected) in cases {
+        let path = PathBuf::from(name);
+        let got = derive_file_header_title(Some(&path));
+        assert_eq!(got, expected, "title for {name}");
+    }
+}
+
+#[test]
+fn test_derive_file_header_title_no_path_fallback() {
+    let got = derive_file_header_title(None);
+    assert_eq!(got, "Module.");
+}
+
+#[test]
+fn test_eager_collection_conversion_ignores_iter_annotation() {
+    let source = r#"pipeline default(task) {
+  let xs: Iter<int> = iter([1, 2, 3]).map(fn(x) { return x + 1 })
+  log(xs)
+}
+"#;
+    let diags = lint_source(source);
+    assert_eq!(
+        count_rule(&diags, "eager-collection-conversion"),
+        0,
+        "Iter<T> annotation should not trigger rule, got: {diags:?}"
     );
 }

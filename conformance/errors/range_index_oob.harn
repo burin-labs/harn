@@ -1,0 +1,4 @@
+pipeline test(task) {
+  let r = 1 to 5
+  log(r[100])
+}

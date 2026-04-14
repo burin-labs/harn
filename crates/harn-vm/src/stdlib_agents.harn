@@ -1,7 +1,7 @@
 import "std/collections"
 import "std/context"
 
-/// workflow_model_spec.
+/** workflow_model_spec. */
 pub fn workflow_model_spec(config) {
   let target = config?.model ?? config?.model_alias ?? config?.model_tier ?? config?.tier
   if target == nil || target == "" {
@@ -10,7 +10,7 @@ pub fn workflow_model_spec(config) {
   return llm_pick_model(target, filter_nil({provider: config?.provider}))
 }
 
-/// workflow_options.
+/** workflow_options. */
 pub fn workflow_options(config) {
   let spec = workflow_model_spec(config)
   return filter_nil({
@@ -46,7 +46,7 @@ pub fn workflow_options(config) {
   })
 }
 
-/// stage_config.
+/** stage_config. */
 pub fn stage_config(flow, overrides, stage_name) {
   let combined = (flow ?? {}) + (overrides ?? {})
   let stage = combined[stage_name] ?? {}
@@ -54,7 +54,7 @@ pub fn stage_config(flow, overrides, stage_name) {
   return filter_nil(merged + {_stage: stage_name})
 }
 
-/// stage_prompt.
+/** stage_prompt. */
 pub fn stage_prompt(task, config) {
   let ctx = config?.context
   return prompt_compose(task, ctx, filter_nil({
@@ -66,7 +66,7 @@ pub fn stage_prompt(task, config) {
   }))
 }
 
-/// run_stage.
+/** run_stage. */
 pub fn run_stage(task, config) {
   let prompt = stage_prompt(task, config)
   let opts = workflow_options(config)
@@ -81,7 +81,7 @@ pub fn run_stage(task, config) {
   })
 }
 
-/// verify_command.
+/** verify_command. */
 pub fn verify_command(config) {
   if config?.command == nil || config?.command == "" {
     return nil
@@ -101,7 +101,7 @@ pub fn verify_command(config) {
   }
 }
 
-/// verify_result.
+/** verify_result. */
 pub fn verify_result(task, result, config) {
   if config == nil {
     return nil
@@ -119,7 +119,7 @@ pub fn verify_result(task, result, config) {
   return nil
 }
 
-/// repair_task.
+/** repair_task. */
 pub fn repair_task(original_task, verification, config) {
   if config?.prompt != nil {
     return config?.prompt
@@ -129,12 +129,12 @@ pub fn repair_task(original_task, verification, config) {
   return message
 }
 
-/// workflow.
+/** workflow. */
 pub fn workflow(config) {
   return workflow_graph(config ?? {})
 }
 
-/// task_run.
+/** task_run. */
 pub fn task_run(task, flow, overrides) {
   let graph = workflow_graph(flow ?? {})
   let runtime = workflow_execute(task, graph, overrides?.artifacts ?? [], overrides)
@@ -182,14 +182,14 @@ pub fn task_run(task, flow, overrides) {
   }
 }
 
-/// workflow_continue.
+/** workflow_continue. */
 pub fn workflow_continue(prev, task, flow, overrides) {
   let transcript = prev?.transcript ?? prev
   let merged = (overrides ?? {}) + {transcript: transcript}
   return task_run(task, flow, merged)
 }
 
-/// workflow_result_text.
+/** workflow_result_text. */
 pub fn workflow_result_text(result) {
   let raw = if type_of(result) == "string" {
     result
@@ -205,7 +205,7 @@ pub fn workflow_result_text(result) {
   return json_stringify(raw)
 }
 
-/// workflow_result_transcript.
+/** workflow_result_transcript. */
 pub fn workflow_result_transcript(task, workflow_name, result, metadata) {
   let existing = result?.run?.transcript ?? result?.transcript ?? result?.result?.transcript
   if existing {
@@ -228,7 +228,7 @@ pub fn workflow_result_transcript(task, workflow_name, result, metadata) {
   return built
 }
 
-/// workflow_result_run.
+/** workflow_result_run. */
 pub fn workflow_result_run(task, workflow_name, result, artifacts, options) {
   let base_run = if result?._type == "run_record" {
     result
@@ -293,7 +293,7 @@ pub fn workflow_result_run(task, workflow_name, result, artifacts, options) {
   )
 }
 
-/// workflow_result_persist.
+/** workflow_result_persist. */
 pub fn workflow_result_persist(task, workflow_name, result, artifacts, options) {
   let base_run = if result?._type == "run_record" {
     result
@@ -368,7 +368,7 @@ pub fn workflow_result_persist(task, workflow_name, result, artifacts, options) 
   }
 }
 
-/// workflow_session.
+/** workflow_session. */
 pub fn workflow_session(prev) {
   let transcript = prev?.transcript ?? prev?.result?.transcript ?? prev
   let run = prev?.run ?? prev?.result?.run
@@ -390,7 +390,7 @@ pub fn workflow_session(prev) {
   }
 }
 
-/// workflow_session_new.
+/** workflow_session_new. */
 pub fn workflow_session_new(metadata) {
   return workflow_session(
     {
@@ -400,7 +400,7 @@ pub fn workflow_session_new(metadata) {
   )
 }
 
-/// workflow_session_restore.
+/** workflow_session_restore. */
 pub fn workflow_session_restore(source) {
   let run = if type_of(source) == "string" {
     run_record_load(source)
@@ -417,13 +417,13 @@ pub fn workflow_session_restore(source) {
   )
 }
 
-/// workflow_session_fork.
+/** workflow_session_fork. */
 pub fn workflow_session_fork(prev) {
   let session = workflow_session(prev)
   return workflow_session(session + {transcript: transcript_fork(session?.transcript)})
 }
 
-/// workflow_session_archive.
+/** workflow_session_archive. */
 pub fn workflow_session_archive(prev) {
   let session = workflow_session(prev)
   return workflow_session(
@@ -434,7 +434,7 @@ pub fn workflow_session_archive(prev) {
   )
 }
 
-/// workflow_session_resume.
+/** workflow_session_resume. */
 pub fn workflow_session_resume(prev) {
   let session = workflow_session(prev)
   return workflow_session(
@@ -445,13 +445,13 @@ pub fn workflow_session_resume(prev) {
   )
 }
 
-/// workflow_compact.
+/** workflow_compact. */
 pub fn workflow_compact(prev, options) {
   let transcript = prev?.transcript ?? prev
   return transcript_summarize(transcript, options)
 }
 
-/// workflow_session_compact.
+/** workflow_session_compact. */
 pub fn workflow_session_compact(prev, options) {
   let session = workflow_session(prev)
   return workflow_session(
@@ -461,7 +461,7 @@ pub fn workflow_session_compact(prev, options) {
   )
 }
 
-/// workflow_reset.
+/** workflow_reset. */
 pub fn workflow_reset(prev, carry_summary) {
   let transcript = prev?.transcript ?? prev
   if carry_summary && transcript_summary(transcript) {
@@ -470,7 +470,7 @@ pub fn workflow_reset(prev, carry_summary) {
   return transcript()
 }
 
-/// workflow_session_reset.
+/** workflow_session_reset. */
 pub fn workflow_session_reset(prev, carry_summary) {
   let session = workflow_session(prev)
   return workflow_session(
@@ -482,7 +482,7 @@ pub fn workflow_session_reset(prev, carry_summary) {
   )
 }
 
-/// workflow_session_persist.
+/** workflow_session_persist. */
 pub fn workflow_session_persist(prev, path) {
   let session = workflow_session(prev)
   if session?.run == nil {

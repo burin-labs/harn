@@ -3586,21 +3586,24 @@
             "name": "_expression"
           },
           {
-            "type": "CHOICE",
-            "members": [
-              {
-                "type": "STRING",
-                "value": "upto"
-              },
-              {
-                "type": "STRING",
-                "value": "thru"
-              }
-            ]
+            "type": "STRING",
+            "value": "to"
           },
           {
             "type": "SYMBOL",
             "name": "_expression"
+          },
+          {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "STRING",
+                "value": "exclusive"
+              },
+              {
+                "type": "BLANK"
+              }
+            ]
           }
         ]
       }
@@ -5872,11 +5875,11 @@
         },
         {
           "type": "STRING",
-          "value": "thru"
+          "value": "to"
         },
         {
           "type": "STRING",
-          "value": "upto"
+          "value": "exclusive"
         },
         {
           "type": "STRING",

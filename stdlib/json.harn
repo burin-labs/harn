@@ -2,12 +2,12 @@
 //
 // Import with: import "std/json"
 
-/// Pretty-print a value as indented JSON (2-space indent).
+/** Pretty-print a value as indented JSON (2-space indent). */
 fn pretty(value) {
   return json_stringify(value)
 }
 
-/// Safely parse JSON, returning nil on failure instead of throwing.
+/** Safely parse JSON, returning nil on failure instead of throwing. */
 fn safe_parse(text) {
   try {
     return json_parse(text)
@@ -16,7 +16,7 @@ fn safe_parse(text) {
   }
 }
 
-/// Merge two dicts (shallow). Keys in b override keys in a.
+/** Merge two dicts (shallow). Keys in b override keys in a. */
 fn merge(a, b) {
   var result = a
   for entry in b {
@@ -25,7 +25,7 @@ fn merge(a, b) {
   return result
 }
 
-/// Pick specific keys from a dict.
+/** Pick specific keys from a dict. */
 fn pick(data, keys) {
   var result = {}
   for k in keys {
@@ -36,7 +36,7 @@ fn pick(data, keys) {
   return result
 }
 
-/// Omit specific keys from a dict.
+/** Omit specific keys from a dict. */
 fn omit(data, keys) {
   let exclude = set(keys)
   var result = {}

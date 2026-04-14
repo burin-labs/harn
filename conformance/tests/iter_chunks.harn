@@ -1,0 +1,11 @@
+pipeline test(task) {
+  let a = iter([1, 2, 3, 4, 5]).chunks(2).to_list()
+  log(a)
+  let b = iter([1, 2, 3, 4, 5, 6]).chunks(3).to_list()
+  log(b)
+  let c = iter([1, 2, 3]).chunks(10).to_list()
+  log(c)
+  let d = iter([]).chunks(2).to_list()
+  log(d)
+  log(len(d))
+}

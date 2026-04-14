@@ -2,6 +2,7 @@ mod a2a;
 mod acp;
 mod cli;
 mod commands;
+mod config;
 mod package;
 mod test_runner;
 
@@ -113,15 +114,30 @@ async fn main() {
             let cross_file_imports = commands::check::collect_cross_file_imports(&files);
             if args.fix {
                 for file in &files {
-                    let config = package::load_check_config(Some(file));
-                    commands::check::lint_fix_file(file, &config, &cross_file_imports);
+                    let mut config = package::load_check_config(Some(file));
+                    commands::check::apply_harn_lint_config(file, &mut config);
+                    let require_header = args.require_file_header
+                        || commands::check::harn_lint_require_file_header(file);
+                    commands::check::lint_fix_file(
+                        file,
+                        &config,
+                        &cross_file_imports,
+                        require_header,
+                    );
                 }
             } else {
                 let mut should_fail = false;
                 for file in &files {
-                    let config = package::load_check_config(Some(file));
-                    let outcome =
-                        commands::check::lint_file_inner(file, &config, &cross_file_imports);
+                    let mut config = package::load_check_config(Some(file));
+                    commands::check::apply_harn_lint_config(file, &mut config);
+                    let require_header = args.require_file_header
+                        || commands::check::harn_lint_require_file_header(file);
+                    let outcome = commands::check::lint_file_inner(
+                        file,
+                        &config,
+                        &cross_file_imports,
+                        require_header,
+                    );
                     should_fail |= outcome.should_fail(config.strict);
                 }
                 if should_fail {
@@ -131,9 +147,30 @@ async fn main() {
         }
         Command::Fmt(args) => {
             let targets: Vec<&str> = args.targets.iter().map(String::as_str).collect();
-            let opts = harn_fmt::FmtOptions {
-                line_width: args.line_width,
+            // Build a per-target FmtOptions by loading harn.toml for the
+            // first target (for directory-wide runs that's the closest we
+            // can do cheaply). CLI flags always win over config.
+            let anchor = targets.first().map(Path::new).unwrap_or(Path::new("."));
+            let loaded = match config::load_for_path(anchor) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("warning: {e}");
+                    config::HarnConfig::default()
+                }
             };
+            let mut opts = harn_fmt::FmtOptions::default();
+            if let Some(w) = loaded.fmt.line_width {
+                opts.line_width = w;
+            }
+            if let Some(w) = loaded.fmt.separator_width {
+                opts.separator_width = w;
+            }
+            if let Some(w) = args.line_width {
+                opts.line_width = w;
+            }
+            if let Some(w) = args.separator_width {
+                opts.separator_width = w;
+            }
             commands::check::fmt_targets(&targets, args.check, &opts);
         }
         Command::Test(args) => {

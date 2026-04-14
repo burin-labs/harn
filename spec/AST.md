@@ -572,11 +572,11 @@ or `Some("+")` for `+=`, etc.
 RangeExpr { start: Box<SNode>, end: Box<SNode>, inclusive: bool }
 ```
 
-Range expression. `inclusive: false` uses `upto`, `inclusive: true` uses `thru`.
+Range expression. `inclusive: true` is the default (`a to b`); add a trailing `exclusive` modifier for the half-open form.
 
 ```harn
-0 upto 10   // exclusive
-0 thru 9    // inclusive
+0 to 10 exclusive   // [0, 10)
+0 to 9              // [0, 9] inclusive
 ```
 
 ### `DeferStmt`

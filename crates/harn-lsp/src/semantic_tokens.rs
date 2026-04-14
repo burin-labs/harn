@@ -80,9 +80,9 @@ fn token_kind_to_semantic(kind: &TokenKind) -> Option<u32> {
         | TokenKind::Impl
         | TokenKind::Pub
         | TokenKind::From
-        | TokenKind::Thru
+        | TokenKind::To
         | TokenKind::Tool
-        | TokenKind::Upto
+        | TokenKind::Exclusive
         | TokenKind::Guard
         | TokenKind::Require
         | TokenKind::Deadline
@@ -133,7 +133,7 @@ fn token_kind_to_semantic(kind: &TokenKind) -> Option<u32> {
         | TokenKind::Bar => Some(sem::OPERATOR),
 
         // Comments
-        TokenKind::LineComment(_) | TokenKind::BlockComment(_) => Some(sem::COMMENT),
+        TokenKind::LineComment { .. } | TokenKind::BlockComment { .. } => Some(sem::COMMENT),
 
         // Identifiers are context-dependent — handled separately
         TokenKind::Identifier(_) => Some(sem::VARIABLE),

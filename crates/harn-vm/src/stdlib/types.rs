@@ -139,6 +139,7 @@ pub(crate) fn register_type_builtins(vm: &mut Vm) {
             VmValue::List(items) => Ok(VmValue::Int(items.len() as i64)),
             VmValue::Dict(map) => Ok(VmValue::Int(map.len() as i64)),
             VmValue::Set(s) => Ok(VmValue::Int(s.len() as i64)),
+            VmValue::Range(r) => Ok(VmValue::Int(r.len())),
             _ => Ok(VmValue::Int(0)),
         }
     });

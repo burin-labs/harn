@@ -595,7 +595,10 @@ fn test_backslash_continuation_roundtrip() {
 // --- Custom line width ---
 
 fn fmt_opts(source: &str, line_width: usize) -> String {
-    let opts = FmtOptions { line_width };
+    let opts = FmtOptions {
+        line_width,
+        separator_width: 80,
+    };
     format_source_opts(source, &opts).unwrap()
 }
 
@@ -684,7 +687,10 @@ fn test_custom_line_width_idempotent() {
     let source = r#"pipeline default() {
   let x = really_long_function_name(alpha, beta, gamma)
 }"#;
-    let opts = FmtOptions { line_width: 40 };
+    let opts = FmtOptions {
+        line_width: 40,
+        separator_width: 80,
+    };
     let first = format_source_opts(source, &opts).unwrap();
     let second = format_source_opts(&first, &opts).unwrap();
     assert_eq!(first, second, "Custom-width formatter is not idempotent");
@@ -939,5 +945,255 @@ fn test_roundtrip_never_type_annotation() {
     throw "err"
   }
 }"#,
+    );
+}
+
+#[test]
+fn test_doc_comment_triple_slash_multiline() {
+    let source =
+        "/// First line.\n/// Second line.\npub fn exposed() -> string {\n  return \"x\"\n}\n";
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("/**\n * First line.\n * Second line.\n */"),
+        "expected canonical multi-line /** */ block, got:\n{result}"
+    );
+    assert!(
+        !result.contains("///"),
+        "formatter should not emit `///` after normalization, got:\n{result}"
+    );
+}
+
+#[test]
+fn test_doc_comment_triple_slash_compact_one_liner() {
+    let source = "/// Short.\npub fn exposed() -> string {\n  return \"x\"\n}\n";
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("/** Short. */"),
+        "expected compact one-liner doc comment, got:\n{result}"
+    );
+}
+
+#[test]
+fn test_doc_comment_existing_block_is_canonicalized() {
+    let source = "/** messy\n   alignment */\npub fn exposed() -> string {\n  return \"x\"\n}\n";
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("/**\n * messy\n * alignment\n */"),
+        "expected canonical multi-line shape, got:\n{result}"
+    );
+}
+
+#[test]
+fn test_plain_double_slash_comment_preserved_verbatim() {
+    let source = "// plain comment\npub fn exposed() -> string {\n  return \"x\"\n}\n";
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("// plain comment"),
+        "plain // comment should be preserved verbatim, got:\n{result}"
+    );
+    assert!(
+        !result.contains("/**"),
+        "formatter should not convert // to /** */ (that's the linter's job), got:\n{result}"
+    );
+}
+
+#[test]
+fn test_doc_comment_inside_impl_block() {
+    let source =
+        "impl Foo {\n  /// Inner method.\n  pub fn bar() -> string {\n    return \"x\"\n  }\n}\n";
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("  /** Inner method. */"),
+        "doc comment inside impl body should be normalized, got:\n{result}"
+    );
+    assert!(
+        !result.contains("///"),
+        "no `///` should remain after formatting, got:\n{result}"
+    );
+}
+
+#[test]
+fn test_blank_line_between_top_level_fns() {
+    let source = "fn one() -> int {\n  return 1\n}\nfn two() -> int {\n  return 2\n}\n";
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("}\n\nfn two"),
+        "expected a blank line between adjacent top-level fns, got:\n{result}"
+    );
+    // Idempotence: formatting the formatted output must yield the same string.
+    let result2 = format_source(&result).unwrap();
+    assert_eq!(result, result2, "formatter is not idempotent for two fns");
+}
+
+#[test]
+fn test_blank_line_between_mixed_top_level_items_idempotent() {
+    let source = "type A = int\ntype B = string\nstruct C {\n  a: int\n}\nenum E {\n  X\n}\nfn f() -> int {\n  return 1\n}\n";
+    let result = format_source(source).unwrap();
+    // Each adjacent pair should be separated by exactly one blank line.
+    assert!(result.contains("type A = int\n\ntype B"));
+    assert!(result.contains("type B = string\n\nstruct"));
+    assert!(result.contains("}\n\nenum"));
+    assert!(result.contains("}\n\nfn"));
+    let result2 = format_source(&result).unwrap();
+    assert_eq!(
+        result, result2,
+        "formatter is not idempotent for mixed top-level items"
+    );
+}
+
+#[test]
+fn test_doc_comment_glued_to_item_blank_line_above() {
+    let source =
+        "fn first() -> int {\n  return 1\n}\n/// Second docs.\n/// More.\nfn second() -> int {\n  return 2\n}\n";
+    let result = format_source(source).unwrap();
+    // Blank line above the doc block; doc block glued to fn second.
+    assert!(
+        result.contains("}\n\n/**\n * Second docs.\n * More.\n */\nfn second"),
+        "doc block should have blank line above and be glued to item, got:\n{result}"
+    );
+    let result2 = format_source(&result).unwrap();
+    assert_eq!(
+        result, result2,
+        "formatter is not idempotent with doc comments between items"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Section-header canonicalization
+// ---------------------------------------------------------------------------
+
+fn canonical_bar() -> String {
+    // Default separator_width is 80 → 77 dashes after `// `.
+    let dashes: String = "-".repeat(77);
+    format!("// {dashes}")
+}
+
+#[test]
+fn test_section_header_three_line_canonical_passthrough() {
+    let bar = canonical_bar();
+    let source = format!(
+        "fn a() -> int {{\n  return 1\n}}\n{bar}\n// Helpers\n{bar}\nfn b() -> int {{\n  return 2\n}}\n"
+    );
+    let result = format_source(&source).unwrap();
+    let expected = format!(
+        "fn a() -> int {{\n  return 1\n}}\n\n{bar}\n// Helpers\n{bar}\n\nfn b() -> int {{\n  return 2\n}}\n"
+    );
+    assert_eq!(result, expected, "canonical 3-line header not passthrough");
+    let result2 = format_source(&result).unwrap();
+    assert_eq!(result, result2, "3-line header not idempotent");
+}
+
+#[test]
+fn test_section_header_three_line_short_bars_normalized() {
+    let source =
+        "fn a() -> int { return 1 }\n// ----\n// Helpers\n// ----\nfn b() -> int { return 2 }\n";
+    let result = format_source(source).unwrap();
+    let bar = canonical_bar();
+    assert!(
+        result.contains(&format!("{bar}\n// Helpers\n{bar}")),
+        "short bars should normalize to separator_width, got:\n{result}"
+    );
+}
+
+#[test]
+fn test_section_header_one_line_bar_normalized() {
+    let source = "fn a() -> int { return 1 }\n// ----\nfn b() -> int { return 2 }\n";
+    let result = format_source(source).unwrap();
+    let bar = canonical_bar();
+    assert!(
+        result.contains(&format!("\n{bar}\n")),
+        "one-line bar should normalize, got:\n{result}"
+    );
+    // Pure bars stay one-liner (no title promotion).
+    assert!(
+        !result.contains("// Helpers"),
+        "pure bar must not gain a title"
+    );
+}
+
+#[test]
+fn test_section_header_one_line_bar_with_title_promoted() {
+    let source = "fn a() -> int { return 1 }\n// ---- Helpers ----\nfn b() -> int { return 2 }\n";
+    let result = format_source(source).unwrap();
+    let bar = canonical_bar();
+    assert!(
+        result.contains(&format!("{bar}\n// Helpers\n{bar}")),
+        "one-liner with title should promote to 3-line form, got:\n{result}"
+    );
+}
+
+#[test]
+fn test_section_header_blank_lines_above_and_below() {
+    let source = "fn a() -> int {\n  return 1\n}\n// ----\n// Helpers\n// ----\nfn b() -> int {\n  return 2\n}\n";
+    let result = format_source(source).unwrap();
+    let bar = canonical_bar();
+    // Expect: prev fn close, blank, header, blank, next fn.
+    let header = format!("{bar}\n// Helpers\n{bar}");
+    let expected_window = format!("}}\n\n{header}\n\nfn b");
+    assert!(
+        result.contains(&expected_window),
+        "expected blank lines above and below section header, got:\n{result}"
+    );
+}
+
+#[test]
+fn test_section_header_respects_custom_separator_width() {
+    let opts = FmtOptions {
+        line_width: 100,
+        separator_width: 40,
+    };
+    let source = "fn a() -> int { return 1 }\n// ----\nfn b() -> int { return 2 }\n";
+    let result = format_source_opts(source, &opts).unwrap();
+    let dashes: String = "-".repeat(37);
+    let bar = format!("// {dashes}");
+    assert!(
+        result.contains(&bar),
+        "separator should match separator_width=40, got:\n{result}"
+    );
+}
+
+#[test]
+fn test_multiline_string_preserves_indent() {
+    let source = "pipeline test(task) {\n  let g = \"\"\"\n    hello world\n    second line\n    \"\"\"\n  log(g)\n}\n";
+    let out = format_source(source).unwrap();
+    assert!(
+        out.contains("    hello world"),
+        "multiline string body should keep indent, got:\n{out}"
+    );
+    assert!(
+        out.contains("    \"\"\""),
+        "closing \"\"\" should be indented one level deeper than the let, got:\n{out}"
+    );
+    let out2 = format_source(&out).unwrap();
+    assert_eq!(
+        out, out2,
+        "formatter should be idempotent on multiline strings"
+    );
+}
+
+#[test]
+fn test_multiline_interpolated_string_preserves_indent() {
+    let source = "pipeline test(task) {\n  let name = \"x\"\n  let g = \"\"\"\n    hi ${name}\n    \"\"\"\n  log(g)\n}\n";
+    let out = format_source(source).unwrap();
+    assert!(
+        out.contains("    hi ${name}"),
+        "interpolated body should keep indent, got:\n{out}"
+    );
+    let out2 = format_source(&out).unwrap();
+    assert_eq!(out, out2, "formatter should be idempotent");
+}
+
+#[test]
+fn test_imports_stay_tight_then_blank_before_first_item() {
+    let source = "import \"std/http\"\nimport \"alpha\"\nimport \"zeta\"\npipeline default(task) { log(1) }\n";
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("import \"std/http\"\nimport \"alpha\"\nimport \"zeta\"\n\npipeline"),
+        "imports should be tight with a single blank line before the first non-import item, got:\n{result}"
+    );
+    let result2 = format_source(&result).unwrap();
+    assert_eq!(
+        result, result2,
+        "formatter is not idempotent around imports"
     );
 }

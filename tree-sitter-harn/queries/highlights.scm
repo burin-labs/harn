@@ -37,8 +37,8 @@
 "timeout" @keyword
 "default" @keyword
 "not" @keyword.operator
-"upto" @keyword.operator
-"thru" @keyword.operator
+"to" @keyword.operator
+"exclusive" @keyword.operator
 
 ; Literals
 (true) @boolean

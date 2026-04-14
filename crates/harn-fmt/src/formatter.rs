@@ -132,14 +132,15 @@ impl Formatter {
         });
 
         for (position, (original_index, node)) in imports.into_iter().enumerate() {
-            if position > 0 {
-                self.output.push('\n');
-            }
             let comment_from = if original_index == 0 {
                 1
             } else {
                 nodes[original_index - 1].span.line + 1
             };
+            // Consecutive imports inside the sorted block stay tight: no blank
+            // line between them. `writeln` already terminates each import with
+            // a single `\n`, so we deliberately skip adding another.
+            let _ = position;
             self.emit_comments_in_range(comment_from, node.span.line);
             self.format_node(node);
         }
@@ -180,24 +181,31 @@ impl Formatter {
         if import_count > 0 {
             self.format_sorted_import_block(nodes);
         } else if let Some(first) = nodes.first() {
-            self.emit_comments_in_range(1, first.span.line);
+            self.emit_top_level_comments_in_range(1, first.span.line);
         }
         for (i, node) in nodes.iter().enumerate().skip(import_count) {
             if i > 0 {
+                // Between adjacent non-import top-level items (and between the
+                // end of the import block and the first non-import item), emit
+                // exactly one blank line. `writeln` already terminated the
+                // previous line with `\n`, so pushing another `\n` here yields
+                // the blank line. Any leading comments (including doc blocks
+                // or section-header bars) are emitted AFTER the blank line so
+                // a doc comment stays glued to the item it documents.
                 self.output.push('\n');
                 let prev_end = if i == import_count && import_count > 0 {
                     nodes[import_count - 1].span.line + 1
                 } else {
                     nodes[i - 1].span.line + 1
                 };
-                self.emit_comments_in_range(prev_end, node.span.line);
+                self.emit_top_level_comments_in_range(prev_end, node.span.line);
             }
             self.format_node(node);
         }
         if !self.comments.is_empty() {
             let max_line = *self.comments.keys().max().unwrap_or(&0);
             let last_line = nodes.last().map(|n| n.span.line + 1).unwrap_or(1);
-            self.emit_comments_in_range(last_line, max_line + 1);
+            self.emit_top_level_comments_in_range(last_line, max_line + 1);
         }
     }
 
@@ -662,8 +670,7 @@ impl Formatter {
         match &node.node {
             Node::StringLiteral(s) => {
                 if node.span.line != node.span.end_line {
-                    // Multiline string: reconstruct """...""" form
-                    format!("\"\"\"\n{s}\n\"\"\"")
+                    format_multiline_triple_quoted(s, self.indent)
                 } else {
                     let escaped = escape_string(s);
                     format!("\"{escaped}\"")
@@ -674,18 +681,16 @@ impl Formatter {
             }
             Node::InterpolatedString(segments) => {
                 if node.span.line != node.span.end_line {
-                    // Multiline interpolated string: reconstruct """...""" form
-                    let mut result = String::from("\"\"\"\n");
+                    let mut body = String::new();
                     for seg in segments {
                         match seg {
-                            StringSegment::Literal(s) => result.push_str(s),
+                            StringSegment::Literal(s) => body.push_str(s),
                             StringSegment::Expression(e, _, _) => {
-                                result.push_str(&format!("${{{e}}}"));
+                                body.push_str(&format!("${{{e}}}"));
                             }
                         }
                     }
-                    result.push_str("\n\"\"\"");
-                    return result;
+                    return format_multiline_triple_quoted(&body, self.indent);
                 }
                 let mut result = String::from("\"");
                 for seg in segments {
@@ -861,8 +866,11 @@ impl Formatter {
             } => {
                 let s = self.format_expr(start);
                 let e = self.format_expr(end);
-                let kw = if *inclusive { "thru" } else { "upto" };
-                format!("{s} {kw} {e}")
+                if *inclusive {
+                    format!("{s} to {e}")
+                } else {
+                    format!("{s} to {e} exclusive")
+                }
             }
             Node::Closure {
                 params,

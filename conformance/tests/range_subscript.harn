@@ -1,0 +1,14 @@
+pipeline test(task) {
+  // r[k] is O(1) and computes start + k with a bounds check.
+  let r = 1 to 10
+  log(r[0])
+  log(r[3])
+  log(r[9])
+  // Negative indices count from the end (Python-style).
+  log(r[-1])
+  log(r[-10])
+  // Exclusive ranges index the same way
+  let e = 0 to 5 exclusive
+  log(e[0])
+  log(e[4])
+}
