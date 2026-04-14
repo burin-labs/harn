@@ -1,0 +1,9 @@
+pipeline test(task) {
+  let a = iter([1, 2, 3, 4, 5]).windows(3).to_list()
+  log(a)
+  let b = iter([1, 2, 3, 4, 5]).windows(5).to_list()
+  log(b)
+  let c = iter([1, 2, 3]).windows(10).to_list()
+  log(c)
+  log(len(c))
+}

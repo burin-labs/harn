@@ -8,7 +8,7 @@
 //! steps per the plan.
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::rc::Rc;
 
 use crate::chunk::CompiledFunction;
@@ -86,6 +86,19 @@ pub enum VmIter {
         a: Rc<RefCell<VmIter>>,
         b: Rc<RefCell<VmIter>>,
         on_a: bool,
+    },
+    /// Yields `VmValue::List` batches of up to `n` items from `inner`.
+    /// The final batch may be shorter; empty input yields no batches.
+    Chunks {
+        inner: Rc<RefCell<VmIter>>,
+        n: usize,
+    },
+    /// Yields sliding windows of exactly `n` items from `inner` as `VmValue::List`.
+    /// If the input has fewer than `n` items total, no windows are yielded.
+    Windows {
+        inner: Rc<RefCell<VmIter>>,
+        n: usize,
+        buf: VecDeque<VmValue>,
     },
     /// Terminal state: `next` always returns `None`.
     Exhausted,
@@ -372,6 +385,54 @@ impl VmIter {
                     }
                     Some(v) => Ok(Some(v)),
                 }
+            }
+            VmIter::Chunks { inner, n } => {
+                let n = *n;
+                let mut batch: Vec<VmValue> = Vec::with_capacity(n);
+                for _ in 0..n {
+                    let item = inner.borrow_mut().next(vm, functions).await?;
+                    match item {
+                        Some(v) => batch.push(v),
+                        None => break,
+                    }
+                }
+                if batch.is_empty() {
+                    *self = VmIter::Exhausted;
+                    Ok(None)
+                } else {
+                    Ok(Some(VmValue::List(Rc::new(batch))))
+                }
+            }
+            VmIter::Windows { inner, n, buf } => {
+                let n = *n;
+                if buf.is_empty() {
+                    // First call: fill buf to exactly n.
+                    while buf.len() < n {
+                        let item = inner.borrow_mut().next(vm, functions).await?;
+                        match item {
+                            Some(v) => buf.push_back(v),
+                            None => {
+                                *self = VmIter::Exhausted;
+                                return Ok(None);
+                            }
+                        }
+                    }
+                } else {
+                    // Subsequent calls: slide by one.
+                    let item = inner.borrow_mut().next(vm, functions).await?;
+                    match item {
+                        Some(v) => {
+                            buf.pop_front();
+                            buf.push_back(v);
+                        }
+                        None => {
+                            *self = VmIter::Exhausted;
+                            return Ok(None);
+                        }
+                    }
+                }
+                let snapshot: Vec<VmValue> = buf.iter().cloned().collect();
+                Ok(Some(VmValue::List(Rc::new(snapshot))))
             }
             VmIter::Chan { handle } => {
                 let is_closed = handle.closed.load(std::sync::atomic::Ordering::Relaxed);

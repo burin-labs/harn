@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::future::Future;
 use std::pin::Pin;
 use std::rc::Rc;
@@ -1098,6 +1098,35 @@ impl super::Vm {
                                 a: handle,
                                 b: b_handle,
                                 on_a: true,
+                            }))))
+                        }
+                        "chunks" => {
+                            let n = match args.first() {
+                                Some(VmValue::Int(i)) if *i > 0 => *i as usize,
+                                _ => {
+                                    return Err(VmError::TypeError(
+                                        "iter.chunks: chunk size must be positive".to_string(),
+                                    ))
+                                }
+                            };
+                            Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Chunks {
+                                inner: handle,
+                                n,
+                            }))))
+                        }
+                        "windows" => {
+                            let n = match args.first() {
+                                Some(VmValue::Int(i)) if *i > 0 => *i as usize,
+                                _ => {
+                                    return Err(VmError::TypeError(
+                                        "iter.windows: window size must be positive".to_string(),
+                                    ))
+                                }
+                            };
+                            Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Windows {
+                                inner: handle,
+                                n,
+                                buf: VecDeque::new(),
                             }))))
                         }
                         "to_list" => {
