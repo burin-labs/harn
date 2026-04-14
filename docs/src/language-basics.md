@@ -460,6 +460,77 @@ nums.all({ x -> x > 0 })           // true
 nums.flat_map({ x -> [x, x] })     // [1, 1, 2, 2, 3, 3, 4, 4, 5, 5]
 ```
 
+### Lazy iterators
+
+Collection methods like `.map` and `.filter` above are *eager* — each
+call allocates a new list and walks the whole input. That's fine for
+small inputs, but wastes work when you only need the first few
+results, or when you want to compose several transforms.
+
+Harn also ships a lazy iterator protocol. Call `.iter()` on any
+iterable source (list, dict, set, string, generator, channel) to lift
+it into an `Iter<T>` — a single-pass, fused iterator. Combinators on
+an `Iter` return a new `Iter` without running any work. Sinks drain
+the iter and return an eager value.
+
+```harn,ignore
+let xs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+let first_three_doubled_evens = xs
+  .iter()
+  .filter({ x -> x % 2 == 0 })
+  .map({ x -> x * 2 })
+  .take(3)
+  .to_list()
+println(first_three_doubled_evens)  // [4, 8, 12]
+```
+
+Use `.enumerate()` to get `(index, value)` pairs in a for-loop:
+
+```harn,ignore
+let items = ["a", "b", "c"]
+for (i, x) in items.iter().enumerate() {
+  println("${i}: ${x}")
+}
+```
+
+`.iter()` on a dict yields `Pair(key, value)` values — destructure
+them in a for-loop:
+
+```harn,ignore
+for (k, v) in {a: 1, b: 2}.iter() {
+  println("${k}: ${v}")
+}
+```
+
+A direct `for entry in some_dict` still yields the usual
+`{key, value}` dicts (back-compat). `pair(a, b)` also exists as a
+builtin for constructing pairs explicitly.
+
+**Lazy combinators** (return a new `Iter`): `.map`, `.filter`,
+`.flat_map`, `.take(n)`, `.skip(n)`, `.take_while`, `.skip_while`,
+`.zip`, `.enumerate`, `.chain`, `.chunks(n)`, `.windows(n)`.
+
+**Sinks** (drain the iter, return a value): `.to_list()`, `.to_set()`,
+`.to_dict()` (requires `Pair` items), `.count()`, `.sum()`, `.min()`,
+`.max()`, `.reduce(init, f)`, `.first()`, `.last()`, `.any(p)`,
+`.all(p)`, `.find(p)`, `.for_each(f)`.
+
+**When to use which**: reach for eager list/dict/set methods for
+simple one-shot transforms where you want a collection back. Reach
+for `.iter()` when you're composing multiple transforms, taking the
+first N results of a large input, consuming a generator lazily, or
+driving a for-loop over combined sources.
+
+Iterators are **single-pass and fused** — once exhausted, they stay
+exhausted. Iteration takes a **snapshot** of the backing collection,
+so mutating the source after `.iter()` does not affect the iter.
+Printing an iter renders `<iter>` without draining it.
+
+One current limitation: numeric ranges like `(1 to 1_000_000)`
+materialize as a list before iter combinators can chain on them. Use
+`.take(n)` after `.iter()` as the first combinator to cap the
+in-memory size until lazy ranges land.
+
 ## Pipe operator
 
 The pipe operator `|>` passes the left side as the argument to the right side:

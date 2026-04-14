@@ -23,6 +23,8 @@ Complete reference for all built-in functions available in Harn.
 | `to_int(value)` | value: any | int or nil | Parse/convert to integer. Floats truncate, bools become 0/1 |
 | `to_float(value)` | value: any | float or nil | Parse/convert to float |
 | `unreachable(value?)` | value: any (optional) | never | Throws "unreachable code was reached" at runtime. When the argument is a variable, the type checker verifies it has been narrowed to `never` (exhaustiveness check) |
+| `iter(x)` | x: list, dict, set, string, generator, channel, or iter | `Iter<T>` | Lift an iterable source into a lazy, single-pass, fused iterator. No-op on an existing iter. Dict iters yield `Pair(key, value)`; string iters yield chars. See [Iterator methods](#iterator-methods) |
+| `pair(a, b)` | a: any, b: any | `Pair` | Construct a two-element `Pair` value. Access via `.first` / `.second`, or destructure in a for-loop: `for (k, v) in ...` |
 
 ## Runtime shape validation
 
@@ -378,6 +380,57 @@ These are called on string values with dot notation: `"hello".uppercase()`.
 | `.contains(item)` | item: any | bool | Check if list contains item |
 | `.index_of(item)` | item: any | int | Index of item (-1 if not found) |
 | `.slice(start, end?)` | start: int, end: int | list | Slice with negative index support |
+
+### Iterator methods
+
+Eager list/dict/set/string methods listed above are unchanged — they
+still return eager collections. Lazy iteration is opt-in via
+`.iter()`, which lifts a list, dict, set, string, generator, or
+channel into an `Iter<T>` value. Iterators are **single-pass, fused,
+and snapshot** — they `Rc`-clone the backing collection, so mutating
+the source after `.iter()` does not affect the iter.
+
+On a dict, `.iter()` yields `Pair(key, value)` values (use `.first` /
+`.second`, or destructure in a for-loop). String iteration yields
+chars (Unicode scalar values).
+
+Printing with `log(it)` renders `<iter>` or `<iter (exhausted)>` and
+does **not** drain the iterator.
+
+#### Lazy combinators (return a new `Iter`)
+
+| Method | Parameters | Returns | Description |
+|---|---|---|---|
+| `.iter()` | none | `Iter<T>` | Lift a source into an iter; no-op on an existing iter |
+| `.map(fn)` | fn: closure | `Iter<U>` | Lazily transform each item |
+| `.filter(fn)` | fn: closure | `Iter<T>` | Lazily keep items where fn returns truthy |
+| `.flat_map(fn)` | fn: closure | `Iter<U>` | Map then flatten, lazily |
+| `.take(n)` | n: int | `Iter<T>` | First n items |
+| `.skip(n)` | n: int | `Iter<T>` | Drop first n items |
+| `.take_while(fn)` | fn: closure | `Iter<T>` | Items until predicate first returns falsy |
+| `.skip_while(fn)` | fn: closure | `Iter<T>` | Drop items while predicate is truthy |
+| `.zip(other)` | other: iter | `Iter<Pair<T, U>>` | Pair items from two iters, stops at shorter |
+| `.enumerate()` | none | `Iter<Pair<int, T>>` | Pair each item with a 0-based index |
+| `.chain(other)` | other: iter | `Iter<T>` | Yield items from self, then from other |
+| `.chunks(n)` | n: int | `Iter<list<T>>` | Non-overlapping fixed-size chunks |
+| `.windows(n)` | n: int | `Iter<list<T>>` | Sliding windows of size n |
+
+#### Sinks (drain the iter, return an eager value)
+
+| Method | Parameters | Returns | Description |
+|---|---|---|---|
+| `.to_list()` | none | list | Collect all items into a list |
+| `.to_set()` | none | set | Collect all items into a set |
+| `.to_dict()` | none | dict | Collect `Pair(key, value)` items into a dict |
+| `.count()` | none | int | Count remaining items |
+| `.sum()` | none | int or float | Sum of numeric items |
+| `.min()` / `.max()` | none | any | Min/max item |
+| `.reduce(init, fn)` | init: any, fn: closure | any | Fold with accumulator |
+| `.first()` / `.last()` | none | any or nil | First/last item |
+| `.any(fn)` | fn: closure | bool | True if any remaining item matches |
+| `.all(fn)` | fn: closure | bool | True if all remaining items match |
+| `.find(fn)` | fn: closure | any or nil | First item matching predicate |
+| `.for_each(fn)` | fn: closure | nil | Invoke fn on each remaining item |
 
 ## Path functions
 

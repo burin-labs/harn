@@ -2936,5 +2936,4 @@ fn vm_build_json_schema(params: Option<&BTreeMap<String, VmValue>>) -> serde_jso
 }
 
 #[cfg(test)]
-#[path = "tools_tests.rs"]
 mod tests;
