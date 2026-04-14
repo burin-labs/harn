@@ -120,44 +120,32 @@ pub async fn run_agent_loop_internal(
     opts: &mut super::api::LlmCallOptions,
     config: AgentLoopConfig,
 ) -> Result<serde_json::Value, VmError> {
-    // Build the long-lived loop state (drop guards, prelude computations,
-    // daemon snapshot resume). The original inline prelude now lives on
-    // `AgentLoopState::new` — behavior must be identical.
     let mut state = state::AgentLoopState::new(opts, config)?;
 
-    // Rebuild the `tools` borrow the loop body reads. `AgentLoopState::new`
-    // already mutated `opts.native_tools` and `opts.tool_choice` so these
-    // views are stable for the rest of the run.
+    // `AgentLoopState::new` already mutated `opts.native_tools` /
+    // `opts.tool_choice`; `tools_val` is a stable view for the run.
     let tools_owned = opts.tools.clone();
     let tools_val = tools_owned.as_ref();
 
-    // Snapshot the config fields the iteration loop reads as locals so
-    // we don't hold an immutable borrow on `state.config` across the
-    // loop body (which would conflict with the `&mut state` phase
-    // methods take). `config.turn_policy` is `Option<TurnPolicy>`;
-    // clone it once here rather than `.as_ref()`-ing through a borrow.
-    let llm_retries: usize = state.config.llm_retries;
-    let llm_backoff_ms: u64 = state.config.llm_backoff_ms;
+    // Snapshot config + state fields as locals so the iteration body
+    // can pass them into phase contexts without holding an immutable
+    // borrow on `state` that would conflict with `&mut state`.
+    let llm_retries = state.config.llm_retries;
+    let llm_backoff_ms = state.config.llm_backoff_ms;
     let turn_policy = state.config.turn_policy.clone();
     let stop_after_successful_tools = state.config.stop_after_successful_tools.clone();
     let post_turn_callback = state.config.post_turn_callback.clone();
-
-    // Copy/clone bindings for identifiers that collide with argument
-    // names, module paths, or pattern bindings (so renaming `state.foo`
-    // at every callsite would be brittle). `bridge` is an `Option<Rc>`,
-    // cheap to clone; the rest are small scalars or already-cloned
-    // owned values.
     let bridge = state.bridge.clone();
-    let max_iterations: usize = state.max_iterations;
-    let max_nudges: usize = state.max_nudges;
-    let tool_retries: usize = state.tool_retries;
-    let tool_backoff_ms: u64 = state.tool_backoff_ms;
-    let exit_when_verified: bool = state.exit_when_verified;
-    let persistent: bool = state.persistent;
-    let daemon: bool = state.daemon;
-    let has_tools: bool = state.has_tools;
-    let loop_detect_enabled: bool = state.loop_detect_enabled;
-    let resumed_iterations: usize = state.resumed_iterations;
+    let max_iterations = state.max_iterations;
+    let max_nudges = state.max_nudges;
+    let tool_retries = state.tool_retries;
+    let tool_backoff_ms = state.tool_backoff_ms;
+    let exit_when_verified = state.exit_when_verified;
+    let persistent = state.persistent;
+    let daemon = state.daemon;
+    let has_tools = state.has_tools;
+    let loop_detect_enabled = state.loop_detect_enabled;
+    let resumed_iterations = state.resumed_iterations;
     let tool_format = state.tool_format.clone();
     let done_sentinel = state.done_sentinel.clone();
     let break_unless_phase = state.break_unless_phase.clone();

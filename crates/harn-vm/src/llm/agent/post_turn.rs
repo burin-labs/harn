@@ -142,30 +142,27 @@ pub(super) async fn run_post_turn(
         // pending-feedback messages via `agent_inject_feedback`;
         // those are drained at the top of the next iteration before
         // the LLM is called again.
-        let turn_info = {
-            let tool_names: Vec<&str> = call_result
-                .tool_calls
-                .iter()
-                .filter_map(|tc| tc["name"].as_str())
-                .collect();
-            let turn_info = serde_json::json!({
-                "tool_names": tool_names,
-                "tool_results": dispatch.tool_results_this_iter,
-                "successful_tool_names": successful_tool_names,
-                "tool_count": call_result.tool_calls.len(),
-                "iteration": iteration,
-                "consecutive_single_tool_turns": state.consecutive_single_tool_turns,
-                "session_tools_used": state.all_tools_used,
-                "session_successful_tools": state.successful_tools_used,
-            });
-            super::emit_agent_event(&AgentEvent::TurnEnd {
-                session_id: ctx.session_id.to_string(),
-                iteration,
-                turn_info: turn_info.clone(),
-            })
-            .await;
-            turn_info
-        };
+        let tool_names: Vec<&str> = call_result
+            .tool_calls
+            .iter()
+            .filter_map(|tc| tc["name"].as_str())
+            .collect();
+        let turn_info = serde_json::json!({
+            "tool_names": tool_names,
+            "tool_results": dispatch.tool_results_this_iter,
+            "successful_tool_names": successful_tool_names,
+            "tool_count": call_result.tool_calls.len(),
+            "iteration": iteration,
+            "consecutive_single_tool_turns": state.consecutive_single_tool_turns,
+            "session_tools_used": state.all_tools_used,
+            "session_successful_tools": state.successful_tools_used,
+        });
+        super::emit_agent_event(&AgentEvent::TurnEnd {
+            session_id: ctx.session_id.to_string(),
+            iteration,
+            turn_info: turn_info.clone(),
+        })
+        .await;
         if let Some(stop_tools) = ctx.stop_after_successful_tools.as_ref() {
             if should_stop_after_successful_tools(&dispatch.tool_results_this_iter, stop_tools) {
                 crate::events::log_debug(
