@@ -2,6 +2,23 @@
 
 All notable changes to Harn are documented in this file.
 
+## v0.5.83
+
+### Fixed
+
+- **Text-mode tagged parser preserves bare tool calls with heredoc bodies.**
+  The outer chunker that delimits stray prose between top-level tags scanned
+  forward to the next `<` byte, which truncated bare
+  `name({ key: <<EOF\n...\nEOF })` tool calls at the heredoc opener. The
+  salvage path inside `report_stray` then saw a fragment ending mid-argument
+  and rejected it for unbalanced braces, silently dropping the call. Smaller
+  local models like `qwen2.5-coder` reproduced this on every `py-test` run by
+  emitting the whole test-file body as a heredoc value without wrapping the
+  call in `<tool_call>` tags, stalling the loop. The chunker now recognizes
+  `<<` at a stray-scan boundary as a heredoc opener and skips past the
+  closing tag line before resuming, so the bare-call salvage sees a complete
+  `name({...})` fragment and executes it.
+
 ## v0.5.82
 
 ### Fixed
