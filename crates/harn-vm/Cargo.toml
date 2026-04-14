@@ -21,7 +21,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 reqwest-eventsource = "0.6"
 tokio-stream = "0.1"
 base64 = "0.22"
-sha2 = "0.10"
+sha2 = "0.11"
 md-5 = "0.11"
 toml = "0.8"
 serde_yaml = "0.9"
