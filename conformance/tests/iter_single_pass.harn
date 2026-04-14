@@ -3,7 +3,6 @@ pipeline test(task) {
   let it = iter([1, 2, 3])
   log(it.to_list())
   log(it.to_list())
-
   // Same for a combinator chain.
   let chain = iter([1, 2, 3, 4]).map({ x -> x * 10 }).filter({ x -> x > 10 })
   log(chain.to_list())
