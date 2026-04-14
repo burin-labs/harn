@@ -1,0 +1,10 @@
+pipeline test(task) {
+  let pairs = iter(["a", "b", "c"]).enumerate().to_list()
+  for p in pairs {
+    log("${p.first}:${p.second}")
+  }
+  for (i, x) in iter(["x", "y", "z"]).enumerate() {
+    log("${i}-${x}")
+  }
+  log(iter([]).enumerate().to_list())
+}

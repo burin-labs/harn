@@ -1,0 +1,5 @@
+pipeline test(task) {
+  log(iter([1, 2, 3, 4, 5]).take(3).to_list())
+  log(iter([1, 2, 3]).take(10).to_list())
+  log(iter([1, 2, 3]).take(0).to_list())
+}

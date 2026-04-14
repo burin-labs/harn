@@ -1,0 +1,6 @@
+pipeline test(task) {
+  let it = iter([1, 2, 3])
+  for x in it {
+    log(x)
+  }
+}

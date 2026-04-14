@@ -195,6 +195,13 @@ pub enum VmValue {
     Set(Rc<Vec<VmValue>>),
     Generator(VmGenerator),
     Range(VmRange),
+    /// Lazy iterator handle. Single-pass, fused. See `crate::vm::iter::VmIter`.
+    Iter(Rc<RefCell<crate::vm::iter::VmIter>>),
+    /// Two-element pair value. Produced by `pair(a, b)`, yielded by the
+    /// Dict iterator source, and (later) by `zip` / `enumerate` combinators.
+    /// Accessed via `.first` / `.second`, and destructurable in
+    /// `for (a, b) in ...` loops.
+    Pair(Rc<(VmValue, VmValue)>),
 }
 
 /// A compiled closure value.
@@ -594,6 +601,8 @@ impl VmValue {
             // Match Python semantics: range objects are always truthy,
             // even the empty range (analogous to generators / iterators).
             VmValue::Range(_) => true,
+            VmValue::Iter(_) => true,
+            VmValue::Pair(_) => true,
         }
     }
 
@@ -618,6 +627,8 @@ impl VmValue {
             VmValue::Set(_) => "set",
             VmValue::Generator(_) => "generator",
             VmValue::Range(_) => "range",
+            VmValue::Iter(_) => "iter",
+            VmValue::Pair(_) => "pair",
         }
     }
 
@@ -754,6 +765,20 @@ impl VmValue {
                     out.push_str(" exclusive");
                 }
             }
+            VmValue::Iter(h) => {
+                if matches!(&*h.borrow(), crate::vm::iter::VmIter::Exhausted) {
+                    out.push_str("<iter (exhausted)>");
+                } else {
+                    out.push_str("<iter>");
+                }
+            }
+            VmValue::Pair(p) => {
+                out.push('(');
+                p.0.write_display(out);
+                out.push_str(", ");
+                p.1.write_display(out);
+                out.push(')');
+            }
         }
     }
 
@@ -790,6 +815,7 @@ pub fn values_identical(a: &VmValue, b: &VmValue) -> bool {
         (VmValue::Closure(x), VmValue::Closure(y)) => Rc::ptr_eq(x, y),
         (VmValue::String(x), VmValue::String(y)) => Rc::ptr_eq(x, y) || x == y,
         (VmValue::BuiltinRef(x), VmValue::BuiltinRef(y)) => x == y,
+        (VmValue::Pair(x), VmValue::Pair(y)) => Rc::ptr_eq(x, y),
         // Primitives: identity collapses to structural equality.
         _ => values_equal(a, b),
     }
@@ -963,6 +989,10 @@ pub fn values_equal(a: &VmValue, b: &VmValue) -> bool {
         (VmValue::Range(a), VmValue::Range(b)) => {
             a.start == b.start && a.end == b.end && a.inclusive == b.inclusive
         }
+        (VmValue::Iter(a), VmValue::Iter(b)) => Rc::ptr_eq(a, b),
+        (VmValue::Pair(a), VmValue::Pair(b)) => {
+            values_equal(&a.0, &b.0) && values_equal(&a.1, &b.1)
+        }
         _ => false,
     }
 }
@@ -1000,6 +1030,14 @@ pub fn compare_values(a: &VmValue, b: &VmValue) -> i32 {
             }
         }
         (VmValue::String(x), VmValue::String(y)) => x.cmp(y) as i32,
+        (VmValue::Pair(x), VmValue::Pair(y)) => {
+            let c = compare_values(&x.0, &y.0);
+            if c != 0 {
+                c
+            } else {
+                compare_values(&x.1, &y.1)
+            }
+        }
         _ => 0,
     }
 }

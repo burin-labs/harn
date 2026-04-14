@@ -1,0 +1,32 @@
+pipeline test(task) {
+  // list
+  for x in iter([1, 2, 3]) {
+    log("list:${x}")
+  }
+  // dict yields Pair — access via .first / .second
+  let d = {a: 1, b: 2}
+  for p in iter(d) {
+    log("dict_pair:${p.first}=${p.second}")
+  }
+  // dict with destructuring
+  for (k, v) in iter(d) {
+    log("dict_des:${k}=${v}")
+  }
+  // set
+  let s = set([10, 20, 30])
+  for x in iter(s) {
+    log("set:${x}")
+  }
+  // string (yields chars)
+  for c in iter("abc") {
+    log("str:${c}")
+  }
+  // generator
+  fn g() {
+    yield 100
+    yield 200
+  }
+  for x in iter(g()) {
+    log("gen:${x}")
+  }
+}

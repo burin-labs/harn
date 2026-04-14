@@ -1801,6 +1801,64 @@ fn test_blank_line_between_items_ok_with_doc_block_and_blank_above() {
     );
 }
 
+// -----------------------------------------------------------------------
+// eager-collection-conversion
+// -----------------------------------------------------------------------
+
+#[test]
+fn test_eager_collection_conversion_let_list() {
+    let source = r#"pipeline default(task) {
+  let xs: list<int> = iter([1, 2, 3]).map(fn(x) { return x + 1 })
+  log(xs)
+}
+"#;
+    let diags = lint_source(source);
+    assert_eq!(
+        count_rule(&diags, "eager-collection-conversion"),
+        1,
+        "expected exactly one eager-collection-conversion diagnostic, got: {diags:?}"
+    );
+    let fixed = apply_fixes(source, &diags);
+    assert!(
+        fixed.contains(".to_list()"),
+        "expected autofix to append .to_list(), got: {fixed}"
+    );
+}
+
+#[test]
+fn test_eager_collection_conversion_no_flag_when_already_to_list() {
+    let source = r#"pipeline default(task) {
+  let xs: list<int> = iter([1, 2, 3]).map(fn(x) { return x + 1 }).to_list()
+  log(xs)
+}
+"#;
+    let diags = lint_source(source);
+    assert_eq!(
+        count_rule(&diags, "eager-collection-conversion"),
+        0,
+        "should not flag already-materialized chains, got: {diags:?}"
+    );
+}
+
+#[test]
+fn test_eager_collection_conversion_return_stmt() {
+    let source = r#"fn build() -> list<int> {
+  return iter([1, 2, 3]).filter(fn(x) { return x > 0 })
+}
+"#;
+    let diags = lint_source(source);
+    assert_eq!(
+        count_rule(&diags, "eager-collection-conversion"),
+        1,
+        "expected eager-collection-conversion on return, got: {diags:?}"
+    );
+    let fixed = apply_fixes(source, &diags);
+    assert!(
+        fixed.contains(".to_list()"),
+        "expected autofix to append .to_list(), got: {fixed}"
+    );
+}
+
 #[test]
 fn test_blank_line_between_items_fires_when_doc_has_no_blank_above() {
     // No blank line above the doc block — the rule fires.
@@ -2029,4 +2087,19 @@ fn test_derive_file_header_title_cases() {
 fn test_derive_file_header_title_no_path_fallback() {
     let got = derive_file_header_title(None);
     assert_eq!(got, "Module.");
+}
+
+#[test]
+fn test_eager_collection_conversion_ignores_iter_annotation() {
+    let source = r#"pipeline default(task) {
+  let xs: Iter<int> = iter([1, 2, 3]).map(fn(x) { return x + 1 })
+  log(xs)
+}
+"#;
+    let diags = lint_source(source);
+    assert_eq!(
+        count_rule(&diags, "eager-collection-conversion"),
+        0,
+        "Iter<T> annotation should not trigger rule, got: {diags:?}"
+    );
 }

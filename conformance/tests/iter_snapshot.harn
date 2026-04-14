@@ -1,0 +1,9 @@
+pipeline test(task) {
+  // Iter snapshots the source: reassigning the source binding to a new
+  // list does not affect what the already-constructed iter yields.
+  var xs = [1, 2, 3]
+  let it = iter(xs)
+  xs = xs + [99]
+  log(it.to_list())
+  log(xs)
+}

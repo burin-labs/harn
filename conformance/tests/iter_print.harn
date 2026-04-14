@@ -1,0 +1,10 @@
+pipeline test(task) {
+  // Printing an iter renders <iter> and does NOT drain it — the
+  // subsequent .to_list() still yields the full sequence.
+  let it = iter([1, 2, 3])
+  log(it)
+  log(it.to_list())
+  // After draining, the same handle prints as <iter (exhausted)>.
+  log(it)
+  log(it.to_list())
+}

@@ -1,5 +1,6 @@
 mod format;
 mod imports;
+pub mod iter;
 mod methods;
 mod ops;
 
@@ -109,6 +110,9 @@ pub(crate) enum IterState {
     Range {
         next: i64,
         stop: i64,
+    },
+    VmIter {
+        handle: std::rc::Rc<std::cell::RefCell<crate::vm::iter::VmIter>>,
     },
 }
 

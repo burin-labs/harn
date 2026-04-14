@@ -452,6 +452,7 @@ impl TypeChecker {
                 | TypeExpr::Applied { .. }
                 | TypeExpr::FnType { .. }
                 | TypeExpr::List(_)
+                | TypeExpr::Iter(_)
                 | TypeExpr::DictType(_, _)
         ) || matches!(ty, TypeExpr::Named(n) if n != "dict" && n != "any" && n != "_")
     }
@@ -661,6 +662,10 @@ impl TypeChecker {
                     define(scope, &elem.name);
                 }
             }
+            BindingPattern::Pair(a, b) => {
+                define(scope, a);
+                define(scope, b);
+            }
         }
     }
 
@@ -682,6 +687,7 @@ impl TypeChecker {
                     }
                 }
             }
+            BindingPattern::Pair(_, _) => {}
         }
     }
 
@@ -918,10 +924,17 @@ impl TypeChecker {
             } => {
                 self.check_node(iterable, scope);
                 let mut loop_scope = scope.child();
+                let iter_type = self.infer_type(iterable, scope);
                 if let BindingPattern::Identifier(variable) = pattern {
                     // Infer loop variable type from iterable
-                    let elem_type = match self.infer_type(iterable, scope) {
+                    let elem_type = match iter_type {
                         Some(TypeExpr::List(inner)) => Some(*inner),
+                        Some(TypeExpr::Iter(inner)) => Some(*inner),
+                        Some(TypeExpr::Applied { ref name, ref args })
+                            if name == "Iter" && args.len() == 1 =>
+                        {
+                            Some(args[0].clone())
+                        }
                         Some(TypeExpr::Named(n)) if n == "string" => {
                             Some(TypeExpr::Named("string".into()))
                         }
@@ -932,6 +945,38 @@ impl TypeChecker {
                         _ => None,
                     };
                     loop_scope.define_var(variable, elem_type);
+                } else if let BindingPattern::Pair(a, b) = pattern {
+                    // Pair destructuring: `for (k, v) in iter` — extract K, V
+                    // from the yielded Pair<K, V>.
+                    let (ka, vb) = match &iter_type {
+                        Some(TypeExpr::Iter(inner)) => {
+                            if let TypeExpr::Applied { name, args } = inner.as_ref() {
+                                if name == "Pair" && args.len() == 2 {
+                                    (Some(args[0].clone()), Some(args[1].clone()))
+                                } else {
+                                    (None, None)
+                                }
+                            } else {
+                                (None, None)
+                            }
+                        }
+                        Some(TypeExpr::Applied { name, args })
+                            if name == "Iter" && args.len() == 1 =>
+                        {
+                            if let TypeExpr::Applied { name: n2, args: a2 } = &args[0] {
+                                if n2 == "Pair" && a2.len() == 2 {
+                                    (Some(a2[0].clone()), Some(a2[1].clone()))
+                                } else {
+                                    (None, None)
+                                }
+                            } else {
+                                (None, None)
+                            }
+                        }
+                        _ => (None, None),
+                    };
+                    loop_scope.define_var(a, ka);
+                    loop_scope.define_var(b, vb);
                 } else {
                     self.check_pattern_defaults(pattern, &mut loop_scope);
                     Self::define_pattern_vars(pattern, &mut loop_scope, false);
@@ -2097,6 +2142,9 @@ impl TypeChecker {
             TypeExpr::List(inner) => {
                 TypeExpr::List(Box::new(Self::apply_type_bindings(inner, bindings)))
             }
+            TypeExpr::Iter(inner) => {
+                TypeExpr::Iter(Box::new(Self::apply_type_bindings(inner, bindings)))
+            }
             TypeExpr::DictType(key, value) => TypeExpr::DictType(
                 Box::new(Self::apply_type_bindings(key, bindings)),
                 Box::new(Self::apply_type_bindings(value, bindings)),
@@ -3141,6 +3189,16 @@ impl TypeChecker {
                 }
                 // Shape field access: obj.field → field type
                 let obj_type = self.infer_type(object, scope);
+                // Pair<K, V> has `.first` and `.second` accessors.
+                if let Some(TypeExpr::Applied { name, args }) = &obj_type {
+                    if name == "Pair" && args.len() == 2 {
+                        if property == "first" {
+                            return Some(args[0].clone());
+                        } else if property == "second" {
+                            return Some(args[1].clone());
+                        }
+                    }
+                }
                 if let Some(TypeExpr::Shape(fields)) = &obj_type {
                     if let Some(field) = fields.iter().find(|f| f.name == *property) {
                         return Some(field.type_expr.clone());
@@ -3221,6 +3279,90 @@ impl TypeChecker {
                     }
                 }
                 let obj_type = self.infer_type(object, scope);
+                // Iter<T> receiver: combinators preserve or transform T; sinks
+                // materialize. This must come before the shared-method match
+                // below so `.map` / `.filter` / etc. on an iter return Iter,
+                // not list.
+                let iter_elem_type: Option<TypeExpr> = match &obj_type {
+                    Some(TypeExpr::Iter(inner)) => Some((**inner).clone()),
+                    Some(TypeExpr::Named(n)) if n == "iter" => Some(TypeExpr::Named("any".into())),
+                    _ => None,
+                };
+                if let Some(t) = iter_elem_type {
+                    let pair = |k: TypeExpr, v: TypeExpr| TypeExpr::Applied {
+                        name: "Pair".into(),
+                        args: vec![k, v],
+                    };
+                    let iter_of = |ty: TypeExpr| TypeExpr::Iter(Box::new(ty));
+                    match method.as_str() {
+                        "iter" => return Some(iter_of(t)),
+                        "map" | "flat_map" => {
+                            // Closure-return inference is not threaded here;
+                            // fall back to a coarse `iter<any>` — matches the
+                            // list-return style the rest of the checker uses.
+                            return Some(TypeExpr::Named("iter".into()));
+                        }
+                        "filter" | "take" | "skip" | "take_while" | "skip_while" => {
+                            return Some(iter_of(t));
+                        }
+                        "zip" => {
+                            return Some(iter_of(pair(t, TypeExpr::Named("any".into()))));
+                        }
+                        "enumerate" => {
+                            return Some(iter_of(pair(TypeExpr::Named("int".into()), t)));
+                        }
+                        "chain" => return Some(iter_of(t)),
+                        "chunks" | "windows" => {
+                            return Some(iter_of(TypeExpr::List(Box::new(t))));
+                        }
+                        // Sinks
+                        "to_list" => return Some(TypeExpr::List(Box::new(t))),
+                        "to_set" => {
+                            return Some(TypeExpr::Applied {
+                                name: "set".into(),
+                                args: vec![t],
+                            })
+                        }
+                        "to_dict" => return Some(TypeExpr::Named("dict".into())),
+                        "count" => return Some(TypeExpr::Named("int".into())),
+                        "sum" => {
+                            return Some(TypeExpr::Union(vec![
+                                TypeExpr::Named("int".into()),
+                                TypeExpr::Named("float".into()),
+                            ]))
+                        }
+                        "min" | "max" | "first" | "last" | "find" => {
+                            return Some(TypeExpr::Union(vec![t, TypeExpr::Named("nil".into())]));
+                        }
+                        "any" | "all" => return Some(TypeExpr::Named("bool".into())),
+                        "for_each" => return Some(TypeExpr::Named("nil".into())),
+                        "reduce" => return None,
+                        _ => {}
+                    }
+                }
+                // list<T> / dict / set / string .iter() → iter<T>. Other
+                // combinator methods on list/dict/set/string keep their
+                // existing eager typings (the runtime still materializes
+                // them). Only the explicit .iter() bridge returns Iter.
+                if method == "iter" {
+                    match &obj_type {
+                        Some(TypeExpr::List(inner)) => {
+                            return Some(TypeExpr::Iter(Box::new((**inner).clone())));
+                        }
+                        Some(TypeExpr::DictType(k, v)) => {
+                            return Some(TypeExpr::Iter(Box::new(TypeExpr::Applied {
+                                name: "Pair".into(),
+                                args: vec![(**k).clone(), (**v).clone()],
+                            })));
+                        }
+                        Some(TypeExpr::Named(n))
+                            if n == "list" || n == "dict" || n == "set" || n == "string" =>
+                        {
+                            return Some(TypeExpr::Named("iter".into()));
+                        }
+                        _ => {}
+                    }
+                }
                 let is_dict = matches!(&obj_type, Some(TypeExpr::Named(n)) if n == "dict")
                     || matches!(&obj_type, Some(TypeExpr::DictType(..)))
                     || matches!(&obj_type, Some(TypeExpr::Shape(_)));
@@ -3458,6 +3600,11 @@ impl TypeChecker {
             }
             (TypeExpr::Named(n), TypeExpr::List(_)) if n == "list" => true,
             (TypeExpr::List(_), TypeExpr::Named(n)) if n == "list" => true,
+            (TypeExpr::Iter(expected_inner), TypeExpr::Iter(actual_inner)) => {
+                self.types_compatible(expected_inner, actual_inner, scope)
+            }
+            (TypeExpr::Named(n), TypeExpr::Iter(_)) if n == "iter" => true,
+            (TypeExpr::Iter(_), TypeExpr::Named(n)) if n == "iter" => true,
             (TypeExpr::DictType(ek, ev), TypeExpr::DictType(ak, av)) => {
                 self.types_compatible(ek, ak, scope) && self.types_compatible(ev, av, scope)
             }
@@ -3513,6 +3660,7 @@ impl TypeChecker {
                     .collect(),
             ),
             TypeExpr::List(inner) => TypeExpr::List(Box::new(self.resolve_alias(inner, scope))),
+            TypeExpr::Iter(inner) => TypeExpr::Iter(Box::new(self.resolve_alias(inner, scope))),
             TypeExpr::DictType(key, value) => TypeExpr::DictType(
                 Box::new(self.resolve_alias(key, scope)),
                 Box::new(self.resolve_alias(value, scope)),
@@ -3873,6 +4021,7 @@ pub fn format_type(ty: &TypeExpr) -> String {
             format!("{{{}}}", inner.join(", "))
         }
         TypeExpr::List(inner) => format!("list<{}>", format_type(inner)),
+        TypeExpr::Iter(inner) => format!("iter<{}>", format_type(inner)),
         TypeExpr::DictType(k, v) => format!("dict<{}, {}>", format_type(k), format_type(v)),
         TypeExpr::Applied { name, args } => {
             let args_str = args.iter().map(format_type).collect::<Vec<_>>().join(", ");

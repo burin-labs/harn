@@ -73,6 +73,23 @@ pub(crate) fn simple_ident_rename_fix(
     }])
 }
 
+/// Build a FixEdit that appends `.to_list()` / `.to_set()` / `.to_dict()`
+/// (or another sink) at the end of an expression span. Used by the
+/// `eager-collection-conversion` lint rule to materialize a lazy `Iter`
+/// into the concrete collection type the surrounding context expects.
+pub(crate) fn append_sink_fix(expr_span: Span, sink: &str) -> Vec<FixEdit> {
+    let replacement = format!(".{sink}()");
+    vec![FixEdit {
+        span: Span::with_offsets(
+            expr_span.end,
+            expr_span.end,
+            expr_span.line,
+            expr_span.column,
+        ),
+        replacement,
+    }]
+}
+
 pub(crate) fn is_ident_byte(b: u8) -> bool {
     matches!(b, b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_')
 }

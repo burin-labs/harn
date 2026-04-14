@@ -1,0 +1,11 @@
+pipeline test(task) {
+  let pairs = iter([1, 2, 3]).zip([10, 20, 30]).to_list()
+  for p in pairs {
+    log("${p.first}=${p.second}")
+  }
+  let short = iter([1, 2, 3, 4]).zip([10, 20]).to_list()
+  log(len(short))
+  for (a, b) in iter([1, 2, 3, 4]).zip([10, 20]) {
+    log("${a}|${b}")
+  }
+}

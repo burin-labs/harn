@@ -171,6 +171,79 @@ let results = parallel settle paths with { max_concurrent: 4 } { p ->
 `retry { } catch err { }`, channels, `select`, and `deadline` in
 `docs/src/concurrency.md`.
 
+## Iteration & lazy iterators
+
+Eager collection methods (`list.map`, `list.filter`, `list.flat_map`,
+`dict.map_values`, `dict.filter`, set/string equivalents, `.reduce`,
+`.find`, `.any`, `.all`, etc.) still return eager collections. Nothing
+about those has changed — use them when you just want a list/dict back.
+
+Lazy iteration is opt-in via `.iter()`:
+
+```harn
+let xs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+let first_three_doubled_evens = xs
+  .iter()
+  .filter({ x -> x % 2 == 0 })
+  .map({ x -> x * 2 })
+  .take(3)
+  .to_list()
+// [4, 8, 12]
+```
+
+`.iter()` lifts a list/dict/set/string/generator/channel into
+`Iter<T>` — a lazy, single-pass, fused iterator. Combinators chain by
+returning a new `Iter`. Sinks drain the iter and return an eager value.
+
+### Lazy combinators (`Iter<T> -> Iter<...>`)
+
+`.map(f)`, `.filter(p)`, `.flat_map(f)`, `.take(n)`, `.skip(n)`,
+`.take_while(p)`, `.skip_while(p)`, `.zip(other)`, `.enumerate()`,
+`.chain(other)`, `.chunks(n)`, `.windows(n)`, `.iter()` (no-op on an
+iter). `iter(x)` is also available as a free builtin.
+
+### Sinks (drain, return eager value)
+
+`.to_list()`, `.to_set()`, `.to_dict()` (requires `Pair` items),
+`.count()`, `.sum()`, `.min()`, `.max()`, `.reduce(init, f)`,
+`.first()`, `.last()`, `.any(p)`, `.all(p)`, `.find(p)`,
+`.for_each(f)`.
+
+### Dict iteration and `Pair`
+
+`.iter()` on a dict yields `Pair(key, value)` values — **not**
+`{key, value}` dicts. Access with `.first` / `.second`, or destructure
+in a for-loop:
+
+```harn
+for (k, v) in {a: 1, b: 2}.iter() {
+  println("${k}: ${v}")
+}
+```
+
+A direct `for entry in some_dict` still yields `{key, value}` dicts
+(back-compat). A `pair(a, b)` builtin exists for constructing pairs
+explicitly; `.zip` and `.enumerate` also emit pairs.
+
+### Semantics
+
+- **Lazy**: nothing runs until a sink (or for-loop) pulls values.
+- **Single-pass, fused**: once exhausted, stays exhausted. Call
+  `.iter()` again on the source to restart.
+- **Snapshot**: the iter `Rc`-clones the backing collection, so
+  mutating the source after `.iter()` doesn't affect the iter.
+- **String iteration**: yields chars (Unicode scalar values), not
+  graphemes.
+- **Printing**: `log(it)` renders `<iter>` or `<iter (exhausted)>`
+  without draining.
+
+### Range caveat
+
+`(1 to 1_000_000)` currently materializes as a list before you can
+chain iter methods on it. Lazy ranges are a future feature. Until
+then, prefer bounded-size inputs or apply `.take(n)` as the first
+combinator after `.iter()`.
+
 ## Regex
 
 ```harn
