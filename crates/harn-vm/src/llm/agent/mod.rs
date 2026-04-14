@@ -4,7 +4,7 @@ use crate::agent_events::{self, AgentEvent, ToolCallStatus};
 use crate::value::{ErrorCategory, VmError, VmValue};
 
 use super::daemon::detect_watch_changes;
-use super::helpers::{transcript_event, transcript_to_vm_with_events};
+use super::helpers::transcript_event;
 use super::tools::{
     build_assistant_tool_message, build_tool_result_message, collect_tool_schemas,
     normalize_tool_args, parse_text_tool_calls_with_tools, validate_tool_args,
@@ -19,6 +19,7 @@ use super::agent_tools::{
     stable_hash_str, LoopIntervention,
 };
 
+mod finalize;
 mod helpers;
 mod state;
 
@@ -1739,94 +1740,16 @@ pub async fn run_agent_loop_internal(
         );
     }
 
-    state.deferred_user_messages.extend(
-        inject_queued_user_messages(
-            bridge.as_ref(),
-            &mut state.visible_messages,
-            crate::bridge::DeliveryCheckpoint::EndOfInteraction,
-        )
-        .await?
-        .into_iter()
-        .map(|message| message.content),
-    );
-
-    if daemon && state.final_status == "done" {
-        state.final_status = "idle";
-    }
-    if state.final_status == "done" {
-        if let Some(required_tools) = config.require_successful_tools.as_ref() {
-            if !required_tools.is_empty()
-                && !state.successful_tools_used
-                    .iter()
-                    .any(|tool_name| required_tools.iter().any(|wanted| wanted == tool_name))
-            {
-                state.final_status = "failed";
-            }
-        }
-    }
-    if daemon {
-        state.daemon_state = state.final_status.to_string();
-        let final_snapshot = daemon_snapshot_from_state(
-            &state.daemon_state,
-            &state.visible_messages,
-            &state.recorded_messages,
-            &state.transcript_summary,
-            &state.transcript_events,
-            &state.total_text,
-            &state.last_iteration_text,
-            &state.all_tools_used,
-            &state.rejected_tools,
-            &state.deferred_user_messages,
-            state.total_iterations,
-            state.idle_backoff_ms,
-            state.last_run_exit_code,
-            &state.daemon_watch_state,
-        );
-        state.daemon_snapshot_path = maybe_persist_daemon_snapshot(&daemon_config, &final_snapshot)?
-            .or(state.daemon_snapshot_path);
-    }
-
-    // Emit structured trace event for loop completion.
-    super::trace::emit_agent_event(super::trace::AgentTraceEvent::LoopComplete {
-        status: state.final_status.to_string(),
-        iterations: state.total_iterations,
-        total_duration_ms: loop_start.elapsed().as_millis() as u64,
-        tools_used: state.all_tools_used.clone(),
-        successful_tools: state.successful_tools_used.clone(),
-    });
-    let trace_summary = super::trace::agent_trace_summary();
-
-    // Serialize the final ledger state into the result so workflow post-
-    // processors (QC officer, audit pipelines) can reason over what the
-    // agent thought "done" meant.
-    let ledger_json = serde_json::to_value(&state.task_ledger).unwrap_or(serde_json::Value::Null);
-    let ledger_done_nudge_count = state.ledger_done_rejections as i64;
-    Ok(serde_json::json!({
-        "status": state.final_status,
-        "daemon_state": state.daemon_state,
-        "daemon_snapshot_path": state.daemon_snapshot_path,
-        "text": state.total_text,
-        "visible_text": state.last_iteration_text,
-        "iterations": state.total_iterations,
-        "duration_ms": loop_start.elapsed().as_millis() as i64,
-        "tools_used": state.all_tools_used,
-        "successful_tools": state.successful_tools_used,
-        "rejected_tools": state.rejected_tools,
-        "tool_calling_mode": tool_format,
-        "deferred_user_messages": state.deferred_user_messages,
-        "task_ledger": ledger_json,
-        "ledger_done_rejections": ledger_done_nudge_count,
-        "trace": trace_summary,
-        "transcript": super::helpers::vm_value_to_json(&transcript_to_vm_with_events(
-            opts.transcript_id.clone(),
-            state.transcript_summary,
-            opts.transcript_metadata.clone(),
-            &state.recorded_messages,
-            state.transcript_events,
-            Vec::new(),
-            Some(if state.final_status == "done" { "active" } else { "paused" }),
-        )),
-    }))
+    finalize::run_finalize(
+        &mut state,
+        opts,
+        bridge,
+        daemon,
+        &daemon_config,
+        &tool_format,
+        loop_start,
+    )
+    .await
 }
 
 /// Register a tool-aware `agent_loop` that uses a bridge for tool execution.
