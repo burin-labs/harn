@@ -32,7 +32,9 @@ pub(crate) fn expects_structured_output(opts: &crate::llm::api::LlmCallOptions) 
 // =============================================================================
 
 /// Extract all LLM call options from the standard (prompt, system, options) args.
-pub(crate) fn extract_llm_options(args: &[VmValue]) -> Result<crate::llm::api::LlmCallOptions, VmError> {
+pub(crate) fn extract_llm_options(
+    args: &[VmValue],
+) -> Result<crate::llm::api::LlmCallOptions, VmError> {
     use crate::llm::api::{LlmCallOptions, ThinkingConfig};
     use crate::llm::tools::vm_tools_to_native;
 

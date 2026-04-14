@@ -26,13 +26,12 @@ mod turn_preflight;
 
 use helpers::{
     action_turn_nudge, append_host_messages_to_recorded, append_message_to_contexts,
-    assistant_history_text, daemon_snapshot_from_state, has_successful_tools,
-    inject_queued_user_messages, loop_state_requests_phase_change,
+    assistant_history_text, daemon_snapshot_from_state, inject_queued_user_messages,
+    interpret_post_turn_callback_result, loop_state_requests_phase_change,
     maybe_auto_compact_agent_messages, maybe_persist_daemon_snapshot, prose_exceeds_budget,
     runtime_feedback_message, sentinel_without_action_nudge, should_stop_after_successful_tools,
     trim_prose_for_history,
 };
-
 
 thread_local! {
     static CURRENT_HOST_BRIDGE: std::cell::RefCell<Option<Rc<crate::bridge::HostBridge>>> = const { std::cell::RefCell::new(None) };
@@ -99,8 +98,11 @@ async fn emit_agent_event(event: &AgentEvent) {
 /// host builtin; drained by the turn loop.
 pub(crate) fn push_pending_feedback(session_id: &str, kind: &str, content: &str) {
     PENDING_FEEDBACK.with(|q| {
-        q.borrow_mut()
-            .push((session_id.to_string(), kind.to_string(), content.to_string()))
+        q.borrow_mut().push((
+            session_id.to_string(),
+            kind.to_string(),
+            content.to_string(),
+        ))
     });
 }
 
@@ -157,6 +159,7 @@ pub async fn run_agent_loop_internal(
     let llm_backoff_ms: u64 = state.config.llm_backoff_ms;
     let turn_policy = state.config.turn_policy.clone();
     let stop_after_successful_tools = state.config.stop_after_successful_tools.clone();
+    let post_turn_callback = state.config.post_turn_callback.clone();
 
     // Copy/clone bindings for identifiers that collide with argument
     // names, module paths, or pattern bindings (so renaming `state.foo`
@@ -454,7 +457,9 @@ pub async fn run_agent_loop_internal(
         // If the model emitted the sentinel but verification hasn't passed,
         // inject a corrective so the model knows it must keep going.
         if sentinel_in_text && !verified && persistent {
-            let code_str = state.last_run_exit_code.map_or("none".to_string(), |c| c.to_string());
+            let code_str = state
+                .last_run_exit_code
+                .map_or("none".to_string(), |c| c.to_string());
             let corrective = format!(
                 "You emitted the done sentinel but verification has not passed \
                  (last run exit code: {code_str}). The loop will continue. \
@@ -469,8 +474,7 @@ pub async fn run_agent_loop_internal(
         // If the model emitted the sentinel without having made any tool
         // calls, it's trying to declare done without doing any work.
         if sentinel_in_text && !has_acted && persistent && has_tools {
-            let corrective =
-                sentinel_without_action_nudge(&tool_format, turn_policy.as_ref());
+            let corrective = sentinel_without_action_nudge(&tool_format, turn_policy.as_ref());
             append_message_to_contexts(
                 &mut state.visible_messages,
                 &mut state.recorded_messages,
@@ -517,7 +521,11 @@ pub async fn run_agent_loop_internal(
             false
         });
         for message in ledger_tool_results.drain(..) {
-            append_message_to_contexts(&mut state.visible_messages, &mut state.recorded_messages, message);
+            append_message_to_contexts(
+                &mut state.visible_messages,
+                &mut state.recorded_messages,
+                message,
+            );
         }
 
         if !tool_calls.is_empty() {
@@ -915,8 +923,8 @@ pub async fn run_agent_loop_internal(
                 // and the ACP server can observe the dispatch before it
                 // starts. Status transitions (InProgress, Completed,
                 // Failed) follow via ToolCallUpdate.
-                let tool_kind = crate::orchestration::current_tool_annotations(tool_name)
-                    .map(|a| a.kind);
+                let tool_kind =
+                    crate::orchestration::current_tool_annotations(tool_name).map(|a| a.kind);
                 emit_agent_event(&AgentEvent::ToolCall {
                     session_id: session_id.clone(),
                     tool_call_id: tool_call_id.clone(),
@@ -1027,7 +1035,9 @@ pub async fn run_agent_loop_internal(
                                 "loop_skipped": true,
                                 "repeat_count": count,
                             })),
-                            error: Some(format!("tool loop detected (skipped after {count} repeats)")),
+                            error: Some(format!(
+                                "tool loop detected (skipped after {count} repeats)"
+                            )),
                         })
                         .await;
                         continue;
@@ -1340,7 +1350,8 @@ pub async fn run_agent_loop_internal(
                 .filter_map(|result| result["tool_name"].as_str())
                 .collect();
             for tool_name in &successful_tool_names {
-                if !state.successful_tools_used
+                if !state
+                    .successful_tools_used
                     .iter()
                     .any(|existing| existing == tool_name)
                 {
@@ -1351,7 +1362,7 @@ pub async fn run_agent_loop_internal(
             // pending-feedback messages via `agent_inject_feedback`;
             // those are drained at the top of the next iteration before
             // the LLM is called again.
-            {
+            let turn_info = {
                 let tool_names: Vec<&str> = tool_calls
                     .iter()
                     .filter_map(|tc| tc["name"].as_str())
@@ -1369,10 +1380,11 @@ pub async fn run_agent_loop_internal(
                 emit_agent_event(&AgentEvent::TurnEnd {
                     session_id: session_id.clone(),
                     iteration,
-                    turn_info,
+                    turn_info: turn_info.clone(),
                 })
                 .await;
-            }
+                turn_info
+            };
             if let Some(stop_tools) = stop_after_successful_tools.as_ref() {
                 if should_stop_after_successful_tools(&tool_results_this_iter, stop_tools) {
                     crate::events::log_debug(
@@ -1384,12 +1396,48 @@ pub async fn run_agent_loop_internal(
                     break;
                 }
             }
+            // Invoke the optional post_turn_callback. Accepts:
+            //   ""/nil: no-op
+            //   string: inject as runtime-feedback user message
+            //   bool true: stop the stage immediately
+            //   dict {message, stop}: both (optional fields)
+            if let Some(VmValue::Closure(closure)) = post_turn_callback.as_ref() {
+                {
+                    let mut cb_vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
+                        VmError::Runtime(
+                            "post_turn_callback requires an async builtin VM context".to_string(),
+                        )
+                    })?;
+                    let info_vm = crate::stdlib::json_to_vm_value(&turn_info);
+                    let cb_result = cb_vm.call_closure_pub(closure, &[info_vm], &[]).await?;
+                    let (message, stop) = interpret_post_turn_callback_result(&cb_result);
+                    if let Some(msg) = message {
+                        if !msg.trim().is_empty() {
+                            let feedback =
+                                runtime_feedback_message("post_turn_callback", msg.as_str());
+                            append_message_to_contexts(
+                                &mut state.visible_messages,
+                                &mut state.recorded_messages,
+                                feedback,
+                            );
+                        }
+                    }
+                    if stop {
+                        crate::events::log_debug(
+                            "agent.post_turn_callback",
+                            &format!("iter={iteration} post_turn_callback requested stage stop"),
+                        );
+                        break;
+                    }
+                }
+            }
 
             // Auto-compaction check after tool processing.
             // Include the system prompt + tool definitions in the estimate
             // since they consume context window alongside messages.
             if let Some(ref ac) = auto_compact {
-                let mut est = crate::orchestration::estimate_message_tokens(&state.visible_messages);
+                let mut est =
+                    crate::orchestration::estimate_message_tokens(&state.visible_messages);
                 if let Some(ref sys) = opts.system {
                     est += sys.len() / 4;
                 }
@@ -1525,8 +1573,9 @@ pub async fn run_agent_loop_internal(
                 state.last_run_exit_code,
                 &state.daemon_watch_state,
             );
-            state.daemon_snapshot_path = maybe_persist_daemon_snapshot(&daemon_config, &idle_snapshot)?
-                .or(state.daemon_snapshot_path);
+            state.daemon_snapshot_path =
+                maybe_persist_daemon_snapshot(&daemon_config, &idle_snapshot)?
+                    .or(state.daemon_snapshot_path);
             if !daemon_config.has_wake_source(bridge.is_some()) {
                 state.final_status = "idle";
                 break;

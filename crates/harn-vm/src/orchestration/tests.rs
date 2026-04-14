@@ -53,10 +53,7 @@ fn install_current_mutation_session_round_trips() {
 fn active_execution_policy_rejects_unknown_bridge_builtin() {
     push_execution_policy(CapabilityPolicy {
         tools: vec!["read".to_string()],
-        capabilities: BTreeMap::from([(
-            "workspace".to_string(),
-            vec!["read_text".to_string()],
-        )]),
+        capabilities: BTreeMap::from([("workspace".to_string(), vec!["read_text".to_string()])]),
         side_effect_level: Some("read_only".to_string()),
         recursion_limit: Some(1),
         ..Default::default()
@@ -76,10 +73,7 @@ fn active_execution_policy_rejects_unknown_bridge_builtin() {
 fn active_execution_policy_rejects_mcp_escape_hatch() {
     push_execution_policy(CapabilityPolicy {
         tools: vec!["read".to_string()],
-        capabilities: BTreeMap::from([(
-            "workspace".to_string(),
-            vec!["read_text".to_string()],
-        )]),
+        capabilities: BTreeMap::from([("workspace".to_string(), vec!["read_text".to_string()])]),
         side_effect_level: Some("read_only".to_string()),
         recursion_limit: Some(1),
         ..Default::default()
@@ -352,8 +346,7 @@ fn run_diff_reports_changed_stage() {
 
 #[test]
 fn eval_suite_manifest_can_fail_on_baseline_diff() {
-    let temp_dir =
-        std::env::temp_dir().join(format!("harn-eval-suite-{}", uuid::Uuid::now_v7()));
+    let temp_dir = std::env::temp_dir().join(format!("harn-eval-suite-{}", uuid::Uuid::now_v7()));
     std::fs::create_dir_all(&temp_dir).unwrap();
     let baseline_path = temp_dir.join("baseline.json");
     let candidate_path = temp_dir.join("candidate.json");
@@ -935,11 +928,8 @@ fn arg_constraint_rejects_non_matching_pattern() {
         }],
         ..Default::default()
     };
-    let result = enforce_tool_arg_constraints(
-        &policy,
-        "exec",
-        &serde_json::json!({"command": "rm -rf /"}),
-    );
+    let result =
+        enforce_tool_arg_constraints(&policy, "exec", &serde_json::json!({"command": "rm -rf /"}));
     assert!(result.is_err());
 }
 
@@ -1048,7 +1038,10 @@ fn arg_constraint_with_explicit_arg_key_allows_matching_path() {
             "path": "tests/unit/test_experiment_service.py",
         }),
     );
-    assert!(result.is_ok(), "expected allow (path matches), got: {result:?}");
+    assert!(
+        result.is_ok(),
+        "expected allow (path matches), got: {result:?}"
+    );
 }
 
 #[test]

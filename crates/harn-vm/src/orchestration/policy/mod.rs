@@ -15,16 +15,15 @@ use crate::value::{VmError, VmValue};
 
 pub use crate::tool_annotations::{ToolArgSchema, ToolKind};
 pub use types::{
-    enforce_tool_arg_constraints, BranchSemantics, CapabilityPolicy, ContextPolicy,
-    EqIgnored, EscalationPolicy, JoinPolicy, MapPolicy, ModelPolicy, ReducePolicy, RetryPolicy,
-    StageContract, ToolArgConstraint, TranscriptPolicy, TurnPolicy,
+    enforce_tool_arg_constraints, BranchSemantics, CapabilityPolicy, ContextPolicy, EqIgnored,
+    EscalationPolicy, JoinPolicy, MapPolicy, ModelPolicy, ReducePolicy, RetryPolicy, StageContract,
+    ToolArgConstraint, TranscriptPolicy, TurnPolicy,
 };
 
 thread_local! {
     static EXECUTION_POLICY_STACK: RefCell<Vec<CapabilityPolicy>> = const { RefCell::new(Vec::new()) };
     static EXECUTION_APPROVAL_POLICY_STACK: RefCell<Vec<ToolApprovalPolicy>> = const { RefCell::new(Vec::new()) };
 }
-
 
 // ── Execution policy stack ──────────────────────────────────────────
 

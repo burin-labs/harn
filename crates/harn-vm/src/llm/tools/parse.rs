@@ -484,10 +484,7 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                 while cursor < bytes.len() && bytes[cursor] != b'<' {
                     cursor += 1;
                 }
-                if cursor + 1 < bytes.len()
-                    && bytes[cursor] == b'<'
-                    && bytes[cursor + 1] == b'<'
-                {
+                if cursor + 1 < bytes.len() && bytes[cursor] == b'<' && bytes[cursor + 1] == b'<' {
                     if let Some(after) = skip_heredoc_body(src, cursor) {
                         cursor = after;
                         continue;
@@ -1092,4 +1089,3 @@ fn parse_ts_call_from(text: &str, name: String) -> Result<(serde_json::Value, us
         )),
     }
 }
-

@@ -111,6 +111,5 @@ pub(crate) fn parse_json_value<T: for<'de> Deserialize<'de>>(
     parse_json_payload(vm_value_to_json(value), "orchestration")
 }
 
-
 #[cfg(test)]
 mod tests;

@@ -111,12 +111,20 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
+        name: "agent_inject_feedback",
+        return_type: Some(BuiltinReturn::Named("nil")),
+    },
+    BuiltinSig {
         name: "agent_loop",
         return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
         name: "agent_name",
         return_type: None,
+    },
+    BuiltinSig {
+        name: "agent_subscribe",
+        return_type: Some(BuiltinReturn::Named("nil")),
     },
     BuiltinSig {
         name: "agent_trace",

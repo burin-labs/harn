@@ -48,7 +48,10 @@ impl AcpAgentEventSink {
 impl AgentEventSink for AcpAgentEventSink {
     fn handle_event(&self, event: &AgentEvent) {
         match event {
-            AgentEvent::AgentMessageChunk { session_id, content } => {
+            AgentEvent::AgentMessageChunk {
+                session_id,
+                content,
+            } => {
                 let visible = sanitize_visible_assistant_text(content, true);
                 self.write_notification(serde_json::json!({
                     "sessionId": session_id,
@@ -63,7 +66,10 @@ impl AgentEventSink for AcpAgentEventSink {
                     },
                 }));
             }
-            AgentEvent::AgentThoughtChunk { session_id, content } => {
+            AgentEvent::AgentThoughtChunk {
+                session_id,
+                content,
+            } => {
                 self.write_notification(serde_json::json!({
                     "sessionId": session_id,
                     "update": {

@@ -1011,7 +1011,6 @@ fn render_assetish_label(kind: &str, dict: &BTreeMap<String, VmValue>) -> String
     format!("<{kind}:{label}>")
 }
 
-
 // =============================================================================
 // Convert VmValue dict to serde_json::Value for API payloads
 // =============================================================================

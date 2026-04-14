@@ -7,13 +7,13 @@ use super::helpers::{
     should_stop_after_successful_tools, trim_prose_for_history,
 };
 use super::run_agent_loop_internal;
+use crate::bridge::HostBridge;
 use crate::llm::agent_config::{build_llm_call_result, AgentLoopConfig};
 use crate::llm::agent_observe::{extract_retry_after_ms, observed_llm_call, LlmRetryConfig};
 use crate::llm::agent_tools::{
     merge_agent_loop_policy, normalize_native_tools_for_format, normalize_tool_choice_for_format,
     normalize_tool_examples_for_format, required_tool_choice_for_provider,
 };
-use crate::bridge::HostBridge;
 use crate::llm::api::{LlmCallOptions, LlmResult};
 use crate::llm::daemon::{persist_snapshot, DaemonLoopConfig, DaemonSnapshot};
 use crate::llm::mock::{get_llm_mock_calls, reset_llm_mock_state};
@@ -88,6 +88,7 @@ fn base_agent_config() -> AgentLoopConfig {
         session_id: "test_session".to_string(),
         event_sink: None,
         task_ledger: Default::default(),
+        post_turn_callback: None,
     }
 }
 

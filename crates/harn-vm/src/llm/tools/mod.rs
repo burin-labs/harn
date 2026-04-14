@@ -8,8 +8,8 @@ use std::rc::Rc;
 use super::vm_value_to_json;
 use crate::value::{VmError, VmValue};
 
-pub(crate) use handle_local::handle_tool_locally;
 use handle_local::coerce_integer_like_tool_args;
+pub(crate) use handle_local::handle_tool_locally;
 pub(crate) use parse::parse_text_tool_calls_with_tools;
 #[cfg(test)]
 pub(crate) use parse::{parse_bare_calls_in_body, parse_native_json_tool_calls};
@@ -145,7 +145,6 @@ pub(crate) fn normalize_tool_args(name: &str, args: &serde_json::Value) -> serde
     coerce_integer_like_tool_args(&mut normalized);
     normalized
 }
-
 
 // ── Recursive type expression ───────────────────────────────────────────────
 //
@@ -1127,7 +1126,6 @@ The runtime maintains a durable `<task_ledger>` of the user's deliverables (inje
 
 Prefer marking deliverables done only AFTER a concrete tool call demonstrates completion (an edit landed, a run() returned exit 0, a read confirmed an invariant). Don't mark done on prose alone.
 ";
-
 
 pub(crate) fn vm_tools_to_native(
     tools_val: &VmValue,

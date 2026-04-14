@@ -481,9 +481,8 @@ pub fn register_llm_builtins(vm: &mut Vm) {
         let tool_backoff_ms = opt_int(&options, "tool_backoff_ms").unwrap_or(1000) as u64;
         let tool_format = opt_str(&options, "tool_format").unwrap_or_else(|| "text".to_string());
         let daemon = opt_bool(&options, "daemon");
-        let session_id = opt_str(&options, "session_id").unwrap_or_else(|| {
-            format!("agent_session_{}", uuid::Uuid::now_v7())
-        });
+        let session_id = opt_str(&options, "session_id")
+            .unwrap_or_else(|| format!("agent_session_{}", uuid::Uuid::now_v7()));
         let auto_compact = if opt_bool(&options, "auto_compact") {
             let mut ac = crate::orchestration::AutoCompactConfig::default();
             if let Some(v) = opt_int(&options, "compact_threshold") {
@@ -569,6 +568,11 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                 session_id,
                 event_sink: None,
                 task_ledger: parse_task_ledger_from_vm_options(&options),
+                post_turn_callback: options
+                    .as_ref()
+                    .and_then(|o| o.get("post_turn_callback"))
+                    .filter(|v| matches!(v, crate::value::VmValue::Closure(_)))
+                    .cloned(),
             },
         )
         .await?;

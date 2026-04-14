@@ -73,6 +73,14 @@ pub struct AgentLoopConfig {
     /// deliverables list), the ledger is rendered into each turn's
     /// prompt and gates `<done>` until resolved. See `llm/ledger.rs`.
     pub task_ledger: crate::llm::ledger::TaskLedger,
+    /// Optional Harn closure called after each tool turn. Receives a
+    /// dict of turn metadata (`tool_results`, `successful_tool_names`,
+    /// `iteration`, ...) and may return:
+    /// - `""` / `nil`: no action
+    /// - `"some string"`: inject that user message into the transcript
+    /// - `true`: stop the stage immediately
+    /// - `{message, stop}` dict: both (optional `message`, optional `stop`)
+    pub post_turn_callback: Option<crate::value::VmValue>,
 }
 
 impl std::fmt::Debug for AgentLoopConfig {
@@ -232,9 +240,8 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
             });
             let done_sentinel = opt_str(&options, "done_sentinel");
             let break_unless_phase = opt_str(&options, "break_unless_phase");
-            let session_id = opt_str(&options, "session_id").unwrap_or_else(|| {
-                format!("agent_session_{}", uuid::Uuid::now_v7())
-            });
+            let session_id = opt_str(&options, "session_id")
+                .unwrap_or_else(|| format!("agent_session_{}", uuid::Uuid::now_v7()));
             let daemon = opt_bool(&options, "daemon");
             let auto_compact = if opt_bool(&options, "auto_compact") {
                 let mut ac = crate::orchestration::AutoCompactConfig::default();
@@ -351,6 +358,11 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
                     session_id,
                     event_sink: None,
                     task_ledger: parse_task_ledger_from_options(&options),
+                    post_turn_callback: options
+                        .as_ref()
+                        .and_then(|o| o.get("post_turn_callback"))
+                        .filter(|v| matches!(v, crate::value::VmValue::Closure(_)))
+                        .cloned(),
                 },
             )
             .await?;
@@ -390,15 +402,14 @@ pub fn register_agent_subscribe(vm: &mut Vm) {
 
 pub fn register_agent_inject_feedback(vm: &mut Vm) {
     vm.register_builtin("agent_inject_feedback", |args, _out| {
-        let session_id = match args.first() {
-            Some(VmValue::String(s)) => s.to_string(),
-            _ => {
-                return Err(crate::value::VmError::Runtime(
+        let session_id =
+            match args.first() {
+                Some(VmValue::String(s)) => s.to_string(),
+                _ => return Err(crate::value::VmError::Runtime(
                     "agent_inject_feedback(session_id, kind, content): session_id must be a string"
                         .into(),
-                ))
-            }
-        };
+                )),
+            };
         let kind = match args.get(1) {
             Some(VmValue::String(s)) => s.to_string(),
             _ => {
@@ -408,15 +419,14 @@ pub fn register_agent_inject_feedback(vm: &mut Vm) {
                 ))
             }
         };
-        let content = match args.get(2) {
-            Some(VmValue::String(s)) => s.to_string(),
-            _ => {
-                return Err(crate::value::VmError::Runtime(
+        let content =
+            match args.get(2) {
+                Some(VmValue::String(s)) => s.to_string(),
+                _ => return Err(crate::value::VmError::Runtime(
                     "agent_inject_feedback(session_id, kind, content): content must be a string"
                         .into(),
-                ))
-            }
-        };
+                )),
+            };
         super::agent::push_pending_feedback(&session_id, &kind, &content);
         Ok(VmValue::Nil)
     });

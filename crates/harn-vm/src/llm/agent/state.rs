@@ -12,9 +12,8 @@ use crate::value::VmError;
 
 use super::super::agent_config::AgentLoopConfig;
 use super::super::agent_tools::{
-    merge_agent_loop_approval_policy, merge_agent_loop_policy,
-    normalize_native_tools_for_format, normalize_tool_choice_for_format,
-    normalize_tool_examples_for_format, ToolCallTracker,
+    merge_agent_loop_approval_policy, merge_agent_loop_policy, normalize_native_tools_for_format,
+    normalize_tool_choice_for_format, normalize_tool_examples_for_format, ToolCallTracker,
 };
 use super::super::tools::build_tool_calling_contract_prompt;
 

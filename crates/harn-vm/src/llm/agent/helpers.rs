@@ -365,3 +365,44 @@ pub(crate) fn maybe_persist_daemon_snapshot(
     };
     persist_snapshot(path, snapshot).map(Some)
 }
+
+/// Interpret the value returned by a `post_turn_callback` closure.
+///
+/// Returns `(message, stop)`:
+/// - `message`: if `Some`, the caller should inject this as a user
+///   message into the transcript (empty strings are filtered upstream).
+/// - `stop`: whether the stage should break out of the loop.
+///
+/// Accepted return shapes:
+/// - `nil` / empty string → `(None, false)` (no-op)
+/// - string → inject as user message
+/// - `true` / `false` → stop flag (no message)
+/// - dict with optional `message` (string) and `stop` (bool) keys
+pub(crate) fn interpret_post_turn_callback_result(value: &VmValue) -> (Option<String>, bool) {
+    match value {
+        VmValue::Nil => (None, false),
+        VmValue::Bool(b) => (None, *b),
+        VmValue::String(s) => {
+            if s.is_empty() {
+                (None, false)
+            } else {
+                (Some(s.to_string()), false)
+            }
+        }
+        VmValue::Dict(dict) => {
+            let message = dict.get("message").and_then(|v| match v {
+                VmValue::String(s) if !s.is_empty() => Some(s.to_string()),
+                _ => None,
+            });
+            let stop = dict
+                .get("stop")
+                .and_then(|v| match v {
+                    VmValue::Bool(b) => Some(*b),
+                    _ => None,
+                })
+                .unwrap_or(false);
+            (message, stop)
+        }
+        _ => (None, false),
+    }
+}

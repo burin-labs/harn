@@ -141,11 +141,7 @@ impl Default for MultiSink {
 
 impl AgentEventSink for MultiSink {
     fn handle_event(&self, event: &AgentEvent) {
-        let sinks = self
-            .sinks
-            .lock()
-            .expect("sink mutex poisoned")
-            .clone();
+        let sinks = self.sinks.lock().expect("sink mutex poisoned").clone();
         for sink in sinks {
             sink.handle_event(event);
         }
@@ -154,9 +150,10 @@ impl AgentEventSink for MultiSink {
 
 // ── Registries ──────────────────────────────────────────────────────
 
-fn external_sinks() -> &'static RwLock<HashMap<String, Vec<Arc<dyn AgentEventSink>>>> {
-    static REGISTRY: OnceLock<RwLock<HashMap<String, Vec<Arc<dyn AgentEventSink>>>>> =
-        OnceLock::new();
+type ExternalSinkRegistry = RwLock<HashMap<String, Vec<Arc<dyn AgentEventSink>>>>;
+
+fn external_sinks() -> &'static ExternalSinkRegistry {
+    static REGISTRY: OnceLock<ExternalSinkRegistry> = OnceLock::new();
     REGISTRY.get_or_init(|| RwLock::new(HashMap::new()))
 }
 
@@ -180,14 +177,15 @@ pub fn register_sink(session_id: impl Into<String>, sink: Arc<dyn AgentEventSink
 pub fn register_closure_subscriber(session_id: impl Into<String>, closure: VmValue) {
     let session_id = session_id.into();
     CLOSURE_SUBSCRIBERS.with(|reg| {
-        reg.borrow_mut().entry(session_id).or_default().push(closure);
+        reg.borrow_mut()
+            .entry(session_id)
+            .or_default()
+            .push(closure);
     });
 }
 
 pub fn closure_subscribers_for(session_id: &str) -> Vec<VmValue> {
-    CLOSURE_SUBSCRIBERS.with(|reg| {
-        reg.borrow().get(session_id).cloned().unwrap_or_default()
-    })
+    CLOSURE_SUBSCRIBERS.with(|reg| reg.borrow().get(session_id).cloned().unwrap_or_default())
 }
 
 pub fn clear_session_sinks(session_id: &str) {

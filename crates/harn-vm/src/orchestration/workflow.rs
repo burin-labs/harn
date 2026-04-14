@@ -10,8 +10,8 @@ use super::{
     ArtifactRecord, BranchSemantics, CapabilityPolicy, ContextPolicy, EscalationPolicy, JoinPolicy,
     MapPolicy, ModelPolicy, ReducePolicy, RetryPolicy, StageContract, TranscriptPolicy,
 };
-use crate::tool_annotations::{SideEffectLevel, ToolAnnotations, ToolArgSchema, ToolKind};
 use crate::llm::{extract_llm_options, vm_call_llm_full, vm_value_to_json};
+use crate::tool_annotations::{SideEffectLevel, ToolAnnotations, ToolArgSchema, ToolKind};
 use crate::value::{VmError, VmValue};
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -207,9 +207,7 @@ fn parse_tool_annotations(map: &serde_json::Map<String, serde_json::Value>) -> T
     }
 }
 
-pub fn workflow_tool_annotations(
-    value: &serde_json::Value,
-) -> BTreeMap<String, ToolAnnotations> {
+pub fn workflow_tool_annotations(value: &serde_json::Value) -> BTreeMap<String, ToolAnnotations> {
     match value {
         serde_json::Value::Null => BTreeMap::new(),
         serde_json::Value::Array(items) => items
@@ -916,6 +914,13 @@ pub async fn execute_stage_node(
                         .map(crate::llm::helpers::vm_value_to_json)
                         .and_then(|json| serde_json::from_value(json).ok())
                         .unwrap_or_default(),
+                    post_turn_callback: node
+                        .raw_model_policy
+                        .as_ref()
+                        .and_then(|v| v.as_dict())
+                        .and_then(|d| d.get("post_turn_callback"))
+                        .filter(|v| matches!(v, crate::value::VmValue::Closure(_)))
+                        .cloned(),
                 },
             )
             .await?
