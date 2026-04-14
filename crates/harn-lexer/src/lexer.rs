@@ -202,8 +202,8 @@ impl Lexer {
         let start_line = self.line;
         self.advance(); // skip first /
         self.advance(); // skip second /
-        // Detect doc-comment marker: a third `/` that is NOT followed by another
-        // `/`. So `///foo` is a doc comment, `////foo` (a separator bar) is not.
+                        // Detect doc-comment marker: a third `/` that is NOT followed by another
+                        // `/`. So `///foo` is a doc comment, `////foo` (a separator bar) is not.
         let is_doc = self.source.get(self.pos).copied() == Some('/')
             && self.source.get(self.pos + 1).copied() != Some('/');
         if is_doc {
@@ -225,9 +225,9 @@ impl Lexer {
         let start = Span::with_offsets(self.byte_pos, self.byte_pos, self.line, self.column);
         self.advance(); // skip /
         self.advance(); // skip *
-        // Detect doc-comment marker: a second `*` that is not followed by
-        // another `*` (so `/*** */` stays regular) and not followed by `/`
-        // (so the empty `/**/` block stays regular).
+                        // Detect doc-comment marker: a second `*` that is not followed by
+                        // another `*` (so `/*** */` stays regular) and not followed by `/`
+                        // (so the empty `/**/` block stays regular).
         let is_doc = self.source.get(self.pos).copied() == Some('*')
             && self.source.get(self.pos + 1).copied() != Some('*')
             && self.source.get(self.pos + 1).copied() != Some('/');

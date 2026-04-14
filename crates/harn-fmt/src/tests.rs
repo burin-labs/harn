@@ -952,7 +952,8 @@ fn test_roundtrip_never_type_annotation() {
 
 #[test]
 fn test_doc_comment_triple_slash_multiline() {
-    let source = "/// First line.\n/// Second line.\npub fn exposed() -> string {\n  return \"x\"\n}\n";
+    let source =
+        "/// First line.\n/// Second line.\npub fn exposed() -> string {\n  return \"x\"\n}\n";
     let result = format_source(source).unwrap();
     assert!(
         result.contains("/**\n * First line.\n * Second line.\n */"),
@@ -1015,9 +1016,8 @@ fn test_doc_comment_inside_impl_block() {
 
 #[test]
 fn test_blank_line_between_top_level_fns() {
-    let source =
-        "fn one() -> int {\n  return 1\n}\nfn two() -> int {\n  return 2\n}\n";
-    let result = format_source(&source).unwrap();
+    let source = "fn one() -> int {\n  return 1\n}\nfn two() -> int {\n  return 2\n}\n";
+    let result = format_source(source).unwrap();
     assert!(
         result.contains("}\n\nfn two"),
         "expected a blank line between adjacent top-level fns, got:\n{result}"
@@ -1030,7 +1030,7 @@ fn test_blank_line_between_top_level_fns() {
 #[test]
 fn test_blank_line_between_mixed_top_level_items_idempotent() {
     let source = "type A = int\ntype B = string\nstruct C {\n  a: int\n}\nenum E {\n  X\n}\nfn f() -> int {\n  return 1\n}\n";
-    let result = format_source(&source).unwrap();
+    let result = format_source(source).unwrap();
     // Each adjacent pair should be separated by exactly one blank line.
     assert!(result.contains("type A = int\n\ntype B"));
     assert!(result.contains("type B = string\n\nstruct"));
@@ -1047,7 +1047,7 @@ fn test_blank_line_between_mixed_top_level_items_idempotent() {
 fn test_doc_comment_glued_to_item_blank_line_above() {
     let source =
         "fn first() -> int {\n  return 1\n}\n/// Second docs.\n/// More.\nfn second() -> int {\n  return 2\n}\n";
-    let result = format_source(&source).unwrap();
+    let result = format_source(source).unwrap();
     // Blank line above the doc block; doc block glued to fn second.
     assert!(
         result.contains("}\n\n/**\n * Second docs.\n * More.\n */\nfn second"),
@@ -1066,7 +1066,7 @@ fn test_doc_comment_glued_to_item_blank_line_above() {
 
 fn canonical_bar() -> String {
     // Default separator_width is 80 → 77 dashes after `// `.
-    let dashes: String = std::iter::repeat('-').take(77).collect();
+    let dashes: String = "-".repeat(77);
     format!("// {dashes}")
 }
 
@@ -1087,7 +1087,8 @@ fn test_section_header_three_line_canonical_passthrough() {
 
 #[test]
 fn test_section_header_three_line_short_bars_normalized() {
-    let source = "fn a() -> int { return 1 }\n// ----\n// Helpers\n// ----\nfn b() -> int { return 2 }\n";
+    let source =
+        "fn a() -> int { return 1 }\n// ----\n// Helpers\n// ----\nfn b() -> int { return 2 }\n";
     let result = format_source(source).unwrap();
     let bar = canonical_bar();
     assert!(
@@ -1114,8 +1115,7 @@ fn test_section_header_one_line_bar_normalized() {
 
 #[test]
 fn test_section_header_one_line_bar_with_title_promoted() {
-    let source =
-        "fn a() -> int { return 1 }\n// ---- Helpers ----\nfn b() -> int { return 2 }\n";
+    let source = "fn a() -> int { return 1 }\n// ---- Helpers ----\nfn b() -> int { return 2 }\n";
     let result = format_source(source).unwrap();
     let bar = canonical_bar();
     assert!(
@@ -1147,7 +1147,7 @@ fn test_section_header_respects_custom_separator_width() {
     };
     let source = "fn a() -> int { return 1 }\n// ----\nfn b() -> int { return 2 }\n";
     let result = format_source_opts(source, &opts).unwrap();
-    let dashes: String = std::iter::repeat('-').take(37).collect();
+    let dashes: String = "-".repeat(37);
     let bar = format!("// {dashes}");
     assert!(
         result.contains(&bar),
@@ -1189,11 +1189,14 @@ fn test_multiline_interpolated_string_preserves_indent() {
 #[test]
 fn test_imports_stay_tight_then_blank_before_first_item() {
     let source = "import \"std/http\"\nimport \"alpha\"\nimport \"zeta\"\npipeline default(task) { log(1) }\n";
-    let result = format_source(&source).unwrap();
+    let result = format_source(source).unwrap();
     assert!(
         result.contains("import \"std/http\"\nimport \"alpha\"\nimport \"zeta\"\n\npipeline"),
         "imports should be tight with a single blank line before the first non-import item, got:\n{result}"
     );
     let result2 = format_source(&result).unwrap();
-    assert_eq!(result, result2, "formatter is not idempotent around imports");
+    assert_eq!(
+        result, result2,
+        "formatter is not idempotent around imports"
+    );
 }

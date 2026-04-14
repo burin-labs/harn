@@ -916,7 +916,8 @@ impl super::Vm {
                     // redesign is tracked as a follow-up.
                     _ => {
                         let materialized = VmValue::List(Rc::new(r.to_vec()));
-                        self.call_method(materialized, method, args, functions).await
+                        self.call_method(materialized, method, args, functions)
+                            .await
                     }
                 },
                 VmValue::StructInstance { struct_name, .. } => {

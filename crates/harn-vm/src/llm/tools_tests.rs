@@ -1699,8 +1699,14 @@ fn tagged_parser_executes_bare_tool_call_with_heredoc_body() {
     let body = result.calls[0]["arguments"]["content"]
         .as_str()
         .unwrap_or("");
-    assert!(body.contains("import pytest"), "heredoc body preserved: {body:?}");
-    assert!(body.contains("def test_one"), "heredoc body preserved: {body:?}");
+    assert!(
+        body.contains("import pytest"),
+        "heredoc body preserved: {body:?}"
+    );
+    assert!(
+        body.contains("def test_one"),
+        "heredoc body preserved: {body:?}"
+    );
 }
 
 #[test]

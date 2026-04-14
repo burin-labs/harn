@@ -1156,7 +1156,10 @@ mod tests {
                 "path": "tests/unit/test_experiment_service.py",
             }),
         );
-        assert!(result.is_ok(), "expected allow (path matches), got: {result:?}");
+        assert!(
+            result.is_ok(),
+            "expected allow (path matches), got: {result:?}"
+        );
     }
 
     #[test]

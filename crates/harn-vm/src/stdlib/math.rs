@@ -201,22 +201,16 @@ pub(crate) fn register_math_builtins(vm: &mut Vm) {
         let (start, end) = match args.len() {
             1 => {
                 let n = args[0].as_int().ok_or_else(|| {
-                    VmError::TypeError(
-                        "range(n): expected integer argument".to_string(),
-                    )
+                    VmError::TypeError("range(n): expected integer argument".to_string())
                 })?;
                 (0, n)
             }
             2 => {
                 let a = args[0].as_int().ok_or_else(|| {
-                    VmError::TypeError(
-                        "range(a, b): expected integer arguments".to_string(),
-                    )
+                    VmError::TypeError("range(a, b): expected integer arguments".to_string())
                 })?;
                 let b = args[1].as_int().ok_or_else(|| {
-                    VmError::TypeError(
-                        "range(a, b): expected integer arguments".to_string(),
-                    )
+                    VmError::TypeError("range(a, b): expected integer arguments".to_string())
                 })?;
                 (a, b)
             }

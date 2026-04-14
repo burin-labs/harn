@@ -211,7 +211,11 @@ line_width = 80
     #[test]
     fn malformed_manifest_is_an_error() {
         let tmp = tempfile::tempdir().unwrap();
-        write_file(tmp.path(), "harn.toml", "[fmt]\nline_width = \"not-a-number\"\n");
+        write_file(
+            tmp.path(),
+            "harn.toml",
+            "[fmt]\nline_width = \"not-a-number\"\n",
+        );
         let harn_file = write_file(tmp.path(), "main.harn", "pipeline default(t) {}\n");
         match load_for_path(&harn_file) {
             Err(ConfigError::Parse { .. }) => {}

@@ -1673,10 +1673,7 @@ fn is_top_level_item(node: &Node) -> bool {
 }
 
 fn is_import_item(node: &Node) -> bool {
-    matches!(
-        node,
-        Node::ImportDecl { .. } | Node::SelectiveImport { .. }
-    )
+    matches!(node, Node::ImportDecl { .. } | Node::SelectiveImport { .. })
 }
 
 /// Return true when this node kind participates in the `legacy-doc-comment`
@@ -1824,10 +1821,8 @@ fn check_legacy_doc_comments(
         return;
     }
     // Index by starting line for fast upward walks.
-    let by_line: std::collections::HashMap<usize, &LegacyCommentTok> = comments
-        .iter()
-        .map(|c| (c.line, c))
-        .collect();
+    let by_line: std::collections::HashMap<usize, &LegacyCommentTok> =
+        comments.iter().map(|c| (c.line, c)).collect();
 
     fn visit(
         node: &SNode,
@@ -1897,13 +1892,13 @@ fn check_one_item(
         return;
     }
     walked.reverse(); // now in top-to-bottom order
-    // Any contiguous run of `//` / `///` line comments directly above the
-    // item (no blank-line gap) is treated as a doc comment and rewritten.
-    // This covers both design triggers:
-    //  - entirely `///` lines (the original HarnDoc form), and
-    //  - entirely plain `//` lines adjacent to a def,
-    // as well as the pragmatic mixed case (legacy hand-written `//` block
-    // followed by an auto-generated `///` stub — both are the item's doc).
+                      // Any contiguous run of `//` / `///` line comments directly above the
+                      // item (no blank-line gap) is treated as a doc comment and rewritten.
+                      // This covers both design triggers:
+                      //  - entirely `///` lines (the original HarnDoc form), and
+                      //  - entirely plain `//` lines adjacent to a def,
+                      // as well as the pragmatic mixed case (legacy hand-written `//` block
+                      // followed by an auto-generated `///` stub — both are the item's doc).
     let any_doc = walked.iter().any(|c| c.is_doc);
     let any_plain = walked.iter().any(|c| !c.is_doc);
 
@@ -1924,12 +1919,7 @@ fn check_one_item(
     // Find the span we're replacing: from line_start of first comment up to
     // end of last comment byte. This preserves the trailing newline after
     // the run (we don't consume it).
-    let replace_span = Span::with_offsets(
-        line_start,
-        last.end_byte,
-        first.line,
-        1,
-    );
+    let replace_span = Span::with_offsets(line_start, last.end_byte, first.line, 1);
     let fix = vec![FixEdit {
         span: replace_span,
         replacement,
@@ -2208,10 +2198,8 @@ fn check_blank_line_between_items(
     }
     // Collect all comment tokens keyed by starting line (1-based).
     let comment_tokens = collect_comment_tokens(source);
-    let comments_by_line: std::collections::HashMap<usize, &LegacyCommentTok> = comment_tokens
-        .iter()
-        .map(|c| (c.line, c))
-        .collect();
+    let comments_by_line: std::collections::HashMap<usize, &LegacyCommentTok> =
+        comment_tokens.iter().map(|c| (c.line, c)).collect();
 
     // Precompute line → byte offset of start of line (1-based lines).
     let line_starts = build_line_starts(source);
@@ -2262,12 +2250,7 @@ fn check_blank_line_between_items(
             let Some(&insert_offset) = line_starts.get(insert_line.saturating_sub(1)) else {
                 continue;
             };
-            let span = Span::with_offsets(
-                insert_offset,
-                insert_offset,
-                insert_line,
-                1,
-            );
+            let span = Span::with_offsets(insert_offset, insert_offset, insert_line, 1);
             diagnostics.push(LintDiagnostic {
                 rule: "blank-line-between-items",
                 message: "top-level items should be separated by a blank line".to_string(),
@@ -2447,8 +2430,7 @@ fn check_trailing_comma(source: &str, diagnostics: &mut Vec<LintDiagnostic>) {
                     }
                 }
             }
-            harn_lexer::TokenKind::Identifier(_)
-            | harn_lexer::TokenKind::StringLiteral(_) => {
+            harn_lexer::TokenKind::Identifier(_) | harn_lexer::TokenKind::StringLiteral(_) => {
                 if let Some(top) = stack.last_mut() {
                     if matches!(top.opener, Opener::Brace) && !top.decision_made {
                         top.pending_key_token = true;
@@ -2487,7 +2469,7 @@ fn check_import_order(source: &str, program: &[SNode], diagnostics: &mut Vec<Lin
         return;
     }
     let mut sorted = imports.clone();
-    sorted.sort_by(|a, b| import_sort_key(a).cmp(&import_sort_key(b)));
+    sorted.sort_by_key(|a| import_sort_key(a));
     let already_sorted = imports
         .iter()
         .zip(sorted.iter())
@@ -2618,10 +2600,7 @@ pub fn derive_file_header_title(file_path: Option<&std::path::Path>) -> String {
         }
     }
     // Normalize whitespace: collapse internal runs of spaces.
-    let collapsed = cleaned
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
+    let collapsed = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
     let mut trimmed = collapsed.trim().to_string();
     if trimmed.is_empty() {
         trimmed.push_str("module");

@@ -1233,10 +1233,7 @@ impl TypeChecker {
                                 (l == "string" && r == "int") || (l == "int" && r == "string");
                             if !is_numeric && !is_string_repeat {
                                 self.error_at(
-                                    format!(
-                                        "can't multiply {} and {} (try string * int)",
-                                        l, r
-                                    ),
+                                    format!("can't multiply {} and {} (try string * int)", l, r),
                                     span,
                                 );
                             }
@@ -1250,8 +1247,7 @@ impl TypeChecker {
                                     | ("dict", "dict")
                             );
                             if !valid {
-                                let msg =
-                                    format!("can't add {} and {}", l, r);
+                                let msg = format!("can't add {} and {}", l, r);
                                 // Offer interpolation fix when one side is string
                                 let fix = if l == "string" || r == "string" {
                                     self.build_interpolation_fix(left, right, l == "string", span)
@@ -1700,9 +1696,7 @@ impl TypeChecker {
                             self.error_at(message, arg.span);
                         }
                     }
-                    for (_index, (field, arg)) in
-                        enum_variant.fields.iter().zip(args.iter()).enumerate()
-                    {
+                    for (field, arg) in enum_variant.fields.iter().zip(args.iter()) {
                         let Some(expected_type) = &field.type_expr else {
                             continue;
                         };
@@ -3618,8 +3612,7 @@ impl TypeChecker {
                                     | ("dict", "dict")
                             );
                             if !valid {
-                                let msg =
-                                    format!("can't add {} and {}", l, r);
+                                let msg = format!("can't add {} and {}", l, r);
                                 let fix = if l == "string" || r == "string" {
                                     self.build_interpolation_fix(left, right, l == "string", span)
                                 } else {
@@ -3652,10 +3645,7 @@ impl TypeChecker {
                                 (l == "string" && r == "int") || (l == "int" && r == "string");
                             if !is_numeric && !is_string_repeat {
                                 self.error_at(
-                                    format!(
-                                        "can't multiply {} and {} (try string * int)",
-                                        l, r
-                                    ),
+                                    format!("can't multiply {} and {} (try string * int)", l, r),
                                     span,
                                 );
                             }
@@ -4491,8 +4481,7 @@ add("hello", 2) }"#,
     fn test_exponentiation_requires_numeric_operands() {
         let errs = errors(r#"pipeline t(task) { let x = "nope" ** 2 }"#);
         assert!(
-            errs.iter()
-                .any(|err| err.contains("can't use '**'")),
+            errs.iter().any(|err| err.contains("can't use '**'")),
             "missing exponentiation type error: {errs:?}"
         );
     }

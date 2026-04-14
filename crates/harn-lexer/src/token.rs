@@ -238,8 +238,14 @@ pub enum TokenKind {
     Semicolon, // ;
 
     // Comments
-    LineComment { text: String, is_doc: bool },  // // text or /// text
-    BlockComment { text: String, is_doc: bool }, // /* text */ or /** text */
+    LineComment {
+        text: String,
+        is_doc: bool,
+    }, // // text or /// text
+    BlockComment {
+        text: String,
+        is_doc: bool,
+    }, // /* text */ or /** text */
 
     // Special
     Newline,

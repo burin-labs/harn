@@ -1792,7 +1792,8 @@ fn test_blank_line_between_items_ok_when_blank_present() {
 #[test]
 fn test_blank_line_between_items_ok_with_doc_block_and_blank_above() {
     // Blank line above the doc block — doc block is glued to fn b.
-    let source = "fn a() -> int {\n  return 1\n}\n\n/** Describes b. */\nfn b() -> int {\n  return 2\n}\n";
+    let source =
+        "fn a() -> int {\n  return 1\n}\n\n/** Describes b. */\nfn b() -> int {\n  return 2\n}\n";
     let diags = lint_source(source);
     assert!(
         !has_rule(&diags, "blank-line-between-items"),
@@ -1803,7 +1804,8 @@ fn test_blank_line_between_items_ok_with_doc_block_and_blank_above() {
 #[test]
 fn test_blank_line_between_items_fires_when_doc_has_no_blank_above() {
     // No blank line above the doc block — the rule fires.
-    let source = "fn a() -> int {\n  return 1\n}\n/** Describes b. */\nfn b() -> int {\n  return 2\n}\n";
+    let source =
+        "fn a() -> int {\n  return 1\n}\n/** Describes b. */\nfn b() -> int {\n  return 2\n}\n";
     let diags = lint_source(source);
     let hit = diags
         .iter()
@@ -1830,7 +1832,8 @@ fn test_blank_line_between_items_does_not_fire_between_imports() {
 
 #[test]
 fn test_trailing_comma_fires_on_multiline_list() {
-    let source = "pipeline default(task) {\n  let xs = [\n    1,\n    2,\n    3\n  ]\n  log(xs[0])\n}\n";
+    let source =
+        "pipeline default(task) {\n  let xs = [\n    1,\n    2,\n    3\n  ]\n  log(xs[0])\n}\n";
     let diags = lint_source(source);
     assert!(
         has_rule(&diags, "trailing-comma"),
@@ -1840,7 +1843,8 @@ fn test_trailing_comma_fires_on_multiline_list() {
 
 #[test]
 fn test_trailing_comma_ok_when_present() {
-    let source = "pipeline default(task) {\n  let xs = [\n    1,\n    2,\n    3,\n  ]\n  log(xs[0])\n}\n";
+    let source =
+        "pipeline default(task) {\n  let xs = [\n    1,\n    2,\n    3,\n  ]\n  log(xs[0])\n}\n";
     let diags = lint_source(source);
     assert!(
         !has_rule(&diags, "trailing-comma"),
@@ -1871,7 +1875,8 @@ fn test_trailing_comma_ignores_fn_body_block() {
 
 #[test]
 fn test_trailing_comma_fires_on_dict_literal() {
-    let source = "pipeline default(task) {\n  let d = {\n    \"a\": 1,\n    \"b\": 2\n  }\n  log(d)\n}\n";
+    let source =
+        "pipeline default(task) {\n  let d = {\n    \"a\": 1,\n    \"b\": 2\n  }\n  log(d)\n}\n";
     let diags = lint_source(source);
     assert!(
         has_rule(&diags, "trailing-comma"),

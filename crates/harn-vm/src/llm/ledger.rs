@@ -567,5 +567,4 @@ mod tests {
         assert!(rendered.contains("done when auth paths share one interface"));
         assert!(rendered.contains("existing middleware lives in src/auth/"));
     }
-
 }

@@ -1163,8 +1163,7 @@ impl super::Vm {
                     };
                     // `5 to 1` is simply empty (no reverse iteration in v1).
                     let next = r.start;
-                    self.iterators
-                        .push(super::IterState::Range { next, stop });
+                    self.iterators.push(super::IterState::Range { next, stop });
                 }
                 _ => {
                     self.iterators.push(super::IterState::Vec {

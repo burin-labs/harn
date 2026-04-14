@@ -99,10 +99,7 @@ pub fn enforce_tool_arg_constraints(
             found
         } else {
             // Args is a bare string — match directly.
-            (
-                "value".to_string(),
-                args.as_str().map(|s| s.to_string()),
-            )
+            ("value".to_string(), args.as_str().map(|s| s.to_string()))
         };
 
         // If the declared argument is absent on this call, the
