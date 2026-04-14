@@ -182,7 +182,7 @@ impl VmIter {
             }
             VmIter::Map { inner, f } => {
                 let f = f.clone();
-                let item = inner.borrow_mut().next(vm, functions).await?;
+                let item = next_handle(inner, vm, functions).await?;
                 match item {
                     None => {
                         *self = VmIter::Exhausted;
@@ -197,7 +197,7 @@ impl VmIter {
             VmIter::Filter { inner, p } => {
                 let p = p.clone();
                 loop {
-                    let item = inner.borrow_mut().next(vm, functions).await?;
+                    let item = next_handle(inner, vm, functions).await?;
                     match item {
                         None => {
                             *self = VmIter::Exhausted;
@@ -216,13 +216,13 @@ impl VmIter {
                 let f = f.clone();
                 loop {
                     if let Some(cur_iter) = cur.clone() {
-                        let item = cur_iter.borrow_mut().next(vm, functions).await?;
+                        let item = next_handle(&cur_iter, vm, functions).await?;
                         if let Some(v) = item {
                             return Ok(Some(v));
                         }
                         *cur = None;
                     }
-                    let item = inner.borrow_mut().next(vm, functions).await?;
+                    let item = next_handle(inner, vm, functions).await?;
                     match item {
                         None => {
                             *self = VmIter::Exhausted;
@@ -247,7 +247,7 @@ impl VmIter {
                     *self = VmIter::Exhausted;
                     return Ok(None);
                 }
-                let item = inner.borrow_mut().next(vm, functions).await?;
+                let item = next_handle(inner, vm, functions).await?;
                 match item {
                     None => {
                         *self = VmIter::Exhausted;
@@ -264,7 +264,7 @@ impl VmIter {
             }
             VmIter::Skip { inner, remaining } => {
                 while *remaining > 0 {
-                    let item = inner.borrow_mut().next(vm, functions).await?;
+                    let item = next_handle(inner, vm, functions).await?;
                     match item {
                         None => {
                             *self = VmIter::Exhausted;
@@ -275,7 +275,7 @@ impl VmIter {
                         }
                     }
                 }
-                let item = inner.borrow_mut().next(vm, functions).await?;
+                let item = next_handle(inner, vm, functions).await?;
                 match item {
                     None => {
                         *self = VmIter::Exhausted;
@@ -289,7 +289,7 @@ impl VmIter {
                     return Ok(None);
                 }
                 let p = p.clone();
-                let item = inner.borrow_mut().next(vm, functions).await?;
+                let item = next_handle(inner, vm, functions).await?;
                 match item {
                     None => {
                         *self = VmIter::Exhausted;
@@ -308,7 +308,7 @@ impl VmIter {
             }
             VmIter::SkipWhile { inner, p, primed } => {
                 if *primed {
-                    let item = inner.borrow_mut().next(vm, functions).await?;
+                    let item = next_handle(inner, vm, functions).await?;
                     return match item {
                         None => {
                             *self = VmIter::Exhausted;
@@ -319,7 +319,7 @@ impl VmIter {
                 }
                 let p = p.clone();
                 loop {
-                    let item = inner.borrow_mut().next(vm, functions).await?;
+                    let item = next_handle(inner, vm, functions).await?;
                     match item {
                         None => {
                             *self = VmIter::Exhausted;
@@ -337,7 +337,7 @@ impl VmIter {
                 }
             }
             VmIter::Zip { a, b } => {
-                let ia = a.borrow_mut().next(vm, functions).await?;
+                let ia = next_handle(a, vm, functions).await?;
                 let x = match ia {
                     None => {
                         *self = VmIter::Exhausted;
@@ -345,7 +345,7 @@ impl VmIter {
                     }
                     Some(v) => v,
                 };
-                let ib = b.borrow_mut().next(vm, functions).await?;
+                let ib = next_handle(b, vm, functions).await?;
                 let y = match ib {
                     None => {
                         *self = VmIter::Exhausted;
@@ -356,7 +356,7 @@ impl VmIter {
                 Ok(Some(VmValue::Pair(Rc::new((x, y)))))
             }
             VmIter::Enumerate { inner, i } => {
-                let item = inner.borrow_mut().next(vm, functions).await?;
+                let item = next_handle(inner, vm, functions).await?;
                 match item {
                     None => {
                         *self = VmIter::Exhausted;
@@ -371,13 +371,13 @@ impl VmIter {
             }
             VmIter::Chain { a, b, on_a } => {
                 if *on_a {
-                    let item = a.borrow_mut().next(vm, functions).await?;
+                    let item = next_handle(a, vm, functions).await?;
                     if let Some(v) = item {
                         return Ok(Some(v));
                     }
                     *on_a = false;
                 }
-                let item = b.borrow_mut().next(vm, functions).await?;
+                let item = next_handle(b, vm, functions).await?;
                 match item {
                     None => {
                         *self = VmIter::Exhausted;
@@ -390,7 +390,7 @@ impl VmIter {
                 let n = *n;
                 let mut batch: Vec<VmValue> = Vec::with_capacity(n);
                 for _ in 0..n {
-                    let item = inner.borrow_mut().next(vm, functions).await?;
+                    let item = next_handle(inner, vm, functions).await?;
                     match item {
                         Some(v) => batch.push(v),
                         None => break,
@@ -408,7 +408,7 @@ impl VmIter {
                 if buf.is_empty() {
                     // First call: fill buf to exactly n.
                     while buf.len() < n {
-                        let item = inner.borrow_mut().next(vm, functions).await?;
+                        let item = next_handle(inner, vm, functions).await?;
                         match item {
                             Some(v) => buf.push_back(v),
                             None => {
@@ -419,7 +419,7 @@ impl VmIter {
                     }
                 } else {
                     // Subsequent calls: slide by one.
-                    let item = inner.borrow_mut().next(vm, functions).await?;
+                    let item = next_handle(inner, vm, functions).await?;
                     match item {
                         Some(v) => {
                             buf.pop_front();
@@ -456,6 +456,27 @@ impl VmIter {
     }
 }
 
+/// Advance a handle without holding a `RefCell` borrow across the await.
+///
+/// Swaps the iter state out into a local owned value (replacing it with
+/// `Exhausted`), runs `next` on the owned state, then swaps it back. This
+/// avoids `clippy::await_holding_refcell_ref` while preserving single-pass
+/// semantics: a nested `next` call on the same handle during the await would
+/// see `Exhausted` (the iter protocol doesn't permit re-entrant stepping of
+/// the same handle anyway).
+pub async fn next_handle(
+    handle: &Rc<RefCell<VmIter>>,
+    vm: &mut crate::vm::Vm,
+    functions: &[CompiledFunction],
+) -> Result<Option<VmValue>, VmError> {
+    let mut state = std::mem::replace(&mut *handle.borrow_mut(), VmIter::Exhausted);
+    let result = state.next(vm, functions).await;
+    // Restore the (possibly-mutated) state unless the inner call itself
+    // replaced the state with Exhausted via `*self = ...`.
+    *handle.borrow_mut() = state;
+    result
+}
+
 /// Fully consume an iter handle into a Vec of values.
 pub async fn drain(
     handle: &Rc<RefCell<VmIter>>,
@@ -464,7 +485,7 @@ pub async fn drain(
 ) -> Result<Vec<VmValue>, VmError> {
     let mut out = Vec::new();
     loop {
-        let v = handle.borrow_mut().next(vm, functions).await?;
+        let v = next_handle(handle, vm, functions).await?;
         match v {
             Some(v) => out.push(v),
             None => break,

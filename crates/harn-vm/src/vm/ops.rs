@@ -1175,10 +1175,7 @@ impl super::Vm {
                 // (future combinator variants) is safe as long as they
                 // don't re-enter the same iter.
                 let functions = self.frames.last().unwrap().chunk.functions.clone();
-                let next_val = {
-                    let mut inner = handle.borrow_mut();
-                    inner.next(self, &functions).await?
-                };
+                let next_val = crate::vm::iter::next_handle(&handle, self, &functions).await?;
                 match next_val {
                     Some(v) => self.stack.push(v),
                     None => {

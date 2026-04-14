@@ -7,7 +7,7 @@ use std::cell::RefCell;
 
 use crate::chunk::CompiledFunction;
 use crate::value::{compare_values, values_equal, VmError, VmValue};
-use crate::vm::iter::{drain, iter_from_value, VmIter};
+use crate::vm::iter::{drain, iter_from_value, next_handle, VmIter};
 
 impl super::Vm {
     pub(super) fn call_method<'a>(
@@ -1174,7 +1174,7 @@ impl super::Vm {
                         "count" => {
                             let mut n: i64 = 0;
                             loop {
-                                let v = handle.borrow_mut().next(self, functions).await?;
+                                let v = next_handle(&handle, self, functions).await?;
                                 if v.is_none() {
                                     break;
                                 }
@@ -1259,7 +1259,7 @@ impl super::Vm {
                                 ));
                             }
                             loop {
-                                let item = handle.borrow_mut().next(self, functions).await?;
+                                let item = next_handle(&handle, self, functions).await?;
                                 match item {
                                     None => return Ok(acc),
                                     Some(v) => {
@@ -1271,13 +1271,13 @@ impl super::Vm {
                             }
                         }
                         "first" => {
-                            let v = handle.borrow_mut().next(self, functions).await?;
+                            let v = next_handle(&handle, self, functions).await?;
                             Ok(v.unwrap_or(VmValue::Nil))
                         }
                         "last" => {
                             let mut last = VmValue::Nil;
                             loop {
-                                let v = handle.borrow_mut().next(self, functions).await?;
+                                let v = next_handle(&handle, self, functions).await?;
                                 match v {
                                     Some(v) => last = v,
                                     None => return Ok(last),
@@ -1293,7 +1293,7 @@ impl super::Vm {
                                     VmError::TypeError("iter.any: expected callable".to_string())
                                 })?;
                             loop {
-                                let item = handle.borrow_mut().next(self, functions).await?;
+                                let item = next_handle(&handle, self, functions).await?;
                                 match item {
                                     None => return Ok(VmValue::Bool(false)),
                                     Some(v) => {
@@ -1315,7 +1315,7 @@ impl super::Vm {
                                     VmError::TypeError("iter.all: expected callable".to_string())
                                 })?;
                             loop {
-                                let item = handle.borrow_mut().next(self, functions).await?;
+                                let item = next_handle(&handle, self, functions).await?;
                                 match item {
                                     None => return Ok(VmValue::Bool(true)),
                                     Some(v) => {
@@ -1337,7 +1337,7 @@ impl super::Vm {
                                     VmError::TypeError("iter.find: expected callable".to_string())
                                 })?;
                             loop {
-                                let item = handle.borrow_mut().next(self, functions).await?;
+                                let item = next_handle(&handle, self, functions).await?;
                                 match item {
                                     None => return Ok(VmValue::Nil),
                                     Some(v) => {
@@ -1362,7 +1362,7 @@ impl super::Vm {
                                     )
                                 })?;
                             loop {
-                                let item = handle.borrow_mut().next(self, functions).await?;
+                                let item = next_handle(&handle, self, functions).await?;
                                 match item {
                                     None => return Ok(VmValue::Nil),
                                     Some(v) => {
