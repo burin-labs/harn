@@ -928,16 +928,15 @@ impl super::Vm {
                     }
                     "first" => Ok(r.first().map(VmValue::Int).unwrap_or(VmValue::Nil)),
                     "last" => Ok(r.last().map(VmValue::Int).unwrap_or(VmValue::Nil)),
-                    "to_list" => Ok(VmValue::List(Rc::new(r.to_vec()))),
                     "to_string" => Ok(VmValue::String(Rc::from(obj.display()))),
-                    // Delegate any other method to the materialized list. This
-                    // covers `.map`, `.filter`, `.enumerate`, `.zip`, `.sort`,
-                    // etc. v1 shortcut — a proper lazy iterator-protocol
-                    // redesign is tracked as a follow-up.
+                    // Everything else routes through the unified lazy iter
+                    // protocol: lift the Range into a VmValue::Iter (which
+                    // preserves laziness via VmIter::Range) and delegate.
+                    // `.map/.filter/.take/...` stay lazy; sinks like
+                    // `.to_list/.sum/.reduce` materialize only on demand.
                     _ => {
-                        let materialized = VmValue::List(Rc::new(r.to_vec()));
-                        self.call_method(materialized, method, args, functions)
-                            .await
+                        let lifted = iter_from_value(obj.clone())?;
+                        self.call_method(lifted, method, args, functions).await
                     }
                 },
                 VmValue::StructInstance { struct_name, .. } => {

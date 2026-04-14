@@ -17,6 +17,10 @@ use crate::value::{VmChannelHandle, VmError, VmGenerator, VmValue};
 /// Backing enum for `VmValue::Iter`. See module docs.
 #[derive(Debug)]
 pub enum VmIter {
+    /// Step through a lazy integer range without materializing.
+    /// `next` is the value to emit on the next call; `stop` is the
+    /// first value that terminates the iteration (one past the end).
+    Range { next: i64, stop: i64 },
     /// Snapshot over a shared list / set backing store.
     Vec { items: Rc<Vec<VmValue>>, idx: usize },
     /// Snapshot over a dict; yields one-key `{key, value}` dicts for now.
@@ -125,6 +129,16 @@ impl VmIter {
     ) -> Result<Option<VmValue>, VmError> {
         match self {
             VmIter::Exhausted => Ok(None),
+            VmIter::Range { next, stop } => {
+                if *next < *stop {
+                    let v = *next;
+                    *next += 1;
+                    Ok(Some(VmValue::Int(v)))
+                } else {
+                    *self = VmIter::Exhausted;
+                    Ok(None)
+                }
+            }
             VmIter::Vec { items, idx } => {
                 if *idx < items.len() {
                     let v = items[*idx].clone();
@@ -499,6 +513,17 @@ pub async fn drain(
 pub fn iter_from_value(v: VmValue) -> Result<VmValue, VmError> {
     let inner = match v {
         VmValue::Iter(h) => return Ok(VmValue::Iter(h)),
+        VmValue::Range(r) => {
+            let stop = if r.inclusive {
+                r.end.saturating_add(1)
+            } else {
+                r.end
+            };
+            VmIter::Range {
+                next: r.start,
+                stop,
+            }
+        }
         VmValue::List(items) => VmIter::Vec { items, idx: 0 },
         VmValue::Set(items) => VmIter::Vec { items, idx: 0 },
         VmValue::Dict(entries) => {

@@ -1,0 +1,32 @@
+pipeline test(task) {
+  // Map over a 10-million element range, take 5, materialize. Must be
+  // lazy: only 5 elements actually flow through .map, so this finishes
+  // instantly instead of allocating 10M Ints.
+  let doubled = (1 to 10000000).map(fn(x) { return x * 2 }).take(5).to_list()
+  log(doubled)
+
+  // Filter + take on a huge range: lazy chain should only walk as far as
+  // needed to produce 3 outputs.
+  let evens = (1 to 10000000).filter(fn(x) { return x % 2 == 0 }).take(3).to_list()
+  log(evens)
+
+  // Enumerate returns Pair(i, x) values — destructurable in a for head.
+  var seen: list<string> = []
+  for (i, x) in (10 to 12).enumerate() {
+    seen = seen + ["i=" + to_string(i) + ",x=" + to_string(x)]
+  }
+  log(seen)
+
+  // Zip a range with a list, take a prefix, materialize.
+  let zipped = (1 to 1000000).zip([10, 20, 30]).to_list()
+  log(zipped)
+
+  // O(1) fast paths still work directly on Range — no iter round-trip.
+  log((1 to 1000000).len())
+  log((1 to 100).contains(42))
+  log((1 to 100).first())
+  log((1 to 100).last())
+
+  // reduce/sum on a modest range to prove sinks route through iter.
+  log((1 to 10).sum())
+}

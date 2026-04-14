@@ -237,12 +237,18 @@ explicitly; `.zip` and `.enumerate` also emit pairs.
 - **Printing**: `log(it)` renders `<iter>` or `<iter (exhausted)>`
   without draining.
 
-### Range caveat
+### Ranges and iters
 
-`(1 to 1_000_000)` currently materializes as a list before you can
-chain iter methods on it. Lazy ranges are a future feature. Until
-then, prefer bounded-size inputs or apply `.take(n)` as the first
-combinator after `.iter()`.
+`Range` (from `a to b` / `range(n)`) is its own value type with O(1)
+`.len() / .first() / .last() / .contains(x)` and `r[k]` subscript —
+no materialization. Calling any lazy combinator on a Range
+(`.map / .filter / .flat_map / .take / .skip / .take_while /
+.skip_while / .zip / .enumerate / .chain / .chunks / .windows`)
+returns a lazy `iter`. Sinks (`.to_list / .sum / .reduce / ...`)
+drain through the iter. In short: Range handles integer ranges
+with O(1) ops; Iter handles arbitrary lazy sequences. Chaining
+`(1 to 10_000_000).map(...).take(5).to_list()` finishes instantly
+because only 5 elements flow through the pipeline.
 
 ## Regex
 
