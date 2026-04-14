@@ -236,8 +236,7 @@ pub(super) async fn run_post_turn(
                     );
                     let merged = match state.transcript_summary.take() {
                         Some(existing)
-                            if !existing.trim().is_empty()
-                                && existing.trim() != summary.trim() =>
+                            if !existing.trim().is_empty() && existing.trim() != summary.trim() =>
                         {
                             format!("{existing}\n\n{summary}")
                         }
@@ -346,8 +345,9 @@ pub(super) async fn run_post_turn(
             state.last_run_exit_code,
             &state.daemon_watch_state,
         );
-        state.daemon_snapshot_path = maybe_persist_daemon_snapshot(ctx.daemon_config, &idle_snapshot)?
-            .or(state.daemon_snapshot_path.take());
+        state.daemon_snapshot_path =
+            maybe_persist_daemon_snapshot(ctx.daemon_config, &idle_snapshot)?
+                .or(state.daemon_snapshot_path.take());
         if !ctx.daemon_config.has_wake_source(ctx.bridge.is_some()) {
             state.final_status = "idle";
             return Ok(IterationOutcome::Break);
@@ -382,7 +382,10 @@ pub(super) async fn run_post_turn(
             let changed_paths = if ctx.daemon_config.watch_paths.is_empty() {
                 Vec::new()
             } else {
-                detect_watch_changes(&ctx.daemon_config.watch_paths, &mut state.daemon_watch_state)
+                detect_watch_changes(
+                    &ctx.daemon_config.watch_paths,
+                    &mut state.daemon_watch_state,
+                )
             };
             for message in &idle_messages {
                 state.transcript_events.push(transcript_event(
@@ -440,7 +443,8 @@ pub(super) async fn run_post_turn(
                 state.idle_backoff_ms = 100;
                 break;
             }
-            ctx.daemon_config.update_idle_backoff(&mut state.idle_backoff_ms);
+            ctx.daemon_config
+                .update_idle_backoff(&mut state.idle_backoff_ms);
         }
         return Ok(IterationOutcome::Continue);
     }

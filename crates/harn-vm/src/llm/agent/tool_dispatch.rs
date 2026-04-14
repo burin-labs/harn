@@ -43,6 +43,11 @@ use crate::agent_events::{AgentEvent, ToolCallStatus};
 use crate::bridge::HostBridge;
 use crate::value::{ErrorCategory, VmError, VmValue};
 
+use super::super::agent_tools::{
+    classify_tool_mutation, declared_paths, denied_tool_result, dispatch_tool_execution,
+    is_denied_tool_result, loop_intervention_message, render_tool_result, stable_hash,
+    stable_hash_str, LoopIntervention,
+};
 use super::super::helpers::transcript_event;
 use super::super::tools::{
     build_assistant_tool_message, build_tool_result_message, collect_tool_schemas,
@@ -51,11 +56,6 @@ use super::super::tools::{
 use super::helpers::{append_message_to_contexts, assistant_history_text};
 use super::llm_call::LlmCallResult;
 use super::state::AgentLoopState;
-use super::super::agent_tools::{
-    classify_tool_mutation, declared_paths, denied_tool_result, dispatch_tool_execution,
-    is_denied_tool_result, loop_intervention_message, render_tool_result, stable_hash,
-    stable_hash_str, LoopIntervention,
-};
 
 pub(super) struct ToolDispatchContext<'a> {
     pub bridge: &'a Option<Rc<HostBridge>>,
@@ -492,10 +492,8 @@ pub(super) async fn run_tool_dispatch(
             error: None,
         })
         .await;
-        let tool_span_id = crate::tracing::span_start(
-            crate::tracing::SpanKind::ToolCall,
-            tool_name.to_string(),
-        );
+        let tool_span_id =
+            crate::tracing::span_start(crate::tracing::SpanKind::ToolCall, tool_name.to_string());
         crate::tracing::span_set_metadata(tool_span_id, "tool_name", serde_json::json!(tool_name));
         crate::tracing::span_set_metadata(tool_span_id, "tool_use_id", serde_json::json!(tool_id));
         crate::tracing::span_set_metadata(
@@ -527,8 +525,7 @@ pub(super) async fn run_tool_dispatch(
             0
         };
         if ctx.loop_detect_enabled {
-            if let LoopIntervention::Skip { count } =
-                state.loop_tracker.check(tool_name, args_hash)
+            if let LoopIntervention::Skip { count } = state.loop_tracker.check(tool_name, args_hash)
             {
                 // Skip execution entirely — the model is stuck.
                 let skip_msg =
@@ -569,7 +566,9 @@ pub(super) async fn run_tool_dispatch(
                         "loop_skipped": true,
                         "repeat_count": count,
                     })),
-                    error: Some(format!("tool loop detected (skipped after {count} repeats)")),
+                    error: Some(format!(
+                        "tool loop detected (skipped after {count} repeats)"
+                    )),
                 })
                 .await;
                 continue;
@@ -720,7 +719,8 @@ pub(super) async fn run_tool_dispatch(
         crate::tracing::span_end(tool_span_id);
 
         // Record tool call result if recording mode is active.
-        if crate::llm::mock::get_tool_recording_mode() == crate::llm::mock::ToolRecordingMode::Record
+        if crate::llm::mock::get_tool_recording_mode()
+            == crate::llm::mock::ToolRecordingMode::Record
         {
             crate::llm::mock::record_tool_call(crate::orchestration::ToolCallRecord {
                 tool_name: tool_name.to_string(),
@@ -799,11 +799,13 @@ pub(super) async fn run_tool_dispatch(
         ));
 
         if is_rejected {
-            super::super::trace::emit_agent_event(super::super::trace::AgentTraceEvent::ToolRejected {
-                tool_name: tool_name.to_string(),
-                reason: result_text.clone(),
-                iteration,
-            });
+            super::super::trace::emit_agent_event(
+                super::super::trace::AgentTraceEvent::ToolRejected {
+                    tool_name: tool_name.to_string(),
+                    reason: result_text.clone(),
+                    iteration,
+                },
+            );
         } else {
             super::super::trace::emit_agent_event(
                 super::super::trace::AgentTraceEvent::ToolExecution {

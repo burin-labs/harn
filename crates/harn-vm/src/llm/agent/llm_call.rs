@@ -289,17 +289,19 @@ pub(super) async fn run_llm_call(
         .is_some_and(|phase| loop_state_requests_phase_change(&text, phase));
     if phase_change {
         if let Some(phase) = ctx.break_unless_phase {
-            super::super::trace::emit_agent_event(super::super::trace::AgentTraceEvent::PhaseChange {
-                from_phase: phase.to_string(),
-                to_phase: text
-                    .lines()
-                    .rev()
-                    .find_map(|l| l.trim().strip_prefix("next_phase:"))
-                    .unwrap_or("")
-                    .trim()
-                    .to_string(),
-                iteration,
-            });
+            super::super::trace::emit_agent_event(
+                super::super::trace::AgentTraceEvent::PhaseChange {
+                    from_phase: phase.to_string(),
+                    to_phase: text
+                        .lines()
+                        .rev()
+                        .find_map(|l| l.trim().strip_prefix("next_phase:"))
+                        .unwrap_or("")
+                        .trim()
+                        .to_string(),
+                    iteration,
+                },
+            );
         }
     }
     // When exit_when_verified is set, the sentinel is only honoured if the
