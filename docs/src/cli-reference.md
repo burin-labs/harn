@@ -138,8 +138,8 @@ this limit the formatter wraps it automatically:
 ## harn lint
 
 Lint one or more `.harn` files or directories for common issues (unused
-variables, unused functions, unreachable code, empty blocks, missing `///`
-HarnDoc on public functions, etc.).
+variables, unused functions, unreachable code, empty blocks, missing
+`/** */` HarnDoc on public functions, etc.).
 
 ```bash
 harn lint main.harn

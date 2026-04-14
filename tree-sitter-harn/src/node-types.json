@@ -10294,6 +10294,10 @@
     "named": false
   },
   {
+    "type": "exclusive",
+    "named": false
+  },
+  {
     "type": "extends",
     "named": false
   },
@@ -10442,11 +10446,11 @@
     "named": false
   },
   {
-    "type": "thru",
+    "type": "timeout",
     "named": false
   },
   {
-    "type": "timeout",
+    "type": "to",
     "named": false
   },
   {
@@ -10463,10 +10467,6 @@
   },
   {
     "type": "type",
-    "named": false
-  },
-  {
-    "type": "upto",
     "named": false
   },
   {
