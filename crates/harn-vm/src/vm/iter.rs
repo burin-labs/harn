@@ -73,6 +73,20 @@ pub enum VmIter {
         p: VmValue,
         primed: bool,
     },
+    /// Advances two inner iters in lockstep; yields `Pair(a, b)` until either
+    /// side is exhausted.
+    Zip {
+        a: Rc<RefCell<VmIter>>,
+        b: Rc<RefCell<VmIter>>,
+    },
+    /// Yields `Pair(i, item)` starting at `i = 0`.
+    Enumerate { inner: Rc<RefCell<VmIter>>, i: i64 },
+    /// Concatenates two iters: drains `a` first, then `b`.
+    Chain {
+        a: Rc<RefCell<VmIter>>,
+        b: Rc<RefCell<VmIter>>,
+        on_a: bool,
+    },
     /// Terminal state: `next` always returns `None`.
     Exhausted,
 }
@@ -307,6 +321,56 @@ impl VmIter {
                             }
                         }
                     }
+                }
+            }
+            VmIter::Zip { a, b } => {
+                let ia = a.borrow_mut().next(vm, functions).await?;
+                let x = match ia {
+                    None => {
+                        *self = VmIter::Exhausted;
+                        return Ok(None);
+                    }
+                    Some(v) => v,
+                };
+                let ib = b.borrow_mut().next(vm, functions).await?;
+                let y = match ib {
+                    None => {
+                        *self = VmIter::Exhausted;
+                        return Ok(None);
+                    }
+                    Some(v) => v,
+                };
+                Ok(Some(VmValue::Pair(Rc::new((x, y)))))
+            }
+            VmIter::Enumerate { inner, i } => {
+                let item = inner.borrow_mut().next(vm, functions).await?;
+                match item {
+                    None => {
+                        *self = VmIter::Exhausted;
+                        Ok(None)
+                    }
+                    Some(v) => {
+                        let idx = *i;
+                        *i += 1;
+                        Ok(Some(VmValue::Pair(Rc::new((VmValue::Int(idx), v)))))
+                    }
+                }
+            }
+            VmIter::Chain { a, b, on_a } => {
+                if *on_a {
+                    let item = a.borrow_mut().next(vm, functions).await?;
+                    if let Some(v) = item {
+                        return Ok(Some(v));
+                    }
+                    *on_a = false;
+                }
+                let item = b.borrow_mut().next(vm, functions).await?;
+                match item {
+                    None => {
+                        *self = VmIter::Exhausted;
+                        Ok(None)
+                    }
+                    Some(v) => Ok(Some(v)),
                 }
             }
             VmIter::Chan { handle } => {

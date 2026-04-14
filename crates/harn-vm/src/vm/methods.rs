@@ -1061,6 +1061,45 @@ impl super::Vm {
                                 primed: false,
                             }))))
                         }
+                        "zip" => {
+                            let other = args.first().cloned().ok_or_else(|| {
+                                VmError::TypeError(
+                                    "iter.zip: expected iterable argument".to_string(),
+                                )
+                            })?;
+                            let other_iter = iter_from_value(other)?;
+                            let b_handle = match other_iter {
+                                VmValue::Iter(h) => h,
+                                _ => unreachable!("iter_from_value returns Iter"),
+                            };
+                            Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Zip {
+                                a: handle,
+                                b: b_handle,
+                            }))))
+                        }
+                        "enumerate" => {
+                            Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Enumerate {
+                                inner: handle,
+                                i: 0,
+                            }))))
+                        }
+                        "chain" => {
+                            let other = args.first().cloned().ok_or_else(|| {
+                                VmError::TypeError(
+                                    "iter.chain: expected iterable argument".to_string(),
+                                )
+                            })?;
+                            let other_iter = iter_from_value(other)?;
+                            let b_handle = match other_iter {
+                                VmValue::Iter(h) => h,
+                                _ => unreachable!("iter_from_value returns Iter"),
+                            };
+                            Ok(VmValue::Iter(Rc::new(RefCell::new(VmIter::Chain {
+                                a: handle,
+                                b: b_handle,
+                                on_a: true,
+                            }))))
+                        }
                         "to_list" => {
                             let items = drain(&handle, self, functions).await?;
                             Ok(VmValue::List(Rc::new(items)))
