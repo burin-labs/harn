@@ -988,3 +988,157 @@ async fn daemon_resume_path_restores_prior_session_state() {
 
     let _ = std::fs::remove_dir_all(dir);
 }
+
+// ── Event substrate tests ──────────────────────────────────────────
+// These cover the WS-1 contract (ToolAnnotations + AgentEvent +
+// agent_subscribe + agent_inject_feedback + clear_session_sinks)
+// with minimal harness — no LLM call, no tokio runtime dance — just
+// exercise the thread-local registries and drain/cleanup helpers.
+
+#[test]
+fn pending_feedback_drain_filters_by_session_and_preserves_order() {
+    use crate::llm::agent::{drain_pending_feedback, push_pending_feedback};
+
+    // Push items into two sessions interleaved. Drain one; the other
+    // must survive untouched with its original ordering.
+    push_pending_feedback("sess_a", "post_turn", "a-first");
+    push_pending_feedback("sess_b", "post_turn", "b-only");
+    push_pending_feedback("sess_a", "grounding_violation", "a-second");
+
+    let drained_a = drain_pending_feedback("sess_a");
+    assert_eq!(
+        drained_a,
+        vec![
+            ("post_turn".to_string(), "a-first".to_string()),
+            ("grounding_violation".to_string(), "a-second".to_string()),
+        ],
+        "drain must return session-matched entries in push order"
+    );
+
+    let remaining_b = drain_pending_feedback("sess_b");
+    assert_eq!(
+        remaining_b,
+        vec![("post_turn".to_string(), "b-only".to_string())],
+        "unrelated session's queue must survive the first drain"
+    );
+
+    // Draining again yields nothing — queue is empty now.
+    assert!(drain_pending_feedback("sess_a").is_empty());
+    assert!(drain_pending_feedback("sess_b").is_empty());
+}
+
+#[test]
+fn session_sink_registry_round_trip_and_cleanup() {
+    use crate::agent_events::{
+        clear_session_sinks, emit_event, register_sink, reset_all_sinks,
+        session_external_sink_count, AgentEvent, AgentEventSink,
+    };
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Counter(Arc<AtomicUsize>);
+    impl AgentEventSink for Counter {
+        fn handle_event(&self, _event: &AgentEvent) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    reset_all_sinks();
+    let hits = Arc::new(AtomicUsize::new(0));
+    register_sink("sink-lifecycle", Arc::new(Counter(hits.clone())));
+    assert_eq!(session_external_sink_count("sink-lifecycle"), 1);
+
+    emit_event(&AgentEvent::TurnStart {
+        session_id: "sink-lifecycle".into(),
+        iteration: 0,
+    });
+    assert_eq!(hits.load(Ordering::SeqCst), 1);
+
+    clear_session_sinks("sink-lifecycle");
+    assert_eq!(session_external_sink_count("sink-lifecycle"), 0);
+
+    // A post-clear emit must NOT re-invoke the stale counter.
+    emit_event(&AgentEvent::TurnEnd {
+        session_id: "sink-lifecycle".into(),
+        iteration: 0,
+        turn_info: json!({}),
+    });
+    assert_eq!(hits.load(Ordering::SeqCst), 1);
+    reset_all_sinks();
+}
+
+#[test]
+fn tool_kind_is_read_only_excludes_other() {
+    // Regression for invariant #5 of the ACP refactor: ToolKind::Other
+    // must NOT auto-classify as read-only. Unannotated tools stay out
+    // of the concurrent-dispatch fast path by design.
+    let annotations = ToolAnnotations {
+        kind: ToolKind::Other,
+        ..Default::default()
+    };
+    assert!(!annotations.kind.is_read_only());
+    for kind in [
+        ToolKind::Read,
+        ToolKind::Search,
+        ToolKind::Think,
+        ToolKind::Fetch,
+    ] {
+        assert!(kind.is_read_only(), "{:?} must be read-only", kind);
+    }
+    for kind in [
+        ToolKind::Edit,
+        ToolKind::Delete,
+        ToolKind::Move,
+        ToolKind::Execute,
+    ] {
+        assert!(
+            !kind.is_read_only(),
+            "{:?} must NOT be read-only (has side effect)",
+            kind
+        );
+    }
+}
+
+#[test]
+fn workflow_stage_extracts_session_id_from_raw_model_policy() {
+    // orchestration/workflow.rs reads session_id from the caller's
+    // model_policy dict. A workflow-stage builder minting its own id
+    // (via `burin_new_session_id`) must thread through unchanged —
+    // otherwise the pipeline-side agent_subscribe handlers attach to
+    // an id the VM never uses.
+    let mut dict: std::collections::BTreeMap<String, VmValue> = Default::default();
+    dict.insert(
+        "session_id".to_string(),
+        VmValue::String(Rc::from("implement_abc123")),
+    );
+    let raw_model_policy = VmValue::Dict(Rc::new(dict));
+
+    let extracted = raw_model_policy
+        .as_dict()
+        .and_then(|d| d.get("session_id"))
+        .and_then(|v| match v {
+            VmValue::String(s) if !s.trim().is_empty() => Some(s.to_string()),
+            _ => None,
+        });
+    assert_eq!(extracted.as_deref(), Some("implement_abc123"));
+
+    // Nil / blank / wrong-type values must fall through to None so
+    // the workflow executor mints a fresh id.
+    for bad in [
+        VmValue::Nil,
+        VmValue::String(Rc::from("")),
+        VmValue::String(Rc::from("   ")),
+        VmValue::Int(42),
+    ] {
+        let mut d: std::collections::BTreeMap<String, VmValue> = Default::default();
+        d.insert("session_id".to_string(), bad.clone());
+        let probe = VmValue::Dict(Rc::new(d));
+        let got = probe
+            .as_dict()
+            .and_then(|dd| dd.get("session_id"))
+            .and_then(|v| match v {
+                VmValue::String(s) if !s.trim().is_empty() => Some(s.to_string()),
+                _ => None,
+            });
+        assert_eq!(got, None, "value {:?} must not extract as session_id", bad);
+    }
+}

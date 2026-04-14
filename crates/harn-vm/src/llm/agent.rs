@@ -46,6 +46,18 @@ thread_local! {
 /// Emit an event through both external sinks (sync) and closure
 /// subscribers (async, via the agent-loop's VM context). Called by the
 /// turn loop at every phase.
+///
+/// **Thread-local invariant.** Pipeline closure subscribers are stored
+/// in a `thread_local!` registry in `agent_events.rs` because
+/// `VmValue` wraps `Rc` and can't cross threads. The agent loop itself
+/// runs on a tokio `LocalSet`-pinned task, and `agent_subscribe`
+/// (the host builtin that populates the registry) runs on that same
+/// task, so the invariant holds. If a future VM embedder runs the
+/// loop from a multi-thread runtime without a `LocalSet`, closure
+/// subscribers will silently decouple from their emit site. The
+/// `debug_assert!` below catches that invariant violation in debug
+/// builds; release builds tolerate the divergence rather than panic
+/// on a misconfigured embedding.
 async fn emit_agent_event(event: &AgentEvent) {
     // External (Rust-side) sinks first — they're always sync.
     agent_events::emit_event(event);
@@ -64,7 +76,21 @@ async fn emit_agent_event(event: &AgentEvent) {
             continue;
         };
         let arg = crate::stdlib::json_to_vm_value(&payload);
-        let _ = vm.call_closure_pub(&closure, &[arg], &[]).await;
+        // Log but do not propagate subscriber errors — one misbehaving
+        // subscriber (e.g. a pipeline grounding handler with a type
+        // error) must not tear down the agent loop. Silent drops hid
+        // pipeline bugs; logging surfaces them without escalating.
+        if let Err(err) = vm.call_closure_pub(&closure, &[arg], &[]).await {
+            crate::events::log_warn(
+                "agent.subscriber",
+                &format!(
+                    "session={} event={:?} subscriber error: {}",
+                    event.session_id(),
+                    std::mem::discriminant(event),
+                    err
+                ),
+            );
+        }
     }
 }
 
@@ -79,7 +105,7 @@ pub(crate) fn push_pending_feedback(session_id: &str, kind: &str, content: &str)
 
 /// Drain every pending-feedback item for a session. Called by the turn
 /// loop at injection boundaries.
-fn drain_pending_feedback(session_id: &str) -> Vec<(String, String)> {
+pub(super) fn drain_pending_feedback(session_id: &str) -> Vec<(String, String)> {
     PENDING_FEEDBACK.with(|q| {
         let mut queue = q.borrow_mut();
         let mut drained: Vec<(String, String)> = Vec::new();
@@ -496,6 +522,25 @@ pub async fn run_agent_loop_internal(
         }
     }
 
+    /// Drops every external sink and closure subscriber registered
+    /// against this loop's session_id when the loop exits (success or
+    /// error). Without this, pipeline `agent_subscribe` closures would
+    /// accumulate across workflow stages — each stage builder calls
+    /// `agent_subscribe` exactly once for its own session_id, but the
+    /// registry only cleared when the ACP server explicitly tore a
+    /// session down. CLI / non-ACP embeddings leaked monotonically.
+    struct SessionSinkGuard {
+        session_id: String,
+    }
+
+    impl Drop for SessionSinkGuard {
+        fn drop(&mut self) {
+            if !self.session_id.is_empty() {
+                crate::agent_events::clear_session_sinks(&self.session_id);
+            }
+        }
+    }
+
     let bridge = current_host_bridge();
     let max_iterations = config.max_iterations;
     let persistent = config.persistent;
@@ -510,6 +555,9 @@ pub async fn run_agent_loop_internal(
     let tool_backoff_ms = config.tool_backoff_ms;
     let tool_format = config.tool_format;
     let session_id = config.session_id.clone();
+    let _sink_guard = SessionSinkGuard {
+        session_id: session_id.clone(),
+    };
 
     let auto_compact = config.auto_compact.clone();
     let daemon = config.daemon;
