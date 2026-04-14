@@ -19,7 +19,7 @@ harn-fmt = { path = "../harn-fmt", version = "0.7" }
 axum = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "signal", "time"] }
 serde_json = "1"
-reedline = "0.38"
+reedline = "0.47"
 nu-ansi-term = "0.50"
 toml = "0.8"
 serde = { version = "1", features = ["derive"] }

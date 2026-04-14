@@ -69,6 +69,7 @@ impl reedline::Completer for HarnCompleter {
                 extra: None,
                 span: reedline::Span::new(word_start, pos),
                 append_whitespace: true,
+                ..Default::default()
             })
             .collect()
     }
@@ -431,6 +432,9 @@ pub(crate) async fn run_repl() {
             }
             Ok((_, Ok(Signal::CtrlC))) | Ok((_, Ok(Signal::CtrlD))) => {
                 println!("Goodbye!");
+                break;
+            }
+            Ok((_, Ok(_))) => {
                 break;
             }
             Ok((_editor, Err(e))) => {
