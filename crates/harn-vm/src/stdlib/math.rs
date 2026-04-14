@@ -99,13 +99,13 @@ pub(crate) fn register_math_builtins(vm: &mut Vm) {
     });
 
     vm.register_builtin("random", |_args, _out| {
-        use rand::Rng;
+        use rand::RngExt;
         let val: f64 = rand::rng().random();
         Ok(VmValue::Float(val))
     });
 
     vm.register_builtin("random_int", |args, _out| {
-        use rand::Rng;
+        use rand::RngExt;
         if args.len() >= 2 {
             let min = args[0].as_int().unwrap_or(0);
             let max = args[1].as_int().unwrap_or(0);

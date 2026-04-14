@@ -371,7 +371,7 @@ async fn vm_execute_http_request(
 
     for attempt in 0..total_attempts {
         if attempt > 0 {
-            use rand::Rng;
+            use rand::RngExt;
             let base_delay = backoff_ms.saturating_mul(1u64 << (attempt - 1).min(30));
             let jitter: f64 = rand::rng().random_range(0.75..=1.25);
             let delay_ms = ((base_delay as f64 * jitter) as u64).min(60_000);
