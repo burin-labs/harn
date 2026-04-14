@@ -2267,6 +2267,10 @@
           {
             "type": "list_pattern",
             "named": true
+          },
+          {
+            "type": "pair_pattern",
+            "named": true
           }
         ]
       }
@@ -2959,6 +2963,10 @@
           },
           {
             "type": "list_pattern",
+            "named": true
+          },
+          {
+            "type": "pair_pattern",
             "named": true
           }
         ]
@@ -4359,6 +4367,21 @@
       "types": [
         {
           "type": "parameter_list",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "pair_pattern",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "identifier",
           "named": true
         }
       ]
@@ -9586,6 +9609,10 @@
           },
           {
             "type": "list_pattern",
+            "named": true
+          },
+          {
+            "type": "pair_pattern",
             "named": true
           }
         ]

@@ -68,13 +68,44 @@ bump_version() {
   python3 - "$next" <<'PY'
 from pathlib import Path
 import re, sys
+
 next_version = sys.argv[1]
-path = Path("Cargo.toml")
-text = path.read_text()
-updated, count = re.subn(r'^version = "[^"]+"', f'version = "{next_version}"', text, count=1, flags=re.M)
+major_minor = ".".join(next_version.split(".")[:2])
+
+root = Path("Cargo.toml")
+text = root.read_text()
+updated, count = re.subn(
+    r'^version = "[^"]+"', f'version = "{next_version}"', text, count=1, flags=re.M
+)
 if count != 1:
     raise SystemExit("failed to update workspace version")
-path.write_text(updated)
+root.write_text(updated)
+
+# Update inter-crate dep specs across workspace + excluded crates so a
+# major/minor bump keeps harn-* path deps resolvable against the new
+# version line. Patch bumps within a X.Y line are no-ops here.
+crate_dirs = [p for p in Path("crates").iterdir() if p.is_dir()]
+harn_crates = {p.name for p in crate_dirs}
+pattern = re.compile(
+    r'(harn-[A-Za-z0-9_-]+)(\s*=\s*\{\s*path\s*=\s*"[^"]+"\s*,\s*version\s*=\s*)"([^"]+)"'
+)
+
+
+def rewrite(match: re.Match) -> str:
+    name = match.group(1)
+    if name not in harn_crates:
+        return match.group(0)
+    return f'{name}{match.group(2)}"{major_minor}"'
+
+
+for crate_dir in crate_dirs:
+    manifest = crate_dir / "Cargo.toml"
+    if not manifest.exists():
+        continue
+    original = manifest.read_text()
+    new_text = pattern.sub(rewrite, original)
+    if new_text != original:
+        manifest.write_text(new_text)
 PY
 }
 

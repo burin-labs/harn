@@ -227,8 +227,12 @@ module.exports = grammar({
       choice(
         $.identifier,
         $.dict_pattern,
-        $.list_pattern
+        $.list_pattern,
+        $.pair_pattern
       ),
+
+    pair_pattern: ($) =>
+      seq("(", $.identifier, ",", $.identifier, ")"),
 
     dict_pattern: ($) =>
       seq("{", optional(commaSep1($.dict_pattern_field)), "}"),

@@ -2229,9 +2229,9 @@ return an eager value.
 - `.min()` / `.max()` return `nil` on an empty iter.
 - `.any` / `.all` / `.find` short-circuit as soon as the result is
   determined.
-- Numeric ranges currently materialize as a list before combinators
-  can chain on them; lazy ranges are a future extension of this
-  protocol.
+- Numeric ranges (`a to b`, `range(n)`) participate in the lazy iter
+  protocol directly; applying any combinator on a `Range` returns a
+  lazy `Iter` without materializing the range.
 
 ## Method-style builtins
 
