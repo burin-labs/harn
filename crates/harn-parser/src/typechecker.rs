@@ -2160,6 +2160,8 @@ impl TypeChecker {
                 return_type: Box::new(Self::apply_type_bindings(return_type, bindings)),
             },
             TypeExpr::Never => TypeExpr::Never,
+            TypeExpr::LitString(s) => TypeExpr::LitString(s.clone()),
+            TypeExpr::LitInt(v) => TypeExpr::LitInt(*v),
         }
     }
 
@@ -3646,6 +3648,20 @@ impl TypeChecker {
             // FnType is compatible with Named("closure") for backward compat
             (TypeExpr::FnType { .. }, TypeExpr::Named(n)) if n == "closure" => true,
             (TypeExpr::Named(n), TypeExpr::FnType { .. }) if n == "closure" => true,
+            // Literal types: identical literals match; a literal flows
+            // into its base type (`"pass"` → `string`); and — as a gradual
+            // concession — a base type flows into a literal-typed slot
+            // (`string` → `"pass" | "fail"`) so that existing
+            // string/int-typed data can populate discriminated unions
+            // without per-call-site widening. Runtime schema validation
+            // (emitted for typed params and `schema_is`/`schema_expect`
+            // guards) catches values that violate the literal set.
+            (TypeExpr::LitString(a), TypeExpr::LitString(b)) => a == b,
+            (TypeExpr::LitInt(a), TypeExpr::LitInt(b)) => a == b,
+            (TypeExpr::Named(n), TypeExpr::LitString(_)) if n == "string" => true,
+            (TypeExpr::Named(n), TypeExpr::LitInt(_)) if n == "int" || n == "float" => true,
+            (TypeExpr::LitString(_), TypeExpr::Named(n)) if n == "string" => true,
+            (TypeExpr::LitInt(_), TypeExpr::Named(n)) if n == "int" => true,
             _ => false,
         }
     }
@@ -3698,6 +3714,8 @@ impl TypeChecker {
                     .collect(),
             },
             TypeExpr::Never => TypeExpr::Never,
+            TypeExpr::LitString(s) => TypeExpr::LitString(s.clone()),
+            TypeExpr::LitInt(v) => TypeExpr::LitInt(*v),
         }
     }
 
@@ -4054,6 +4072,8 @@ pub fn format_type(ty: &TypeExpr) -> String {
             format!("fn({}) -> {}", params_str, format_type(return_type))
         }
         TypeExpr::Never => "never".to_string(),
+        TypeExpr::LitString(s) => format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")),
+        TypeExpr::LitInt(v) => v.to_string(),
     }
 }
 
@@ -4111,8 +4131,24 @@ fn extract_type_of_var(node: &SNode) -> Option<String> {
 
 fn schema_type_expr_from_node(node: &SNode, scope: &TypeScope) -> Option<TypeExpr> {
     match &node.node {
-        Node::Identifier(name) => scope.get_schema_binding(name).cloned().flatten(),
+        Node::Identifier(name) => {
+            // Prefer schema bindings (runtime dicts), then fall back to a
+            // declared `type` alias with the same name. This powers
+            // `schema_is(x, T)` / `schema_expect(x, T)` narrowing when `T`
+            // is a type alias rather than a schema-dict binding.
+            if let Some(schema) = scope.get_schema_binding(name).cloned().flatten() {
+                return Some(schema);
+            }
+            scope.resolve_type(name).cloned()
+        }
         Node::DictLiteral(entries) => schema_type_expr_from_dict(entries, scope),
+        Node::FunctionCall { name, args } if name == "schema_of" && args.len() == 1 => {
+            // `schema_is(x, schema_of(T))` narrows the same as `schema_is(x, T)`.
+            if let Node::Identifier(alias) = &args[0].node {
+                return scope.resolve_type(alias).cloned();
+            }
+            None
+        }
         _ => None,
     }
 }
@@ -4282,6 +4318,23 @@ fn normalize_schema_type_name(text: &str) -> String {
 
 fn intersect_types(current: &TypeExpr, schema_type: &TypeExpr) -> Option<TypeExpr> {
     match (current, schema_type) {
+        // Literal intersections: two equal literals keep the literal.
+        (TypeExpr::LitString(a), TypeExpr::LitString(b)) if a == b => {
+            Some(TypeExpr::LitString(a.clone()))
+        }
+        (TypeExpr::LitInt(a), TypeExpr::LitInt(b)) if a == b => Some(TypeExpr::LitInt(*a)),
+        // Intersecting a literal with its base type keeps the literal.
+        (TypeExpr::LitString(s), TypeExpr::Named(n))
+        | (TypeExpr::Named(n), TypeExpr::LitString(s))
+            if n == "string" =>
+        {
+            Some(TypeExpr::LitString(s.clone()))
+        }
+        (TypeExpr::LitInt(v), TypeExpr::Named(n)) | (TypeExpr::Named(n), TypeExpr::LitInt(v))
+            if n == "int" || n == "float" =>
+        {
+            Some(TypeExpr::LitInt(*v))
+        }
         (TypeExpr::Union(members), other) => {
             let kept = members
                 .iter()

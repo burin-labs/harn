@@ -383,6 +383,11 @@ pub enum TypeExpr {
     /// The bottom type: the type of expressions that never produce a value
     /// (return, throw, break, continue).
     Never,
+    /// A string-literal type: `"pass"`, `"fail"`. Assignable to `string`.
+    /// Used in unions to represent enum-like discriminated values.
+    LitString(String),
+    /// An int-literal type: `0`, `1`, `-1`. Assignable to `int`.
+    LitInt(i64),
 }
 
 /// A field in a dict shape type.

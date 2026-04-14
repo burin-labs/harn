@@ -1,0 +1,18 @@
+// `schema_of(T)` must produce a schema dict that round-trips cleanly
+// through the OpenAPI/JSON-Schema converter — the same representation
+// ACP's `ToolAnnotations.args` consumes.
+type Task = {title: string, priority: "low" | "med" | "high", points: 1 | 2 | 3 | 5 | 8}
+
+pipeline test(task) {
+  let s = schema_of(Task)
+  let json_schema = schema_to_json_schema(s)
+  // JSON Schema canonical keys for the enum members.
+  println(json_schema.type)
+  println(json_schema.properties.priority.enum)
+  println(json_schema.properties.points.enum)
+  // Round-trip back and revalidate a known-good value.
+  let back = schema_from_json_schema(json_schema)
+  println(schema_is({title: "write spec", priority: "high", points: 5}, back))
+  println(schema_is({title: "x", priority: "nope", points: 5}, back))
+  println(schema_is({title: "x", priority: "low", points: 4}, back))
+}

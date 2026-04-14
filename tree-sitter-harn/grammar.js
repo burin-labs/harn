@@ -843,7 +843,11 @@ module.exports = grammar({
         seq($.identifier, "<", $.type_annotation, ">"),
         prec.left(1, seq($.type_annotation, "|", $.type_annotation)),
         $.shape_type,
-        $.identifier
+        $.identifier,
+        $.string_literal,
+        $.raw_string_literal,
+        $.integer_literal,
+        seq("-", $.integer_literal)
       ),
 
     fn_type: ($) =>

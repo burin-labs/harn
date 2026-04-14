@@ -49,3 +49,4 @@
 
 - [0.6.x → 0.7.0](./migrations/v0.7.md)
 - [Prompt templates: v2](./migrations/template-engine-v2.md)
+- [Schema-as-type](./migrations/schema-as-type.md)

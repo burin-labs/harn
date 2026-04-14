@@ -1,0 +1,7 @@
+dict
+[verdict, score, summary]
+[pass, fail, unclear]
+[0, 1, 2]
+true
+false
+false

@@ -2329,7 +2329,7 @@ impl Parser {
             return self.parse_shape_type();
         }
         if let Some(tok) = self.current() {
-            let type_name = match &tok.kind {
+            match &tok.kind {
                 TokenKind::Nil => {
                     self.advance();
                     return Ok(TypeExpr::Named("nil".to_string()));
@@ -2338,10 +2338,26 @@ impl Parser {
                     self.advance();
                     return Ok(TypeExpr::Named("bool".to_string()));
                 }
-                _ => None,
-            };
-            if let Some(name) = type_name {
-                return Ok(TypeExpr::Named(name));
+                TokenKind::StringLiteral(text) | TokenKind::RawStringLiteral(text) => {
+                    let text = text.clone();
+                    self.advance();
+                    return Ok(TypeExpr::LitString(text));
+                }
+                TokenKind::IntLiteral(value) => {
+                    let value = *value;
+                    self.advance();
+                    return Ok(TypeExpr::LitInt(value));
+                }
+                TokenKind::Minus => {
+                    // Allow negative int literals: `-1 | 0 | 1`.
+                    if let Some(TokenKind::IntLiteral(v)) = self.peek_kind_at(1) {
+                        let v = *v;
+                        self.advance();
+                        self.advance();
+                        return Ok(TypeExpr::LitInt(-v));
+                    }
+                }
+                _ => {}
             }
         }
         if self.check(&TokenKind::Fn) {

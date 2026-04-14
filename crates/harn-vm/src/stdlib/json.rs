@@ -142,6 +142,22 @@ pub(crate) fn register_json_builtins(vm: &mut Vm) {
         Ok(VmValue::Bool(schema::schema_is_value(&args[0], &args[1])?))
     });
 
+    // `schema_of(T)` is primarily a compile-time intrinsic: the compiler
+    // rewrites `schema_of(TypeAlias)` to the alias's JSON-Schema dict
+    // constant. This runtime fallback accepts an already-built schema dict
+    // and returns it unchanged, keeping `schema_of` useful in pipelines
+    // that pass schemas around at runtime (e.g. `let s = schema_of(T); ...`).
+    vm.register_builtin("schema_of", |args, _out| {
+        require_args(args, 1, "schema_of")?;
+        match &args[0] {
+            VmValue::Dict(_) => Ok(args[0].clone()),
+            other => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                "schema_of: expected a type alias or schema dict, got {}",
+                other.type_name()
+            ))))),
+        }
+    });
+
     vm.register_builtin("is_type", |args, _out| {
         require_args(args, 2, "is_type")?;
         Ok(VmValue::Bool(schema::schema_is_value(&args[0], &args[1])?))

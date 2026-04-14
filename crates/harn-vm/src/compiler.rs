@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use harn_lexer::StringSegment;
-use harn_parser::{BindingPattern, Node, ParallelMode, SNode, TypedParam};
+use harn_parser::{BindingPattern, Node, ParallelMode, SNode, ShapeField, TypeExpr, TypedParam};
 
 use crate::chunk::{Chunk, CompiledFunction, Constant, Op};
 use crate::schema;
@@ -76,6 +76,9 @@ pub struct Compiler {
     temp_counter: usize,
     /// Number of lexical block scopes currently active in this compiled frame.
     scope_depth: usize,
+    /// Top-level `type` aliases, used to lower `schema_of(T)` and
+    /// `output_schema: T` into constant JSON-Schema dicts at compile time.
+    type_aliases: std::collections::HashMap<String, TypeExpr>,
 }
 
 impl Compiler {
@@ -91,7 +94,100 @@ impl Compiler {
             finally_bodies: Vec::new(),
             temp_counter: 0,
             scope_depth: 0,
+            type_aliases: std::collections::HashMap::new(),
         }
+    }
+
+    /// Populate `type_aliases` from a program's top-level `type T = ...`
+    /// declarations so later lowerings can resolve alias names to their
+    /// canonical `TypeExpr`.
+    fn collect_type_aliases(&mut self, program: &[SNode]) {
+        for sn in program {
+            if let Node::TypeDecl { name, type_expr } = &sn.node {
+                self.type_aliases.insert(name.clone(), type_expr.clone());
+            }
+        }
+    }
+
+    /// Expand a single layer of alias references. Returns the resolved
+    /// `TypeExpr` with all `Named(T)` nodes whose `T` is a known alias
+    /// replaced by the alias's body.
+    fn expand_alias(&self, ty: &TypeExpr) -> TypeExpr {
+        match ty {
+            TypeExpr::Named(name) => {
+                if let Some(target) = self.type_aliases.get(name) {
+                    self.expand_alias(target)
+                } else {
+                    TypeExpr::Named(name.clone())
+                }
+            }
+            TypeExpr::Union(types) => {
+                TypeExpr::Union(types.iter().map(|t| self.expand_alias(t)).collect())
+            }
+            TypeExpr::Shape(fields) => TypeExpr::Shape(
+                fields
+                    .iter()
+                    .map(|field| ShapeField {
+                        name: field.name.clone(),
+                        type_expr: self.expand_alias(&field.type_expr),
+                        optional: field.optional,
+                    })
+                    .collect(),
+            ),
+            TypeExpr::List(inner) => TypeExpr::List(Box::new(self.expand_alias(inner))),
+            TypeExpr::Iter(inner) => TypeExpr::Iter(Box::new(self.expand_alias(inner))),
+            TypeExpr::DictType(k, v) => TypeExpr::DictType(
+                Box::new(self.expand_alias(k)),
+                Box::new(self.expand_alias(v)),
+            ),
+            TypeExpr::FnType {
+                params,
+                return_type,
+            } => TypeExpr::FnType {
+                params: params.iter().map(|p| self.expand_alias(p)).collect(),
+                return_type: Box::new(self.expand_alias(return_type)),
+            },
+            TypeExpr::Applied { name, args } => TypeExpr::Applied {
+                name: name.clone(),
+                args: args.iter().map(|a| self.expand_alias(a)).collect(),
+            },
+            TypeExpr::Never => TypeExpr::Never,
+            TypeExpr::LitString(s) => TypeExpr::LitString(s.clone()),
+            TypeExpr::LitInt(v) => TypeExpr::LitInt(*v),
+        }
+    }
+
+    /// Build the JSON-Schema VmValue for a named type alias, or `None` if
+    /// the name is unknown or the alias cannot be lowered to a schema.
+    fn schema_value_for_alias(&self, name: &str) -> Option<VmValue> {
+        let ty = self.type_aliases.get(name)?;
+        let expanded = self.expand_alias(ty);
+        Self::type_expr_to_schema_value(&expanded)
+    }
+
+    /// Schema-guard builtins that accept a schema as their second argument.
+    /// When callers pass a type-alias identifier here, the compiler lowers
+    /// it to the alias's JSON-Schema dict constant.
+    fn is_schema_guard(name: &str) -> bool {
+        matches!(
+            name,
+            "schema_is"
+                | "schema_expect"
+                | "schema_parse"
+                | "schema_check"
+                | "is_type"
+                | "json_validate"
+        )
+    }
+
+    /// Check whether a dict-literal key node matches the given keyword
+    /// (identifier or string literal form).
+    fn entry_key_is(key: &SNode, keyword: &str) -> bool {
+        matches!(
+            &key.node,
+            Node::Identifier(name) | Node::StringLiteral(name) | Node::RawStringLiteral(name)
+                if name == keyword
+        )
     }
 
     /// Compile a program (list of top-level nodes) into a Chunk.
@@ -102,6 +198,7 @@ impl Compiler {
         Self::collect_enum_names(program, &mut self.enum_names);
         self.enum_names.insert("Result".to_string());
         Self::collect_interface_methods(program, &mut self.interface_methods);
+        self.collect_type_aliases(program);
 
         for sn in program {
             match &sn.node {
@@ -163,6 +260,7 @@ impl Compiler {
     ) -> Result<Chunk, CompileError> {
         Self::collect_enum_names(program, &mut self.enum_names);
         Self::collect_interface_methods(program, &mut self.interface_methods);
+        self.collect_type_aliases(program);
 
         for sn in program {
             if matches!(
@@ -347,6 +445,46 @@ impl Compiler {
                 Some(VmValue::Dict(Rc::new(out)))
             }
             harn_parser::TypeExpr::Union(members) => {
+                // Special-case unions of literals: emit as `enum: [...]`
+                // so the schema round-trips as canonical JSON Schema and
+                // is ACP-/OpenAPI-compatible. Mixed unions fall back to
+                // the `union:` key that validators recognize.
+                if !members.is_empty()
+                    && members
+                        .iter()
+                        .all(|m| matches!(m, harn_parser::TypeExpr::LitString(_)))
+                {
+                    let values = members
+                        .iter()
+                        .map(|m| match m {
+                            harn_parser::TypeExpr::LitString(s) => {
+                                VmValue::String(Rc::from(s.as_str()))
+                            }
+                            _ => unreachable!(),
+                        })
+                        .collect::<Vec<_>>();
+                    return Some(VmValue::Dict(Rc::new(BTreeMap::from([
+                        ("type".to_string(), VmValue::String(Rc::from("string"))),
+                        ("enum".to_string(), VmValue::List(Rc::new(values))),
+                    ]))));
+                }
+                if !members.is_empty()
+                    && members
+                        .iter()
+                        .all(|m| matches!(m, harn_parser::TypeExpr::LitInt(_)))
+                {
+                    let values = members
+                        .iter()
+                        .map(|m| match m {
+                            harn_parser::TypeExpr::LitInt(v) => VmValue::Int(*v),
+                            _ => unreachable!(),
+                        })
+                        .collect::<Vec<_>>();
+                    return Some(VmValue::Dict(Rc::new(BTreeMap::from([
+                        ("type".to_string(), VmValue::String(Rc::from("int"))),
+                        ("enum".to_string(), VmValue::List(Rc::new(values))),
+                    ]))));
+                }
                 let branches = members
                     .iter()
                     .filter_map(Self::type_expr_to_schema_value)
@@ -369,6 +507,14 @@ impl Compiler {
             harn_parser::TypeExpr::Applied { .. } => None,
             harn_parser::TypeExpr::Iter(_) => None,
             harn_parser::TypeExpr::Never => None,
+            harn_parser::TypeExpr::LitString(s) => Some(VmValue::Dict(Rc::new(BTreeMap::from([
+                ("type".to_string(), VmValue::String(Rc::from("string"))),
+                ("const".to_string(), VmValue::String(Rc::from(s.as_str()))),
+            ])))),
+            harn_parser::TypeExpr::LitInt(v) => Some(VmValue::Dict(Rc::new(BTreeMap::from([
+                ("type".to_string(), VmValue::String(Rc::from("int"))),
+                ("const".to_string(), VmValue::Int(*v)),
+            ])))),
         }
     }
 
@@ -787,6 +933,41 @@ impl Compiler {
             }
 
             Node::FunctionCall { name, args } => {
+                // Compile-time lowering: `schema_of(TypeAlias)` emits the
+                // alias's JSON-Schema dict as a constant. Falls through to
+                // the runtime `schema_of(...)` builtin when the argument is
+                // not a known type alias (e.g. a string name computed at
+                // runtime, or a dict pass-through).
+                if name == "schema_of" && args.len() == 1 {
+                    if let Node::Identifier(alias) = &args[0].node {
+                        if let Some(schema) = self.schema_value_for_alias(alias) {
+                            self.emit_vm_value_literal(&schema);
+                            return Ok(());
+                        }
+                    }
+                }
+                // `schema_is(x, T)` / `schema_expect(x, T[, defaults])` /
+                // `schema_parse(x, T)` / `schema_check(x, T)` /
+                // `is_type(x, T)`: when the schema argument is a type-alias
+                // identifier, inline the alias's JSON-Schema dict as a
+                // constant. This is the counterpart to the parser-side
+                // narrowing in `schema_type_expr_from_node`.
+                if Self::is_schema_guard(name) && args.len() >= 2 {
+                    if let Node::Identifier(alias) = &args[1].node {
+                        if let Some(schema) = self.schema_value_for_alias(alias) {
+                            let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
+                            self.chunk.emit_u16(Op::Constant, name_idx, self.line);
+                            self.compile_node(&args[0])?;
+                            self.emit_vm_value_literal(&schema);
+                            for arg in &args[2..] {
+                                self.compile_node(arg)?;
+                            }
+                            self.chunk.emit_u8(Op::Call, args.len() as u8, self.line);
+                            return Ok(());
+                        }
+                    }
+                }
+
                 let has_spread = args.iter().any(|a| matches!(&a.node, Node::Spread(_)));
                 let name_idx = self.chunk.add_constant(Constant::String(name.clone()));
                 self.chunk.emit_u16(Op::Constant, name_idx, self.line);
@@ -1213,6 +1394,21 @@ impl Compiler {
                 if !has_spread {
                     for entry in entries {
                         self.compile_node(&entry.key)?;
+                        // Sugar: `output_schema: TypeAlias` inside an
+                        // `llm_call(..., { ... })` options dict lowers to
+                        // the alias's JSON-Schema dict constant. This lets
+                        // users reuse one `type T = { ... }` declaration
+                        // for both type-checking and structured-output
+                        // validation. Falls through to the normal expression
+                        // path when the name does not resolve.
+                        if Self::entry_key_is(&entry.key, "output_schema") {
+                            if let Node::Identifier(alias) = &entry.value.node {
+                                if let Some(schema) = self.schema_value_for_alias(alias) {
+                                    self.emit_vm_value_literal(&schema);
+                                    continue;
+                                }
+                            }
+                        }
                         self.compile_node(&entry.value)?;
                     }
                     self.chunk

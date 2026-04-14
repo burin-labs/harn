@@ -11,6 +11,21 @@ granular archaeology.
 
 ### Added
 
+- **Schema-as-type: unified `type` aliases with `output_schema` /
+  `schema_*` builtins.** A `type` alias can now drive both static
+  type-checking and runtime schema validation from a single source of
+  truth. `schema_of(T)` lowers a type alias to a JSON-Schema dict at
+  compile time, and the same alias identifier is accepted as the schema
+  argument of `schema_is` / `schema_expect` / `schema_parse` /
+  `schema_check` / `is_type` / `json_validate`, and as the value of
+  `output_schema:` in an `llm_call` options dict. Narrowing on
+  `schema_is(x, T)` refines `x` to `T` in the truthy branch. The type
+  grammar now admits string- and int-literal types in unions
+  (`"pass" | "fail" | "unclear"`, `0 | 1 | 2`), emitted as canonical
+  `{type, enum}` JSON Schema so schemas are compatible with both
+  structured-output validators and ACP `ToolAnnotations.args`. Resolves
+  [#25](https://github.com/burin-labs/harn/issues/25). See
+  `docs/src/migrations/schema-as-type.md` for the migration guide.
 - **`harn check` workspace manifest (`[workspace].pipelines`).** The CLI now
   walks upward from a target file (stopping at the first `.git` boundary) to
   find the nearest `harn.toml` and honors a new `[workspace]` section. Run

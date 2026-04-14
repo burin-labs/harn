@@ -1,0 +1,25 @@
+// Literal types can appear as union members in `type` aliases and
+// on bare annotations. They round-trip through schema_of as enum schemas.
+type Verdict = "pass" | "fail" | "unclear"
+
+type Score = 0 | 1 | 2
+
+pipeline test(task) {
+  // Assignable: a literal flows into its base-typed slot.
+  let v: Verdict = "pass"
+  let s: Score = 2
+  println(v)
+  println(s)
+  // schema_of emits canonical enum JSON Schema.
+  let vs = schema_of(Verdict)
+  let ss = schema_of(Score)
+  println(vs.type)
+  println(vs.enum)
+  println(ss.type)
+  println(ss.enum)
+  // schema_is accepts conforming values and rejects non-members.
+  println(schema_is("fail", Verdict))
+  println(schema_is("nope", Verdict))
+  println(schema_is(1, Score))
+  println(schema_is(5, Score))
+}

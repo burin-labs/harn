@@ -1812,6 +1812,22 @@ let value: string | nil = nil
 let id: int | string = "abc"
 ```
 
+Union members may also be **literal types** — specific string or int
+values used to encode enum-like discriminated sets:
+
+```harn
+type Verdict = "pass" | "fail" | "unclear"
+type RetryCount = 0 | 1 | 2 | 3
+
+let v: Verdict = "pass"
+```
+
+Literal types are assignable to their base type (`"pass"` flows into
+`string`), and a base-typed value flows into a literal union (`string`
+into `Verdict`). Runtime `schema_is` / `schema_expect` guards and the
+parameter-annotation runtime check reject values that violate the
+literal set.
+
 ### Parameterized types
 
 ```harn
@@ -1857,6 +1873,43 @@ Shapes are compatible with `dict` and `dict<string, V>` when all field values ma
 type Config = {model: string, max_tokens: int}
 let cfg: Config = {model: "gpt-4", max_tokens: 100}
 ```
+
+A type alias can also drive schema validation for structured LLM output
+and runtime guards. `schema_of(T)` lowers an alias to a JSON-Schema
+dict at compile time:
+
+```harn
+type GraderOut = {
+  verdict: "pass" | "fail" | "unclear",
+  summary: string,
+  findings: list<string>,
+}
+
+// Use the alias directly wherever a schema dict is expected.
+let s = schema_of(GraderOut)
+let ok = schema_is({verdict: "pass", summary: "x", findings: []}, GraderOut)
+
+let r = llm_call(prompt, nil, {
+  provider: "openai",
+  output_schema: GraderOut,     // alias in value position — compiled to schema_of(T)
+  schema_retries: 2,
+})
+```
+
+The emitted schema follows canonical JSON-Schema conventions (objects
+with `properties`/`required`, arrays with `items`, literal unions as
+`{type, enum}`) so it is compatible with structured-output validators
+and with ACP `ToolAnnotations.args` schemas. The compile-time lowering
+applies when the alias identifier appears as:
+
+- The argument of `schema_of(T)`.
+- The schema argument of `schema_is`, `schema_expect`, `schema_parse`,
+  `schema_check`, `is_type`, `json_validate`.
+- The value of an `output_schema:` entry in an `llm_call` options dict.
+
+For aliases not known at compile time (e.g. `let T = schema_of(Foo)`
+or dynamic construction), passthrough through the runtime `schema_of`
+builtin keeps existing schema dicts working.
 
 ### Function type annotations
 

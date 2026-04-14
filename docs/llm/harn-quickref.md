@@ -318,7 +318,7 @@ println(response.output_tokens)
 | `temperature` | float | provider default | |
 | `tools` | list | nil | Registered tool schemas. |
 | `response_format` | string | nil | `"json"` asks the provider for JSON mode. |
-| `output_schema` | dict | nil | JSON-schema-shaped dict. Validated after parse. |
+| `output_schema` | dict \| type-alias | nil | JSON-schema-shaped dict, or a top-level `type T = ...` alias (compiler lowers to the schema dict). Validated after parse. |
 | `output_validation` | string | `"off"` | `"error"` throws on mismatch; `"warn"` logs. |
 | `schema_retries` | int | 1 | When validation fails, re-prompt up to N times with a corrective nudge. Works alongside `output_validation: "error"`. |
 | `schema_retry_nudge` | string \| bool | auto | String = verbatim corrective message (+ validation errors appended). `true` = auto nudge from schema required/properties keys. `false` = retry without a nudge. |
@@ -348,6 +348,28 @@ let r = llm_call(prompt, sys, {
   response_format: "json",
 })
 println(r.data.verdict)
+```
+
+Schema-as-type (a `type` alias drives both the schema and the
+narrowing guard — lowered to the canonical JSON-Schema dict at compile
+time; literal-string/int unions emit as `{type, enum}`):
+
+```harn
+type GraderOut = {
+  verdict: "pass" | "fail" | "unclear",
+  summary: string,
+}
+
+let r = llm_call(prompt, sys, {
+  provider: "auto",
+  output_schema: GraderOut,      // alias in value position
+  output_validation: "error",
+  schema_retries: 2,
+  response_format: "json",
+})
+if schema_is(r.data, GraderOut) {
+  println(r.data.verdict)        // narrowed to GraderOut here
+}
 ```
 
 Batch grading at bounded concurrency:

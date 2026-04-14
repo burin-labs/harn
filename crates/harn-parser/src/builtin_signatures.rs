@@ -1162,6 +1162,10 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("bool")),
     },
     BuiltinSig {
+        name: "schema_of",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
         name: "schema_omit",
         return_type: Some(BuiltinReturn::Named("dict")),
     },

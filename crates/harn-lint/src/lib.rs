@@ -264,6 +264,7 @@ impl<'a> Linter<'a> {
                 self.record_type_expr_references(return_type);
             }
             TypeExpr::Never => {}
+            TypeExpr::LitString(_) | TypeExpr::LitInt(_) => {}
         }
     }
 
