@@ -2,9 +2,11 @@
 //! parser, the schema → TypeScript renderer (TypeExpr + ComponentRegistry),
 //! and the argument-normalizer compatibility shims.
 //!
-//! This file is included via `#[path = "tools_tests.rs"] mod tests;` in
-//! `tools.rs`, so everything here has full access to that module's private
-//! items as if it were inlined.
+//! Declared as `#[cfg(test)] mod tests;` in `tools/mod.rs`, so `super::`
+//! names either items defined directly in `mod.rs` or parser symbols
+//! that `mod.rs` re-exports (`pub(crate) use parse::…`,
+//! `pub(crate) use handle_local::…`) for callers outside the tools
+//! module. Either way the flat `use super::{…}` below is accurate.
 
 use super::{
     build_assistant_response_message, build_assistant_tool_message,
