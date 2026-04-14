@@ -88,6 +88,10 @@ struct TypeScope {
     /// Maps var name → source function name (e.g. "json_parse").
     /// Empty string = explicitly cleared (shadows parent scope entry).
     untyped_sources: BTreeMap<String, String>,
+    /// Concrete `type_of` variants ruled out on the current flow path for each
+    /// `unknown`-typed variable. Drives the exhaustive-narrowing warning at
+    /// `unreachable()` / `throw` / `never`-returning calls.
+    unknown_ruled_out: BTreeMap<String, Vec<String>>,
     parent: Option<Box<TypeScope>>,
 }
 
@@ -133,6 +137,7 @@ impl TypeScope {
             narrowed_vars: BTreeMap::new(),
             schema_bindings: BTreeMap::new(),
             untyped_sources: BTreeMap::new(),
+            unknown_ruled_out: BTreeMap::new(),
             parent: None,
         };
         scope.enums.insert(
@@ -179,6 +184,7 @@ impl TypeScope {
             narrowed_vars: BTreeMap::new(),
             schema_bindings: BTreeMap::new(),
             untyped_sources: BTreeMap::new(),
+            unknown_ruled_out: BTreeMap::new(),
             parent: Some(Box::new(self.clone())),
         }
     }
@@ -187,6 +193,60 @@ impl TypeScope {
         self.vars
             .get(name)
             .or_else(|| self.parent.as_ref()?.get_var(name))
+    }
+
+    /// Record that a concrete `type_of` variant has been ruled out for
+    /// an `unknown`-typed variable on the current flow path.
+    fn add_unknown_ruled_out(&mut self, var_name: &str, type_name: &str) {
+        if !self.unknown_ruled_out.contains_key(var_name) {
+            let inherited = self.lookup_unknown_ruled_out(var_name);
+            self.unknown_ruled_out
+                .insert(var_name.to_string(), inherited);
+        }
+        let entry = self
+            .unknown_ruled_out
+            .get_mut(var_name)
+            .expect("just inserted");
+        if !entry.iter().any(|t| t == type_name) {
+            entry.push(type_name.to_string());
+        }
+    }
+
+    /// Return the ruled-out concrete types recorded for `var_name` across
+    /// the current scope chain (child entries mask parent entries).
+    fn lookup_unknown_ruled_out(&self, var_name: &str) -> Vec<String> {
+        if let Some(list) = self.unknown_ruled_out.get(var_name) {
+            list.clone()
+        } else if let Some(parent) = &self.parent {
+            parent.lookup_unknown_ruled_out(var_name)
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Collect every `unknown`-typed variable that has at least one ruled-out
+    /// concrete type on the current flow path (merged across parent scopes).
+    fn collect_unknown_ruled_out(&self) -> BTreeMap<String, Vec<String>> {
+        let mut out: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        self.collect_unknown_ruled_out_inner(&mut out);
+        out
+    }
+
+    fn collect_unknown_ruled_out_inner(&self, acc: &mut BTreeMap<String, Vec<String>>) {
+        if let Some(parent) = &self.parent {
+            parent.collect_unknown_ruled_out_inner(acc);
+        }
+        for (name, list) in &self.unknown_ruled_out {
+            acc.insert(name.clone(), list.clone());
+        }
+    }
+
+    /// Drop the ruled-out set for a variable (used on reassignment).
+    fn clear_unknown_ruled_out(&mut self, var_name: &str) {
+        // Shadow any parent entry with an empty list so lookups in this
+        // scope (and its children) treat the variable as un-narrowed.
+        self.unknown_ruled_out
+            .insert(var_name.to_string(), Vec::new());
     }
 
     fn get_fn(&self, name: &str) -> Option<&FnSignature> {
@@ -303,6 +363,14 @@ struct Refinements {
     truthy: Vec<(String, InferredType)>,
     /// Narrowings when the condition evaluates to false/falsy.
     falsy: Vec<(String, InferredType)>,
+    /// Concrete `type_of` variants (var_name, type_name) to add to the
+    /// ruled-out coverage set on the truthy branch. Only populated for
+    /// `type_of(x) != "T"` patterns against `unknown`-typed values.
+    truthy_ruled_out: Vec<(String, String)>,
+    /// Same as `truthy_ruled_out` but applied on the falsy branch — the
+    /// common case for `if type_of(x) == "T" { return }` exhaustiveness
+    /// patterns.
+    falsy_ruled_out: Vec<(String, String)>,
 }
 
 impl Refinements {
@@ -315,6 +383,24 @@ impl Refinements {
         Self {
             truthy: self.falsy,
             falsy: self.truthy,
+            truthy_ruled_out: self.falsy_ruled_out,
+            falsy_ruled_out: self.truthy_ruled_out,
+        }
+    }
+
+    /// Apply the truthy-branch narrowings and ruled-out additions to `scope`.
+    fn apply_truthy(&self, scope: &mut TypeScope) {
+        apply_refinements(scope, &self.truthy);
+        for (var, ty) in &self.truthy_ruled_out {
+            scope.add_unknown_ruled_out(var, ty);
+        }
+    }
+
+    /// Apply the falsy-branch narrowings and ruled-out additions to `scope`.
+    fn apply_falsy(&self, scope: &mut TypeScope) {
+        apply_refinements(scope, &self.falsy);
+        for (var, ty) in &self.falsy_ruled_out {
+            scope.add_unknown_ruled_out(var, ty);
         }
     }
 }
@@ -884,7 +970,7 @@ impl TypeChecker {
                 let refs = Self::extract_refinements(condition, scope);
 
                 let mut then_scope = scope.child();
-                apply_refinements(&mut then_scope, &refs.truthy);
+                refs.apply_truthy(&mut then_scope);
                 // Strict types: schema_is/is_type in condition clears
                 // untyped source in then-branch
                 if self.strict_types {
@@ -900,7 +986,7 @@ impl TypeChecker {
 
                 if let Some(else_body) = else_body {
                     let mut else_scope = scope.child();
-                    apply_refinements(&mut else_scope, &refs.falsy);
+                    refs.apply_falsy(&mut else_scope);
                     self.check_block(else_body, &mut else_scope);
 
                     // Post-branch narrowing: if one branch definitely exits,
@@ -908,16 +994,16 @@ impl TypeChecker {
                     if Self::block_definitely_exits(then_body)
                         && !Self::block_definitely_exits(else_body)
                     {
-                        apply_refinements(scope, &refs.falsy);
+                        refs.apply_falsy(scope);
                     } else if Self::block_definitely_exits(else_body)
                         && !Self::block_definitely_exits(then_body)
                     {
-                        apply_refinements(scope, &refs.truthy);
+                        refs.apply_truthy(scope);
                     }
                 } else {
                     // No else: if then-body always exits, apply falsy after
                     if Self::block_definitely_exits(then_body) {
-                        apply_refinements(scope, &refs.falsy);
+                        refs.apply_falsy(scope);
                     }
                 }
             }
@@ -993,7 +1079,7 @@ impl TypeChecker {
                 self.check_node(condition, scope);
                 let refs = Self::extract_refinements(condition, scope);
                 let mut loop_scope = scope.child();
-                apply_refinements(&mut loop_scope, &refs.truthy);
+                refs.apply_truthy(&mut loop_scope);
                 self.check_block(body, &mut loop_scope);
             }
 
@@ -1096,6 +1182,7 @@ impl TypeChecker {
                         scope.define_var(name, original);
                     }
                     scope.define_schema_binding(name, None);
+                    scope.clear_unknown_ruled_out(name);
                 }
             }
 
@@ -1477,16 +1564,20 @@ impl TypeChecker {
                 let refs = Self::extract_refinements(condition, scope);
 
                 let mut true_scope = scope.child();
-                apply_refinements(&mut true_scope, &refs.truthy);
+                refs.apply_truthy(&mut true_scope);
                 self.check_node(true_expr, &mut true_scope);
 
                 let mut false_scope = scope.child();
-                apply_refinements(&mut false_scope, &refs.falsy);
+                refs.apply_falsy(&mut false_scope);
                 self.check_node(false_expr, &mut false_scope);
             }
 
             Node::ThrowStmt { value } => {
                 self.check_node(value, scope);
+                // A `throw` in the tail of a `type_of`-narrowing chain claims
+                // exhaustiveness on the enclosing `unknown`-typed variable.
+                // Warn if the claim isn't actually complete.
+                self.check_unknown_exhaustiveness(scope, snode.span, "throw");
             }
 
             Node::GuardStmt {
@@ -1497,12 +1588,12 @@ impl TypeChecker {
                 let refs = Self::extract_refinements(condition, scope);
 
                 let mut else_scope = scope.child();
-                apply_refinements(&mut else_scope, &refs.falsy);
+                refs.apply_falsy(&mut else_scope);
                 self.check_block(else_body, &mut else_scope);
 
                 // After guard, condition is true — apply truthy refinements
                 // to the OUTER scope (guard's else-body must exit)
-                apply_refinements(scope, &refs.truthy);
+                refs.apply_truthy(scope);
             }
 
             Node::SpawnExpr { body } => {
@@ -1890,13 +1981,13 @@ impl TypeChecker {
             } => {
                 let refs = Self::extract_refinements(condition, scope);
                 let mut then_scope = scope.child();
-                apply_refinements(&mut then_scope, &refs.truthy);
+                refs.apply_truthy(&mut then_scope);
                 for stmt in then_body {
                     self.check_return_type(stmt, expected, &mut then_scope);
                 }
                 if let Some(else_body) = else_body {
                     let mut else_scope = scope.child();
-                    apply_refinements(&mut else_scope, &refs.falsy);
+                    refs.apply_falsy(&mut else_scope);
                     for stmt in else_body {
                         self.check_return_type(stmt, expected, &mut else_scope);
                     }
@@ -1904,16 +1995,16 @@ impl TypeChecker {
                     if Self::block_definitely_exits(then_body)
                         && !Self::block_definitely_exits(else_body)
                     {
-                        apply_refinements(scope, &refs.falsy);
+                        refs.apply_falsy(scope);
                     } else if Self::block_definitely_exits(else_body)
                         && !Self::block_definitely_exits(then_body)
                     {
-                        apply_refinements(scope, &refs.truthy);
+                        refs.apply_truthy(scope);
                     }
                 } else {
                     // No else: if then-body always exits, apply falsy after
                     if Self::block_definitely_exits(then_body) {
-                        apply_refinements(scope, &refs.falsy);
+                        refs.apply_falsy(scope);
                     }
                 }
             }
@@ -2405,9 +2496,13 @@ impl TypeChecker {
                 let right_ref = Self::extract_refinements(right, scope);
                 let mut truthy = left_ref.truthy;
                 truthy.extend(right_ref.truthy);
+                let mut truthy_ruled_out = left_ref.truthy_ruled_out;
+                truthy_ruled_out.extend(right_ref.truthy_ruled_out);
                 Refinements {
                     truthy,
                     falsy: vec![],
+                    truthy_ruled_out,
+                    falsy_ruled_out: vec![],
                 }
             }
 
@@ -2417,9 +2512,13 @@ impl TypeChecker {
                 let right_ref = Self::extract_refinements(right, scope);
                 let mut falsy = left_ref.falsy;
                 falsy.extend(right_ref.falsy);
+                let mut falsy_ruled_out = left_ref.falsy_ruled_out;
+                falsy_ruled_out.extend(right_ref.falsy_ruled_out);
                 Refinements {
                     truthy: vec![],
                     falsy,
+                    truthy_ruled_out: vec![],
+                    falsy_ruled_out,
                 }
             }
 
@@ -2438,6 +2537,8 @@ impl TypeChecker {
                             return Refinements {
                                 truthy: vec![(name.clone(), Some(narrowed))],
                                 falsy: vec![(name.clone(), Some(TypeExpr::Named("nil".into())))],
+                                truthy_ruled_out: vec![],
+                                falsy_ruled_out: vec![],
                             };
                         }
                     }
@@ -2486,6 +2587,7 @@ impl TypeChecker {
                         let neq_refs = Refinements {
                             truthy: vec![(name.clone(), Some(narrowed))],
                             falsy: vec![(name.clone(), Some(TypeExpr::Named("nil".into())))],
+                            ..Refinements::default()
                         };
                         return if op == "!=" {
                             neq_refs
@@ -2499,6 +2601,7 @@ impl TypeChecker {
                     let eq_refs = Refinements {
                         truthy: vec![(name.clone(), Some(TypeExpr::Named("nil".into())))],
                         falsy: vec![(name.clone(), Some(TypeExpr::Never))],
+                        ..Refinements::default()
                     };
                     return if op == "==" {
                         eq_refs
@@ -2551,6 +2654,7 @@ impl TypeChecker {
                         falsy: remaining
                             .map(|r| vec![(var_name.clone(), Some(r))])
                             .unwrap_or_default(),
+                        ..Refinements::default()
                     };
                     return if op == "==" {
                         eq_refs
@@ -2565,6 +2669,7 @@ impl TypeChecker {
                 let eq_refs = Refinements {
                     truthy: vec![(var_name.clone(), Some(TypeExpr::Named(type_name)))],
                     falsy: vec![(var_name.clone(), Some(TypeExpr::Never))],
+                    ..Refinements::default()
                 };
                 return if op == "==" {
                     eq_refs
@@ -2575,10 +2680,15 @@ impl TypeChecker {
             Some(TypeExpr::Named(ref n)) if n == "unknown" => {
                 // `unknown` narrows to the tested concrete type on the truthy
                 // branch. The falsy branch keeps `unknown` — subtracting one
-                // concrete type from an open top still leaves an open top.
+                // concrete type from an open top still leaves an open top —
+                // but we remember which concrete variants have been ruled
+                // out so `unreachable()` / `throw` can detect incomplete
+                // exhaustive-narrowing chains.
                 let eq_refs = Refinements {
-                    truthy: vec![(var_name.clone(), Some(TypeExpr::Named(type_name)))],
+                    truthy: vec![(var_name.clone(), Some(TypeExpr::Named(type_name.clone())))],
                     falsy: vec![],
+                    truthy_ruled_out: vec![],
+                    falsy_ruled_out: vec![(var_name.clone(), type_name)],
                 };
                 return if op == "==" {
                     eq_refs
@@ -2617,6 +2727,7 @@ impl TypeChecker {
                                 Some(TypeExpr::Shape(narrowed_fields)),
                             )],
                             falsy: vec![],
+                            ..Refinements::default()
                         };
                     }
                 }
@@ -2643,7 +2754,11 @@ impl TypeChecker {
             .map(|ty| vec![(var_name.clone(), Some(ty))])
             .unwrap_or_default();
 
-        Refinements { truthy, falsy }
+        Refinements {
+            truthy,
+            falsy,
+            ..Refinements::default()
+        }
     }
 
     /// Check whether a block definitely exits (delegates to the free function).
@@ -2830,6 +2945,60 @@ impl TypeChecker {
         }
     }
 
+    /// Complete set of concrete variants that `type_of` may return, used as
+    /// the reference for exhaustive-narrowing warnings on `unknown`.
+    const UNKNOWN_CONCRETE_TYPES: &'static [&'static str] = &[
+        "int", "string", "float", "bool", "nil", "list", "dict", "closure",
+    ];
+
+    /// Emit a warning if any `unknown`-typed variable in scope has been
+    /// partially narrowed via `type_of(v) == "T"` checks but the current
+    /// control-flow path reaches a never-returning site (`unreachable()`,
+    /// a function with `Never` return, or a `throw`) without covering every
+    /// concrete `type_of` variant.
+    ///
+    /// The ruled-out set must be non-empty — reaching `throw`/`unreachable`
+    /// without any narrowing isn't an exhaustiveness claim, so it stays
+    /// silent and avoids false positives on plain error paths.
+    fn check_unknown_exhaustiveness(&mut self, scope: &TypeScope, span: Span, site_label: &str) {
+        let entries = scope.collect_unknown_ruled_out();
+        for (var_name, covered) in entries {
+            if covered.is_empty() {
+                continue;
+            }
+            // Only warn if `v` is still typed `unknown` at this point —
+            // if it was fully narrowed elsewhere the ruled-out set is stale.
+            if !matches!(
+                scope.get_var(&var_name),
+                Some(Some(TypeExpr::Named(n))) if n == "unknown"
+            ) {
+                continue;
+            }
+            let missing: Vec<&str> = Self::UNKNOWN_CONCRETE_TYPES
+                .iter()
+                .copied()
+                .filter(|t| !covered.iter().any(|c| c == t))
+                .collect();
+            if missing.is_empty() {
+                continue;
+            }
+            let missing_str = missing
+                .iter()
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            self.warning_at(
+                format!(
+                    "`{site}` reached but `{var}: unknown` was not fully narrowed — uncovered concrete type(s): {missing}",
+                    site = site_label,
+                    var = var_name,
+                    missing = missing_str,
+                ),
+                span,
+            );
+        }
+    }
+
     fn check_call(&mut self, name: &str, args: &[SNode], scope: &mut TypeScope, span: Span) {
         // Special-case: unreachable(x) — when the argument is a variable,
         // verify it has been narrowed to `never` (exhaustiveness check).
@@ -2850,10 +3019,19 @@ impl TypeChecker {
                     }
                 }
             }
+            self.check_unknown_exhaustiveness(scope, span, "unreachable()");
             for arg in args {
                 self.check_node(arg, scope);
             }
             return;
+        }
+
+        // Calls to user-defined functions with a `never` return type also
+        // signal "this path claims exhaustiveness" — apply the same check.
+        if let Some(sig) = scope.get_fn(name).cloned() {
+            if matches!(sig.return_type, Some(TypeExpr::Never)) {
+                self.check_unknown_exhaustiveness(scope, span, &format!("{}()", name));
+            }
         }
 
         // Check against known function signatures
@@ -3183,11 +3361,11 @@ impl TypeChecker {
                 let refs = Self::extract_refinements(condition, scope);
 
                 let mut true_scope = scope.child();
-                apply_refinements(&mut true_scope, &refs.truthy);
+                refs.apply_truthy(&mut true_scope);
                 let tt = self.infer_type(true_expr, &true_scope);
 
                 let mut false_scope = scope.child();
-                apply_refinements(&mut false_scope, &refs.falsy);
+                refs.apply_falsy(&mut false_scope);
                 let ft = self.infer_type(false_expr, &false_scope);
 
                 match (&tt, &ft) {
@@ -4887,6 +5065,135 @@ add("hello", 2) }"#,
         assert_eq!(exhaustive_warns.len(), 1);
         assert!(exhaustive_warns[0].contains("Inactive"));
         assert!(exhaustive_warns[0].contains("Pending"));
+    }
+
+    fn exhaustive_warns(source: &str) -> Vec<String> {
+        warnings(source)
+            .into_iter()
+            .filter(|w| w.contains("was not fully narrowed"))
+            .collect()
+    }
+
+    #[test]
+    fn test_unknown_exhaustive_unreachable_happy_path() {
+        // All eight concrete variants covered → no warning on unreachable().
+        let source = r#"pipeline t(task) {
+  fn describe(v: unknown) -> string {
+    if type_of(v) == "string"  { return "s" }
+    if type_of(v) == "int"     { return "i" }
+    if type_of(v) == "float"   { return "f" }
+    if type_of(v) == "bool"    { return "b" }
+    if type_of(v) == "nil"     { return "n" }
+    if type_of(v) == "list"    { return "l" }
+    if type_of(v) == "dict"    { return "d" }
+    if type_of(v) == "closure" { return "c" }
+    unreachable("unknown type_of variant")
+  }
+  log(describe(1))
+}"#;
+        assert!(exhaustive_warns(source).is_empty());
+    }
+
+    #[test]
+    fn test_unknown_exhaustive_unreachable_incomplete_warns() {
+        let source = r#"pipeline t(task) {
+  fn describe(v: unknown) -> string {
+    if type_of(v) == "string" { return "s" }
+    if type_of(v) == "int"    { return "i" }
+    unreachable("unknown type_of variant")
+  }
+  log(describe(1))
+}"#;
+        let warns = exhaustive_warns(source);
+        assert_eq!(warns.len(), 1, "expected one warning, got: {:?}", warns);
+        let w = &warns[0];
+        for missing in &["float", "bool", "nil", "list", "dict", "closure"] {
+            assert!(w.contains(missing), "missing {missing} in: {w}");
+        }
+        assert!(!w.contains("int"));
+        assert!(!w.contains("string"));
+        assert!(w.contains("unreachable"));
+        assert!(w.contains("v: unknown"));
+    }
+
+    #[test]
+    fn test_unknown_incomplete_normal_return_no_warning() {
+        // Normal `return` fallthrough is NOT an exhaustiveness claim.
+        let source = r#"pipeline t(task) {
+  fn describe(v: unknown) -> string {
+    if type_of(v) == "string" { return "s" }
+    if type_of(v) == "int"    { return "i" }
+    return "other"
+  }
+  log(describe(1))
+}"#;
+        assert!(exhaustive_warns(source).is_empty());
+    }
+
+    #[test]
+    fn test_unknown_exhaustive_throw_incomplete_warns() {
+        let source = r#"pipeline t(task) {
+  fn describe(v: unknown) -> string {
+    if type_of(v) == "string" { return "s" }
+    throw "unhandled"
+  }
+  log(describe("x"))
+}"#;
+        let warns = exhaustive_warns(source);
+        assert_eq!(warns.len(), 1, "expected one warning, got: {:?}", warns);
+        assert!(warns[0].contains("throw"));
+        assert!(warns[0].contains("int"));
+    }
+
+    #[test]
+    fn test_unknown_throw_without_narrowing_no_warning() {
+        // A bare throw with no preceding `type_of` narrowing is not
+        // an exhaustiveness claim — stay silent.
+        let source = r#"pipeline t(task) {
+  fn crash(v: unknown) -> string {
+    throw "nope"
+  }
+  log(crash(1))
+}"#;
+        assert!(exhaustive_warns(source).is_empty());
+    }
+
+    #[test]
+    fn test_unknown_exhaustive_nested_branch() {
+        // Nested if inside a single branch: inner exhaustiveness doesn't
+        // escape to the outer scope, and incomplete outer coverage warns.
+        let source = r#"pipeline t(task) {
+  fn describe(v: unknown, x: int) -> string {
+    if type_of(v) == "string" {
+      if x > 0 { return v.upper() } else { return "s" }
+    }
+    if type_of(v) == "int" { return "i" }
+    unreachable("unknown type_of variant")
+  }
+  log(describe(1, 1))
+}"#;
+        let warns = exhaustive_warns(source);
+        assert_eq!(warns.len(), 1, "expected one warning, got: {:?}", warns);
+        assert!(warns[0].contains("float"));
+    }
+
+    #[test]
+    fn test_unknown_exhaustive_negated_check() {
+        // `type_of(v) != "T"` guards the happy path, so the then-branch
+        // accumulates coverage on the truthy side via inversion.
+        let source = r#"pipeline t(task) {
+  fn describe(v: unknown) -> string {
+    if type_of(v) != "string" {
+      // v still unknown here, but "string" is NOT ruled out on this path
+      return "non-string"
+    }
+    // v: string here
+    return v.upper()
+  }
+  log(describe("x"))
+}"#;
+        // No unreachable/throw so no warning regardless.
+        assert!(exhaustive_warns(source).is_empty());
     }
 
     #[test]

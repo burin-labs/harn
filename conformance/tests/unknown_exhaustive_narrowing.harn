@@ -1,0 +1,85 @@
+// Exhaustive narrowing on `unknown`: when all eight concrete `type_of`
+// variants are covered before an `unreachable()` fallback, the type
+// checker emits no warning and the program runs end-to-end.
+pipeline test(task) {
+  fn describe(v: unknown) -> string {
+    if type_of(v) == "string" {
+      return "string:${v.upper()}"
+    }
+    if type_of(v) == "int" {
+      return "int:${v + 1}"
+    }
+    if type_of(v) == "float" {
+      return "float:${v}"
+    }
+    if type_of(v) == "bool" {
+      return "bool:${v}"
+    }
+    if type_of(v) == "nil" {
+      return "nil"
+    }
+    if type_of(v) == "list" {
+      return "list:${len(v)}"
+    }
+    if type_of(v) == "dict" {
+      return "dict:${len(v.keys())}"
+    }
+    if type_of(v) == "closure" {
+      return "closure"
+    }
+    unreachable("unknown type_of variant")
+  }
+  log(describe("hi"))
+  log(describe(41))
+  log(describe(nil))
+  log(describe([1, 2, 3]))
+  log(describe({a: 1}))
+  log(describe(true))
+  // Partial narrowing with a plain `return` fallback is NOT an
+  // exhaustiveness claim — it compiles silently and runs fine.
+  fn categorize(v: unknown) -> string {
+    if type_of(v) == "string" {
+      return "str"
+    }
+    if type_of(v) == "int" {
+      return "int"
+    }
+    return "other"
+  }
+  log(categorize("x"))
+  log(categorize(1))
+  log(categorize([1]))
+  // Nested narrowing inside a covered branch doesn't leak coverage out.
+  fn shape(v: unknown) -> string {
+    if type_of(v) == "string" {
+      return "s:${v}"
+    }
+    if type_of(v) == "int" {
+      return "i:${v}"
+    }
+    if type_of(v) == "float" {
+      return "f"
+    }
+    if type_of(v) == "bool" {
+      return "b"
+    }
+    if type_of(v) == "nil" {
+      return "n"
+    }
+    if type_of(v) == "list" {
+      if len(v) == 0 {
+        return "empty-list"
+      }
+      return "list"
+    }
+    if type_of(v) == "dict" {
+      return "d"
+    }
+    if type_of(v) == "closure" {
+      return "c"
+    }
+    unreachable("unknown type_of variant")
+  }
+  log(shape([]))
+  log(shape([1, 2]))
+}

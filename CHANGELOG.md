@@ -11,6 +11,16 @@ granular archaeology.
 
 ### Added
 
+- **Exhaustive narrowing on `unknown`.** The type checker now tracks
+  which concrete `type_of` variants have been ruled out on each
+  flow path for every `unknown`-typed variable. When control flow
+  reaches a never-returning site — `unreachable()`, a `throw`, or a
+  call to a user-defined function with return type `never` — the
+  checker warns if the coverage set is non-empty but incomplete,
+  naming the uncovered variants. Plain `return` fallthroughs are
+  not exhaustiveness claims and stay silent, and a bare `throw`
+  with no prior `type_of` narrowing also stays silent. Resolves
+  [#27](https://github.com/burin-labs/harn/issues/27).
 - **`try*` finally-pop fix.** Compiler now unconditionally pops the
   one-value-per-block leftover after a finally body, so a `finally`
   ending in a non-value statement (e.g. `x = x + 1`) no longer leaks

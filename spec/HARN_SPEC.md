@@ -1826,7 +1826,11 @@ Narrowing rules for `unknown`:
 - `guard type_of(x) == "T" else { ... }` narrows `x` to `T` in the
   surrounding scope after the guard.
 - The falsy branch keeps `unknown` — subtracting one concrete type
-  from an open top still leaves an open top.
+  from an open top still leaves an open top. The checker still tracks
+  which concrete `type_of` variants have been ruled out on the current
+  flow path, so an exhaustive chain ending in `unreachable()` / `throw`
+  can be validated; see the "Exhaustive narrowing on `unknown`"
+  subsection of "Flow-sensitive type refinement".
 
 Interop between `any` and `unknown`:
 
@@ -2116,6 +2120,44 @@ fn process(x: string | int | nil) -> string {
 At runtime, `unreachable()` throws `"unreachable code was reached"` as a
 safety net. When called without arguments or with a non-variable argument,
 no compile-time check is performed.
+
+#### Exhaustive narrowing on `unknown`
+
+The checker tracks the set of concrete `type_of` variants that have been
+ruled out on the current flow path for every `unknown`-typed variable.
+The falsy branch of `type_of(v) == "T"` still leaves `v` typed `unknown`
+(subtracting one concrete type from an open top still leaves an open
+top), but the **coverage set** for `v` gains `"T"`.
+
+When control flow reaches a never-returning site — `unreachable()`, a
+`throw` statement, or a call to a user-defined function whose return
+type is `never` — the checker verifies that the coverage set for every
+still-`unknown` variable is either empty or complete. An incomplete
+coverage set is treated as a failed exhaustiveness claim and triggers a
+warning that names the uncovered concrete variants:
+
+```harn
+fn handle(v: unknown) -> string {
+  if type_of(v) == "string" { return "s:${v}" }
+  if type_of(v) == "int"    { return "i:${v}" }
+  unreachable("unknown type_of variant")
+  // warning: `unreachable()` reached but `v: unknown` was not fully
+  // narrowed — uncovered concrete type(s): float, bool, nil, list,
+  // dict, closure
+}
+```
+
+Covering all eight `type_of` variants (`int`, `string`, `float`, `bool`,
+`nil`, `list`, `dict`, `closure`) silences the warning. Suppression via
+an explicit fallthrough `return` is intentional: a plain `return`
+doesn't claim exhaustiveness, so partial narrowing followed by a normal
+return stays silent. Reaching `throw` or `unreachable()` with no prior
+`type_of` narrowing also stays silent — the coverage set must be
+non-empty for the warning to fire, which avoids false positives on
+unrelated error paths.
+
+Reassigning the variable clears its coverage set, matching the way
+narrowing is already invalidated on reassignment.
 
 #### Unreachable code warnings
 
