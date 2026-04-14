@@ -1104,8 +1104,9 @@ agent_loop("task", "system", {
 
 Evaluation order: `auto_deny` → `write_path_allowlist` → `auto_approve` →
 `require_approval`. Tools that match no pattern default to `AutoApproved`.
-`require_approval` calls the host via the `tool/request_approval` bridge
-request and **fail closed** if the host does not implement it. Policies compose
+`require_approval` calls the host via the canonical ACP
+`session/request_permission` request and **fails closed** if the host
+does not implement it. Policies compose
 across nested scopes with most-restrictive intersection: auto-deny and
 require-approval take the union, while `auto_approve` and
 `write_path_allowlist` take the intersection.

@@ -3,111 +3,57 @@
 Harn's stdio bridge uses JSON-RPC 2.0 notifications and requests for host/runtime
 coordination that sits below ACP session semantics.
 
-## Tool lifecycle gates
+## Tool lifecycle observation
 
-Hosts can opt into request-response tool gates. These calls are best-effort: if the
-host does not implement them, Harn proceeds normally.
+The `tool/pre_use`, `tool/post_use`, and `tool/request_approval` bridge
+request/response methods have been **retired** in favor of the canonical
+ACP surface:
 
-### `tool/pre_use`
+- Tool lifecycle is now carried on the `session/update` notification
+  stream as `tool_call` and `tool_call_update` variants (see the ACP
+  schema at <https://agentclientprotocol.com/protocol/schema>). Hosts
+  observe every dispatch via the session update stream — there is no
+  host-side approve/deny/modify hook at dispatch time.
+- Approvals route through canonical `session/request_permission`. When
+  harn's declarative `ToolApprovalPolicy` classifies a call as
+  `RequiresHostApproval`, the agent loop issues a
+  `session/request_permission` request to the host and **fails closed**
+  if the host does not implement it (or returns an error).
 
-Sent as a bridge request before a tool call executes.
+Internally, the agent loop emits `AgentEvent::ToolCall` +
+`AgentEvent::ToolCallUpdate` events; `harn-cli`'s ACP server translates
+them into `session/update` notifications via an `AgentEventSink` it
+registers per session.
 
-Request payload:
+### `session/request_permission`
 
-```json
-{
-  "tool_name": "list_directory",
-  "tool_use_id": "call_123",
-  "args": {"path": "."},
-  "mutation": {
-    "classification": "read_only",
-    "declared_paths": ["."],
-    "session": {
-      "session_id": "session_123",
-      "run_id": "run_123",
-      "worker_id": null,
-      "mutation_scope": "read_only",
-      "approval_policy": null
-    }
-  }
-}
-```
-
-Response payload:
-
-- `{ "action": "allow" }`: continue unchanged
-- `{ "action": "deny", "reason": "..." }`: reject the tool call and surface the rejection in the transcript
-- `{ "action": "modify", "args": {...} }`: replace arguments before execution
-
-`mutation.classification` is advisory runtime metadata from Harn. Hosts may
-apply stricter local policy.
-
-### `tool/request_approval`
-
-Sent as a bridge request when the active `ToolApprovalPolicy` classifies the
-call as `RequiresHostApproval` (matching a `require_approval` pattern). The
-host is expected to prompt the user and return a decision. Unlike
-`tool/pre_use`, this call **fails closed**: if the host does not implement it
-or returns an error, the tool is denied.
-
-Request payload:
+Request payload (harn-issued):
 
 ```json
 {
-  "tool_name": "edit_file",
-  "tool_use_id": "call_123",
-  "args": {"path": "src/main.rs"},
-  "declared_paths": ["src/main.rs"],
+  "sessionId": "session_123",
+  "toolCall": {
+    "toolCallId": "call_123",
+    "toolName": "edit_file",
+    "rawInput": {"path": "src/main.rs"}
+  },
   "mutation": {
     "session_id": "session_123",
     "run_id": "run_123",
     "worker_id": null,
     "mutation_scope": "apply_workspace",
     "approval_policy": {"require_approval": ["edit*"]}
-  }
+  },
+  "declaredPaths": ["src/main.rs"]
 }
 ```
 
-Response payload:
+Response payload (host-issued):
 
-- `{ "granted": true }`: proceed with the original arguments
-- `{ "granted": true, "args": {...} }`: proceed with rewritten arguments
-- `{ "granted": false, "reason": "..." }`: reject the tool call
-
-Use `tool/pre_use` for passive host-side filtering that does not need user
-input (audit logging, automatic allow/deny from stored rules); use
-`tool/request_approval` for any call that should surface an interactive prompt.
-
-### `tool/post_use`
-
-Sent as a bridge request after a tool call completes.
-
-Request payload:
-
-```json
-{
-  "tool_name": "list_directory",
-  "tool_use_id": "call_123",
-  "result": "...tool output...",
-  "rejected": false,
-  "mutation": {
-    "classification": "read_only",
-    "declared_paths": ["."],
-    "session": {
-      "session_id": "session_123",
-      "run_id": "run_123",
-      "worker_id": null,
-      "mutation_scope": "read_only",
-      "approval_policy": null
-    }
-  }
-}
-```
-
-Response payload:
-
-- `{ "result": "..." }`: replace the visible tool result text
-- any other payload: leave the result unchanged
+- `{ "outcome": { "outcome": "selected" } }` (ACP canonical): granted
+- `{ "granted": true }` (legacy shim): granted with original args
+- `{ "granted": true, "args": {...} }`: granted with rewritten args
+- `{ "granted": false, "reason": "..." }`: denied
 
 ## Worker lifecycle notifications
 

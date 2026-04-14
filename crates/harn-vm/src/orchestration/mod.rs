@@ -56,7 +56,8 @@ pub struct MutationSessionRecord {
     pub execution_kind: Option<String>,
     pub mutation_scope: String,
     /// Declarative per-tool approval policy for this session. When `None`,
-    /// the host drives approval out-of-band via `tool/pre_use` (legacy path).
+    /// no policy-driven approval is requested; the session update stream
+    /// remains the only host-observable surface for tool dispatch.
     pub approval_policy: Option<ToolApprovalPolicy>,
 }
 

@@ -1121,7 +1121,7 @@ pub async fn run_agent_loop_internal(
             let mut observations = String::new();
             let mut tools_used_this_iter = Vec::new();
             let mut tool_results_this_iter: Vec<serde_json::Value> = Vec::new();
-            let mut rejection_followups: Vec<String> = Vec::new();
+            let rejection_followups: Vec<String> = Vec::new();
             let tool_schemas = collect_tool_schemas(tools_val, opts.native_tools.as_deref());
 
             // Parallel dispatch for read-only exploration batches. When the
@@ -1287,21 +1287,37 @@ pub async fn run_agent_loop_internal(
                         Err(("auto_denied", reason))
                     }
                     Some(crate::orchestration::ToolApprovalDecision::RequiresHostApproval) => {
+                        // Canonical ACP: request permission via
+                        // `session/request_permission`. Fail closed: if the
+                        // host does not implement the method or returns an
+                        // error, the tool is denied.
                         if let Some(bridge) = bridge.as_ref() {
                             let mutation = crate::orchestration::current_mutation_session();
                             let payload = serde_json::json!({
-                                "tool_name": tool_name,
-                                "tool_use_id": tool_id,
-                                "args": tool_args,
+                                "sessionId": session_id,
+                                "toolCall": {
+                                    "toolCallId": tool_id,
+                                    "toolName": tool_name,
+                                    "rawInput": tool_args,
+                                },
                                 "mutation": mutation,
-                                "declared_paths": declared_paths(tool_name, &tool_args),
+                                "declaredPaths": declared_paths(tool_name, &tool_args),
                             });
-                            match bridge.call("tool/request_approval", payload).await {
+                            match bridge.call("session/request_permission", payload).await {
                                 Ok(response) => {
-                                    let granted = response
-                                        .get("granted")
-                                        .and_then(|v| v.as_bool())
-                                        .unwrap_or(false);
+                                    let outcome = response
+                                        .get("outcome")
+                                        .and_then(|v| v.get("outcome"))
+                                        .and_then(|v| v.as_str())
+                                        .or_else(|| {
+                                            response.get("outcome").and_then(|v| v.as_str())
+                                        })
+                                        .unwrap_or("");
+                                    let granted = matches!(outcome, "selected" | "allow")
+                                        || response
+                                            .get("granted")
+                                            .and_then(|v| v.as_bool())
+                                            .unwrap_or(false);
                                     if granted {
                                         if let Some(new_args) = response.get("args") {
                                             tool_args = new_args.clone();
@@ -1319,7 +1335,7 @@ pub async fn run_agent_loop_internal(
                                 Err(_) => Err((
                                     "host_denied",
                                     "approval request failed or host does not implement \
-                                     tool/request_approval"
+                                     session/request_permission"
                                         .to_string(),
                                 )),
                             }
@@ -1412,76 +1428,13 @@ pub async fn run_agent_loop_internal(
                 // tool's ToolAnnotations). The VM no longer provides a
                 // pre-dispatch mutation hook.
 
-                // Bridge-level PreToolUse gate: host can allow/deny/modify
-                if let Some(bridge) = bridge.as_ref() {
-                    let mutation = crate::orchestration::current_mutation_session();
-                    let mutation_classification = classify_tool_mutation(tool_name);
-                    if let Ok(response) = bridge
-                        .call(
-                            "tool/pre_use",
-                            serde_json::json!({
-                                "tool_name": tool_name,
-                                "tool_use_id": tool_id,
-                                "args": tool_args,
-                                "mutation": {
-                                    "classification": mutation_classification,
-                                    "session": mutation,
-                                    "declared_paths": declared_paths(tool_name, &tool_args),
-                                },
-                            }),
-                        )
-                        .await
-                    {
-                        let action = response
-                            .get("action")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("allow");
-                        match action {
-                            "deny" => {
-                                let reason = response
-                                    .get("reason")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("denied by host");
-                                let result_text =
-                                    render_tool_result(&denied_tool_result(tool_name, reason));
-                                rejection_followups.push(format!(
-                                    "The previous tool call was rejected by the host. Treat this as a hard instruction and follow it exactly now.\n{reason}"
-                                ));
-                                if !rejected_tools.contains(&tool_name.to_string()) {
-                                    rejected_tools.push(tool_name.to_string());
-                                }
-                                transcript_events.push(transcript_event(
-                                    "tool_execution", "tool", "internal", &result_text,
-                                    Some(serde_json::json!({"tool_name": tool_name, "tool_use_id": tool_id, "rejected": true})),
-                                ));
-                                if tool_format == "native" {
-                                    append_message_to_contexts(
-                                        &mut visible_messages,
-                                        &mut recorded_messages,
-                                        build_tool_result_message(
-                                            tool_id,
-                                            &result_text,
-                                            &opts.provider,
-                                        ),
-                                    );
-                                } else {
-                                    observations.push_str(&format!(
-                                        "[result of {tool_name}]\n{result_text}\n[end of {tool_name} result]\n\n"
-                                    ));
-                                }
-                                continue;
-                            }
-                            "modify" => {
-                                if let Some(new_args) = response.get("args") {
-                                    tool_args = new_args.clone();
-                                }
-                            }
-                            _ => {} // "allow" or anything else — proceed
-                        }
-                    }
-                    // If the bridge call fails (host doesn't implement tool/pre_use),
-                    // we silently proceed — the host can opt in to this protocol.
-                }
+                // Bridge-level PreToolUse gate has been retired. The canonical
+                // ACP observation surface is the AgentEvent stream — external
+                // sinks (e.g. the harn-cli ACP server) receive `ToolCall`
+                // events and translate them into `session/update` with the
+                // `tool_call` variant. Hosts that need to block a call use
+                // `session/request_permission` (see the declarative approval
+                // policy above).
                 // Validate required parameters before dispatch so the LLM gets
                 // a clear error instead of a cryptic handler failure.
                 if let Err(msg) = validate_tool_args(tool_name, &tool_args, &tool_schemas) {
@@ -1588,20 +1541,10 @@ pub async fn run_agent_loop_internal(
                     "declared_paths",
                     serde_json::json!(declared_paths_current.clone()),
                 );
-                if let Some(bridge) = bridge.as_ref() {
-                    bridge.send_call_start(
-                        &tool_call_id,
-                        "tool",
-                        tool_name,
-                        serde_json::json!({
-                            "tool_name": tool_name,
-                            "tool_use_id": tool_id,
-                            "iteration": iteration,
-                            "classification": mutation_classification,
-                            "declared_paths": declared_paths_current,
-                        }),
-                    );
-                }
+                // Tool-call observability is now carried by the AgentEvent
+                // stream (`ToolCall` + `ToolCallUpdate`); the ACP server
+                // consumes those via `AgentEventSink` and emits canonical
+                // `session/update` notifications. No direct bridge call here.
 
                 // Tool loop detection: check BEFORE dispatch whether this
                 // exact call has been stuck in a loop.
@@ -1645,16 +1588,20 @@ pub async fn run_agent_loop_internal(
                             ));
                         }
                         crate::tracing::span_end(tool_span_id);
-                        if let Some(bridge) = bridge.as_ref() {
-                            bridge.send_call_end(
-                                &tool_call_id,
-                                "tool",
-                                tool_name,
-                                0,
-                                "loop_skipped",
-                                serde_json::json!({"loop_skipped": true, "repeat_count": count}),
-                            );
-                        }
+                        // Surface the loop-skip as a ToolCallUpdate so
+                        // external sinks still see a completion event.
+                        emit_agent_event(&AgentEvent::ToolCallUpdate {
+                            session_id: session_id.clone(),
+                            tool_call_id: tool_call_id.clone(),
+                            tool_name: tool_name.to_string(),
+                            status: ToolCallStatus::Failed,
+                            raw_output: Some(serde_json::json!({
+                                "loop_skipped": true,
+                                "repeat_count": count,
+                            })),
+                            error: Some(format!("tool loop detected (skipped after {count} repeats)")),
+                        })
+                        .await;
                         continue;
                     }
                 }
@@ -1794,55 +1741,14 @@ pub async fn run_agent_loop_internal(
                 })
                 .await;
 
-                // Bridge-level PostToolUse gate: host can inspect/modify result
-                let result_text = if let Some(bridge) = bridge.as_ref() {
-                    let mutation = crate::orchestration::current_mutation_session();
-                    if let Ok(response) = bridge
-                        .call(
-                            "tool/post_use",
-                            serde_json::json!({
-                                "tool_name": tool_name,
-                                "tool_use_id": tool_id,
-                                "result": result_text,
-                                "rejected": is_rejected,
-                                "mutation": {
-                                    "classification": classify_tool_mutation(tool_name),
-                                    "session": mutation,
-                                    "declared_paths": declared_paths(tool_name, &tool_args),
-                                },
-                            }),
-                        )
-                        .await
-                    {
-                        response
-                            .get("result")
-                            .and_then(|v| v.as_str())
-                            .map(|s| s.to_string())
-                            .unwrap_or(result_text)
-                    } else {
-                        result_text
-                    }
-                } else {
-                    result_text
-                };
-                if let Some(bridge) = bridge.as_ref() {
-                    bridge.send_call_end(
-                        &tool_call_id,
-                        "tool",
-                        tool_name,
-                        tool_started_at.elapsed().as_millis() as u64,
-                        if is_rejected { "rejected" } else { "ok" },
-                        serde_json::json!({
-                            "tool_name": tool_name,
-                            "tool_use_id": tool_id,
-                            "iteration": iteration,
-                            "classification": classify_tool_mutation(tool_name),
-                            "declared_paths": declared_paths(tool_name, &tool_args),
-                            "result_chars": result_text.len(),
-                            "rejected": is_rejected,
-                        }),
-                    );
-                }
+                // Bridge-level PostToolUse gate has been retired. Hosts that
+                // need to observe or mutate a tool result subscribe to the
+                // AgentEvent stream — `ToolCallUpdate` events carry the
+                // outcome. Pipeline-side closure subscribers can still
+                // inject feedback via `agent_inject_feedback`.
+                // The terminal ToolCallUpdate event above already carries
+                // the final status; no direct bridge.send_call_end is
+                // needed. Sinks consume the event stream instead.
                 crate::tracing::span_end(tool_span_id);
 
                 // Record tool call result if recording mode is active.

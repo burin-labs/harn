@@ -886,7 +886,23 @@ pub async fn execute_stage_node(
                         .stop_after_successful_tools
                         .clone(),
                     require_successful_tools: node.model_policy.require_successful_tools.clone(),
-                    session_id: format!("workflow_stage_{}", uuid::Uuid::now_v7()),
+                    // Honor any caller-supplied session_id on the
+                    // model_policy so pipelines that install
+                    // agent_subscribe handlers keyed on that id actually
+                    // receive events. Falls back to a freshly minted id
+                    // when the caller hasn't specified one.
+                    session_id: node
+                        .raw_model_policy
+                        .as_ref()
+                        .and_then(|v| v.as_dict())
+                        .and_then(|d| d.get("session_id"))
+                        .and_then(|v| match v {
+                            crate::value::VmValue::String(s) if !s.trim().is_empty() => {
+                                Some(s.to_string())
+                            }
+                            _ => None,
+                        })
+                        .unwrap_or_else(|| format!("workflow_stage_{}", uuid::Uuid::now_v7())),
                     event_sink: None,
                     // Seed the ledger from the workflow stage's explicit
                     // deliverables/ledger fields so the graph can carry a

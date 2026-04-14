@@ -13,6 +13,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
+use harn_vm::agent_events::{
+    clear_session_sinks, register_sink, AgentEvent, AgentEventSink,
+};
 use harn_vm::visible_text::{sanitize_visible_assistant_text, VisibleTextState};
 use tokio::io::AsyncBufReadExt;
 use tokio::sync::{oneshot, Mutex};
@@ -302,6 +305,16 @@ impl AcpServer {
         let next_id = &self.next_id;
         let sid = session_id.clone();
 
+        // Register a per-session AgentEventSink that translates canonical
+        // AgentEvent variants into ACP session/update notifications. The
+        // turn loop (harn-vm::llm::agent) emits ToolCall / ToolCallUpdate
+        // events around every dispatch; without this sink the ACP client
+        // wouldn't observe tool lifecycle on the wire.
+        register_sink(
+            session_id.clone(),
+            Arc::new(AcpAgentEventSink::new(stdout_lock.clone())),
+        );
+
         // We need to construct a lightweight struct that the builtins can use
         // to send notifications and make client requests. We package the
         // relevant Arc/Rc references into an AcpBridge.
@@ -358,6 +371,11 @@ impl AcpServer {
         if let Some(session) = self.sessions.get_mut(&session_id) {
             session.host_bridge = None;
         }
+
+        // Unregister the AgentEventSink so the next prompt starts clean
+        // and a subsequent session re-using this id cannot receive stale
+        // events routed to a dropped stdout lock.
+        clear_session_sinks(&session_id);
 
         match result {
             Ok(output) => {
@@ -507,6 +525,12 @@ impl AcpBridge {
     }
 
     /// Send a structured `session/update` with progress phase, message, and data.
+    ///
+    /// `progress` is a harn vendor-extension session-update variant. The
+    /// canonical ACP `sessionUpdate` values (`agent_message_chunk`,
+    /// `agent_thought_chunk`, `tool_call`, `tool_call_update`, `plan`) do
+    /// not include a progress phase concept, so harn retains this as an
+    /// extension for pipeline-level progress reporting.
     fn send_progress(
         &self,
         phase: &str,
@@ -539,6 +563,9 @@ impl AcpBridge {
     }
 
     /// Send a structured `session/update` with log level, message, and fields.
+    ///
+    /// `log` is a harn vendor-extension session-update variant; canonical
+    /// ACP does not define a log channel on the session-update stream.
     fn send_log(&self, level: &str, message: &str, fields: Option<serde_json::Value>) {
         if level == "info" && suppress_default_info_log(message) {
             return;
@@ -572,67 +599,6 @@ impl AcpBridge {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clone()
-    }
-
-    /// Send a `session/update` with `call_start` — signals the beginning of
-    /// an LLM call, tool call, or builtin call for observability.
-    #[allow(dead_code)]
-    fn send_call_start(
-        &self,
-        call_id: &str,
-        call_type: &str,
-        name: &str,
-        metadata: serde_json::Value,
-    ) {
-        let script = self.get_script_name();
-        self.send_notification(
-            "session/update",
-            serde_json::json!({
-                "sessionId": self.session_id,
-                "update": {
-                    "sessionUpdate": "call_start",
-                    "content": {
-                        "toolCallId": call_id,
-                        "call_type": call_type,
-                        "name": name,
-                        "script": script,
-                        "metadata": metadata,
-                    },
-                },
-            }),
-        );
-    }
-
-    /// Send a `session/update` with `call_end` — signals completion of a call.
-    #[allow(dead_code)]
-    fn send_call_end(
-        &self,
-        call_id: &str,
-        call_type: &str,
-        name: &str,
-        duration_ms: u64,
-        status: &str,
-        metadata: serde_json::Value,
-    ) {
-        let script = self.get_script_name();
-        self.send_notification(
-            "session/update",
-            serde_json::json!({
-                "sessionId": self.session_id,
-                "update": {
-                    "sessionUpdate": "call_end",
-                    "content": {
-                        "toolCallId": call_id,
-                        "call_type": call_type,
-                        "name": name,
-                        "script": script,
-                        "duration_ms": duration_ms,
-                        "status": status,
-                        "metadata": metadata,
-                    },
-                },
-            }),
-        );
     }
 
     /// Send a JSON-RPC request to the client and await the response.
@@ -684,6 +650,146 @@ impl AcpBridge {
                     "Client did not respond to '{method}' within {timeout:?}"
                 )))
             }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// AgentEventSink — translates canonical AgentEvent variants into ACP
+// session/update notifications. Registered per-session at prompt start.
+// ---------------------------------------------------------------------------
+
+/// Writes canonical ACP `session/update` notifications for each
+/// `AgentEvent` the turn loop emits. Holds only the minimum state needed
+/// to serialize notifications without the full AcpBridge.
+struct AcpAgentEventSink {
+    stdout_lock: Arc<std::sync::Mutex<()>>,
+}
+
+impl AcpAgentEventSink {
+    fn new(stdout_lock: Arc<std::sync::Mutex<()>>) -> Self {
+        Self { stdout_lock }
+    }
+
+    fn write_notification(&self, params: serde_json::Value) {
+        let notification = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": params,
+        });
+        if let Ok(line) = serde_json::to_string(&notification) {
+            let _guard = self.stdout_lock.lock().unwrap_or_else(|e| e.into_inner());
+            let mut stdout = std::io::stdout().lock();
+            let _ = stdout.write_all(line.as_bytes());
+            let _ = stdout.write_all(b"\n");
+            let _ = stdout.flush();
+        }
+    }
+
+    fn status_str(status: harn_vm::agent_events::ToolCallStatus) -> &'static str {
+        use harn_vm::agent_events::ToolCallStatus::*;
+        match status {
+            Pending => "pending",
+            InProgress => "in_progress",
+            Completed => "completed",
+            Failed => "failed",
+        }
+    }
+}
+
+impl AgentEventSink for AcpAgentEventSink {
+    fn handle_event(&self, event: &AgentEvent) {
+        match event {
+            AgentEvent::AgentMessageChunk { session_id, content } => {
+                let visible = sanitize_visible_assistant_text(content, true);
+                self.write_notification(serde_json::json!({
+                    "sessionId": session_id,
+                    "update": {
+                        "sessionUpdate": "agent_message_chunk",
+                        "content": {
+                            "type": "text",
+                            "text": content,
+                            "visible_text": visible.clone(),
+                            "visible_delta": visible,
+                        },
+                    },
+                }));
+            }
+            AgentEvent::AgentThoughtChunk { session_id, content } => {
+                self.write_notification(serde_json::json!({
+                    "sessionId": session_id,
+                    "update": {
+                        "sessionUpdate": "agent_thought_chunk",
+                        "content": {
+                            "type": "text",
+                            "text": content,
+                        },
+                    },
+                }));
+            }
+            AgentEvent::ToolCall {
+                session_id,
+                tool_call_id,
+                tool_name,
+                kind,
+                status,
+                raw_input,
+            } => {
+                let mut update = serde_json::json!({
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": tool_call_id,
+                    "title": tool_name,
+                    "status": Self::status_str(*status),
+                    "rawInput": raw_input,
+                });
+                if let Some(k) = kind {
+                    update["kind"] = serde_json::to_value(k).unwrap_or_default();
+                }
+                self.write_notification(serde_json::json!({
+                    "sessionId": session_id,
+                    "update": update,
+                }));
+            }
+            AgentEvent::ToolCallUpdate {
+                session_id,
+                tool_call_id,
+                tool_name,
+                status,
+                raw_output,
+                error,
+            } => {
+                let mut update = serde_json::json!({
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": tool_call_id,
+                    "title": tool_name,
+                    "status": Self::status_str(*status),
+                });
+                if let Some(out) = raw_output {
+                    update["rawOutput"] = out.clone();
+                }
+                if let Some(err) = error {
+                    update["error"] = serde_json::Value::String(err.clone());
+                }
+                self.write_notification(serde_json::json!({
+                    "sessionId": session_id,
+                    "update": update,
+                }));
+            }
+            AgentEvent::Plan { session_id, plan } => {
+                self.write_notification(serde_json::json!({
+                    "sessionId": session_id,
+                    "update": {
+                        "sessionUpdate": "plan",
+                        "plan": plan,
+                    },
+                }));
+            }
+            // Internal variants (TurnStart/TurnEnd/FeedbackInjected) are
+            // pipeline-loop milestones and have no canonical ACP mapping;
+            // we deliberately do not forward them as session/update.
+            AgentEvent::TurnStart { .. }
+            | AgentEvent::TurnEnd { .. }
+            | AgentEvent::FeedbackInjected { .. } => {}
         }
     }
 }
