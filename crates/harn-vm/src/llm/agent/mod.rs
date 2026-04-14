@@ -2385,5 +2385,5 @@ pub async fn run_agent_loop_internal(
 /// 2. Execute tool calls via the bridge (delegated to host)
 /// 3. Feed tool results back into the conversation
 #[cfg(test)]
-#[path = "agent_tests.rs"]
+#[path = "../agent_tests.rs"]
 mod tests;
