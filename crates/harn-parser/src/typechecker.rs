@@ -481,6 +481,11 @@ pub struct TypeChecker {
     /// Lexical depth of enclosing function-like bodies (fn/tool/pipeline/closure).
     /// `try*` requires `fn_depth > 0` so the rethrow has a body to live in.
     fn_depth: usize,
+    /// Maps function name -> deprecation metadata `(since, use_hint)`. Populated
+    /// when an `@deprecated` attribute is encountered on a top-level fn decl
+    /// during the `check_inner` pre-pass; consulted at every `FunctionCall`
+    /// site to emit a warning + help line.
+    deprecated_fns: std::collections::HashMap<String, (Option<String>, Option<String>)>,
 }
 
 impl TypeChecker {
@@ -508,6 +513,7 @@ impl TypeChecker {
             hints: Vec::new(),
             strict_types: false,
             fn_depth: 0,
+            deprecated_fns: std::collections::HashMap::new(),
         }
     }
 
@@ -521,6 +527,7 @@ impl TypeChecker {
             hints: Vec::new(),
             strict_types: strict,
             fn_depth: 0,
+            deprecated_fns: std::collections::HashMap::new(),
         }
     }
 
@@ -623,8 +630,43 @@ impl TypeChecker {
             }
         }
 
+        // Pre-pass: index `@deprecated` attributes on top-level fn decls so
+        // `check_call` (and the standalone deprecation visitor below) can
+        // flag callers anywhere in the program.
         for snode in program {
-            match &snode.node {
+            if let Node::AttributedDecl { attributes, inner } = &snode.node {
+                if let Node::FnDecl { name, .. } = &inner.node {
+                    for attr in attributes {
+                        if attr.name == "deprecated" {
+                            let since = attr.string_arg("since");
+                            let use_hint = attr.string_arg("use");
+                            self.deprecated_fns.insert(name.clone(), (since, use_hint));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Walk every node looking for FunctionCalls of deprecated names.
+        // This catches calls in contexts (e.g. `let x = old_fn()`) where
+        // `check_node`'s FunctionCall arm doesn't fire because the value
+        // is inferred rather than checked.
+        if !self.deprecated_fns.is_empty() {
+            for snode in program {
+                self.visit_for_deprecation(snode);
+            }
+        }
+
+        for snode in program {
+            // Transparently process attributed wrappers around top-level
+            // declarations. Attribute-specific semantics (deprecation,
+            // unknown-attribute warnings) were already applied above and
+            // by `check_attributes`.
+            let inner_node = match &snode.node {
+                Node::AttributedDecl { inner, .. } => inner.as_ref(),
+                _ => snode,
+            };
+            match &inner_node.node {
                 Node::Pipeline { params, body, .. } => {
                     let mut child = self.scope.child();
                     for p in params {
@@ -1966,6 +2008,38 @@ impl TypeChecker {
                 self.check_block(body, &mut decl_scope);
                 self.fn_depth -= 1;
             }
+            Node::AttributedDecl { attributes, inner } => {
+                self.check_attributes(attributes, inner);
+                self.check_node(inner, scope);
+            }
+        }
+    }
+
+    /// Validate attribute usage and emit warnings for unknown attributes.
+    /// Recognized attribute names: `deprecated`, `test`, `complexity`,
+    /// `acp_tool`. All other names produce a warning so misspellings
+    /// surface early without breaking compilation.
+    fn check_attributes(&mut self, attributes: &[Attribute], inner: &SNode) {
+        for attr in attributes {
+            match attr.name.as_str() {
+                "deprecated" | "test" | "complexity" | "acp_tool" => {}
+                other => {
+                    self.warning_at(format!("unknown attribute `@{}`", other), attr.span);
+                }
+            }
+            // `@test` only applies to functions.
+            if attr.name == "test" && !matches!(inner.node, Node::FnDecl { .. }) {
+                self.warning_at(
+                    "`@test` only applies to function declarations".to_string(),
+                    attr.span,
+                );
+            }
+            if attr.name == "acp_tool" && !matches!(inner.node, Node::FnDecl { .. }) {
+                self.warning_at(
+                    "`@acp_tool` only applies to function declarations".to_string(),
+                    attr.span,
+                );
+            }
         }
     }
 
@@ -3139,7 +3213,238 @@ impl TypeChecker {
         }
     }
 
+    /// Recursively scan an AST node for FunctionCalls whose name is in
+    /// `self.deprecated_fns`, emitting a warning at each call site.
+    /// Standalone from `check_call` so it works even in expression
+    /// positions where `check_node` only triggers `infer_type`.
+    fn visit_for_deprecation(&mut self, node: &SNode) {
+        match &node.node {
+            Node::FunctionCall { name, args } => {
+                if let Some((since, use_hint)) = self.deprecated_fns.get(name).cloned() {
+                    let mut msg = format!("`{name}` is deprecated");
+                    if let Some(s) = since {
+                        msg.push_str(&format!(" (since {s})"));
+                    }
+                    match use_hint {
+                        Some(h) => {
+                            self.warning_at_with_help(msg, node.span, format!("use `{h}` instead"))
+                        }
+                        None => self.warning_at(msg, node.span),
+                    }
+                }
+                for a in args {
+                    self.visit_for_deprecation(a);
+                }
+            }
+            Node::MethodCall { object, args, .. }
+            | Node::OptionalMethodCall { object, args, .. } => {
+                self.visit_for_deprecation(object);
+                for a in args {
+                    self.visit_for_deprecation(a);
+                }
+            }
+            Node::AttributedDecl { inner, .. } => self.visit_for_deprecation(inner),
+            Node::Pipeline { body, .. }
+            | Node::OverrideDecl { body, .. }
+            | Node::FnDecl { body, .. }
+            | Node::ToolDecl { body, .. }
+            | Node::SpawnExpr { body }
+            | Node::TryExpr { body }
+            | Node::Block(body)
+            | Node::Closure { body, .. }
+            | Node::WhileLoop { body, .. }
+            | Node::Retry { body, .. }
+            | Node::DeferStmt { body }
+            | Node::MutexBlock { body }
+            | Node::Parallel { body, .. } => {
+                for s in body {
+                    self.visit_for_deprecation(s);
+                }
+            }
+            Node::IfElse {
+                condition,
+                then_body,
+                else_body,
+            } => {
+                self.visit_for_deprecation(condition);
+                for s in then_body {
+                    self.visit_for_deprecation(s);
+                }
+                if let Some(eb) = else_body {
+                    for s in eb {
+                        self.visit_for_deprecation(s);
+                    }
+                }
+            }
+            Node::ForIn { iterable, body, .. } => {
+                self.visit_for_deprecation(iterable);
+                for s in body {
+                    self.visit_for_deprecation(s);
+                }
+            }
+            Node::TryCatch {
+                body,
+                catch_body,
+                finally_body,
+                ..
+            } => {
+                for s in body {
+                    self.visit_for_deprecation(s);
+                }
+                for s in catch_body {
+                    self.visit_for_deprecation(s);
+                }
+                if let Some(fb) = finally_body {
+                    for s in fb {
+                        self.visit_for_deprecation(s);
+                    }
+                }
+            }
+            Node::DeadlineBlock { duration, body } => {
+                self.visit_for_deprecation(duration);
+                for s in body {
+                    self.visit_for_deprecation(s);
+                }
+            }
+            Node::MatchExpr { value, arms } => {
+                self.visit_for_deprecation(value);
+                for arm in arms {
+                    if let Some(g) = &arm.guard {
+                        self.visit_for_deprecation(g);
+                    }
+                    for s in &arm.body {
+                        self.visit_for_deprecation(s);
+                    }
+                }
+            }
+            Node::LetBinding { value, .. } | Node::VarBinding { value, .. } => {
+                self.visit_for_deprecation(value);
+            }
+            Node::Assignment { target, value, .. } => {
+                self.visit_for_deprecation(target);
+                self.visit_for_deprecation(value);
+            }
+            Node::ReturnStmt { value: Some(v) } | Node::YieldExpr { value: Some(v) } => {
+                self.visit_for_deprecation(v);
+            }
+            Node::ThrowStmt { value }
+            | Node::TryOperator { operand: value }
+            | Node::TryStar { operand: value }
+            | Node::Spread(value) => self.visit_for_deprecation(value),
+            Node::UnaryOp { operand, .. } => self.visit_for_deprecation(operand),
+            Node::BinaryOp { left, right, .. } => {
+                self.visit_for_deprecation(left);
+                self.visit_for_deprecation(right);
+            }
+            Node::Ternary {
+                condition,
+                true_expr,
+                false_expr,
+            } => {
+                self.visit_for_deprecation(condition);
+                self.visit_for_deprecation(true_expr);
+                self.visit_for_deprecation(false_expr);
+            }
+            Node::PropertyAccess { object, .. } | Node::OptionalPropertyAccess { object, .. } => {
+                self.visit_for_deprecation(object)
+            }
+            Node::SubscriptAccess { object, index } => {
+                self.visit_for_deprecation(object);
+                self.visit_for_deprecation(index);
+            }
+            Node::SliceAccess { object, start, end } => {
+                self.visit_for_deprecation(object);
+                if let Some(s) = start {
+                    self.visit_for_deprecation(s);
+                }
+                if let Some(e) = end {
+                    self.visit_for_deprecation(e);
+                }
+            }
+            Node::EnumConstruct { args, .. } | Node::ListLiteral(args) => {
+                for a in args {
+                    self.visit_for_deprecation(a);
+                }
+            }
+            Node::DictLiteral(entries)
+            | Node::StructConstruct {
+                fields: entries, ..
+            } => {
+                for e in entries {
+                    self.visit_for_deprecation(&e.key);
+                    self.visit_for_deprecation(&e.value);
+                }
+            }
+            Node::GuardStmt {
+                condition,
+                else_body,
+            } => {
+                self.visit_for_deprecation(condition);
+                for s in else_body {
+                    self.visit_for_deprecation(s);
+                }
+            }
+            Node::RequireStmt {
+                condition, message, ..
+            } => {
+                self.visit_for_deprecation(condition);
+                if let Some(m) = message {
+                    self.visit_for_deprecation(m);
+                }
+            }
+            Node::RangeExpr { start, end, .. } => {
+                self.visit_for_deprecation(start);
+                self.visit_for_deprecation(end);
+            }
+            Node::SelectExpr {
+                cases,
+                timeout,
+                default_body,
+            } => {
+                for c in cases {
+                    self.visit_for_deprecation(&c.channel);
+                    for s in &c.body {
+                        self.visit_for_deprecation(s);
+                    }
+                }
+                if let Some((d, b)) = timeout {
+                    self.visit_for_deprecation(d);
+                    for s in b {
+                        self.visit_for_deprecation(s);
+                    }
+                }
+                if let Some(b) = default_body {
+                    for s in b {
+                        self.visit_for_deprecation(s);
+                    }
+                }
+            }
+            Node::ImplBlock { methods, .. } => {
+                for m in methods {
+                    self.visit_for_deprecation(m);
+                }
+            }
+            // Terminals / decls without nested expressions of interest
+            _ => {}
+        }
+    }
+
     fn check_call(&mut self, name: &str, args: &[SNode], scope: &mut TypeScope, span: Span) {
+        // Deprecation: emit a warning at every call site of an `@deprecated`
+        // function, including `since:` and `use:` hints when present.
+        // (Also covered by the visit_for_deprecation pass; keep both so
+        // callers reachable only through one path are still flagged.)
+        if let Some((since, use_hint)) = self.deprecated_fns.get(name).cloned() {
+            let mut msg = format!("`{name}` is deprecated");
+            if let Some(s) = since {
+                msg.push_str(&format!(" (since {s})"));
+            }
+            let help = use_hint.map(|h| format!("use `{h}` instead"));
+            match help {
+                Some(h) => self.warning_at_with_help(msg, span, h),
+                None => self.warning_at(msg, span),
+            }
+        }
         // Special-case: unreachable(x) — when the argument is a variable,
         // verify it has been narrowed to `never` (exhaustiveness check).
         if name == "unreachable" {

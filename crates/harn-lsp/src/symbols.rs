@@ -784,6 +784,10 @@ fn collect_symbols(
         | Node::YieldExpr { value: None }
         | Node::BreakStmt
         | Node::ContinueStmt => {}
+
+        Node::AttributedDecl { inner, .. } => {
+            collect_symbols(inner, symbols, scope_span, source, None);
+        }
     }
 }
 

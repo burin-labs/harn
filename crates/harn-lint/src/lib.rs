@@ -114,6 +114,10 @@ struct Linter<'a> {
     /// `return <iter-chain>` inside a function declared to return a
     /// concrete collection.
     return_type_stack: Vec<Option<TypeExpr>>,
+    /// Tracks how many enclosing `@complexity(allow)` attributes are
+    /// active. When > 0, the cyclomatic-complexity rule is suppressed
+    /// for the contained function.
+    complexity_suppression_depth: usize,
 }
 
 impl<'a> Linter<'a> {
@@ -139,6 +143,7 @@ impl<'a> Linter<'a> {
             type_declarations: Vec::new(),
             type_references: HashSet::new(),
             return_type_stack: Vec::new(),
+            complexity_suppression_depth: 0,
         }
     }
 
@@ -593,7 +598,7 @@ impl<'a> Linter<'a> {
                     self.type_references.insert(clause.bound.clone());
                 }
                 let complexity = cyclomatic_complexity(body);
-                if complexity > 10 {
+                if complexity > 10 && self.complexity_suppression_depth == 0 {
                     self.diagnostics.push(LintDiagnostic {
                         rule: "cyclomatic-complexity",
                         message: format!(
@@ -642,7 +647,7 @@ impl<'a> Linter<'a> {
                     self.record_type_expr_references(type_expr);
                 }
                 let complexity = cyclomatic_complexity(body);
-                if complexity > 10 {
+                if complexity > 10 && self.complexity_suppression_depth == 0 {
                     self.diagnostics.push(LintDiagnostic {
                         rule: "cyclomatic-complexity",
                         message: format!(
@@ -1472,6 +1477,23 @@ impl<'a> Linter<'a> {
                         )),
                         fix: None,
                     });
+                }
+            }
+
+            Node::AttributedDecl { attributes, inner } => {
+                let suppresses_complexity = attributes.iter().any(|a| {
+                    a.name == "complexity"
+                        && a.args.iter().any(|arg| {
+                            arg.name.is_none()
+                                && matches!(&arg.value.node, Node::Identifier(s) if s == "allow")
+                        })
+                });
+                if suppresses_complexity {
+                    self.complexity_suppression_depth += 1;
+                }
+                self.lint_node(inner);
+                if suppresses_complexity {
+                    self.complexity_suppression_depth -= 1;
                 }
             }
         }

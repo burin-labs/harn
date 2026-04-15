@@ -1,0 +1,20 @@
+// Smoke test: parser accepts stacked attributes on a top-level decl
+// and the runtime executes the underlying function unchanged.
+@deprecated(since: "0.8", use: "compute_v2")
+pub fn compute_legacy(x: int) -> int {
+  return x + 1
+}
+
+pub fn compute_v2(x: int) -> int {
+  return x + 2
+}
+
+@test
+pipeline test_attribute_smoke(task) {
+  // Don't call the deprecated fn — that would emit a typecheck
+  // warning that conformance would diff against. The point of this
+  // test is just that `@deprecated` parses and that `@test` flags a
+  // pipeline as a test entry point.
+  assert(compute_v2(2) == 4, "v2 still callable")
+  log("attributes_basic ok")
+}

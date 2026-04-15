@@ -1,0 +1,17 @@
+// `@acp_tool` desugars to a runtime tool_define call. The attribute
+// args populate ToolAnnotations (kind, side_effect_level, etc.) on the
+// returned tool entry.
+//
+// Note: tool_registry() in the current runtime returns a fresh registry
+// per call rather than a global, so the registration's side effect
+// isn't observable across calls. This test just verifies the function
+// remains directly callable and the attribute compiles cleanly.
+@acp_tool(name: "echo", kind: "read", side_effect_level: "none")
+pub fn echo(msg: string) -> string {
+  return msg
+}
+
+pipeline test_acp_tool(task) {
+  assert(echo("hello") == "hello", "function still callable")
+  log("attributes_acp_tool ok")
+}

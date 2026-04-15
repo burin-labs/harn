@@ -48,9 +48,57 @@ module.exports = grammar({
 
     _top_level_item: ($) =>
       choice(
+        $.attributed_declaration,
         $.pipeline_declaration,
         $.import_declaration,
         $._statement
+      ),
+
+    // Attributes: `@name` or `@name(arg, key: value)`. Stack on the
+    // declaration that follows. Mirrors the parser in
+    // crates/harn-parser/src/parser.rs (parse_attributed_decl).
+    attributed_declaration: ($) =>
+      seq(
+        repeat1(seq($.attribute, optional($._line_sep))),
+        choice(
+          $.pipeline_declaration,
+          $.fn_declaration,
+          $.struct_declaration,
+          $.enum_declaration,
+          $.type_declaration,
+          $.interface_declaration,
+          $.impl_block
+        )
+      ),
+
+    attribute: ($) =>
+      seq(
+        "@",
+        field("name", $.identifier),
+        optional(seq(
+          "(",
+          optional(commaSep1($.attribute_arg)),
+          optional(","),
+          ")"
+        ))
+      ),
+
+    attribute_arg: ($) =>
+      choice(
+        seq(field("name", $.identifier), ":", field("value", $._attribute_value)),
+        $._attribute_value
+      ),
+
+    _attribute_value: ($) =>
+      choice(
+        $.string_literal,
+        $.raw_string_literal,
+        $.integer_literal,
+        $.float_literal,
+        $.true,
+        $.false,
+        $.nil,
+        $.identifier
       ),
 
     _newline: (_) => "\n",

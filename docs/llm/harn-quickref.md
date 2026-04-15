@@ -125,6 +125,29 @@ Top-level mutable `var` cross-fn mutation is not fully supported yet
 shared mutable state across functions, use atomics (`atomic(0)`,
 `atomic_add`, `atomic_get`) or a channel.
 
+## Attributes (`@name(...)`)
+
+Declarative metadata on a top-level decl. Stack any number; each line
+attaches to the **next** declaration. Args are literals only (no expr
+evaluation).
+
+```harn
+@deprecated(since: "0.8", use: "compute_v2")
+@test
+pub fn compute(x: int) -> int { return x + 1 }
+```
+
+| Attr | Effect |
+|---|---|
+| `@deprecated(since: "X", use: "Y")` | Type-check warning at every call site (both args optional). |
+| `@test` | Marks a `pipeline` as a test. `harn test` discovers it alongside the legacy `test_*` naming convention. |
+| `@complexity(allow)` | Suppresses the `cyclomatic-complexity` lint warning on this fn. |
+| `@acp_tool(name: "X", kind: "edit", side_effect_level: "mutation", ...)` | Compiles to `tool_define(...)` with the fn as the handler and the named args (minus `name`) lifted into `annotations`. `name` defaults to the fn name. |
+
+Unknown attribute names produce a type-checker warning (typo guard)
+but don't break compilation. Attached to any non-decl statement is a
+parse error.
+
 ## Typing: `any` vs `unknown` vs no annotation
 
 Harn is gradually typed. Three levels of "I don't know the type yet":

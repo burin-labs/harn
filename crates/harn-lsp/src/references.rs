@@ -287,6 +287,9 @@ fn collect_references(snode: &SNode, target_name: &str, refs: &mut Vec<Span>) {
                 refs.push(snode.span);
             }
         }
+        Node::AttributedDecl { inner, .. } => {
+            collect_references(inner, target_name, refs);
+        }
         // Terminals
         _ => {}
     }

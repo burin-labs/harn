@@ -90,6 +90,8 @@ impl Parser {
 
             let result = if self.check(&TokenKind::Import) {
                 self.parse_import()
+            } else if self.check(&TokenKind::At) {
+                self.parse_attributed_decl()
             } else if self.check(&TokenKind::Pipeline) {
                 self.parse_pipeline()
             } else {
@@ -276,6 +278,7 @@ impl Parser {
         })?;
 
         match &tok.kind {
+            TokenKind::At => self.parse_attributed_decl(),
             TokenKind::Let => self.parse_let_binding(),
             TokenKind::Var => self.parse_var_binding(),
             TokenKind::If => self.parse_if_else(),
@@ -895,6 +898,144 @@ impl Parser {
             },
             Span::merge(start, self.prev_span()),
         ))
+    }
+
+    /// Parse one or more `@attr` / `@attr(args)` attributes followed by a
+    /// declaration. Returns an `AttributedDecl` wrapping the underlying
+    /// declaration. Attributes attach to the next declaration only;
+    /// statements other than declarations after `@attr` raise a parse
+    /// error.
+    fn parse_attributed_decl(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
+        let mut attributes = Vec::new();
+        while self.check(&TokenKind::At) {
+            attributes.push(self.parse_one_attribute()?);
+            self.skip_newlines();
+        }
+        // `pipeline` is a top-level form that parse_statement doesn't
+        // dispatch to. Route directly so `@attr pipeline foo(...)` works.
+        let inner = if self.check(&TokenKind::Pipeline) {
+            self.parse_pipeline()?
+        } else {
+            self.parse_statement()?
+        };
+        match &inner.node {
+            Node::FnDecl { .. }
+            | Node::ToolDecl { .. }
+            | Node::Pipeline { .. }
+            | Node::StructDecl { .. }
+            | Node::EnumDecl { .. }
+            | Node::TypeDecl { .. }
+            | Node::InterfaceDecl { .. }
+            | Node::ImplBlock { .. } => {}
+            _ => {
+                return Err(ParserError::Unexpected {
+                    got: "non-declaration statement".into(),
+                    expected:
+                        "fn/tool/pipeline/struct/enum/type/interface/impl declaration after `@attr`"
+                            .into(),
+                    span: inner.span,
+                });
+            }
+        }
+        Ok(spanned(
+            Node::AttributedDecl {
+                attributes,
+                inner: Box::new(inner),
+            },
+            Span::merge(start, self.prev_span()),
+        ))
+    }
+
+    fn parse_one_attribute(&mut self) -> Result<Attribute, ParserError> {
+        let at_span = self.current_span();
+        self.consume(&TokenKind::At, "@")?;
+        let name_span = self.current_span();
+        let name = self.consume_identifier("attribute name")?;
+        let mut args = Vec::new();
+        if self.check(&TokenKind::LParen) {
+            self.advance();
+            while !self.check(&TokenKind::RParen) {
+                args.push(self.parse_attribute_arg()?);
+                if self.check(&TokenKind::Comma) {
+                    self.advance();
+                    self.skip_newlines();
+                } else {
+                    break;
+                }
+            }
+            self.consume(&TokenKind::RParen, ")")?;
+        }
+        let _ = name_span;
+        Ok(Attribute {
+            name,
+            args,
+            span: Span::merge(at_span, self.prev_span()),
+        })
+    }
+
+    fn parse_attribute_arg(&mut self) -> Result<AttributeArg, ParserError> {
+        let start = self.current_span();
+        // Detect `key: value` form by looking ahead.
+        if let (Some(t1), Some(t2)) = (self.peek_kind_at(0), self.peek_kind_at(1)) {
+            if matches!(t1, TokenKind::Identifier(_)) && matches!(t2, TokenKind::Colon) {
+                let key = self.consume_identifier("argument name")?;
+                self.consume(&TokenKind::Colon, ":")?;
+                let value = self.parse_attribute_value()?;
+                return Ok(AttributeArg {
+                    name: Some(key),
+                    value,
+                    span: Span::merge(start, self.prev_span()),
+                });
+            }
+        }
+        let value = self.parse_attribute_value()?;
+        Ok(AttributeArg {
+            name: None,
+            value,
+            span: Span::merge(start, self.prev_span()),
+        })
+    }
+
+    /// Parse a literal-or-identifier expression for an attribute argument.
+    /// Restricted to keep attribute evaluation purely compile-time:
+    /// strings, ints, floats, bools, nil, and bare identifiers (typically
+    /// type names like `EditArgs` or sentinel values like `allow`).
+    fn parse_attribute_value(&mut self) -> Result<SNode, ParserError> {
+        let span = self.current_span();
+        let tok = self.current().ok_or_else(|| ParserError::UnexpectedEof {
+            expected: "attribute value".into(),
+            span: self.prev_span(),
+        })?;
+        let node = match &tok.kind {
+            TokenKind::StringLiteral(s) => Node::StringLiteral(s.clone()),
+            TokenKind::RawStringLiteral(s) => Node::RawStringLiteral(s.clone()),
+            TokenKind::IntLiteral(i) => Node::IntLiteral(*i),
+            TokenKind::FloatLiteral(f) => Node::FloatLiteral(*f),
+            TokenKind::True => Node::BoolLiteral(true),
+            TokenKind::False => Node::BoolLiteral(false),
+            TokenKind::Nil => Node::NilLiteral,
+            TokenKind::Identifier(name) => Node::Identifier(name.clone()),
+            TokenKind::Minus => {
+                self.advance();
+                let inner_tok = self.current().ok_or_else(|| ParserError::UnexpectedEof {
+                    expected: "number after '-'".into(),
+                    span: self.prev_span(),
+                })?;
+                let n = match &inner_tok.kind {
+                    TokenKind::IntLiteral(i) => Node::IntLiteral(-i),
+                    TokenKind::FloatLiteral(f) => Node::FloatLiteral(-f),
+                    _ => {
+                        return Err(self.error("number after '-' in attribute argument"));
+                    }
+                };
+                self.advance();
+                return Ok(spanned(n, Span::merge(span, self.prev_span())));
+            }
+            _ => return Err(self.error("attribute argument value (literal or identifier)")),
+        };
+        self.advance();
+        Ok(spanned(node, span))
     }
 
     fn parse_fn_decl_with_pub(&mut self, is_pub: bool) -> Result<SNode, ParserError> {

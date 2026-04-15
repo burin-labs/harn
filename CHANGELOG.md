@@ -7,6 +7,34 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## Unreleased
+
+### Added
+
+- **Attribute / decorator surface (`@name(...)`).** Top-level
+  declarations (`pipeline`, `fn`, `tool`, `struct`, `enum`, `type`,
+  `interface`, `impl`) can now carry one or more attributes. The
+  initial set is:
+  - `@deprecated(since: "X", use: "Y")` — type-checker warning at
+    every call site, with both args optional.
+  - `@test` — marks a `pipeline` as a test entry point, recognized
+    by `harn test conformance` alongside the legacy `test_*` naming
+    convention.
+  - `@complexity(allow)` — suppresses the `cyclomatic-complexity` lint
+    on the attached function.
+  - `@acp_tool(name: ..., kind: ..., side_effect_level: ..., ...)` —
+    desugars to a runtime `tool_define(...)` call with the attached
+    function bound as the handler and named args (other than `name`)
+    lifted into the `annotations` dict so `ToolAnnotations` flows
+    through ACP/A2A unchanged.
+
+  Attribute arguments are restricted to literal values (strings,
+  numbers, `true`/`false`/`nil`, bare identifiers) — there is no
+  runtime evaluation. Unknown attribute names produce a type-checker
+  warning so misspellings surface at check time. Documented in
+  `spec/HARN_SPEC.md` ("Attributes" section) and the quickref.
+  Resolves [#30](https://github.com/burin-labs/harn/issues/30).
+
 ## v0.7.6
 
 ### Added

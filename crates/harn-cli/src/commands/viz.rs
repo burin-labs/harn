@@ -456,6 +456,14 @@ fn summarize_node(node: &SNode) -> String {
         Node::Parallel { .. } => "parallel".to_string(),
         Node::SelectExpr { .. } => "select".to_string(),
         Node::Block(body) => format!("block ({} statements)", body.len()),
+        Node::AttributedDecl { attributes, inner } => {
+            let attr_names = attributes
+                .iter()
+                .map(|a| format!("@{}", a.name))
+                .collect::<Vec<_>>()
+                .join(" ");
+            format!("{} {}", attr_names, summarize_node(inner))
+        }
     }
 }
 

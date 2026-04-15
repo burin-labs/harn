@@ -230,13 +230,20 @@ impl Vm {
             let mut public_names: HashSet<String> = HashSet::new();
 
             for node in program {
+                // Imports may carry `@deprecated` / `@test` etc. on top-level
+                // fn decls; transparently peel the wrapper before pattern
+                // matching the FnDecl shape.
+                let inner = match &node.node {
+                    harn_parser::Node::AttributedDecl { inner, .. } => inner.as_ref(),
+                    _ => node,
+                };
                 let harn_parser::Node::FnDecl {
                     name,
                     params,
                     body,
                     is_pub,
                     ..
-                } = &node.node
+                } = &inner.node
                 else {
                     continue;
                 };

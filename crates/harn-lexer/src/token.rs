@@ -227,6 +227,7 @@ pub enum TokenKind {
     Comma,     // ,
     Colon,     // :
     Semicolon, // ;
+    At,        // @ (attribute prefix)
 
     LineComment {
         text: String,
@@ -331,6 +332,7 @@ impl fmt::Display for TokenKind {
             TokenKind::Comma => write!(f, ","),
             TokenKind::Colon => write!(f, ":"),
             TokenKind::Semicolon => write!(f, ";"),
+            TokenKind::At => write!(f, "@"),
             TokenKind::LineComment { text, is_doc } => {
                 let prefix = if *is_doc { "///" } else { "//" };
                 write!(f, "{prefix} {text}")

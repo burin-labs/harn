@@ -144,6 +144,7 @@ fn token_kind_to_semantic(kind: &TokenKind) -> Option<u32> {
         | TokenKind::Comma
         | TokenKind::Colon
         | TokenKind::Semicolon
+        | TokenKind::At
         | TokenKind::Newline
         | TokenKind::Eof => None,
     }

@@ -912,6 +912,7 @@ fn node_children_bundle(node: &SNode) -> Vec<&SNode> {
         | Node::DurationLiteral(_)
         | Node::BreakStmt
         | Node::ContinueStmt => Vec::new(),
+        Node::AttributedDecl { inner, .. } => vec![inner.as_ref()],
     }
 }
 
@@ -1537,6 +1538,15 @@ fn collect_mock_host_capabilities_from_node(
         | Node::BreakStmt
         | Node::ContinueStmt => {
             let _ = source;
+        }
+        Node::AttributedDecl { inner, .. } => {
+            collect_mock_host_capabilities_from_node(
+                inner,
+                file_path,
+                source,
+                visited,
+                capabilities,
+            );
         }
     }
 }
@@ -2540,6 +2550,17 @@ fn scan_node_preflight(
         | Node::Identifier(_)
         | Node::BreakStmt
         | Node::ContinueStmt => {}
+        Node::AttributedDecl { inner, .. } => {
+            scan_node_preflight(
+                inner,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
+        }
     }
 }
 

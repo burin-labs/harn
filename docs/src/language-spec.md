@@ -267,6 +267,7 @@ let doc = """
 | `,` | `.comma` |
 | `:` | `.colon` |
 | `;` | `.semicolon` |
+| `@` | `.at` (attribute prefix) |
 
 ### Special tokens
 
@@ -286,8 +287,18 @@ before checking the expected token.
 ```ebnf
 program            ::= (top_level | NEWLINE)*
 top_level          ::= import_decl
+                     | attributed_decl
                      | pipeline_decl
                      | statement
+
+attributed_decl    ::= attribute+ (pipeline_decl | fn_decl | tool_decl
+                                  | struct_decl | enum_decl | type_decl
+                                  | interface_decl | impl_block)
+attribute          ::= '@' IDENTIFIER ['(' attr_arg (',' attr_arg)* [','] ')']
+attr_arg           ::= [IDENTIFIER ':'] attr_value
+attr_value         ::= STRING_LITERAL | RAW_STRING | INT_LITERAL
+                     | FLOAT_LITERAL | 'true' | 'false' | 'nil'
+                     | IDENTIFIER | '-' INT_LITERAL | '-' FLOAT_LITERAL
 
 import_decl        ::= 'import' STRING_LITERAL
                      | 'import' '{' IDENTIFIER (',' IDENTIFIER)* '}'
@@ -1805,6 +1816,107 @@ type Box<out T> = fn(T) -> int
 // ERROR: type parameter 'T' is declared 'out' (covariant) but appears
 // in a contravariant position in type alias 'Box'
 ```
+
+## Attributes
+
+Attributes are declarative metadata attached to a top-level declaration
+with the `@` prefix. They compile to side-effects (warnings, runtime
+registrations) at the attached declaration, and stack so a single decl
+can carry multiple. Arguments are restricted to literal values
+(strings, numbers, booleans, `nil`, bare identifiers) — no runtime
+evaluation, no expressions.
+
+### Syntax
+
+```ebnf
+attribute    ::= '@' IDENTIFIER ['(' attr_arg (',' attr_arg)* [','] ')']
+attr_arg     ::= [IDENTIFIER ':'] attr_value
+attr_value   ::= literal | IDENTIFIER
+```
+
+```harn
+@deprecated(since: "0.8", use: "compute_v2")
+@test
+pub fn compute(x: int) -> int { return x + 1 }
+```
+
+Attributes attach to the **immediately following** declaration —
+either `pipeline`, `fn`, `tool`, `struct`, `enum`, `type`, `interface`,
+or `impl`. Attaching to anything else (a `let`, a statement) is a parse
+error.
+
+### Standard attributes
+
+#### `@deprecated`
+
+```harn,ignore
+@deprecated(since: "0.8", use: "new_fn")
+pub fn old_fn() -> int { ... }
+```
+
+Emits a type-checker warning at every call site of the attributed
+function. Both arguments are optional; when present they are folded
+into the warning message.
+
+| Argument | Type | Meaning |
+|---|---|---|
+| `since` | string | Version that introduced the deprecation |
+| `use` | string | Replacement function name (rendered as a help line) |
+
+#### `@test`
+
+```harn,ignore
+@test
+pipeline test_smoke(task) { ... }
+```
+
+Marks a pipeline as a test entry point. The conformance / `harn test`
+runner discovers attributed pipelines in addition to the legacy
+`test_*` naming convention. Both forms continue to work.
+
+#### `@complexity(allow)`
+
+```harn,ignore
+@complexity(allow)
+pub fn classify(x: int) -> string {
+  if x == 1 { return "one" }
+  ...
+}
+```
+
+Suppresses the `cyclomatic-complexity` lint warning on the attached
+function. The bare `allow` identifier is the only currently accepted
+form.
+
+#### `@acp_tool`
+
+```harn,ignore
+@acp_tool(name: "edit", kind: "edit", side_effect_level: "mutation")
+pub fn apply_edit(path: string, content: string) -> EditResult { ... }
+```
+
+Compiles to the same runtime registration as an imperative
+`tool_define(tool_registry(), name, "", { handler, annotations })`
+call, with the function bound as the tool's `handler` and every named
+attribute argument (other than `name`) lifted into the
+`annotations` dict. `name` defaults to the function name when
+omitted.
+
+| Argument | Type | Meaning |
+|---|---|---|
+| `name` | string | Tool name (defaults to fn name) |
+| `kind` | string | One of `read`, `edit`, `delete`, `move`, `search`, `execute`, `think`, `fetch`, `other` |
+| `side_effect_level` | string | `none`, `read`, `mutation`, `destructive` |
+
+Other named arguments pass through to the annotations dict unchanged,
+so additional `ToolAnnotations` fields can be added without a parser
+change.
+
+### Unknown attributes
+
+Unknown attribute names produce a type-checker warning so that
+misspellings surface at check time. The attribute itself is otherwise
+ignored — code still compiles.
 
 ## Type annotations
 

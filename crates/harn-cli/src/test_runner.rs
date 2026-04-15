@@ -46,17 +46,28 @@ pub async fn run_test_file(
     let test_names: Vec<String> = program
         .iter()
         .filter_map(|snode| {
-            if let Node::Pipeline { name, .. } = &snode.node {
-                if name.starts_with("test_") {
-                    if let Some(pattern) = filter {
-                        if !name.contains(pattern) {
-                            return None;
-                        }
-                    }
-                    return Some(name.clone());
+            // Recognize either:
+            //  - the legacy naming convention: `pipeline test_*`
+            //  - the explicit `@test` attribute on a Pipeline (declarative)
+            let (has_test_attr, decl_node) = match &snode.node {
+                Node::AttributedDecl { attributes, inner } => {
+                    (attributes.iter().any(|a| a.name == "test"), inner.as_ref())
+                }
+                _ => (false, snode),
+            };
+            let name = match &decl_node.node {
+                Node::Pipeline { name, .. } => name.clone(),
+                _ => return None,
+            };
+            if !(has_test_attr || name.starts_with("test_")) {
+                return None;
+            }
+            if let Some(pattern) = filter {
+                if !name.contains(pattern) {
+                    return None;
                 }
             }
-            None
+            Some(name)
         })
         .collect();
 

@@ -118,7 +118,7 @@ mod pipeline_tests {
 
     #[test]
     fn parse_source_lex_error() {
-        let err = parse_source("let x = @").unwrap_err();
+        let err = parse_source("let x = `").unwrap_err();
         assert!(matches!(err, PipelineError::Lex(_)));
         assert!(err.span().is_some());
         assert!(err.to_string().contains("Unexpected character"));
@@ -145,16 +145,16 @@ mod pipeline_tests {
 
     #[test]
     fn check_source_strict_catches_lex_error() {
-        let err = check_source_strict("@").unwrap_err();
+        let err = check_source_strict("`").unwrap_err();
         assert!(matches!(err, PipelineError::Lex(_)));
     }
 
     #[test]
     fn pipeline_error_display_is_informative() {
-        let err = parse_source("@").unwrap_err();
+        let err = parse_source("`").unwrap_err();
         let msg = err.to_string();
         assert!(!msg.is_empty());
-        assert!(msg.contains('@') || msg.contains("Unexpected"));
+        assert!(msg.contains('`') || msg.contains("Unexpected"));
     }
 
     #[test]

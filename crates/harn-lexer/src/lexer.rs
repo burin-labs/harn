@@ -761,6 +761,7 @@ impl Lexer {
             '>' => Some(TokenKind::Gt),
             '?' => Some(TokenKind::Question),
             '|' => Some(TokenKind::Bar),
+            '@' => Some(TokenKind::At),
             _ => None,
         }
     }
@@ -1017,9 +1018,17 @@ mod tests {
 
     #[test]
     fn test_unexpected_character() {
-        let mut lexer = Lexer::new("@");
+        let mut lexer = Lexer::new("`");
         let err = lexer.tokenize().unwrap_err();
-        assert!(matches!(err, LexerError::UnexpectedCharacter('@', _)));
+        assert!(matches!(err, LexerError::UnexpectedCharacter('`', _)));
+    }
+
+    #[test]
+    fn test_at_token() {
+        let mut lexer = Lexer::new("@deprecated");
+        let tokens = lexer.tokenize().unwrap();
+        assert_eq!(tokens[0].kind, TokenKind::At);
+        assert_eq!(tokens[1].kind, TokenKind::Identifier("deprecated".into()));
     }
 
     #[test]

@@ -4,6 +4,16 @@ use std::rc::Rc;
 use harn_lexer::StringSegment;
 use harn_parser::{BindingPattern, Node, ParallelMode, SNode, ShapeField, TypeExpr, TypedParam};
 
+/// Look through an `AttributedDecl` wrapper to the inner declaration.
+/// `compile_named` / `compile` use this so attributed declarations like
+/// `@test pipeline foo(...)` are still discoverable by name.
+fn peel_node(sn: &SNode) -> &Node {
+    match &sn.node {
+        Node::AttributedDecl { inner, .. } => &inner.node,
+        other => other,
+    }
+}
+
 use crate::chunk::{Chunk, CompiledFunction, Constant, Op};
 use crate::schema;
 use crate::value::VmValue;
@@ -231,16 +241,16 @@ impl Compiler {
         }
         let main = program
             .iter()
-            .find(|sn| matches!(&sn.node, Node::Pipeline { name, .. } if name == "default"))
+            .find(|sn| matches!(peel_node(sn), Node::Pipeline { name, .. } if name == "default"))
             .or_else(|| {
                 program
                     .iter()
-                    .find(|sn| matches!(&sn.node, Node::Pipeline { .. }))
+                    .find(|sn| matches!(peel_node(sn), Node::Pipeline { .. }))
             });
 
         if let Some(sn) = main {
             self.compile_top_level_declarations(program)?;
-            if let Node::Pipeline { body, extends, .. } = &sn.node {
+            if let Node::Pipeline { body, extends, .. } = peel_node(sn) {
                 if let Some(parent_name) = extends {
                     self.compile_parent_pipeline(program, parent_name)?;
                 }
@@ -293,13 +303,13 @@ impl Compiler {
                 self.compile_node(sn)?;
             }
         }
-        let target = program
-            .iter()
-            .find(|sn| matches!(&sn.node, Node::Pipeline { name, .. } if name == pipeline_name));
+        let target = program.iter().find(
+            |sn| matches!(peel_node(sn), Node::Pipeline { name, .. } if name == pipeline_name),
+        );
 
         if let Some(sn) = target {
             self.compile_top_level_declarations(program)?;
-            if let Node::Pipeline { body, extends, .. } = &sn.node {
+            if let Node::Pipeline { body, extends, .. } = peel_node(sn) {
                 if let Some(parent_name) = extends {
                     self.compile_parent_pipeline(program, parent_name)?;
                 }
@@ -2937,6 +2947,142 @@ impl Compiler {
                     line: self.line,
                 });
             }
+            Node::AttributedDecl { attributes, inner } => {
+                // Validate first so misuse fails before we emit any code.
+                for attr in attributes {
+                    if attr.name == "acp_tool" && !matches!(inner.node, Node::FnDecl { .. }) {
+                        return Err(CompileError {
+                            message: "@acp_tool can only be applied to function declarations"
+                                .into(),
+                            line: self.line,
+                        });
+                    }
+                }
+                self.compile_node(inner)?;
+                // @acp_tool desugars to a `tool_define(...)` call that
+                // mirrors the imperative tool registration path. Emitted
+                // after the inner FnDecl so the handler binding is in
+                // scope.
+                for attr in attributes {
+                    if attr.name == "acp_tool" {
+                        if let Node::FnDecl { name, .. } = &inner.node {
+                            self.emit_acp_tool_registration(attr, name)?;
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Emit bytecode equivalent to:
+    ///   tool_define(tool_registry(), <attr.name | fn_name>, "", {
+    ///     handler: <fn_name>,
+    ///     annotations: { kind: ..., side_effect_level: ..., ... },
+    ///   })
+    /// `annotations` collects every named attribute arg except `name`.
+    fn emit_acp_tool_registration(
+        &mut self,
+        attr: &harn_parser::Attribute,
+        fn_name: &str,
+    ) -> Result<(), CompileError> {
+        let tool_name = attr
+            .string_arg("name")
+            .unwrap_or_else(|| fn_name.to_string());
+
+        // Push tool_define
+        let define_idx = self
+            .chunk
+            .add_constant(Constant::String("tool_define".into()));
+        self.chunk.emit_u16(Op::Constant, define_idx, self.line);
+
+        // Push tool_registry()
+        let reg_idx = self
+            .chunk
+            .add_constant(Constant::String("tool_registry".into()));
+        self.chunk.emit_u16(Op::Constant, reg_idx, self.line);
+        self.chunk.emit_u8(Op::Call, 0, self.line);
+
+        // Push tool name
+        let name_const = self.chunk.add_constant(Constant::String(tool_name));
+        self.chunk.emit_u16(Op::Constant, name_const, self.line);
+
+        // Push empty description
+        let desc_const = self.chunk.add_constant(Constant::String(String::new()));
+        self.chunk.emit_u16(Op::Constant, desc_const, self.line);
+
+        // Build config dict: { handler: <fn>, annotations: {...} }
+        let handler_key = self.chunk.add_constant(Constant::String("handler".into()));
+        self.chunk.emit_u16(Op::Constant, handler_key, self.line);
+        let fn_name_const = self
+            .chunk
+            .add_constant(Constant::String(fn_name.to_string()));
+        self.chunk.emit_u16(Op::GetVar, fn_name_const, self.line);
+
+        // Annotations dict from named args (skip "name").
+        let mut ann_count: u16 = 0;
+        for arg in &attr.args {
+            let Some(ref key) = arg.name else {
+                continue;
+            };
+            if key == "name" {
+                continue;
+            }
+            let key_idx = self.chunk.add_constant(Constant::String(key.clone()));
+            self.chunk.emit_u16(Op::Constant, key_idx, self.line);
+            self.compile_attribute_value(&arg.value)?;
+            ann_count += 1;
+        }
+        let ann_key_idx = self
+            .chunk
+            .add_constant(Constant::String("annotations".into()));
+        self.chunk.emit_u16(Op::Constant, ann_key_idx, self.line);
+        self.chunk.emit_u16(Op::BuildDict, ann_count, self.line);
+
+        // Build outer config dict with 2 entries: handler + annotations.
+        self.chunk.emit_u16(Op::BuildDict, 2, self.line);
+
+        // Call tool_define(registry, name, desc, config) — 4 args.
+        self.chunk.emit_u8(Op::Call, 4, self.line);
+        self.chunk.emit(Op::Pop, self.line);
+        Ok(())
+    }
+
+    /// Compile a literal-only attribute argument value to a constant push.
+    fn compile_attribute_value(&mut self, node: &SNode) -> Result<(), CompileError> {
+        match &node.node {
+            Node::StringLiteral(s) | Node::RawStringLiteral(s) => {
+                let idx = self.chunk.add_constant(Constant::String(s.clone()));
+                self.chunk.emit_u16(Op::Constant, idx, self.line);
+            }
+            Node::IntLiteral(i) => {
+                let idx = self.chunk.add_constant(Constant::Int(*i));
+                self.chunk.emit_u16(Op::Constant, idx, self.line);
+            }
+            Node::FloatLiteral(f) => {
+                let idx = self.chunk.add_constant(Constant::Float(*f));
+                self.chunk.emit_u16(Op::Constant, idx, self.line);
+            }
+            Node::BoolLiteral(b) => {
+                self.chunk
+                    .emit(if *b { Op::True } else { Op::False }, self.line);
+            }
+            Node::NilLiteral => {
+                self.chunk.emit(Op::Nil, self.line);
+            }
+            Node::Identifier(name) => {
+                // Treat bare identifiers as string sentinels (e.g. `kind: edit`
+                // should behave the same as `kind: "edit"`). This mirrors
+                // common attribute-DSL ergonomics.
+                let idx = self.chunk.add_constant(Constant::String(name.clone()));
+                self.chunk.emit_u16(Op::Constant, idx, self.line);
+            }
+            _ => {
+                return Err(CompileError {
+                    message: "attribute argument must be a literal value".into(),
+                    line: self.line,
+                });
+            }
         }
         Ok(())
     }
@@ -3225,10 +3371,16 @@ impl Compiler {
         }
         // Phase 2: compile type and function declarations. Function closures
         // created here capture the current env which now includes the
-        // module-level bindings from phase 1.
+        // module-level bindings from phase 1. Attributed declarations are
+        // compiled here too — the AttributedDecl arm in compile_node
+        // dispatches to the inner declaration's compile path.
         for sn in program {
+            let inner_kind = match &sn.node {
+                Node::AttributedDecl { inner, .. } => &inner.node,
+                other => other,
+            };
             if matches!(
-                &sn.node,
+                inner_kind,
                 Node::FnDecl { .. }
                     | Node::ToolDecl { .. }
                     | Node::ImplBlock { .. }
@@ -3261,6 +3413,9 @@ impl Compiler {
                 Node::Block(stmts) => {
                     Self::collect_enum_names(stmts, names);
                 }
+                Node::AttributedDecl { inner, .. } => {
+                    Self::collect_enum_names(std::slice::from_ref(inner), names);
+                }
                 _ => {}
             }
         }
@@ -3284,6 +3439,9 @@ impl Compiler {
                 }
                 Node::Block(stmts) => {
                     Self::collect_interface_methods(stmts, interfaces);
+                }
+                Node::AttributedDecl { inner, .. } => {
+                    Self::collect_interface_methods(std::slice::from_ref(inner), interfaces);
                 }
                 _ => {}
             }

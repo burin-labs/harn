@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 
 use harn_parser::{
-    BindingPattern, Node, SNode, TypeExpr, TypeParam, TypedParam, Variance, WhereClause,
+    Attribute, AttributeArg, BindingPattern, Node, SNode, TypeExpr, TypeParam, TypedParam,
+    Variance, WhereClause,
 };
 
 use crate::Formatter;
@@ -10,6 +11,39 @@ use crate::Formatter;
 fn format_default_expr(node: &SNode) -> String {
     let fmt = Formatter::new(BTreeMap::new(), 100, 80);
     fmt.format_expr(node)
+}
+
+/// Format a single attribute as `@name` or `@name(arg, key: value)`.
+pub(crate) fn format_attribute(attr: &Attribute) -> String {
+    if attr.args.is_empty() {
+        format!("@{}", attr.name)
+    } else {
+        let args = attr
+            .args
+            .iter()
+            .map(format_attribute_arg)
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("@{}({})", attr.name, args)
+    }
+}
+
+/// Format a list of attributes as newline-separated lines (trailing newline).
+pub(crate) fn format_attributes(attrs: &[Attribute]) -> String {
+    let mut s = String::new();
+    for attr in attrs {
+        s.push_str(&format_attribute(attr));
+        s.push('\n');
+    }
+    s
+}
+
+fn format_attribute_arg(arg: &AttributeArg) -> String {
+    let value = format_default_expr(&arg.value);
+    match &arg.name {
+        Some(k) => format!("{}: {}", k, value),
+        None => value,
+    }
 }
 
 /// Numeric precedence for binary operators (higher = tighter binding).

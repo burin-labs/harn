@@ -602,6 +602,12 @@ impl Formatter {
                 self.dedent();
                 self.writeln("}");
             }
+            Node::AttributedDecl { attributes, inner } => {
+                for attr in attributes {
+                    self.writeln(&format_attribute(attr));
+                }
+                self.format_node(inner);
+            }
             _ => {
                 let expr = self.format_expr(node);
                 self.writeln(&expr);
@@ -1177,6 +1183,10 @@ impl Formatter {
                 result
             }
             Node::Spread(inner) => format!("...{}", self.format_expr(inner)),
+            Node::AttributedDecl { attributes, inner } => {
+                let attrs = format_attributes(attributes);
+                format!("{}{}", attrs, self.format_expr(inner))
+            }
         }
     }
 

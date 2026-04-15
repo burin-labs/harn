@@ -174,6 +174,7 @@ pub(crate) fn cyclomatic_complexity(nodes: &[SNode]) -> usize {
             | Node::TypeDecl { .. }
             | Node::Pipeline { .. }
             | Node::ImplBlock { .. } => 0,
+            Node::AttributedDecl { inner, .. } => node_complexity(inner),
         }
     }
 

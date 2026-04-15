@@ -1,0 +1,45 @@
+// `@complexity(allow)` suppresses the cyclomatic-complexity lint warning
+// for the attached function. Without it, this branchy fn would be
+// flagged. We don't run the linter from the conformance runner, so this
+// test just verifies the attribute parses and the fn still executes.
+@complexity(allow)
+pub fn classify(x: int) -> string {
+  if x == 1 {
+    return "one"
+  }
+  if x == 2 {
+    return "two"
+  }
+  if x == 3 {
+    return "three"
+  }
+  if x == 4 {
+    return "four"
+  }
+  if x == 5 {
+    return "five"
+  }
+  if x == 6 {
+    return "six"
+  }
+  if x == 7 {
+    return "seven"
+  }
+  if x == 8 {
+    return "eight"
+  }
+  if x == 9 {
+    return "nine"
+  }
+  if x == 10 {
+    return "ten"
+  }
+  return "other"
+}
+
+pipeline test_complexity(task) {
+  assert(classify(1) == "one", "branch 1")
+  assert(classify(10) == "ten", "branch 10")
+  assert(classify(99) == "other", "default branch")
+  log("attributes_complexity ok")
+}

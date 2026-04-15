@@ -28,9 +28,73 @@ pub fn spanned(node: Node, span: Span) -> SNode {
     SNode::new(node, span)
 }
 
+/// If `node` is an `AttributedDecl`, returns `(attrs, inner)`; otherwise
+/// returns an empty attribute slice and the node itself. Use at the top
+/// of any consumer that processes top-level statements so attributes
+/// flow through transparently.
+pub fn peel_attributes(node: &SNode) -> (&[Attribute], &SNode) {
+    match &node.node {
+        Node::AttributedDecl { attributes, inner } => (attributes.as_slice(), inner.as_ref()),
+        _ => (&[], node),
+    }
+}
+
+/// A single argument to an attribute. Positional args have `name = None`;
+/// named args use `name: Some("key")`. Values are restricted to literal
+/// expressions by the parser (string/int/float/bool/nil/identifier).
+#[derive(Debug, Clone, PartialEq)]
+pub struct AttributeArg {
+    pub name: Option<String>,
+    pub value: SNode,
+    pub span: Span,
+}
+
+/// An attribute attached to a declaration: `@deprecated(since: "0.8")`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Attribute {
+    pub name: String,
+    pub args: Vec<AttributeArg>,
+    pub span: Span,
+}
+
+impl Attribute {
+    /// Find a named argument by key.
+    pub fn named_arg(&self, key: &str) -> Option<&SNode> {
+        self.args
+            .iter()
+            .find(|a| a.name.as_deref() == Some(key))
+            .map(|a| &a.value)
+    }
+
+    /// First positional argument, if any.
+    pub fn positional(&self, idx: usize) -> Option<&SNode> {
+        self.args
+            .iter()
+            .filter(|a| a.name.is_none())
+            .nth(idx)
+            .map(|a| &a.value)
+    }
+
+    /// Convenience: extract a string-literal arg by name.
+    pub fn string_arg(&self, key: &str) -> Option<String> {
+        match self.named_arg(key).map(|n| &n.node) {
+            Some(Node::StringLiteral(s)) => Some(s.clone()),
+            Some(Node::RawStringLiteral(s)) => Some(s.clone()),
+            _ => None,
+        }
+    }
+}
+
 /// AST nodes for the Harn language.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Node {
+    /// A declaration carrying one or more attributes (`@attr`). The inner
+    /// node is always one of: FnDecl, ToolDecl, Pipeline, StructDecl,
+    /// EnumDecl, TypeDecl, InterfaceDecl, ImplBlock.
+    AttributedDecl {
+        attributes: Vec<Attribute>,
+        inner: Box<SNode>,
+    },
     Pipeline {
         name: String,
         params: Vec<String>,
