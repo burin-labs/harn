@@ -1,0 +1,9 @@
+// llm_call_safe wraps a successful llm_call in an {ok, response, error}
+// envelope with no throwing.
+pipeline default(task) {
+  llm_mock({text: "ok"})
+  let r = llm_call_safe("hello", nil, {provider: "mock"})
+  println(r.ok)
+  println(r.response.text)
+  println(r.error == nil)
+}

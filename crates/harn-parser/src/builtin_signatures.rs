@@ -466,6 +466,10 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Union(UNION_STRING_NIL)),
     },
     BuiltinSig {
+        name: "env_or",
+        return_type: None,
+    },
+    BuiltinSig {
         name: "error_category",
         return_type: Some(BuiltinReturn::Named("string")),
     },
@@ -695,6 +699,10 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
     },
     BuiltinSig {
         name: "llm_call",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "llm_call_safe",
         return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
@@ -1056,6 +1064,10 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
     BuiltinSig {
         name: "read_file",
         return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
+        name: "read_file_result",
+        return_type: None,
     },
     BuiltinSig {
         name: "receive",
@@ -1638,6 +1650,10 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
         return_type: None,
     },
     BuiltinSig {
+        name: "with_rate_limit",
+        return_type: None,
+    },
+    BuiltinSig {
         name: "workflow_clone",
         return_type: Some(BuiltinReturn::Named("dict")),
     },
@@ -1908,6 +1924,7 @@ pub fn is_untyped_boundary_source(name: &str) -> bool {
             | "yaml_parse"
             | "toml_parse"
             | "llm_call"
+            | "llm_call_safe"
             | "llm_completion"
             | "http_get"
             | "http_post"

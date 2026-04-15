@@ -1,0 +1,12 @@
+// env_or returns the env var when set, or the default otherwise.
+pipeline default(task) {
+  // Unlikely-to-be-set var → default path.
+  let model = env_or("HARN_TEST_UNSET_VAR_28_XYZ", "ollama:qwen3:30b-a3b")
+  println(model)
+  // The default can be any value, not just a string.
+  let port = env_or("HARN_TEST_UNSET_VAR_28_PORT", 8080)
+  println(port)
+  // nil default survives when the env var is unset.
+  let missing = env_or("HARN_TEST_UNSET_VAR_28_NONE", nil)
+  println(missing == nil)
+}

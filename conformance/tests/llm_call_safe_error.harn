@@ -1,0 +1,10 @@
+// llm_call_safe turns a categorized error into an envelope with
+// {ok: false, response: nil, error: {category, message}}.
+pipeline default(task) {
+  llm_mock({error: {category: "rate_limit", message: "429 Too Many Requests"}})
+  let r = llm_call_safe("hello", nil, {provider: "mock", llm_retries: 0})
+  println(r.ok)
+  println(r.response == nil)
+  println(r.error.category)
+  println(r.error.message.contains("429"))
+}

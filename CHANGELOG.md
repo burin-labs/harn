@@ -44,6 +44,29 @@ granular archaeology.
 
 ### Added
 
+- **Stdlib polish: `llm_call_safe`, `read_file_result`, `env_or`,
+  `with_rate_limit`.** Four small builtins that eliminate repetitive
+  ceremony in grading/bench/eval scripts. `llm_call_safe(prompt,
+  system?, opts?)` is a non-throwing envelope around `llm_call`
+  returning `{ok, response, error: {category, message} | nil}`, with
+  `error.category` drawn from the canonical `ErrorCategory` string
+  set (`"rate_limit"`, `"timeout"`, `"overloaded"`,
+  `"transient_network"`, `"schema_validation"`, etc).
+  `read_file_result(path)` is a non-throwing sibling of `read_file`
+  returning `Result.Ok(content)` / `Result.Err(message)` and sharing
+  the same content cache. `env_or(key, default)` collapses the
+  `let v = env(K); if v { v } else { default }` pattern. `with_rate_limit(provider, fn, opts?)`
+  acquires a sliding-window permit and retries the closure with
+  exponential backoff on retryable categories (`rate_limit`,
+  `overloaded`, `transient_network`, `timeout`) — composes with
+  `HARN_RATE_LIMIT_<PROVIDER>` env vars and `llm_rate_limit(...)`.
+  Resolves [#28](https://github.com/burin-labs/harn/issues/28).
+- **`llm_mock` error injection.** `llm_mock({error: {category, message}})`
+  now synthesizes a `VmError::CategorizedError` on match instead of an
+  `LlmResult`, so `try { llm_call(...) }`, `error_category`,
+  `llm_call_safe`'s error envelope, and `with_rate_limit`'s retry loop
+  all have deterministic test coverage. Unknown category strings are
+  rejected at registration time.
 - **Comprehensive variance (`in T` / `out T`).** Type parameters on
   user-defined generics may now be marked with `in` (contravariant)
   or `out` (covariant). Unannotated parameters default to

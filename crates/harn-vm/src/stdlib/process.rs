@@ -89,6 +89,20 @@ pub(crate) fn register_process_builtins(vm: &mut Vm) {
         }
     });
 
+    vm.register_builtin("env_or", |args, _out| {
+        let name = args.first().map(|a| a.display()).unwrap_or_default();
+        let default = args.get(1).cloned().unwrap_or(VmValue::Nil);
+        if let Some(value) =
+            current_execution_context().and_then(|context| context.env.get(&name).cloned())
+        {
+            return Ok(VmValue::String(Rc::from(value)));
+        }
+        match std::env::var(&name) {
+            Ok(val) => Ok(VmValue::String(Rc::from(val))),
+            Err(_) => Ok(default),
+        }
+    });
+
     vm.register_builtin("timestamp", |_args, _out| {
         use std::time::{SystemTime, UNIX_EPOCH};
         let secs = SystemTime::now()
