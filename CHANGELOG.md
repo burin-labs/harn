@@ -7,6 +7,29 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## v0.7.10
+
+### Fixed
+
+- **DAP breakpoints scoped to the requesting source file.** Previously,
+  `setBreakpoints` cleared *all* breakpoints across every file before
+  re-installing the new set, and the VM matched on raw line numbers
+  with no regard for which source file was executing — so a breakpoint
+  at line 10 of `auto.harn` would also fire when an imported library
+  hit its own line 10. The DAP adapter now retains breakpoints from
+  files other than the one named in the request (per spec), and the
+  VM stores breakpoints in a per-file map (`set_breakpoints_for_file`)
+  with a backwards-compatible wildcard form (`set_breakpoints`, empty
+  key). A path-suffix fallback handles relative-vs-absolute path drift
+  between IDE and runtime. Multi-file pipelines now break exactly where
+  the user asked.
+
+### Public API
+
+- `harn_vm::Vm::set_breakpoints_for_file(file, lines)` — replace the
+  breakpoint set for one source file. Existing
+  `set_breakpoints(lines)` is preserved as a wildcard shorthand.
+
 ## v0.7.9
 
 ### Added

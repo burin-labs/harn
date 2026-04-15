@@ -232,8 +232,20 @@ impl Debugger {
             }
         }
 
-        let bp_lines: Vec<usize> = self.breakpoints.iter().map(|bp| bp.line as usize).collect();
-        vm.set_breakpoints(bp_lines);
+        // Hand the VM each file's breakpoint set keyed by source path so
+        // imports don't accidentally match the main script's lines.
+        let mut by_file: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+        for bp in &self.breakpoints {
+            let key = bp
+                .source
+                .as_ref()
+                .and_then(|s| s.path.clone())
+                .unwrap_or_default();
+            by_file.entry(key).or_default().push(bp.line as usize);
+        }
+        for (key, lines) in &by_file {
+            vm.set_breakpoints_for_file(key, lines.clone());
+        }
         *self.latest_debug_state.borrow_mut() = None;
         let latest_debug_state = Rc::clone(&self.latest_debug_state);
         vm.set_debug_hook(move |state| {
@@ -249,7 +261,25 @@ impl Debugger {
     }
 
     fn handle_set_breakpoints(&mut self, msg: &DapMessage) -> Vec<DapResponse> {
-        self.breakpoints.clear();
+        // Per DAP spec, each setBreakpoints request is the *complete* set
+        // of breakpoints for one source file. We must therefore drop any
+        // existing breakpoints for that file before re-adding, but
+        // *preserve* breakpoints from other files (multi-file pipelines).
+        let request_path = msg
+            .arguments
+            .as_ref()
+            .and_then(|a| a.get("source"))
+            .and_then(|s| s.get("path"))
+            .and_then(|p| p.as_str())
+            .map(|s| s.to_string());
+
+        if let Some(ref path) = request_path {
+            self.breakpoints
+                .retain(|bp| bp.source.as_ref().and_then(|s| s.path.as_ref()) != Some(path));
+        } else {
+            // Source-less request — legacy behavior, clear everything.
+            self.breakpoints.clear();
+        }
 
         if let Some(args) = &msg.arguments {
             if let Some(bps) = args.get("breakpoints").and_then(|b| b.as_array()) {
@@ -266,9 +296,9 @@ impl Debugger {
                             id,
                             verified: true,
                             line,
-                            source: self.source_path.as_ref().map(|p| Source {
+                            source: request_path.clone().map(|p| Source {
                                 name: None,
-                                path: Some(p.clone()),
+                                path: Some(p),
                             }),
                             condition,
                         });
@@ -278,8 +308,25 @@ impl Debugger {
         }
 
         if let Some(vm) = &mut self.vm {
-            let bp_lines: Vec<usize> = self.breakpoints.iter().map(|bp| bp.line as usize).collect();
-            vm.set_breakpoints(bp_lines);
+            // Push per-file breakpoint sets so the VM can match
+            // (file, line) precisely instead of treating the lines as
+            // global wildcards.
+            let mut by_file: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+            for bp in &self.breakpoints {
+                let key = bp
+                    .source
+                    .as_ref()
+                    .and_then(|s| s.path.clone())
+                    .unwrap_or_default();
+                by_file.entry(key).or_default().push(bp.line as usize);
+            }
+            // Clear stale files first by setting empty for every file we
+            // know about — covers the case where the user removed all
+            // breakpoints from a file that previously had some.
+            let known_keys: Vec<String> = by_file.keys().cloned().collect();
+            for key in known_keys.iter() {
+                vm.set_breakpoints_for_file(key, by_file[key].clone());
+            }
         }
 
         let seq = self.next_seq();

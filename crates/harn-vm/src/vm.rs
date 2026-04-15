@@ -141,8 +141,11 @@ pub struct Vm {
     pub(crate) task_counter: u64,
     /// Active deadline stack: (deadline_instant, frame_depth).
     pub(crate) deadlines: Vec<(Instant, usize)>,
-    /// Breakpoints (source line numbers).
-    pub(crate) breakpoints: Vec<usize>,
+    /// Breakpoints, keyed by source-file path so a breakpoint at line N
+    /// in `auto.harn` doesn't also fire when execution hits line N in an
+    /// imported lib. The empty-string key is a wildcard used by callers
+    /// that don't track source paths (legacy `set_breakpoints` API).
+    pub(crate) breakpoints: BTreeMap<String, std::collections::BTreeSet<usize>>,
     /// Whether the VM is in step mode.
     pub(crate) step_mode: bool,
     /// The frame depth at which stepping started (for step-over).
@@ -196,7 +199,7 @@ impl Vm {
             spawned_tasks: BTreeMap::new(),
             task_counter: 0,
             deadlines: Vec::new(),
-            breakpoints: Vec::new(),
+            breakpoints: BTreeMap::new(),
             step_mode: false,
             step_frame_depth: 0,
             stopped: false,
@@ -234,9 +237,60 @@ impl Vm {
         self.source_text = Some(text.to_string());
     }
 
-    /// Set breakpoints by source line number.
+    /// Replace breakpoints for a single source file. Pass an empty string
+    /// (or call `set_breakpoints` for the wildcard equivalent) to install
+    /// breakpoints that match every file — useful for ad-hoc CLI runs
+    /// where the embedder doesn't track per-file source paths.
+    pub fn set_breakpoints_for_file(&mut self, file: &str, lines: Vec<usize>) {
+        if lines.is_empty() {
+            self.breakpoints.remove(file);
+            return;
+        }
+        self.breakpoints
+            .insert(file.to_string(), lines.into_iter().collect());
+    }
+
+    /// Backwards-compatible wildcard form. Stores all lines under the
+    /// empty-string key, which matches *any* source file at the check
+    /// site. Existing embedders that don't track file scoping still work.
     pub fn set_breakpoints(&mut self, lines: Vec<usize>) {
-        self.breakpoints = lines;
+        self.set_breakpoints_for_file("", lines);
+    }
+
+    /// Source file path of the currently executing frame, if known.
+    pub(crate) fn current_source_file(&self) -> Option<&str> {
+        self.frames
+            .last()
+            .and_then(|f| f.chunk.source_file.as_deref())
+    }
+
+    /// True when a breakpoint at `line` is set for the current frame's
+    /// source file (or the wildcard set covers it).
+    pub(crate) fn breakpoint_matches(&self, line: usize) -> bool {
+        if let Some(wild) = self.breakpoints.get("") {
+            if wild.contains(&line) {
+                return true;
+            }
+        }
+        if let Some(file) = self.current_source_file() {
+            if let Some(set) = self.breakpoints.get(file) {
+                if set.contains(&line) {
+                    return true;
+                }
+            }
+            // Some callers send a relative or differently-prefixed path
+            // than the chunk records; fall back to suffix comparison so
+            // foo.harn matches /abs/path/foo.harn and vice-versa.
+            for (key, set) in &self.breakpoints {
+                if key.is_empty() {
+                    continue;
+                }
+                if (file.ends_with(key.as_str()) || key.ends_with(file)) && set.contains(&line) {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     /// Enable step mode (stop at next line).
@@ -343,7 +397,7 @@ impl Vm {
                 }
             }
 
-            if self.breakpoints.contains(&current_line) {
+            if self.breakpoint_matches(current_line) {
                 self.stopped = true;
                 return Ok(Some((VmValue::Nil, true)));
             }
@@ -490,7 +544,7 @@ impl Vm {
             spawned_tasks: BTreeMap::new(),
             task_counter: 0,
             deadlines: self.deadlines.clone(),
-            breakpoints: Vec::new(),
+            breakpoints: BTreeMap::new(),
             step_mode: false,
             step_frame_depth: 0,
             stopped: false,
@@ -1244,6 +1298,32 @@ mod tests {
                 })
                 .await
         })
+    }
+
+    #[test]
+    fn test_breakpoints_wildcard_matches_any_file() {
+        let mut vm = Vm::new();
+        vm.set_breakpoints(vec![3, 7]);
+        assert!(vm.breakpoint_matches(3));
+        assert!(vm.breakpoint_matches(7));
+        assert!(!vm.breakpoint_matches(4));
+    }
+
+    #[test]
+    fn test_breakpoints_per_file_does_not_leak_to_wildcard() {
+        let mut vm = Vm::new();
+        vm.set_breakpoints_for_file("auto.harn", vec![10]);
+        // Without an active frame, only the empty-string key matches; a
+        // file-scoped breakpoint must NOT fire when no frame is active.
+        assert!(!vm.breakpoint_matches(10));
+    }
+
+    #[test]
+    fn test_breakpoints_per_file_clear_on_empty() {
+        let mut vm = Vm::new();
+        vm.set_breakpoints_for_file("a.harn", vec![1, 2]);
+        vm.set_breakpoints_for_file("a.harn", vec![]);
+        assert!(!vm.breakpoints.contains_key("a.harn"));
     }
 
     #[test]
