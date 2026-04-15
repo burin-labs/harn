@@ -295,6 +295,46 @@ fn mock_host_call(
     Some(Ok(matched.result.unwrap_or(VmValue::Nil)))
 }
 
+/// Embedder-supplied bridge for `host_call` ops.
+///
+/// Embedders (debug adapters, CLIs, IDE hosts) implement this trait to
+/// satisfy capability/operation pairs that harn-vm itself doesn't know how
+/// to handle. Returning `Ok(None)` means "I don't handle this op — fall
+/// through to the built-in fallbacks (env-derived defaults, then the
+/// `unsupported operation` error)". `Ok(Some(value))` is the result;
+/// `Err(VmError::Thrown(_))` surfaces as a Harn exception.
+///
+/// The trait is intentionally synchronous. Bridges that need async I/O
+/// (e.g. DAP reverse requests) should drive their own runtime or use a
+/// blocking channel — see `harn-dap`'s `DapHostBridge` for the canonical
+/// pattern. Sync keeps the boundary simple and avoids forcing the entire
+/// dispatch path into an opaque future.
+pub trait HostCallBridge {
+    fn dispatch(
+        &self,
+        capability: &str,
+        operation: &str,
+        params: &BTreeMap<String, VmValue>,
+    ) -> Result<Option<VmValue>, VmError>;
+}
+
+thread_local! {
+    static HOST_CALL_BRIDGE: RefCell<Option<Rc<dyn HostCallBridge>>> = const { RefCell::new(None) };
+}
+
+/// Install a bridge for the current thread. The bridge is consulted on
+/// every `host_call` *after* mock matching but *before* the built-in
+/// match arms, so embedders can override anything they like (and equally
+/// punt on anything they don't, by returning `Ok(None)`).
+pub fn set_host_call_bridge(bridge: Rc<dyn HostCallBridge>) {
+    HOST_CALL_BRIDGE.with(|b| *b.borrow_mut() = Some(bridge));
+}
+
+/// Remove the current thread's bridge. Idempotent.
+pub fn clear_host_call_bridge() {
+    HOST_CALL_BRIDGE.with(|b| *b.borrow_mut() = None);
+}
+
 async fn dispatch_host_operation(
     capability: &str,
     operation: &str,
@@ -302,6 +342,13 @@ async fn dispatch_host_operation(
 ) -> Result<VmValue, VmError> {
     if let Some(mocked) = mock_host_call(capability, operation, params) {
         return mocked;
+    }
+
+    let bridge = HOST_CALL_BRIDGE.with(|b| b.borrow().clone());
+    if let Some(bridge) = bridge {
+        if let Some(value) = bridge.dispatch(capability, operation, params)? {
+            return Ok(value);
+        }
     }
 
     match (capability, operation) {
@@ -365,6 +412,23 @@ async fn dispatch_host_operation(
             // No-op when no host is attached; swallow silently so standalone
             // scripts can still call `set_result` without crashing.
             Ok(VmValue::Nil)
+        }
+        ("workspace", "project_root") => {
+            // Standalone fallback: prefer HARN_PROJECT_ROOT, then the
+            // current working directory. Pipelines call this very early so
+            // crashing here would block any debug-launched script.
+            let path = std::env::var("HARN_PROJECT_ROOT").unwrap_or_else(|_| {
+                std::env::current_dir()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default()
+            });
+            Ok(VmValue::String(Rc::from(path)))
+        }
+        ("workspace", "cwd") => {
+            let path = std::env::current_dir()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default();
+            Ok(VmValue::String(Rc::from(path)))
         }
         _ => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
             "host_call: unsupported operation {capability}.{operation}"

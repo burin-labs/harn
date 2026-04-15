@@ -1,15 +1,21 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// Incoming DAP message (request or event from client).
+/// Incoming DAP message. Carries the union of request (`type: "request"`)
+/// and response (`type: "response"`) shapes — incoming responses are how
+/// the client replies to *reverse requests* the adapter sent (DAP's
+/// canonical mechanism for adapter→client RPCs, à la `runInTerminal`).
 #[derive(Debug, Deserialize)]
 pub struct DapMessage {
     pub seq: i64,
     #[serde(rename = "type")]
-    #[allow(dead_code)]
     pub msg_type: String,
     pub command: Option<String>,
     pub arguments: Option<Value>,
+    pub request_seq: Option<i64>,
+    pub success: Option<bool>,
+    pub message: Option<String>,
+    pub body: Option<Value>,
 }
 
 /// Outgoing DAP response or event.
@@ -60,7 +66,12 @@ impl DapResponse {
     }
 }
 
-/// DAP Capabilities.
+/// DAP Capabilities. `supports_harn_host_call` is a Harn-specific
+/// extension key that signals the client implements the `harnHostCall`
+/// reverse request — when present, the adapter routes any unhandled
+/// `host_call` op back to the client instead of the harn-vm fallback
+/// path. Clients that don't set the matching client capability still
+/// work; they just see the standalone fallbacks.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Capabilities {
@@ -71,6 +82,7 @@ pub struct Capabilities {
     pub supports_conditional_breakpoints: bool,
     pub supports_exception_breakpoint_filters: bool,
     pub supports_terminate_request: bool,
+    pub supports_harn_host_call: bool,
     pub exception_breakpoint_filters: Vec<ExceptionBreakpointFilter>,
 }
 
@@ -84,6 +96,7 @@ impl Default for Capabilities {
             supports_conditional_breakpoints: true,
             supports_exception_breakpoint_filters: true,
             supports_terminate_request: true,
+            supports_harn_host_call: true,
             exception_breakpoint_filters: vec![ExceptionBreakpointFilter {
                 filter: "all".to_string(),
                 label: "All Exceptions".to_string(),

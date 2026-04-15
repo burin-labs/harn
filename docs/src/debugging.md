@@ -27,6 +27,48 @@ automatically. The equivalent `launch.json` entry is:
 This supports line breakpoints, variable inspection, stack traces, and step
 in / over / out against `.harn` files.
 
+### Host-call bridge (`harnHostCall`)
+
+The debug adapter advertises `supportsHarnHostCall: true` in its
+`Capabilities` response. When a script calls `host_call(capability,
+operation, params)` and the VM has no built-in handler for the op, the
+adapter forwards it to the DAP client as a **reverse request** named
+`harnHostCall` — mirroring the DAP `runInTerminal` pattern:
+
+```json
+{"seq": 17, "type": "request", "command": "harnHostCall",
+ "arguments": {"capability": "workspace", "operation": "project_root",
+               "params": {}}}
+```
+
+The client replies with a normal DAP response:
+
+```json
+{"seq": 18, "type": "response", "request_seq": 17, "command": "harnHostCall",
+ "success": true, "body": {"value": "/Users/x/proj"}}
+```
+
+On `success: true`, the adapter returns the body's `value` field (or the
+whole body when `value` is absent) to the script. On `success: false`,
+the adapter throws `VmError::Thrown(message)` so scripts can `try` /
+`catch` the failure like any other Harn exception. Clients that do not
+implement `harnHostCall` still work — the script just sees the
+standalone fallbacks (`workspace.project_root`, `workspace.cwd`, etc.).
+
+### LLM telemetry output events
+
+During `run` / step-through, the adapter forwards every `llm_call` the
+VM makes as a DAP `output` event with `category: "telemetry"` and a
+JSON body:
+
+```json
+{"category": "telemetry",
+ "output": "{\"call_id\":\"…\",\"model\":\"…\",\"prompt_tokens\":…,\"completion_tokens\":…,\"cache_tokens\":…,\"total_ms\":…,\"iteration\":…}"}
+```
+
+IDEs can parse these to show a live LLM-call ledger alongside the
+debug session.
+
 ## Run records
 
 Every `agent_loop()` or `workflow_execute()` call can produce a run record —

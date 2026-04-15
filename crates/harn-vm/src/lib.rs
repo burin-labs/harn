@@ -40,6 +40,7 @@ pub use mcp_server::{
     take_mcp_serve_resources, tool_registry_to_mcp_tools, McpServer,
 };
 pub use metadata::{register_metadata_builtins, register_scan_builtins};
+pub use stdlib::host::{clear_host_call_bridge, set_host_call_bridge, HostCallBridge};
 pub use stdlib::{
     register_agent_stdlib, register_core_stdlib, register_io_stdlib, register_vm_stdlib,
 };

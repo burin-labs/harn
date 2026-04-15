@@ -2,12 +2,14 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
+use harn_vm::llm::{enable_tracing, take_agent_trace, AgentTraceEvent};
 use harn_vm::{
-    register_http_builtins, register_llm_builtins, register_vm_stdlib, DebugAction, DebugState, Vm,
-    VmError, VmValue,
+    clear_host_call_bridge, register_http_builtins, register_llm_builtins, register_vm_stdlib,
+    set_host_call_bridge, DebugAction, DebugState, Vm, VmError, VmValue,
 };
 use serde_json::json;
 
+use crate::host_bridge::DapHostBridge;
 use crate::protocol::*;
 
 /// Execution state for stepping.
@@ -71,6 +73,10 @@ pub struct Debugger {
     break_on_exceptions: bool,
     /// Latest VM debug snapshot captured through the VM debug hook.
     latest_debug_state: Rc<RefCell<Option<DebugState>>>,
+    /// Optional bridge that round-trips unhandled `host_call` ops to the
+    /// DAP client as reverse requests. When `None`, scripts only see the
+    /// harn-vm fallbacks.
+    host_bridge: Option<DapHostBridge>,
 }
 
 impl Debugger {
@@ -96,7 +102,14 @@ impl Debugger {
                 .unwrap(),
             break_on_exceptions: false,
             latest_debug_state: Rc::new(RefCell::new(None)),
+            host_bridge: None,
         }
+    }
+
+    /// Install a host bridge. Cloned into an `Rc` and registered with
+    /// harn-vm via `set_host_call_bridge` whenever a fresh VM is built.
+    pub fn attach_host_bridge(&mut self, bridge: std::sync::Arc<DapHostBridge>) {
+        self.host_bridge = Some((*bridge).clone());
     }
 
     fn next_seq(&mut self) -> i64 {
@@ -199,6 +212,17 @@ impl Debugger {
         register_vm_stdlib(&mut vm);
         register_http_builtins(&mut vm);
         register_llm_builtins(&mut vm);
+        // Enable LLM trace collection so the debugger can surface llm_call
+        // telemetry to the IDE via DAP `output` events with category=telemetry.
+        enable_tracing();
+
+        // Reset any prior bridge from a previous launch, then install the
+        // current one (if any) so unhandled host_call ops route to the
+        // DAP client via reverse requests instead of erroring out.
+        clear_host_call_bridge();
+        if let Some(bridge) = &self.host_bridge {
+            set_host_call_bridge(Rc::new(bridge.clone()));
+        }
 
         if let Some(ref path) = self.source_path {
             if let Some(parent) = std::path::Path::new(path).parent() {
@@ -283,6 +307,53 @@ impl Debugger {
         responses
     }
 
+    /// Drain agent trace events the VM has accumulated and serialize the
+    /// LLM-call entries as DAP `output` events with `category: "telemetry"`.
+    /// Other event kinds (tool execution, phase change, etc.) are skipped
+    /// for now — the IDE consumes only LLM telemetry. Keeping this here
+    /// rather than in harn-vm preserves the rule that DAP wire-format
+    /// concerns belong in harn-dap.
+    fn drain_telemetry_events(&mut self) -> Vec<DapResponse> {
+        let events = take_agent_trace();
+        if events.is_empty() {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        for event in events {
+            if let AgentTraceEvent::LlmCall {
+                call_id,
+                model,
+                input_tokens,
+                output_tokens,
+                cache_tokens,
+                duration_ms,
+                iteration,
+            } = event
+            {
+                let payload = json!({
+                    "call_id": call_id,
+                    "model": model,
+                    "prompt_tokens": input_tokens,
+                    "completion_tokens": output_tokens,
+                    "cache_tokens": cache_tokens,
+                    "total_ms": duration_ms,
+                    "iteration": iteration,
+                });
+                let body_str = serde_json::to_string(&payload).unwrap_or_default();
+                let seq = self.next_seq();
+                out.push(DapResponse::event(
+                    seq,
+                    "output",
+                    Some(json!({
+                        "category": "telemetry",
+                        "output": body_str,
+                    })),
+                ));
+            }
+        }
+        out
+    }
+
     /// Run the VM until it hits a breakpoint, step completes, or terminates.
     fn run_to_breakpoint(&mut self) -> Vec<DapResponse> {
         let mut responses = Vec::new();
@@ -309,6 +380,14 @@ impl Debugger {
                 let vm = self.vm.as_mut().unwrap();
                 self.runtime.block_on(async { vm.step_execute().await })
             };
+
+            // Drain any LLM-call telemetry the VM emitted during this step
+            // and forward to the DAP client as `output` events with
+            // `category: "telemetry"` and a JSON body.
+            for tele in self.drain_telemetry_events() {
+                responses.push(tele);
+            }
+
             match step_result {
                 Ok(Some((val, stopped))) => {
                     if stopped {
@@ -979,6 +1058,10 @@ mod tests {
             msg_type: "request".to_string(),
             command: Some(command.to_string()),
             arguments: args,
+            request_seq: None,
+            success: None,
+            message: None,
+            body: None,
         }
     }
 

@@ -20,6 +20,104 @@ use crate::semantic_tokens::{build_semantic_tokens, semantic_token_legend};
 use crate::symbols::{format_shape_expanded, EnumVariantInfo, HarnSymbolKind, SymbolInfo};
 use crate::HarnLsp;
 
+/// Walk the document's top-level imports, resolve each path to a file on
+/// disk (matching `harn-vm`'s relative + `.harn/packages/` lookup order),
+/// parse the file, build its symbol table, and return a `Location`
+/// pointing at the first match for `word`. Returns `None` when no import
+/// chain contains the symbol.
+fn resolve_cross_file_definition(
+    uri: &Url,
+    program: &[harn_parser::SNode],
+    word: &str,
+) -> Option<Location> {
+    let current_path = uri.to_file_path().ok()?;
+    let base_dir = current_path.parent()?.to_path_buf();
+
+    // Collect relevant import paths (including selective imports that name
+    // the symbol — they're the highest-confidence hits).
+    let mut paths: Vec<(String, bool)> = Vec::new(); // (path, prefer)
+    for node in program {
+        match &node.node {
+            harn_parser::Node::ImportDecl { path } => paths.push((path.clone(), false)),
+            harn_parser::Node::SelectiveImport { names, path } => {
+                let prefer = names.iter().any(|n| n == word);
+                paths.push((path.clone(), prefer));
+            }
+            _ => {}
+        }
+    }
+    // Search preferred imports first.
+    paths.sort_by_key(|(_, prefer)| !prefer);
+
+    for (rel_path, _) in paths {
+        let mut file_path = base_dir.join(&rel_path);
+        if !file_path.exists() && file_path.extension().is_none() {
+            file_path.set_extension("harn");
+        }
+        if !file_path.exists() {
+            let pkg_path = base_dir.join(".harn/packages").join(&rel_path);
+            if pkg_path.is_dir() && pkg_path.join("lib.harn").exists() {
+                file_path = pkg_path.join("lib.harn");
+            } else if pkg_path.exists() {
+                file_path = pkg_path;
+            } else {
+                let mut alt = pkg_path.clone();
+                alt.set_extension("harn");
+                if alt.exists() {
+                    file_path = alt;
+                }
+            }
+        }
+        if !file_path.exists() {
+            continue;
+        }
+
+        let imported_source = match std::fs::read_to_string(&file_path) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        let mut lexer = harn_lexer::Lexer::new(&imported_source);
+        let tokens = match lexer.tokenize() {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+        let mut parser = harn_parser::Parser::new(tokens);
+        let imported_program = match parser.parse() {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+        let imported_symbols =
+            crate::symbols::build_symbol_table(&imported_program, &imported_source);
+
+        for sym in &imported_symbols {
+            if sym.name == word
+                && matches!(
+                    sym.kind,
+                    HarnSymbolKind::Pipeline
+                        | HarnSymbolKind::Function
+                        | HarnSymbolKind::Variable
+                        | HarnSymbolKind::Parameter
+                        | HarnSymbolKind::Enum
+                        | HarnSymbolKind::Struct
+                        | HarnSymbolKind::Interface
+                )
+            {
+                let range = span_to_full_range(&sym.def_span, &imported_source);
+                let imported_uri = match Url::from_file_path(&file_path) {
+                    Ok(u) => u,
+                    Err(_) => continue,
+                };
+                return Some(Location {
+                    uri: imported_uri,
+                    range,
+                });
+            }
+        }
+    }
+
+    None
+}
+
 fn push_method_items(items: &mut Vec<CompletionItem>, methods: &[&str]) {
     for method in methods {
         items.push(CompletionItem {
@@ -364,6 +462,7 @@ impl tower_lsp::LanguageServer for HarnLsp {
         };
         let source = state.source.clone();
         let symbols = state.symbols.clone();
+        let ast = state.cached_ast.clone();
         drop(docs);
 
         let word = match word_at_position(&source, position) {
@@ -389,6 +488,14 @@ impl tower_lsp::LanguageServer for HarnLsp {
                     uri: uri.clone(),
                     range,
                 })));
+            }
+        }
+
+        // Cross-file: walk the document's import declarations, resolve each
+        // to a file on disk, parse it, and look for `word` in its symbols.
+        if let Some(program) = ast {
+            if let Some(loc) = resolve_cross_file_definition(uri, &program, &word) {
+                return Ok(Some(GotoDefinitionResponse::Scalar(loc)));
             }
         }
 

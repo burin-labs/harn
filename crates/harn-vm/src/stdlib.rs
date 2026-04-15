@@ -6,7 +6,7 @@ mod concurrency;
 mod crypto;
 mod datetime;
 mod fs;
-mod host;
+pub mod host;
 mod io;
 mod iter;
 pub(crate) mod json;

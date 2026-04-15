@@ -7,6 +7,54 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## v0.7.9
+
+### Added
+
+- **DAP host-call bridge (`harnHostCall` reverse request).** The
+  debugger now round-trips unhandled `host_call(capability, operation,
+  ...)` ops to the DAP client as reverse requests, mirroring the DAP
+  `runInTerminal` pattern. On `success: true`, the adapter returns the
+  body's `value` (or the whole body when `value` is absent); on
+  `success: false`, it raises `VmError::Thrown(message)` so scripts can
+  `try`/`catch` it. The stdin reader runs on a dedicated thread so the
+  bridge can block on reply channels without starving the main message
+  loop, and adapter-initiated seqs (forward responses + reverse
+  requests) share one counter so every frame stays unique. Capabilities
+  advertise the new `supportsHarnHostCall: true` field — clients that
+  do not set the matching capability still work and simply see the
+  standalone fallbacks.
+- **`HostCallBridge` trait in `harn-vm`.** New public surface
+  (`harn_vm::HostCallBridge`, `set_host_call_bridge`,
+  `clear_host_call_bridge`) lets embedders (debug adapters, IDE hosts,
+  CLI wrappers) satisfy capability/operation pairs that harn-vm itself
+  does not know how to handle. `Ok(None)` falls through to the built-in
+  fallbacks; `Ok(Some(_))` is the result; `Err(VmError::Thrown(_))`
+  surfaces as a Harn exception. The bridge is consulted after mock
+  matching and before built-in match arms, so embedders can override
+  anything and equally punt on anything.
+- **Standalone `workspace.project_root` / `workspace.cwd` fallbacks.**
+  Pipelines call `host_call("workspace", "project_root", {})` very
+  early, so the VM now answers these ops even when no embedder bridge
+  is installed. `project_root` prefers `HARN_PROJECT_ROOT` and falls
+  back to `std::env::current_dir()`; `cwd` always returns the current
+  working directory. Keeps debug-launched scripts unblocked when the
+  IDE has not wired `harnHostCall` through yet.
+- **LLM-call telemetry as DAP `output` events.** The debugger enables
+  harn-vm's agent trace, drains `AgentTraceEvent::LlmCall` entries
+  between VM steps, and forwards them as DAP `output` events with
+  `category: "telemetry"` and a JSON body (`call_id`, `model`,
+  `prompt_tokens`, `completion_tokens`, `cache_tokens`, `total_ms`,
+  `iteration`). Other trace kinds are skipped for now — the IDE
+  consumes only LLM telemetry.
+- **Cross-file go-to-definition in the LSP.** `textDocument/definition`
+  now walks the document's `import` declarations, resolves each path
+  with the same relative + `.harn/packages/` lookup order harn-vm
+  uses, parses the imported file, builds its symbol table, and
+  returns the first matching pipeline / function / variable / struct /
+  enum / interface. Selective imports that name the target symbol are
+  searched first so the highest-confidence hit wins.
+
 ## v0.7.8
 
 ### Added
