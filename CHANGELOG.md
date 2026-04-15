@@ -7,7 +7,7 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
-## Unreleased
+## v0.7.5
 
 ### Added
 
