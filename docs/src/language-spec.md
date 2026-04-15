@@ -2029,6 +2029,44 @@ For aliases not known at compile time (e.g. `let T = schema_of(Foo)`
 or dynamic construction), passthrough through the runtime `schema_of`
 builtin keeps existing schema dicts working.
 
+#### Generic inference via `Schema<T>`
+
+Schema-driven builtins are typed with proper generics so user-defined
+wrappers pick up the same narrowing.
+
+- `llm_call<T>(prompt, system, options: {output_schema: Schema<T>, ...})
+  -> {data: T, text: string, ...}`
+- `llm_completion<T>` has the same signature.
+- `schema_parse<T>(value: unknown, schema: Schema<T>) -> Result<T, string>`
+- `schema_check<T>(value: unknown, schema: Schema<T>) -> Result<T, string>`
+- `schema_expect<T>(value: unknown, schema: Schema<T>) -> T`
+
+`Schema<T>` denotes a runtime schema value whose static shape is `T`.
+In a parameter position, matching a `Schema<T>` against an argument
+whose value resolves to a type alias (directly, via `schema_of(T)`,
+or via an inline JSON-Schema dict literal) binds the type parameter.
+A user-defined wrapper such as
+
+```harn,ignore
+fn grade<T>(prompt: string, schema: Schema<T>) -> T {
+  let r = llm_call(prompt, nil,
+    {provider: "mock", output_schema: schema, output_validation: "error",
+     response_format: "json"})
+  return r.data
+}
+
+let out: GraderOut = grade("Grade this", schema_of(GraderOut))
+println(out.verdict)
+```
+
+narrows `out` to `GraderOut` at the call site without any
+`schema_is` / `schema_expect` guard, and without per-wrapper
+typechecker support.
+
+`Schema<T>` is a type-level construct. In value positions, the
+runtime `schema_of(T)` builtin returns an idiomatic schema dict
+whose static type is `Schema<T>`.
+
 ### Function type annotations
 
 Parameters and return types can be annotated:
