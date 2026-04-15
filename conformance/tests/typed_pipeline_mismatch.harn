@@ -1,0 +1,3 @@
+pipeline test(task) -> int {
+  return "not an int"
+}

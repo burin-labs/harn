@@ -98,6 +98,7 @@ pub enum Node {
     Pipeline {
         name: String,
         params: Vec<String>,
+        return_type: Option<TypeExpr>,
         body: Vec<SNode>,
         extends: Option<String>,
         is_pub: bool,

@@ -178,11 +178,25 @@ pub(crate) fn harn_lint_require_file_header(path: &Path) -> bool {
     }
 }
 
+/// Read `[lint] complexity_threshold` from the nearest harn.toml. Returns
+/// `None` when unset or when the manifest is missing/malformed — the
+/// linter falls back to `harn_lint::DEFAULT_COMPLEXITY_THRESHOLD`.
+pub(crate) fn harn_lint_complexity_threshold(path: &Path) -> Option<usize> {
+    match harn_config::load_for_path(path) {
+        Ok(cfg) => cfg.lint.complexity_threshold,
+        Err(e) => {
+            eprintln!("warning: {e}");
+            None
+        }
+    }
+}
+
 pub(crate) fn lint_file_inner(
     path: &Path,
     config: &CheckConfig,
     externally_imported_names: &std::collections::HashSet<String>,
     require_file_header: bool,
+    complexity_threshold: Option<usize>,
 ) -> CommandOutcome {
     let path_str = path.to_string_lossy().into_owned();
     let (source, program) = parse_source_file(&path_str);
@@ -190,6 +204,7 @@ pub(crate) fn lint_file_inner(
     let options = harn_lint::LintOptions {
         file_path: Some(path),
         require_file_header,
+        complexity_threshold,
     };
     let diagnostics = harn_lint::lint_with_options(
         &program,
@@ -222,6 +237,7 @@ pub(crate) fn lint_fix_file(
     config: &CheckConfig,
     externally_imported_names: &HashSet<String>,
     require_file_header: bool,
+    complexity_threshold: Option<usize>,
 ) -> usize {
     let path_str = path.to_string_lossy().into_owned();
     let (source, program) = parse_source_file(&path_str);
@@ -229,6 +245,7 @@ pub(crate) fn lint_fix_file(
     let options = harn_lint::LintOptions {
         file_path: Some(path),
         require_file_header,
+        complexity_threshold,
     };
     let lint_diags = harn_lint::lint_with_options(
         &program,
@@ -254,7 +271,7 @@ pub(crate) fn lint_fix_file(
 
     // Descending by span.start so edits apply right-to-left without
     // invalidating earlier offsets; drop overlaps in that same order.
-    edits.sort_by(|a, b| b.span.start.cmp(&a.span.start));
+    edits.sort_by_key(|edit| std::cmp::Reverse(edit.span.start));
 
     let mut accepted: Vec<&harn_lexer::FixEdit> = Vec::new();
     for edit in &edits {

@@ -116,6 +116,7 @@ impl Debugger {
             "next" => self.handle_next(&msg),
             "stepIn" => self.handle_step_in(&msg),
             "stepOut" => self.handle_step_out(&msg),
+            "pause" => self.handle_pause(&msg),
             "threads" => self.handle_threads(&msg),
             "stackTrace" => self.handle_stack_trace(&msg),
             "scopes" => self.handle_scopes(&msg),
@@ -486,6 +487,42 @@ impl Debugger {
         let mut responses = vec![DapResponse::success(seq, msg.seq, "stepOut", None)];
 
         responses.extend(self.run_to_breakpoint());
+        responses
+    }
+
+    /// Break into the currently running program at the next VM step.
+    ///
+    /// The DAP flow is single-threaded today: requests only arrive when
+    /// the VM is already stopped at a breakpoint, so "pause" has nothing
+    /// live to interrupt. We still respond successfully and set the VM
+    /// into step-in mode so the very next step call stops on the next
+    /// instruction — this gives IDEs a meaningful pause affordance the
+    /// moment execution resumes.
+    fn handle_pause(&mut self, msg: &DapMessage) -> Vec<DapResponse> {
+        self.step_mode = StepMode::StepIn;
+        if let Some(vm) = &mut self.vm {
+            vm.set_step_mode(true);
+        }
+
+        let seq = self.next_seq();
+        let mut responses = vec![DapResponse::success(seq, msg.seq, "pause", None)];
+
+        // If execution is already stopped (typical case given the
+        // single-threaded stdio flow), emit a stopped event so the IDE
+        // knows the pause was honored.
+        if self.stopped {
+            let stop_seq = self.next_seq();
+            responses.push(DapResponse::event(
+                stop_seq,
+                "stopped",
+                Some(json!({
+                    "reason": "pause",
+                    "threadId": 1,
+                    "allThreadsStopped": true,
+                })),
+            ));
+        }
+
         responses
     }
 

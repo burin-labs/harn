@@ -141,59 +141,49 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
         return Ok(());
     };
     match name {
-        "read_file" => {
-            if !policy_allows_capability(&policy, "workspace", "read_text") {
-                return reject_policy(format!(
-                    "builtin '{name}' exceeds workspace.read_text ceiling"
-                ));
-            }
+        "read_file" if !policy_allows_capability(&policy, "workspace", "read_text") => {
+            return reject_policy(format!(
+                "builtin '{name}' exceeds workspace.read_text ceiling"
+            ));
         }
-        "list_dir" => {
-            if !policy_allows_capability(&policy, "workspace", "list") {
-                return reject_policy(format!("builtin '{name}' exceeds workspace.list ceiling"));
-            }
+        "list_dir" if !policy_allows_capability(&policy, "workspace", "list") => {
+            return reject_policy(format!("builtin '{name}' exceeds workspace.list ceiling"));
         }
-        "file_exists" | "stat" => {
-            if !policy_allows_capability(&policy, "workspace", "exists") {
-                return reject_policy(format!("builtin '{name}' exceeds workspace.exists ceiling"));
-            }
+        "file_exists" | "stat" if !policy_allows_capability(&policy, "workspace", "exists") => {
+            return reject_policy(format!("builtin '{name}' exceeds workspace.exists ceiling"));
         }
-        "write_file" | "append_file" | "mkdir" | "copy_file" => {
+        "write_file" | "append_file" | "mkdir" | "copy_file"
             if !policy_allows_capability(&policy, "workspace", "write_text")
-                || !policy_allows_side_effect(&policy, "workspace_write")
-            {
-                return reject_policy(format!("builtin '{name}' exceeds workspace write ceiling"));
-            }
+                || !policy_allows_side_effect(&policy, "workspace_write") =>
+        {
+            return reject_policy(format!("builtin '{name}' exceeds workspace write ceiling"));
         }
-        "delete_file" => {
+        "delete_file"
             if !policy_allows_capability(&policy, "workspace", "delete")
-                || !policy_allows_side_effect(&policy, "workspace_write")
-            {
-                return reject_policy(
-                    "builtin 'delete_file' exceeds workspace.delete ceiling".to_string(),
-                );
-            }
+                || !policy_allows_side_effect(&policy, "workspace_write") =>
+        {
+            return reject_policy(
+                "builtin 'delete_file' exceeds workspace.delete ceiling".to_string(),
+            );
         }
-        "apply_edit" => {
+        "apply_edit"
             if !policy_allows_capability(&policy, "workspace", "apply_edit")
-                || !policy_allows_side_effect(&policy, "workspace_write")
-            {
-                return reject_policy(
-                    "builtin 'apply_edit' exceeds workspace.apply_edit ceiling".to_string(),
-                );
-            }
+                || !policy_allows_side_effect(&policy, "workspace_write") =>
+        {
+            return reject_policy(
+                "builtin 'apply_edit' exceeds workspace.apply_edit ceiling".to_string(),
+            );
         }
-        "exec" | "exec_at" | "shell" | "shell_at" => {
+        "exec" | "exec_at" | "shell" | "shell_at"
             if !policy_allows_capability(&policy, "process", "exec")
-                || !policy_allows_side_effect(&policy, "process_exec")
-            {
-                return reject_policy(format!("builtin '{name}' exceeds process.exec ceiling"));
-            }
+                || !policy_allows_side_effect(&policy, "process_exec") =>
+        {
+            return reject_policy(format!("builtin '{name}' exceeds process.exec ceiling"));
         }
-        "http_get" | "http_post" | "http_put" | "http_patch" | "http_delete" | "http_request" => {
-            if !policy_allows_side_effect(&policy, "network") {
-                return reject_policy(format!("builtin '{name}' exceeds network ceiling"));
-            }
+        "http_get" | "http_post" | "http_put" | "http_patch" | "http_delete" | "http_request"
+            if !policy_allows_side_effect(&policy, "network") =>
+        {
+            return reject_policy(format!("builtin '{name}' exceeds network ceiling"));
         }
         "mcp_connect"
         | "mcp_call"
@@ -204,12 +194,11 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
         | "mcp_list_prompts"
         | "mcp_get_prompt"
         | "mcp_server_info"
-        | "mcp_disconnect" => {
+        | "mcp_disconnect"
             if !policy_allows_capability(&policy, "process", "exec")
-                || !policy_allows_side_effect(&policy, "process_exec")
-            {
-                return reject_policy(format!("builtin '{name}' exceeds process.exec ceiling"));
-            }
+                || !policy_allows_side_effect(&policy, "process_exec") =>
+        {
+            return reject_policy(format!("builtin '{name}' exceeds process.exec ceiling"));
         }
         "host_call" => {
             let name = args.first().map(|v| v.display()).unwrap_or_default();

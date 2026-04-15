@@ -584,36 +584,29 @@ pub fn validate_workflow(
                     ));
                 }
             }
-            "fork" => {
-                if outgoing.len() < 2 {
-                    errors.push(format!(
-                        "node {node_id}: fork nodes require at least two outgoing edges"
-                    ));
-                }
+            "fork" if outgoing.len() < 2 => {
+                errors.push(format!(
+                    "node {node_id}: fork nodes require at least two outgoing edges"
+                ));
             }
-            "join" => {
-                if incoming < 2 {
-                    warnings.push(format!(
-                        "node {node_id}: join node has fewer than two incoming edges"
-                    ));
-                }
+            "join" if incoming < 2 => {
+                warnings.push(format!(
+                    "node {node_id}: join node has fewer than two incoming edges"
+                ));
             }
-            "map" => {
+            "map"
                 if node.map_policy.items.is_empty()
                     && node.map_policy.item_artifact_kind.is_none()
-                    && node.input_contract.input_kinds.is_empty()
-                {
-                    errors.push(format!(
-                        "node {node_id}: map nodes require items, item_artifact_kind, or input_contract.input_kinds"
-                    ));
-                }
+                    && node.input_contract.input_kinds.is_empty() =>
+            {
+                errors.push(format!(
+                    "node {node_id}: map nodes require items, item_artifact_kind, or input_contract.input_kinds"
+                ));
             }
-            "reduce" => {
-                if node.input_contract.input_kinds.is_empty() {
-                    warnings.push(format!(
-                        "node {node_id}: reduce node has no input_contract.input_kinds; it will consume all available artifacts"
-                    ));
-                }
+            "reduce" if node.input_contract.input_kinds.is_empty() => {
+                warnings.push(format!(
+                    "node {node_id}: reduce node has no input_contract.input_kinds; it will consume all available artifacts"
+                ));
             }
             _ => {}
         }

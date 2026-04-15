@@ -124,13 +124,7 @@ pub(crate) fn register_concurrency_builtins(vm: &mut Vm) {
         let initial = match args.first() {
             Some(VmValue::Int(n)) => *n,
             Some(VmValue::Float(f)) => *f as i64,
-            Some(VmValue::Bool(b)) => {
-                if *b {
-                    1
-                } else {
-                    0
-                }
-            }
+            Some(VmValue::Bool(b)) => i64::from(*b),
             _ => 0,
         };
         Ok(VmValue::Atomic(VmAtomicHandle {

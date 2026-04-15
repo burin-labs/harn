@@ -16,6 +16,7 @@
 //! [lint]
 //! disabled = ["unused-import"]
 //! require_file_header = false
+//! complexity_threshold = 25
 //! ```
 
 use std::fmt;
@@ -60,6 +61,11 @@ pub struct LintConfig {
     /// `false`.
     #[serde(default, alias = "require-file-header")]
     pub require_file_header: Option<bool>,
+    /// Override the default cyclomatic-complexity warning threshold
+    /// (see `harn_lint::DEFAULT_COMPLEXITY_THRESHOLD`). Accept both
+    /// snake_case and kebab-case for consistency with the other keys.
+    #[serde(default, alias = "complexity-threshold")]
+    pub complexity_threshold: Option<usize>,
 }
 
 #[derive(Debug, Default, Deserialize)]

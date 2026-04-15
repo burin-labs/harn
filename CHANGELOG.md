@@ -7,6 +7,52 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## v0.7.8
+
+### Added
+
+- **Typed pipeline returns (`pipeline name() -> TypeExpr { ... }`).**
+  Pipelines can now declare a return type with the same `-> TypeExpr`
+  syntax as functions. The type checker validates every `return <expr>`
+  against the declared type, turning the Harn→ACP/A2A boundary into a
+  type-checked contract instead of relying on the host bridge as the
+  only enforcement point. A new `std/acp` stdlib module ships
+  canonical ACP envelope type aliases (`SessionUpdate`,
+  `AgentMessageChunk`, `ToolCall`, `ToolCallUpdate`, `Plan`,
+  `PipelineResult`) plus constructor helpers
+  (`agent_message_chunk`/`tool_call`/`tool_call_update`/`plan`).
+  Public pipelines without an explicit return type emit the
+  `pipeline-return-type` lint warning as a one-release deprecation
+  window; well-known entry names (`default`, `main`, `auto`, `test`)
+  are exempt. Resolves
+  [#31](https://github.com/burin-labs/harn/issues/31).
+- **DAP `pause` request and `supports_terminate_request` capability.**
+  The debugger now handles the DAP `pause` request by flipping the VM
+  into step-in mode and emitting a `stopped` event when execution is
+  already halted, giving IDEs a meaningful pause affordance.
+  Capabilities now advertise `supports_terminate_request: true`.
+
+### Changed
+
+- **`cyclomatic-complexity` default bumped from 10 → 25** and made
+  configurable via `[lint].complexity_threshold` in `harn.toml`. The
+  old default treated any function with more than ten decision points
+  as suspect, which turned the rule into the dominant lint signal in
+  real Harn projects (137 of 210 warnings in `burin-code`, 65%). 25
+  matches Clippy's `cognitive_complexity` default and splits the
+  difference between ESLint (20) and gocyclo (30); Harn counts
+  `&&`/`||` per operator, so real-world Harn functions score a notch
+  higher than in tools that only count control-flow nodes. The
+  diagnostic now names the `@complexity(allow)` escape hatch and the
+  `harn.toml` knob. Note: the originally-proposed `harn lint --fix`
+  for cyclomatic complexity was dropped after inspection — none of
+  the mechanical transforms (early-return flattening, De Morgan on
+  nested `if`-returns, redundant-`else` elimination) actually reduce
+  the cyclomatic score, since guards and `&&`/`||` each cost 1. Those
+  transforms improve cognitive complexity / nesting depth and may
+  ship under a separate future lint. Resolves
+  [#29](https://github.com/burin-labs/harn/issues/29).
+
 ## v0.7.7
 
 ### Added

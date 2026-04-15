@@ -290,6 +290,47 @@ Runtime behavior:
 - `finish_step`: inject after the current tool/operation completes
 - `wait_for_completion`: defer until the current agent interaction yields
 
+### Typed pipeline returns (Harn → ACP boundary)
+
+Pipelines are what produce ACP events (`agent_message_chunk`,
+`tool_call`, `tool_call_update`, `plan`, `sessionUpdate`). Declaring a
+return type on a pipeline turns the Harn→ACP boundary into a
+type-checked contract instead of an implicit shape that only the bridge
+validates:
+
+```harn
+type PipelineResult = {
+  text: string | nil,
+  events: list<dict> | nil,
+}
+
+pub pipeline ghost_text(task) -> PipelineResult {
+  return {
+    text: "hello",
+    events: [],
+  }
+}
+```
+
+The type checker verifies every `return <expr>` against the declared
+type, so drift between pipeline output and bridge expectation is caught
+before the Swift/TypeScript bridge ever sees the message.
+
+Public pipelines without an explicit return type emit the
+`pipeline-return-type` lint warning. Explicit return types on the
+Harn→ACP boundary will be required in a future release; the warning is
+a one-release deprecation window.
+
+Well-known entry pipelines (`default`, `main`, `auto`, `test`) are
+exempt from the warning because their return value is host-driven, not
+consumed by a protocol bridge.
+
+Canonical ACP envelope types are provided as Harn type aliases in
+`std/acp` — `SessionUpdate`, `AgentMessageChunk`, `ToolCall`,
+`ToolCallUpdate`, and `Plan` — and can be used directly as pipeline
+return types so a pipeline's contract matches the ACP schema
+byte-for-byte.
+
 ## Security notes
 
 ### Remote MCP OAuth

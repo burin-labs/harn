@@ -1,0 +1,4 @@
+pipeline test(task) -> {text: string, code: int} {
+  log("typed dict ok")
+  return {text: "hello", code: 0}
+}

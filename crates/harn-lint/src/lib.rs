@@ -118,7 +118,19 @@ struct Linter<'a> {
     /// active. When > 0, the cyclomatic-complexity rule is suppressed
     /// for the contained function.
     complexity_suppression_depth: usize,
+    /// Threshold above which the cyclomatic-complexity rule fires.
+    /// Configurable via `[lint].complexity_threshold` in `harn.toml`.
+    complexity_threshold: usize,
 }
+
+/// Default cyclomatic-complexity threshold. Callers can override via
+/// [`LintOptions::complexity_threshold`] (wired to
+/// `[lint].complexity_threshold` in `harn.toml`). Chosen to match
+/// Clippy's `cognitive_complexity` default and sit between ESLint (20)
+/// and gocyclo (30); Harn's scorer counts `&&`/`||` per operator, so
+/// real-world Harn functions score a notch higher than in tools that
+/// only count control-flow nodes.
+pub const DEFAULT_COMPLEXITY_THRESHOLD: usize = 25;
 
 impl<'a> Linter<'a> {
     fn new(source: Option<&'a str>) -> Self {
@@ -144,6 +156,7 @@ impl<'a> Linter<'a> {
             type_references: HashSet::new(),
             return_type_stack: Vec::new(),
             complexity_suppression_depth: 0,
+            complexity_threshold: DEFAULT_COMPLEXITY_THRESHOLD,
         }
     }
 
@@ -171,6 +184,10 @@ impl<'a> Linter<'a> {
         name == "test" || name.starts_with("test_")
     }
 
+    fn is_entry_pipeline_name(name: &str) -> bool {
+        matches!(name, "default" | "main" | "auto")
+    }
+
     fn is_assert_builtin(name: &str) -> bool {
         matches!(name, "assert" | "assert_eq" | "assert_ne")
     }
@@ -196,6 +213,33 @@ impl<'a> Linter<'a> {
             return false;
         }
         name.chars().all(|ch| ch.is_ascii_alphanumeric())
+    }
+
+    /// Score the body of a function/tool and emit a
+    /// `cyclomatic-complexity` warning if it exceeds the configured
+    /// threshold. No-op when the enclosing decl carries
+    /// `@complexity(allow)`.
+    fn check_cyclomatic_complexity(&mut self, name: &str, body: &[SNode], span: Span) {
+        if self.complexity_suppression_depth > 0 {
+            return;
+        }
+        let complexity = cyclomatic_complexity(body);
+        let threshold = self.complexity_threshold;
+        if complexity <= threshold {
+            return;
+        }
+        self.diagnostics.push(LintDiagnostic {
+            rule: "cyclomatic-complexity",
+            message: format!(
+                "function `{name}` has cyclomatic complexity {complexity} (> {threshold})"
+            ),
+            span,
+            severity: LintSeverity::Warning,
+            suggestion: Some(format!(
+                "split `{name}` into smaller helpers, or mark it `@complexity(allow)` if the branching is intrinsic; threshold configurable via `[lint].complexity_threshold` in `harn.toml`"
+            )),
+            fix: None,
+        });
     }
 
     fn lint_function_name(&mut self, name: &str, span: Span) {
@@ -533,9 +577,33 @@ impl<'a> Linter<'a> {
     fn lint_node(&mut self, snode: &SNode) {
         match &snode.node {
             Node::Pipeline {
-                params, body, name, ..
+                params,
+                return_type,
+                body,
+                name,
+                is_pub,
+                ..
             } => {
                 self.known_functions.insert(name.clone());
+                if return_type.is_none()
+                    && *is_pub
+                    && !Self::is_entry_pipeline_name(name)
+                    && !Self::is_test_pipeline_name(name)
+                {
+                    self.diagnostics.push(LintDiagnostic {
+                        rule: "pipeline-return-type",
+                        message: format!(
+                            "public pipeline `{name}` has no declared return type; \
+                             explicit return types will be required in a future release"
+                        ),
+                        span: snode.span,
+                        severity: LintSeverity::Warning,
+                        suggestion: Some(format!(
+                            "declare a return type: `pub pipeline {name}(...) -> TypeExpr {{ ... }}`"
+                        )),
+                        fix: None,
+                    });
+                }
                 self.push_scope();
                 for p in params {
                     if let Some(scope) = self.scopes.last_mut() {
@@ -597,22 +665,7 @@ impl<'a> Linter<'a> {
                 for clause in where_clauses {
                     self.type_references.insert(clause.bound.clone());
                 }
-                let complexity = cyclomatic_complexity(body);
-                if complexity > 10 && self.complexity_suppression_depth == 0 {
-                    self.diagnostics.push(LintDiagnostic {
-                        rule: "cyclomatic-complexity",
-                        message: format!(
-                            "function `{name}` has cyclomatic complexity {complexity} (> 10)"
-                        ),
-                        span: snode.span,
-                        severity: LintSeverity::Warning,
-                        suggestion: Some(
-                            "split the function into smaller helpers or simplify branching"
-                                .to_string(),
-                        ),
-                        fix: None,
-                    });
-                }
+                self.check_cyclomatic_complexity(name, body, snode.span);
                 self.push_scope();
                 let saved_loop_depth = self.loop_depth;
                 self.loop_depth = 0;
@@ -646,22 +699,7 @@ impl<'a> Linter<'a> {
                 if let Some(type_expr) = return_type {
                     self.record_type_expr_references(type_expr);
                 }
-                let complexity = cyclomatic_complexity(body);
-                if complexity > 10 && self.complexity_suppression_depth == 0 {
-                    self.diagnostics.push(LintDiagnostic {
-                        rule: "cyclomatic-complexity",
-                        message: format!(
-                            "function `{name}` has cyclomatic complexity {complexity} (> 10)"
-                        ),
-                        span: snode.span,
-                        severity: LintSeverity::Warning,
-                        suggestion: Some(
-                            "split the function into smaller helpers or simplify branching"
-                                .to_string(),
-                        ),
-                        fix: None,
-                    });
-                }
+                self.check_cyclomatic_complexity(name, body, snode.span);
                 self.push_scope();
                 let saved_loop_depth = self.loop_depth;
                 self.loop_depth = 0;
@@ -2139,6 +2177,9 @@ pub struct LintOptions<'a> {
     pub file_path: Option<&'a std::path::Path>,
     /// When true, the opt-in `require-file-header` rule runs.
     pub require_file_header: bool,
+    /// Override the cyclomatic-complexity threshold. `None` uses
+    /// [`DEFAULT_COMPLEXITY_THRESHOLD`].
+    pub complexity_threshold: Option<usize>,
 }
 
 /// Lint an AST program and return all diagnostics.
@@ -2217,6 +2258,9 @@ fn lint_full(
     linter
         .externally_imported_names
         .clone_from(externally_imported_names);
+    if let Some(threshold) = options.complexity_threshold {
+        linter.complexity_threshold = threshold;
+    }
     linter.lint_program(program);
     if let Some(src) = source {
         if options.require_file_header {

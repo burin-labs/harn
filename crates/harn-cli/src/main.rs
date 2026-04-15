@@ -153,11 +153,14 @@ async fn main() {
                     commands::check::apply_harn_lint_config(file, &mut config);
                     let require_header = args.require_file_header
                         || commands::check::harn_lint_require_file_header(file);
+                    let complexity_threshold =
+                        commands::check::harn_lint_complexity_threshold(file);
                     commands::check::lint_fix_file(
                         file,
                         &config,
                         &cross_file_imports,
                         require_header,
+                        complexity_threshold,
                     );
                 }
             } else {
@@ -167,11 +170,14 @@ async fn main() {
                     commands::check::apply_harn_lint_config(file, &mut config);
                     let require_header = args.require_file_header
                         || commands::check::harn_lint_require_file_header(file);
+                    let complexity_threshold =
+                        commands::check::harn_lint_complexity_threshold(file);
                     let outcome = commands::check::lint_file_inner(
                         file,
                         &config,
                         &cross_file_imports,
                         require_header,
+                        complexity_threshold,
                     );
                     should_fail |= outcome.should_fail(config.strict);
                 }

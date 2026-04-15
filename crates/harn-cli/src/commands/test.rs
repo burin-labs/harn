@@ -445,7 +445,7 @@ pub(crate) async fn run_conformance_tests(
         }
 
         let mut by_time: Vec<&(String, bool, String, u64)> = junit_results.iter().collect();
-        by_time.sort_by(|a, b| b.3.cmp(&a.3));
+        by_time.sort_by_key(|entry| std::cmp::Reverse(entry.3));
         let top_n = by_time.len().min(10);
         if top_n > 0 {
             println!();

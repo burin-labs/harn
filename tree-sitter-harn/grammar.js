@@ -138,6 +138,7 @@ module.exports = grammar({
         "(",
         optional($.parameter_list),
         ")",
+        optional(seq("->", field("return_type", $.type_annotation))),
         optional(seq("extends", field("parent", $.identifier))),
         $.block
       ),

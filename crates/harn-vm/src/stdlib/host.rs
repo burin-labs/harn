@@ -354,6 +354,18 @@ async fn dispatch_host_operation(
                 Ok(VmValue::Nil)
             }
         }
+        // Standalone-run fallbacks for capabilities normally supplied by
+        // an embedder's JSON-RPC bridge. `runtime.task` lets a debugger or
+        // CLI invocation read the pipeline input from `HARN_TASK` without
+        // the host explicitly wiring a callback for every op.
+        ("runtime", "task") => Ok(VmValue::String(Rc::from(
+            std::env::var("HARN_TASK").unwrap_or_default(),
+        ))),
+        ("runtime", "set_result") => {
+            // No-op when no host is attached; swallow silently so standalone
+            // scripts can still call `set_result` without crashing.
+            Ok(VmValue::Nil)
+        }
         _ => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
             "host_call: unsupported operation {capability}.{operation}"
         ))))),

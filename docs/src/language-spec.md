@@ -305,6 +305,7 @@ import_decl        ::= 'import' STRING_LITERAL
                        'from' STRING_LITERAL
 
 pipeline_decl      ::= ['pub'] 'pipeline' IDENTIFIER '(' param_list ')'
+                       ['->' type_expr]
                        ['extends' IDENTIFIER] '{' block '}'
 
 param_list         ::= (IDENTIFIER (',' IDENTIFIER)*)?
@@ -770,6 +771,28 @@ simple scripts to work without wrapping code in a pipeline block.
 If the pipeline parameter list includes `task`, it is bound to `context.task`.
 If it includes `project`, it is bound to `context.projectRoot`.
 A `context` dict is always injected with keys `task`, `project_root`, and `task_type`.
+
+### Pipeline return type
+
+Pipelines may declare a return type with the same `-> TypeExpr` syntax
+as functions:
+
+```harn
+pipeline ghost_text(task) -> {text: string, code: int} {
+  return {text: "hello", code: 0}
+}
+```
+
+The type checker verifies every `return <expr>` statement against the
+declared type. Mismatches are reported as `return type doesn't match`
+errors.
+
+A declared return type is the typed contract that a host or bridge
+(ACP, A2A) can rely on when consuming the pipeline's output.
+
+Public pipelines (`pub pipeline`) without an explicit return type emit
+the `pipeline-return-type` lint warning; explicit return types on the
+Harn→ACP boundary will be required in a future release.
 
 ### Pipeline inheritance
 
@@ -1886,7 +1909,24 @@ pub fn classify(x: int) -> string {
 
 Suppresses the `cyclomatic-complexity` lint warning on the attached
 function. The bare `allow` identifier is the only currently accepted
-form.
+form. Use it for functions whose branching is *intrinsic* (parsers,
+tier dispatchers, tree-sitter adapters) rather than accidental.
+
+The rule fires when a function's cyclomatic score exceeds the default
+threshold of **25**. Projects can override the threshold in
+`harn.toml`:
+
+```toml
+[lint]
+complexity_threshold = 15   # stricter for this project
+```
+
+Cyclomatic complexity counts each branching construct (`if`/`else`,
+`guard`, `match` arm, `for`, `while`, `try`/`catch`, `ternary`,
+`select` case, `retry`) and each short-circuit boolean operator
+(`&&`, `||`). Nesting, guard-vs-if, and De Morgan rewrites are all
+**score-preserving** — the only way to reduce the count is to
+extract helpers or mark the function `@complexity(allow)`.
 
 #### `@acp_tool`
 
@@ -2850,6 +2890,24 @@ the manifest directory and recursively checks every `.harn` file under
 each. Positional targets remain additive. The manifest is discovered by
 walking upward from the first positional target (or the current working
 directory when none is supplied).
+
+### `[lint]` — lint configuration
+
+```toml
+[lint]
+disabled = ["unused-import"]
+require_file_header = false
+complexity_threshold = 25
+```
+
+- `disabled` silences the listed rules for the whole project.
+- `require_file_header` opts into the `require-file-header` rule,
+  which checks that each source file begins with a `/** */` HarnDoc
+  block whose title matches the filename.
+- `complexity_threshold` overrides the default cyclomatic-complexity
+  warning threshold (default **25**, chosen to match Clippy's
+  `cognitive_complexity` default). Set lower to tighten, higher to
+  loosen. Per-function escapes still go through `@complexity(allow)`.
 
 ## Sandbox mode
 

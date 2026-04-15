@@ -2408,7 +2408,7 @@ fn span_kind_totals(spans: &[PortalSpan]) -> Vec<(String, u64)> {
         *totals.entry(span.kind.clone()).or_default() += span.duration_ms;
     }
     let mut values = totals.into_iter().collect::<Vec<_>>();
-    values.sort_by(|a, b| b.1.cmp(&a.1));
+    values.sort_by_key(|entry| std::cmp::Reverse(entry.1));
     values
 }
 

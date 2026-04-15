@@ -667,13 +667,26 @@ impl TypeChecker {
                 _ => snode,
             };
             match &inner_node.node {
-                Node::Pipeline { params, body, .. } => {
+                Node::Pipeline {
+                    params,
+                    return_type,
+                    body,
+                    ..
+                } => {
                     let mut child = self.scope.child();
                     for p in params {
                         child.define_var(p, None);
                     }
                     self.fn_depth += 1;
+                    let ret_scope_base = return_type.as_ref().map(|_| child.child());
                     self.check_block(body, &mut child);
+                    if let (Some(ret_type), Some(mut ret_scope)) =
+                        (return_type.as_ref(), ret_scope_base)
+                    {
+                        for stmt in body {
+                            self.check_return_type(stmt, ret_type, &mut ret_scope);
+                        }
+                    }
                     self.fn_depth -= 1;
                 }
                 Node::FnDecl {

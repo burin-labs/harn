@@ -207,11 +207,17 @@ impl Formatter {
             Node::Pipeline {
                 name,
                 params,
+                return_type,
                 body,
                 extends,
                 is_pub,
             } => {
                 let pub_prefix = if *is_pub { "pub " } else { "" };
+                let ret = if let Some(rt) = return_type {
+                    format!(" -> {}", format_type_expr(rt))
+                } else {
+                    String::new()
+                };
                 let ext = if let Some(base) = extends {
                     format!(" extends {base}")
                 } else {
@@ -220,7 +226,7 @@ impl Formatter {
                 let prefix_len = self.indent * 2 + pub_prefix.len() + 9 + name.len() + 1;
                 let params_str = self.format_string_list_wrapped(params, prefix_len);
                 self.writeln(&format!(
-                    "{pub_prefix}pipeline {name}({params_str}){ext} {{"
+                    "{pub_prefix}pipeline {name}({params_str}){ret}{ext} {{"
                 ));
                 self.indent();
                 self.format_body(body, node_line);

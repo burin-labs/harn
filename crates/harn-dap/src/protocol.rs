@@ -70,6 +70,7 @@ pub struct Capabilities {
     pub supports_set_variable: bool,
     pub supports_conditional_breakpoints: bool,
     pub supports_exception_breakpoint_filters: bool,
+    pub supports_terminate_request: bool,
     pub exception_breakpoint_filters: Vec<ExceptionBreakpointFilter>,
 }
 
@@ -82,6 +83,7 @@ impl Default for Capabilities {
             supports_set_variable: false,
             supports_conditional_breakpoints: true,
             supports_exception_breakpoint_filters: true,
+            supports_terminate_request: true,
             exception_breakpoint_filters: vec![ExceptionBreakpointFilter {
                 filter: "all".to_string(),
                 label: "All Exceptions".to_string(),

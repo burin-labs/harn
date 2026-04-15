@@ -185,6 +185,13 @@ impl Parser {
         let params = self.parse_param_list()?;
         self.consume(&TokenKind::RParen, ")")?;
 
+        let return_type = if self.check(&TokenKind::Arrow) {
+            self.advance();
+            Some(self.parse_type_expr()?)
+        } else {
+            None
+        };
+
         let extends = if self.check(&TokenKind::Extends) {
             self.advance();
             Some(self.consume_identifier("parent pipeline name")?)
@@ -200,6 +207,7 @@ impl Parser {
             Node::Pipeline {
                 name,
                 params,
+                return_type,
                 body,
                 extends,
                 is_pub,
@@ -2204,11 +2212,7 @@ impl Parser {
                     TokenKind::LBrace | TokenKind::LParen | TokenKind::LBracket => depth += 1,
                     TokenKind::RBrace if depth == 0 => return false,
                     TokenKind::RBrace => depth -= 1,
-                    TokenKind::RParen | TokenKind::RBracket => {
-                        if depth > 0 {
-                            depth -= 1;
-                        }
-                    }
+                    TokenKind::RParen | TokenKind::RBracket if depth > 0 => depth -= 1,
                     _ => {}
                 }
                 self.advance();

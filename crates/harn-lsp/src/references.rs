@@ -282,10 +282,10 @@ fn collect_references(snode: &SNode, target_name: &str, refs: &mut Vec<Span>) {
         }
         Node::EnumDecl { name, .. }
         | Node::StructDecl { name, .. }
-        | Node::InterfaceDecl { name, .. } => {
-            if name == target_name {
-                refs.push(snode.span);
-            }
+        | Node::InterfaceDecl { name, .. }
+            if name == target_name =>
+        {
+            refs.push(snode.span);
         }
         Node::AttributedDecl { inner, .. } => {
             collect_references(inner, target_name, refs);
