@@ -140,6 +140,7 @@ pub enum Node {
     },
     TypeDecl {
         name: String,
+        type_params: Vec<TypeParam>,
         type_expr: TypeExpr,
     },
     SpawnExpr {
@@ -446,10 +447,40 @@ pub struct ListPatternElement {
     pub default_value: Option<Box<SNode>>,
 }
 
+/// Declared variance of a generic type parameter.
+///
+/// - `Invariant` (default, no marker): the parameter appears in both
+///   input and output positions, or mutable state. `T<A>` and `T<B>`
+///   are unrelated unless `A == B`.
+/// - `Covariant` (`out T`): the parameter appears only in output
+///   positions (produced, not consumed). `T<Sub>` flows into
+///   `T<Super>`.
+/// - `Contravariant` (`in T`): the parameter appears only in input
+///   positions (consumed, not produced). `T<Super>` flows into
+///   `T<Sub>`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Variance {
+    Invariant,
+    Covariant,
+    Contravariant,
+}
+
 /// A generic type parameter on a function or pipeline declaration.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeParam {
     pub name: String,
+    pub variance: Variance,
+}
+
+impl TypeParam {
+    /// Construct an invariant type parameter (the default for
+    /// unannotated `<T>`).
+    pub fn invariant(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            variance: Variance::Invariant,
+        }
+    }
 }
 
 /// A where-clause constraint on a generic type parameter.

@@ -119,7 +119,12 @@ impl Compiler {
     /// canonical `TypeExpr`.
     fn collect_type_aliases(&mut self, program: &[SNode]) {
         for sn in program {
-            if let Node::TypeDecl { name, type_expr } = &sn.node {
+            if let Node::TypeDecl {
+                name,
+                type_expr,
+                type_params: _,
+            } = &sn.node
+            {
                 self.type_aliases.insert(name.clone(), type_expr.clone());
             }
         }

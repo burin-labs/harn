@@ -1,0 +1,7 @@
+// `out T` declares T covariant; the alias body uses T only in a
+// covariant (return) position, which is consistent with the
+// declared variance.
+pipeline test(task) {
+  type Reader<out T> = fn() -> T
+  println("ok")
+}

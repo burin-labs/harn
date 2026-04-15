@@ -149,6 +149,25 @@ fn handle(v: unknown) -> string {
 `unreachable()`, and blocks that always exit infer to `never`. It's a
 subtype of every type.
 
+### Variance (`in T` / `out T`)
+
+User-declared generics default to **invariant**. Mark a type
+parameter `out T` for covariance (T appears only in output position)
+or `in T` for contravariance (T appears only in input position):
+
+```harn,ignore
+type Reader<out T> = fn() -> T
+interface Sink<in T> { fn accept(v: T) -> int }
+fn map<in A, out B>(value: A) -> B { ... }
+```
+
+Built-ins: `iter<T>` covariant; `list<T>` and `dict<K, V>` invariant
+(mutable); `Result<T, E>` covariant in both. Function types are
+**contravariant in parameters**, covariant in return — `fn(float)`
+stands in for `fn(int)`, never the reverse. The numeric widening
+`int <: float` is suppressed in invariant positions, so `list<int>`
+does not flow into `list<float>`.
+
 ## Results and errors
 
 `try { ... }` returns a `Result.Ok(value)` on success or

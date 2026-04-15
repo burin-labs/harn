@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 
-use harn_parser::{BindingPattern, Node, SNode, TypeExpr, TypeParam, TypedParam, WhereClause};
+use harn_parser::{
+    BindingPattern, Node, SNode, TypeExpr, TypeParam, TypedParam, Variance, WhereClause,
+};
 
 use crate::Formatter;
 
@@ -242,8 +244,15 @@ pub(crate) fn format_type_params(type_params: &[TypeParam]) -> String {
     if type_params.is_empty() {
         String::new()
     } else {
-        let names: Vec<&str> = type_params.iter().map(|tp| tp.name.as_str()).collect();
-        format!("<{}>", names.join(", "))
+        let parts: Vec<String> = type_params
+            .iter()
+            .map(|tp| match tp.variance {
+                Variance::Covariant => format!("out {}", tp.name),
+                Variance::Contravariant => format!("in {}", tp.name),
+                Variance::Invariant => tp.name.clone(),
+            })
+            .collect();
+        format!("<{}>", parts.join(", "))
     }
 }
 

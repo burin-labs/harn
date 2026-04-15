@@ -11,6 +11,26 @@ granular archaeology.
 
 ### Added
 
+- **Comprehensive variance (`in T` / `out T`).** Type parameters on
+  user-defined generics may now be marked with `in` (contravariant)
+  or `out` (covariant). Unannotated parameters default to
+  **invariant** — strictly safer than the previous implicit
+  covariance. The subtype relation is now polarity-aware: built-in
+  `iter<T>` is covariant, `list<T>` and `dict<K, V>` are invariant
+  (mutable), and function types are contravariant in their parameters
+  and covariant in their return type. Declaration sites are checked
+  too: `type Box<out T> = fn(T) -> int` is rejected because `T`
+  appears in a contravariant position. Generic type aliases
+  (`type Foo<T> = ...`) are now supported in the parser. See the
+  spec's "Subtyping and variance" section. Resolves
+  [#34](https://github.com/burin-labs/harn/issues/34).
+- **`fn`-type parameter contravariance fix.** Function-type
+  parameter compatibility was previously checked covariantly, which
+  let `fn(int) -> R` stand in for an expected `fn(float) -> R` —
+  unsound, since the caller may hand the closure a float it cannot
+  receive. Parameters are now checked contravariantly per the
+  variance rewrite above; `fn(float)` correctly substitutes for
+  `fn(int)` but not the reverse.
 - **Exhaustive narrowing on `unknown`.** The type checker now tracks
   which concrete `type_of` variants have been ruled out on each
   flow path for every `unknown`-typed variable. When control flow
@@ -72,6 +92,23 @@ granular archaeology.
   a blanket `*`. The existing `--host-capabilities` flag continues to work as
   a per-invocation override of `[check].host_capabilities_path`. Resolves
   [#24](https://github.com/burin-labs/harn/issues/24).
+
+### Breaking
+
+- **Unannotated user generics are now invariant by default**
+  instead of implicitly covariant. Code that relied on
+  `MyBox<int>` flowing into `MyBox<float>` must add an explicit
+  `out T` annotation to the declaration (and ensure `T` only
+  appears in covariant positions). See
+  [#34](https://github.com/burin-labs/harn/issues/34).
+- **`list<T>` and `dict<K, V>` are now invariant.** `list<int>` no
+  longer flows into `list<float>`, and `dict<string, int>` no
+  longer flows into `dict<string, float>`. Mutable containers
+  cannot be soundly covariant on writes; use `iter<T>` for
+  read-only sequences that still need element-type widening.
+- **`fn`-type parameters are now contravariant.** `fn(int)` no
+  longer satisfies an expected `fn(float)`. The reverse direction
+  (`fn(float)` standing in for `fn(int)`) is the new accepted form.
 
 ## v0.7.3
 

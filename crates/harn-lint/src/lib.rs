@@ -1435,7 +1435,11 @@ impl<'a> Linter<'a> {
                 }
             }
 
-            Node::TypeDecl { name, type_expr } => {
+            Node::TypeDecl {
+                name,
+                type_params: _,
+                type_expr,
+            } => {
                 self.lint_type_name("type", name, snode.span);
                 self.record_type_expr_references(type_expr);
             }

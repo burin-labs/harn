@@ -1010,6 +1010,30 @@ consistently across arguments, so `fn<T>(a: T, b: T)` cannot be called with
 mixed concrete types such as `(int, string)`. Container bindings like
 `list<T>` preserve and validate their element type at call sites too.
 
+### Variance: `in T` and `out T`
+
+Type parameters on user-defined generics may be marked `in` (the
+parameter is contravariant — it appears only in input positions) or
+`out` (covariant — only in output positions). Unannotated parameters
+default to **invariant**: `Box<int>` and `Box<float>` are unrelated
+unless `Box` declares `out T` and uses `T` only covariantly.
+
+```harn,ignore
+type Reader<out T> = fn() -> T          // T is produced
+interface Sink<in T> { fn accept(v: T) -> int }  // T is consumed
+```
+
+Built-in containers carry sensible variance: `iter<T>` is covariant
+(read-only), but `list<T>` and `dict<K, V>` are invariant (mutable).
+Function types are contravariant in their parameters and covariant in
+their return type — `fn(float)` can stand in for `fn(int)`, but not
+the other way around. The full variance table lives in the spec under
+"Subtyping and variance".
+
+Declarations are checked at the definition site: a `type Box<out T>
+= fn(T) -> int` is rejected because `T` appears in a contravariant
+position despite the `out` annotation.
+
 ## Spread in function calls
 
 The spread operator `...` expands a list into individual function

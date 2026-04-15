@@ -110,21 +110,24 @@
 
 (interface_declaration
   (generic_params
-    (identifier) @type))
+    (generic_param
+      (identifier) @type)))
 
 (interface_method
   name: (identifier) @function)
 
 (interface_method
   (generic_params
-    (identifier) @type))
+    (generic_param
+      (identifier) @type)))
 
 (associated_type_declaration
   name: (identifier) @type)
 
 ; Generic params
 (generic_params
-  (identifier) @type)
+  (generic_param
+    (identifier) @type))
 
 ; Where clause
 (where_clause

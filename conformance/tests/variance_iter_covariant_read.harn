@@ -1,0 +1,11 @@
+// Iterators are read-only, so element-type widening is sound:
+// an `iter<int>` flows into an `iter<float>`-typed slot.
+pipeline test(task) {
+  fn sink(ys: iter<float>) -> int {
+    return 0
+  }
+  fn pipe(xs: iter<int>) -> int {
+    return sink(xs)
+  }
+  println("ok")
+}

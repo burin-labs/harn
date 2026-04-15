@@ -37,6 +37,62 @@ pipeline build() {
                 (identifier)))))))))
 
 ==================
+Variance Markers
+==================
+
+type Reader<out T> = T
+
+interface Sink<in T> {
+  fn accept(value: T) -> int
+}
+
+fn map<in A, out B>(value: A) -> B {
+  return value
+}
+
+---
+
+(source_file
+  (type_declaration
+    name: (identifier)
+    (generic_params
+      (generic_param
+        (identifier)))
+    type: (type_annotation
+      (identifier)))
+  (interface_declaration
+    name: (identifier)
+    (generic_params
+      (generic_param
+        (identifier)))
+    (interface_method
+      name: (identifier)
+      (parameter_list
+        (typed_parameter
+          name: (identifier)
+          type: (type_annotation
+            (identifier))))
+      (type_annotation
+        (identifier))))
+  (fn_declaration
+    name: (identifier)
+    (generic_params
+      (generic_param
+        (identifier))
+      (generic_param
+        (identifier)))
+    (parameter_list
+      (typed_parameter
+        name: (identifier)
+        type: (type_annotation
+          (identifier))))
+    (type_annotation
+      (identifier))
+    body: (block
+      (return_statement
+        (identifier)))))
+
+==================
 Import With Trailing Comma
 ==================
 
@@ -121,7 +177,8 @@ interface Repository<T> {
   (interface_declaration
     name: (identifier)
     (generic_params
-      (identifier))
+      (generic_param
+        (identifier)))
     (interface_method
       name: (identifier)
       (parameter_list
@@ -134,7 +191,8 @@ interface Repository<T> {
     (interface_method
       name: (identifier)
       (generic_params
-        (identifier))
+        (generic_param
+          (identifier)))
       (parameter_list
         (typed_parameter
           name: (identifier)

@@ -393,7 +393,13 @@ module.exports = grammar({
       ),
 
     generic_params: ($) =>
-      seq("<", commaSep1($.identifier), ">"),
+      seq("<", commaSep1($.generic_param), ">"),
+
+    generic_param: ($) =>
+      seq(
+        optional(field("variance", choice("in", "out"))),
+        $.identifier
+      ),
 
     where_clause: ($) =>
       seq(
@@ -419,7 +425,13 @@ module.exports = grammar({
       ),
 
     type_declaration: ($) =>
-      seq("type", field("name", $.identifier), "=", field("type", $.type_annotation)),
+      seq(
+        "type",
+        field("name", $.identifier),
+        optional($.generic_params),
+        "=",
+        field("type", $.type_annotation)
+      ),
 
     interface_method: ($) =>
       seq(

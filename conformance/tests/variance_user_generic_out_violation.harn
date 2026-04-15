@@ -1,0 +1,6 @@
+// `out T` declares T covariant, but the alias body uses T as a
+// function parameter (a contravariant position) — must be rejected
+// at the declaration site.
+pipeline test(task) {
+  type Box<out T> = fn(T) -> int
+}

@@ -1735,6 +1735,77 @@ consistently across all arguments in the call, and container bindings such as
 `list<T>` propagate the concrete element type instead of collapsing to an
 unconstrained generic.
 
+### Subtyping and variance
+
+Harn's subtype relation is *polarity-aware*: each compound type has a
+declared variance per slot that determines whether widening (e.g.
+`int <: float`) is allowed in that slot, prohibited entirely, or
+applied with the direction reversed.
+
+Type parameters on user-defined generics may be marked with `in` or
+`out`:
+
+```harn,ignore
+type Reader<out T> = fn() -> T          // T appears only in output position
+interface Sink<in T> { fn accept(v: T) -> int }
+fn map<in A, out B>(value: A) -> B { ... }
+```
+
+| Marker | Meaning | Where T may appear |
+|---|---|---|
+| `out T` | covariant | output positions only |
+| `in T` | contravariant | input positions only |
+| (none) | invariant (default) | anywhere |
+
+Unannotated parameters default to **invariant**. This is strictly
+safer than implicit covariance — `Box<int>` does not flow into
+`Box<float>` unless `Box` declares `out T` and the body uses `T`
+only in covariant positions.
+
+#### Built-in variance
+
+| Constructor | Variance |
+|---|---|
+| `iter<T>` | covariant in `T` (read-only) |
+| `list<T>` | invariant in `T` (mutable: `push`, index assignment) |
+| `dict<K, V>` | invariant in both `K` and `V` (mutable) |
+| `Result<T, E>` | covariant in both `T` and `E` |
+| `fn(P1, ...) -> R` | parameters **contravariant**, return covariant |
+| Shape `{ field: T, ... }` | covariant per field (width subtyping) |
+
+The numeric widening `int <: float` only applies in covariant
+positions. In invariant or contravariant positions it is suppressed —
+that is what makes `list<int>` to `list<float>` a type error.
+
+#### Function subtyping
+
+For an actual `fn(A) -> R'` to be a subtype of an expected `fn(B) -> R`,
+**`B` must be a subtype of `A`** (parameters are contravariant) and
+`R'` must be a subtype of `R` (return is covariant). A callback that
+accepts a wider input or produces a narrower output is always a valid
+substitute.
+
+```harn,ignore
+let wide = fn(x: float) { return 0 }
+let cb: fn(int) -> int = wide   // OK: float-accepting closure stands in for int-accepting
+
+let narrow = fn(x: int) { return 0 }
+let bad: fn(float) -> int = narrow   // ERROR: narrow cannot accept the float a caller may pass
+```
+
+#### Declaration-site checking
+
+When a type parameter is marked `in` or `out`, the declaration body
+is checked: each occurrence of the parameter must respect the
+declared variance. Mismatches are caught at definition time, not at
+each use:
+
+```harn,ignore
+type Box<out T> = fn(T) -> int
+// ERROR: type parameter 'T' is declared 'out' (covariant) but appears
+// in a contravariant position in type alias 'Box'
+```
+
 ## Type annotations
 
 Harn has an optional, gradual type system. Type annotations are checked at compile time

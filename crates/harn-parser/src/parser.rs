@@ -993,10 +993,20 @@ impl Parser {
         let start = self.current_span();
         self.consume(&TokenKind::TypeKw, "type")?;
         let name = self.consume_identifier("type name")?;
+        let type_params = if self.check(&TokenKind::Lt) {
+            self.advance();
+            self.parse_type_param_list()?
+        } else {
+            Vec::new()
+        };
         self.consume(&TokenKind::Assign, "=")?;
         let type_expr = self.parse_type_expr()?;
         Ok(spanned(
-            Node::TypeDecl { name, type_expr },
+            Node::TypeDecl {
+                name,
+                type_params,
+                type_expr,
+            },
             Span::merge(start, self.prev_span()),
         ))
     }
@@ -2261,13 +2271,18 @@ impl Parser {
         Ok(params)
     }
 
-    /// Parse a comma-separated list of type parameter names until `>`.
+    /// Parse a comma-separated list of type parameters until `>`.
+    ///
+    /// Each parameter may be prefixed with a variance marker:
+    /// `in T` (contravariant) or `out T` (covariant). Unannotated
+    /// parameters default to `Invariant`.
     fn parse_type_param_list(&mut self) -> Result<Vec<TypeParam>, ParserError> {
         let mut params = Vec::new();
         self.skip_newlines();
         while !self.is_at_end() && !self.check(&TokenKind::Gt) {
+            let variance = self.parse_optional_variance_marker();
             let name = self.consume_identifier("type parameter name")?;
-            params.push(TypeParam { name });
+            params.push(TypeParam { name, variance });
             if self.check(&TokenKind::Comma) {
                 self.advance();
                 self.skip_newlines();
@@ -2275,6 +2290,27 @@ impl Parser {
         }
         self.consume(&TokenKind::Gt, ">")?;
         Ok(params)
+    }
+
+    /// Consume an optional `in` / `out` variance marker at the start
+    /// of a type parameter. `in` is a reserved keyword and so is
+    /// always a marker when it appears here. `out` is a contextual
+    /// keyword: it is a marker only when followed by another
+    /// identifier (otherwise it is the parameter name itself).
+    fn parse_optional_variance_marker(&mut self) -> Variance {
+        if self.check(&TokenKind::In) {
+            self.advance();
+            return Variance::Contravariant;
+        }
+        if self.check_identifier("out") {
+            if let Some(kind) = self.peek_kind() {
+                if matches!(kind, TokenKind::Identifier(_)) {
+                    self.advance();
+                    return Variance::Covariant;
+                }
+            }
+        }
+        Variance::Invariant
     }
 
     /// Parse an optional `where T: bound, U: bound` clause.

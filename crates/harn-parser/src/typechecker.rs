@@ -34,21 +34,46 @@ pub enum DiagnosticSeverity {
 /// Inferred type of an expression. None means unknown/untyped (gradual typing).
 type InferredType = Option<TypeExpr>;
 
+/// The polarity of a position in a type when checking subtyping.
+///
+/// Polarity propagates through compound types: `FnType` flips it on
+/// its parameters; `Invariant` absorbs any further flip.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Polarity {
+    Covariant,
+    Contravariant,
+    Invariant,
+}
+
+impl Polarity {
+    /// Compose the outer position polarity with the declared variance
+    /// of a type parameter (or the hard-coded variance of a compound
+    /// type constructor's slot).
+    fn compose(self, child: Variance) -> Polarity {
+        match (self, child) {
+            (_, Variance::Invariant) | (Polarity::Invariant, _) => Polarity::Invariant,
+            (p, Variance::Covariant) => p,
+            (Polarity::Covariant, Variance::Contravariant) => Polarity::Contravariant,
+            (Polarity::Contravariant, Variance::Contravariant) => Polarity::Covariant,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct EnumDeclInfo {
-    type_params: Vec<String>,
+    type_params: Vec<TypeParam>,
     variants: Vec<EnumVariant>,
 }
 
 #[derive(Debug, Clone)]
 struct StructDeclInfo {
-    type_params: Vec<String>,
+    type_params: Vec<TypeParam>,
     fields: Vec<StructField>,
 }
 
 #[derive(Debug, Clone)]
 struct InterfaceDeclInfo {
-    type_params: Vec<String>,
+    type_params: Vec<TypeParam>,
     associated_types: Vec<(String, Option<TypeExpr>)>,
     methods: Vec<InterfaceMethod>,
 }
@@ -143,7 +168,16 @@ impl TypeScope {
         scope.enums.insert(
             "Result".into(),
             EnumDeclInfo {
-                type_params: vec!["T".into(), "E".into()],
+                type_params: vec![
+                    TypeParam {
+                        name: "T".into(),
+                        variance: Variance::Covariant,
+                    },
+                    TypeParam {
+                        name: "E".into(),
+                        variance: Variance::Covariant,
+                    },
+                ],
                 variants: vec![
                     EnumVariant {
                         name: "Ok".into(),
@@ -308,6 +342,25 @@ impl TypeScope {
         self.impl_methods
             .get(name)
             .or_else(|| self.parent.as_ref()?.get_impl_methods(name))
+    }
+
+    /// Look up declared variance for each type parameter of a
+    /// constructor (enum / struct / interface). Returns `None` if the
+    /// name is not a known user-declared generic. Built-in type
+    /// constructors that live outside `Applied` (list, dict, iter,
+    /// FnType) are handled directly in the subtype match arms rather
+    /// than via this table.
+    fn variance_of(&self, name: &str) -> Option<Vec<Variance>> {
+        if let Some(info) = self.get_enum(name) {
+            return Some(info.type_params.iter().map(|tp| tp.variance).collect());
+        }
+        if let Some(info) = self.get_struct(name) {
+            return Some(info.type_params.iter().map(|tp| tp.variance).collect());
+        }
+        if let Some(info) = self.get_interface(name) {
+            return Some(info.type_params.iter().map(|tp| tp.variance).collect());
+        }
+        None
     }
 
     fn define_var(&mut self, name: &str, ty: InferredType) {
@@ -628,7 +681,11 @@ impl TypeChecker {
     fn register_declarations_into(scope: &mut TypeScope, nodes: &[SNode]) {
         for snode in nodes {
             match &snode.node {
-                Node::TypeDecl { name, type_expr } => {
+                Node::TypeDecl {
+                    name,
+                    type_params: _,
+                    type_expr,
+                } => {
                     scope.type_aliases.insert(name.clone(), type_expr.clone());
                 }
                 Node::EnumDecl {
@@ -640,7 +697,7 @@ impl TypeChecker {
                     scope.enums.insert(
                         name.clone(),
                         EnumDeclInfo {
-                            type_params: type_params.iter().map(|tp| tp.name.clone()).collect(),
+                            type_params: type_params.clone(),
                             variants: variants.clone(),
                         },
                     );
@@ -654,7 +711,7 @@ impl TypeChecker {
                     scope.interfaces.insert(
                         name.clone(),
                         InterfaceDeclInfo {
-                            type_params: type_params.iter().map(|tp| tp.name.clone()).collect(),
+                            type_params: type_params.clone(),
                             associated_types: associated_types.clone(),
                             methods: methods.clone(),
                         },
@@ -669,7 +726,7 @@ impl TypeChecker {
                     scope.structs.insert(
                         name.clone(),
                         StructDeclInfo {
-                            type_params: type_params.iter().map(|tp| tp.name.clone()).collect(),
+                            type_params: type_params.clone(),
                             fields: fields.clone(),
                         },
                     );
@@ -920,6 +977,7 @@ impl TypeChecker {
                 };
                 scope.define_fn(name, sig.clone());
                 scope.define_var(name, None);
+                self.check_fn_decl_variance(type_params, params, return_type.as_ref(), name, span);
                 self.check_fn_body(type_params, params, return_type, body, where_clauses);
             }
 
@@ -1186,8 +1244,13 @@ impl TypeChecker {
                 }
             }
 
-            Node::TypeDecl { name, type_expr } => {
+            Node::TypeDecl {
+                name,
+                type_params,
+                type_expr,
+            } => {
                 scope.type_aliases.insert(name.clone(), type_expr.clone());
+                self.check_type_alias_decl_variance(type_params, type_expr, name, span);
             }
 
             Node::EnumDecl {
@@ -1199,10 +1262,11 @@ impl TypeChecker {
                 scope.enums.insert(
                     name.clone(),
                     EnumDeclInfo {
-                        type_params: type_params.iter().map(|tp| tp.name.clone()).collect(),
+                        type_params: type_params.clone(),
                         variants: variants.clone(),
                     },
                 );
+                self.check_enum_decl_variance(type_params, variants, name, span);
             }
 
             Node::StructDecl {
@@ -1214,10 +1278,11 @@ impl TypeChecker {
                 scope.structs.insert(
                     name.clone(),
                     StructDeclInfo {
-                        type_params: type_params.iter().map(|tp| tp.name.clone()).collect(),
+                        type_params: type_params.clone(),
                         fields: fields.clone(),
                     },
                 );
+                self.check_struct_decl_variance(type_params, fields, name, span);
             }
 
             Node::InterfaceDecl {
@@ -1229,11 +1294,12 @@ impl TypeChecker {
                 scope.interfaces.insert(
                     name.clone(),
                     InterfaceDeclInfo {
-                        type_params: type_params.iter().map(|tp| tp.name.clone()).collect(),
+                        type_params: type_params.clone(),
                         associated_types: associated_types.clone(),
                         methods: methods.clone(),
                     },
                 );
+                self.check_interface_decl_variance(type_params, methods, name, span);
             }
 
             Node::ImplBlock {
@@ -1827,8 +1893,11 @@ impl TypeChecker {
                             span,
                         );
                     }
-                    let type_param_set: std::collections::BTreeSet<String> =
-                        enum_info.type_params.iter().cloned().collect();
+                    let type_param_set: std::collections::BTreeSet<String> = enum_info
+                        .type_params
+                        .iter()
+                        .map(|tp| tp.name.clone())
+                        .collect();
                     let mut type_bindings = BTreeMap::new();
                     for (field, arg) in enum_variant.fields.iter().zip(args.iter()) {
                         let Some(expected_type) = &field.type_expr else {
@@ -2307,8 +2376,11 @@ impl TypeChecker {
         fields: &[DictEntry],
         scope: &TypeScope,
     ) -> BTreeMap<String, TypeExpr> {
-        let type_param_set: std::collections::BTreeSet<String> =
-            struct_info.type_params.iter().cloned().collect();
+        let type_param_set: std::collections::BTreeSet<String> = struct_info
+            .type_params
+            .iter()
+            .map(|tp| tp.name.clone())
+            .collect();
         let mut bindings = BTreeMap::new();
         for field in &struct_info.fields {
             let Some(expected_type) = &field.type_expr else {
@@ -2343,9 +2415,9 @@ impl TypeChecker {
         let args = struct_info
             .type_params
             .iter()
-            .map(|name| {
+            .map(|tp| {
                 bindings
-                    .get(name)
+                    .get(&tp.name)
                     .cloned()
                     .unwrap_or_else(Self::wildcard_type)
             })
@@ -2361,8 +2433,11 @@ impl TypeChecker {
         args: &[SNode],
         scope: &TypeScope,
     ) -> TypeExpr {
-        let type_param_set: std::collections::BTreeSet<String> =
-            enum_info.type_params.iter().cloned().collect();
+        let type_param_set: std::collections::BTreeSet<String> = enum_info
+            .type_params
+            .iter()
+            .map(|tp| tp.name.clone())
+            .collect();
         let mut bindings = BTreeMap::new();
         if let Some(variant) = enum_info
             .variants
@@ -2387,9 +2462,9 @@ impl TypeChecker {
         let args = enum_info
             .type_params
             .iter()
-            .map(|name| {
+            .map(|tp| {
                 bindings
-                    .get(name)
+                    .get(&tp.name)
                     .cloned()
                     .unwrap_or_else(Self::wildcard_type)
             })
@@ -3711,8 +3786,44 @@ impl TypeChecker {
         stmts.last().and_then(|s| self.infer_type(s, scope))
     }
 
-    /// Check if two types are compatible (actual can be assigned to expected).
+    /// Check if `actual` can be assigned to `expected` (covariant subtype).
+    ///
+    /// This is a thin wrapper over [`types_compatible_at`] that enters
+    /// the relation at covariant polarity. Callers that want to check
+    /// invariance or contravariance directly can use
+    /// [`types_compatible_at`] with the appropriate [`Polarity`].
     fn types_compatible(&self, expected: &TypeExpr, actual: &TypeExpr, scope: &TypeScope) -> bool {
+        self.types_compatible_at(Polarity::Covariant, expected, actual, scope)
+    }
+
+    /// Polarity-aware subtype check.
+    ///
+    /// - `Covariant`: `actual <: expected` under ordinary widening
+    ///   (this is the public entry point behavior).
+    /// - `Contravariant`: swaps the arguments and recurses covariantly.
+    /// - `Invariant`: both directions must hold covariantly. This
+    ///   disables the asymmetric numeric widening (`int <: float`)
+    ///   that we rely on in covariant positions, so mutable container
+    ///   slots do not accept a narrower element type.
+    fn types_compatible_at(
+        &self,
+        polarity: Polarity,
+        expected: &TypeExpr,
+        actual: &TypeExpr,
+        scope: &TypeScope,
+    ) -> bool {
+        match polarity {
+            Polarity::Covariant => {}
+            Polarity::Contravariant => {
+                return self.types_compatible_at(Polarity::Covariant, actual, expected, scope);
+            }
+            Polarity::Invariant => {
+                return self.types_compatible_at(Polarity::Covariant, expected, actual, scope)
+                    && self.types_compatible_at(Polarity::Covariant, actual, expected, scope);
+            }
+        }
+
+        // From here on we are in the covariant case.
         if Self::is_wildcard_type(expected) || Self::is_wildcard_type(actual) {
             return true;
         }
@@ -3736,7 +3847,7 @@ impl TypeChecker {
                 let mut interface_bindings = BTreeMap::new();
                 if let TypeExpr::Applied { args, .. } = &expected {
                     for (type_param, arg) in interface_info.type_params.iter().zip(args.iter()) {
-                        interface_bindings.insert(type_param.clone(), arg.clone());
+                        interface_bindings.insert(type_param.name.clone(), arg.clone());
                     }
                 }
                 if let Some(type_name) = Self::base_type_name(&actual) {
@@ -3780,13 +3891,32 @@ impl TypeChecker {
                     args: actual_args,
                 },
             ) => {
-                expected_name == actual_name
-                    && expected_args.len() == actual_args.len()
-                    && expected_args.iter().zip(actual_args.iter()).all(
-                        |(expected_arg, actual_arg)| {
-                            self.types_compatible(expected_arg, actual_arg, scope)
-                        },
-                    )
+                if expected_name != actual_name || expected_args.len() != actual_args.len() {
+                    return false;
+                }
+                // Consult the declared variance for each type parameter
+                // of this constructor. User-declared generics default
+                // to `Invariant` for any parameter without a marker,
+                // which is enforced by the per-TypeParam default set in
+                // the parser and AST. Unknown constructors (e.g. an
+                // inferred schema-driven wrapper whose decl has not
+                // been registered yet) fall back to invariance — that
+                // is strictly safer than the previous implicit
+                // covariance.
+                let variances = scope.variance_of(expected_name);
+                for (idx, (expected_arg, actual_arg)) in
+                    expected_args.iter().zip(actual_args.iter()).enumerate()
+                {
+                    let child_variance = variances
+                        .as_ref()
+                        .and_then(|v| v.get(idx).copied())
+                        .unwrap_or(Variance::Invariant);
+                    let arg_polarity = Polarity::Covariant.compose(child_variance);
+                    if !self.types_compatible_at(arg_polarity, expected_arg, actual_arg, scope) {
+                        return false;
+                    }
+                }
+                true
             }
             // Union-to-Union: every member of actual must be compatible with
             // at least one member of expected.
@@ -3828,22 +3958,40 @@ impl TypeChecker {
             }
             // Shape expected, dict<K, V> actual → gradual: allow since dict may have the fields
             (TypeExpr::Shape(_), TypeExpr::DictType(_, _)) => true,
+            // list<T> is invariant: the element type must match exactly
+            // (no int→float widening) because lists are mutable
+            // (`push`, index assignment). Covariant lists are unsound
+            // on write — a `list<int>` flowing into a `list<float>`
+            // slot would let a `float` be pushed and later observed
+            // as an `int`.
             (TypeExpr::List(expected_inner), TypeExpr::List(actual_inner)) => {
-                self.types_compatible(expected_inner, actual_inner, scope)
+                self.types_compatible_at(Polarity::Invariant, expected_inner, actual_inner, scope)
             }
             (TypeExpr::Named(n), TypeExpr::List(_)) if n == "list" => true,
             (TypeExpr::List(_), TypeExpr::Named(n)) if n == "list" => true,
+            // iter<T> is covariant: it is a read-only sequence with no
+            // mutating projection, so widening its element type is
+            // sound.
             (TypeExpr::Iter(expected_inner), TypeExpr::Iter(actual_inner)) => {
                 self.types_compatible(expected_inner, actual_inner, scope)
             }
             (TypeExpr::Named(n), TypeExpr::Iter(_)) if n == "iter" => true,
             (TypeExpr::Iter(_), TypeExpr::Named(n)) if n == "iter" => true,
+            // dict<K, V> is invariant in both K and V: dicts are
+            // mutable (key/value assignment). See the `list` comment
+            // above for the soundness argument.
             (TypeExpr::DictType(ek, ev), TypeExpr::DictType(ak, av)) => {
-                self.types_compatible(ek, ak, scope) && self.types_compatible(ev, av, scope)
+                self.types_compatible_at(Polarity::Invariant, ek, ak, scope)
+                    && self.types_compatible_at(Polarity::Invariant, ev, av, scope)
             }
             (TypeExpr::Named(n), TypeExpr::DictType(_, _)) if n == "dict" => true,
             (TypeExpr::DictType(_, _), TypeExpr::Named(n)) if n == "dict" => true,
-            // FnType compatibility: params match positionally and return types match
+            // FnType subtyping: parameters are contravariant (an
+            // `fn(float)` can stand in for an expected `fn(int)`
+            // because floats contain ints); return types remain
+            // covariant. Previously params were checked covariantly,
+            // which let `fn(int)` stand in for `fn(float)` — an
+            // unsound callback substitution.
             (
                 TypeExpr::FnType {
                     params: ep,
@@ -3855,10 +4003,9 @@ impl TypeChecker {
                 },
             ) => {
                 ep.len() == ap.len()
-                    && ep
-                        .iter()
-                        .zip(ap.iter())
-                        .all(|(e, a)| self.types_compatible(e, a, scope))
+                    && ep.iter().zip(ap.iter()).all(|(e, a)| {
+                        self.types_compatible_at(Polarity::Contravariant, e, a, scope)
+                    })
                     && self.types_compatible(er, ar, scope)
             }
             // FnType is compatible with Named("closure") for backward compat
@@ -3932,6 +4079,258 @@ impl TypeChecker {
             TypeExpr::Never => TypeExpr::Never,
             TypeExpr::LitString(s) => TypeExpr::LitString(s.clone()),
             TypeExpr::LitInt(v) => TypeExpr::LitInt(*v),
+        }
+    }
+
+    /// Check declared variance on a `fn` declaration. Parameter
+    /// types are contravariant positions; the return type is a
+    /// covariant position.
+    fn check_fn_decl_variance(
+        &mut self,
+        type_params: &[TypeParam],
+        params: &[TypedParam],
+        return_type: Option<&TypeExpr>,
+        name: &str,
+        span: Span,
+    ) {
+        let mut positions: Vec<(&TypeExpr, Polarity)> = Vec::new();
+        for p in params {
+            if let Some(te) = &p.type_expr {
+                positions.push((te, Polarity::Contravariant));
+            }
+        }
+        if let Some(rt) = return_type {
+            positions.push((rt, Polarity::Covariant));
+        }
+        let kind = format!("function '{name}'");
+        self.check_decl_variance(&kind, type_params, &positions, span);
+    }
+
+    /// Check declared variance on a `type` alias. The alias body is
+    /// treated as a covariant position (what the alias "produces").
+    fn check_type_alias_decl_variance(
+        &mut self,
+        type_params: &[TypeParam],
+        type_expr: &TypeExpr,
+        name: &str,
+        span: Span,
+    ) {
+        let positions = [(type_expr, Polarity::Covariant)];
+        let kind = format!("type alias '{name}'");
+        self.check_decl_variance(&kind, type_params, &positions, span);
+    }
+
+    /// Check declared variance on an `enum` declaration. Variant
+    /// field types are covariant positions (enums are produced,
+    /// not mutated in place).
+    fn check_enum_decl_variance(
+        &mut self,
+        type_params: &[TypeParam],
+        variants: &[EnumVariant],
+        name: &str,
+        span: Span,
+    ) {
+        let mut positions: Vec<(&TypeExpr, Polarity)> = Vec::new();
+        for variant in variants {
+            for field in &variant.fields {
+                if let Some(te) = &field.type_expr {
+                    positions.push((te, Polarity::Covariant));
+                }
+            }
+        }
+        let kind = format!("enum '{name}'");
+        self.check_decl_variance(&kind, type_params, &positions, span);
+    }
+
+    /// Check declared variance on a `struct` declaration. Field
+    /// types are invariant positions because struct fields are
+    /// mutable in Harn. (If Harn ever gains read-only fields, those
+    /// could be covariant.)
+    fn check_struct_decl_variance(
+        &mut self,
+        type_params: &[TypeParam],
+        fields: &[StructField],
+        name: &str,
+        span: Span,
+    ) {
+        let positions: Vec<(&TypeExpr, Polarity)> = fields
+            .iter()
+            .filter_map(|f| f.type_expr.as_ref().map(|te| (te, Polarity::Invariant)))
+            .collect();
+        let kind = format!("struct '{name}'");
+        self.check_decl_variance(&kind, type_params, &positions, span);
+    }
+
+    /// Check declared variance on an `interface` declaration.
+    /// Method parameter types are contravariant; method return types
+    /// are covariant. Associated types are invariant positions.
+    fn check_interface_decl_variance(
+        &mut self,
+        type_params: &[TypeParam],
+        methods: &[InterfaceMethod],
+        name: &str,
+        span: Span,
+    ) {
+        let mut positions: Vec<(&TypeExpr, Polarity)> = Vec::new();
+        for method in methods {
+            for p in &method.params {
+                if let Some(te) = &p.type_expr {
+                    positions.push((te, Polarity::Contravariant));
+                }
+            }
+            if let Some(rt) = &method.return_type {
+                positions.push((rt, Polarity::Covariant));
+            }
+        }
+        let kind = format!("interface '{name}'");
+        self.check_decl_variance(&kind, type_params, &positions, span);
+    }
+
+    /// Declaration-site variance check.
+    ///
+    /// Given a set of declared type parameters (with their `Variance`
+    /// annotations) and a list of positions in the declaration body
+    /// where those parameters may appear, walk each position tracking
+    /// polarity. A parameter declared `out T` (`Covariant`) may appear
+    /// only in covariant positions; `in T` (`Contravariant`) only in
+    /// contravariant positions; unannotated (`Invariant`) may appear
+    /// anywhere.
+    ///
+    /// Callers pass each top-level expression together with its
+    /// starting polarity. For example, a function's return type
+    /// starts at `Covariant`, each parameter starts at `Contravariant`,
+    /// an enum variant field starts at `Covariant`, etc.
+    fn check_decl_variance(
+        &mut self,
+        decl_kind: &str,
+        type_params: &[TypeParam],
+        positions: &[(&TypeExpr, Polarity)],
+        span: Span,
+    ) {
+        // Build a quick lookup: param name -> declared variance.
+        // If no parameter has a non-invariant marker, skip the walk —
+        // invariant params can appear in any polarity.
+        if type_params
+            .iter()
+            .all(|tp| tp.variance == Variance::Invariant)
+        {
+            return;
+        }
+        let declared: BTreeMap<String, Variance> = type_params
+            .iter()
+            .map(|tp| (tp.name.clone(), tp.variance))
+            .collect();
+        for (ty, polarity) in positions {
+            self.walk_variance(decl_kind, ty, *polarity, &declared, span);
+        }
+    }
+
+    /// Recursive walker used by [`check_decl_variance`].
+    #[allow(clippy::only_used_in_recursion)]
+    fn walk_variance(
+        &mut self,
+        decl_kind: &str,
+        ty: &TypeExpr,
+        polarity: Polarity,
+        declared: &BTreeMap<String, Variance>,
+        span: Span,
+    ) {
+        match ty {
+            TypeExpr::Named(name) => {
+                if let Some(&declared_variance) = declared.get(name) {
+                    let ok = matches!(
+                        (declared_variance, polarity),
+                        (Variance::Invariant, _)
+                            | (Variance::Covariant, Polarity::Covariant)
+                            | (Variance::Contravariant, Polarity::Contravariant)
+                    );
+                    if !ok {
+                        let (marker, declared_word) = match declared_variance {
+                            Variance::Covariant => ("out", "covariant"),
+                            Variance::Contravariant => ("in", "contravariant"),
+                            Variance::Invariant => unreachable!(),
+                        };
+                        let position_word = match polarity {
+                            Polarity::Covariant => "covariant",
+                            Polarity::Contravariant => "contravariant",
+                            Polarity::Invariant => "invariant",
+                        };
+                        self.error_at(
+                            format!(
+                                "type parameter '{name}' is declared '{marker}' \
+                                 ({declared_word}) but appears in a \
+                                 {position_word} position in {decl_kind}"
+                            ),
+                            span,
+                        );
+                    }
+                }
+            }
+            TypeExpr::List(inner) | TypeExpr::Iter(inner) => {
+                // `list<T>` is invariant; `iter<T>` is covariant.
+                let sub = match ty {
+                    TypeExpr::List(_) => Polarity::Invariant,
+                    TypeExpr::Iter(_) => polarity,
+                    _ => unreachable!(),
+                };
+                self.walk_variance(decl_kind, inner, sub, declared, span);
+            }
+            TypeExpr::DictType(k, v) => {
+                // dict<K, V> is invariant in both.
+                self.walk_variance(decl_kind, k, Polarity::Invariant, declared, span);
+                self.walk_variance(decl_kind, v, Polarity::Invariant, declared, span);
+            }
+            TypeExpr::Shape(fields) => {
+                for f in fields {
+                    self.walk_variance(decl_kind, &f.type_expr, polarity, declared, span);
+                }
+            }
+            TypeExpr::Union(members) => {
+                for m in members {
+                    self.walk_variance(decl_kind, m, polarity, declared, span);
+                }
+            }
+            TypeExpr::FnType {
+                params,
+                return_type,
+            } => {
+                // Parameters are contravariant; return is covariant,
+                // composed with the outer polarity.
+                let param_polarity = polarity.compose(Variance::Contravariant);
+                for p in params {
+                    self.walk_variance(decl_kind, p, param_polarity, declared, span);
+                }
+                self.walk_variance(decl_kind, return_type, polarity, declared, span);
+            }
+            TypeExpr::Applied { name, args } => {
+                // Consult the declared variance of this constructor.
+                // Built-in `Result` has covariant-covariant; user
+                // generics carry their own variance annotations;
+                // unknown constructors fall back to invariance (safe).
+                let variances: Option<Vec<Variance>> = self
+                    .scope
+                    .get_enum(name)
+                    .map(|info| info.type_params.iter().map(|tp| tp.variance).collect())
+                    .or_else(|| {
+                        self.scope
+                            .get_struct(name)
+                            .map(|info| info.type_params.iter().map(|tp| tp.variance).collect())
+                    })
+                    .or_else(|| {
+                        self.scope
+                            .get_interface(name)
+                            .map(|info| info.type_params.iter().map(|tp| tp.variance).collect())
+                    });
+                for (idx, arg) in args.iter().enumerate() {
+                    let child_variance = variances
+                        .as_ref()
+                        .and_then(|v| v.get(idx).copied())
+                        .unwrap_or(Variance::Invariant);
+                    let sub = polarity.compose(child_variance);
+                    self.walk_variance(decl_kind, arg, sub, declared, span);
+                }
+            }
+            TypeExpr::Never | TypeExpr::LitString(_) | TypeExpr::LitInt(_) => {}
         }
     }
 
@@ -4997,6 +5396,133 @@ add("hello", 2) }"#,
     fn test_no_contravariance_float_to_int() {
         let errs = errors("pipeline t(task) { fn add(a: int) -> int { return a + 1 }\nadd(3.14) }");
         assert_eq!(errs.len(), 1);
+    }
+
+    // --- Comprehensive variance (issue #34) --------------------------------
+
+    #[test]
+    fn test_fn_param_contravariance_positive() {
+        // A closure that accepts a float (a supertype of int) can
+        // stand in for an expected `fn(int) -> int`: anything the
+        // caller hands in (an int) the closure can still accept.
+        let errs = errors(
+            r#"pipeline t(task) {
+                let wide = fn(x: float) { return 0 }
+                let cb: fn(int) -> int = wide
+            }"#,
+        );
+        assert!(
+            errs.is_empty(),
+            "expected fn(float)->int to satisfy fn(int)->int, got: {errs:?}"
+        );
+    }
+
+    #[test]
+    fn test_fn_param_contravariance_negative() {
+        // A closure that only accepts ints cannot stand in for an
+        // expected `fn(float) -> int`: the caller may hand it a
+        // float, which it is not prepared to receive.
+        let errs = errors(
+            r#"pipeline t(task) {
+                let narrow = fn(x: int) { return 0 }
+                let cb: fn(float) -> int = narrow
+            }"#,
+        );
+        assert!(
+            !errs.is_empty(),
+            "expected fn(int)->int NOT to satisfy fn(float)->int, but type-check passed"
+        );
+    }
+
+    #[test]
+    fn test_list_invariant_int_to_float_rejected() {
+        // `list<int>` must not flow into `list<float>` — lists are
+        // mutable, so a covariant assignment is unsound.
+        let errs = errors(
+            r#"pipeline t(task) {
+                let xs: list<int> = [1, 2, 3]
+                let ys: list<float> = xs
+            }"#,
+        );
+        assert!(
+            !errs.is_empty(),
+            "expected list<int> NOT to flow into list<float>, but type-check passed"
+        );
+    }
+
+    #[test]
+    fn test_iter_covariant_int_to_float_accepted() {
+        // Iterators are read-only, so element-type widening is sound.
+        let errs = errors(
+            r#"pipeline t(task) {
+                fn sink(ys: iter<float>) -> int { return 0 }
+                fn pipe(xs: iter<int>) -> int { return sink(xs) }
+            }"#,
+        );
+        assert!(
+            errs.is_empty(),
+            "expected iter<int> to flow into iter<float>, got: {errs:?}"
+        );
+    }
+
+    #[test]
+    fn test_decl_site_out_used_in_contravariant_position_rejected() {
+        // `type Box<out T> = fn(T) -> ()` — T is declared covariant
+        // but appears only as an input (contravariant). Must be
+        // rejected at declaration time.
+        let errs = errors(
+            r#"pipeline t(task) {
+                type Box<out T> = fn(T) -> int
+            }"#,
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("declared 'out'")),
+            "expected 'out T' misuse diagnostic, got: {errs:?}"
+        );
+    }
+
+    #[test]
+    fn test_decl_site_in_used_in_covariant_position_rejected() {
+        // `interface Producer<in T> { fn next() -> T }` — T is declared
+        // contravariant but appears only in output position.
+        let errs = errors(
+            r#"pipeline t(task) {
+                interface Producer<in T> { fn next() -> T }
+            }"#,
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("declared 'in'")),
+            "expected 'in T' misuse diagnostic, got: {errs:?}"
+        );
+    }
+
+    #[test]
+    fn test_decl_site_out_in_covariant_position_ok() {
+        // `type Reader<out T> = fn() -> T` — T appears in a covariant
+        // position, consistent with `out T`.
+        let errs = errors(
+            r#"pipeline t(task) {
+                type Reader<out T> = fn() -> T
+            }"#,
+        );
+        assert!(
+            errs.iter().all(|e| !e.contains("declared 'out'")),
+            "unexpected variance diagnostic: {errs:?}"
+        );
+    }
+
+    #[test]
+    fn test_dict_invariant_int_to_float_rejected() {
+        let errs = errors(
+            r#"pipeline t(task) {
+                let d: dict<string, int> = {"a": 1}
+                let e: dict<string, float> = d
+            }"#,
+        );
+        assert!(
+            !errs.is_empty(),
+            "expected dict<string, int> NOT to flow into dict<string, float>"
+        );
     }
 
     fn warnings(source: &str) -> Vec<String> {

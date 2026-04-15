@@ -586,9 +586,14 @@ impl Formatter {
                 self.dedent();
                 self.writeln("}");
             }
-            Node::TypeDecl { name, type_expr } => {
+            Node::TypeDecl {
+                name,
+                type_params,
+                type_expr,
+            } => {
+                let params = format_type_params(type_params);
                 let te = format_type_expr(type_expr);
-                self.writeln(&format!("type {name} = {te}"));
+                self.writeln(&format!("type {name}{params} = {te}"));
             }
             Node::Block(stmts) => {
                 self.writeln("{");
@@ -1128,9 +1133,14 @@ impl Formatter {
             Node::InterfaceDecl { name, .. } => format!("/* interface {name} */"),
             Node::ImplBlock { type_name, .. } => format!("/* impl {type_name} */"),
             Node::OverrideDecl { name, .. } => format!("/* override {name} */"),
-            Node::TypeDecl { name, type_expr } => {
+            Node::TypeDecl {
+                name,
+                type_params,
+                type_expr,
+            } => {
+                let params = format_type_params(type_params);
                 let te = format_type_expr(type_expr);
-                format!("type {name} = {te}")
+                format!("type {name}{params} = {te}")
             }
             Node::SelectExpr {
                 cases,

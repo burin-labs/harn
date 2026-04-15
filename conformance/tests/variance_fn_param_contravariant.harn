@@ -1,0 +1,8 @@
+// fn-type subtyping: parameters are contravariant, so a callback
+// declared `fn(float) -> int` (which accepts floats — a supertype
+// of int) is a valid substitute for an expected `fn(int) -> int`.
+pipeline test(task) {
+  let wide = fn(x: float) { return 0 }
+  let cb: fn(int) -> int = wide
+  println("ok")
+}
