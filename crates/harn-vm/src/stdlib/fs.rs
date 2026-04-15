@@ -18,6 +18,22 @@ fn resolve_fs_path(path: &str) -> PathBuf {
     crate::stdlib::process::resolve_source_relative_path(path)
 }
 
+fn result_ok(value: VmValue) -> VmValue {
+    VmValue::EnumVariant {
+        enum_name: "Result".into(),
+        variant: "Ok".into(),
+        fields: vec![value],
+    }
+}
+
+fn result_err(value: VmValue) -> VmValue {
+    VmValue::EnumVariant {
+        enum_name: "Result".into(),
+        variant: "Err".into(),
+        fields: vec![value],
+    }
+}
+
 pub(crate) fn register_fs_builtins(vm: &mut Vm) {
     vm.register_builtin("read_file", |args, _out| {
         let path = args.first().map(|a| a.display()).unwrap_or_default();
@@ -34,6 +50,27 @@ pub(crate) fn register_fs_builtins(vm: &mut Vm) {
                 Ok(VmValue::String(shared))
             }
             Err(e) => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                "Failed to read file {}: {e}",
+                resolved.display()
+            ))))),
+        }
+    });
+
+    vm.register_builtin("read_file_result", |args, _out| {
+        let path = args.first().map(|a| a.display()).unwrap_or_default();
+        let resolved = resolve_fs_path(&path);
+        if let Some(cached) = FILE_TEXT_CACHE.with(|cache| cache.borrow().get(&resolved).cloned()) {
+            return Ok(result_ok(VmValue::String(cached)));
+        }
+        match std::fs::read_to_string(&resolved) {
+            Ok(content) => {
+                let shared: Rc<str> = Rc::from(content);
+                FILE_TEXT_CACHE.with(|cache| {
+                    cache.borrow_mut().insert(resolved.clone(), shared.clone());
+                });
+                Ok(result_ok(VmValue::String(shared)))
+            }
+            Err(e) => Ok(result_err(VmValue::String(Rc::from(format!(
                 "Failed to read file {}: {e}",
                 resolved.display()
             ))))),

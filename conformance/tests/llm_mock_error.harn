@@ -1,0 +1,19 @@
+// Inject a categorized error via llm_mock({error: ...}) and verify
+// the category round-trips through the `try { llm_call } catch` path.
+pipeline default(task) {
+  // `llm_retries: 0` disables the llm_call-internal transient retry so
+  // a single injected error surfaces as a throw on the first attempt.
+  llm_mock({error: {category: "rate_limit", message: "429 Too Many Requests"}})
+  try {
+    llm_call("hello", nil, {provider: "mock", llm_retries: 0})
+  } catch (e) {
+    println(error_category(e))
+    println(is_rate_limited(e))
+  }
+  llm_mock({error: {category: "overloaded", message: "529 overloaded"}})
+  try {
+    llm_call("hello again", nil, {provider: "mock", llm_retries: 0})
+  } catch (e2) {
+    println(error_category(e2))
+  }
+}

@@ -418,7 +418,7 @@ async fn vm_call_llm_full_inner_request(
             &request.messages,
             request.system.as_deref(),
             request.native_tools.as_deref(),
-        );
+        )?;
         if let Some(tx) = delta_tx {
             if !result.text.is_empty() {
                 let _ = tx.send(result.text.clone());
@@ -465,11 +465,12 @@ async fn vm_call_llm_full_inner_offthread(
     delta_tx: Option<DeltaSender>,
 ) -> Result<LlmResult, String> {
     if request.provider == "mock" {
-        return Ok(mock_llm_response(
+        return mock_llm_response(
             &request.messages,
             request.system.as_deref(),
             request.native_tools.as_deref(),
-        ));
+        )
+        .map_err(|e| e.to_string());
     }
 
     let replay_mode = get_replay_mode();

@@ -38,10 +38,10 @@ impl MockProvider {
         request: &LlmRequestPayload,
         _delta_tx: Option<DeltaSender>,
     ) -> Result<LlmResult, VmError> {
-        Ok(mock_llm_response(
+        mock_llm_response(
             &request.messages,
             request.system.as_deref(),
             request.native_tools.as_deref(),
-        ))
+        )
     }
 }

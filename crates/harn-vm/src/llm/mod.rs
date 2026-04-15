@@ -96,7 +96,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::stdlib::{json_to_vm_value, schema_result_value};
-use crate::value::{VmChannelHandle, VmValue};
+use crate::value::{VmChannelHandle, VmError, VmValue};
 use crate::vm::Vm;
 
 use self::api::{vm_build_llm_result, vm_call_completion_full};
@@ -297,110 +297,217 @@ pub fn reset_llm_state() {
     mock::reset_llm_mock_state();
 }
 
+/// Shared implementation of `llm_call` / `llm_call_safe`. Runs the
+/// full schema-retry loop; on success returns the LLM result dict, on
+/// failure returns the underlying `VmError`. `llm_call` propagates the
+/// error; `llm_call_safe` wraps it in a `{ok: false, error: …}` envelope.
+async fn llm_call_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let mut opts = extract_llm_options(&args)?;
+    let options = args.get(2).and_then(|a| a.as_dict()).cloned();
+    // Default `llm_retries` to 2 for resilience against transient
+    // HTTP / provider failures. Pass `llm_retries: 0` to opt out.
+    let retry_config = agent_observe::LlmRetryConfig {
+        retries: helpers::opt_int(&options, "llm_retries").unwrap_or(2) as usize,
+        backoff_ms: helpers::opt_int(&options, "llm_backoff_ms").unwrap_or(2000) as u64,
+    };
+    // Schema retry loop is orthogonal to transient retries. Each
+    // schema retry gets a fresh transient budget. Small/local models
+    // often need the corrective nudge to produce conforming JSON.
+    let schema_retries = helpers::opt_int(&options, "schema_retries")
+        .unwrap_or(1)
+        .max(0) as usize;
+    let nudge_mode = parse_schema_nudge(&options);
+
+    let tool_format = helpers::opt_str(&options, "tool_format");
+    for attempt in 0..=schema_retries {
+        let result = agent_observe::observed_llm_call(
+            &opts,
+            tool_format.as_deref(),
+            None, // no bridge
+            &retry_config,
+            None,
+            false,
+            false, // non-bridge path runs on the local set
+        )
+        .await?;
+
+        // Non-bridge path runs schema validation; bridge path
+        // delegates validation to the host.
+        let mut vm_result = agent_config::build_llm_call_result(&result, &opts);
+        if !helpers::expects_structured_output(&opts) {
+            return Ok(vm_result);
+        }
+        let VmValue::Dict(ref dict) = vm_result else {
+            return Ok(vm_result);
+        };
+        let Some(data) = dict.get("data") else {
+            return Ok(vm_result);
+        };
+        let errors = compute_validation_errors(data, &opts);
+        if errors.is_empty() {
+            let mut d = dict.as_ref().clone();
+            d.insert("data".to_string(), data.clone());
+            vm_result = VmValue::Dict(Rc::new(d));
+            return Ok(vm_result);
+        }
+
+        let more_attempts = attempt < schema_retries;
+        let should_retry = more_attempts && !matches!(nudge_mode, SchemaNudge::Disabled);
+        if should_retry {
+            let nudge = build_schema_nudge(&errors, opts.output_schema.as_ref(), &nudge_mode);
+            emit_agent_event(AgentTraceEvent::SchemaRetry {
+                attempt: attempt + 1,
+                errors: errors.clone(),
+                nudge_used: !nudge.is_empty(),
+            });
+            // Append broken response + corrective nudge so the next
+            // call has progressively richer context.
+            opts.messages.push(serde_json::json!({
+                "role": "assistant",
+                "content": result.text,
+            }));
+            if !nudge.is_empty() {
+                opts.messages.push(serde_json::json!({
+                    "role": "user",
+                    "content": nudge,
+                }));
+            }
+            continue;
+        }
+
+        // Attempts exhausted: honor the caller's output_validation mode.
+        let hint = if schema_retries == 0 {
+            " (hint: set `schema_retries: N` in the llm_call options to automatically re-prompt the model with a corrective nudge)"
+        } else {
+            " (hint: schema_retries budget exhausted — the model did not produce conforming output after the configured retries; consider raising `schema_retries` or relaxing the schema)"
+        };
+        let message = format!(
+            "LLM output failed schema validation: {}{hint}",
+            errors.join("; ")
+        );
+        match output_validation_mode(&opts) {
+            "error" => {
+                return Err(crate::value::VmError::CategorizedError {
+                    message,
+                    category: crate::value::ErrorCategory::SchemaValidation,
+                });
+            }
+            "warn" => {
+                crate::events::log_warn("llm", &message);
+                return Ok(vm_result);
+            }
+            _ => return Ok(vm_result),
+        }
+    }
+    unreachable!("schema retry loop exited without returning");
+}
+
+fn llm_safe_envelope_ok(response: VmValue) -> VmValue {
+    let mut dict = std::collections::BTreeMap::new();
+    dict.insert("ok".to_string(), VmValue::Bool(true));
+    dict.insert("response".to_string(), response);
+    dict.insert("error".to_string(), VmValue::Nil);
+    VmValue::Dict(Rc::new(dict))
+}
+
+fn llm_safe_envelope_err(err: &VmError) -> VmValue {
+    let category = crate::value::error_to_category(err);
+    let message = match err {
+        VmError::CategorizedError { message, .. } => message.clone(),
+        VmError::Thrown(VmValue::String(s)) => s.to_string(),
+        VmError::Thrown(VmValue::Dict(d)) => d
+            .get("message")
+            .map(|v| v.display())
+            .unwrap_or_else(|| err.to_string()),
+        _ => err.to_string(),
+    };
+    let mut err_dict = std::collections::BTreeMap::new();
+    err_dict.insert(
+        "category".to_string(),
+        VmValue::String(Rc::from(category.as_str())),
+    );
+    err_dict.insert("message".to_string(), VmValue::String(Rc::from(message)));
+    let mut dict = std::collections::BTreeMap::new();
+    dict.insert("ok".to_string(), VmValue::Bool(false));
+    dict.insert("response".to_string(), VmValue::Nil);
+    dict.insert("error".to_string(), VmValue::Dict(Rc::new(err_dict)));
+    VmValue::Dict(Rc::new(dict))
+}
+
 /// Register LLM builtins on a VM.
 pub fn register_llm_builtins(vm: &mut Vm) {
     rate_limit::init_from_config();
     agent_config::register_agent_subscribe(vm);
     agent_config::register_agent_inject_feedback(vm);
-    vm.register_async_builtin("llm_call", |args| async move {
-        let mut opts = extract_llm_options(&args)?;
-        let options = args.get(2).and_then(|a| a.as_dict()).cloned();
-        // Default `llm_retries` to 2 for resilience against transient
-        // HTTP / provider failures. Pass `llm_retries: 0` to opt out.
-        let retry_config = agent_observe::LlmRetryConfig {
-            retries: helpers::opt_int(&options, "llm_retries").unwrap_or(2) as usize,
-            backoff_ms: helpers::opt_int(&options, "llm_backoff_ms").unwrap_or(2000) as u64,
+    vm.register_async_builtin("llm_call", |args| async move { llm_call_impl(args).await });
+    // `llm_call_safe` shares the exact same execution path as `llm_call`
+    // but replaces the throw-on-failure contract with a normalized
+    // `{ok, response, error}` envelope. Saves five lines of
+    // `try`/`guard`/`unwrap`/`?.data` boilerplate at every callsite.
+    vm.register_async_builtin("llm_call_safe", |args| async move {
+        match llm_call_impl(args).await {
+            Ok(response) => Ok(llm_safe_envelope_ok(response)),
+            Err(err) => Ok(llm_safe_envelope_err(&err)),
+        }
+    });
+
+    // `with_rate_limit(provider, fn() -> T, opts?) -> T` — acquires a
+    // permit from the provider's sliding-window rate limiter, invokes
+    // the closure, and retries with exponential backoff on
+    // classifier-retryable errors. Composes with
+    // `HARN_RATE_LIMIT_<PROVIDER>` env vars and `llm_rate_limit(...)`.
+    vm.register_async_builtin("with_rate_limit", |args| async move {
+        let provider = args.first().map(|a| a.display()).unwrap_or_default();
+        if provider.is_empty() {
+            return Err(VmError::Runtime(
+                "with_rate_limit: provider name is required".to_string(),
+            ));
+        }
+        let closure = match args.get(1) {
+            Some(VmValue::Closure(c)) => c.clone(),
+            _ => {
+                return Err(VmError::Runtime(
+                    "with_rate_limit: second argument must be a closure".to_string(),
+                ))
+            }
         };
-        // Schema retry loop is orthogonal to transient retries. Each
-        // schema retry gets a fresh transient budget. Small/local models
-        // often need the corrective nudge to produce conforming JSON.
-        let schema_retries = helpers::opt_int(&options, "schema_retries")
-            .unwrap_or(1)
-            .max(0) as usize;
-        let nudge_mode = parse_schema_nudge(&options);
+        let opts = args.get(2).and_then(|a| a.as_dict()).cloned();
+        let max_retries = helpers::opt_int(&opts, "max_retries").unwrap_or(5).max(0) as usize;
+        let mut backoff_ms = helpers::opt_int(&opts, "backoff_ms").unwrap_or(1000).max(1) as u64;
 
-        let tool_format = helpers::opt_str(&options, "tool_format");
-        for attempt in 0..=schema_retries {
-            let result = agent_observe::observed_llm_call(
-                &opts,
-                tool_format.as_deref(),
-                None, // no bridge
-                &retry_config,
-                None,
-                false,
-                false, // non-bridge path runs on the local set
-            )
-            .await?;
-
-            // Non-bridge path runs schema validation; bridge path
-            // delegates validation to the host.
-            let mut vm_result = agent_config::build_llm_call_result(&result, &opts);
-            if !helpers::expects_structured_output(&opts) {
-                return Ok(vm_result);
-            }
-            let VmValue::Dict(ref dict) = vm_result else {
-                return Ok(vm_result);
-            };
-            let Some(data) = dict.get("data") else {
-                return Ok(vm_result);
-            };
-            let errors = compute_validation_errors(data, &opts);
-            if errors.is_empty() {
-                let mut d = dict.as_ref().clone();
-                d.insert("data".to_string(), data.clone());
-                vm_result = VmValue::Dict(Rc::new(d));
-                return Ok(vm_result);
-            }
-
-            let more_attempts = attempt < schema_retries;
-            let should_retry = more_attempts && !matches!(nudge_mode, SchemaNudge::Disabled);
-            if should_retry {
-                let nudge = build_schema_nudge(&errors, opts.output_schema.as_ref(), &nudge_mode);
-                emit_agent_event(AgentTraceEvent::SchemaRetry {
-                    attempt: attempt + 1,
-                    errors: errors.clone(),
-                    nudge_used: !nudge.is_empty(),
-                });
-                // Append broken response + corrective nudge so the next
-                // call has progressively richer context.
-                opts.messages.push(serde_json::json!({
-                    "role": "assistant",
-                    "content": result.text,
-                }));
-                if !nudge.is_empty() {
-                    opts.messages.push(serde_json::json!({
-                        "role": "user",
-                        "content": nudge,
-                    }));
+        let mut attempt: usize = 0;
+        loop {
+            rate_limit::acquire_permit(&provider).await;
+            let mut child_vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
+                VmError::Runtime("with_rate_limit requires an async builtin VM context".to_string())
+            })?;
+            match child_vm.call_closure_pub(&closure, &[], &[]).await {
+                Ok(v) => return Ok(v),
+                Err(err) => {
+                    let cat = crate::value::error_to_category(&err);
+                    let retryable = matches!(
+                        cat,
+                        crate::value::ErrorCategory::RateLimit
+                            | crate::value::ErrorCategory::Overloaded
+                            | crate::value::ErrorCategory::TransientNetwork
+                            | crate::value::ErrorCategory::Timeout
+                    );
+                    if !retryable || attempt >= max_retries {
+                        return Err(err);
+                    }
+                    crate::events::log_debug(
+                        "llm.with_rate_limit",
+                        &format!(
+                            "retrying after {cat:?} (attempt {}/{max_retries}) in {backoff_ms}ms",
+                            attempt + 1
+                        ),
+                    );
+                    tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
+                    backoff_ms = backoff_ms.saturating_mul(2).min(30_000);
+                    attempt += 1;
                 }
-                continue;
-            }
-
-            // Attempts exhausted: honor the caller's output_validation mode.
-            let hint = if schema_retries == 0 {
-                " (hint: set `schema_retries: N` in the llm_call options to automatically re-prompt the model with a corrective nudge)"
-            } else {
-                " (hint: schema_retries budget exhausted — the model did not produce conforming output after the configured retries; consider raising `schema_retries` or relaxing the schema)"
-            };
-            let message = format!(
-                "LLM output failed schema validation: {}{hint}",
-                errors.join("; ")
-            );
-            match output_validation_mode(&opts) {
-                "error" => {
-                    return Err(crate::value::VmError::CategorizedError {
-                        message,
-                        category: crate::value::ErrorCategory::SchemaValidation,
-                    });
-                }
-                "warn" => {
-                    crate::events::log_warn("llm", &message);
-                    return Ok(vm_result);
-                }
-                _ => return Ok(vm_result),
             }
         }
-        unreachable!("schema retry loop exited without returning");
     });
 
     vm.register_async_builtin("llm_completion", |args| async move {
@@ -589,7 +696,7 @@ pub fn register_llm_builtins(vm: &mut Vm) {
 
 /// Register llm_mock / llm_mock_calls / llm_mock_clear builtins.
 fn register_llm_mock_builtins(vm: &mut Vm) {
-    use mock::{get_llm_mock_calls, push_llm_mock, reset_llm_mock_state, LlmMock};
+    use mock::{get_llm_mock_calls, push_llm_mock, reset_llm_mock_state, LlmMock, MockError};
 
     vm.register_builtin("llm_mock", |args, _out| {
         let config = match args.first() {
@@ -640,6 +747,45 @@ fn register_llm_mock_builtins(vm: &mut Vm) {
             .map(|v| v.display())
             .unwrap_or_else(|| "mock".to_string());
 
+        // Optional error injection: {error: {category, message}}. When
+        // present the mock short-circuits the provider call and surfaces
+        // as `VmError::CategorizedError`, making it observable via
+        // `error_category`, `try { ... }`, and the `llm_call_safe`
+        // envelope.
+        let error = match config.get("error") {
+            None | Some(VmValue::Nil) => None,
+            Some(VmValue::Dict(err_dict)) => {
+                let category_str = err_dict
+                    .get("category")
+                    .map(|v| v.display())
+                    .unwrap_or_default();
+                if category_str.is_empty() {
+                    return Err(crate::value::VmError::Runtime(
+                        "llm_mock: error.category is required".to_string(),
+                    ));
+                }
+                let category = crate::value::ErrorCategory::parse(&category_str);
+                // Reject typos loudly: `parse` falls back to Generic on
+                // unknown input. Let `"generic"` through; anything else
+                // that fell back is a typo.
+                if category.as_str() != category_str {
+                    return Err(crate::value::VmError::Runtime(format!(
+                        "llm_mock: unknown error category `{category_str}`",
+                    )));
+                }
+                let message = err_dict
+                    .get("message")
+                    .map(|v| v.display())
+                    .unwrap_or_default();
+                Some(MockError { category, message })
+            }
+            _ => {
+                return Err(crate::value::VmError::Runtime(
+                    "llm_mock: error must be a dict {category, message}".to_string(),
+                ));
+            }
+        };
+
         push_llm_mock(LlmMock {
             text,
             tool_calls,
@@ -649,6 +795,7 @@ fn register_llm_mock_builtins(vm: &mut Vm) {
             thinking,
             stop_reason,
             model,
+            error,
         });
         Ok(VmValue::Nil)
     });

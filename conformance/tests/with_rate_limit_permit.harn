@@ -1,0 +1,14 @@
+// with_rate_limit acquires a sliding-window permit for the provider and
+// invokes the closure. With a high RPM limit, successive calls return
+// immediately.
+pipeline default(task) {
+  llm_rate_limit("mock", {rpm: 1000})
+  llm_mock({text: "one"})
+  llm_mock({text: "two"})
+  let a = with_rate_limit("mock", fn() { llm_call("hello", nil, {provider: "mock"}) })
+  let b = with_rate_limit("mock", fn() { llm_call("hello", nil, {provider: "mock"}) })
+  println(a.text)
+  println(b.text)
+  // Clear the rate limit so other tests aren't affected by it.
+  llm_rate_limit("mock", {rpm: 0})
+}

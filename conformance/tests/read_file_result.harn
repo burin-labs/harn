@@ -1,0 +1,17 @@
+// read_file_result returns Result.Ok(content) on success and
+// Result.Err(message) on failure (instead of throwing like read_file).
+pipeline default(task) {
+  // Write a known file, then read it back via read_file_result.
+  write_file("rfr_fixture.txt", "hello result")
+  let ok = read_file_result("rfr_fixture.txt")
+  println(is_ok(ok))
+  println(unwrap(ok))
+  delete_file("rfr_fixture.txt")
+  // Missing path returns Result.Err with a descriptive message.
+  let bad = read_file_result("does_not_exist_7f3a.txt")
+  println(is_err(bad))
+  match bad {
+    Result.Err(msg) -> { println(msg.contains("Failed to read")) }
+    Result.Ok(_) -> { println("unexpected") }
+  }
+}

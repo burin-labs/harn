@@ -474,6 +474,47 @@ two stages sharing an id share their conversation automatically. The
 pre-0.7 `transcript_policy` dict (with `mode: "reset" | "fork"`) was
 removed — call the lifecycle verbs explicitly.
 
+## Resilient LLM patterns
+
+`llm_call` throws on transport / schema / budget failures. Two helpers
+flatten the common recovery boilerplate:
+
+```harn
+// Non-throwing envelope: the ok/response/error shape eliminates the
+// try/guard/unwrap/?.data boilerplate at every callsite.
+let r = llm_call_safe(user_prompt, nil, opts)
+if !r.ok {
+  log("llm_call failed:", r.error.category, r.error.message)
+  return nil
+}
+let data = r.response.data
+
+// Scoped permit acquisition + backoff for flaky providers. Retries on
+// rate_limit / overloaded / transient_network / timeout categories with
+// exponential backoff (capped at 30s). Composes with
+// HARN_RATE_LIMIT_<PROVIDER> and the providers.toml `rpm` field.
+let r = with_rate_limit("openai", fn() {
+  llm_call(user_prompt, nil, {provider: "openai", llm_retries: 0})
+}, {max_retries: 5, backoff_ms: 500})
+```
+
+`llm_call_safe`'s `error.category` is one of the canonical
+`ErrorCategory` strings: `"rate_limit"`, `"timeout"`, `"overloaded"`,
+`"server_error"`, `"transient_network"`, `"schema_validation"`,
+`"auth"`, `"not_found"`, `"circuit_open"`, `"tool_error"`,
+`"tool_rejected"`, `"cancelled"`, `"generic"`. Match on these instead
+of string-sniffing the message.
+
+Pair with `llm_mock({error: {category, message}})` to write
+deterministic tests for either helper's error path:
+
+```harn
+llm_mock({error: {category: "rate_limit", message: "429"}})
+let r = llm_call_safe("hi", nil, {provider: "mock", llm_retries: 0})
+assert(!r.ok)
+assert(r.error.category == "rate_limit")
+```
+
 ## Rate limiting
 
 Per-provider RPM limiting is built in:
@@ -484,6 +525,8 @@ Per-provider RPM limiting is built in:
   `HARN_RATE_LIMIT_TOGETHER=600`, `HARN_RATE_LIMIT_LOCAL=60`). Env
   overrides config.
 - Or `llm_rate_limit("provider", 600)` at runtime.
+- Wrap individual call sites in `with_rate_limit(provider, fn, opts?)`
+  to acquire a permit and auto-retry retryable failures.
 
 RPM shapes sustained throughput; `max_concurrent` caps simultaneous
 in-flight work. Use both when batching LLM calls at scale.

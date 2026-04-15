@@ -2,6 +2,7 @@ use std::cell::RefCell;
 
 use super::api::LlmResult;
 use crate::orchestration::ToolCallRecord;
+use crate::value::{ErrorCategory, VmError};
 
 /// LLM replay mode.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -19,6 +20,16 @@ pub enum ToolRecordingMode {
     Replay,
 }
 
+/// Categorized error injected by a mock. When present, the mock
+/// short-circuits the provider call and surfaces as
+/// `VmError::CategorizedError`, so `llm_call` throws and
+/// `llm_call_safe` populates its `error` envelope.
+#[derive(Clone)]
+pub(crate) struct MockError {
+    pub category: ErrorCategory,
+    pub message: String,
+}
+
 pub(crate) struct LlmMock {
     pub text: String,
     pub tool_calls: Vec<serde_json::Value>,
@@ -28,6 +39,9 @@ pub(crate) struct LlmMock {
     pub thinking: Option<String>,
     pub stop_reason: Option<String>,
     pub model: String,
+    /// When `Some`, this mock synthesizes an error instead of an
+    /// `LlmResult`. `text`/`tool_calls` are ignored for error mocks.
+    pub error: Option<MockError>,
 }
 
 #[derive(Clone)]
@@ -159,23 +173,40 @@ fn mock_glob_match(pattern: &str, text: &str) -> bool {
     true
 }
 
-/// Try to find and return a matching mock response.
-/// Returns Some(LlmResult) if a mock matched, None to fall through to default.
-fn try_match_mock(last_msg: &str) -> Option<LlmResult> {
+/// Convert a mock's `error` payload into the `VmError` that the
+/// provider path would have raised, so classification, retry, and
+/// `error_category` all behave identically to a real failure.
+fn mock_error_to_vm_error(err: &MockError) -> VmError {
+    VmError::CategorizedError {
+        message: err.message.clone(),
+        category: err.category.clone(),
+    }
+}
+
+/// Try to find and return a matching mock response. Returns
+/// `Some(Ok(LlmResult))` on a text/tool_call match, `Some(Err(VmError))`
+/// on an error-mock match, and `None` to fall through to default.
+fn try_match_mock(last_msg: &str) -> Option<Result<LlmResult, VmError>> {
     LLM_MOCKS.with(|mocks| {
         let mut mocks = mocks.borrow_mut();
 
         // FIFO: first mock without a match pattern (consumed on use).
         if let Some(idx) = mocks.iter().position(|m| m.match_pattern.is_none()) {
             let mock = mocks.remove(idx);
-            return Some(build_mock_result(&mock, last_msg.len()));
+            return Some(match &mock.error {
+                Some(err) => Err(mock_error_to_vm_error(err)),
+                None => Ok(build_mock_result(&mock, last_msg.len())),
+            });
         }
 
         // Pattern match (last registered wins).
         for mock in mocks.iter().rev() {
             if let Some(ref pattern) = mock.match_pattern {
                 if mock_glob_match(pattern, last_msg) {
-                    return Some(build_mock_result(mock, last_msg.len()));
+                    return Some(match &mock.error {
+                        Some(err) => Err(mock_error_to_vm_error(err)),
+                        None => Ok(build_mock_result(mock, last_msg.len())),
+                    });
                 }
             }
         }
@@ -320,7 +351,7 @@ pub(crate) fn mock_llm_response(
     messages: &[serde_json::Value],
     system: Option<&str>,
     native_tools: Option<&[serde_json::Value]>,
-) -> LlmResult {
+) -> Result<LlmResult, VmError> {
     record_llm_mock_call(messages, system, native_tools);
 
     let last_msg = messages
@@ -329,8 +360,8 @@ pub(crate) fn mock_llm_response(
         .and_then(|c| c.as_str())
         .unwrap_or("");
 
-    if let Some(result) = try_match_mock(last_msg) {
-        return result;
+    if let Some(matched) = try_match_mock(last_msg) {
+        return matched;
     }
 
     // Generate a mock tool call for the first tool, filling required
@@ -343,7 +374,7 @@ pub(crate) fn mock_llm_response(
                 .and_then(|n| n.as_str())
                 .unwrap_or("unknown");
             let mock_args = mock_required_args(first_tool);
-            return LlmResult {
+            return Ok(LlmResult {
                 text: String::new(),
                 tool_calls: vec![serde_json::json!({
                     "id": "mock_call_1",
@@ -366,7 +397,7 @@ pub(crate) fn mock_llm_response(
                     "arguments": mock_args,
                     "visibility": "internal",
                 })],
-            };
+            });
         }
     }
 
@@ -389,7 +420,7 @@ pub(crate) fn mock_llm_response(
     };
     let response = format!("<assistant_prose>{prose_body}</assistant_prose>{done_block}");
 
-    LlmResult {
+    Ok(LlmResult {
         text: response.clone(),
         tool_calls: vec![],
         input_tokens: last_msg.len() as i64,
@@ -405,7 +436,7 @@ pub(crate) fn mock_llm_response(
             "text": response,
             "visibility": "public",
         })],
-    }
+    })
 }
 
 pub fn set_tool_recording_mode(mode: ToolRecordingMode) {

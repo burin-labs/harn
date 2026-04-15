@@ -1,0 +1,15 @@
+// with_rate_limit retries on rate_limit / overloaded / transient_network /
+// timeout errors with exponential backoff, then returns the successful
+// response. backoff_ms: 1 keeps the test fast.
+pipeline default(task) {
+  llm_mock({error: {category: "rate_limit", message: "429"}})
+  llm_mock({error: {category: "transient_network", message: "connection reset"}})
+  llm_mock({text: "finally"})
+  let r = with_rate_limit(
+    "mock",
+    fn() { llm_call("hello", nil, {provider: "mock", llm_retries: 0}) },
+    {backoff_ms: 1, max_retries: 5},
+  )
+  println(r.text)
+  println(len(llm_mock_calls()))
+}

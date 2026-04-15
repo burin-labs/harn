@@ -445,7 +445,8 @@ does **not** drain the iterator.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `read_file(path)` | path: string | string | Read entire file as UTF-8 string. Throws on failure |
+| `read_file(path)` | path: string | string | Read entire file as UTF-8 string. Throws on failure. **Deprecated in favor of `read_file_result` for new code; the throwing form remains supported.** |
+| `read_file_result(path)` | path: string | `Result<string, string>` | Non-throwing read: returns `Result.Ok(content)` on success or `Result.Err(message)` on failure. Shares `read_file`'s content cache |
 | `write_file(path, content)` | path: string, content: string | nil | Write string to file. Throws on failure |
 | `append_file(path, content)` | path: string, content: string | nil | Append string to file, creating it if it doesn't exist. Throws on failure |
 | `copy_file(src, dst)` | src: string, dst: string | nil | Copy a file. Throws on failure |
@@ -463,6 +464,7 @@ does **not** drain the iterator.
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `env(name)` | name: string | string or nil | Read environment variable |
+| `env_or(name, default)` | name: string, default: any | string or default | Read environment variable, or return `default` when unset. One-line replacement for the common `let v = env(K); if v { v } else { default }` pattern |
 | `timestamp()` | none | float | Unix timestamp in seconds with sub-second precision |
 | `elapsed()` | none | int | Milliseconds since VM startup |
 | `exec(cmd, args...)` | cmd: string, args: strings | dict | Execute external command. Returns `{stdout, stderr, status, success}` |
@@ -712,7 +714,9 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `llm_call(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Single LLM request. Returns `{text, model, input_tokens, output_tokens}` |
+| `llm_call(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Single LLM request. Returns `{text, model, input_tokens, output_tokens}`. Throws on transport / rate-limit / schema-validation failures |
+| `llm_call_safe(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Non-throwing envelope around `llm_call`. Returns `{ok: bool, response: dict or nil, error: {category, message} or nil}`. `error.category` is one of `ErrorCategory`'s canonical strings (`"rate_limit"`, `"timeout"`, `"overloaded"`, `"server_error"`, `"transient_network"`, `"schema_validation"`, `"auth"`, `"not_found"`, `"circuit_open"`, `"tool_error"`, `"tool_rejected"`, `"cancelled"`, `"generic"`) |
+| `with_rate_limit(provider, fn, options?)` | provider: string, fn: closure, options: dict | whatever `fn` returns | Acquire a permit from the provider's sliding-window rate limiter, invoke `fn`, and retry with exponential backoff on retryable errors (`rate_limit`, `overloaded`, `transient_network`, `timeout`). Options: `max_retries` (default 5), `backoff_ms` (default 1000, capped at 30s after doubling) |
 | `llm_completion(prefix, suffix?, system?, options?)` | prefix: string, suffix: string, system: string, options: dict | dict | Text completion / fill-in-the-middle request. Returns `{text, model, input_tokens, output_tokens}` |
 | `agent_loop(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Multi-turn agent loop with `##DONE##` sentinel, daemon/idling support, and optional per-turn context filtering. Returns `{status, text, iterations, duration_ms, tools_used}` |
 | `llm_info()` | — | dict | Current LLM config: `{provider, model, api_key_set}` |
@@ -729,7 +733,7 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `llm_session_cost()` | — | dict | Session totals: `{total_cost, input_tokens, output_tokens, call_count}` |
 | `llm_budget(max_cost)` | max_cost: float | nil | Set session budget in USD. LLM calls throw if exceeded |
 | `llm_budget_remaining()` | — | float or nil | Remaining budget (nil if no budget set) |
-| `llm_mock(response)` | response: dict | nil | Queue a mock LLM response. Dict supports `text`, `tool_calls`, `match` (glob), `input_tokens`, `output_tokens`, `thinking`, `stop_reason`, `model` |
+| `llm_mock(response)` | response: dict | nil | Queue a mock LLM response. Dict supports `text`, `tool_calls`, `match` (glob), `input_tokens`, `output_tokens`, `thinking`, `stop_reason`, `model`, `error: {category, message}` (short-circuits the call and surfaces as `VmError::CategorizedError` — useful for testing `llm_call_safe` envelopes and `with_rate_limit` retry loops) |
 | `llm_mock_calls()` | — | list | Return list of `{messages, system, tools}` for all calls made to the mock provider |
 | `llm_mock_clear()` | — | nil | Clear all queued mock responses and recorded calls |
 
@@ -750,6 +754,12 @@ assert_eq(r.text, "The answer is 42.")
 
 // Pattern-matched mocks (reusable, not consumed)
 llm_mock({text: "Hello!", match: "*greeting*"})
+
+// Error injection for testing resilient code paths. The mock
+// surfaces as a real `VmError::CategorizedError`, so `error_category`,
+// `try { ... } catch`, `llm_call_safe`, and `with_rate_limit` all see
+// it the same way they would a live provider failure.
+llm_mock({error: {category: "rate_limit", message: "429 Too Many Requests"}})
 
 // Inspect what was sent
 let calls = llm_mock_calls()
