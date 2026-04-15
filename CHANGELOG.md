@@ -7,6 +7,39 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## Unreleased
+
+### Added
+
+- **Generic inference across schema-driven builtins.** `llm_call`,
+  `llm_completion`, `schema_parse`, `schema_check`, and `schema_expect`
+  now carry real generic signatures keyed on a new `Schema<T>` type
+  constructor. User-defined wrappers inherit the same narrowing
+  without any typechecker special case:
+
+  ```harn
+  fn grade<T>(prompt: string, schema: Schema<T>) -> T {
+    let r = llm_call(prompt, nil,
+      {output_schema: schema, output_validation: "error",
+       response_format: "json"})
+    return r.data
+  }
+
+  let out: GraderOut = grade("Grade this", schema_of(GraderOut))
+  // out.verdict / out.summary narrow without schema_is guards.
+  ```
+
+  The `Schema<T>` type constructor denotes a runtime schema value
+  whose static shape is `T`. When a parameter is typed `Schema<T>`,
+  the argument's value node (a type-alias identifier, `schema_of(T)`,
+  or an inline JSON-Schema dict) binds the generic parameter,
+  threading the narrowed type through the call's return type. The
+  hand-rolled `extract_llm_schema_from_options` narrowing is
+  removed in favor of this generic dispatch, and user generic
+  functions use the same node-walking inference. Runtime
+  `schema_of(T)` is unchanged. Resolves
+  [#33](https://github.com/burin-labs/harn/issues/33).
+
 ## v0.7.4
 
 ### Added

@@ -361,7 +361,7 @@ println(response.output_tokens)
 | `temperature` | float | provider default | |
 | `tools` | list | nil | Registered tool schemas. |
 | `response_format` | string | nil | `"json"` asks the provider for JSON mode. |
-| `output_schema` | dict \| type-alias | nil | JSON-schema-shaped dict, or a top-level `type T = ...` alias (compiler lowers to the schema dict). Validated after parse. |
+| `output_schema` | `Schema<T>` (dict \| type-alias) | nil | JSON-schema-shaped dict, or a top-level `type T = ...` alias (compiler lowers to the schema dict). The generic parameter `T` flows into the narrowed `r.data: T`. Validated after parse. |
 | `output_validation` | string | `"off"` | `"error"` throws on mismatch; `"warn"` logs. |
 | `schema_retries` | int | 1 | When validation fails, re-prompt up to N times with a corrective nudge. Works alongside `output_validation: "error"`. |
 | `schema_retry_nudge` | string \| bool | auto | String = verbatim corrective message (+ validation errors appended). `true` = auto nudge from schema required/properties keys. `false` = retry without a nudge. |
@@ -413,6 +413,24 @@ let r = llm_call(prompt, sys, {
 if schema_is(r.data, GraderOut) {
   println(r.data.verdict)        // narrowed to GraderOut here
 }
+```
+
+Reusable generic wrapper (narrows without a `schema_is` guard via
+the `Schema<T>` generic param):
+
+```harn
+fn grade<T>(prompt: string, schema: Schema<T>) -> T {
+  let r = llm_call(prompt, nil, {
+    provider: "auto",
+    output_schema: schema,
+    output_validation: "error",
+    response_format: "json",
+  })
+  return r.data
+}
+
+let out: GraderOut = grade("Grade this", schema_of(GraderOut))
+println(out.verdict)
 ```
 
 Batch grading at bounded concurrency:

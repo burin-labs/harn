@@ -1,0 +1,24 @@
+type GraderOut = {verdict: "pass" | "fail", summary: string}
+
+/**
+ * A user-defined generic wrapper over llm_call. `Schema<T>` in the
+ * parameter position binds T from the schema passed in, so the
+ * wrapper's return type is narrowed without any schema_is or
+ * schema_expect guard. The inner llm_call picks up the same binding
+ * via its own generic signature.
+ */
+fn grade<T>(prompt: string, schema: Schema<T>) -> T {
+  let r = llm_call(
+    prompt,
+    nil,
+    {provider: "mock", output_schema: schema, output_validation: "error", response_format: "json"},
+  )
+  return r.data
+}
+
+pipeline default() {
+  llm_mock({text: "{\"verdict\": \"pass\", \"summary\": \"ok\"}"})
+  let out: GraderOut = grade("Grade this", schema_of(GraderOut))
+  println(out.verdict)
+  println(out.summary)
+}

@@ -556,7 +556,7 @@ impl TypeChecker {
                 }
                 // llm_call/llm_completion with a schema option are type-safe
                 if (name == "llm_call" || name == "llm_completion")
-                    && Self::extract_llm_schema_from_options(args, scope).is_some()
+                    && Self::llm_call_has_typed_schema_option(args, scope)
                 {
                     return None;
                 }
@@ -567,24 +567,26 @@ impl TypeChecker {
         }
     }
 
-    /// Extract a schema TypeExpr from the options dict of an llm_call/llm_completion.
-    /// Looks for `schema` or `output_schema` key in the 3rd argument (dict literal).
-    fn extract_llm_schema_from_options(args: &[SNode], scope: &TypeScope) -> Option<TypeExpr> {
-        let opts = args.get(2)?;
-        let entries = match &opts.node {
-            Node::DictLiteral(entries) => entries,
-            _ => return None,
+    /// True if an `llm_call` / `llm_completion` options dict names a
+    /// resolvable output schema. Used by the strict-types boundary checks
+    /// to suppress "unvalidated" warnings when the call site is typed.
+    /// Actual return-type narrowing is driven by the generic-builtin
+    /// dispatch path in `infer_type`, not this helper.
+    fn llm_call_has_typed_schema_option(args: &[SNode], scope: &TypeScope) -> bool {
+        let Some(opts) = args.get(2) else {
+            return false;
         };
-        for entry in entries {
+        let Node::DictLiteral(entries) = &opts.node else {
+            return false;
+        };
+        entries.iter().any(|entry| {
             let key = match &entry.key.node {
                 Node::StringLiteral(k) | Node::Identifier(k) => k.as_str(),
-                _ => continue,
+                _ => return false,
             };
-            if key == "schema" || key == "output_schema" {
-                return schema_type_expr_from_node(&entry.value, scope);
-            }
-        }
-        None
+            (key == "schema" || key == "output_schema")
+                && schema_type_expr_from_node(&entry.value, scope).is_some()
+        })
     }
 
     /// Check whether a type annotation is a concrete shape/struct type
@@ -1548,7 +1550,7 @@ impl TypeChecker {
                     if let Node::FunctionCall { name, args } = &object.node {
                         if builtin_signatures::is_untyped_boundary_source(name) {
                             let has_schema = (name == "llm_call" || name == "llm_completion")
-                                && Self::extract_llm_schema_from_options(args, scope).is_some();
+                                && Self::llm_call_has_typed_schema_option(args, scope);
                             if !has_schema {
                                 self.warning_at_with_help(
                                     format!(
@@ -1582,7 +1584,7 @@ impl TypeChecker {
                     if let Node::FunctionCall { name, args } = &object.node {
                         if builtin_signatures::is_untyped_boundary_source(name) {
                             let has_schema = (name == "llm_call" || name == "llm_completion")
-                                && Self::extract_llm_schema_from_options(args, scope).is_some();
+                                && Self::llm_call_has_typed_schema_option(args, scope);
                             if !has_schema {
                                 self.warning_at_with_help(
                                     format!(
@@ -2301,6 +2303,69 @@ impl TypeChecker {
                 Self::extract_type_bindings(p_ret, a_ret, type_params, bindings)
             }
             _ => Ok(()),
+        }
+    }
+
+    /// Bind type parameters by walking a param [`TypeExpr`] against an
+    /// argument AST node. Used by the generic-builtin dispatch path for
+    /// `llm_call`, `schema_parse`, etc.
+    ///
+    /// Unlike [`extract_type_bindings`], which matches a param type against
+    /// an inferred arg *type*, this walks the arg *node* so that
+    /// `Schema<T>` in a param position can pull `T` from the structural
+    /// value of the corresponding argument (e.g. a type alias identifier
+    /// or an inline JSON-Schema dict literal). When the param is not a
+    /// `Schema<_>` or shape marker, we fall back to standard type-based
+    /// binding against the arg's inferred type.
+    fn bind_from_arg_node(
+        &self,
+        param: &TypeExpr,
+        arg: &SNode,
+        type_params: &std::collections::BTreeSet<String>,
+        bindings: &mut BTreeMap<String, TypeExpr>,
+        scope: &TypeScope,
+    ) -> Result<(), String> {
+        match param {
+            TypeExpr::Applied { name, args } if name == "Schema" && args.len() == 1 => {
+                if let TypeExpr::Named(tp) = &args[0] {
+                    if type_params.contains(tp) {
+                        if let Some(resolved) = schema_type_expr_from_node(arg, scope) {
+                            Self::bind_type_param(tp, &resolved, bindings)?;
+                        }
+                    }
+                }
+                Ok(())
+            }
+            TypeExpr::Shape(fields) => {
+                if let Node::DictLiteral(entries) = &arg.node {
+                    for field in fields {
+                        let matching = entries.iter().find(|entry| match &entry.key.node {
+                            Node::StringLiteral(key) | Node::Identifier(key) => key == &field.name,
+                            _ => false,
+                        });
+                        if let Some(entry) = matching {
+                            self.bind_from_arg_node(
+                                &field.type_expr,
+                                &entry.value,
+                                type_params,
+                                bindings,
+                                scope,
+                            )?;
+                        }
+                    }
+                    return Ok(());
+                }
+                if let Some(arg_ty) = self.infer_type(arg, scope) {
+                    Self::extract_type_bindings(param, &arg_ty, type_params, bindings)?;
+                }
+                Ok(())
+            }
+            _ => {
+                if let Some(arg_ty) = self.infer_type(arg, scope) {
+                    Self::extract_type_bindings(param, &arg_ty, type_params, bindings)?;
+                }
+                Ok(())
+            }
         }
     }
 
@@ -3148,15 +3213,14 @@ impl TypeChecker {
                 sig.type_param_names.iter().cloned().collect();
             for (arg, (_param_name, param_type)) in args.iter().zip(sig.params.iter()) {
                 if let Some(param_ty) = param_type {
-                    if let Some(arg_ty) = self.infer_type(arg, scope) {
-                        if let Err(message) = Self::extract_type_bindings(
-                            param_ty,
-                            &arg_ty,
-                            &type_param_set,
-                            &mut type_bindings,
-                        ) {
-                            self.error_at(message, arg.span);
-                        }
+                    if let Err(message) = self.bind_from_arg_node(
+                        param_ty,
+                        arg,
+                        &type_param_set,
+                        &mut type_bindings,
+                        scope,
+                    ) {
+                        self.error_at(message, arg.span);
                     }
                 }
             }
@@ -3312,7 +3376,7 @@ impl TypeChecker {
                     });
                 }
                 // Check user-defined function return types
-                if let Some(sig) = scope.get_fn(name) {
+                if let Some(sig) = scope.get_fn(name).cloned() {
                     let mut return_type = sig.return_type.clone();
                     if let Some(ty) = return_type.take() {
                         if sig.type_param_names.is_empty() {
@@ -3323,90 +3387,41 @@ impl TypeChecker {
                             sig.type_param_names.iter().cloned().collect();
                         for (arg, (_param_name, param_type)) in args.iter().zip(sig.params.iter()) {
                             if let Some(param_ty) = param_type {
-                                if let Some(arg_ty) = self.infer_type(arg, scope) {
-                                    let _ = Self::extract_type_bindings(
-                                        param_ty,
-                                        &arg_ty,
-                                        &type_param_set,
-                                        &mut bindings,
-                                    );
-                                }
+                                let _ = self.bind_from_arg_node(
+                                    param_ty,
+                                    arg,
+                                    &type_param_set,
+                                    &mut bindings,
+                                    scope,
+                                );
                             }
                         }
                         return Some(Self::apply_type_bindings(&ty, &bindings));
                     }
                     return None;
                 }
-                // Schema-aware return types for validation/boundary builtins
-                if name == "schema_expect" && args.len() >= 2 {
-                    if let Some(schema_type) = schema_type_expr_from_node(&args[1], scope) {
-                        return Some(schema_type);
+                // Generic builtins (llm_call, schema_parse/check/expect):
+                // bind T by walking each arg node against the param
+                // TypeExpr, then apply bindings to the declared return
+                // type. Falls through to `builtin_return_type` when no T
+                // could be bound (e.g. llm_call without an output_schema
+                // option), preserving the historical `dict` return.
+                if let Some(sig) = builtin_signatures::lookup_generic_builtin_sig(name) {
+                    let type_param_set: std::collections::BTreeSet<String> =
+                        sig.type_params.iter().cloned().collect();
+                    let mut bindings: BTreeMap<String, TypeExpr> = BTreeMap::new();
+                    for (arg, param_ty) in args.iter().zip(sig.params.iter()) {
+                        let _ = self.bind_from_arg_node(
+                            param_ty,
+                            arg,
+                            &type_param_set,
+                            &mut bindings,
+                            scope,
+                        );
                     }
-                }
-                if (name == "schema_check" || name == "schema_parse") && args.len() >= 2 {
-                    if let Some(schema_type) = schema_type_expr_from_node(&args[1], scope) {
-                        return Some(TypeExpr::Applied {
-                            name: "Result".into(),
-                            args: vec![schema_type, TypeExpr::Named("string".into())],
-                        });
-                    }
-                }
-                // Schema-aware llm_call: when options contain a schema, return
-                // a shape with typed `data` field
-                if (name == "llm_call" || name == "llm_completion") && args.len() >= 3 {
-                    if let Some(schema_type) = Self::extract_llm_schema_from_options(args, scope) {
-                        return Some(TypeExpr::Shape(vec![
-                            ShapeField {
-                                name: "text".into(),
-                                type_expr: TypeExpr::Named("string".into()),
-                                optional: false,
-                            },
-                            ShapeField {
-                                name: "model".into(),
-                                type_expr: TypeExpr::Named("string".into()),
-                                optional: false,
-                            },
-                            ShapeField {
-                                name: "provider".into(),
-                                type_expr: TypeExpr::Named("string".into()),
-                                optional: false,
-                            },
-                            ShapeField {
-                                name: "input_tokens".into(),
-                                type_expr: TypeExpr::Named("int".into()),
-                                optional: false,
-                            },
-                            ShapeField {
-                                name: "output_tokens".into(),
-                                type_expr: TypeExpr::Named("int".into()),
-                                optional: false,
-                            },
-                            ShapeField {
-                                name: "data".into(),
-                                type_expr: schema_type,
-                                optional: false,
-                            },
-                            ShapeField {
-                                name: "visible_text".into(),
-                                type_expr: TypeExpr::Named("string".into()),
-                                optional: true,
-                            },
-                            ShapeField {
-                                name: "tool_calls".into(),
-                                type_expr: TypeExpr::Named("list".into()),
-                                optional: true,
-                            },
-                            ShapeField {
-                                name: "thinking".into(),
-                                type_expr: TypeExpr::Named("string".into()),
-                                optional: true,
-                            },
-                            ShapeField {
-                                name: "stop_reason".into(),
-                                type_expr: TypeExpr::Named("string".into()),
-                                optional: true,
-                            },
-                        ]));
+                    let all_bound = sig.type_params.iter().all(|tp| bindings.contains_key(tp));
+                    if all_bound {
+                        return Some(Self::apply_type_bindings(&sig.return_type, &bindings));
                     }
                 }
                 // Check builtin return types
@@ -4757,8 +4772,11 @@ fn schema_type_expr_from_node(node: &SNode, scope: &TypeScope) -> Option<TypeExp
             scope.resolve_type(name).cloned()
         }
         Node::DictLiteral(entries) => schema_type_expr_from_dict(entries, scope),
+        // `schema_of(T)` is a runtime function that returns the JSON-Schema
+        // dict for a type alias. When its result is passed into a position
+        // typed `Schema<T>`, we resolve the underlying alias to its
+        // TypeExpr so the generic binding can extract `T`.
         Node::FunctionCall { name, args } if name == "schema_of" && args.len() == 1 => {
-            // `schema_is(x, schema_of(T))` narrows the same as `schema_is(x, T)`.
             if let Node::Identifier(alias) = &args[0].node {
                 return scope.resolve_type(alias).cloned();
             }
