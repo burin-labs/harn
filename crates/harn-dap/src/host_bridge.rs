@@ -205,6 +205,31 @@ impl HostCallBridge for DapHostBridge {
     }
 }
 
+impl DapHostBridge {
+    /// Drain every in-flight reverse request and reply with a synthetic
+    /// failure carrying `reason` as the message. Called on `disconnect`
+    /// / `terminate` so any DapHostBridge::dispatch call blocking inside
+    /// `await_reply` unwinds promptly instead of waiting on the 60s
+    /// per-op timeout. The script sees a normal Harn exception that
+    /// propagates up and ends the run cleanly.
+    pub fn cancel_all_pending(&self, reason: &str) {
+        let mut guard = match self.pending.lock() {
+            Ok(g) => g,
+            Err(_) => return,
+        };
+        let drained: Vec<(i64, Sender<DapHostCallReply>)> =
+            std::mem::take(&mut *guard).into_iter().collect();
+        drop(guard);
+        for (_seq, tx) in drained {
+            let _ = tx.send(DapHostCallReply {
+                success: false,
+                body: None,
+                message: Some(format!("cancelled: {reason}")),
+            });
+        }
+    }
+}
+
 /// Send a reply for a single pending reverse request, then drop the
 /// channel. Called by `main.rs` when an incoming `type: "response"`
 /// frame matches one of our reverse-request seqs.

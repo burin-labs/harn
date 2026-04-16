@@ -77,6 +77,27 @@ pub struct Debugger {
     /// DAP client as reverse requests. When `None`, scripts only see the
     /// harn-vm fallbacks.
     host_bridge: Option<DapHostBridge>,
+    /// True when the VM is in a "should keep stepping" state (after
+    /// continue/next/stepIn/stepOut/configurationDone). The main loop
+    /// drives one VM step per iteration while this is set, draining any
+    /// pending DAP messages between steps so pause/disconnect/etc. get
+    /// serviced mid-run instead of being starved.
+    running: bool,
+    /// Snapshotted breakpoint conditions for the active run. Refreshed
+    /// each time we transition idle→running so condition edits between
+    /// runs take effect.
+    bp_conditions: Vec<(i64, Option<String>)>,
+    /// Set by handle_pause; the next VM step honors it by emitting a
+    /// stopped event with reason="pause" and clearing the flag.
+    pending_pause: bool,
+    /// progressId of the in-flight DAP progressStart, if any. The IDE
+    /// uses it to display a "still working" indicator and reset its own
+    /// per-request timeouts. Cleared on stop/terminate via progressEnd.
+    active_progress_id: Option<String>,
+    /// Number of VM steps taken since the most recent progressStart;
+    /// used to throttle progressUpdate emission to one per ~256 steps
+    /// so we don't flood the IDE with no-op events.
+    steps_since_progress_update: u32,
 }
 
 impl Debugger {
@@ -103,7 +124,58 @@ impl Debugger {
             break_on_exceptions: false,
             latest_debug_state: Rc::new(RefCell::new(None)),
             host_bridge: None,
+            running: false,
+            bp_conditions: Vec::new(),
+            pending_pause: false,
+            active_progress_id: None,
+            steps_since_progress_update: 0,
         }
+    }
+
+    /// End any in-flight progress event. Called whenever the VM stops
+    /// (breakpoint, pause, terminate, error) so the IDE clears its
+    /// "Running…" indicator.
+    fn end_progress(&mut self, responses: &mut Vec<DapResponse>) {
+        if let Some(id) = self.active_progress_id.take() {
+            let seq = self.next_seq();
+            responses.push(DapResponse::event(
+                seq,
+                "progressEnd",
+                Some(json!({ "progressId": id })),
+            ));
+        }
+        self.steps_since_progress_update = 0;
+    }
+
+    /// Emit a progressUpdate roughly every 256 steps so the IDE sees
+    /// liveness ticks during long runs and can extend its own timeouts.
+    /// Cheap when there's no active progress (early return).
+    fn maybe_progress_update(&mut self, responses: &mut Vec<DapResponse>) {
+        if self.active_progress_id.is_none() {
+            return;
+        }
+        self.steps_since_progress_update = self.steps_since_progress_update.wrapping_add(1);
+        if self.steps_since_progress_update & 0xFF != 0 {
+            return;
+        }
+        let id = self.active_progress_id.clone().unwrap();
+        let line = self.current_line;
+        let seq = self.next_seq();
+        responses.push(DapResponse::event(
+            seq,
+            "progressUpdate",
+            Some(json!({
+                "progressId": id,
+                "message": format!("line {}", line),
+            })),
+        ));
+    }
+
+    /// True when the main loop should keep stepping this debugger's VM.
+    /// Drives the message-interleave loop in `main.rs` — when false, the
+    /// loop blocks on `request_rx.recv()` instead of busy-stepping.
+    pub fn is_running(&self) -> bool {
+        self.running && self.vm.is_some()
     }
 
     /// Install a host bridge. Cloned into an `Rc` and registered with
@@ -137,6 +209,7 @@ impl Debugger {
             "evaluate" => self.handle_evaluate(&msg),
             "setExceptionBreakpoints" => self.handle_set_exception_breakpoints(&msg),
             "disconnect" => self.handle_disconnect(&msg),
+            "harnPing" => self.handle_ping(&msg),
             _ => {
                 vec![DapResponse::success(
                     self.next_seq(),
@@ -339,19 +412,26 @@ impl Debugger {
     }
 
     fn handle_configuration_done(&mut self, msg: &DapMessage) -> Vec<DapResponse> {
-        let mut responses = Vec::new();
-
         let seq = self.next_seq();
-        responses.push(DapResponse::success(
-            seq,
-            msg.seq,
-            "configurationDone",
-            None,
-        ));
-
-        responses.extend(self.run_to_breakpoint());
-
-        responses
+        let response = DapResponse::success(seq, msg.seq, "configurationDone", None);
+        self.enter_running();
+        // Emit a progressStart event so the IDE shows "Running…" while
+        // the VM works through its first step batch. We end the progress
+        // when the VM stops (next breakpoint, terminates, or pause). DAP
+        // spec: progressStart/progressUpdate/progressEnd, identified by
+        // a stable progressId we hold for the lifetime of the run.
+        let progress_seq = self.next_seq();
+        self.active_progress_id = Some(format!("run-{}", progress_seq));
+        let progress = DapResponse::event(
+            progress_seq,
+            "progressStart",
+            Some(json!({
+                "progressId": self.active_progress_id.clone().unwrap(),
+                "title": "Running script",
+                "cancellable": false,
+            })),
+        );
+        vec![response, progress]
     }
 
     /// Drain agent trace events the VM has accumulated and serialize the
@@ -401,242 +481,244 @@ impl Debugger {
         out
     }
 
-    /// Run the VM until it hits a breakpoint, step completes, or terminates.
-    fn run_to_breakpoint(&mut self) -> Vec<DapResponse> {
-        let mut responses = Vec::new();
-
-        if self.vm.is_none() {
-            let seq = self.next_seq();
-            responses.push(DapResponse::event(seq, "terminated", None));
-            return responses;
-        }
-
-        // Snapshot conditions up front — `self.vm.step_execute` borrows `self` mutably
-        // inside the loop, so we can't re-borrow `self.breakpoints` there.
-        let bp_conditions: Vec<(i64, Option<String>)> = self
+    /// Transition idle → running. Snapshots breakpoint conditions and
+    /// resets per-run state. Caller sets the appropriate `step_mode` and
+    /// VM step flag separately. Returns nothing — actual stepping happens
+    /// later when `main` polls `step_running_vm` between message drains.
+    fn enter_running(&mut self) {
+        self.bp_conditions = self
             .breakpoints
             .iter()
             .map(|bp| (bp.line, bp.condition.clone()))
             .collect();
-
         self.var_refs.clear();
         self.next_var_ref = 100;
+        self.running = self.vm.is_some();
+    }
 
-        loop {
-            let step_result = {
-                let vm = self.vm.as_mut().unwrap();
-                self.runtime.block_on(async { vm.step_execute().await })
-            };
+    /// Take ONE VM step and return any DAP events the step produced.
+    /// Stops the run (sets `running = false`) when the program hits a
+    /// breakpoint, terminates, or errors. Designed to be called in a
+    /// tight loop by main, interleaved with `request_rx.try_recv()` so
+    /// pause/disconnect/setBreakpoints get handled mid-run instead of
+    /// being starved by a blocking inner loop.
+    pub fn step_running_vm(&mut self) -> Vec<DapResponse> {
+        if !self.running || self.vm.is_none() {
+            return Vec::new();
+        }
 
-            // Drain any LLM-call telemetry the VM emitted during this step
-            // and forward to the DAP client as `output` events with
-            // `category: "telemetry"` and a JSON body.
-            for tele in self.drain_telemetry_events() {
-                responses.push(tele);
-            }
+        // Honor a pending pause request before taking the step — we
+        // don't actually advance the VM, just stop with reason="pause".
+        if self.pending_pause {
+            self.pending_pause = false;
+            return self.handle_pause_stop();
+        }
 
-            match step_result {
-                Ok(Some((val, stopped))) => {
-                    if stopped {
-                        let state = self.current_debug_state();
-                        let current_line = state.line as i64;
-                        let vars = state.variables;
+        let mut responses = Vec::new();
+        let step_result = {
+            let vm = self.vm.as_mut().unwrap();
+            self.runtime.block_on(async { vm.step_execute().await })
+        };
 
-                        let should_stop = check_condition(&bp_conditions, current_line, &vars);
+        for tele in self.drain_telemetry_events() {
+            responses.push(tele);
+        }
+        self.maybe_progress_update(&mut responses);
 
-                        if !should_stop {
-                            continue;
-                        }
-
-                        self.stopped = true;
-                        self.current_line = current_line;
-                        self.variables = vars;
-                        self.program_state = ProgramState::Stopped;
-
-                        let output = self.vm.as_ref().unwrap().output().to_string();
-                        if !output.is_empty() && output != self.output {
-                            let new_output = &output[self.output.len()..];
-                            if !new_output.is_empty() {
-                                let seq = self.next_seq();
-                                responses.push(DapResponse::event(
-                                    seq,
-                                    "output",
-                                    Some(json!({
-                                        "category": "stdout",
-                                        "output": new_output,
-                                    })),
-                                ));
-                            }
-                            self.output = output;
-                        }
-
-                        let seq = self.next_seq();
-                        responses.push(DapResponse::event(
-                            seq,
-                            "stopped",
-                            Some(json!({
-                                "reason": "breakpoint",
-                                "threadId": 1,
-                                "allThreadsStopped": true,
-                            })),
-                        ));
-                        return responses;
-                    } else {
-                        let _val = val;
-                        let output = self.vm.as_ref().unwrap().output().to_string();
-                        if !output.is_empty() && output != self.output {
-                            let new_output = &output[self.output.len()..];
-                            if !new_output.is_empty() {
-                                let seq = self.next_seq();
-                                responses.push(DapResponse::event(
-                                    seq,
-                                    "output",
-                                    Some(json!({
-                                        "category": "stdout",
-                                        "output": new_output,
-                                    })),
-                                ));
-                            }
-                        }
-
-                        self.program_state = ProgramState::Terminated;
-                        let seq = self.next_seq();
-                        responses.push(DapResponse::event(seq, "terminated", None));
-                        return responses;
-                    }
+        match step_result {
+            Ok(Some((_val, stopped))) if stopped => {
+                let state = self.current_debug_state();
+                let current_line = state.line as i64;
+                let vars = state.variables;
+                if !check_condition(&self.bp_conditions, current_line, &vars) {
+                    return responses;
                 }
-                Ok(None) => continue,
-                Err(e) => {
-                    // Exception breakpoints: pause on thrown exceptions instead of terminating.
-                    if self.break_on_exceptions && matches!(&e, VmError::Thrown(_)) {
-                        let error_msg = e.to_string();
-                        let state = self.current_debug_state();
-                        self.stopped = true;
-                        self.current_line = state.line as i64;
-                        self.variables = state.variables;
-                        self.program_state = ProgramState::Stopped;
-
-                        let seq = self.next_seq();
-                        responses.push(DapResponse::event(
-                            seq,
-                            "output",
-                            Some(json!({
-                                "category": "stderr",
-                                "output": format!("Exception: {error_msg}\n"),
-                            })),
-                        ));
-
-                        let seq = self.next_seq();
-                        responses.push(DapResponse::event(
-                            seq,
-                            "stopped",
-                            Some(json!({
-                                "reason": "exception",
-                                "description": error_msg,
-                                "threadId": 1,
-                                "allThreadsStopped": true,
-                            })),
-                        ));
-                        return responses;
-                    }
-
+                self.stopped = true;
+                self.running = false;
+                self.current_line = current_line;
+                self.variables = vars;
+                self.program_state = ProgramState::Stopped;
+                self.flush_output_into(&mut responses);
+                self.end_progress(&mut responses);
+                let seq = self.next_seq();
+                responses.push(DapResponse::event(
+                    seq,
+                    "stopped",
+                    Some(json!({
+                        "reason": "breakpoint",
+                        "threadId": 1,
+                        "allThreadsStopped": true,
+                    })),
+                ));
+            }
+            Ok(Some((_val, _))) => {
+                // Program reached its natural end.
+                self.flush_output_into(&mut responses);
+                self.program_state = ProgramState::Terminated;
+                self.running = false;
+                self.end_progress(&mut responses);
+                let seq = self.next_seq();
+                responses.push(DapResponse::event(seq, "terminated", None));
+            }
+            Ok(None) => {
+                // Mid-instruction continuation; just keep stepping.
+            }
+            Err(e) => {
+                self.running = false;
+                self.end_progress(&mut responses);
+                if self.break_on_exceptions && matches!(&e, VmError::Thrown(_)) {
+                    let error_msg = e.to_string();
+                    let state = self.current_debug_state();
+                    self.stopped = true;
+                    self.current_line = state.line as i64;
+                    self.variables = state.variables;
+                    self.program_state = ProgramState::Stopped;
                     let seq = self.next_seq();
                     responses.push(DapResponse::event(
                         seq,
                         "output",
                         Some(json!({
                             "category": "stderr",
-                            "output": format!("Error: {e}\n"),
+                            "output": format!("Exception: {error_msg}\n"),
                         })),
                     ));
-                    self.program_state = ProgramState::Terminated;
                     let seq = self.next_seq();
-                    responses.push(DapResponse::event(seq, "terminated", None));
+                    responses.push(DapResponse::event(
+                        seq,
+                        "stopped",
+                        Some(json!({
+                            "reason": "exception",
+                            "description": error_msg,
+                            "threadId": 1,
+                            "allThreadsStopped": true,
+                        })),
+                    ));
                     return responses;
                 }
+                let seq = self.next_seq();
+                responses.push(DapResponse::event(
+                    seq,
+                    "output",
+                    Some(json!({
+                        "category": "stderr",
+                        "output": format!("Error: {e}\n"),
+                    })),
+                ));
+                self.program_state = ProgramState::Terminated;
+                let seq = self.next_seq();
+                responses.push(DapResponse::event(seq, "terminated", None));
             }
+        }
+
+        responses
+    }
+
+    /// Honor a deferred pause request: stop on the current instruction
+    /// without advancing, emit a stopped event with reason="pause".
+    fn handle_pause_stop(&mut self) -> Vec<DapResponse> {
+        let mut responses = Vec::new();
+        let state = self.current_debug_state();
+        self.stopped = true;
+        self.running = false;
+        self.current_line = state.line as i64;
+        self.variables = state.variables;
+        self.program_state = ProgramState::Stopped;
+        self.flush_output_into(&mut responses);
+        self.end_progress(&mut responses);
+        let seq = self.next_seq();
+        responses.push(DapResponse::event(
+            seq,
+            "stopped",
+            Some(json!({
+                "reason": "pause",
+                "threadId": 1,
+                "allThreadsStopped": true,
+            })),
+        ));
+        responses
+    }
+
+    /// Drain any new VM stdout into `output` DAP events. Used by the
+    /// stop/terminate paths so the IDE doesn't lose trailing print()s.
+    fn flush_output_into(&mut self, responses: &mut Vec<DapResponse>) {
+        let output = self.vm.as_ref().unwrap().output().to_string();
+        if !output.is_empty() && output != self.output {
+            let new_output = output[self.output.len()..].to_string();
+            if !new_output.is_empty() {
+                let seq = self.next_seq();
+                responses.push(DapResponse::event(
+                    seq,
+                    "output",
+                    Some(json!({
+                        "category": "stdout",
+                        "output": new_output,
+                    })),
+                ));
+            }
+            self.output = output;
         }
     }
 
     fn handle_continue(&mut self, msg: &DapMessage) -> Vec<DapResponse> {
         self.step_mode = StepMode::Continue;
         self.stopped = false;
-
         let seq = self.next_seq();
-        let mut responses = vec![DapResponse::success(
+        let response = DapResponse::success(
             seq,
             msg.seq,
             "continue",
             Some(json!({ "allThreadsContinued": true })),
-        )];
-
-        responses.extend(self.run_to_breakpoint());
-        responses
+        );
+        self.enter_running();
+        vec![response]
     }
 
     fn handle_next(&mut self, msg: &DapMessage) -> Vec<DapResponse> {
         self.step_mode = StepMode::StepOver;
-
         if let Some(vm) = &mut self.vm {
             vm.set_step_over();
         }
-
         let seq = self.next_seq();
-        let mut responses = vec![DapResponse::success(seq, msg.seq, "next", None)];
-
-        responses.extend(self.run_to_breakpoint());
-        responses
+        let response = DapResponse::success(seq, msg.seq, "next", None);
+        self.enter_running();
+        vec![response]
     }
 
     fn handle_step_in(&mut self, msg: &DapMessage) -> Vec<DapResponse> {
         self.step_mode = StepMode::StepIn;
-
         if let Some(vm) = &mut self.vm {
             vm.set_step_mode(true);
         }
-
         let seq = self.next_seq();
-        let mut responses = vec![DapResponse::success(seq, msg.seq, "stepIn", None)];
-
-        responses.extend(self.run_to_breakpoint());
-        responses
+        let response = DapResponse::success(seq, msg.seq, "stepIn", None);
+        self.enter_running();
+        vec![response]
     }
 
     fn handle_step_out(&mut self, msg: &DapMessage) -> Vec<DapResponse> {
         self.step_mode = StepMode::StepOut;
-
         if let Some(vm) = &mut self.vm {
             vm.set_step_out();
         }
-
         let seq = self.next_seq();
-        let mut responses = vec![DapResponse::success(seq, msg.seq, "stepOut", None)];
-
-        responses.extend(self.run_to_breakpoint());
-        responses
+        let response = DapResponse::success(seq, msg.seq, "stepOut", None);
+        self.enter_running();
+        vec![response]
     }
 
     /// Break into the currently running program at the next VM step.
     ///
-    /// The DAP flow is single-threaded today: requests only arrive when
-    /// the VM is already stopped at a breakpoint, so "pause" has nothing
-    /// live to interrupt. We still respond successfully and set the VM
-    /// into step-in mode so the very next step call stops on the next
-    /// instruction — this gives IDEs a meaningful pause affordance the
-    /// moment execution resumes.
+    /// With message interleaving, this works even mid-run: main.rs drains
+    /// the message channel between VM steps, so a pause request lands
+    /// while the VM is in flight. We set `pending_pause` so the next
+    /// `step_running_vm` call honors it without advancing the VM.
     fn handle_pause(&mut self, msg: &DapMessage) -> Vec<DapResponse> {
-        self.step_mode = StepMode::StepIn;
-        if let Some(vm) = &mut self.vm {
-            vm.set_step_mode(true);
-        }
-
         let seq = self.next_seq();
         let mut responses = vec![DapResponse::success(seq, msg.seq, "pause", None)];
 
-        // If execution is already stopped (typical case given the
-        // single-threaded stdio flow), emit a stopped event so the IDE
-        // knows the pause was honored.
         if self.stopped {
+            // Already stopped — just emit a stopped event so the IDE
+            // updates its UI immediately.
             let stop_seq = self.next_seq();
             responses.push(DapResponse::event(
                 stop_seq,
@@ -647,6 +729,13 @@ impl Debugger {
                     "allThreadsStopped": true,
                 })),
             ));
+        } else {
+            // Defer: next step_running_vm tick will stop with reason=pause.
+            self.pending_pause = true;
+            self.step_mode = StepMode::StepIn;
+            if let Some(vm) = &mut self.vm {
+                vm.set_step_mode(true);
+            }
         }
 
         responses
@@ -1044,9 +1133,47 @@ impl Debugger {
         )]
     }
 
-    fn handle_disconnect(&mut self, msg: &DapMessage) -> Vec<DapResponse> {
+    /// Lightweight liveness check the IDE pings us with periodically.
+    /// Replies with the current run-state so the IDE can distinguish
+    /// "wedged" from "actively stepping" without having to emit
+    /// progress events (which we already do for active runs).
+    fn handle_ping(&mut self, msg: &DapMessage) -> Vec<DapResponse> {
         let seq = self.next_seq();
-        vec![DapResponse::success(seq, msg.seq, "disconnect", None)]
+        let state_str = match self.program_state {
+            ProgramState::NotStarted => "not_started",
+            ProgramState::Running => "running",
+            ProgramState::Stopped => "stopped",
+            ProgramState::Terminated => "terminated",
+        };
+        vec![DapResponse::success(
+            seq,
+            msg.seq,
+            "harnPing",
+            Some(json!({
+                "state": state_str,
+                "running": self.running,
+                "stopped": self.stopped,
+            })),
+        )]
+    }
+
+    fn handle_disconnect(&mut self, msg: &DapMessage) -> Vec<DapResponse> {
+        // Stop the VM and release any reverse-request waiters. Without
+        // the cancellation step, a host_call in flight via DapHostBridge
+        // would block until its 60s timeout — leaving the script (and
+        // any tokio task driving step_execute) stuck for a minute after
+        // the IDE walks away.
+        self.running = false;
+        if let Some(bridge) = &self.host_bridge {
+            bridge.cancel_all_pending("disconnect");
+        }
+        self.vm = None;
+        self.program_state = ProgramState::Terminated;
+        let mut responses = Vec::new();
+        self.end_progress(&mut responses);
+        let seq = self.next_seq();
+        responses.push(DapResponse::success(seq, msg.seq, "disconnect", None));
+        responses
     }
 }
 
@@ -1169,9 +1296,14 @@ mod tests {
             Some(json!({"program": file.to_string_lossy()})),
         ));
 
-        // configurationDone triggers execution and should produce at least
-        // configurationDone + terminated responses.
-        let responses = dbg.handle_message(make_request(3, "configurationDone", None));
+        // configurationDone transitions the debugger into "running" and
+        // returns immediately; the main loop drives step_running_vm
+        // between message drains. In tests we drain manually until the
+        // program terminates.
+        let mut responses = dbg.handle_message(make_request(3, "configurationDone", None));
+        while dbg.is_running() {
+            responses.extend(dbg.step_running_vm());
+        }
         assert!(responses.len() >= 2);
 
         let output_event = responses.iter().find(|r| {
@@ -1439,7 +1571,10 @@ mod tests {
             Some(json!({"program": file.to_string_lossy()})),
         ));
 
-        let responses = dbg.handle_message(make_request(4, "configurationDone", None));
+        let mut responses = dbg.handle_message(make_request(4, "configurationDone", None));
+        while dbg.is_running() {
+            responses.extend(dbg.step_running_vm());
+        }
 
         let has_stopped = responses
             .iter()
@@ -1454,5 +1589,56 @@ mod tests {
 
         std::fs::remove_file(&file).ok();
         std::fs::remove_dir(&dir).ok();
+    }
+
+    #[test]
+    fn test_pause_interrupts_running_vm() {
+        let mut dbg = Debugger::new();
+
+        let dir = std::env::temp_dir().join("harn_dap_pause_test");
+        std::fs::create_dir_all(&dir).ok();
+        let file = dir.join("test_pause.harn");
+        std::fs::write(
+            &file,
+            "pipeline test(task) {\n  let x = 1\n  let y = 2\n  let z = 3\n}",
+        )
+        .unwrap();
+
+        dbg.handle_message(make_request(1, "initialize", None));
+        dbg.handle_message(make_request(
+            2,
+            "launch",
+            Some(json!({"program": file.to_string_lossy()})),
+        ));
+        dbg.handle_message(make_request(3, "configurationDone", None));
+        assert!(dbg.is_running());
+
+        // Pause the in-flight VM before draining; the next step tick
+        // must honor the pending pause and emit stopped/reason=pause.
+        dbg.handle_message(make_request(4, "pause", None));
+        let step_responses = dbg.step_running_vm();
+        let paused = step_responses.iter().any(|r| {
+            r.event.as_deref() == Some("stopped")
+                && r.body
+                    .as_ref()
+                    .map(|b| b["reason"] == "pause")
+                    .unwrap_or(false)
+        });
+        assert!(paused, "expected a stopped event with reason=pause");
+        assert!(!dbg.is_running());
+
+        std::fs::remove_file(&file).ok();
+        std::fs::remove_dir(&dir).ok();
+    }
+
+    #[test]
+    fn test_harn_ping_reports_state() {
+        let mut dbg = Debugger::new();
+        let responses = dbg.handle_message(make_request(1, "harnPing", None));
+        assert_eq!(responses.len(), 1);
+        let body = responses[0].body.as_ref().unwrap();
+        assert_eq!(body["state"], "not_started");
+        assert_eq!(body["running"], false);
+        assert_eq!(body["stopped"], false);
     }
 }

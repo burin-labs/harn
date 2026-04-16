@@ -39,10 +39,51 @@ fn main() {
     let mut debugger = Debugger::new();
     debugger.attach_host_bridge(Arc::clone(&bridge));
 
-    while let Ok(msg) = request_rx.recv() {
-        let responses = debugger.handle_message(msg);
-        for response in responses {
-            send_response(&stdout, &response);
+    // Interleaved drive loop. Two phases per iteration:
+    //   1. Drain any pending DAP messages from the channel (try_recv —
+    //      non-blocking) so commands like pause / disconnect /
+    //      setBreakpoints get serviced even mid-run.
+    //   2. If the debugger is in a "running" state (after continue /
+    //      next / stepIn / stepOut / configurationDone), take ONE VM
+    //      step and emit any events. Otherwise block waiting for the
+    //      next message — we don't busy-loop while idle.
+    //
+    // This is what makes pause work during long scripts. The previous
+    // model called run_to_breakpoint() inside handle_continue, which
+    // monopolized the main thread until the VM voluntarily stopped;
+    // any pause / disconnect arriving in the meantime sat in the
+    // channel ignored.
+    use std::sync::mpsc::TryRecvError;
+    loop {
+        // Phase 1: drain pending messages.
+        loop {
+            match request_rx.try_recv() {
+                Ok(msg) => {
+                    let responses = debugger.handle_message(msg);
+                    for response in responses {
+                        send_response(&stdout, &response);
+                    }
+                }
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => return,
+            }
+        }
+        // Phase 2: step the VM if running, else block on next message.
+        if debugger.is_running() {
+            let responses = debugger.step_running_vm();
+            for response in responses {
+                send_response(&stdout, &response);
+            }
+        } else {
+            match request_rx.recv() {
+                Ok(msg) => {
+                    let responses = debugger.handle_message(msg);
+                    for response in responses {
+                        send_response(&stdout, &response);
+                    }
+                }
+                Err(_) => return,
+            }
         }
     }
 }

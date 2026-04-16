@@ -7,6 +7,36 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## v0.7.11
+
+### Added
+
+- **DAP pause-during-run.** `pause` now interrupts a program that is
+  actively executing instead of being a no-op during runs. The adapter's
+  main loop interleaves VM steps with non-blocking drains of the DAP
+  request channel, so `pause`, `setBreakpoints`, and `disconnect`
+  arriving mid-run are serviced between steps. On `pause`, the next step
+  tick stops with `reason: "pause"` without advancing the VM.
+- **DAP progress events during runs.** `configurationDone` now emits a
+  `progressStart` so the IDE shows a "Running…" indicator, with
+  throttled `progressUpdate` ticks (roughly every 256 VM steps) carrying
+  the current line. Progress is ended on every stop path (breakpoint,
+  pause, exception, terminate, disconnect) so the IDE's liveness
+  indicator clears cleanly.
+- **`harnPing` DAP request.** Lightweight liveness check the IDE can
+  send to distinguish "wedged" from "actively stepping". Responds with
+  `{state, running, stopped}` derived from the current debugger state.
+
+### Fixed
+
+- **DAP `disconnect` no longer waits on in-flight host calls.**
+  `disconnect` now cancels any pending `DapHostBridge` reverse-request
+  waiters with a synthetic failure carrying `reason: "cancelled:
+  disconnect"`, tears down the VM, and ends any active progress event.
+  Previously, a host call in flight at disconnect time kept the script
+  blocked until the 60s reverse-request timeout. Scripts now unwind
+  promptly when the IDE walks away.
+
 ## v0.7.10
 
 ### Fixed
