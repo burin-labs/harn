@@ -234,7 +234,7 @@ cmd_prepare() {
   current="$(current_version)"
   next="$(next_version "$bump")"
   bump_version "$next"
-  cargo check --workspace >/dev/null
+  cargo check --workspace --all-targets >/dev/null
   echo "Version updated: $current -> $next"
   echo "Next steps:"
   echo "  1. Review docs/release notes diff"

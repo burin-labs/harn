@@ -2,7 +2,7 @@
 set -e
 
 echo "=== Pre-push: running fast release-quality checks ==="
-cargo test --workspace
+make test
 cargo run --quiet --bin harn -- fmt --check conformance/tests/
 
 if command -v npx >/dev/null 2>&1; then
