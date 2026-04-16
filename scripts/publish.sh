@@ -51,7 +51,32 @@ if ! git diff --quiet --ignore-submodules HEAD --; then
 fi
 
 RETRY_DELAY=120  # seconds to wait on rate limit
+INDEX_SETTLE_DELAY=30  # seconds to wait for index propagation between retries
 MAX_ATTEMPTS=3
+
+# Crates to publish, in dependency order. Used by the per-crate fallback
+# when `cargo publish --workspace` bails out partway through.
+WORKSPACE_CRATES=(
+  harn-lexer
+  harn-parser
+  harn-fmt
+  harn-vm
+  harn-lint
+  harn-dap
+  harn-lsp
+  harn-cli
+)
+
+# Cargo classifies several non-fatal conditions as fatal exits, so the
+# bare `cargo publish --workspace` can fail mid-stream without actually
+# being broken. We retry on:
+#   - 429 / Too Many Requests              — crates.io rate limit, real
+#   - "unexpected cargo internal error"    — known cargo bug where it gives
+#   - "packages remain in plan"              up waiting on index propagation
+#                                            after a successful upload
+#   - "already exists on crates.io index"  — crate succeeded on an earlier
+#                                            attempt; nothing to do
+RETRYABLE_PATTERN='429|Too Many Requests|unexpected cargo internal error|packages remain in plan|already exists on crates.io index'
 
 attempt_workspace_publish() {
   local attempt=1
@@ -66,23 +91,66 @@ attempt_workspace_publish() {
 
     echo "$output"
 
-    # Rate-limit retry. `cargo publish --workspace` is non-atomic, so if we
-    # get a 429 partway through, subsequent retries will skip the already-
-    # published crates via cargo's "already exists" handling.
-    if echo "$output" | grep -q "429\|Too Many Requests"; then
+    if echo "$output" | grep -Eq "$RETRYABLE_PATTERN"; then
       if [[ $attempt -lt $MAX_ATTEMPTS ]]; then
-        echo "  Rate limited. Waiting ${RETRY_DELAY}s before retry..."
-        sleep "$RETRY_DELAY"
+        local delay="$INDEX_SETTLE_DELAY"
+        if echo "$output" | grep -q "429\|Too Many Requests"; then
+          delay="$RETRY_DELAY"
+          echo "  Rate limited. Waiting ${delay}s before retry..."
+        else
+          echo "  Cargo bailed mid-publish (likely index propagation lag). Waiting ${delay}s before retry..."
+        fi
+        sleep "$delay"
         attempt=$((attempt + 1))
         continue
       fi
-      echo "  FAILED: still rate limited after $MAX_ATTEMPTS attempts"
-      return 1
+      echo "  Workspace publish still failing after $MAX_ATTEMPTS attempts; falling back to per-crate publish"
+      return 2  # signal: try per-crate fallback
     fi
 
-    echo "  FAILED to publish workspace"
+    echo "  FAILED to publish workspace (non-retryable error)"
     return 1
   done
+  return 2
+}
+
+# Per-crate fallback for the case where `cargo publish --workspace` keeps
+# bailing on the cargo internal error. Walks crates in dependency order
+# and treats "already exists on crates.io index" as success.
+attempt_per_crate_publish() {
+  echo ""
+  echo "=== Per-crate publish fallback ==="
+  local crate
+  local output
+  for crate in "${WORKSPACE_CRATES[@]}"; do
+    echo ""
+    echo "--- Publishing $crate ---"
+    if output=$(cargo publish -p "$crate" $DRY_RUN $VERIFY_FLAGS $ALLOW_DIRTY 2>&1); then
+      echo "$output"
+      continue
+    fi
+    if echo "$output" | grep -q "already exists on crates.io index"; then
+      echo "  $crate already published at this version — skipping"
+      continue
+    fi
+    if echo "$output" | grep -q "429\|Too Many Requests"; then
+      echo "$output"
+      echo "  Rate limited on $crate. Waiting ${RETRY_DELAY}s and retrying once..."
+      sleep "$RETRY_DELAY"
+      if output=$(cargo publish -p "$crate" $DRY_RUN $VERIFY_FLAGS $ALLOW_DIRTY 2>&1); then
+        echo "$output"
+        continue
+      fi
+      if echo "$output" | grep -q "already exists on crates.io index"; then
+        echo "  $crate already published at this version — skipping"
+        continue
+      fi
+    fi
+    echo "$output"
+    echo "  FAILED to publish $crate"
+    return 1
+  done
+  return 0
 }
 
 CURRENT_VERSION="$(cargo metadata --format-version 1 --no-deps 2>/dev/null \
@@ -90,7 +158,16 @@ CURRENT_VERSION="$(cargo metadata --format-version 1 --no-deps 2>/dev/null \
 echo "Publishing workspace at version $CURRENT_VERSION"
 echo ""
 
+set +e
 attempt_workspace_publish
+ws_status=$?
+set -e
+
+if [[ $ws_status -eq 2 ]]; then
+  attempt_per_crate_publish
+elif [[ $ws_status -ne 0 ]]; then
+  exit "$ws_status"
+fi
 
 echo ""
 echo "=== Workspace publish complete ==="

@@ -1,9 +1,11 @@
 [workspace]
+default-members = ["crates/harn-cli"]
 members = [
     "crates/harn-lexer",
     "crates/harn-parser",
     "crates/harn-cli",
     "crates/harn-lsp",
+    "crates/harn-modules",
     "crates/harn-vm",
     "crates/harn-dap",
     "crates/harn-fmt",

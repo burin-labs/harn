@@ -343,6 +343,29 @@ import { extract_paths, parse_cells } from "std/text"
 6. Source-relative builtins like `render(...)` inside imported functions resolve
    paths relative to the imported module's directory, not the entry pipeline
 
+## Static cross-module checking
+
+`harn check`, `harn run`, `harn bench`, and the Harn LSP all build a
+**module graph** from the entry file that follows `import` statements
+transitively, so they share one consistent view of what names are
+visible in each module.
+
+When every import in a file resolves, the typechecker treats a call to
+an unknown name as an **error** (not a lint warning):
+
+```text
+error: call target `helpr` is not defined or imported
+```
+
+Resolution is conservative: if any import in the file fails to resolve
+(missing file, parse error, nonexistent package), the stricter
+cross-module check is turned off for that file and only the normal
+builtin/local-declaration check applies. That way one broken import
+does not produce a flood of follow-on undefined-name errors.
+
+Go-to-definition in the LSP uses the same graph, so navigation works
+across any chain of imports — not just direct ones.
+
 ## Import collision detection
 
 If two wildcard imports export a function with the same name, Harn will

@@ -698,6 +698,7 @@ dependencies = [
  "harn-fmt",
  "harn-lexer",
  "harn-lint",
+ "harn-modules",
  "harn-parser",
  "harn-vm",
  "include_dir",
@@ -750,6 +751,7 @@ name = "harn-lint"
 version = "0.7.11"
 dependencies = [
  "harn-lexer",
+ "harn-modules",
  "harn-parser",
  "harn-vm",
 ]
@@ -761,10 +763,20 @@ dependencies = [
  "harn-fmt",
  "harn-lexer",
  "harn-lint",
+ "harn-modules",
  "harn-parser",
  "serde_json",
  "tokio",
  "tower-lsp",
+]
+
+[[package]]
+name = "harn-modules"
+version = "0.7.11"
+dependencies = [
+ "harn-lexer",
+ "harn-parser",
+ "tempfile",
 ]
 
 [[package]]

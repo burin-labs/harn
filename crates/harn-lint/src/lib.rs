@@ -1,6 +1,8 @@
 use std::collections::HashSet;
+use std::path::Path;
 
 use harn_lexer::{FixEdit, Span, StringSegment};
+use harn_modules::WildcardResolution;
 use harn_parser::diagnostic::find_closest_match;
 use harn_parser::{stmt_definitely_exits, BindingPattern, Node, SNode, TypeExpr, TypedParam};
 
@@ -91,6 +93,12 @@ struct Linter<'a> {
     /// Whether the file has wildcard imports (import "module").
     /// If true, skip undefined-function checks since we can't know what was imported.
     has_wildcard_import: bool,
+    /// Whether wildcard imports were resolved using [`harn_modules`] and we can
+    /// choose between known/wildcard modes explicitly.
+    use_module_graph_for_wildcards: bool,
+    /// Wildcard export names resolved from [`harn_modules`]. `None` means
+    /// unknown, so conservative behavior should skip undefined-function checks.
+    module_graph_wildcard_exports: Option<HashSet<String>>,
     /// Track function declarations for unused-function detection.
     fn_declarations: Vec<FnDeclaration>,
     /// Track actual function usage sites (calls + value references).
@@ -146,6 +154,8 @@ impl<'a> Linter<'a> {
             known_functions: Self::builtin_names(),
             function_calls: Vec::new(),
             has_wildcard_import: false,
+            use_module_graph_for_wildcards: false,
+            module_graph_wildcard_exports: None,
             fn_declarations: Vec::new(),
             function_references: HashSet::new(),
             in_impl_block: false,
@@ -1450,7 +1460,9 @@ impl<'a> Linter<'a> {
             }
 
             Node::ImportDecl { .. } => {
-                self.has_wildcard_import = true;
+                if !self.use_module_graph_for_wildcards {
+                    self.has_wildcard_import = true;
+                }
             }
 
             Node::InterfaceDecl {
@@ -1754,8 +1766,18 @@ impl<'a> Linter<'a> {
             .chain(self.param_declarations.iter().map(|p| p.name.clone()))
             .collect();
 
-        // Wildcard imports hide the real name set, so skip entirely.
-        if self.has_wildcard_import {
+        // Wildcard imports hide the real name set unless we can fully
+        // resolve them to exports.
+        if self.use_module_graph_for_wildcards {
+            match &self.module_graph_wildcard_exports {
+                Some(names) => {
+                    self.known_functions.extend(names.iter().cloned());
+                }
+                None => {
+                    return;
+                }
+            }
+        } else if self.has_wildcard_import {
             return;
         }
         for (name, span) in &self.function_calls {
@@ -2209,6 +2231,7 @@ pub fn lint_with_config_and_source(
         source,
         &HashSet::new(),
         &LintOptions::default(),
+        None,
     )
 }
 
@@ -2227,6 +2250,27 @@ pub fn lint_with_cross_file_imports(
         source,
         externally_imported_names,
         &LintOptions::default(),
+        None,
+    )
+}
+
+/// Lint with cross-file import awareness driven by [`harn_modules::ModuleGraph`].
+pub fn lint_with_module_graph(
+    program: &[SNode],
+    disabled_rules: &[String],
+    source: Option<&str>,
+    externally_imported_names: &HashSet<String>,
+    module_graph: &harn_modules::ModuleGraph,
+    file_path: &Path,
+    options: &LintOptions<'_>,
+) -> Vec<LintDiagnostic> {
+    lint_full(
+        program,
+        disabled_rules,
+        source,
+        externally_imported_names,
+        options,
+        Some((module_graph, file_path)),
     )
 }
 
@@ -2244,6 +2288,7 @@ pub fn lint_with_options(
         source,
         externally_imported_names,
         options,
+        None,
     )
 }
 
@@ -2253,11 +2298,19 @@ fn lint_full(
     source: Option<&str>,
     externally_imported_names: &HashSet<String>,
     options: &LintOptions<'_>,
+    module_graph: Option<(&harn_modules::ModuleGraph, &Path)>,
 ) -> Vec<LintDiagnostic> {
     let mut linter = Linter::new(source);
     linter
         .externally_imported_names
         .clone_from(externally_imported_names);
+    if let Some((module_graph, file_path)) = module_graph {
+        linter.use_module_graph_for_wildcards = true;
+        linter.module_graph_wildcard_exports = match module_graph.wildcard_exports_for(file_path) {
+            WildcardResolution::Resolved(exports) => Some(exports),
+            WildcardResolution::Unknown => None,
+        };
+    }
     if let Some(threshold) = options.complexity_threshold {
         linter.complexity_threshold = threshold;
     }

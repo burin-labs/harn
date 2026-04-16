@@ -25,7 +25,13 @@ pub(crate) async fn run_bench(path: &str, iterations: usize) {
     }
 
     let (source, program) = parse_source_file(path);
-    let type_diagnostics = harn_parser::TypeChecker::new().check(&program);
+    let file_path = Path::new(path);
+    let graph = harn_modules::build(&[file_path.to_path_buf()]);
+    let mut checker = harn_parser::TypeChecker::new();
+    if let Some(imported) = graph.imported_names_for_file(file_path) {
+        checker = checker.with_imported_names(imported);
+    }
+    let type_diagnostics = checker.check(&program);
     let mut had_type_error = false;
     for diag in &type_diagnostics {
         match diag.severity {

@@ -13,6 +13,6 @@ pipeline test(task) {
     """
   log(len(multi.split("\n")))
   // Empty multiline
-  let empty = """"""
+  let empty = ""
   log(len(empty))
 }

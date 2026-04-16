@@ -7,6 +7,28 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## v0.7.12
+
+### Added
+
+- **Static cross-module undefined-call errors.** `harn check`,
+  `harn run`, `harn bench`, and the LSP now share one recursive module
+  graph built by `harn-modules`. When every import in a file resolves,
+  the typechecker treats any call target that is not a builtin, local
+  declaration, struct constructor, callable variable, or imported
+  symbol as an error (`call target ... is not defined or imported`)
+  instead of letting the VM discover it at runtime. If any import is
+  unresolved, the stricter check is skipped for that file so one broken
+  import does not cascade into a flood of false positives.
+
+### Changed
+
+- **DRY cross-module primitives.** LSP go-to-definition now walks the
+  same `harn_modules::ModuleGraph` used by check/lint, instead of its
+  own duplicated import-walking logic. `harn-lsp`, `harn-lint`, and the
+  CLI all consume a single `harn_modules::build(...)` call per entry
+  file, which transitively loads every reachable `.harn` module once.
+
 ## v0.7.11
 
 ### Added

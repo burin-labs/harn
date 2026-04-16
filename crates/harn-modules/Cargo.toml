@@ -1,13 +1,14 @@
 [package]
-name = "harn-lint"
+name = "harn-modules"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Linter for the Harn programming language"
+description = "Cross-file module graph and import resolution utilities for Harn"
 
 [dependencies]
 harn-lexer = { path = "../harn-lexer", version = "0.7" }
 harn-parser = { path = "../harn-parser", version = "0.7" }
-harn-vm = { path = "../harn-vm", version = "0.7" }
-harn-modules = { path = "../harn-modules", version = "0.7" }
+
+[dev-dependencies]
+tempfile = "3"

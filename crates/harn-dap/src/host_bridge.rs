@@ -49,7 +49,7 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 use harn_vm::{HostCallBridge, VmError, VmValue};
@@ -61,8 +61,23 @@ use crate::protocol::DapResponse;
 /// to do real work (LSP queries, file scans) before responding.
 const REVERSE_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// Inner state of the pending-request map: the map itself plus a condvar
+/// the bridge notifies whenever it registers a new pending request.
+/// Downstream consumers (DAP reply router, tests) use the condvar to wake
+/// deterministically instead of polling.
+#[derive(Debug, Default)]
+pub struct PendingState {
+    pub map: Mutex<BTreeMap<i64, Sender<DapHostCallReply>>>,
+    pub inserted: Condvar,
+}
+
 /// Shared map from outgoing reverse-request seq → response channel.
-pub type PendingMap = Arc<Mutex<BTreeMap<i64, Sender<DapHostCallReply>>>>;
+pub type PendingMap = Arc<PendingState>;
+
+/// Create an empty pending map.
+pub fn pending_map_new() -> PendingMap {
+    Arc::new(PendingState::default())
+}
 
 /// What the DAP client replies with after a reverse request.
 #[derive(Debug)]
@@ -112,6 +127,30 @@ impl DapHostBridge {
         self.seq.fetch_add(1, Ordering::SeqCst)
     }
 
+    /// Emit a DAP `output` event so the IDE's debug console / log view
+    /// can show host_call activity in real time. Category `"host_call"`
+    /// surfaces as `dap.host_call` in HarnLogsView.
+    fn emit_output(&self, category: &str, text: &str) {
+        let seq = self.next_seq();
+        let event = json!({
+            "seq": seq,
+            "type": "event",
+            "event": "output",
+            "body": {
+                "category": category,
+                "output": format!("{text}\n"),
+            }
+        });
+        if let Ok(body) = serde_json::to_string(&event) {
+            let header = format!("Content-Length: {}\r\n\r\n", body.len());
+            if let Ok(mut guard) = self.stdout.lock() {
+                let _ = guard.write_all(header.as_bytes());
+                let _ = guard.write_all(body.as_bytes());
+                let _ = guard.flush();
+            }
+        }
+    }
+
     fn send_reverse_request(
         &self,
         capability: &str,
@@ -123,10 +162,14 @@ impl DapHostBridge {
         {
             let mut guard = self
                 .pending
+                .map
                 .lock()
                 .map_err(|_| VmError::Runtime("DapHostBridge pending map poisoned".into()))?;
             guard.insert(req_seq, tx);
         }
+        // Notify any waiter watching for new pending entries (e.g. tests
+        // that deliver synthetic replies without spinning on a poll loop).
+        self.pending.inserted.notify_all();
 
         let frame = json!({
             "seq": req_seq,
@@ -177,9 +220,13 @@ impl HostCallBridge for DapHostBridge {
         operation: &str,
         params: &BTreeMap<String, VmValue>,
     ) -> Result<Option<VmValue>, VmError> {
+        let start = std::time::Instant::now();
+        self.emit_output("host_call", &format!("→ {capability}.{operation}"));
+
         let params_json = vm_dict_to_json(params);
         let rx = self.send_reverse_request(capability, operation, params_json)?;
         let reply = self.await_reply(rx, capability, operation)?;
+        let elapsed_ms = start.elapsed().as_millis();
         if !reply.success {
             // The client knows the op exists but it failed — surface as a
             // throwable so user pipelines can `try`/`catch` it.
@@ -187,8 +234,16 @@ impl HostCallBridge for DapHostBridge {
                 .message
                 .or_else(|| reply.body.as_ref().map(|v| v.to_string()))
                 .unwrap_or_else(|| format!("{capability}.{operation} failed"));
+            self.emit_output(
+                "host_call",
+                &format!("✗ {capability}.{operation} ({elapsed_ms}ms): {detail}"),
+            );
             return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(detail))));
         }
+        self.emit_output(
+            "host_call",
+            &format!("← {capability}.{operation} ({elapsed_ms}ms)"),
+        );
         // Convention: success body shape is `{"value": <result>}`. If the
         // client returned a body without `value`, treat the whole body as
         // the result. Empty body → Nil (matches ACP `fs/write_text_file`
@@ -213,7 +268,7 @@ impl DapHostBridge {
     /// per-op timeout. The script sees a normal Harn exception that
     /// propagates up and ends the run cleanly.
     pub fn cancel_all_pending(&self, reason: &str) {
-        let mut guard = match self.pending.lock() {
+        let mut guard = match self.pending.map.lock() {
             Ok(g) => g,
             Err(_) => return,
         };
@@ -235,7 +290,7 @@ impl DapHostBridge {
 /// frame matches one of our reverse-request seqs.
 pub fn deliver_reply(pending: &PendingMap, request_seq: i64, reply: DapHostCallReply) {
     let tx = {
-        let mut guard = match pending.lock() {
+        let mut guard = match pending.map.lock() {
             Ok(g) => g,
             Err(_) => return,
         };
@@ -348,38 +403,82 @@ mod tests {
         }
     }
 
-    fn parse_lsp_frame(bytes: &[u8]) -> serde_json::Value {
-        let body_start = bytes
-            .windows(4)
-            .position(|w| w == b"\r\n\r\n")
-            .expect("LSP framing terminator")
-            + 4;
-        serde_json::from_slice(&bytes[body_start..]).expect("valid JSON body")
+    /// Parse every LSP frame in `bytes` in order. The test buffer
+    /// accumulates all writes the bridge emits (debug output, the
+    /// reverse request, the completion event), so tests need to pick
+    /// the frame they're asserting on instead of assuming the first
+    /// one.
+    fn parse_lsp_frames(bytes: &[u8]) -> Vec<serde_json::Value> {
+        let mut frames = Vec::new();
+        let mut cursor = 0;
+        while cursor < bytes.len() {
+            let Some(header_end_rel) = bytes[cursor..].windows(4).position(|w| w == b"\r\n\r\n")
+            else {
+                break;
+            };
+            let header_bytes = &bytes[cursor..cursor + header_end_rel];
+            let header_str = match std::str::from_utf8(header_bytes) {
+                Ok(s) => s,
+                Err(_) => break,
+            };
+            let content_length = header_str
+                .lines()
+                .find_map(|line| line.strip_prefix("Content-Length:"))
+                .and_then(|v| v.trim().parse::<usize>().ok())
+                .expect("header has Content-Length");
+            let body_start = cursor + header_end_rel + 4;
+            let body_end = body_start + content_length;
+            let frame: serde_json::Value =
+                serde_json::from_slice(&bytes[body_start..body_end]).expect("valid JSON body");
+            frames.push(frame);
+            cursor = body_end;
+        }
+        frames
+    }
+
+    /// Return the first frame whose `command` matches `command`. Panics
+    /// if no such frame exists — tests use this to pick the reverse
+    /// request out of the bridge's mixed output stream.
+    fn find_request_frame(bytes: &[u8], command: &str) -> serde_json::Value {
+        parse_lsp_frames(bytes)
+            .into_iter()
+            .find(|v| {
+                v.get("type") == Some(&serde_json::Value::String("request".into()))
+                    && v.get("command") == Some(&serde_json::Value::String(command.into()))
+            })
+            .unwrap_or_else(|| panic!("no {command} request frame in buffer"))
     }
 
     fn rig() -> (DapHostBridge, Arc<Mutex<Vec<u8>>>, PendingMap) {
         let buf = Arc::new(Mutex::new(Vec::<u8>::new()));
         let stdout: Arc<Mutex<Box<dyn Write + Send>>> =
             Arc::new(Mutex::new(Box::new(SharedWriter(Arc::clone(&buf)))));
-        let pending: PendingMap = Arc::new(Mutex::new(BTreeMap::new()));
+        let pending: PendingMap = pending_map_new();
         let seq = Arc::new(AtomicI64::new(1));
         let bridge = DapHostBridge::new(seq, stdout, Arc::clone(&pending));
         (bridge, buf, pending)
     }
 
     /// Wait for the bridge to register a pending reverse-request id.
-    /// Returns the seq, or panics after a short timeout.
+    /// Blocks on the pending map's condvar so there is no polling race:
+    /// the waiter only wakes when `send_reverse_request` has already
+    /// inserted an entry and called `notify_all`. The `Duration` is a
+    /// safety cap in case the notifier thread dies before inserting.
     fn await_pending_seq(pending: &PendingMap) -> i64 {
-        for _ in 0..200 {
-            {
-                let guard = pending.lock().unwrap();
-                if let Some(&k) = guard.keys().next() {
-                    return k;
-                }
+        let mut guard = pending.map.lock().expect("pending map poisoned");
+        loop {
+            if let Some(&k) = guard.keys().next() {
+                return k;
             }
-            thread::sleep(Duration::from_millis(5));
+            let (next, timeout) = pending
+                .inserted
+                .wait_timeout(guard, Duration::from_secs(60))
+                .expect("pending condvar poisoned");
+            if timeout.timed_out() {
+                panic!("bridge never registered a pending reverse request");
+            }
+            guard = next;
         }
-        panic!("bridge never registered a pending reverse request");
     }
 
     /// Spawn a helper that waits for the bridge to register a pending
@@ -420,9 +519,7 @@ mod tests {
         }
 
         let bytes = buf.lock().unwrap().clone();
-        let frame = parse_lsp_frame(&bytes);
-        assert_eq!(frame["type"], "request");
-        assert_eq!(frame["command"], "harnHostCall");
+        let frame = find_request_frame(&bytes, "harnHostCall");
         assert_eq!(frame["arguments"]["capability"], "workspace");
         assert_eq!(frame["arguments"]["operation"], "read_text");
         assert_eq!(frame["arguments"]["params"]["path"], "foo");

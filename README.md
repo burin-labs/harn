@@ -133,10 +133,15 @@ enforcement.
   dependent.
 - Stronger preflight behavior via `harn check`: import graph resolution,
   literal template/render path validation, import symbol collision detection,
-  and host capability contract validation all fail before runtime.
-  `render(...)` resolves relative to the module source tree (including inside
-  imported modules) instead of the ambient process cwd. Literal delegated
-  execution roots, `exec_at(...)` / `shell_at(...)` directories, and unknown
+  and host capability contract validation all fail before runtime. Starting in
+  v0.7.12, `harn check` / `harn run` / the LSP share one recursive module
+  graph that resolves every `import` (including `std/*` embeds) and rejects
+  calls to names that are not builtins, local declarations, struct
+  constructors, callable variables, or imported symbols — so stale or typo'd
+  references surface before the VM starts. `render(...)` resolves relative to
+  the module source tree (including inside imported modules) instead of the
+  ambient process cwd. Literal delegated execution roots,
+  `exec_at(...)` / `shell_at(...)` directories, and unknown
   `host_call("capability.operation", ...)` contracts are also checked before launch.
 - Runtime-local typed host mocking for tests via `host_mock(...)`,
   `host_mock_clear()`, and `host_mock_calls()`, so `.harn` conformance and VM

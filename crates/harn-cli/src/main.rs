@@ -114,7 +114,8 @@ async fn main() {
             if files.is_empty() {
                 command_error("no .harn files found under the given target(s)");
             }
-            let cross_file_imports = commands::check::collect_cross_file_imports(&files);
+            let module_graph = commands::check::build_module_graph(&files);
+            let cross_file_imports = commands::check::collect_cross_file_imports(&module_graph);
             let mut should_fail = false;
             for file in &files {
                 let mut config = package::load_check_config(Some(file));
@@ -130,7 +131,12 @@ async fn main() {
                 if let Some(sev) = args.preflight.as_deref() {
                     config.preflight_severity = Some(sev.to_string());
                 }
-                let outcome = commands::check::check_file_inner(file, &config, &cross_file_imports);
+                let outcome = commands::check::check_file_inner(
+                    file,
+                    &config,
+                    &cross_file_imports,
+                    &module_graph,
+                );
                 should_fail |= outcome.should_fail(config.strict);
             }
             if should_fail {
@@ -146,7 +152,8 @@ async fn main() {
             if files.is_empty() {
                 command_error("no .harn files found under the given target(s)");
             }
-            let cross_file_imports = commands::check::collect_cross_file_imports(&files);
+            let module_graph = commands::check::build_module_graph(&files);
+            let cross_file_imports = commands::check::collect_cross_file_imports(&module_graph);
             if args.fix {
                 for file in &files {
                     let mut config = package::load_check_config(Some(file));
@@ -159,6 +166,7 @@ async fn main() {
                         file,
                         &config,
                         &cross_file_imports,
+                        &module_graph,
                         require_header,
                         complexity_threshold,
                     );
@@ -176,6 +184,7 @@ async fn main() {
                         file,
                         &config,
                         &cross_file_imports,
+                        &module_graph,
                         require_header,
                         complexity_threshold,
                     );
@@ -785,7 +794,18 @@ pub(crate) async fn execute(source: &str, source_path: Option<&Path>) -> Result<
     let mut parser = Parser::new(tokens);
     let program = parser.parse().map_err(|e| e.to_string())?;
 
-    let type_diagnostics = TypeChecker::new().check(&program);
+    // Static cross-module resolution: when executed from a file, derive the
+    // import graph so `execute` catches undefined calls at typecheck time.
+    // The REPL / `-e` path invokes this without `source_path`, where there
+    // is no importing file context; we fall back to no-imports checking.
+    let mut checker = TypeChecker::new();
+    if let Some(path) = source_path {
+        let graph = harn_modules::build(&[path.to_path_buf()]);
+        if let Some(imported) = graph.imported_names_for_file(path) {
+            checker = checker.with_imported_names(imported);
+        }
+    }
+    let type_diagnostics = checker.check(&program);
     let mut warning_lines = Vec::new();
     for diag in &type_diagnostics {
         match diag.severity {

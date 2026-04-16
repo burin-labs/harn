@@ -27,6 +27,13 @@ You can also run a file directly without the `run` subcommand:
 harn main.harn
 ```
 
+Before starting the VM, `harn run <file>` builds the cross-module
+graph for the entry file. When all imports resolve, unknown call
+targets produce a static error and the VM is never started — the same
+`call target ... is not defined or imported` message you see from
+`harn check`. The inline `-e <code>` form has no importing file and
+therefore skips the cross-module check.
+
 ## harn test
 
 Run tests.
@@ -164,6 +171,22 @@ contracts, and flags missing template resources, execution directories, and work
 otherwise fail only at runtime. Source-aware lint rules run as part of
 `check`, including the `missing-harndoc` warning for undocumented `pub fn`
 APIs.
+
+`check` builds a cross-module graph from each entry file and follows
+`import` statements recursively. When every import in a file resolves,
+the typechecker knows the exact set of names that module brings into
+scope and will emit a hard error for any call target that is neither a
+builtin, a local declaration, a struct constructor, a callable
+variable, nor an imported symbol:
+
+```text
+error: call target `helpr` is not defined or imported
+```
+
+This catches typos and stale imports before the VM runs. If any import
+in the file is unresolved, the stricter check is turned off for that
+file so one broken import does not avalanche into spurious errors — the
+unresolved import itself still fails at runtime.
 
 ```bash
 harn check main.harn

@@ -66,6 +66,22 @@ pub(crate) fn build_denied_builtins(
     }
 }
 
+/// Run the static type checker against `program` with cross-module
+/// import-aware call resolution when the file's imports all resolve. Used
+/// by `run_file` and the MCP server entry so `harn run` catches undefined
+/// cross-module calls before the VM starts.
+fn typecheck_with_imports(
+    program: &[harn_parser::SNode],
+    path: &Path,
+) -> Vec<harn_parser::TypeDiagnostic> {
+    let graph = harn_modules::build(&[path.to_path_buf()]);
+    let mut checker = harn_parser::TypeChecker::new();
+    if let Some(imported) = graph.imported_names_for_file(path) {
+        checker = checker.with_imported_names(imported);
+    }
+    checker.check(program)
+}
+
 pub(crate) async fn run_file(
     path: &str,
     trace: bool,
@@ -75,7 +91,7 @@ pub(crate) async fn run_file(
     let (source, program) = parse_source_file(path);
 
     let mut had_type_error = false;
-    let type_diagnostics = harn_parser::TypeChecker::new().check(&program);
+    let type_diagnostics = typecheck_with_imports(&program, Path::new(path));
     for diag in &type_diagnostics {
         match diag.severity {
             DiagnosticSeverity::Error => {
@@ -327,7 +343,7 @@ fn print_trace_summary() {
 pub(crate) async fn run_file_mcp_serve(path: &str) {
     let (source, program) = crate::parse_source_file(path);
 
-    let type_diagnostics = harn_parser::TypeChecker::new().check(&program);
+    let type_diagnostics = typecheck_with_imports(&program, Path::new(path));
     for diag in &type_diagnostics {
         match diag.severity {
             DiagnosticSeverity::Error => {

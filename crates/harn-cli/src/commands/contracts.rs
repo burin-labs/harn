@@ -123,7 +123,8 @@ fn bundle_contract_value(args: &ContractsBundleArgs) -> (serde_json::Value, bool
 
     let mut failed = false;
     if args.verify {
-        let cross_file_imports = check::collect_cross_file_imports(&files);
+        let module_graph = check::build_module_graph(&files);
+        let cross_file_imports = check::collect_cross_file_imports(&module_graph);
         for file in &files {
             let mut file_config = package::load_check_config(Some(file));
             if let Some(path) = args.host_capabilities.as_ref() {
@@ -132,7 +133,8 @@ fn bundle_contract_value(args: &ContractsBundleArgs) -> (serde_json::Value, bool
             if let Some(path) = args.bundle_root.as_ref() {
                 file_config.bundle_root = Some(path.clone());
             }
-            let outcome = check::check_file_inner(file, &file_config, &cross_file_imports);
+            let outcome =
+                check::check_file_inner(file, &file_config, &cross_file_imports, &module_graph);
             failed |= outcome.should_fail(file_config.strict);
         }
     }

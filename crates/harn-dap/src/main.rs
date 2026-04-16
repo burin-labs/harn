@@ -2,7 +2,6 @@ mod debugger;
 mod host_bridge;
 mod protocol;
 
-use std::collections::BTreeMap;
 use std::io::{self, BufRead, Read, Write};
 use std::sync::atomic::AtomicI64;
 use std::sync::mpsc::{channel, Sender};
@@ -10,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use debugger::Debugger;
-use host_bridge::{deliver_reply, DapHostBridge, DapHostCallReply, PendingMap};
+use host_bridge::{deliver_reply, pending_map_new, DapHostBridge, DapHostCallReply, PendingMap};
 use protocol::{DapMessage, DapResponse};
 
 fn main() {
@@ -22,7 +21,7 @@ fn main() {
     // Stdout writer behind a mutex — both the main response loop and the
     // host bridge serialize their writes here.
     let stdout: Arc<Mutex<Box<dyn Write + Send>>> = Arc::new(Mutex::new(Box::new(io::stdout())));
-    let pending: PendingMap = Arc::new(Mutex::new(BTreeMap::new()));
+    let pending: PendingMap = pending_map_new();
 
     // Stdin reader runs on its own OS thread so the bridge can block on
     // reverse-request replies without starving the read loop.

@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use crate::ast::*;
 use crate::builtin_signatures;
@@ -283,6 +283,17 @@ impl TypeScope {
             .insert(var_name.to_string(), Vec::new());
     }
 
+    /// Collect every function name visible through this scope chain.
+    /// Used by the strict cross-module check to offer "did you mean"
+    /// suggestions that span the whole lexical visibility set.
+    fn all_fn_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.functions.keys().cloned().collect();
+        if let Some(parent) = &self.parent {
+            names.extend(parent.all_fn_names());
+        }
+        names
+    }
+
     fn get_fn(&self, name: &str) -> Option<&FnSignature> {
         self.functions
             .get(name)
@@ -486,6 +497,13 @@ pub struct TypeChecker {
     /// during the `check_inner` pre-pass; consulted at every `FunctionCall`
     /// site to emit a warning + help line.
     deprecated_fns: std::collections::HashMap<String, (Option<String>, Option<String>)>,
+    /// Names statically known to be introduced by cross-module imports
+    /// (resolved via `harn-modules`). `Some(set)` switches the checker into
+    /// strict cross-module mode: an unresolved callable name is reported as
+    /// an error instead of silently passing through. `None` preserves the
+    /// conservative pre-v0.7.12 behavior (no cross-module undefined-name
+    /// diagnostics).
+    imported_names: Option<HashSet<String>>,
 }
 
 impl TypeChecker {
@@ -514,6 +532,7 @@ impl TypeChecker {
             strict_types: false,
             fn_depth: 0,
             deprecated_fns: std::collections::HashMap::new(),
+            imported_names: None,
         }
     }
 
@@ -528,7 +547,23 @@ impl TypeChecker {
             strict_types: strict,
             fn_depth: 0,
             deprecated_fns: std::collections::HashMap::new(),
+            imported_names: None,
         }
+    }
+
+    /// Attach the set of names statically introduced by cross-module imports.
+    ///
+    /// Enables strict cross-module undefined-call errors: call sites that are
+    /// not builtins, not local declarations, not struct constructors, not
+    /// callable variables, and not in `imported` will produce a type error.
+    ///
+    /// Passing `None` (the default) preserves pre-v0.7.12 behavior where
+    /// unresolved call names only surface via lint diagnostics. Callers
+    /// should only pass `Some(set)` when every import in the file resolved
+    /// — see `harn_modules::ModuleGraph::imported_names_for_file`.
+    pub fn with_imported_names(mut self, imported: HashSet<String>) -> Self {
+        self.imported_names = Some(imported);
+        self
     }
 
     /// Check a program with source text for autofix generation.
@@ -629,6 +664,13 @@ impl TypeChecker {
                 Self::register_declarations_into(&mut self.scope, body);
             }
         }
+        // Pre-register every top-level `fn`/`pipeline`/`tool` name so a
+        // caller earlier in the file can reference a callable defined
+        // later without the strict cross-module check falsely flagging
+        // it as undefined. Signatures populated here are overwritten
+        // when the body is actually walked; this pass only needs the
+        // name to exist so `check_call`'s resolvability check passes.
+        Self::register_callable_placeholders(&mut self.scope, program);
 
         // Pre-pass: index `@deprecated` attributes on top-level fn decls so
         // `check_call` (and the standalone deprecation visitor below) can
@@ -732,6 +774,96 @@ impl TypeChecker {
         }
 
         (self.diagnostics, self.hints)
+    }
+
+    /// Pre-populate placeholder signatures for every
+    /// `fn`/`pipeline`/`tool`/`let`/`var` name reachable from the
+    /// program (including names defined inside pipeline or fn bodies)
+    /// so the strict cross-module undefined-call check can resolve
+    /// forward references and recursive calls whose own scope does not
+    /// inherit from the enclosing block.
+    ///
+    /// Rust's lexical scoping guarantees the runtime lookup will still
+    /// respect shadowing at execution time; the placeholders only
+    /// satisfy the *static* "does this name exist somewhere" check.
+    fn register_callable_placeholders(scope: &mut TypeScope, nodes: &[SNode]) {
+        fn walk(scope: &mut TypeScope, node: &SNode) {
+            let inner = match &node.node {
+                Node::AttributedDecl { inner, .. } => inner.as_ref(),
+                _ => node,
+            };
+            match &inner.node {
+                Node::FnDecl {
+                    name,
+                    params,
+                    return_type,
+                    type_params,
+                    where_clauses,
+                    body,
+                    ..
+                } => {
+                    let sig = FnSignature {
+                        params: params
+                            .iter()
+                            .map(|p| (p.name.clone(), p.type_expr.clone()))
+                            .collect(),
+                        return_type: return_type.clone(),
+                        type_param_names: type_params.iter().map(|tp| tp.name.clone()).collect(),
+                        required_params: params
+                            .iter()
+                            .filter(|p| p.default_value.is_none())
+                            .count(),
+                        where_clauses: where_clauses
+                            .iter()
+                            .map(|wc| (wc.type_name.clone(), wc.bound.clone()))
+                            .collect(),
+                        has_rest: params.last().is_some_and(|p| p.rest),
+                    };
+                    scope.define_fn(name, sig);
+                    walk_all(scope, body);
+                }
+                Node::Pipeline { name, body, .. } => {
+                    let sig = FnSignature {
+                        params: Vec::new(),
+                        return_type: None,
+                        type_param_names: Vec::new(),
+                        required_params: 0,
+                        where_clauses: Vec::new(),
+                        has_rest: false,
+                    };
+                    scope.define_fn(name, sig);
+                    walk_all(scope, body);
+                }
+                Node::ToolDecl { name, body, .. } => {
+                    let sig = FnSignature {
+                        params: Vec::new(),
+                        return_type: None,
+                        type_param_names: Vec::new(),
+                        required_params: 0,
+                        where_clauses: Vec::new(),
+                        has_rest: false,
+                    };
+                    scope.define_fn(name, sig);
+                    walk_all(scope, body);
+                }
+                Node::LetBinding { pattern, .. } | Node::VarBinding { pattern, .. } => {
+                    // Only bare-identifier patterns at module scope
+                    // need forward-ref placeholders; destructuring
+                    // patterns are checked as statements and define
+                    // their vars as they are walked.
+                    if let BindingPattern::Identifier(name) = pattern {
+                        scope.define_var(name, None);
+                    }
+                }
+                _ => {}
+            }
+        }
+        fn walk_all(scope: &mut TypeScope, nodes: &[SNode]) {
+            for node in nodes {
+                walk(scope, node);
+            }
+        }
+        walk_all(scope, nodes);
     }
 
     /// Register type, enum, interface, and struct declarations from AST nodes into a scope.
@@ -3443,6 +3575,63 @@ impl TypeChecker {
     }
 
     fn check_call(&mut self, name: &str, args: &[SNode], scope: &mut TypeScope, span: Span) {
+        // Cross-module undefined-call check. Only active when the caller
+        // supplied a resolved imported-name set via `with_imported_names`;
+        // in that mode every call target must be satisfied by builtins,
+        // local declarations, struct constructors, callable variables, or
+        // an imported symbol. Anything else is a static resolution error
+        // (not a lint warning, so it fails `harn check`/`harn run` before
+        // the VM does).
+        if let Some(imported) = self.imported_names.as_ref() {
+            let resolvable = is_builtin(name)
+                || scope.get_fn(name).is_some()
+                || scope.get_struct(name).is_some()
+                || scope.get_enum(name).is_some()
+                || scope.get_var(name).is_some()
+                || imported.contains(name)
+                || scope.is_generic_type_param(name)
+                || name.starts_with("__")
+                // Built-in value constructors — `Ok`/`Err` are VM
+                // builtins (Result variants) but are not in the
+                // parser's BUILTIN_SIGNATURES table because they have
+                // no static arity signature. `Some`/`None` are Option
+                // variants constructed via the same path.
+                || matches!(name, "Ok" | "Err" | "Some" | "None");
+            if !resolvable {
+                // Suggest a close match across builtins, local
+                // functions, and imported names so typos show the same
+                // "did you mean?" hint the linter used to provide.
+                let candidates: Vec<String> = builtin_signatures::iter_builtin_names()
+                    .map(|s| s.to_string())
+                    .chain(scope.all_fn_names())
+                    .chain(imported.iter().cloned())
+                    .collect();
+                let suggestion = crate::diagnostic::find_closest_match(
+                    name,
+                    candidates.iter().map(|s| s.as_str()),
+                    2,
+                )
+                .map(|c| c.to_string());
+                // Fold the suggestion into the message so callers that
+                // only surface `diag.message` (like `harn run` / the
+                // conformance runner) still see the "did you mean"
+                // hint. The rendered help line also duplicates it for
+                // pretty-printed output.
+                let message = match &suggestion {
+                    Some(s) => format!(
+                        "call target `{name}` is not defined or imported — did you mean `{s}`?"
+                    ),
+                    None => format!("call target `{name}` is not defined or imported"),
+                };
+                match suggestion {
+                    Some(s) => {
+                        self.error_at_with_help(message, span, format!("did you mean `{s}`?"))
+                    }
+                    None => self.error_at(message, span),
+                }
+            }
+        }
+
         // Deprecation: emit a warning at every call site of an `@deprecated`
         // function, including `since:` and `use:` hints when present.
         // (Also covered by the visit_for_deprecation pass; keep both so
@@ -5390,6 +5579,17 @@ mod tests {
         let mut parser = Parser::new(tokens);
         let program = parser.parse().unwrap();
         TypeChecker::new().check(&program)
+    }
+
+    fn check_source_with_imports(source: &str, imported: &[&str]) -> Vec<TypeDiagnostic> {
+        let mut lexer = Lexer::new(source);
+        let tokens = lexer.tokenize().unwrap();
+        let mut parser = Parser::new(tokens);
+        let program = parser.parse().unwrap();
+        let imports: HashSet<String> = imported.iter().map(|s| s.to_string()).collect();
+        TypeChecker::new()
+            .with_imported_names(imports)
+            .check(&program)
     }
 
     fn errors(source: &str) -> Vec<String> {
@@ -7499,5 +7699,84 @@ add("hello", 2) }"#,
             !warns.iter().any(|w| w.contains("unvalidated")),
             "llm_call with schema variable should not warn, got: {warns:?}"
         );
+    }
+
+    #[test]
+    fn test_cross_module_unresolved_call_errors() {
+        let diags = check_source_with_imports(
+            r#"pipeline t(task) { missing_helper() }"#,
+            &["other_helper"],
+        );
+        let errs: Vec<&String> = diags
+            .iter()
+            .filter(|d| d.severity == DiagnosticSeverity::Error)
+            .map(|d| &d.message)
+            .collect();
+        assert!(
+            errs.iter().any(|m| m.contains("missing_helper")),
+            "expected undefined-call error, got: {errs:?}"
+        );
+    }
+
+    #[test]
+    fn test_cross_module_imported_call_is_allowed() {
+        let diags =
+            check_source_with_imports(r#"pipeline t(task) { helper_fn(1, 2) }"#, &["helper_fn"]);
+        let errs: Vec<&String> = diags
+            .iter()
+            .filter(|d| d.severity == DiagnosticSeverity::Error)
+            .map(|d| &d.message)
+            .collect();
+        assert!(
+            !errs.iter().any(|m| m.contains("helper_fn")),
+            "imported call should not error, got: {errs:?}"
+        );
+    }
+
+    #[test]
+    fn test_cross_module_local_fn_not_flagged() {
+        let diags = check_source_with_imports(
+            r#"fn local_fn() { 42 }
+pipeline t(task) { local_fn() }"#,
+            &[],
+        );
+        let errs: Vec<&String> = diags
+            .iter()
+            .filter(|d| d.severity == DiagnosticSeverity::Error)
+            .map(|d| &d.message)
+            .collect();
+        assert!(errs.is_empty(), "local fn should not error, got: {errs:?}");
+    }
+
+    #[test]
+    fn test_cross_module_forward_reference_is_allowed() {
+        // A pipeline that calls a fn declared *later* in the same file
+        // should not trigger the strict cross-module undefined-call
+        // check, because top-level names are registered up-front.
+        let diags = check_source_with_imports(
+            r#"pipeline t(task) { helper() }
+fn helper() { 42 }"#,
+            &[],
+        );
+        let errs: Vec<&String> = diags
+            .iter()
+            .filter(|d| d.severity == DiagnosticSeverity::Error)
+            .map(|d| &d.message)
+            .collect();
+        assert!(
+            !errs.iter().any(|m| m.contains("helper")),
+            "forward-declared fn should not error, got: {errs:?}"
+        );
+    }
+
+    #[test]
+    fn test_cross_module_builtin_not_flagged() {
+        let diags = check_source_with_imports(r#"pipeline t(task) { log("hello") }"#, &[]);
+        let errs: Vec<&String> = diags
+            .iter()
+            .filter(|d| d.severity == DiagnosticSeverity::Error)
+            .map(|d| &d.message)
+            .collect();
+        assert!(errs.is_empty(), "builtin should not error, got: {errs:?}");
     }
 }

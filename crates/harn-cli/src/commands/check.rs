@@ -4,6 +4,7 @@ use std::process;
 
 use harn_fmt::{format_source_opts, FmtOptions};
 use harn_lint::LintSeverity;
+use harn_modules::resolve_import_path;
 use harn_parser::{DiagnosticSeverity, Node, SNode, TypeChecker};
 
 use crate::config as harn_config;
@@ -54,6 +55,7 @@ pub(crate) fn check_file_inner(
     path: &Path,
     config: &CheckConfig,
     externally_imported_names: &std::collections::HashSet<String>,
+    module_graph: &harn_modules::ModuleGraph,
 ) -> CommandOutcome {
     let path_str = path.to_string_lossy().into_owned();
     let (source, program) = parse_source_file(&path_str);
@@ -62,7 +64,11 @@ pub(crate) fn check_file_inner(
     let mut has_warning = false;
     let mut diagnostic_count = 0;
 
-    let type_diagnostics = TypeChecker::with_strict_types(config.strict_types).check(&program);
+    let mut checker = TypeChecker::with_strict_types(config.strict_types);
+    if let Some(imported) = module_graph.imported_names_for_file(path) {
+        checker = checker.with_imported_names(imported);
+    }
+    let type_diagnostics = checker.check(&program);
     for diag in &type_diagnostics {
         let severity = match diag.severity {
             DiagnosticSeverity::Error => {
@@ -91,11 +97,18 @@ pub(crate) fn check_file_inner(
         }
     }
 
-    let lint_diagnostics = harn_lint::lint_with_cross_file_imports(
+    let lint_diagnostics = harn_lint::lint_with_module_graph(
         &program,
         &config.disable_rules,
         Some(&source),
         externally_imported_names,
+        module_graph,
+        path,
+        &harn_lint::LintOptions {
+            file_path: Some(path),
+            require_file_header: false,
+            complexity_threshold: None,
+        },
     );
     diagnostic_count += lint_diagnostics.len();
     if lint_diagnostics
@@ -195,6 +208,7 @@ pub(crate) fn lint_file_inner(
     path: &Path,
     config: &CheckConfig,
     externally_imported_names: &std::collections::HashSet<String>,
+    module_graph: &harn_modules::ModuleGraph,
     require_file_header: bool,
     complexity_threshold: Option<usize>,
 ) -> CommandOutcome {
@@ -206,11 +220,13 @@ pub(crate) fn lint_file_inner(
         require_file_header,
         complexity_threshold,
     };
-    let diagnostics = harn_lint::lint_with_options(
+    let diagnostics = harn_lint::lint_with_module_graph(
         &program,
         &config.disable_rules,
         Some(&source),
         externally_imported_names,
+        module_graph,
+        path,
         &options,
     );
 
@@ -236,6 +252,7 @@ pub(crate) fn lint_fix_file(
     path: &Path,
     config: &CheckConfig,
     externally_imported_names: &HashSet<String>,
+    module_graph: &harn_modules::ModuleGraph,
     require_file_header: bool,
     complexity_threshold: Option<usize>,
 ) -> usize {
@@ -247,16 +264,21 @@ pub(crate) fn lint_fix_file(
         require_file_header,
         complexity_threshold,
     };
-    let lint_diags = harn_lint::lint_with_options(
+    let lint_diags = harn_lint::lint_with_module_graph(
         &program,
         &config.disable_rules,
         Some(&source),
         externally_imported_names,
+        module_graph,
+        path,
         &options,
     );
 
-    let type_diags =
-        TypeChecker::with_strict_types(config.strict_types).check_with_source(&program, &source);
+    let mut checker = TypeChecker::with_strict_types(config.strict_types);
+    if let Some(imported) = module_graph.imported_names_for_file(path) {
+        checker = checker.with_imported_names(imported);
+    }
+    let type_diags = checker.check_with_source(&program, &source);
 
     let mut edits: Vec<&harn_lexer::FixEdit> = lint_diags
         .iter()
@@ -299,11 +321,13 @@ pub(crate) fn lint_fix_file(
     println!("{path_str}: applied {applied} fix(es)");
 
     let (source2, program2) = parse_source_file(&path_str);
-    let remaining = harn_lint::lint_with_options(
+    let remaining = harn_lint::lint_with_module_graph(
         &program2,
         &config.disable_rules,
         Some(&source2),
         externally_imported_names,
+        module_graph,
+        path,
         &options,
     );
     if !remaining.is_empty() {
@@ -358,14 +382,19 @@ pub(crate) fn collect_harn_targets(targets: &[&str]) -> Vec<PathBuf> {
 /// Collect every function name that appears in a selective import across
 /// the given files, so the linter doesn't flag library functions consumed
 /// by other files as unused.
-pub(crate) fn collect_cross_file_imports(files: &[PathBuf]) -> std::collections::HashSet<String> {
-    let mut names = std::collections::HashSet::new();
-    for file in files {
-        let path_str = file.to_string_lossy().into_owned();
-        let (_, program) = parse_source_file(&path_str);
-        names.extend(harn_lint::collect_selective_import_names(&program));
-    }
-    names
+pub(crate) fn collect_cross_file_imports(
+    module_graph: &harn_modules::ModuleGraph,
+) -> std::collections::HashSet<String> {
+    let graph = module_graph;
+    graph
+        .all_selective_import_names()
+        .into_iter()
+        .map(|name| name.to_string())
+        .collect()
+}
+
+pub(crate) fn build_module_graph(files: &[PathBuf]) -> harn_modules::ModuleGraph {
+    harn_modules::build(files)
 }
 
 /// Format a single file. Returns true on success, false on error.
@@ -2601,38 +2630,6 @@ fn scan_children(
             diagnostics,
         );
     }
-}
-
-fn resolve_import_path(current_file: &Path, import_path: &str) -> Option<PathBuf> {
-    let base = current_file.parent().unwrap_or(Path::new("."));
-    let mut file_path = base.join(import_path);
-    if !file_path.exists() && file_path.extension().is_none() {
-        file_path.set_extension("harn");
-    }
-    if file_path.exists() {
-        return Some(file_path);
-    }
-    {
-        let pkg_path = base.join(".harn/packages").join(import_path);
-        if pkg_path.exists() {
-            return Some(if pkg_path.is_dir() {
-                let lib = pkg_path.join("lib.harn");
-                if lib.exists() {
-                    lib
-                } else {
-                    pkg_path
-                }
-            } else {
-                pkg_path
-            });
-        }
-        let mut pkg_harn = pkg_path.clone();
-        pkg_harn.set_extension("harn");
-        if pkg_harn.exists() {
-            return Some(pkg_harn);
-        }
-    }
-    None
 }
 
 fn resolve_source_relative(current_file: &Path, target: &str) -> PathBuf {

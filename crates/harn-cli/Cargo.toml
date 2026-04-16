@@ -15,6 +15,7 @@ harn-lexer = { path = "../harn-lexer", version = "0.7" }
 harn-parser = { path = "../harn-parser", version = "0.7" }
 harn-vm = { path = "../harn-vm", version = "0.7" }
 harn-lint = { path = "../harn-lint", version = "0.7" }
+harn-modules = { path = "../harn-modules", version = "0.7" }
 harn-fmt = { path = "../harn-fmt", version = "0.7" }
 axum = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "signal", "time"] }

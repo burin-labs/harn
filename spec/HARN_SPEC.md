@@ -822,6 +822,30 @@ if no `pub` functions exist, all functions are exported.
 Imported pipelines are registered for later invocation.
 Non-pipeline top-level statements (fn declarations, let bindings) are executed immediately.
 
+### Static cross-module resolution
+
+`harn check`, `harn run`, `harn bench`, and the LSP build a **module graph**
+from the entry file that transitively loads every `import`-reachable
+`.harn` module. The graph drives:
+
+- **Typechecker**: when every import in a file resolves, call targets
+  that are not builtins, not local declarations, not struct constructors,
+  not callable variables, and not introduced by an import produce a
+  `call target ... is not defined or imported` **error** (not a lint
+  warning). This catches typos and stale imports before the VM loads.
+- **Linter**: wildcard imports are resolved via the same graph; the
+  `undefined-function` rule can now check against the actual exported
+  name set of imported modules rather than silently disabling itself.
+- **LSP go-to-definition**: cross-file navigation walks the graph's
+  `definition_of` lookup, so any reachable symbol (through any number of
+  transitive imports) can be jumped to.
+
+Resolution conservatively **degrades to the pre-v0.7.12 behavior** when
+any import in the file is unresolved (missing file, parse error,
+non-existent package directory), so a single broken import does not
+avalanche into a sea of false-positive undefined-name errors. The
+unresolved import itself still surfaces via the runtime loader.
+
 ## Runtime values
 
 | Type | Syntax | Description |
@@ -1093,6 +1117,8 @@ to Go's `defer`. The deferred block runs in the scope where it was
 declared.
 
 ```harn
+fn open(path) { path }
+fn close(f) { log("closing ${f}") }
 let f = open("data.txt")
 defer { close(f) }
 // ... use f ...
@@ -1176,6 +1202,8 @@ corresponding body. Only one case fires per select.
 #### timeout case
 
 ```harn
+fn handle(msg) { log(msg) }
+let ch1 = channel(1)
 select {
   msg from ch1 { handle(msg) }
   timeout 5s {
@@ -1189,6 +1217,8 @@ If no channel produces a value within the duration, the timeout body runs.
 #### default case (non-blocking)
 
 ```harn
+fn handle(msg) { log(msg) }
+let ch1 = channel(1)
 select {
   msg from ch1 { handle(msg) }
   default {
@@ -2736,6 +2766,14 @@ and `negative_knowledge.record(...)`.
 | `retryExhausted` | All retry attempts failed |
 | `thrownError(value)` | User-thrown error via `throw` |
 
+Most `undefinedBuiltin` errors are now caught statically by the
+cross-module typechecker (see [Static cross-module
+resolution](#static-cross-module-resolution)) — `harn check` and
+`harn run` refuse to start the VM when a file contains a call to a name
+that is not a builtin, local declaration, struct constructor, callable
+variable, or imported symbol. The runtime check remains as a backstop
+for cases where imports could not be resolved at check time.
+
 ### Stack traces
 
 Runtime errors include a full call stack trace showing the chain of
@@ -2805,7 +2843,13 @@ primary primitive for building resumable pipelines.
 ```harn
 import { checkpoint_stage } from "std/checkpoint"
 
+fn fetch_dataset(url) { url }
+fn clean(data) { data }
+fn run_model(cleaned) { cleaned }
+fn upload(result) { log(result) }
+
 pipeline process(task) {
+  let url = "https://example.com/data.csv"
   let data    = checkpoint_stage("fetch",   fn() { fetch_dataset(url) })
   let cleaned = checkpoint_stage("clean",   fn() { clean(data) })
   let result  = checkpoint_stage("process", fn() { run_model(cleaned) })
@@ -2823,7 +2867,13 @@ failure before propagating the error. Once successful, the result is cached so
 retries are never needed on resume.
 
 ```harn
+import { checkpoint_stage_retry } from "std/checkpoint"
+
+fn fetch_with_timeout(url) { url }
+
+let url = "https://example.com/data.csv"
 let data = checkpoint_stage_retry("fetch", 3, fn() { fetch_with_timeout(url) })
+log(data)
 ```
 
 ### File location
