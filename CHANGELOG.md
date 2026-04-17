@@ -7,6 +7,44 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## v0.7.15
+
+### Changed
+
+- **Internal: finished splitting the remaining oversized source files
+  into focused modules.** v0.7.13's `typechecker/` split continues with
+  six more multi-thousand-line files, each now a directory of focused
+  submodules. Public API surface is preserved through `pub(crate) use`
+  re-exports in each `mod.rs`, so downstream crates and call sites are
+  unchanged. Bytecode output and all conformance/unit/portal/
+  tree-sitter tests are byte-for-byte identical (472/472 conformance,
+  164/164 parser, 130/130 harn-cli, 16/16 tree-sitter). Every resulting
+  file is under ~1,200 lines.
+  - `crates/harn-parser/src/parser.rs` (3,038 lines) → `parser/`
+    module split into `decls`, `error`, `expressions`, `patterns`,
+    `state`, `statements`, and `types` (closes #41).
+  - `crates/harn-vm/src/compiler.rs` (3,631 lines) → `compiler/`
+    module split into `closures`, `concurrency`, `decls`, `error`,
+    `error_handling`, `expressions`, `patterns`, `pipe`, `state`,
+    `statements`, `tests`, and `yield_scan` (closes #38).
+  - `crates/harn-vm/src/stdlib/workflow.rs` (2,240 lines) →
+    `workflow/` module split into `artifact`, `convert`, `guards`,
+    `map`, `policy`, `register`, `stage`, `tests`, and `usage`
+    (closes #45).
+  - `crates/harn-cli/src/commands/portal.rs` (3,070 lines) → `portal/`
+    module split into `assets`, `dto`, `errors`, `handlers/`,
+    `highlight`, `launch`, `llm`, `query`, `router`, `run_analysis`,
+    `state`, `transcript`, and `util` (closes #40).
+  - `crates/harn-cli/src/commands/check.rs` (3,505 lines) → `check/`
+    module split into `bundle`, `check_cmd`, `config`, `fmt`,
+    `host_capabilities`, `imports`, `lint`, `mock_host`, `outcome`,
+    `preflight`, and `tests` (closes #39).
+  - `crates/harn-lint/src/lib.rs` (2,652 lines) → focused modules:
+    `diagnostic`, `decls`, `naming`, `harndoc`, `linter` (+
+    `linter/walk`), and one file per source-aware rule under `rules/`
+    (`blank_lines`, `file_header`, `import_order`, `trailing_comma`)
+    (closes #43).
+
 ## v0.7.14
 
 ### Fixed
