@@ -195,6 +195,19 @@ pub struct PromptSourceSpan {
     pub output_end: usize,
     pub kind: PromptSpanKind,
     pub bound_value: Option<String>,
+    /// When the span was rendered from inside an `include` (possibly
+    /// transitively), this points at the including call's span in the
+    /// parent template. Chained boxes let the IDE walk `A → B → C`
+    /// cross-template breadcrumbs when a deep render spans three
+    /// files. `None` for top-level spans.
+    pub parent_span: Option<Box<PromptSourceSpan>>,
+    /// Template URI for the file that authored this span. Top-level
+    /// spans carry the root render's template uri; included-child
+    /// spans carry the included file's uri so breadcrumb navigation
+    /// can open the right file when the user clicks through the
+    /// `parent_span` chain. Defaults to empty string for callers that
+    /// don't plumb it through.
+    pub template_uri: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -240,6 +253,7 @@ pub(crate) fn render_template_with_provenance(
         base: base.map(Path::to_path_buf),
         include_stack: Vec::new(),
         current_path: source_path.map(Path::to_path_buf),
+        current_include_parent: None,
     };
     let mut spans = if collect_provenance {
         Some(Vec::new())
@@ -1394,6 +1408,22 @@ struct RenderCtx {
     base: Option<PathBuf>,
     include_stack: Vec<PathBuf>,
     current_path: Option<PathBuf>,
+    /// When inside an `{% include %}`, this holds the include-call's
+    /// span (in the *parent* template). Every span emitted during the
+    /// recursive render points at this as its `parent_span`, so the
+    /// IDE can walk a breadcrumb back through nested includes
+    /// (#96). `None` at the top level.
+    current_include_parent: Option<Box<PromptSourceSpan>>,
+}
+
+/// Template URI reported alongside every span — the absolute path of
+/// the currently-rendering `.harn.prompt` file. Empty string when the
+/// renderer doesn't know (inline template arg or synthetic snippet).
+fn current_template_uri(rc: &RenderCtx) -> String {
+    rc.current_path
+        .as_deref()
+        .and_then(|p| p.to_str().map(|s| s.to_string()))
+        .unwrap_or_default()
 }
 
 fn render_nodes(
@@ -1436,6 +1466,8 @@ fn render_node(
                     output_start: start,
                     output_end: out.len(),
                     kind: PromptSpanKind::Text,
+                    parent_span: rc.current_include_parent.clone(),
+                    template_uri: current_template_uri(rc),
                     bound_value: None,
                 });
             }
@@ -1451,6 +1483,8 @@ fn render_node(
                     output_start: start,
                     output_end: out.len(),
                     kind: PromptSpanKind::Expr,
+                    parent_span: rc.current_include_parent.clone(),
+                    template_uri: current_template_uri(rc),
                     bound_value: Some(truncate_for_preview(&rendered)),
                 });
             }
@@ -1471,6 +1505,8 @@ fn render_node(
                     output_start: start,
                     output_end: out.len(),
                     kind: PromptSpanKind::LegacyBareInterp,
+                    parent_span: rc.current_include_parent.clone(),
+                    template_uri: current_template_uri(rc),
                     bound_value: preview,
                 });
             }
@@ -1502,6 +1538,8 @@ fn render_node(
                     output_start: start,
                     output_end: out.len(),
                     kind: PromptSpanKind::If,
+                    parent_span: rc.current_include_parent.clone(),
+                    template_uri: current_template_uri(rc),
                     bound_value: None,
                 });
             }
@@ -1549,6 +1587,8 @@ fn render_node(
                             output_start: iter_start,
                             output_end: out.len(),
                             kind: PromptSpanKind::ForIteration,
+                            parent_span: rc.current_include_parent.clone(),
+                            template_uri: current_template_uri(rc),
                             bound_value: None,
                         });
                     }
@@ -1633,13 +1673,26 @@ fn render_node(
             let mut child_scope = Scope::new(Some(&child_bindings));
             let saved_base = rc.base.clone();
             let saved_current = rc.current_path.clone();
+            let saved_parent = rc.current_include_parent.clone();
+            // Build the include-call's own span (#96): points at the
+            // include directive in the parent template. Every span
+            // emitted inside the recursive render links back to this
+            // as its parent_span, composing with any already-present
+            // chain to give A → B → C breadcrumbs on nested includes.
+            let include_call_span = PromptSourceSpan {
+                template_line: *line,
+                template_col: *col,
+                output_start: start,
+                output_end: start,
+                kind: PromptSpanKind::Include,
+                bound_value: None,
+                parent_span: saved_parent.clone(),
+                template_uri: current_template_uri(rc),
+            };
             rc.base = new_base;
             rc.current_path = Some(resolved.clone());
+            rc.current_include_parent = Some(Box::new(include_call_span));
             rc.include_stack.push(canonical);
-            // NB: child-template spans are recorded under the parent's
-            // span kind for now. #96 tracks threading a `parent_span`
-            // chain so cross-template provenance navigation can follow
-            // back through includes.
             let res = render_nodes(
                 &child_nodes,
                 &mut child_scope,
@@ -1650,6 +1703,7 @@ fn render_node(
             rc.include_stack.pop();
             rc.base = saved_base;
             rc.current_path = saved_current;
+            rc.current_include_parent = saved_parent;
             res?;
             if let Some(spans) = spans.as_mut() {
                 spans.push(PromptSourceSpan {
@@ -1658,6 +1712,8 @@ fn render_node(
                     output_start: start,
                     output_end: out.len(),
                     kind: PromptSpanKind::Include,
+                    parent_span: rc.current_include_parent.clone(),
+                    template_uri: current_template_uri(rc),
                     bound_value: None,
                 });
             }
@@ -2522,6 +2578,59 @@ mod tests {
         let src = fs::read_to_string(&parent).unwrap();
         let out = render_template_result(&src, Some(&b), Some(&dir), Some(&parent)).unwrap();
         assert_eq!(out, "hello [world]!");
+    }
+
+    #[test]
+    fn include_propagates_parent_span_chain() {
+        use std::fs;
+        let dir = tempdir();
+        // Three-level include chain: top → mid → leaf. Every span
+        // emitted inside `leaf` must chain back through mid's include
+        // call to top's include call so the IDE can render a
+        // breadcrumb.
+        let leaf = dir.join("leaf.prompt");
+        fs::write(&leaf, "LEAF:{{v}}").unwrap();
+        let mid = dir.join("mid.prompt");
+        fs::write(&mid, r#"MID:{{ include "leaf.prompt" }}"#).unwrap();
+        let top = dir.join("top.prompt");
+        fs::write(&top, r#"TOP:{{ include "mid.prompt" }}"#).unwrap();
+        let b = dict(&[("v", s("ok"))]);
+        let src = fs::read_to_string(&top).unwrap();
+        let (rendered, spans) =
+            render_template_with_provenance(&src, Some(&b), Some(&dir), Some(&top), true).unwrap();
+        assert_eq!(rendered, "TOP:MID:LEAF:ok");
+
+        // Locate the interpolation span for `{{v}}` — it lives at
+        // depth 2 (inside leaf, inside mid, inside top). Its
+        // parent_span chain must be length 2: leaf's span has mid's
+        // include as parent, which has top's include as grandparent.
+        // Bare `{{ident}}` is LegacyBareInterp, not Expr.
+        let leaf_expr = spans
+            .iter()
+            .find(|s| {
+                matches!(
+                    s.kind,
+                    PromptSpanKind::Expr | PromptSpanKind::LegacyBareInterp
+                ) && s.parent_span.is_some()
+            })
+            .expect("interpolation span emitted");
+        let mid_parent = leaf_expr
+            .parent_span
+            .as_deref()
+            .expect("leaf span must have mid's include as parent");
+        assert_eq!(mid_parent.kind, PromptSpanKind::Include);
+        let top_parent = mid_parent
+            .parent_span
+            .as_deref()
+            .expect("mid's include must chain up to top's include");
+        assert_eq!(top_parent.kind, PromptSpanKind::Include);
+        assert!(top_parent.parent_span.is_none(), "chain bottoms out at top");
+
+        // templateUri on each level points at the authoring file so
+        // IDE breadcrumbs can open the right source.
+        assert!(leaf_expr.template_uri.ends_with("leaf.prompt"));
+        assert!(mid_parent.template_uri.ends_with("mid.prompt"));
+        assert!(top_parent.template_uri.ends_with("top.prompt"));
     }
 
     #[test]

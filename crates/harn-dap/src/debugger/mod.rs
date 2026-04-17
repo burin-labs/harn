@@ -14,6 +14,26 @@ use serde_json::json;
 use crate::protocol::*;
 use state::ProgramState;
 
+/// Recursively serialize a PromptSourceSpan parent chain into nested
+/// JSON so IDEs can render a breadcrumb like `A → B → C` when a deep
+/// render spanned three included files (#96). Returns null when the
+/// span is None so `optional_chain` on the IDE side is cheap.
+fn serialize_parent_chain(span: Option<&harn_vm::PromptSourceSpan>) -> serde_json::Value {
+    match span {
+        None => serde_json::Value::Null,
+        Some(s) => json!({
+            "templateUri": s.template_uri,
+            "templateLine": s.template_line,
+            "templateCol": s.template_col,
+            "outputStart": s.output_start,
+            "outputEnd": s.output_end,
+            "kind": prompt_span_kind_label(s.kind),
+            "boundValue": s.bound_value,
+            "parentSpan": serialize_parent_chain(s.parent_span.as_deref()),
+        }),
+    }
+}
+
 fn prompt_span_kind_label(kind: harn_vm::PromptSpanKind) -> &'static str {
     match kind {
         harn_vm::PromptSpanKind::Text => "text",
@@ -227,18 +247,30 @@ impl Debugger {
         match harn_vm::lookup_prompt_span(&prompt_id, output_offset) {
             Some((template_uri, span)) => {
                 let seq = self.next_seq();
+                // Span-level templateUri carries the inner file; the
+                // request's top-level `templateUri` is the root render.
+                // When the span was rendered inside an include, the
+                // `parentSpan` chain walks back through each level so
+                // the IDE can render an `A → B → C` breadcrumb (#96).
+                let effective_uri = if span.template_uri.is_empty() {
+                    template_uri.clone()
+                } else {
+                    span.template_uri.clone()
+                };
                 vec![DapResponse::success(
                     seq,
                     msg.seq,
                     "burin/promptProvenance",
                     Some(json!({
-                        "templateUri": template_uri,
+                        "templateUri": effective_uri,
+                        "rootTemplateUri": template_uri,
                         "templateLine": span.template_line,
                         "templateCol": span.template_col,
                         "outputStart": span.output_start,
                         "outputEnd": span.output_end,
                         "kind": prompt_span_kind_label(span.kind),
                         "boundValue": span.bound_value,
+                        "parentSpan": serialize_parent_chain(span.parent_span.as_deref()),
                     })),
                 )]
             }
