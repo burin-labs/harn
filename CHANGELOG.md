@@ -7,10 +7,98 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
-## Unreleased
+## v0.7.17
 
 ### Added
 
+- **Debugger M1–M4: DAP surface reaches protocol parity.** Adds the full
+  Debug Adapter Protocol feature set needed for IDEs to drive Harn runs
+  as first-class debug sessions. Capabilities advertised:
+  `supportsLogPoints`, `supportsHitConditionalBreakpoints`,
+  `supportsConditionalBreakpoints`, `supportsSetVariable`,
+  `supportsSetExpression`, `supportsFunctionBreakpoints`,
+  `supportsRestartFrame`, `supportsCompletionsRequest`,
+  `supportsStepInTargetsRequest`, `supportsCancelRequest`,
+  `supportsInvalidatedEvent`, plus Burin-namespaced
+  `supportsBurinPromptProvenance`. `exceptionBreakpointFilters` expands
+  to `{all, tool_error, llm_refusal, budget_exceeded, parse_failure}`
+  with optional per-filter conditions (both legacy `filters` and
+  DAP-1.58 `filterOptions` supported). Specific landings:
+  - **#85 unified frame evaluator.** `Vm::evaluate_in_frame` /
+    `set_variable_in_frame` / `restart_frame` with 10k-step budget,
+    VM state snapshot/restore — powers hover, watches, conditional
+    BPs, `setVariable` / `setExpression`, logpoint message rendering.
+  - **#86 multi-thread readiness.** Per-`Debugger` thread registry
+    seeded with `{1 → "main"}`; `threadStarted` / `threadExited`
+    events; stepping / pause / exception events carry the live
+    `threadId` instead of hardcoded 1.
+  - **#87 logpoints.** `SourceBreakpoint.logMessage` renders via
+    `{var}` interpolation without stopping.
+  - **#88 hit-count breakpoints.** `hitCondition` parsed in
+    `N / >=N / >N / %N` forms; counts reset on run enter and BP
+    edits.
+  - **#89 conditional breakpoints.** `SourceBreakpoint.condition`
+    evaluated via the unified frame evaluator.
+  - **#90 function breakpoints.** `setFunctionBreakpoints` stops on
+    entry to any closure whose name matches; re-applied on launch so
+    they survive relaunch.
+  - **#91 `setVariable` / `setExpression`.** Mutate scope while
+    paused, bypassing let-immutability via `VmEnv::assign_debug`.
+  - **#92 `restartFrame`.** Rewinds `ip` and restores the
+    `initial_env` snapshot captured at every call site.
+  - **#93/#94 prompt provenance MVP.** `PromptSourceSpan` +
+    thread-local `PROMPT_REGISTRY`; `render_with_provenance` builtin
+    returns `{text, template_uri, prompt_id, spans}`; custom
+    `burin/promptProvenance` and `burin/promptConsumers` DAP
+    requests expose the registry over the wire.
+  - **#102 triggered breakpoints.** `Breakpoint.triggeredBy: [id]`
+    arms a BP only after a listed dependency BP has fired; armed
+    state clears per run. Pattern: "break on the second turn's
+    first `tool_error`".
+  - **#108 `cancel` request.** Dispatches DAP cancel to both the
+    `DapHostBridge`'s pending reverse-request waiter and a new
+    `Vm::install_cancel_token` / `signal_cancel` cooperative token.
+    The step loop polls on every instruction and unwinds with a
+    `kind:cancelled:` `Thrown` that flows through the exception
+    filter pipeline.
+  - **#109 completions.** `Vm::identifiers_in_scope(frame_id)`
+    unions frame locals with every registered builtin / async
+    builtin; filtered by prefix, capped at 200.
+  - **#110 `invalidated` events.** Helper builds the DAP
+    `invalidated` event carrying areas + `current_thread_id`.
+  - **#111 per-kind exception filters.** `extract_exception_kind`
+    plus `exception_filter_matches` route `kind:<name>:` throws
+    through the selected filter; stopped event carries
+    `hitBreakpointIds: [kind]`.
+  - **#112 `stepInTargets`.** Call-family ops on the current line
+    enumerate per-target step-in IDs (`frame_id × 1e6 + index`).
+- **Cross-template provenance chains (#96).** Every span emitted by
+  `render_template_with_provenance` gets a `parent_span` +
+  `template_uri`, so `include` traversal builds a walkable A→B→C
+  chain. `burin/promptProvenance` surfaces the recursive chain plus
+  `rootTemplateUri`, letting the IDE render cross-template
+  breadcrumbs that click through to the inner source.
+- **JSONL `AgentEvent` persistence (#103).** New `JsonlEventSink`
+  writes an append-only `event_log-*.jsonl` stream with
+  `{index, emitted_at_ms, frame_depth, event}` envelopes (flattened
+  so `jq '.type'` still works). 100 MB rotation, `Drop`-flush,
+  errors swallowed so a broken sink never kills a session.
+  `agent_sessions::open_or_create` auto-registers the sink when
+  `HARN_EVENT_LOG_DIR` is set. Foundation for the scrubber,
+  branch-replay, and jump-to-render IDE actions.
+- **Branch-replay via `fork_at` (#105).** `agent_sessions::fork_at`
+  forks a source session and truncates the new session's transcript
+  to the first N messages, so the scrubber can rewind to a past
+  event index and spawn a live sibling whose next decision diverges
+  cleanly. Subscribers are not carried over — parent fanout
+  consumers don't double-receive.
+- **Prompt render-index registry (#106).** Thread-local
+  `PROMPT_RENDER_INDICES` map from `prompt_id` → `[ordinal…]`, plus
+  new `prompt_mark_rendered(prompt_id) → int` host builtin that
+  pipelines call right before handing a rendered prompt to
+  `llm_call`. `burin/promptConsumers` now surfaces the ordinal list
+  so the IDE template gutter can jump to the next matching render
+  event.
 - **Tool Vault foundation: native progressive tool disclosure on Anthropic.**
   Mark individual tools with `defer_loading: true` via `tool_define`
   (or the dict form) and opt a call into progressive disclosure with a
@@ -66,6 +154,14 @@ granular archaeology.
   `crates/harn-parser/src/typechecker/inference/subtyping.rs`. No new
   syntax or keyword required — distribution is an implementation of
   existing alias-application semantics.
+
+### Removed
+
+- **`auto.harn` `< 40-char` safety net (#107 follow-up).** The fallback
+  that routed short inputs through `chat_reply` is gone; explanation
+  intents classify as `qa` upstream and take the dedicated
+  `qa_reply` path. An empty result now surfaces the real pipeline
+  state honestly instead of masking bugs.
 
 ### Fixed
 

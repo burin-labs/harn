@@ -1409,6 +1409,37 @@ multi-tool registries.
 
 Like `fn`, `tool` may be prefixed with `pub`.
 
+#### Deferred tool loading (`defer_loading`)
+
+A tool registered through `tool_define` may set `defer_loading: true`
+in its config dict. Deferred tools keep their schema out of the model's
+context on each LLM call until a tool-search call surfaces them.
+
+```harn
+fn admin(token) { log(token) }
+
+let registry = tool_registry()
+registry = tool_define(registry, "rare_admin_action", "...", {
+  parameters: {token: {type: "string"}},
+  defer_loading: true,
+  handler: { args -> admin(args.token) },
+})
+```
+
+`defer_loading` is validated as a bool at registration time — typos like
+`defer_loading: "yes"` raise at `tool_define` rather than silently
+falling back to eager loading.
+
+Deferred tools are only materialised on the wire when the call opts
+into `tool_search` (see the `llm_call` option of the same name and
+`docs/src/llm-and-agents.md`). On providers that support native
+progressive disclosure (Anthropic Claude Opus/Sonnet 4.0+ and
+Haiku 4.5+), Harn emits `defer_loading: true` in the native tool JSON
+and Anthropic keeps the schemas in the API prefix but out of the
+model's context (prompt caching stays warm). On providers without
+native support, Phase 1 refuses `tool_search` with a diagnostic error;
+client-executed fallback is tracked separately.
+
 ### Closures
 
 ```harn

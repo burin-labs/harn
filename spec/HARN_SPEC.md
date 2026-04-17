@@ -1414,6 +1414,9 @@ in its config dict. Deferred tools keep their schema out of the model's
 context on each LLM call until a tool-search call surfaces them.
 
 ```harn
+fn admin(token) { log(token) }
+
+let registry = tool_registry()
 registry = tool_define(registry, "rare_admin_action", "...", {
   parameters: {token: {type: "string"}},
   defer_loading: true,
