@@ -63,6 +63,100 @@ fn test_non_exhaustive_multiple_missing() {
 }
 
 #[test]
+fn test_tagged_shape_union_match_exhaustive_no_warning() {
+    let warns = warnings(
+        r#"type Msg = {kind: "ping", ttl: int} | {kind: "pong", latency_ms: int}
+
+pipeline t(task) {
+  fn handle(m: Msg) -> string {
+    match m.kind {
+      "ping" -> { return "ping" }
+      "pong" -> { return "pong" }
+    }
+  }
+}"#,
+    );
+    let exh: Vec<_> = warns
+        .iter()
+        .filter(|w| w.contains("Non-exhaustive"))
+        .collect();
+    assert!(
+        exh.is_empty(),
+        "no non-exhaustive warning expected, got: {:?}",
+        warns
+    );
+}
+
+#[test]
+fn test_tagged_shape_union_match_missing_arm_warns() {
+    let warns = warnings(
+        r#"type Msg = {kind: "ping", ttl: int} | {kind: "pong", latency_ms: int}
+
+pipeline t(task) {
+  fn handle(m: Msg) -> string {
+    match m.kind {
+      "ping" -> { return "ping" }
+    }
+  }
+}"#,
+    );
+    let exh: Vec<_> = warns
+        .iter()
+        .filter(|w| w.contains("Non-exhaustive match on tagged shape union"))
+        .collect();
+    assert_eq!(exh.len(), 1, "got: {:?}", warns);
+    assert!(
+        exh[0].contains("\"pong\""),
+        "expected missing pong, got: {}",
+        exh[0]
+    );
+}
+
+#[test]
+fn test_literal_union_match_exhaustive_no_warning() {
+    let warns = warnings(
+        r#"type Verdict = "pass" | "fail" | "unclear"
+
+pipeline t(task) {
+  fn classify(v: Verdict) -> string {
+    match v {
+      "pass" -> { return "ok" }
+      "fail" -> { return "no" }
+      "unclear" -> { return "?" }
+    }
+  }
+}"#,
+    );
+    let exh: Vec<_> = warns
+        .iter()
+        .filter(|w| w.contains("Non-exhaustive"))
+        .collect();
+    assert!(exh.is_empty(), "no warning expected, got: {:?}", warns);
+}
+
+#[test]
+fn test_literal_union_match_missing_warns() {
+    let warns = warnings(
+        r#"type Verdict = "pass" | "fail" | "unclear"
+
+pipeline t(task) {
+  fn classify(v: Verdict) -> string {
+    match v {
+      "pass" -> { return "ok" }
+      "fail" -> { return "no" }
+    }
+  }
+}"#,
+    );
+    let exh: Vec<_> = warns
+        .iter()
+        .filter(|w| w.contains("Non-exhaustive match on literal union"))
+        .collect();
+    assert_eq!(exh.len(), 1, "got: {:?}", warns);
+    assert!(exh[0].contains("\"unclear\""));
+}
+
+#[test]
 fn test_unknown_exhaustive_unreachable_happy_path() {
     // All eight concrete variants covered → no warning on unreachable().
     let source = r#"pipeline t(task) {

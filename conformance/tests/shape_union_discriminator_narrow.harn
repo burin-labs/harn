@@ -1,0 +1,74 @@
+// Discriminator narrowing on tagged shape unions: `match v.<tag>` and
+// `if v.<tag> == "..."` both refine `v` to the matching variant in
+// each arm/branch, regardless of the discriminant field name.
+//
+// Companion to shape_union_discriminator_forms (which pins the surface
+// invariants); this file exercises the *narrowed* variant types so the
+// `let pinned: <variant_shape> = v` assignments only succeed when
+// narrowing actually fires.
+
+type Msg = {kind: "ping", ttl: int} | {kind: "pong", latency_ms: int}
+
+fn handle_msg(m: Msg) -> string {
+  match m.kind {
+    "ping" -> {
+      let pinned: {kind: "ping", ttl: int} = m
+      return "ping " + to_string(pinned.ttl)
+    }
+    "pong" -> {
+      let pinned: {kind: "pong", latency_ms: int} = m
+      return "pong " + to_string(pinned.latency_ms)
+    }
+  }
+}
+
+fn handle_msg_if(m: Msg) -> string {
+  if m.kind == "ping" {
+    let pinned: {kind: "ping", ttl: int} = m
+    return "if-ping " + to_string(pinned.ttl)
+  } else {
+    let pinned: {kind: "pong", latency_ms: int} = m
+    return "if-pong " + to_string(pinned.latency_ms)
+  }
+}
+
+type Event = {type: "click", x: int, y: int} | {type: "scroll", dy: int}
+
+fn handle_event(e: Event) -> string {
+  match e.type {
+    "click" -> {
+      let pinned: {type: "click", x: int, y: int} = e
+      return "click " + to_string(pinned.x) + "," + to_string(pinned.y)
+    }
+    "scroll" -> {
+      let pinned: {type: "scroll", dy: int} = e
+      return "scroll " + to_string(pinned.dy)
+    }
+  }
+}
+
+type Instr = {op: "add", lhs: int, rhs: int} | {op: "neg", arg: int}
+
+fn handle_instr(i: Instr) -> string {
+  match i.op {
+    "add" -> {
+      let pinned: {op: "add", lhs: int, rhs: int} = i
+      return "add " + to_string(pinned.lhs + pinned.rhs)
+    }
+    "neg" -> {
+      let pinned: {op: "neg", arg: int} = i
+      return "neg " + to_string(0 - pinned.arg)
+    }
+  }
+}
+
+pipeline default(task) {
+  println(handle_msg({kind: "ping", ttl: 30}))
+  println(handle_msg({kind: "pong", latency_ms: 12}))
+  println(handle_msg_if({kind: "ping", ttl: 1}))
+  println(handle_msg_if({kind: "pong", latency_ms: 2}))
+  println(handle_event({type: "click", x: 7, y: 9}))
+  println(handle_event({type: "scroll", dy: -2}))
+  println(handle_instr({op: "add", lhs: 2, rhs: 3}))
+  println(handle_instr({op: "neg", arg: 11}))
+}

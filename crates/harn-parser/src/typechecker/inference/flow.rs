@@ -20,9 +20,63 @@ use super::super::exits::block_definitely_exits;
 use super::super::schema_inference::schema_type_expr_from_node;
 use super::super::scope::{Refinements, TypeScope};
 use super::super::union::{
-    extract_type_of_var, intersect_types, narrow_to_single, remove_from_union, subtract_type,
+    discriminant_field, extract_type_of_var, intersect_types, narrow_shape_union_by_tag,
+    narrow_to_single, remove_from_union, subtract_type, DiscriminantValue,
 };
 use super::super::TypeChecker;
+
+/// Walk through `Named(alias)` indirections in `scope.type_aliases` to a
+/// concrete type. Stops as soon as the alias body is something other than
+/// another `Named` reference, or the lookup fails. The parameterised
+/// distribution path still lives in `TypeChecker::resolve_alias`; this
+/// flow-only helper exists because the refinement extractors are
+/// associated functions without access to `&self`.
+fn resolve_named_alias_chain(ty: TypeExpr, scope: &TypeScope) -> TypeExpr {
+    let mut current = ty;
+    let mut seen: Vec<String> = Vec::new();
+    loop {
+        let TypeExpr::Named(name) = &current else {
+            return current;
+        };
+        if seen.iter().any(|s| s == name) {
+            return current;
+        }
+        seen.push(name.clone());
+        match scope.resolve_type(name) {
+            Some(body) => current = body.clone(),
+            None => return current,
+        }
+    }
+}
+
+/// Extract `(var_name, property_name)` from a `Identifier.property` access.
+/// Returns `None` for nested accesses or non-identifier objects.
+fn extract_property_var(node: &SNode) -> Option<(String, String)> {
+    if let Node::PropertyAccess { object, property } = &node.node {
+        if let Node::Identifier(name) = &object.node {
+            return Some((name.clone(), property.clone()));
+        }
+    }
+    None
+}
+
+/// Project a literal expression node to a [`DiscriminantValue`]. Only the
+/// literal kinds eligible as tagged-shape-union discriminants
+/// (`StringLiteral`, `IntLiteral`) are recognised here.
+fn discriminant_value_from_node(node: &SNode) -> Option<DiscriminantValue> {
+    match &node.node {
+        Node::StringLiteral(s) => Some(DiscriminantValue::Str(s.clone())),
+        Node::IntLiteral(v) => Some(DiscriminantValue::Int(*v)),
+        _ => None,
+    }
+}
+
+fn format_discriminant(v: &DiscriminantValue) -> String {
+    match v {
+        DiscriminantValue::Str(s) => format!("\"{}\"", s),
+        DiscriminantValue::Int(v) => v.to_string(),
+    }
+}
 
 impl TypeChecker {
     /// Extract bidirectional type refinements from a condition expression.
@@ -39,6 +93,10 @@ impl TypeChecker {
                 let typeof_ref = Self::extract_typeof_refinements(op, left, right, scope);
                 if !typeof_ref.truthy.is_empty() || !typeof_ref.falsy.is_empty() {
                     return typeof_ref;
+                }
+                let tag_ref = Self::extract_discriminator_refinements(op, left, right, scope);
+                if !tag_ref.truthy.is_empty() || !tag_ref.falsy.is_empty() {
+                    return tag_ref;
                 }
                 Refinements::empty()
             }
@@ -254,6 +312,67 @@ impl TypeChecker {
         Refinements::empty()
     }
 
+    /// Extract refinements from `obj.<tag> == "value"` / `obj.<tag> == 7` style
+    /// patterns where `obj` is a tagged shape union and `<tag>` is the union's
+    /// auto-detected discriminant field. Truthy narrows `obj` to the matching
+    /// variant; falsy narrows to the residual union.
+    fn extract_discriminator_refinements(
+        op: &str,
+        left: &SNode,
+        right: &SNode,
+        scope: &TypeScope,
+    ) -> Refinements {
+        // Find which side is the property access and which is the literal.
+        let (var_name, tag_field, tag_value) = match (
+            extract_property_var(left),
+            discriminant_value_from_node(right),
+        ) {
+            (Some((var, field)), Some(value)) => (var, field, value),
+            _ => match (
+                extract_property_var(right),
+                discriminant_value_from_node(left),
+            ) {
+                (Some((var, field)), Some(value)) => (var, field, value),
+                _ => return Refinements::empty(),
+            },
+        };
+
+        let Some(Some(raw_type)) = scope.get_var(&var_name).cloned() else {
+            return Refinements::empty();
+        };
+        let resolved = resolve_named_alias_chain(raw_type, scope);
+        let TypeExpr::Union(members) = resolved else {
+            return Refinements::empty();
+        };
+        let Some(detected) = discriminant_field(&members) else {
+            return Refinements::empty();
+        };
+        if detected != tag_field {
+            return Refinements::empty();
+        }
+        let Some((matched, residual)) = narrow_shape_union_by_tag(&members, &tag_field, &tag_value)
+        else {
+            return Refinements::empty();
+        };
+
+        let truthy = vec![(var_name.clone(), Some(matched))];
+        let falsy = match residual {
+            TypeExpr::Never => vec![(var_name.clone(), Some(TypeExpr::Never))],
+            other => vec![(var_name.clone(), Some(other))],
+        };
+
+        let eq_refs = Refinements {
+            truthy,
+            falsy,
+            ..Refinements::default()
+        };
+        if op == "==" {
+            eq_refs
+        } else {
+            eq_refs.inverted()
+        }
+    }
+
     /// Extract .has("key") refinements on shape types.
     fn extract_has_refinements(object: &SNode, args: &[SNode], scope: &TypeScope) -> Refinements {
         if let Node::Identifier(var_name) = &object.node {
@@ -351,7 +470,14 @@ impl TypeChecker {
         };
 
         let Some(enum_name) = enum_name else {
-            // Try union type exhaustiveness instead
+            // Two non-enum cases left:
+            //   1. `match obj.<tag>` where `obj` is a tagged shape union →
+            //      check coverage over the discriminant values.
+            //   2. anything else → try the named/literal-union exhaustiveness
+            //      check.
+            if self.check_match_exhaustiveness_tagged_shape(value, arms, scope, span) {
+                return;
+            }
             self.check_match_exhaustiveness_union(value, arms, scope, span);
             return;
         };
@@ -414,7 +540,78 @@ impl TypeChecker {
         }
     }
 
-    /// Check exhaustiveness for match on union types (e.g. `string | int | nil`).
+    /// Check exhaustiveness for `match obj.<tag>` where `obj` resolves to a
+    /// tagged shape union. Returns `true` when the value matched a tagged
+    /// shape union (whether or not a diagnostic was emitted) so the
+    /// dispatcher in `check_match_exhaustiveness` can stop falling through.
+    fn check_match_exhaustiveness_tagged_shape(
+        &mut self,
+        value: &SNode,
+        arms: &[MatchArm],
+        scope: &TypeScope,
+        span: Span,
+    ) -> bool {
+        let Node::PropertyAccess { object, property } = &value.node else {
+            return false;
+        };
+        let Node::Identifier(obj_var) = &object.node else {
+            return false;
+        };
+        let Some(Some(raw_type)) = scope.get_var(obj_var).cloned() else {
+            return false;
+        };
+        let resolved = self.resolve_alias(&raw_type, scope);
+        let TypeExpr::Union(members) = resolved else {
+            return false;
+        };
+        if discriminant_field(&members).as_deref() != Some(property.as_str()) {
+            return false;
+        }
+
+        let mut has_wildcard = false;
+        let mut covered: Vec<DiscriminantValue> = Vec::new();
+        for arm in arms {
+            match &arm.pattern.node {
+                Node::StringLiteral(s) => covered.push(DiscriminantValue::Str(s.clone())),
+                Node::IntLiteral(v) => covered.push(DiscriminantValue::Int(*v)),
+                Node::Identifier(name) if name == "_" => has_wildcard = true,
+                _ => has_wildcard = true,
+            }
+        }
+        if has_wildcard {
+            return true;
+        }
+
+        let mut missing: Vec<String> = Vec::new();
+        for member in &members {
+            let TypeExpr::Shape(fields) = member else {
+                continue;
+            };
+            let Some(field) = fields.iter().find(|f| f.name == *property) else {
+                continue;
+            };
+            let Some(value) = DiscriminantValue::from_type(&field.type_expr) else {
+                continue;
+            };
+            if !covered.contains(&value) {
+                missing.push(format_discriminant(&value));
+            }
+        }
+        if !missing.is_empty() {
+            self.warning_at(
+                format!(
+                    "Non-exhaustive match on tagged shape union: missing variants {}",
+                    missing.join(", ")
+                ),
+                span,
+            );
+        }
+        true
+    }
+
+    /// Check exhaustiveness for match on union types: handles named-type
+    /// unions (`string | int | nil`) and pure literal unions
+    /// (`"pass" | "fail"`, `0 | 1 | 2`).
     fn check_match_exhaustiveness_union(
         &mut self,
         value: &SNode,
@@ -422,9 +619,23 @@ impl TypeChecker {
         scope: &TypeScope,
         span: Span,
     ) {
-        let Some(TypeExpr::Union(members)) = self.infer_type(value, scope) else {
+        let Some(inferred) = self.infer_type(value, scope) else {
             return;
         };
+        let resolved = self.resolve_alias(&inferred, scope);
+        let TypeExpr::Union(members) = resolved else {
+            return;
+        };
+
+        // Pure literal union (LitString / LitInt only). Cover-by-equality.
+        if members
+            .iter()
+            .all(|m| matches!(m, TypeExpr::LitString(_) | TypeExpr::LitInt(_)))
+        {
+            self.check_literal_union_exhaustiveness(&members, arms, span);
+            return;
+        }
+
         // Only check unions of named types (string, int, nil, bool, etc.)
         if !members.iter().all(|m| matches!(m, TypeExpr::Named(_))) {
             return;
@@ -492,6 +703,47 @@ impl TypeChecker {
                 format!(
                     "Non-exhaustive match on union type: missing {}",
                     missing_str
+                ),
+                span,
+            );
+        }
+    }
+
+    /// Coverage check for a pure literal union. Each declared literal must
+    /// either appear as a literal arm pattern or be silenced by a wildcard.
+    fn check_literal_union_exhaustiveness(
+        &mut self,
+        members: &[TypeExpr],
+        arms: &[MatchArm],
+        span: Span,
+    ) {
+        let mut has_wildcard = false;
+        let mut covered: Vec<DiscriminantValue> = Vec::new();
+        for arm in arms {
+            match &arm.pattern.node {
+                Node::StringLiteral(s) => covered.push(DiscriminantValue::Str(s.clone())),
+                Node::IntLiteral(v) => covered.push(DiscriminantValue::Int(*v)),
+                Node::Identifier(name) if name == "_" => has_wildcard = true,
+                _ => has_wildcard = true,
+            }
+        }
+        if has_wildcard {
+            return;
+        }
+        let mut missing: Vec<String> = Vec::new();
+        for member in members {
+            let Some(value) = DiscriminantValue::from_type(member) else {
+                continue;
+            };
+            if !covered.contains(&value) {
+                missing.push(format_discriminant(&value));
+            }
+        }
+        if !missing.is_empty() {
+            self.warning_at(
+                format!(
+                    "Non-exhaustive match on literal union: missing {}",
+                    missing.join(", ")
                 ),
                 span,
             );

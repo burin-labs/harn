@@ -321,6 +321,184 @@ match x {
     assert!(errs.is_empty(), "got: {:?}", errs);
 }
 
+// ---------------------------------------------------------------------------
+// Discriminator narrowing on tagged shape unions (Phase A).
+// ---------------------------------------------------------------------------
+//
+// `match obj.<tag>` / `if obj.<tag> == "..."` should narrow `obj` to the
+// matching shape variant. The discriminant field name is auto-detected:
+// any field shared by all variants and typed as a literal-per-variant
+// qualifies. Tests parameterise over `kind`, `type`, and `op` to pin the
+// no-magic-name contract.
+
+#[test]
+fn test_match_discriminator_narrows_kind_tag() {
+    let errs = errors(
+        r#"type Msg = {kind: "ping", ttl: int} | {kind: "pong", latency_ms: int}
+
+pipeline t(task) {
+  fn handle(m: Msg) {
+    match m.kind {
+      "ping" -> {
+        let p: {kind: "ping", ttl: int} = m
+      }
+      "pong" -> {
+        let p: {kind: "pong", latency_ms: int} = m
+      }
+    }
+  }
+}"#,
+    );
+    assert!(
+        errs.is_empty(),
+        "expected narrowing on m.kind, got: {:?}",
+        errs
+    );
+}
+
+#[test]
+fn test_match_discriminator_narrows_type_tag() {
+    let errs = errors(
+        r#"type Event = {type: "click", x: int, y: int} | {type: "scroll", dy: int}
+
+pipeline t(task) {
+  fn handle(e: Event) {
+    match e.type {
+      "click" -> {
+        let c: {type: "click", x: int, y: int} = e
+      }
+      "scroll" -> {
+        let s: {type: "scroll", dy: int} = e
+      }
+    }
+  }
+}"#,
+    );
+    assert!(
+        errs.is_empty(),
+        "expected narrowing on e.type, got: {:?}",
+        errs
+    );
+}
+
+#[test]
+fn test_match_discriminator_narrows_arbitrary_tag() {
+    // The auto-detected discriminant name is whatever shared, literal-per-variant
+    // field appears first in source order. `op` is no different from `kind`.
+    let errs = errors(
+        r#"type Instr = {op: "add", lhs: int, rhs: int} | {op: "neg", arg: int}
+
+pipeline t(task) {
+  fn handle(i: Instr) {
+    match i.op {
+      "add" -> {
+        let a: {op: "add", lhs: int, rhs: int} = i
+      }
+      "neg" -> {
+        let n: {op: "neg", arg: int} = i
+      }
+    }
+  }
+}"#,
+    );
+    assert!(
+        errs.is_empty(),
+        "expected narrowing on i.op, got: {:?}",
+        errs
+    );
+}
+
+#[test]
+fn test_if_discriminator_narrows_kind_then_branch() {
+    let errs = errors(
+        r#"type Msg = {kind: "ping", ttl: int} | {kind: "pong", latency_ms: int}
+
+pipeline t(task) {
+  fn handle(m: Msg) {
+    if m.kind == "ping" {
+      let p: {kind: "ping", ttl: int} = m
+    }
+  }
+}"#,
+    );
+    assert!(
+        errs.is_empty(),
+        "expected narrowing in then-branch, got: {:?}",
+        errs
+    );
+}
+
+#[test]
+fn test_if_discriminator_narrows_else_branch_residual() {
+    // The else branch sees the residual union (single member here, so a Shape).
+    let errs = errors(
+        r#"type Msg = {kind: "ping", ttl: int} | {kind: "pong", latency_ms: int}
+
+pipeline t(task) {
+  fn handle(m: Msg) {
+    if m.kind == "ping" {
+      let p: {kind: "ping", ttl: int} = m
+    } else {
+      let p: {kind: "pong", latency_ms: int} = m
+    }
+  }
+}"#,
+    );
+    assert!(
+        errs.is_empty(),
+        "expected narrowing in both branches, got: {:?}",
+        errs
+    );
+}
+
+#[test]
+fn test_if_discriminator_neq_inverts_narrowing() {
+    // `m.kind != "ping"` swaps truthy/falsy: then-branch sees the residual
+    // union (the pong shape here), else-branch sees the matched shape.
+    let errs = errors(
+        r#"type Msg = {kind: "ping", ttl: int} | {kind: "pong", latency_ms: int}
+
+pipeline t(task) {
+  fn handle(m: Msg) {
+    if m.kind != "ping" {
+      let p: {kind: "pong", latency_ms: int} = m
+    } else {
+      let p: {kind: "ping", ttl: int} = m
+    }
+  }
+}"#,
+    );
+    assert!(
+        errs.is_empty(),
+        "expected `!=` to invert truthy/falsy, got: {:?}",
+        errs
+    );
+}
+
+#[test]
+fn test_discriminator_narrowing_skipped_when_field_unknown() {
+    // `m.foo` is not the discriminant — narrowing must NOT fire and the
+    // mistyped assignment must still error to prove we didn't accidentally
+    // collapse `m` to one of the variants.
+    let errs = errors(
+        r#"type Msg = {kind: "ping", ttl: int} | {kind: "pong", latency_ms: int}
+
+pipeline t(task) {
+  fn handle(m: Msg) {
+    if m.kind == "ping" {
+      // Sanity: once narrowed, this assignment to the OTHER variant must fail.
+      let wrong: {kind: "pong", latency_ms: int} = m
+    }
+  }
+}"#,
+    );
+    assert!(
+        errs.iter().any(|e| e.contains("'wrong' declared as")),
+        "expected residual-narrowing assignment to fail, got: {:?}",
+        errs
+    );
+}
+
 #[test]
 fn test_has_narrows_optional_field() {
     let errs = errors(

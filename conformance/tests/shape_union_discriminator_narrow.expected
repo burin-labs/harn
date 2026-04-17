@@ -1,0 +1,8 @@
+ping 30
+pong 12
+if-ping 1
+if-pong 2
+click 7,9
+scroll -2
+add 5
+neg -11

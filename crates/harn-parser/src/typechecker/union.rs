@@ -162,6 +162,110 @@ pub(super) fn subtract_type(current: &TypeExpr, schema_type: &TypeExpr) -> Optio
     }
 }
 
+/// A literal-typed field value used as a tagged-shape-union discriminant.
+/// We carry a reduced enum rather than threading two types through every
+/// helper — only string and int literal types are eligible discriminants.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum DiscriminantValue {
+    Str(String),
+    Int(i64),
+}
+
+impl DiscriminantValue {
+    pub(super) fn from_type(t: &TypeExpr) -> Option<Self> {
+        match t {
+            TypeExpr::LitString(s) => Some(Self::Str(s.clone())),
+            TypeExpr::LitInt(v) => Some(Self::Int(*v)),
+            _ => None,
+        }
+    }
+}
+
+/// Auto-detect the discriminant field for a tagged shape union.
+///
+/// Rule: a field that (a) is present and non-optional in every shape
+/// member, and (b) has a literal type (`LitString` / `LitInt`) distinct
+/// per member, qualifies. If multiple fields qualify, pick the first in
+/// source order across the first variant. Returns `None` if no member is
+/// a `Shape` or no field qualifies.
+///
+/// The non-distinct check rules out cases like
+///   { tag: "a", x: int } | { tag: "a", x: string }
+/// where "tag" can't refine the union because both members share a value.
+pub(super) fn discriminant_field(members: &[TypeExpr]) -> Option<String> {
+    if members.len() < 2 {
+        return None;
+    }
+    let shapes: Vec<&[ShapeField]> = members
+        .iter()
+        .map(|m| match m {
+            TypeExpr::Shape(fields) => Some(fields.as_slice()),
+            _ => None,
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let first = shapes[0];
+    'fields: for candidate in first {
+        if candidate.optional {
+            continue;
+        }
+        let Some(first_value) = DiscriminantValue::from_type(&candidate.type_expr) else {
+            continue;
+        };
+        let mut seen: Vec<DiscriminantValue> = vec![first_value];
+        for fields in &shapes[1..] {
+            let Some(field) = fields.iter().find(|f| f.name == candidate.name) else {
+                continue 'fields;
+            };
+            if field.optional {
+                continue 'fields;
+            }
+            let Some(value) = DiscriminantValue::from_type(&field.type_expr) else {
+                continue 'fields;
+            };
+            if seen.contains(&value) {
+                continue 'fields;
+            }
+            seen.push(value);
+        }
+        return Some(candidate.name.clone());
+    }
+    None
+}
+
+/// Narrow a tagged shape union to the variant whose discriminant field
+/// matches `tag_value`. Returns:
+///   `Some(matched_shape, residual)` when exactly one variant matches;
+///     `residual` is the union of every other member, collapsed via
+///     [`simplify_union`] (so a single residual is a `Shape`, not a
+///     length-1 `Union`).
+///   `None` when the input isn't a recognised tagged shape union or no
+///     variant matches the requested tag value.
+pub(super) fn narrow_shape_union_by_tag(
+    members: &[TypeExpr],
+    tag_field: &str,
+    tag_value: &DiscriminantValue,
+) -> Option<(TypeExpr, TypeExpr)> {
+    let mut matched: Option<TypeExpr> = None;
+    let mut residual: Vec<TypeExpr> = Vec::with_capacity(members.len());
+    for member in members {
+        let TypeExpr::Shape(fields) = member else {
+            return None;
+        };
+        let field = fields.iter().find(|f| f.name == tag_field)?;
+        let value = DiscriminantValue::from_type(&field.type_expr)?;
+        if &value == tag_value {
+            if matched.is_some() {
+                return None;
+            }
+            matched = Some(member.clone());
+        } else {
+            residual.push(member.clone());
+        }
+    }
+    let matched = matched?;
+    Some((matched, simplify_union(residual)))
+}
+
 /// Apply a list of refinements to a scope, tracking pre-narrowing types.
 pub(super) fn apply_refinements(scope: &mut TypeScope, refinements: &[(String, InferredType)]) {
     for (var_name, narrowed_type) in refinements {

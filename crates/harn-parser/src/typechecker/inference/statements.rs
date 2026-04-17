@@ -22,7 +22,9 @@ use super::super::scope::{
     EnumDeclInfo, FnSignature, ImplMethodSig, InterfaceDeclInfo, StructDeclInfo, TypeAliasInfo,
     TypeScope,
 };
-use super::super::union::narrow_to_single;
+use super::super::union::{
+    discriminant_field, narrow_shape_union_by_tag, narrow_to_single, DiscriminantValue,
+};
 use super::super::{InlayHintInfo, TypeChecker};
 
 impl TypeChecker {
@@ -671,6 +673,40 @@ impl TypeChecker {
                             };
                             if let Some(narrowed_type) = narrowed {
                                 arm_scope.define_var(var_name, Some(narrowed_type));
+                            }
+                        }
+                    }
+                    // Discriminator narrowing on `match obj.<tag> { "v" -> ... }`:
+                    // when the matched value is a property access on a tagged
+                    // shape union and the arm is a literal pattern matching
+                    // the union's auto-detected discriminant, narrow `obj` to
+                    // the single matching variant inside the arm.
+                    if let Node::PropertyAccess { object, property } = &value.node {
+                        if let Node::Identifier(obj_var) = &object.node {
+                            if let Some(Some(raw_type)) = scope.get_var(obj_var).cloned() {
+                                let resolved = self.resolve_alias(&raw_type, scope);
+                                if let TypeExpr::Union(members) = resolved {
+                                    if discriminant_field(&members).as_deref()
+                                        == Some(property.as_str())
+                                    {
+                                        let tag_value = match &arm.pattern.node {
+                                            Node::StringLiteral(s) => {
+                                                Some(DiscriminantValue::Str(s.clone()))
+                                            }
+                                            Node::IntLiteral(v) => Some(DiscriminantValue::Int(*v)),
+                                            _ => None,
+                                        };
+                                        if let Some(tag_value) = tag_value {
+                                            if let Some((matched_shape, _)) =
+                                                narrow_shape_union_by_tag(
+                                                    &members, property, &tag_value,
+                                                )
+                                            {
+                                                arm_scope.define_var(obj_var, Some(matched_shape));
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
