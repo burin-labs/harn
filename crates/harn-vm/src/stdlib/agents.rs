@@ -8,7 +8,7 @@
 pub(super) mod agents_workers;
 #[path = "records.rs"]
 pub(super) mod records;
-#[path = "workflow.rs"]
+#[path = "workflow/mod.rs"]
 pub(super) mod workflow;
 
 use std::cell::RefCell;
