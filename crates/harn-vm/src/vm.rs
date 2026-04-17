@@ -455,6 +455,38 @@ impl Vm {
         "call".to_string()
     }
 
+    /// Install (or replace) the cooperative cancellation token on
+    /// this VM. Callers (DAP adapter, embedded host) flip the
+    /// wrapped AtomicBool to request graceful shutdown; the step
+    /// loop checks `is_cancel_requested()` at every instruction and
+    /// exits with `VmError::Cancelled` when set.
+    pub fn install_cancel_token(&mut self, token: std::sync::Arc<std::sync::atomic::AtomicBool>) {
+        self.cancel_token = Some(token);
+    }
+
+    /// Signal cooperative cancellation on this VM — the step loop
+    /// unwinds on its next instruction check. Lazily allocates a
+    /// fresh token when none is installed so hosts don't need to
+    /// pre-plumb it on every launch. Returns the Arc so the caller
+    /// can hold onto it and re-signal later if needed.
+    pub fn signal_cancel(&mut self) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
+        let token = self.cancel_token.clone().unwrap_or_else(|| {
+            let t = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            self.cancel_token = Some(t.clone());
+            t
+        });
+        token.store(true, std::sync::atomic::Ordering::SeqCst);
+        token
+    }
+
+    /// True when cooperative cancellation has been requested.
+    pub fn is_cancel_requested(&self) -> bool {
+        self.cancel_token
+            .as_ref()
+            .map(|t| t.load(std::sync::atomic::Ordering::SeqCst))
+            .unwrap_or(false)
+    }
+
     /// Identifiers visible at the given frame's scope — locals plus
     /// every registered builtin + async builtin. Drives DAP
     /// `completions` (#109) so the REPL autocomplete surfaces
@@ -514,6 +546,15 @@ impl Vm {
     /// cleanup ops emitted at line 0 after branch/loop exits — keeps
     /// the debugger aligned with what's actually going to run.
     pub async fn step_execute(&mut self) -> Result<Option<(VmValue, bool)>, VmError> {
+        // Cooperative cancellation (#108): the DAP adapter flips the
+        // shared flag when the IDE presses the Stop pill. Check here
+        // before any instruction work so the loop unwinds promptly
+        // on the next tick.
+        if self.is_cancel_requested() {
+            return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                "kind:cancelled:VM cancelled by host",
+            ))));
+        }
         let current_line = self.upcoming_line();
         let line_changed = current_line != self.last_line && current_line > 0;
 
@@ -1960,6 +2001,39 @@ mod tests {
         // then attempt restart on an out-of-range id.
         let err = vm.restart_frame(99).unwrap_err();
         assert!(err.to_string().contains("out of range"));
+    }
+
+    #[test]
+    fn test_signal_cancel_unwinds_step_loop() {
+        let mut vm = Vm::new();
+        register_vm_stdlib(&mut vm);
+        // A busy-looping pipeline that would never terminate under a
+        // normal run; signal cancel before stepping so the first
+        // instruction check throws VmError::Thrown with the
+        // cancelled kind.
+        let chunk = crate::compile_source(
+            "pipeline t(task) { var i = 0\n while i < 1000000 { i = i + 1 } }\n",
+        )
+        .unwrap();
+        vm.start(&chunk);
+        vm.signal_cancel();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let result = rt.block_on(async {
+            let local = tokio::task::LocalSet::new();
+            local.run_until(vm.step_execute()).await
+        });
+        match result {
+            Err(VmError::Thrown(VmValue::String(s))) => {
+                assert!(
+                    s.contains("kind:cancelled:"),
+                    "cancellation must surface as a kind-tagged Thrown error"
+                );
+            }
+            other => panic!("expected cancelled Thrown, got {other:?}"),
+        }
     }
 
     #[test]

@@ -462,15 +462,28 @@ impl Debugger {
     /// that still returns success — matching VS Code's behavior so
     /// the Stop pill never flashes an error.
     fn handle_cancel(&mut self, msg: &DapMessage) -> Vec<DapResponse> {
+        let request_id = msg
+            .arguments
+            .as_ref()
+            .and_then(|a| a.get("requestId"))
+            .and_then(|v| v.as_i64());
+        // Two-pronged cancellation (#108):
+        //   1. DapHostBridge::cancel_pending signals a pending
+        //      reverse-request waiter (anything blocked inside
+        //      DapHostBridge::dispatch). Handles the common
+        //      "llm_call is blocked on a host_call" case.
+        //   2. Vm::signal_cancel flips the VM's shared cancel
+        //      token so the step loop unwinds on the next
+        //      instruction tick. Handles the "script is looping
+        //      outside host_call" case — agent loops that check
+        //      the token at the top of each turn exit cleanly.
         if let Some(bridge) = &self.host_bridge {
-            let request_id = msg
-                .arguments
-                .as_ref()
-                .and_then(|a| a.get("requestId"))
-                .and_then(|v| v.as_i64());
             if let Some(id) = request_id {
                 bridge.cancel_pending(id, "cancel");
             }
+        }
+        if let Some(vm) = self.vm.as_mut() {
+            vm.signal_cancel();
         }
         let seq = self.next_seq();
         vec![DapResponse::success(seq, msg.seq, "cancel", None)]
