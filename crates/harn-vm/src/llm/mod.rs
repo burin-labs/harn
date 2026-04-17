@@ -922,6 +922,7 @@ mod tests {
             tools: None,
             native_tools: None,
             tool_choice: None,
+            tool_search: None,
             cache: false,
             stream: true,
             timeout: None,

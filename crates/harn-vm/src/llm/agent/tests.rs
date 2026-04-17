@@ -49,6 +49,7 @@ fn base_opts(messages: Vec<serde_json::Value>) -> LlmCallOptions {
         tools: None,
         native_tools: None,
         tool_choice: None,
+        tool_search: None,
         cache: false,
         timeout: None,
         idle_timeout: None,

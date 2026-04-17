@@ -20,6 +20,69 @@ pub(crate) enum ThinkingConfig {
     WithBudget(i64),
 }
 
+/// Which tool-search variant to use. Two shapes today, matching the two
+/// Anthropic variants (also reused as the mental model for the OpenAI path
+/// landing in harn#71). Scripts write the lower-case short name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ToolSearchVariant {
+    /// BM25 / natural-language queries. Default when the user wrote just
+    /// `tool_search: true` or omitted the variant.
+    Bm25,
+    /// Python-regex queries (more precise, less ergonomic).
+    Regex,
+}
+
+impl ToolSearchVariant {
+    pub(crate) fn as_short(self) -> &'static str {
+        match self {
+            ToolSearchVariant::Bm25 => "bm25",
+            ToolSearchVariant::Regex => "regex",
+        }
+    }
+}
+
+/// How to resolve `tool_search` against the active provider.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ToolSearchMode {
+    /// Auto-select: native if the provider supports it, client-executed
+    /// fallback otherwise (harn#70). Default.
+    Auto,
+    /// Force the provider's native mechanism; error if unsupported.
+    Native,
+    /// Force client-executed fallback even when native is available.
+    /// Currently errors with a pointer to harn#70 until the fallback lands.
+    Client,
+}
+
+/// User-facing tool_search configuration. Parsed from the `tool_search`
+/// option on `llm_call` / `agent_loop`. Absent means no deferred-loading
+/// machinery is engaged — tools ship eagerly as always.
+#[derive(Clone, Debug)]
+#[allow(dead_code)] // variant + mode drive option-parse decisions; always_loaded is
+                    // reserved for harn#70 (client-executed tool-search fallback)
+pub(crate) struct ToolSearchConfig {
+    pub variant: ToolSearchVariant,
+    pub mode: ToolSearchMode,
+    /// Tool names that must remain eager even when `defer_loading: true`
+    /// is otherwise set on them. Useful for a "safety net" a skill wants
+    /// always available regardless of the tool-search index's decisions.
+    /// Phase 1 accepts and stores this but only #70 (client-executed
+    /// fallback) consumes it — for the native Anthropic path, eagerness
+    /// is already controlled per-tool via `defer_loading`.
+    pub always_loaded: Vec<String>,
+}
+
+impl ToolSearchConfig {
+    /// Default when the user writes `tool_search: true` with no detail.
+    pub(crate) fn default_bm25_auto() -> Self {
+        Self {
+            variant: ToolSearchVariant::Bm25,
+            mode: ToolSearchMode::Auto,
+            always_loaded: Vec::new(),
+        }
+    }
+}
+
 /// All options for an LLM API call, extracted once from user-facing args.
 #[derive(Clone)]
 pub(crate) struct LlmCallOptions {
@@ -59,6 +122,15 @@ pub(crate) struct LlmCallOptions {
     pub tools: Option<VmValue>,
     pub native_tools: Option<Vec<serde_json::Value>>,
     pub tool_choice: Option<serde_json::Value>,
+    /// Progressive-disclosure configuration. When set, the options
+    /// extractor resolves this against the active provider's capability
+    /// matrix and, for native-supporting providers, prepends a
+    /// `tool_search_tool_*_20251119` meta-tool to `native_tools`. For
+    /// client-executed mode (harn#70) this carries the config forward
+    /// into the agent-loop fallback. See [`ToolSearchConfig`].
+    #[allow(dead_code)] // consumed by the options extractor; persisted for transcript /
+    // replay fidelity and harn#70's client-executed loop
+    pub tool_search: Option<ToolSearchConfig>,
 
     // --- Caching ---
     pub cache: bool,
@@ -1261,6 +1333,39 @@ fn parse_llm_response(
                             "visibility": "internal",
                         }));
                     }
+                    Some("server_tool_use") => {
+                        // Anthropic's server-side tool-search tool emits
+                        // a `server_tool_use` content block when it
+                        // queries. The model never sees this as a
+                        // dispatchable tool — Anthropic executes it for
+                        // us — so we record it for transcript/replay
+                        // fidelity but do NOT add it to `tool_calls`.
+                        blocks.push(serde_json::json!({
+                            "type": "tool_search_query",
+                            "id": block["id"].clone(),
+                            "name": block["name"].clone(),
+                            "query": block["input"].clone(),
+                            "visibility": "internal",
+                        }));
+                    }
+                    Some("tool_search_tool_result") => {
+                        // Server-side search results. Anthropic
+                        // auto-expands the referenced tools inline on
+                        // subsequent turns; we just record the event so
+                        // replay/eval can see which tools were promoted
+                        // and when.
+                        let references: Vec<serde_json::Value> = block["content"]
+                            ["tool_references"]
+                            .as_array()
+                            .cloned()
+                            .unwrap_or_default();
+                        blocks.push(serde_json::json!({
+                            "type": "tool_search_result",
+                            "tool_use_id": block["tool_use_id"].clone(),
+                            "tool_references": references,
+                            "visibility": "internal",
+                        }));
+                    }
                     _ => {}
                 }
             }
@@ -1460,6 +1565,16 @@ async fn vm_call_llm_api_sse_from_response(
         input_json: String,
     }
     let mut current_tool: Option<ToolBlock> = None;
+    // Mirror structure for server-side tool-search queries: Anthropic
+    // streams the query JSON the same way as a regular tool_use, but we
+    // route it to a `tool_search_query` transcript event instead of the
+    // dispatchable `tool_calls` vector.
+    struct ServerToolBlock {
+        id: String,
+        name: String,
+        input_json: String,
+    }
+    let mut current_server_tool: Option<ServerToolBlock> = None;
     let mut thinking_text = String::new();
     let mut in_thinking_block = false;
     let mut stop_reason: Option<String> = None;
@@ -1513,6 +1628,29 @@ async fn vm_call_llm_api_sse_from_response(
                                 input_json: String::new(),
                             });
                         }
+                        Some("server_tool_use") => {
+                            current_server_tool = Some(ServerToolBlock {
+                                id: block["id"].as_str().unwrap_or("").to_string(),
+                                name: block["name"].as_str().unwrap_or("").to_string(),
+                                input_json: String::new(),
+                            });
+                        }
+                        Some("tool_search_tool_result") => {
+                            // Non-streaming content: Anthropic embeds the
+                            // references directly in the block_start
+                            // payload. Record immediately — no deltas
+                            // follow for this block type.
+                            let refs: Vec<serde_json::Value> = block["content"]["tool_references"]
+                                .as_array()
+                                .cloned()
+                                .unwrap_or_default();
+                            blocks.push(serde_json::json!({
+                                "type": "tool_search_result",
+                                "tool_use_id": block["tool_use_id"].clone(),
+                                "tool_references": refs,
+                                "visibility": "internal",
+                            }));
+                        }
                         Some("thinking") => {
                             in_thinking_block = true;
                         }
@@ -1540,6 +1678,10 @@ async fn vm_call_llm_api_sse_from_response(
                                 if let Some(j) = delta["partial_json"].as_str() {
                                     tool.input_json.push_str(j);
                                 }
+                            } else if let Some(ref mut server_tool) = current_server_tool {
+                                if let Some(j) = delta["partial_json"].as_str() {
+                                    server_tool.input_json.push_str(j);
+                                }
                             }
                         }
                         _ => {}
@@ -1553,6 +1695,19 @@ async fn vm_call_llm_api_sse_from_response(
                             "id": tool.id, "name": tool.name, "arguments": args,
                         }));
                         blocks.push(serde_json::json!({"type": "tool_call", "id": tool.id, "name": tool.name, "arguments": args, "visibility": "internal"}));
+                    } else if let Some(server_tool) = current_server_tool.take() {
+                        // Emit a `tool_search_query` transcript event —
+                        // not dispatchable, just observability.
+                        let query =
+                            serde_json::from_str::<serde_json::Value>(&server_tool.input_json)
+                                .unwrap_or(serde_json::Value::Object(Default::default()));
+                        blocks.push(serde_json::json!({
+                            "type": "tool_search_query",
+                            "id": server_tool.id,
+                            "name": server_tool.name,
+                            "query": query,
+                            "visibility": "internal",
+                        }));
                     }
                     in_thinking_block = false;
                 }
@@ -2402,6 +2557,7 @@ mod tests {
                 "type": "function",
                 "function": {"name": "tool"}
             })),
+            tool_search: None,
             cache: true,
             stream: true,
             timeout: Some(5),
@@ -3062,5 +3218,90 @@ mod tests {
         );
         assert!(err.contains("[http_error]"), "err was: {err}");
         assert!(err.contains("upstream exploded"), "err was: {err}");
+    }
+
+    // ─── Tool Vault: server_tool_use + tool_search_tool_result parsing ──────
+
+    // Build a ResolvedProvider for the Anthropic path without going through
+    // the thread-local provider registry — these parser tests only need the
+    // is_anthropic_style flag set.
+    fn anthropic_resolved() -> super::super::helpers::ResolvedProvider<'static> {
+        super::super::helpers::ResolvedProvider::resolve("anthropic")
+    }
+
+    #[test]
+    fn anthropic_parser_records_server_tool_use_as_tool_search_query() {
+        let resolved = anthropic_resolved();
+        // Build a minimal Anthropic Messages API response containing a
+        // server_tool_use block (the model calling the search tool).
+        let response = serde_json::json!({
+            "content": [
+                {"type": "text", "text": "searching now"},
+                {
+                    "type": "server_tool_use",
+                    "id": "srvtoolu_01",
+                    "name": "tool_search_tool_bm25",
+                    "input": {"query": "weather"}
+                }
+            ],
+            "usage": {"input_tokens": 10, "output_tokens": 5}
+        });
+        let result =
+            super::parse_llm_response(&response, "anthropic", "claude-opus-4-7", &resolved)
+                .expect("parser succeeds");
+
+        // tool_calls is for *dispatchable* user tools — server-side tools
+        // must never appear there.
+        assert!(result.tool_calls.is_empty());
+
+        // The tool_search_query event is on the blocks list.
+        let has_query_event = result.blocks.iter().any(|b| {
+            b.get("type").and_then(|v| v.as_str()) == Some("tool_search_query")
+                && b.get("name").and_then(|v| v.as_str()) == Some("tool_search_tool_bm25")
+        });
+        assert!(
+            has_query_event,
+            "expected tool_search_query block; got {:#?}",
+            result.blocks
+        );
+    }
+
+    #[test]
+    fn anthropic_parser_records_tool_search_tool_result_as_event() {
+        let resolved = anthropic_resolved();
+        let response = serde_json::json!({
+            "content": [
+                {
+                    "type": "tool_search_tool_result",
+                    "tool_use_id": "srvtoolu_01",
+                    "content": {
+                        "type": "tool_search_tool_search_result",
+                        "tool_references": [
+                            {"type": "tool_reference", "tool_name": "get_weather"}
+                        ]
+                    }
+                },
+                {"type": "text", "text": "ok"}
+            ],
+            "usage": {"input_tokens": 3, "output_tokens": 1}
+        });
+        let result =
+            super::parse_llm_response(&response, "anthropic", "claude-opus-4-7", &resolved)
+                .expect("parser succeeds");
+
+        let result_block = result
+            .blocks
+            .iter()
+            .find(|b| b.get("type").and_then(|v| v.as_str()) == Some("tool_search_result"))
+            .expect("tool_search_result block present");
+        let refs = result_block["tool_references"]
+            .as_array()
+            .expect("tool_references array");
+        assert_eq!(refs.len(), 1);
+        assert_eq!(
+            refs[0]["tool_name"].as_str(),
+            Some("get_weather"),
+            "reference name preserved"
+        );
     }
 }

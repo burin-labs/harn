@@ -1,0 +1,56 @@
+// Tool Vault foundation: `defer_loading: true` passes through the registry
+// unchanged so provider-specific code can honour it (Anthropic native,
+// harn#70 client fallback, harn#71 OpenAI Responses API).
+pipeline test(task) {
+  var registry = tool_registry()
+  // Eager tool (no defer_loading → not present on entry).
+  registry = tool_define(
+    registry,
+    "look",
+    "Read file contents",
+    {parameters: {path: {type: "string"}}, handler: { args -> "content of " + args.path }},
+  )
+  // Deferred tool (defer_loading: true → present on entry).
+  registry = tool_define(
+    registry,
+    "rare_admin_tool",
+    "Admin-only tool rarely needed",
+    {
+    parameters: {token: {type: "string"}},
+    defer_loading: true,
+    handler: { args -> "admin: " + args.token },
+  },
+  )
+  let eager = tool_find(registry, "look")
+  assert(eager != nil, "eager tool should be found")
+  assert(eager.defer_loading == nil, "eager tool has no defer_loading key")
+  let deferred = tool_find(registry, "rare_admin_tool")
+  assert(deferred != nil, "deferred tool should be found")
+  assert(deferred.defer_loading == true, "deferred tool retains defer_loading: true")
+  // tool_list drops the handler but preserves metadata like defer_loading
+  // so observability surfaces can see which tools are candidates for
+  // progressive disclosure.
+  let tools = tool_list(registry)
+  assert(len(tools) == 2, "registry has two tools")
+  for t in tools {
+    if t.name == "rare_admin_tool" {
+      assert(t.defer_loading == true, "tool_list preserves defer_loading")
+    } else {
+      assert(t.defer_loading == nil, "non-deferred tool unchanged")
+    }
+  }
+  // Type validation: non-bool defer_loading is rejected by tool_define.
+  let caught_bad_type = try {
+    tool_define(
+    tool_registry(),
+    "busted",
+    "has a typo on defer_loading",
+    {parameters: {}, defer_loading: "yes", handler: { _ -> "ok" }},
+  )
+    false
+  } catch (e) {
+    true
+  }
+  assert(caught_bad_type, "non-bool defer_loading must be rejected")
+  log("tool_defer_loading tests passed")
+}
