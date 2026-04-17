@@ -1,0 +1,71 @@
+// Locks the non-negotiable surface contract for discriminated unions:
+//
+//   (i)   pure literal unions stay byte-for-byte unchanged
+//   (ii)  `kind`-tagged shape unions parse and narrow on `match v.kind`
+//   (iii) `type`-tagged shape unions parse and narrow on `match v.type`
+//   (iv)  any other discriminant name (`op`, …) is auto-detected
+//   (v)   the same `match v.<tag>` form narrows to the matching variant
+//         regardless of the discriminant field name.
+//
+// Every variant of every shape union below is exercised, so regressions
+// in either parsing or runtime field access surface as expected output
+// drift.
+/** (i) Pure literal union — no shape involved, no discriminant. */
+type Verdict = "pass" | "fail" | "unclear"
+
+fn classify_verdict(v: Verdict) -> string {
+  match v {
+    "pass" -> { return "ok" }
+    "fail" -> { return "no" }
+    "unclear" -> { return "?" }
+  }
+}
+
+/** (ii) `kind`-tagged shape union — the conventional spelling. */
+type Msg = {kind: "ping", ttl: int} | {kind: "pong", latency_ms: int}
+
+fn describe_msg(m: Msg) -> string {
+  match m.kind {
+    "ping" -> { return "ping ttl=" + to_string(m.ttl) }
+    "pong" -> { return "pong " + to_string(m.latency_ms) + "ms" }
+  }
+}
+
+/** (iii) `type`-tagged shape union — also extremely common. */
+type Event = {type: "click", x: int, y: int} | {type: "scroll", dy: int}
+
+fn describe_event(e: Event) -> string {
+  match e.type {
+    "click" -> { return "click@" + to_string(e.x) + "," + to_string(e.y) }
+    "scroll" -> { return "scroll dy=" + to_string(e.dy) }
+  }
+}
+
+/**
+ * (iv) Arbitrary discriminant name — `op`. Auto-detection must not
+ *  privilege "kind" or "type" over any other shared, literal-typed field.
+ */
+type Instr = {op: "add", lhs: int, rhs: int} | {op: "neg", arg: int}
+
+fn run_instr(i: Instr) -> int {
+  match i.op {
+    "add" -> { return i.lhs + i.rhs }
+    "neg" -> { return 0 - i.arg }
+  }
+}
+
+pipeline default(task) {
+  // Pure-literal-union round trip
+  println(classify_verdict("pass"))
+  println(classify_verdict("fail"))
+  println(classify_verdict("unclear"))
+  // kind-tagged
+  println(describe_msg({kind: "ping", ttl: 30}))
+  println(describe_msg({kind: "pong", latency_ms: 12}))
+  // type-tagged
+  println(describe_event({type: "click", x: 7, y: 9}))
+  println(describe_event({type: "scroll", dy: -2}))
+  // op-tagged
+  println(to_string(run_instr({op: "add", lhs: 2, rhs: 3})))
+  println(to_string(run_instr({op: "neg", arg: 11})))
+}

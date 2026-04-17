@@ -198,7 +198,10 @@ impl Parser {
         self.skip_newlines();
 
         while !self.is_at_end() && !self.check(&TokenKind::RBrace) {
-            let name = self.consume_identifier("field name")?;
+            // Shape field names parallel dict-literal keys: a few reserved
+            // keywords (`type`, `match`, …) are common discriminant names
+            // and must work in shape-type position too.
+            let name = self.consume_identifier_or_keyword("field name")?;
             let optional = if self.check(&TokenKind::Question) {
                 self.advance();
                 true
