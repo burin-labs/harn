@@ -46,6 +46,37 @@ granular archaeology.
   client-executed fallback. This is intentional (no silent
   degradation); client fallback makes the feature provider-agnostic
   in the next phase.
+- **Distributive instantiation of generic type aliases.** Applying a
+  generic `type F<T> = ...` alias to a closed union now expands into a
+  union of per-variant instantiations rather than leaving the union in
+  a single `T` slot. Concretely, for
+
+  ```harn
+  type Action = "create" | "edit"
+  type ActionContainer<T> = { action: T, process_action: fn(T) -> nil }
+  ```
+
+  the type `ActionContainer<Action>` now resolves as
+  `ActionContainer<"create"> | ActionContainer<"edit">`, which lets a
+  `fn("create") -> nil` handler flow into the `"create"` branch without
+  running aground on the contravariance of the function parameter.
+  This is the pattern TypeScript rejects in the classic
+  `Array<ActionContainer<Action>>` playground example; Harn now handles
+  it soundly via distribution at alias-application time in
+  `crates/harn-parser/src/typechecker/inference/subtyping.rs`. No new
+  syntax or keyword required — distribution is an implementation of
+  existing alias-application semantics.
+
+### Fixed
+
+- **Bare function references now carry their full `fn(...)` type.**
+  Previously, a top-level (or nested) function used as a plain value
+  (e.g. inside a dict literal) inferred as `None`, which collapsed to
+  `nil` at the surrounding inference site. A subsequent assignment into
+  a typed slot then failed with a misleading "got nil" diagnostic. The
+  typechecker now falls back from `scope.get_var` to `scope.get_fn`
+  when resolving bare identifiers, projecting the function signature
+  into a proper `FnType { params, return_type }`.
 
 ## v0.7.16
 

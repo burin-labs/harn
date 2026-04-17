@@ -1,0 +1,42 @@
+// Ports the motivating TypeScript playground:
+//   type Action = 'create' | 'edit'
+//   type ActionContainer<T extends Action> = { action: T, processAction: (t: T) => void }
+//   const xs: Array<ActionContainer<Action>> = [
+//     {action: 'create', processAction: processCreate},
+//     {action: 'edit',   processAction: processEdit},
+//   ]
+//
+// TS rejects this because `processCreate: (t: "create") => void` doesn't
+// fit `(t: "create" | "edit") => void` under contravariance. Harn fixes
+// it by distributing `ActionContainer<Action>` over the closed literal
+// union, so each instantiation self-consistently fixes `T`:
+//   ActionContainer<"create"> | ActionContainer<"edit">
+// which is exactly the shape each literal-tagged element inhabits.
+type Action = "create" | "edit"
+
+type ActionContainer<T> = {action: T, process_action: fn(T) -> nil}
+
+fn process_create(a: "create") {
+  println("create " + a)
+}
+
+fn process_edit(a: "edit") {
+  println("edit " + a)
+}
+
+pipeline test(task) {
+  // Scalar case: each annotation distributes `ActionContainer<Action>`
+  // into `ActionContainer<"create"> | ActionContainer<"edit">`; the
+  // literal-tagged shape on the RHS then fits one specific branch.
+  let c1: ActionContainer<Action> = {action: "create", process_action: process_create}
+  let c2: ActionContainer<Action> = {action: "edit", process_action: process_edit}
+  c1.process_action(c1.action)
+  c2.process_action(c2.action)
+  // List case: the TS playground example verbatim. A heterogeneous
+  // list of container instances assigns into `list<ActionContainer<Action>>`
+  // because the element type distributes.
+  let containers: list<ActionContainer<Action>> = [{action: "create", process_action: process_create}, {action: "edit", process_action: process_edit}]
+  for c in containers {
+    c.process_action(c.action)
+  }
+}

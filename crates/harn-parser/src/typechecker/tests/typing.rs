@@ -460,3 +460,77 @@ fn test_dict_invariant_int_to_float_rejected() {
         "expected dict<string, int> NOT to flow into dict<string, float>"
     );
 }
+
+#[test]
+fn test_generic_alias_distributes_over_closed_literal_union() {
+    // `ActionContainer<Action>` must distribute into
+    // `ActionContainer<"create"> | ActionContainer<"edit">`, which lets a
+    // `fn("create") -> nil` value flow into the `"create"` branch without
+    // running into contravariance grief (the TypeScript playground bug).
+    let errs = errors(
+        r#"
+type Action = "create" | "edit"
+type ActionContainer<T> = { action: T, process_action: fn(T) -> nil }
+
+fn process_create(a: "create") {}
+fn process_edit(a: "edit") {}
+
+pipeline t(task) {
+    let c: ActionContainer<Action> = {action: "create", process_action: process_create}
+    let d: ActionContainer<Action> = {action: "edit",   process_action: process_edit}
+}"#,
+    );
+    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
+}
+
+#[test]
+fn test_bare_function_reference_infers_fn_type() {
+    // Before the identifier-to-fn-type fallback, a bare function reference
+    // used as a value inferred to `None`, which meant it collapsed to
+    // `nil` when placed into a dict literal. That silently broke
+    // assignability against any typed `fn(...) -> R` slot.
+    let errs = errors(
+        r#"
+fn process(a: string) -> string { return a }
+
+pipeline t(task) {
+    let slot: fn(string) -> string = process
+    let d: { handler: fn(string) -> string } = { handler: process }
+}"#,
+    );
+    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
+}
+
+#[test]
+fn test_generic_alias_distribution_preserves_non_union_arg() {
+    // Non-union arguments still substitute plainly: `ActionContainer<int>`
+    // expands to `{ action: int, process_action: fn(int) -> nil }` with no
+    // distribution. A `fn(int) -> nil` handler fits; a `fn(string) -> nil`
+    // does not.
+    let ok_errs = errors(
+        r#"
+type ActionContainer<T> = { action: T, process_action: fn(T) -> nil }
+
+fn process_int(a: int) {}
+
+pipeline t(task) {
+    let c: ActionContainer<int> = {action: 7, process_action: process_int}
+}"#,
+    );
+    assert!(ok_errs.is_empty(), "expected no errors: {ok_errs:?}");
+
+    let bad_errs = errors(
+        r#"
+type ActionContainer<T> = { action: T, process_action: fn(T) -> nil }
+
+fn process_string(a: string) {}
+
+pipeline t(task) {
+    let c: ActionContainer<int> = {action: 7, process_action: process_string}
+}"#,
+    );
+    assert!(
+        !bad_errs.is_empty(),
+        "expected an error: `fn(string)` cannot fill an `fn(int)` slot"
+    );
+}
