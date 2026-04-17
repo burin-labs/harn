@@ -25,8 +25,11 @@ pub(crate) fn expects_structured_output(opts: &crate::llm::api::LlmCallOptions) 
 pub(crate) fn extract_llm_options(
     args: &[VmValue],
 ) -> Result<crate::llm::api::LlmCallOptions, VmError> {
-    use crate::llm::api::{LlmCallOptions, ThinkingConfig};
-    use crate::llm::tools::vm_tools_to_native;
+    use crate::llm::api::{LlmCallOptions, ThinkingConfig, ToolSearchMode, ToolSearchVariant};
+    use crate::llm::provider::{provider_supports_defer_loading, provider_tool_search_variants};
+    use crate::llm::tools::{
+        apply_tool_search_native_injection, extract_deferred_tool_names, vm_tools_to_native,
+    };
 
     let prompt = args.first().map(|a| a.display()).unwrap_or_default();
     let system = args.get(1).and_then(|a| {
@@ -123,11 +126,108 @@ pub(crate) fn extract_llm_options(
     };
 
     let tools_val = options.as_ref().and_then(|o| o.get("tools")).cloned();
-    let native_tools = if let Some(tools) = &tools_val {
+    let mut native_tools = if let Some(tools) = &tools_val {
         Some(vm_tools_to_native(tools, &provider)?)
     } else {
         None
     };
+
+    // tool_search option parsing: three shapes accepted.
+    //   - shorthand string: "bm25" | "regex" (mode: auto)
+    //   - bool: true (defaults to bm25/auto), false (no tool_search)
+    //   - dict: { variant, mode, always_loaded }
+    // Unset / false / nil all leave tool_search absent — tools ship eagerly.
+    let tool_search = parse_tool_search_option(options.as_ref())?;
+
+    if let Some(cfg) = &tool_search {
+        // Resolve tool_search against the active provider now — in auto
+        // mode, either promote to native (by injecting the meta-tool) or
+        // error pointing at the client-executed fallback issue (harn#70).
+        let native_variants = provider_tool_search_variants(&provider, &model);
+        let provider_has_native =
+            provider_supports_defer_loading(&provider, &model) && !native_variants.is_empty();
+        let use_native = match cfg.mode {
+            ToolSearchMode::Native => {
+                if !provider_has_native {
+                    return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                        format!(
+                            "tool_search: provider \"{provider}\" does not expose native \
+                         tool-search for model \"{model}\". Set \
+                         `tool_search: {{ mode: \"client\" }}` (see harn#70, pending) \
+                         or omit tool_search to ship tools eagerly."
+                        ),
+                    ))));
+                }
+                true
+            }
+            ToolSearchMode::Client => {
+                return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                    "tool_search: mode: \"client\" is not implemented yet (tracked in \
+                     harn#70). Use mode: \"auto\" with a native-capable provider \
+                     (Anthropic Opus/Sonnet 4.0+, Haiku 4.5+) or omit tool_search.",
+                ))));
+            }
+            ToolSearchMode::Auto => {
+                if !provider_has_native {
+                    return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                        format!(
+                            "tool_search: provider \"{provider}\" / model \"{model}\" \
+                         has no native tool-search and the client-executed fallback \
+                         is not implemented yet (tracked in harn#70). Either switch \
+                         to an Anthropic Claude 4.0+ Opus/Sonnet or Haiku 4.5+ model, \
+                         or omit tool_search."
+                        ),
+                    ))));
+                }
+                true
+            }
+        };
+
+        if use_native {
+            // Confirm the requested variant is actually supported; downgrade
+            // with a warning if not (e.g. user asked for "regex" but provider
+            // only exposes "bm25" — unlikely today but future-proofs).
+            if !native_variants.contains(&cfg.variant.as_short()) {
+                crate::events::log_warn(
+                    "llm.tool_search",
+                    &format!(
+                        "provider \"{provider}\" model \"{model}\" does not support \
+                         tool_search variant \"{}\"; falling back to \"{}\"",
+                        cfg.variant.as_short(),
+                        native_variants[0],
+                    ),
+                );
+            }
+
+            // Pre-flight: Anthropic rejects all-deferred tool lists.
+            if let Some(tools) = native_tools.as_ref() {
+                let deferred = extract_deferred_tool_names(tools);
+                let total_user_tools = tools.len();
+                if total_user_tools > 0 && deferred.len() == total_user_tools {
+                    return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                        "tool_search: all tools have defer_loading set. At least \
+                         one tool must be non-deferred so the model has somewhere \
+                         to start. (Matches Anthropic's 400 on the same condition.)",
+                    ))));
+                }
+            }
+
+            // Inject the native meta-tool at index 0 of native_tools.
+            let effective_variant = if native_variants.contains(&cfg.variant.as_short()) {
+                cfg.variant
+            } else {
+                match native_variants[0] {
+                    "regex" => ToolSearchVariant::Regex,
+                    _ => ToolSearchVariant::Bm25,
+                }
+            };
+            apply_tool_search_native_injection(
+                &mut native_tools,
+                &provider,
+                effective_variant.as_short(),
+            );
+        }
+    }
 
     let tool_choice = options
         .as_ref()
@@ -179,6 +279,7 @@ pub(crate) fn extract_llm_options(
         tools: tools_val,
         native_tools,
         tool_choice,
+        tool_search,
         cache,
         timeout,
         idle_timeout,
@@ -189,6 +290,95 @@ pub(crate) fn extract_llm_options(
 
     validate_options(&opts);
     Ok(opts)
+}
+
+/// Parse the `tool_search` option into a ToolSearchConfig.
+///
+/// Accepts:
+///   - `nil` / absent / `false` → None (no tool_search engaged)
+///   - `true` → default (bm25 + auto)
+///   - `"bm25"` | `"regex"` → that variant + auto
+///   - `{ variant?, mode?, always_loaded? }` → explicit
+fn parse_tool_search_option(
+    options: Option<&BTreeMap<String, VmValue>>,
+) -> Result<Option<crate::llm::api::ToolSearchConfig>, VmError> {
+    use crate::llm::api::{ToolSearchConfig, ToolSearchMode, ToolSearchVariant};
+
+    let raw = match options.and_then(|o| o.get("tool_search")) {
+        Some(v) => v,
+        None => return Ok(None),
+    };
+
+    let variant_from_short = |s: &str| -> Result<ToolSearchVariant, VmError> {
+        match s {
+            "bm25" => Ok(ToolSearchVariant::Bm25),
+            "regex" => Ok(ToolSearchVariant::Regex),
+            other => Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                format!("tool_search.variant: expected \"bm25\" or \"regex\", got \"{other}\""),
+            )))),
+        }
+    };
+    let mode_from_short = |s: &str| -> Result<ToolSearchMode, VmError> {
+        match s {
+            "auto" => Ok(ToolSearchMode::Auto),
+            "native" => Ok(ToolSearchMode::Native),
+            "client" => Ok(ToolSearchMode::Client),
+            other => Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                format!(
+                "tool_search.mode: expected \"auto\" | \"native\" | \"client\", got \"{other}\""
+            ),
+            )))),
+        }
+    };
+
+    match raw {
+        VmValue::Nil => Ok(None),
+        VmValue::Bool(false) => Ok(None),
+        VmValue::Bool(true) => Ok(Some(ToolSearchConfig::default_bm25_auto())),
+        VmValue::String(s) => Ok(Some(ToolSearchConfig {
+            variant: variant_from_short(s.as_ref())?,
+            mode: ToolSearchMode::Auto,
+            always_loaded: Vec::new(),
+        })),
+        VmValue::Dict(d) => {
+            let variant = match d.get("variant") {
+                Some(VmValue::String(s)) => variant_from_short(s.as_ref())?,
+                Some(_) => {
+                    return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                        "tool_search.variant: expected a string",
+                    ))));
+                }
+                None => ToolSearchVariant::Bm25,
+            };
+            let mode = match d.get("mode") {
+                Some(VmValue::String(s)) => mode_from_short(s.as_ref())?,
+                Some(_) => {
+                    return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                        "tool_search.mode: expected a string",
+                    ))));
+                }
+                None => ToolSearchMode::Auto,
+            };
+            let always_loaded = match d.get("always_loaded") {
+                Some(VmValue::List(list)) => list.iter().map(|v| v.display()).collect(),
+                Some(_) => {
+                    return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                        "tool_search.always_loaded: expected a list of tool names",
+                    ))));
+                }
+                None => Vec::new(),
+            };
+            Ok(Some(ToolSearchConfig {
+                variant,
+                mode,
+                always_loaded,
+            }))
+        }
+        _ => Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+            "tool_search: expected bool, string (\"bm25\"/\"regex\"), or dict \
+             ({variant, mode, always_loaded})",
+        )))),
+    }
 }
 
 pub(crate) fn opt_str_list(

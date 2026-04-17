@@ -401,6 +401,20 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
             ))));
         }
 
+        // `defer_loading` controls progressive-disclosure behavior on
+        // capable providers (Anthropic Claude 4.0+ today; OpenAI via
+        // harn#71). Gate the type here so typos don't silently fall back
+        // to the "no defer" default.
+        if let Some(v) = config.get("defer_loading") {
+            if !matches!(v, VmValue::Bool(_)) {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "tool_define: `defer_loading` must be a bool \
+                     (true → hold schema back until a tool_search call \
+                     surfaces it; false or absent → ship eagerly)",
+                ))));
+            }
+        }
+
         let parameters = config
             .get("parameters")
             .cloned()

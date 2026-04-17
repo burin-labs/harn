@@ -1142,6 +1142,7 @@ pub(crate) fn vm_tools_to_native(
                     .unwrap_or_default();
                 let params = entry.get("parameters").and_then(|v| v.as_dict());
                 let output_schema = entry.get("outputSchema").map(vm_value_to_json);
+                let defer_loading = matches!(entry.get("defer_loading"), Some(VmValue::Bool(true)));
 
                 let input_schema = vm_build_json_schema(params);
 
@@ -1159,6 +1160,15 @@ pub(crate) fn vm_tools_to_native(
                     if let Some(output_schema) = output_schema {
                         tool_json["x-harn-output-schema"] = output_schema;
                     }
+                    if defer_loading {
+                        // Anthropic's tool-search docs: per-tool
+                        // `defer_loading: true` keeps the schema out of
+                        // the model's context until a `tool_search_tool_*`
+                        // call surfaces it. The server expands the
+                        // `tool_reference` blocks for us on subsequent
+                        // turns; we just pass the flag through.
+                        tool_json["defer_loading"] = serde_json::Value::Bool(true);
+                    }
                     native_tools.push(tool_json);
                 } else {
                     let mut tool_json = serde_json::json!({
@@ -1171,6 +1181,18 @@ pub(crate) fn vm_tools_to_native(
                     });
                     if let Some(output_schema) = output_schema {
                         tool_json["function"]["x-harn-output-schema"] = output_schema;
+                    }
+                    if defer_loading {
+                        // Record the flag on the Harn-side wrapper so
+                        // harn#71 (OpenAI Responses tool_search) and
+                        // harn#70 (client-executed fallback) can read it
+                        // without re-walking the VmValue tree. Non-
+                        // Anthropic providers that don't understand
+                        // `defer_loading` today will return an error when
+                        // the user explicitly requests tool_search — the
+                        // capability gate in options.rs catches that
+                        // before the payload ever reaches the provider.
+                        tool_json["defer_loading"] = serde_json::Value::Bool(true);
                     }
                     native_tools.push(tool_json);
                 }
@@ -1188,6 +1210,84 @@ pub(crate) fn vm_tools_to_native(
         }
     }
     Ok(native_tools)
+}
+
+/// Return the names of all tools in `native_tools` that have the
+/// `defer_loading: true` flag set. Used for pre-flight validation
+/// (Anthropic rejects all-deferred tool lists with HTTP 400).
+pub(crate) fn extract_deferred_tool_names(native_tools: &[serde_json::Value]) -> Vec<String> {
+    native_tools
+        .iter()
+        .filter_map(|tool| {
+            if tool.get("defer_loading").and_then(|v| v.as_bool()) == Some(true) {
+                // Anthropic shape: `name` at top level.
+                if let Some(name) = tool.get("name").and_then(|v| v.as_str()) {
+                    return Some(name.to_string());
+                }
+                // OpenAI shape: `function.name`.
+                if let Some(name) = tool
+                    .get("function")
+                    .and_then(|f| f.get("name"))
+                    .and_then(|v| v.as_str())
+                {
+                    return Some(name.to_string());
+                }
+            }
+            None
+        })
+        .collect()
+}
+
+/// When tool_search resolves to native mode, prepend the server-side
+/// tool-search meta-tool to the provider's tools array. See the docs at
+/// <https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool>.
+///
+/// Variant strings: `"bm25"` or `"regex"`. Provider must be an Anthropic
+/// Claude 4.0+ model at the model-capability level — the caller is
+/// responsible for gating on that.
+///
+/// No-ops if `native_tools` is `None` (no tools passed = no search to
+/// do). The meta-tool itself never has `defer_loading` — that's a hard
+/// requirement of Anthropic's API and we match it here.
+pub(crate) fn apply_tool_search_native_injection(
+    native_tools: &mut Option<Vec<serde_json::Value>>,
+    provider: &str,
+    variant: &str,
+) {
+    let is_anthropic_style = super::helpers::ResolvedProvider::resolve(provider).is_anthropic_style;
+    if !is_anthropic_style {
+        // OpenAI's native tool_search lands in harn#71 with a different
+        // shape; the options.rs capability gate prevents non-Anthropic
+        // providers from reaching this call for now. This guard is just
+        // defense in depth.
+        return;
+    }
+
+    // Anthropic's documented versioned types. If/when Anthropic issues a
+    // newer dated variant, we'll bump these constants in lockstep; the
+    // short names (`bm25`/`regex`) stay stable for users.
+    let (type_name, tool_name) = match variant {
+        "regex" => ("tool_search_tool_regex_20251119", "tool_search_tool_regex"),
+        // "bm25" and anything else → default to bm25.
+        _ => ("tool_search_tool_bm25_20251119", "tool_search_tool_bm25"),
+    };
+
+    let meta = serde_json::json!({
+        "type": type_name,
+        "name": tool_name,
+    });
+
+    match native_tools {
+        Some(list) => {
+            // Prepend so the search tool is the first thing the model
+            // sees. Cheap — tool lists are rarely longer than a few dozen
+            // entries.
+            list.insert(0, meta);
+        }
+        None => {
+            *native_tools = Some(vec![meta]);
+        }
+    }
 }
 
 fn vm_build_json_schema(params: Option<&BTreeMap<String, VmValue>>) -> serde_json::Value {

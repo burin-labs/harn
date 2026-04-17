@@ -7,6 +7,46 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## Unreleased
+
+### Added
+
+- **Tool Vault foundation: native progressive tool disclosure on Anthropic.**
+  Mark individual tools with `defer_loading: true` via `tool_define`
+  (or the dict form) and opt a call into progressive disclosure with a
+  new `tool_search: "bm25" | "regex" | {variant, mode, always_loaded}`
+  option on `llm_call` / `agent_loop`. On Claude Opus/Sonnet 4.0+ and
+  Haiku 4.5+, Harn emits native `defer_loading: true` in the tool JSON
+  and prepends the appropriate `tool_search_tool_{bm25,regex}_20251119`
+  server tool. Schemas stay in the API prefix (so prompt caching
+  remains warm) but out of the model's context until the model
+  discovers them. Typical token reductions of ~85% for large tool
+  catalogues. Phase 1 of the Harn Skills & Tool Vault series; see
+  harn#69 for the full plan and follow-up issues.
+- **Provider capability surface.** The `LlmProvider` trait gains
+  `supports_defer_loading(&str) -> bool` and
+  `native_tool_search_variants(&str) -> &[&str]`, letting Harn decide
+  per-provider per-model whether native progressive disclosure is
+  available. Anthropic implements both; OpenAI lands in harn#71.
+- **Transcript events for tool search.** Anthropic `server_tool_use`
+  and `tool_search_tool_result` response blocks are now parsed into
+  structured `tool_search_query` and `tool_search_result` events in
+  the run record — replay / eval can reconstruct which tools got
+  promoted when without re-running the call.
+- **Pre-flight validation.** Passing `tool_search` with every tool
+  set to `defer_loading: true` errors before the API call, matching
+  Anthropic's documented 400. `defer_loading` itself is type-checked
+  at `tool_define` so typos fail fast.
+
+### Breaking
+
+- Non-Anthropic providers (or Anthropic models older than 4.0 Opus/
+  Sonnet / 4.5 Haiku) error with a precise diagnostic when
+  `tool_search` is requested, pointing at harn#70 for the upcoming
+  client-executed fallback. This is intentional (no silent
+  degradation); client fallback makes the feature provider-agnostic
+  in the next phase.
+
 ## v0.7.16
 
 ### Fixed

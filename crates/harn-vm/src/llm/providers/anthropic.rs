@@ -94,6 +94,26 @@ fn model_supports_anthropic_prefill(model: &str) -> bool {
     !is_claude_4_6_or_later(model)
 }
 
+/// True for Claude models that support the `tool_search_tool_*_20251119`
+/// server-side tools and the `defer_loading: true` flag on tool definitions.
+/// Per Anthropic's tool-search docs: Claude Mythos Preview, Sonnet 4.0+,
+/// Opus 4.0+, Haiku 4.5+.
+pub(crate) fn claude_model_supports_tool_search(model: &str) -> bool {
+    let lower = model.to_lowercase();
+    match claude_generation(&lower) {
+        Some((major, minor)) => {
+            if lower.contains("haiku-") {
+                // Haiku needs 4.5+.
+                (major, minor) >= (4, 5)
+            } else {
+                // Opus and Sonnet: 4.0+.
+                major >= 4
+            }
+        }
+        None => false,
+    }
+}
+
 fn warn_anthropic_prefill_skipped(model: &str) {
     ANTHROPIC_PREFILL_WARN_ONCE.with(|seen| {
         let mut seen = seen.borrow_mut();
@@ -159,6 +179,22 @@ impl LlmProvider for AnthropicProvider {
 
     fn supports_thinking(&self) -> bool {
         true
+    }
+
+    fn supports_defer_loading(&self, model: &str) -> bool {
+        claude_model_supports_tool_search(model)
+    }
+
+    fn native_tool_search_variants(&self, model: &str) -> &'static [&'static str] {
+        if claude_model_supports_tool_search(model) {
+            // BM25 first — natural-language queries are more ergonomic for
+            // the model than Python regexes. Both variants are produced by
+            // Anthropic at version `20251119`; we surface them as the short
+            // names Harn scripts use.
+            &["bm25", "regex"]
+        } else {
+            &[]
+        }
     }
 }
 
@@ -293,5 +329,71 @@ impl AnthropicProvider {
             false, // is_ollama
         )
         .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tool_search_supported_for_claude_4_opus_and_up() {
+        // Per Anthropic's tool-search docs:
+        //   Claude Mythos Preview, Sonnet 4.0+, Opus 4.0+, Haiku 4.5+.
+        assert!(claude_model_supports_tool_search("claude-opus-4-7"));
+        assert!(claude_model_supports_tool_search("claude-opus-4.7"));
+        assert!(claude_model_supports_tool_search("claude-opus-4-0"));
+        assert!(claude_model_supports_tool_search("claude-sonnet-4-6"));
+        assert!(claude_model_supports_tool_search("claude-sonnet-4-0"));
+    }
+
+    #[test]
+    fn tool_search_unsupported_for_older_claude() {
+        // Opus/Sonnet 3.x predate the feature.
+        assert!(!claude_model_supports_tool_search("claude-opus-3-5"));
+        assert!(!claude_model_supports_tool_search("claude-sonnet-3-5"));
+        assert!(!claude_model_supports_tool_search("claude-haiku-3-5"));
+    }
+
+    #[test]
+    fn tool_search_haiku_requires_4_5() {
+        // Haiku's cutoff is 4.5 (later than Opus/Sonnet's 4.0).
+        assert!(!claude_model_supports_tool_search("claude-haiku-4-0"));
+        assert!(!claude_model_supports_tool_search("claude-haiku-4-4"));
+        assert!(claude_model_supports_tool_search("claude-haiku-4-5"));
+        assert!(claude_model_supports_tool_search(
+            "claude-haiku-4-5-20251001"
+        ));
+        assert!(claude_model_supports_tool_search("claude-haiku-5-0"));
+    }
+
+    #[test]
+    fn tool_search_unsupported_for_non_claude() {
+        assert!(!claude_model_supports_tool_search("gpt-5"));
+        assert!(!claude_model_supports_tool_search("gpt-5.4-turbo"));
+        assert!(!claude_model_supports_tool_search("gemini-2.0"));
+        assert!(!claude_model_supports_tool_search(""));
+    }
+
+    #[test]
+    fn native_tool_search_variants_lists_bm25_first() {
+        let provider = AnthropicProvider;
+        let variants = provider.native_tool_search_variants("claude-opus-4-7");
+        assert_eq!(variants, &["bm25", "regex"]);
+    }
+
+    #[test]
+    fn native_tool_search_variants_empty_for_old_model() {
+        let provider = AnthropicProvider;
+        assert!(provider
+            .native_tool_search_variants("claude-opus-3-5")
+            .is_empty());
+    }
+
+    #[test]
+    fn supports_defer_loading_matches_tool_search_gate() {
+        let provider = AnthropicProvider;
+        assert!(provider.supports_defer_loading("claude-opus-4-7"));
+        assert!(!provider.supports_defer_loading("claude-opus-3-5"));
     }
 }

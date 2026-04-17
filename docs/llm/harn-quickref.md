@@ -383,6 +383,7 @@ println(response.output_tokens)
 | `max_tokens` | int | 4096 | |
 | `temperature` | float | provider default | |
 | `tools` | list | nil | Registered tool schemas. |
+| `tool_search` | bool \| string \| dict | nil | Engage progressive tool disclosure. Shorthand `"bm25"` / `"regex"` (variant, mode auto). Dict: `{variant: "bm25" \| "regex", mode: "auto" \| "native" \| "client", always_loaded: [string]}`. See "Tool loading & search" below. |
 | `response_format` | string | nil | `"json"` asks the provider for JSON mode. |
 | `output_schema` | `Schema<T>` (dict \| type-alias) | nil | JSON-schema-shaped dict, or a top-level `type T = ...` alias (compiler lowers to the schema dict). The generic parameter `T` flows into the narrowed `r.data: T`. Validated after parse. |
 | `output_validation` | string | `"off"` | `"error"` throws on mismatch; `"warn"` logs. |
@@ -391,6 +392,62 @@ println(response.output_tokens)
 | `llm_retries` | int | 2 | Retries on transient HTTP / provider errors. Set to 0 for fail-fast. |
 | `llm_backoff_ms` | int | 2000 | Base exponential backoff. |
 | `stream` | bool | true | SSE streaming transport. |
+
+### Tool loading & search
+
+Mark tools that the model rarely needs with `defer_loading: true` and
+opt the call into progressive disclosure with `tool_search: "bm25"`:
+
+```harn
+var registry = tool_registry()
+registry = tool_define(registry, "look", "Read files", {
+  parameters: {path: {type: "string"}},
+  handler: { args -> read_file(args.path) },
+})
+registry = tool_define(registry, "deploy", "Deploy to production", {
+  parameters: {env: {type: "string"}},
+  defer_loading: true,                 // schema held back until searched
+  handler: { args -> shell("deploy " + args.env) },
+})
+
+let r = llm_call(prompt, sys, {
+  provider: "anthropic",
+  model: "claude-opus-4-7",
+  tools: registry,
+  tool_search: "bm25",                 // or "regex"
+})
+```
+
+Provider support matrix for `tool_search` (v0.7.17+):
+
+| Provider | Native support | Variants |
+|---|---|---|
+| Anthropic — Opus/Sonnet 4.0+, Haiku 4.5+ | ✓ | `bm25`, `regex` |
+| Anthropic — pre-4.0 / other Claude | ✗ | — |
+| OpenAI, Gemini, Ollama, others | ✗ (tracked: harn#70 client fallback, harn#71 OpenAI native) | — |
+
+Semantics:
+
+- `defer_loading: true` on an individual tool keeps its schema out of
+  the model's context until a tool-search call surfaces it. On
+  capable Anthropic models the schema goes into the API prefix but not
+  the model's context, so prompt caching stays warm.
+- `tool_search: "bm25"` prepends the server-side
+  `tool_search_tool_bm25_20251119` meta-tool to the call. The model
+  discovers deferred tools via natural-language queries; matching tools
+  are auto-expanded inline on subsequent turns.
+- `tool_search: "regex"` uses the Python-regex variant
+  (`tool_search_tool_regex_20251119`).
+- `tool_search: {mode: "native"}` refuses to silently downgrade —
+  errors if the provider isn't natively capable.
+- `tool_search: {mode: "client"}` is reserved for harn#70 (client-
+  executed fallback) and currently errors with an implementation-
+  status pointer.
+- Pre-flight: at least one user tool must be non-deferred, matching
+  Anthropic's 400 on all-deferred tool lists.
+- Transcript events: `tool_search_query` and `tool_search_result`
+  blocks appear in the run record so replay / eval can see which tools
+  got promoted and when.
 
 ### Common patterns
 

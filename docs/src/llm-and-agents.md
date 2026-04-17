@@ -110,6 +110,7 @@ println(result.text)
 | `thinking` | bool/dict | nil | Enable extended reasoning. `true` or `{budget_tokens: N}` |
 | `tools` | list | nil | Tool definitions |
 | `tool_choice` | string/dict | `"auto"` | `"auto"`, `"none"`, `"required"`, or `{name: "tool"}` |
+| `tool_search` | bool/string/dict | nil | Progressive tool disclosure. See [Tool Vault](#tool-vault) |
 | `cache` | bool | `false` | Enable prompt caching (Anthropic) |
 | `stream` | bool | `true` | Use streaming SSE transport. Set `false` for synchronous request/response. Env: `HARN_LLM_STREAM` |
 | `timeout` | int | `120` | Request timeout in seconds |
@@ -125,6 +126,96 @@ let result = llm_call("hello", nil, {
   ollama: {num_ctx: 32768}
 })
 ```
+
+## Tool Vault
+
+Harn's Tool Vault is the progressive-tool-disclosure primitive: tool
+definitions that stay out of the model's context until they're
+surfaced by a search call. This keeps context cheap for agents with
+hundreds of tools (coding agents, MCP-heavy setups) without requiring
+the integrator to hand-filter tools per turn.
+
+### Per-tool flag: `defer_loading`
+
+Any tool registered via `tool_define` (or the `tool { … }` language
+form) can opt out of eager loading:
+
+```harn
+var registry = tool_registry()
+registry = tool_define(registry, "deploy", "Deploy to production", {
+  parameters: {env: {type: "string"}},
+  defer_loading: true,
+  handler: { args -> shell("deploy " + args.env) },
+})
+```
+
+Deferred tools never appear in the model's context unless a
+tool-search call surfaces them. They *are* sent to the provider (so
+prompt caching stays warm on Anthropic — the schemas live in the
+API prefix but not the model's context).
+
+### Call-level option: `tool_search`
+
+Turning progressive disclosure on is one option away:
+
+```harn
+let r = llm_call(prompt, sys, {
+  provider: "anthropic",
+  model: "claude-opus-4-7",
+  tools: registry,
+  tool_search: "bm25",
+})
+```
+
+Accepted shapes:
+
+| Shape | Meaning |
+|---|---|
+| `tool_search: true` | Default: `bm25` variant, mode `auto`. |
+| `tool_search: "bm25"` | Natural-language queries. |
+| `tool_search: "regex"` | Python-regex queries. |
+| `tool_search: false` | Explicit off (same as omitting). |
+| `tool_search: {variant, mode, always_loaded}` | Explicit dict form. |
+
+`mode` options:
+
+- `"auto"` (default) — use native if the provider supports it, else
+  error. Phase 1 of the Tool Vault rollout; a client-executed fallback
+  is tracked in [harn#70](https://github.com/burin-labs/harn/issues/70).
+- `"native"` — force the provider's native mechanism. Errors if
+  unsupported.
+- `"client"` — force client-executed fallback. Currently errors with
+  an implementation-status pointer; ships with harn#70.
+
+### Provider support
+
+| Provider | Native `tool_search` | Variants |
+|---|---|---|
+| Anthropic Claude Opus/Sonnet 4.0+, Haiku 4.5+ | ✓ | `bm25`, `regex` |
+| Anthropic 3.x or earlier 4.x Haiku | ✗ | — |
+| OpenAI Responses API (gpt-5.4+) | ✗ (tracked: [harn#71](https://github.com/burin-labs/harn/issues/71)) | will add `hosted`, `client` |
+| Others (Gemini, Ollama, HuggingFace, Together, Fireworks, Groq, Deepseek, local) | ✗ | tracked: [harn#70](https://github.com/burin-labs/harn/issues/70) |
+
+### Pre-flight validation
+
+- At least one user tool must be non-deferred. Harn errors before the
+  API call is made, matching Anthropic's documented 400.
+- `defer_loading` must be a bool — typos like `defer_loading: "yes"`
+  error at `tool_define` time rather than silently falling back to
+  the "no defer" default.
+
+### Transcript events
+
+Every native tool-search round-trip emits structured events in the
+run record:
+
+- `tool_search_query` — the search tool's invocation (input query,
+  search-tool id).
+- `tool_search_result` — the references returned by the server (which
+  deferred tools got promoted on this turn).
+
+These are stable shapes; replay / eval can reconstruct which tools
+were available when without re-running the call.
 
 ## llm_completion
 

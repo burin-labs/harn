@@ -54,6 +54,29 @@ pub(crate) trait LlmProvider {
     /// Apply provider-specific transformations to the request body after it has
     /// been built by `build_request_body()`. Default is a no-op.
     fn transform_request(&self, _body: &mut serde_json::Value) {}
+
+    /// Whether this provider's native API accepts a `defer_loading: true`
+    /// flag on tool definitions — keeping their schema out of the model's
+    /// context until a tool-search call surfaces them. See Anthropic's tool
+    /// search docs and OpenAI's Responses API `tool_search` guide.
+    ///
+    /// Keyed on the specific model because the capability is model-generation
+    /// dependent (e.g. Anthropic: Claude 4.0+ Opus/Sonnet, Haiku 4.5+).
+    fn supports_defer_loading(&self, _model: &str) -> bool {
+        false
+    }
+
+    /// Native tool-search variants this provider supports at the given model.
+    /// Return one of:
+    ///   - `[]` — no native support; callers must fall back (tracked in #70).
+    ///   - `["regex", "bm25"]` — Anthropic's two `tool_search_tool_*_20251119` types.
+    ///   - `["hosted", "client"]` — OpenAI Responses API `tool_search` modes.
+    ///
+    /// Ordering is the provider's recommended default first. Callers that
+    /// don't care which variant they get pick element 0.
+    fn native_tool_search_variants(&self, _model: &str) -> &'static [&'static str] {
+        &[]
+    }
 }
 
 /// Async chat operation. Uses explicit lifetime parameters because providers
@@ -116,4 +139,33 @@ pub(crate) fn is_provider_registered(name: &str) -> bool {
 #[allow(dead_code)]
 pub(crate) fn registered_provider_names() -> Vec<String> {
     PROVIDER_NAMES.with(|names| names.borrow().iter().cloned().collect())
+}
+
+/// Module-level dispatch for `LlmProvider::supports_defer_loading`.
+///
+/// The VM doesn't carry a trait-object handle for the active provider yet
+/// (dispatch is still by string); until it does, this helper keeps the
+/// capability logic in one place so callers don't reach into provider
+/// structs directly.
+pub(crate) fn provider_supports_defer_loading(provider: &str, model: &str) -> bool {
+    match provider {
+        "anthropic" => super::providers::AnthropicProvider.supports_defer_loading(model),
+        // OpenAI's native defer_loading support lands with the Responses
+        // API work in harn#71; stays `false` until then.
+        "openai" | "openrouter" => false,
+        // Everything else: no native support — use the client-executed
+        // fallback tracked in harn#70.
+        _ => false,
+    }
+}
+
+/// Module-level dispatch for `LlmProvider::native_tool_search_variants`.
+pub(crate) fn provider_tool_search_variants(
+    provider: &str,
+    model: &str,
+) -> &'static [&'static str] {
+    match provider {
+        "anthropic" => super::providers::AnthropicProvider.native_tool_search_variants(model),
+        _ => &[],
+    }
 }

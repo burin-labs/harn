@@ -9,10 +9,11 @@
 //! module. Either way the flat `use super::{…}` below is accurate.
 
 use super::{
-    build_assistant_response_message, build_assistant_tool_message,
-    build_tool_calling_contract_prompt, collect_tool_schemas, collect_tool_schemas_with_registry,
-    normalize_tool_args, parse_bare_calls_in_body, parse_native_json_tool_calls,
-    parse_text_tool_calls_with_tools, validate_tool_args, ComponentRegistry, TS_CALL_CONTRACT_HELP,
+    apply_tool_search_native_injection, build_assistant_response_message,
+    build_assistant_tool_message, build_tool_calling_contract_prompt, collect_tool_schemas,
+    collect_tool_schemas_with_registry, extract_deferred_tool_names, normalize_tool_args,
+    parse_bare_calls_in_body, parse_native_json_tool_calls, parse_text_tool_calls_with_tools,
+    validate_tool_args, vm_tools_to_native, ComponentRegistry, TS_CALL_CONTRACT_HELP,
 };
 use crate::value::VmValue;
 use serde_json::json;
@@ -1828,4 +1829,153 @@ fn tagged_parser_accepts_configured_done_body() {
     let result = parse_text_tool_calls_with_tools(text, Some(&tools));
     assert_eq!(result.done_marker.as_deref(), Some("PLAN_READY"));
     assert!(result.violations.is_empty());
+}
+
+// ─── Tool Vault: defer_loading + tool_search ────────────────────────────────
+//
+// These exercise the pieces of the progressive-disclosure surface that can't
+// easily be reached from a `.harn` conformance test without a live provider:
+// payload shape for the Anthropic-style native path, the deferred-tool name
+// extractor, and the synthetic `tool_search_tool_*` meta-tool injection.
+
+fn defer_loading_registry() -> VmValue {
+    let mut eager_params = BTreeMap::new();
+    eager_params.insert("path".to_string(), vm_str("string"));
+    let eager = vm_dict(&[
+        ("name", vm_str("look")),
+        ("description", vm_str("Read file contents")),
+        ("parameters", VmValue::Dict(Rc::new(eager_params))),
+    ]);
+
+    let mut deferred_params = BTreeMap::new();
+    deferred_params.insert("env".to_string(), vm_str("string"));
+    let deferred = vm_dict(&[
+        ("name", vm_str("deploy")),
+        ("description", vm_str("Deploy the app")),
+        ("parameters", VmValue::Dict(Rc::new(deferred_params))),
+        ("defer_loading", vm_bool(true)),
+    ]);
+
+    vm_list(vec![eager, deferred])
+}
+
+#[test]
+fn vm_tools_to_native_emits_defer_loading_for_anthropic() {
+    let registry = defer_loading_registry();
+    let tools = vm_tools_to_native(&registry, "anthropic").expect("anthropic native tools");
+    // Eager `look` tool has no defer_loading key.
+    let look = tools
+        .iter()
+        .find(|t| t.get("name").and_then(|v| v.as_str()) == Some("look"))
+        .expect("look tool present");
+    assert!(look.get("defer_loading").is_none());
+    // Deferred `deploy` tool carries `defer_loading: true`.
+    let deploy = tools
+        .iter()
+        .find(|t| t.get("name").and_then(|v| v.as_str()) == Some("deploy"))
+        .expect("deploy tool present");
+    assert_eq!(
+        deploy.get("defer_loading").and_then(|v| v.as_bool()),
+        Some(true)
+    );
+}
+
+#[test]
+fn vm_tools_to_native_emits_defer_loading_for_openai_compat() {
+    // OpenAI-shape tools place the flag at the wrapper level (not inside
+    // `function`) so harn#71's Responses-API path can read it uniformly
+    // without re-walking. Non-Anthropic providers that don't understand
+    // the flag will never actually see it — the capability gate in
+    // options.rs blocks them before the request leaves the VM.
+    let registry = defer_loading_registry();
+    let tools = vm_tools_to_native(&registry, "openai").expect("openai native tools");
+    let deploy = tools
+        .iter()
+        .find(|t| {
+            t.get("function")
+                .and_then(|f| f.get("name"))
+                .and_then(|v| v.as_str())
+                == Some("deploy")
+        })
+        .expect("deploy tool present");
+    assert_eq!(
+        deploy.get("defer_loading").and_then(|v| v.as_bool()),
+        Some(true)
+    );
+}
+
+#[test]
+fn extract_deferred_tool_names_walks_both_wire_shapes() {
+    let anthropic = vec![
+        json!({"name": "look"}),
+        json!({"name": "deploy", "defer_loading": true}),
+    ];
+    assert_eq!(
+        extract_deferred_tool_names(&anthropic),
+        vec!["deploy".to_string()]
+    );
+
+    let openai = vec![
+        json!({"type": "function", "function": {"name": "look"}}),
+        json!({
+            "type": "function",
+            "function": {"name": "deploy"},
+            "defer_loading": true,
+        }),
+    ];
+    assert_eq!(
+        extract_deferred_tool_names(&openai),
+        vec!["deploy".to_string()]
+    );
+}
+
+#[test]
+fn apply_tool_search_native_injection_prepends_meta_tool() {
+    let mut tools: Option<Vec<serde_json::Value>> =
+        Some(vec![json!({"name": "look"}), json!({"name": "deploy"})]);
+    apply_tool_search_native_injection(&mut tools, "anthropic", "bm25");
+    let tools = tools.expect("tools still set");
+    assert_eq!(tools.len(), 3, "search tool prepended");
+    assert_eq!(
+        tools[0]["type"].as_str(),
+        Some("tool_search_tool_bm25_20251119"),
+        "bm25 variant uses the documented type string"
+    );
+    assert_eq!(tools[0]["name"].as_str(), Some("tool_search_tool_bm25"));
+}
+
+#[test]
+fn apply_tool_search_native_injection_regex_variant() {
+    let mut tools: Option<Vec<serde_json::Value>> = Some(vec![json!({"name": "look"})]);
+    apply_tool_search_native_injection(&mut tools, "anthropic", "regex");
+    let tools = tools.unwrap();
+    assert_eq!(
+        tools[0]["type"].as_str(),
+        Some("tool_search_tool_regex_20251119")
+    );
+    assert_eq!(tools[0]["name"].as_str(), Some("tool_search_tool_regex"));
+}
+
+#[test]
+fn apply_tool_search_native_injection_is_noop_for_non_anthropic() {
+    // OpenAI's native tool_search lands in harn#71 with a different
+    // shape. Until then this injection must not run — the options-layer
+    // capability gate is the single point that decides to skip it.
+    let mut tools: Option<Vec<serde_json::Value>> = Some(vec![json!({"name": "look"})]);
+    apply_tool_search_native_injection(&mut tools, "openai", "bm25");
+    let tools = tools.unwrap();
+    assert_eq!(tools.len(), 1);
+    assert_eq!(tools[0]["name"].as_str(), Some("look"));
+}
+
+#[test]
+fn apply_tool_search_native_injection_creates_list_when_empty() {
+    let mut tools: Option<Vec<serde_json::Value>> = None;
+    apply_tool_search_native_injection(&mut tools, "anthropic", "bm25");
+    let tools = tools.expect("tools populated");
+    assert_eq!(tools.len(), 1);
+    assert_eq!(
+        tools[0]["type"].as_str(),
+        Some("tool_search_tool_bm25_20251119")
+    );
 }
