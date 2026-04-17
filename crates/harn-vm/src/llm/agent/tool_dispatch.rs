@@ -166,6 +166,43 @@ pub(super) async fn run_tool_dispatch(
         let tool_name = tc["name"].as_str().unwrap_or("");
         let mut tool_args = normalize_tool_args(tool_name, &tc["arguments"]);
 
+        // Client-mode tool_search (harn#70): intercept the synthetic
+        // `__harn_tool_search` call before any normal policy / hook /
+        // dispatch machinery runs. Its handler runs the configured
+        // strategy against the deferred-tool index, promotes the
+        // matching tools onto opts.native_tools for the next turn, and
+        // emits the `tool_search_query` / `tool_search_result`
+        // transcript events that replay treats as indistinguishable
+        // from the Anthropic native path.
+        let is_client_search = state
+            .tool_search_client
+            .as_ref()
+            .is_some_and(|c| c.synthetic_name == tool_name);
+        if is_client_search {
+            let result_text = super::tool_search_client::handle_client_tool_search(
+                state, opts, ctx.bridge, tool_id, &tool_args,
+            )
+            .await?;
+            tools_used_this_iter.push(tool_name.to_string());
+            tool_results_this_iter.push(serde_json::json!({
+                "tool_name": tool_name,
+                "status": "ok",
+                "rejected": false,
+            }));
+            if ctx.tool_format == "native" {
+                append_message_to_contexts(
+                    &mut state.visible_messages,
+                    &mut state.recorded_messages,
+                    build_tool_result_message(tool_id, &result_text, &opts.provider),
+                );
+            } else {
+                observations.push_str(&format!(
+                    "[result of {tool_name}]\n{result_text}\n[end of {tool_name} result]\n\n"
+                ));
+            }
+            continue;
+        }
+
         if let Some(parse_err) = tool_args.get("__parse_error").and_then(|v| v.as_str()) {
             let result_text = format!("ERROR: {parse_err}");
             state.transcript_events.push(transcript_event(

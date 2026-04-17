@@ -21,6 +21,15 @@ pub(crate) fn expects_structured_output(opts: &crate::llm::api::LlmCallOptions) 
         || opts.output_schema.is_some()
 }
 
+/// Three-way resolution of `tool_search.mode` against the provider's
+/// native capability. Kept as a private enum so the option-parse path
+/// reads linearly; the `Client` variant feeds the harn#70 fallback
+/// injection, the `Native` variant feeds the phase-1 Anthropic path.
+enum ToolSearchResolution {
+    Native,
+    Client,
+}
+
 /// Extract all LLM call options from the standard (prompt, system, options) args.
 pub(crate) fn extract_llm_options(
     args: &[VmValue],
@@ -137,95 +146,144 @@ pub(crate) fn extract_llm_options(
     //   - bool: true (defaults to bm25/auto), false (no tool_search)
     //   - dict: { variant, mode, always_loaded }
     // Unset / false / nil all leave tool_search absent — tools ship eagerly.
-    let tool_search = parse_tool_search_option(options.as_ref())?;
+    let mut tool_search = parse_tool_search_option(options.as_ref())?;
 
-    if let Some(cfg) = &tool_search {
-        // Resolve tool_search against the active provider now — in auto
-        // mode, either promote to native (by injecting the meta-tool) or
-        // error pointing at the client-executed fallback issue (harn#70).
+    if let Some(cfg) = tool_search.as_mut() {
+        // Resolve tool_search against the active provider now. Three
+        // possible outcomes:
+        //   - native: prepend the provider's meta-tool (Anthropic path).
+        //   - client: keep native_tools as-is so the agent loop can
+        //     strip deferred tools per-turn and inject the synthetic
+        //     `__harn_tool_search` dispatchable.
+        //   - error: explicit native mode on a provider that cannot
+        //     satisfy it.
         let native_variants = provider_tool_search_variants(&provider, &model);
         let provider_has_native =
             provider_supports_defer_loading(&provider, &model) && !native_variants.is_empty();
-        let use_native = match cfg.mode {
+        let resolution = match cfg.mode {
             ToolSearchMode::Native => {
                 if !provider_has_native {
                     return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
                         format!(
                             "tool_search: provider \"{provider}\" does not expose native \
                          tool-search for model \"{model}\". Set \
-                         `tool_search: {{ mode: \"client\" }}` (see harn#70, pending) \
-                         or omit tool_search to ship tools eagerly."
+                         `tool_search: {{ mode: \"client\" }}` to use the client-executed \
+                         fallback, or omit tool_search to ship tools eagerly."
                         ),
                     ))));
                 }
-                true
+                ToolSearchResolution::Native
             }
-            ToolSearchMode::Client => {
-                return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
-                    "tool_search: mode: \"client\" is not implemented yet (tracked in \
-                     harn#70). Use mode: \"auto\" with a native-capable provider \
-                     (Anthropic Opus/Sonnet 4.0+, Haiku 4.5+) or omit tool_search.",
-                ))));
-            }
+            ToolSearchMode::Client => ToolSearchResolution::Client,
             ToolSearchMode::Auto => {
-                if !provider_has_native {
-                    return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
-                        format!(
-                            "tool_search: provider \"{provider}\" / model \"{model}\" \
-                         has no native tool-search and the client-executed fallback \
-                         is not implemented yet (tracked in harn#70). Either switch \
-                         to an Anthropic Claude 4.0+ Opus/Sonnet or Haiku 4.5+ model, \
-                         or omit tool_search."
-                        ),
-                    ))));
+                if provider_has_native {
+                    ToolSearchResolution::Native
+                } else {
+                    ToolSearchResolution::Client
                 }
-                true
             }
         };
 
-        if use_native {
-            // Confirm the requested variant is actually supported; downgrade
-            // with a warning if not (e.g. user asked for "regex" but provider
-            // only exposes "bm25" — unlikely today but future-proofs).
-            if !native_variants.contains(&cfg.variant.as_short()) {
-                crate::events::log_warn(
-                    "llm.tool_search",
-                    &format!(
-                        "provider \"{provider}\" model \"{model}\" does not support \
-                         tool_search variant \"{}\"; falling back to \"{}\"",
-                        cfg.variant.as_short(),
-                        native_variants[0],
-                    ),
+        // Pre-flight (applies to both native and client): all-deferred
+        // tool lists leave the model with no starting point. Anthropic
+        // returns HTTP 400 on this and we match the diagnostic for
+        // consistency across modes.
+        if let Some(tools) = native_tools.as_ref() {
+            let deferred = extract_deferred_tool_names(tools);
+            let total_user_tools = tools.len();
+            if total_user_tools > 0 && deferred.len() == total_user_tools {
+                return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                    "tool_search: all tools have defer_loading set. At least \
+                     one tool must be non-deferred so the model has somewhere \
+                     to start. (Matches Anthropic's 400 on the same condition.)",
+                ))));
+            }
+        }
+
+        match resolution {
+            ToolSearchResolution::Native => {
+                // Confirm the requested variant is actually supported;
+                // downgrade with a warning if not (future-proof for any
+                // future provider that only exposes one variant).
+                if !native_variants.contains(&cfg.variant.as_short()) {
+                    crate::events::log_warn(
+                        "llm.tool_search",
+                        &format!(
+                            "provider \"{provider}\" model \"{model}\" does not support \
+                             tool_search variant \"{}\"; falling back to \"{}\"",
+                            cfg.variant.as_short(),
+                            native_variants[0],
+                        ),
+                    );
+                }
+
+                let effective_variant = if native_variants.contains(&cfg.variant.as_short()) {
+                    cfg.variant
+                } else {
+                    match native_variants[0] {
+                        "regex" => ToolSearchVariant::Regex,
+                        _ => ToolSearchVariant::Bm25,
+                    }
+                };
+                apply_tool_search_native_injection(
+                    &mut native_tools,
+                    &provider,
+                    effective_variant.as_short(),
                 );
             }
-
-            // Pre-flight: Anthropic rejects all-deferred tool lists.
-            if let Some(tools) = native_tools.as_ref() {
-                let deferred = extract_deferred_tool_names(tools);
-                let total_user_tools = tools.len();
-                if total_user_tools > 0 && deferred.len() == total_user_tools {
-                    return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
-                        "tool_search: all tools have defer_loading set. At least \
-                         one tool must be non-deferred so the model has somewhere \
-                         to start. (Matches Anthropic's 400 on the same condition.)",
-                    ))));
+            ToolSearchResolution::Client => {
+                // Client mode: capture the deferred tool bodies into
+                // cfg.deferred_bodies (so the agent loop can re-surface
+                // them), inject the synthetic search tool, and hide the
+                // deferred tools from the initial payload. The agent
+                // loop is responsible for promoting hits back onto
+                // `opts.native_tools` across turns; for single-shot
+                // `llm_call` the model still sees the synthetic tool
+                // but without multi-turn continuity it degrades to one
+                // query + one batch of suggestions.
+                if let Some(list) = native_tools.as_ref() {
+                    for tool in list {
+                        let is_deferred = tool
+                            .get("defer_loading")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+                        if !is_deferred {
+                            continue;
+                        }
+                        let name = tool
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .or_else(|| {
+                                tool.get("function")
+                                    .and_then(|f| f.get("name"))
+                                    .and_then(|v| v.as_str())
+                            })
+                            .unwrap_or("")
+                            .to_string();
+                        if name.is_empty() {
+                            continue;
+                        }
+                        // Strip `defer_loading` from the stored copy —
+                        // providers that don't support the flag will
+                        // reject it when the tool is later promoted.
+                        let mut cloned = tool.clone();
+                        if let Some(obj) = cloned.as_object_mut() {
+                            obj.remove("defer_loading");
+                        }
+                        if let Some(function) =
+                            cloned.get_mut("function").and_then(|v| v.as_object_mut())
+                        {
+                            function.remove("defer_loading");
+                        }
+                        cfg.deferred_bodies.insert(name, cloned);
+                    }
                 }
+                crate::llm::tools::apply_tool_search_client_injection(
+                    &mut native_tools,
+                    &provider,
+                    cfg,
+                );
             }
-
-            // Inject the native meta-tool at index 0 of native_tools.
-            let effective_variant = if native_variants.contains(&cfg.variant.as_short()) {
-                cfg.variant
-            } else {
-                match native_variants[0] {
-                    "regex" => ToolSearchVariant::Regex,
-                    _ => ToolSearchVariant::Bm25,
-                }
-            };
-            apply_tool_search_native_injection(
-                &mut native_tools,
-                &provider,
-                effective_variant.as_short(),
-            );
         }
     }
 
@@ -302,7 +360,9 @@ pub(crate) fn extract_llm_options(
 fn parse_tool_search_option(
     options: Option<&BTreeMap<String, VmValue>>,
 ) -> Result<Option<crate::llm::api::ToolSearchConfig>, VmError> {
-    use crate::llm::api::{ToolSearchConfig, ToolSearchMode, ToolSearchVariant};
+    use crate::llm::api::{
+        ToolSearchConfig, ToolSearchMode, ToolSearchStrategy, ToolSearchVariant,
+    };
 
     let raw = match options.and_then(|o| o.get("tool_search")) {
         Some(v) => v,
@@ -330,6 +390,19 @@ fn parse_tool_search_option(
             )))),
         }
     };
+    let strategy_from_short = |s: &str| -> Result<ToolSearchStrategy, VmError> {
+        match s {
+            "bm25" => Ok(ToolSearchStrategy::Bm25),
+            "regex" => Ok(ToolSearchStrategy::Regex),
+            "semantic" => Ok(ToolSearchStrategy::Semantic),
+            "host" => Ok(ToolSearchStrategy::Host),
+            other => Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                format!(
+                "tool_search.strategy: expected \"bm25\" | \"regex\" | \"semantic\" | \"host\", got \"{other}\""
+            ),
+            )))),
+        }
+    };
 
     match raw {
         VmValue::Nil => Ok(None),
@@ -339,6 +412,11 @@ fn parse_tool_search_option(
             variant: variant_from_short(s.as_ref())?,
             mode: ToolSearchMode::Auto,
             always_loaded: Vec::new(),
+            strategy: None,
+            budget_tokens: None,
+            name: None,
+            include_stub_listing: false,
+            deferred_bodies: std::collections::BTreeMap::new(),
         })),
         VmValue::Dict(d) => {
             let variant = match d.get("variant") {
@@ -368,15 +446,63 @@ fn parse_tool_search_option(
                 }
                 None => Vec::new(),
             };
+            let strategy = match d.get("strategy") {
+                Some(VmValue::String(s)) => Some(strategy_from_short(s.as_ref())?),
+                Some(_) => {
+                    return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                        "tool_search.strategy: expected a string",
+                    ))));
+                }
+                None => None,
+            };
+            let budget_tokens = match d.get("budget_tokens") {
+                Some(VmValue::Int(n)) => Some(*n),
+                Some(VmValue::Nil) | None => None,
+                Some(_) => {
+                    return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                        "tool_search.budget_tokens: expected an integer",
+                    ))));
+                }
+            };
+            let name = match d.get("name") {
+                Some(VmValue::String(s)) => {
+                    let s = s.as_ref().trim();
+                    if s.is_empty() {
+                        None
+                    } else {
+                        Some(s.to_string())
+                    }
+                }
+                Some(VmValue::Nil) | None => None,
+                Some(_) => {
+                    return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                        "tool_search.name: expected a string",
+                    ))));
+                }
+            };
+            let include_stub_listing = match d.get("include_stub_listing") {
+                Some(VmValue::Bool(b)) => *b,
+                Some(VmValue::Nil) | None => false,
+                Some(_) => {
+                    return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                        "tool_search.include_stub_listing: expected a bool",
+                    ))));
+                }
+            };
             Ok(Some(ToolSearchConfig {
                 variant,
                 mode,
                 always_loaded,
+                strategy,
+                budget_tokens,
+                name,
+                include_stub_listing,
+                deferred_bodies: std::collections::BTreeMap::new(),
             }))
         }
         _ => Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
             "tool_search: expected bool, string (\"bm25\"/\"regex\"), or dict \
-             ({variant, mode, always_loaded})",
+             ({variant, mode, strategy, always_loaded, budget_tokens, name, include_stub_listing})",
         )))),
     }
 }

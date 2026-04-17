@@ -463,7 +463,7 @@ println(response.output_tokens)
 | `max_tokens` | int | 4096 | |
 | `temperature` | float | provider default | |
 | `tools` | list | nil | Registered tool schemas. |
-| `tool_search` | bool \| string \| dict | nil | Engage progressive tool disclosure. Shorthand `"bm25"` / `"regex"` (variant, mode auto). Dict: `{variant: "bm25" \| "regex", mode: "auto" \| "native" \| "client", always_loaded: [string]}`. See "Tool loading & search" below. |
+| `tool_search` | bool \| string \| dict | nil | Engage progressive tool disclosure. Shorthand `"bm25"` / `"regex"` (variant, mode auto). Dict: `{variant: "bm25" \| "regex", mode: "auto" \| "native" \| "client", strategy: "bm25" \| "regex" \| "semantic" \| "host", always_loaded: [string], budget_tokens: int, name: string, include_stub_listing: bool}`. See "Tool loading & search" below. |
 | `response_format` | string | nil | `"json"` asks the provider for JSON mode. |
 | `output_schema` | `Schema<T>` (dict \| type-alias) | nil | JSON-schema-shaped dict, or a top-level `type T = ...` alias (compiler lowers to the schema dict). The generic parameter `T` flows into the narrowed `r.data: T`. Validated after parse. |
 | `output_validation` | string | `"off"` | `"error"` throws on mismatch; `"warn"` logs. |
@@ -498,13 +498,13 @@ let r = llm_call(prompt, sys, {
 })
 ```
 
-Provider support matrix for `tool_search` (v0.7.17+):
+Provider support matrix for `tool_search`:
 
-| Provider | Native support | Variants |
+| Provider | Native | Client fallback |
 |---|---|---|
-| Anthropic — Opus/Sonnet 4.0+, Haiku 4.5+ | ✓ | `bm25`, `regex` |
-| Anthropic — pre-4.0 / other Claude | ✗ | — |
-| OpenAI, Gemini, Ollama, others | ✗ (tracked: harn#70 client fallback, harn#71 OpenAI native) | — |
+| Anthropic — Opus/Sonnet 4.0+, Haiku 4.5+ | ✓ (`bm25`, `regex`) | ✓ |
+| Anthropic — pre-4.0 / other Claude | ✗ | ✓ |
+| OpenAI (native tracked in harn#71), Gemini, Ollama, others | ✗ | ✓ |
 
 Semantics:
 
@@ -513,21 +513,37 @@ Semantics:
   capable Anthropic models the schema goes into the API prefix but not
   the model's context, so prompt caching stays warm.
 - `tool_search: "bm25"` prepends the server-side
-  `tool_search_tool_bm25_20251119` meta-tool to the call. The model
-  discovers deferred tools via natural-language queries; matching tools
-  are auto-expanded inline on subsequent turns.
+  `tool_search_tool_bm25_20251119` meta-tool on capable Anthropic
+  models. On any other provider, Harn falls back to a client-executed
+  equivalent: a synthetic `__harn_tool_search` tool whose handler runs
+  BM25/regex/semantic/host in-VM or through the bridge, then promotes
+  the matching deferred tools into subsequent turns' schema list.
 - `tool_search: "regex"` uses the Python-regex variant
-  (`tool_search_tool_regex_20251119`).
+  (`tool_search_tool_regex_20251119`) on Anthropic, or an
+  in-VM case-insensitive Rust-regex search on everything else.
 - `tool_search: {mode: "native"}` refuses to silently downgrade —
   errors if the provider isn't natively capable.
-- `tool_search: {mode: "client"}` is reserved for harn#70 (client-
-  executed fallback) and currently errors with an implementation-
-  status pointer.
+- `tool_search: {mode: "client"}` forces the client-executed path
+  even on providers with native support.
+- `tool_search: {strategy: "bm25" | "regex" | "semantic" | "host"}`
+  (client mode only) picks the implementation. `"semantic"` and
+  `"host"` delegate to the host via the `tool_search/query` bridge
+  RPC so integrators can wire embeddings without Harn pulling in ML
+  crates.
+- `tool_search: {budget_tokens: N}` caps the total token footprint
+  of client-mode promoted tool schemas; oldest-first eviction when
+  exceeded.
+- `tool_search: {name: "find_tool"}` renames the synthetic search
+  tool (default `__harn_tool_search`).
+- `tool_search: {include_stub_listing: true}` appends a short list
+  of deferred tool names to the contract prompt.
 - Pre-flight: at least one user tool must be non-deferred, matching
   Anthropic's 400 on all-deferred tool lists.
 - Transcript events: `tool_search_query` and `tool_search_result`
   blocks appear in the run record so replay / eval can see which tools
-  got promoted and when.
+  got promoted and when. Client-mode events carry a
+  `metadata.mode: "client"` tag so replayers can distinguish the two
+  paths; otherwise the shapes are identical.
 
 ### Skills (bundled tool + prompt + MCP metadata)
 

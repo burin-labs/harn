@@ -55,6 +55,106 @@ impl Drop for ApprovalPolicyGuard {
     }
 }
 
+/// Owned handle for a temporarily-reshaped `VmValue` tools registry.
+/// The state struct doesn't own this — it holds a borrow into it via
+/// `tools_val_borrow` only during construction. Dropped before `Self::new`
+/// returns (the filtered value isn't needed once the contract prompt is
+/// baked). The wrapper exists so the `Option<&VmValue>` borrow can live
+/// alongside its backing `VmValue`.
+struct VmValueOwned(crate::value::VmValue);
+
+/// Build a `VmValue` equivalent to `tools_val` but with `defer_loading:
+/// true` entries removed when they aren't already promoted. Returns
+/// `None` when the input isn't a registry dict (nothing to filter) —
+/// callers should fall back to the original `tools_val`.
+fn filter_deferred_from_tools_val(
+    tools_val: Option<&crate::value::VmValue>,
+    client: &ClientToolSearchState,
+) -> Option<crate::value::VmValue> {
+    use crate::value::VmValue;
+    use std::rc::Rc;
+
+    let tools_val = tools_val?;
+    let dict = tools_val.as_dict()?;
+    let tools_list = match dict.get("tools") {
+        Some(VmValue::List(list)) => list,
+        _ => return None,
+    };
+
+    let mut kept: Vec<VmValue> = Vec::with_capacity(tools_list.len());
+    for entry in tools_list.iter() {
+        let is_hidden = match entry {
+            VmValue::Dict(d) => {
+                let is_deferred = matches!(d.get("defer_loading"), Some(VmValue::Bool(true)));
+                if !is_deferred {
+                    false
+                } else {
+                    let name = d.get("name").map(|v| v.display()).unwrap_or_default();
+                    !(client.always_loaded.contains(&name) || client.promoted_set.contains(&name))
+                }
+            }
+            _ => false,
+        };
+        if !is_hidden {
+            kept.push(entry.clone());
+        }
+    }
+
+    let mut new_dict = dict.clone();
+    new_dict.insert("tools".to_string(), VmValue::List(Rc::new(kept)));
+    Some(VmValue::Dict(Rc::new(new_dict)))
+}
+
+/// Client-mode tool_search state carried across turns. Present only
+/// when `LlmCallOptions.tool_search` resolved to `ToolSearchMode::Client`
+/// (explicitly or via auto-fallback from an unsupported provider).
+///
+/// The loop stashes the deferred tools' full native-shape JSON here so
+/// it can re-add promoted tools to `opts.native_tools` *without*
+/// re-walking the VM-side tool registry on every turn. Lookups are by
+/// tool name.
+pub(super) struct ClientToolSearchState {
+    pub(super) synthetic_name: String,
+    pub(super) strategy: crate::llm::api::ToolSearchStrategy,
+    pub(super) variant: crate::llm::api::ToolSearchVariant,
+    /// Tools the user pinned to the eager set. Consumed by the options
+    /// layer's `apply_tool_search_client_injection`; kept here for
+    /// diagnostics / future refresh logic (if we ever re-walk the
+    /// registry on resume, the pin list is needed to seed the payload).
+    #[allow(dead_code)]
+    pub(super) always_loaded: std::collections::BTreeSet<String>,
+    pub(super) budget_tokens: Option<i64>,
+    /// Canonical copy of every deferred tool's native-shape JSON, keyed
+    /// by tool name. Used to re-surface a tool when its name appears in
+    /// a search result.
+    pub(super) deferred_bodies: std::collections::BTreeMap<String, serde_json::Value>,
+    /// Names currently promoted onto `opts.native_tools`. Kept in FIFO
+    /// promotion order so oldest-eviction is O(1).
+    pub(super) promoted_order: Vec<String>,
+    pub(super) promoted_set: std::collections::BTreeSet<String>,
+    /// Running sum of tokens attributable to currently-promoted tool
+    /// schemas (approximate — one-quarter of the tool JSON's serialized
+    /// char count). Used to enforce the `budget_tokens` soft cap without
+    /// a second JSON walk per turn.
+    pub(super) promoted_token_estimate: std::collections::BTreeMap<String, i64>,
+}
+
+impl ClientToolSearchState {
+    /// Estimate the token cost of a tool's JSON schema. One token ≈ 4
+    /// characters is the rule-of-thumb across major tokenizers
+    /// (Claude, GPT-4, Llama). Close enough for budget accounting —
+    /// overshooting by a few percent is fine; undershooting is the
+    /// failure mode.
+    pub(super) fn estimate_tokens(body: &serde_json::Value) -> i64 {
+        let s = serde_json::to_string(body).unwrap_or_default();
+        ((s.len() as f64) / 4.0).ceil() as i64
+    }
+
+    pub(super) fn current_token_total(&self) -> i64 {
+        self.promoted_token_estimate.values().copied().sum()
+    }
+}
+
 /// Drops every external sink and closure subscriber registered against
 /// this loop's session_id when the loop exits (success or error).
 /// Without this, pipeline `agent_subscribe` closures would accumulate
@@ -159,6 +259,10 @@ pub(super) struct AgentLoopState {
     pub(super) daemon_config: DaemonLoopConfig,
     pub(super) custom_nudge: Option<String>,
 
+    /// Client-mode tool_search state — `None` unless
+    /// `ToolSearchMode::Client` resolved for this loop (harn#70).
+    pub(super) tool_search_client: Option<ClientToolSearchState>,
+
     // Drop guards: see "Drop ordering" on the struct docs.
     pub(super) _approval_guard: ApprovalPolicyGuard,
     pub(super) _policy_guard: ExecutionPolicyGuard,
@@ -167,6 +271,141 @@ pub(super) struct AgentLoopState {
 }
 
 impl AgentLoopState {
+    /// Rebuild the tool-calling contract prompt for a turn with the
+    /// current promoted-tool set factored in. Returns `None` when the
+    /// loop isn't running in client-mode tool_search (use the baked-in
+    /// `tool_contract_prompt` snapshot instead).
+    ///
+    /// Called once per turn from `turn_preflight` so that, after a
+    /// `__harn_tool_search` call promotes `deploy_service` into
+    /// `opts.native_tools`, the model sees its full schema on the
+    /// next turn — not the stale turn-1 snapshot.
+    pub(super) fn rebuild_tool_contract_prompt(
+        &self,
+        opts: &crate::llm::api::LlmCallOptions,
+    ) -> Option<String> {
+        let client = self.tool_search_client.as_ref()?;
+        if !self.has_tools {
+            return None;
+        }
+        let filtered = filter_deferred_from_tools_val(self.config_tools_val(opts).as_ref(), client);
+        let tools_owned;
+        let tools_val_borrow: Option<&crate::value::VmValue> = match (filtered, opts.tools.as_ref())
+        {
+            (Some(v), _) => {
+                tools_owned = Some(v);
+                tools_owned.as_ref()
+            }
+            (None, opt) => opt,
+        };
+        let native_tools_for_prompt = self.rebuild_native_tools_for_prompt(opts);
+        let mut prompt = crate::llm::tools::build_tool_calling_contract_prompt(
+            tools_val_borrow,
+            native_tools_for_prompt.as_deref(),
+            &self.tool_format,
+            self.config
+                .turn_policy
+                .as_ref()
+                .is_some_and(|policy| policy.require_action_or_yield),
+            self.config.tool_examples.as_deref(),
+        );
+        if let Some(client_cfg) = opts.tool_search.as_ref().filter(|c| c.include_stub_listing) {
+            let mut stub_lines = Vec::new();
+            for (name, body) in &client_cfg.deferred_bodies {
+                if client.promoted_set.contains(name) || client.always_loaded.contains(name) {
+                    continue; // already surfaced; don't advertise as deferred
+                }
+                let description = body
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .or_else(|| {
+                        body.get("function")
+                            .and_then(|f| f.get("description"))
+                            .and_then(|v| v.as_str())
+                    })
+                    .unwrap_or("")
+                    .split(['\n', '.'])
+                    .next()
+                    .unwrap_or("")
+                    .trim();
+                if description.is_empty() {
+                    stub_lines.push(format!("- `{name}`"));
+                } else {
+                    stub_lines.push(format!("- `{name}` — {description}"));
+                }
+            }
+            if !stub_lines.is_empty() {
+                prompt.push_str(&format!(
+                    "\n\n## Tools available via `{search_name}` (deferred)\n\n\
+                     Call `{search_name}` with a query to surface any of:\n\n{list}\n",
+                    search_name = client.synthetic_name,
+                    list = stub_lines.join("\n"),
+                ));
+            }
+        }
+        Some(prompt)
+    }
+
+    /// The registry `VmValue` the user passed in, cloned for read-only
+    /// access in helper methods that can't re-borrow from `opts.tools`
+    /// through the mutable ref they hold.
+    fn config_tools_val(
+        &self,
+        opts: &crate::llm::api::LlmCallOptions,
+    ) -> Option<crate::value::VmValue> {
+        opts.tools.clone()
+    }
+
+    /// Assemble the native-tools list used for the text-mode contract
+    /// prompt on the current turn. Merges: the eager + synthetic tools
+    /// currently in `opts.native_tools` (if any — empty in text mode)
+    /// with the deferred bodies currently promoted. `build_tool_contract_prompt`
+    /// dedups by name, so overlap is safe.
+    fn rebuild_native_tools_for_prompt(
+        &self,
+        opts: &crate::llm::api::LlmCallOptions,
+    ) -> Option<Vec<serde_json::Value>> {
+        let client = self.tool_search_client.as_ref()?;
+        let mut merged: Vec<serde_json::Value> = Vec::new();
+        // Start with whatever the agent loop is currently shipping
+        // (includes the synthetic tool + always-loaded + non-deferred).
+        // In text mode `opts.native_tools` is None post-normalize —
+        // fall back to a freshly-built list from the filtered tools_val.
+        if let Some(native) = opts.native_tools.as_ref() {
+            merged.extend(native.iter().cloned());
+        } else if let Some(cfg) = opts.tool_search.as_ref() {
+            // Text mode: reconstruct the synthetic tool + always-loaded
+            // scaffold from the config so the prompt has something to
+            // describe.
+            merged.push(crate::llm::tools::build_client_search_tool_schema(
+                &opts.provider,
+                cfg,
+            ));
+        }
+        // Add promoted deferred bodies that aren't already there.
+        let seen: std::collections::BTreeSet<String> = merged
+            .iter()
+            .filter_map(|t| {
+                t.get("name")
+                    .and_then(|v| v.as_str())
+                    .or_else(|| {
+                        t.get("function")
+                            .and_then(|f| f.get("name"))
+                            .and_then(|v| v.as_str())
+                    })
+                    .map(String::from)
+            })
+            .collect();
+        for name in &client.promoted_order {
+            if seen.contains(name) {
+                continue;
+            }
+            if let Some(body) = client.deferred_bodies.get(name) {
+                merged.push(body.clone());
+            }
+        }
+        Some(merged)
+    }
     /// Build the loop state from a fresh `AgentLoopConfig`, mutating
     /// `opts` in place to normalize the native-tool channel before the
     /// first LLM call.
@@ -247,6 +486,40 @@ impl AgentLoopState {
 
         let tools_owned = opts.tools.clone();
         let tools_val = tools_owned.as_ref();
+        // Capture client-mode tool_search state BEFORE
+        // `normalize_native_tools_for_format` touches the list —
+        // normalization preserves the synthetic tool and strips nothing
+        // deferred (deferred tools were already set aside by option
+        // parsing), but pulling the bodies here keeps the state
+        // construction simple.
+        let tool_search_client = opts
+            .tool_search
+            .as_ref()
+            .filter(|cfg| {
+                cfg.mode == crate::llm::api::ToolSearchMode::Client
+                    || (cfg.mode == crate::llm::api::ToolSearchMode::Auto
+                        && !crate::llm::provider::provider_supports_defer_loading(
+                            &opts.provider,
+                            &opts.model,
+                        ))
+            })
+            .map(|cfg| ClientToolSearchState {
+                synthetic_name: cfg.effective_name().to_string(),
+                strategy: cfg.effective_strategy(),
+                variant: cfg.variant,
+                always_loaded: cfg.always_loaded.iter().cloned().collect(),
+                budget_tokens: cfg.budget_tokens,
+                deferred_bodies: cfg.deferred_bodies.clone(),
+                promoted_order: Vec::new(),
+                promoted_set: std::collections::BTreeSet::new(),
+                promoted_token_estimate: std::collections::BTreeMap::new(),
+            });
+        // Snapshot native_tools *before* format-normalization so the
+        // text-mode contract prompt can still render the synthetic
+        // `__harn_tool_search` tool (normalization drops native_tools
+        // entirely for non-native formats — fine for payload, lossy
+        // for the prompt).
+        let native_tools_for_prompt = opts.native_tools.clone();
         opts.native_tools =
             normalize_native_tools_for_format(&tool_format, opts.native_tools.clone());
         opts.tool_choice = normalize_tool_choice_for_format(
@@ -256,16 +529,28 @@ impl AgentLoopState {
             opts.tool_choice.clone(),
             config.turn_policy.as_ref(),
         );
-        let native_tools_for_prompt = opts.native_tools.clone();
-        let rendered_schemas =
-            crate::llm::tools::collect_tool_schemas(tools_val, native_tools_for_prompt.as_deref());
+        // When client-mode tool_search is active, build a filtered
+        // version of tools_val that hides deferred tools from the
+        // contract prompt — they're surfaced lazily via the synthetic
+        // search tool. Without this, `collect_vm_tool_schemas` would
+        // still emit every declared tool's schema, defeating the token
+        // savings that are the whole point of progressive disclosure.
+        let tools_val_for_prompt = tool_search_client
+            .as_ref()
+            .and_then(|client| filter_deferred_from_tools_val(tools_val, client))
+            .map(VmValueOwned);
+        let tools_val_borrow = tools_val_for_prompt.as_ref().map(|v| &v.0).or(tools_val);
+        let rendered_schemas = crate::llm::tools::collect_tool_schemas(
+            tools_val_borrow,
+            native_tools_for_prompt.as_deref(),
+        );
         let has_tools = !rendered_schemas.is_empty();
         let base_system = opts.system.clone();
         let tool_examples =
             normalize_tool_examples_for_format(&tool_format, config.tool_examples.clone());
         let tool_contract_prompt = if has_tools {
-            Some(build_tool_calling_contract_prompt(
-                tools_val,
+            let mut prompt = build_tool_calling_contract_prompt(
+                tools_val_borrow,
                 native_tools_for_prompt.as_deref(),
                 &tool_format,
                 config
@@ -273,7 +558,53 @@ impl AgentLoopState {
                     .as_ref()
                     .is_some_and(|policy| policy.require_action_or_yield),
                 tool_examples.as_deref(),
-            ))
+            );
+            // Client-mode tool_search: when the user opted into stub
+            // listings, append a short "also available via search"
+            // paragraph so the model knows what's searchable without
+            // calling the search tool first. Matches Anthropic's
+            // described ergonomic even though the native path doesn't
+            // need it (the server handles stubs there).
+            if let Some(client_cfg) = opts.tool_search.as_ref().filter(|c| {
+                c.include_stub_listing
+                    && (c.mode == crate::llm::api::ToolSearchMode::Client
+                        || (c.mode == crate::llm::api::ToolSearchMode::Auto
+                            && !crate::llm::provider::provider_supports_defer_loading(
+                                &opts.provider,
+                                &opts.model,
+                            )))
+            }) {
+                let mut stub_lines = Vec::new();
+                for (name, body) in &client_cfg.deferred_bodies {
+                    let description = body
+                        .get("description")
+                        .and_then(|v| v.as_str())
+                        .or_else(|| {
+                            body.get("function")
+                                .and_then(|f| f.get("description"))
+                                .and_then(|v| v.as_str())
+                        })
+                        .unwrap_or("")
+                        .split(['\n', '.'])
+                        .next()
+                        .unwrap_or("")
+                        .trim();
+                    if description.is_empty() {
+                        stub_lines.push(format!("- `{name}`"));
+                    } else {
+                        stub_lines.push(format!("- `{name}` — {description}"));
+                    }
+                }
+                if !stub_lines.is_empty() {
+                    prompt.push_str(&format!(
+                        "\n\n## Tools available via `{search_name}` (deferred)\n\n\
+                         Call `{search_name}` with a query to surface any of:\n\n{list}\n",
+                        search_name = client_cfg.effective_name(),
+                        list = stub_lines.join("\n"),
+                    ));
+                }
+            }
+            Some(prompt)
         } else {
             None
         };
@@ -428,6 +759,7 @@ impl AgentLoopState {
             auto_compact,
             daemon_config,
             custom_nudge,
+            tool_search_client,
             _approval_guard,
             _policy_guard,
             _sink_guard,

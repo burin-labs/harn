@@ -11,6 +11,7 @@ mod llm_call;
 mod post_turn;
 mod state;
 mod tool_dispatch;
+mod tool_search_client;
 mod turn_preflight;
 
 thread_local! {

@@ -1249,6 +1249,142 @@ pub(crate) fn extract_deferred_tool_names(native_tools: &[serde_json::Value]) ->
 /// No-ops if `native_tools` is `None` (no tools passed = no search to
 /// do). The meta-tool itself never has `defer_loading` — that's a hard
 /// requirement of Anthropic's API and we match it here.
+/// When `tool_search` resolves to client mode (harn#70), inject the
+/// synthetic `__harn_tool_search` dispatchable tool *and* strip the
+/// deferred tools from the outgoing payload. Promoted tools are
+/// restored turn-by-turn by the agent loop's
+/// `refresh_client_mode_tool_payload` helper; this function handles the
+/// initial turn only.
+///
+/// Why strip deferred tools here: the whole point of progressive
+/// disclosure is that the model doesn't see deferred schemas until the
+/// search tool surfaces them. If we left them in `native_tools` the
+/// token savings would be zero.
+///
+/// Safe no-op if `native_tools` is `None` — the user passed no tools
+/// so there is nothing to search.
+pub(crate) fn apply_tool_search_client_injection(
+    native_tools: &mut Option<Vec<serde_json::Value>>,
+    provider: &str,
+    cfg: &super::api::ToolSearchConfig,
+) {
+    let Some(list) = native_tools.as_mut() else {
+        return;
+    };
+    let always_loaded: std::collections::BTreeSet<&str> =
+        cfg.always_loaded.iter().map(String::as_str).collect();
+
+    // Filter out deferred tools whose names aren't pinned via
+    // `always_loaded`. They'll be re-added to the payload lazily when
+    // the model's `__harn_tool_search` call promotes them.
+    list.retain(|tool| {
+        let is_deferred = tool
+            .get("defer_loading")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if !is_deferred {
+            return true;
+        }
+        // Anthropic shape: `name` at top level; OpenAI shape:
+        // `function.name` nested.
+        let name = tool
+            .get("name")
+            .and_then(|v| v.as_str())
+            .or_else(|| {
+                tool.get("function")
+                    .and_then(|f| f.get("name"))
+                    .and_then(|v| v.as_str())
+            })
+            .unwrap_or("");
+        always_loaded.contains(name)
+    });
+
+    // Clear any remaining `defer_loading: true` flags on pinned tools —
+    // the provider's API doesn't know about it in client mode and may
+    // reject unknown fields (OpenAI compat is strict).
+    for tool in list.iter_mut() {
+        if let Some(obj) = tool.as_object_mut() {
+            obj.remove("defer_loading");
+        }
+        if let Some(function) = tool.get_mut("function").and_then(|v| v.as_object_mut()) {
+            function.remove("defer_loading");
+        }
+    }
+
+    // Prepend the synthetic search tool so it's visible even on strict
+    // providers that truncate long tool lists. Name can be overridden
+    // via `tool_search.name`.
+    let synthetic = build_client_search_tool_schema(provider, cfg);
+    list.insert(0, synthetic);
+}
+
+/// Shape the synthetic `__harn_tool_search` schema for the provider's
+/// API style. Deliberately minimal: one required `query` string. The
+/// model figures out whether it should phrase the query as natural
+/// language (BM25) or a regex by reading the description.
+pub(crate) fn build_client_search_tool_schema(
+    provider: &str,
+    cfg: &super::api::ToolSearchConfig,
+) -> serde_json::Value {
+    let name = cfg.effective_name().to_string();
+    let strategy = cfg.effective_strategy();
+    let description = match strategy {
+        super::api::ToolSearchStrategy::Regex => {
+            "Search for tools you need. Pass `query` as a case-insensitive regex \
+             (Rust `regex` crate syntax — no lookaround, no backreferences). \
+             The tool returns `{ \"tool_names\": [...] }`; only the returned \
+             tools will be available to call in the next turn."
+        }
+        super::api::ToolSearchStrategy::Bm25 => {
+            "Search for tools you need. Pass `query` as natural-language \
+             keywords (BM25). The tool returns `{ \"tool_names\": [...] }`; \
+             only the returned tools will be available to call in the next turn. \
+             Cast a wider net if the first search returns nothing useful."
+        }
+        super::api::ToolSearchStrategy::Semantic => {
+            "Search for tools you need. Pass `query` as a natural-language \
+             description; a semantic / embedding index returns the best matches \
+             as `{ \"tool_names\": [...] }`. Only the returned tools will be \
+             available to call in the next turn."
+        }
+        super::api::ToolSearchStrategy::Host => {
+            "Search for tools you need. Pass `query` as the host expects it; \
+             the host returns `{ \"tool_names\": [...] }`. Only the returned \
+             tools will be available to call in the next turn."
+        }
+    };
+
+    let input_schema = serde_json::json!({
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Search query (keywords for BM25/semantic, regex for regex variant).",
+            }
+        },
+        "required": ["query"],
+        "additionalProperties": false,
+    });
+
+    let is_anthropic_style = super::helpers::ResolvedProvider::resolve(provider).is_anthropic_style;
+    if is_anthropic_style {
+        serde_json::json!({
+            "name": name,
+            "description": description,
+            "input_schema": input_schema,
+        })
+    } else {
+        serde_json::json!({
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": description,
+                "parameters": input_schema,
+            }
+        })
+    }
+}
+
 pub(crate) fn apply_tool_search_native_injection(
     native_tools: &mut Option<Vec<serde_json::Value>>,
     provider: &str,
