@@ -47,6 +47,16 @@ pub(super) struct EnumDeclInfo {
     pub(super) variants: Vec<EnumVariant>,
 }
 
+/// Full metadata for a `type T<...> = ...` alias. The type parameters are
+/// retained so that `Applied { name, args }` references can be expanded by
+/// substituting `type_params[i] := args[i]` into `body`, and closed-union
+/// arguments can be distributed into a union of instantiations.
+#[derive(Debug, Clone)]
+pub(super) struct TypeAliasInfo {
+    pub(super) type_params: Vec<TypeParam>,
+    pub(super) body: TypeExpr,
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct StructDeclInfo {
     pub(super) type_params: Vec<TypeParam>,
@@ -67,8 +77,9 @@ pub(super) struct TypeScope {
     pub(super) vars: BTreeMap<String, InferredType>,
     /// Function name → (param types, return type).
     pub(super) functions: BTreeMap<String, FnSignature>,
-    /// Named type aliases.
-    pub(super) type_aliases: BTreeMap<String, TypeExpr>,
+    /// Named type aliases. Retains the declared type parameters so that
+    /// generic aliases can be expanded via substitution on `Applied`.
+    pub(super) type_aliases: BTreeMap<String, TypeAliasInfo>,
     /// Enum declarations with generic and variant metadata.
     pub(super) enums: BTreeMap<String, EnumDeclInfo>,
     /// Interface declarations with associated types and methods.
@@ -291,7 +302,17 @@ impl TypeScope {
     pub(super) fn resolve_type(&self, name: &str) -> Option<&TypeExpr> {
         self.type_aliases
             .get(name)
+            .map(|info| &info.body)
             .or_else(|| self.parent.as_ref()?.resolve_type(name))
+    }
+
+    /// Full alias metadata including declared type parameters. Used by
+    /// `resolve_alias` to expand `Applied { name, args }` references into
+    /// the alias body with substitutions applied.
+    pub(super) fn resolve_type_alias(&self, name: &str) -> Option<&TypeAliasInfo> {
+        self.type_aliases
+            .get(name)
+            .or_else(|| self.parent.as_ref()?.resolve_type_alias(name))
     }
 
     pub(super) fn is_generic_type_param(&self, name: &str) -> bool {

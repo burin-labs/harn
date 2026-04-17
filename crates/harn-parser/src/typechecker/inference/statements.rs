@@ -19,7 +19,8 @@ use super::super::exits::stmt_definitely_exits;
 use super::super::format::{format_type, is_obvious_type, shape_mismatch_detail};
 use super::super::schema_inference::schema_type_expr_from_node;
 use super::super::scope::{
-    EnumDeclInfo, FnSignature, ImplMethodSig, InterfaceDeclInfo, StructDeclInfo, TypeScope,
+    EnumDeclInfo, FnSignature, ImplMethodSig, InterfaceDeclInfo, StructDeclInfo, TypeAliasInfo,
+    TypeScope,
 };
 use super::super::union::narrow_to_single;
 use super::super::{InlayHintInfo, TypeChecker};
@@ -507,7 +508,13 @@ impl TypeChecker {
                 type_params,
                 type_expr,
             } => {
-                scope.type_aliases.insert(name.clone(), type_expr.clone());
+                scope.type_aliases.insert(
+                    name.clone(),
+                    TypeAliasInfo {
+                        type_params: type_params.clone(),
+                        body: type_expr.clone(),
+                    },
+                );
                 self.check_type_alias_decl_variance(type_params, type_expr, name, span);
             }
 

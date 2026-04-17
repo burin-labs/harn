@@ -9,7 +9,8 @@
 use crate::ast::*;
 
 use super::super::scope::{
-    EnumDeclInfo, FnSignature, ImplMethodSig, InterfaceDeclInfo, StructDeclInfo, TypeScope,
+    EnumDeclInfo, FnSignature, ImplMethodSig, InterfaceDeclInfo, StructDeclInfo, TypeAliasInfo,
+    TypeScope,
 };
 use super::super::{InlayHintInfo, TypeChecker, TypeDiagnostic};
 
@@ -234,10 +235,16 @@ impl TypeChecker {
             match &snode.node {
                 Node::TypeDecl {
                     name,
-                    type_params: _,
+                    type_params,
                     type_expr,
                 } => {
-                    scope.type_aliases.insert(name.clone(), type_expr.clone());
+                    scope.type_aliases.insert(
+                        name.clone(),
+                        TypeAliasInfo {
+                            type_params: type_params.clone(),
+                            body: type_expr.clone(),
+                        },
+                    );
                 }
                 Node::EnumDecl {
                     name,
