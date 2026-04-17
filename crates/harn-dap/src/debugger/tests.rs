@@ -356,16 +356,23 @@ fn test_breakpoint_stop() {
         responses.extend(dbg.step_running_vm());
     }
 
-    let has_stopped = responses
-        .iter()
-        .any(|r| r.event.as_deref() == Some("stopped"));
-    let has_terminated = responses
-        .iter()
-        .any(|r| r.event.as_deref() == Some("terminated"));
-
-    // Either we stopped at the breakpoint or the VM raced ahead to completion;
-    // both outcomes are acceptable since execution is single-threaded here.
-    assert!(has_stopped || has_terminated);
+    // A path-keyed breakpoint on the entry script MUST halt execution with
+    // reason="breakpoint". Prior to the source_file fix, the main chunk was
+    // untagged so `Vm::breakpoint_matches` could never match the absolute
+    // path the client sent, and the program raced to terminated -- this
+    // assertion pins that regression.
+    let stopped_on_breakpoint = responses.iter().any(|r| {
+        r.event.as_deref() == Some("stopped")
+            && r.body
+                .as_ref()
+                .and_then(|b| b.get("reason"))
+                .and_then(|v| v.as_str())
+                == Some("breakpoint")
+    });
+    assert!(
+        stopped_on_breakpoint,
+        "expected a stopped event with reason=breakpoint for the entry script"
+    );
 
     std::fs::remove_file(&file).ok();
     std::fs::remove_dir(&dir).ok();

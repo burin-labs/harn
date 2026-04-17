@@ -15,7 +15,16 @@ use crate::protocol::*;
 
 impl Debugger {
     pub(crate) fn compile_program(&mut self, source: &str) -> Result<(), String> {
-        let chunk = harn_vm::compile_source(source)?;
+        let mut chunk = harn_vm::compile_source(source)?;
+        // Tag the main program's chunk with its source path so
+        // `Vm::breakpoint_matches` can match DAP breakpoints keyed by the
+        // absolute path the client sent (otherwise `current_source_file()`
+        // is `None` for the entry chunk and only wildcard-keyed breakpoints
+        // ever fire). Imported modules already get this via
+        // `compile_fn_body`; this covers the entry script too.
+        if let Some(ref path) = self.source_path {
+            chunk.source_file = Some(path.clone());
+        }
 
         let mut vm = Vm::new();
         register_vm_stdlib(&mut vm);

@@ -7,6 +7,21 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## v0.7.16
+
+### Fixed
+
+- **Debugger: breakpoints on the entry script now actually stop execution.**
+  `harn-dap`'s `compile_program` was calling `harn_vm::compile_source`,
+  which produces a `Chunk` without a `source_file` set. Because
+  `Vm::breakpoint_matches` keys its lookup on the current frame's
+  `chunk.source_file`, path-keyed breakpoints from a DAP client (VS Code,
+  Burin, …) could never match — only the wildcard (empty-string) set
+  fired, which clients don't emit in practice. Imported modules already
+  got the right tag via `compile_fn_body`; the entry chunk now gets it
+  too. `test_breakpoint_stop` is tightened to demand `reason="breakpoint"`
+  so the regression can't recur silently.
+
 ## v0.7.15
 
 ### Changed
