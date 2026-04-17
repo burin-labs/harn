@@ -211,7 +211,7 @@ impl Debugger {
                     evt_seq,
                     "continued",
                     Some(json!({
-                        "threadId": 1,
+                        "threadId": self.current_thread_id as i64,
                         "allThreadsContinued": true,
                     })),
                 );
@@ -252,7 +252,7 @@ impl Debugger {
                 "stopped",
                 Some(json!({
                     "reason": "pause",
-                    "threadId": 1,
+                    "threadId": self.current_thread_id as i64,
                     "allThreadsStopped": true,
                 })),
             ));
@@ -286,7 +286,7 @@ impl Debugger {
             "stopped",
             Some(json!({
                 "reason": "pause",
-                "threadId": 1,
+                "threadId": self.current_thread_id as i64,
                 "allThreadsStopped": true,
             })),
         ));
@@ -394,7 +394,7 @@ impl Debugger {
                     "stopped",
                     Some(json!({
                         "reason": reason,
-                        "threadId": 1,
+                        "threadId": self.current_thread_id as i64,
                         "allThreadsStopped": true,
                     })),
                 ));
@@ -437,7 +437,7 @@ impl Debugger {
                         Some(json!({
                             "reason": "exception",
                             "description": error_msg,
-                            "threadId": 1,
+                            "threadId": self.current_thread_id as i64,
                             "allThreadsStopped": true,
                         })),
                     ));

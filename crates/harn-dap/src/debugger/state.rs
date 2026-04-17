@@ -97,6 +97,28 @@ pub struct Debugger {
     /// used to throttle progressUpdate emission to one per ~256 steps
     /// so we don't flood the IDE with no-op events.
     pub(crate) steps_since_progress_update: u32,
+    /// DAP thread registry: stable `thread_id -> display_name` map.
+    /// Seeded with `{1 -> "main"}` so single-session flows see the same
+    /// id they always have. ACP sessions get registered via
+    /// `register_thread` as they open; exits unregister. The registry is
+    /// authoritative for `handle_threads` and drives the `threadId`
+    /// field on stopped/continued/stepping events.
+    pub(crate) threads: BTreeMap<u64, String>,
+    /// Inverse map of `threads`, keyed by ACP session id so we can
+    /// look up a thread id without scanning. Kept in lockstep with
+    /// `threads` by `register_thread` / `unregister_thread`.
+    #[allow(dead_code)]
+    pub(crate) session_to_thread: BTreeMap<String, u64>,
+    /// Monotonic allocator for DAP thread ids. Starts at 2 because id 1
+    /// is permanently the synthetic "main" thread.
+    #[allow(dead_code)]
+    pub(crate) next_thread_id: u64,
+    /// The thread id responsible for the current stop / step request.
+    /// Today we only run one VM so this is always 1, but every DAP
+    /// response that carries a `threadId` reads from this field so the
+    /// wire format is already session-accurate — a future multi-VM
+    /// implementation only has to swap the value when routing requests.
+    pub(crate) current_thread_id: u64,
 }
 
 impl Debugger {
@@ -129,7 +151,85 @@ impl Debugger {
             pending_pause: false,
             active_progress_id: None,
             steps_since_progress_update: 0,
+            threads: {
+                let mut m = BTreeMap::new();
+                m.insert(1, "main".to_string());
+                m
+            },
+            session_to_thread: BTreeMap::new(),
+            next_thread_id: 2,
+            current_thread_id: 1,
         }
+    }
+
+    /// Register a new ACP session as a DAP thread. Returns the allocated
+    /// thread id. Idempotent: calling twice with the same session id
+    /// returns the existing id without re-emitting.
+    ///
+    /// Callers that want to surface the registration on the DAP wire
+    /// should pair this with [`Debugger::thread_started_event`] and emit
+    /// the response. We keep the two steps separate so the debugger can
+    /// sequence thread events alongside its normal seq allocation.
+    ///
+    /// Marked allow(dead_code) because #86 ships the public API ahead
+    /// of the co-requisite ACP-session wiring that will invoke it; the
+    /// DAP wire format is already session-accurate.
+    #[allow(dead_code)]
+    pub fn register_thread(&mut self, session_id: &str) -> u64 {
+        if let Some(&id) = self.session_to_thread.get(session_id) {
+            return id;
+        }
+        let id = self.next_thread_id;
+        self.next_thread_id += 1;
+        self.threads.insert(id, session_id.to_string());
+        self.session_to_thread.insert(session_id.to_string(), id);
+        id
+    }
+
+    /// Drop a session from the thread registry. Returns the freed id so
+    /// the caller can emit a matching `thread` exited event. Refuses to
+    /// unregister the synthetic `main` thread (id 1).
+    #[allow(dead_code)]
+    pub fn unregister_thread(&mut self, session_id: &str) -> Option<u64> {
+        let id = self.session_to_thread.remove(session_id)?;
+        if id == 1 {
+            // Keep main alive; put it back.
+            self.session_to_thread.insert(session_id.to_string(), id);
+            return None;
+        }
+        self.threads.remove(&id);
+        Some(id)
+    }
+
+    /// Build a DAP `thread` event announcing a newly-started session.
+    /// Paired with [`Debugger::register_thread`] by host code that wants
+    /// the IDE to light up a new row in its Threads pane.
+    #[allow(dead_code)]
+    pub fn thread_started_event(&mut self, thread_id: u64) -> crate::protocol::DapResponse {
+        let seq = self.next_seq();
+        crate::protocol::DapResponse::event(
+            seq,
+            "thread",
+            Some(serde_json::json!({
+                "reason": "started",
+                "threadId": thread_id,
+            })),
+        )
+    }
+
+    /// Build a DAP `thread` event announcing an exited session. Pair
+    /// with [`Debugger::unregister_thread`].
+    #[allow(dead_code)]
+    pub fn thread_exited_event(&mut self, thread_id: u64) -> crate::protocol::DapResponse {
+        let seq = self.next_seq();
+        crate::protocol::DapResponse::event(
+            seq,
+            "thread",
+            Some(serde_json::json!({
+                "reason": "exited",
+                "threadId": thread_id,
+            })),
+        )
     }
 
     pub(crate) fn next_seq(&mut self) -> i64 {

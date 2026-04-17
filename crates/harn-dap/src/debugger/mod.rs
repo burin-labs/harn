@@ -121,16 +121,16 @@ impl Debugger {
 
     fn handle_threads(&mut self, msg: &DapMessage) -> Vec<DapResponse> {
         let seq = self.next_seq();
+        let threads: Vec<_> = self
+            .threads
+            .iter()
+            .map(|(id, name)| json!({ "id": *id as i64, "name": name }))
+            .collect();
         vec![DapResponse::success(
             seq,
             msg.seq,
             "threads",
-            Some(json!({
-                "threads": [{
-                    "id": 1,
-                    "name": "main"
-                }]
-            })),
+            Some(json!({ "threads": threads })),
         )]
     }
 

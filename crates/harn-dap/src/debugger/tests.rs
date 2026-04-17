@@ -37,7 +37,83 @@ fn test_threads() {
     let body = responses[0].body.as_ref().unwrap();
     let threads = body["threads"].as_array().unwrap();
     assert_eq!(threads.len(), 1);
+    assert_eq!(threads[0]["id"], 1);
     assert_eq!(threads[0]["name"], "main");
+}
+
+#[test]
+fn test_two_sessions_get_distinct_thread_ids() {
+    let mut dbg = Debugger::new();
+    let a = dbg.register_thread("session-A");
+    let b = dbg.register_thread("session-B");
+    assert_ne!(a, b, "distinct sessions must map to distinct thread ids");
+    assert!(
+        a >= 2 && b >= 2,
+        "allocated ids must not collide with main=1"
+    );
+
+    let responses = dbg.handle_message(make_request(1, "threads", None));
+    let body = responses[0].body.as_ref().unwrap();
+    let threads = body["threads"].as_array().unwrap();
+    assert_eq!(threads.len(), 3, "main + two sessions");
+
+    // Re-registering the same session is idempotent.
+    let a2 = dbg.register_thread("session-A");
+    assert_eq!(a, a2);
+}
+
+#[test]
+fn test_register_thread_emits_started_event() {
+    let mut dbg = Debugger::new();
+    let id = dbg.register_thread("session-X");
+    let evt = dbg.thread_started_event(id);
+    assert_eq!(evt.event.as_deref(), Some("thread"));
+    let body = evt.body.as_ref().unwrap();
+    assert_eq!(body["reason"], "started");
+    assert_eq!(body["threadId"], id as i64);
+}
+
+#[test]
+fn test_unregister_thread_emits_exited_event_but_main_survives() {
+    let mut dbg = Debugger::new();
+    let id = dbg.register_thread("session-Y");
+    let freed = dbg.unregister_thread("session-Y").expect("must free");
+    assert_eq!(freed, id);
+
+    let evt = dbg.thread_exited_event(freed);
+    assert_eq!(evt.event.as_deref(), Some("thread"));
+    assert_eq!(evt.body.as_ref().unwrap()["reason"], "exited");
+
+    // Unregistering a nonexistent session is a no-op.
+    assert!(dbg.unregister_thread("never-registered").is_none());
+
+    // Main thread must never be removable even if aliased.
+    dbg.session_to_thread.insert("main".to_string(), 1);
+    assert!(dbg.unregister_thread("main").is_none());
+    assert!(dbg.threads.contains_key(&1));
+}
+
+#[test]
+fn test_stepping_events_carry_current_thread_id() {
+    // MVP: current_thread_id defaults to 1 and the stepping handlers
+    // read from it. With only one VM we can't actually run a second
+    // session to completion, but we can verify that rewriting the
+    // field routes subsequent events to the new id.
+    let mut dbg = Debugger::new();
+    let new_id = dbg.register_thread("session-thread-check");
+    dbg.current_thread_id = new_id;
+
+    // A pause on an already-stopped debugger emits a stopped event
+    // with reason="pause" and the active threadId.
+    dbg.stopped = true;
+    let responses = dbg.handle_message(make_request(1, "pause", None));
+    let stopped = responses
+        .iter()
+        .find(|r| r.event.as_deref() == Some("stopped"))
+        .expect("pause must emit stopped");
+    let body = stopped.body.as_ref().unwrap();
+    assert_eq!(body["threadId"], new_id as i64);
+    assert_eq!(body["reason"], "pause");
 }
 
 #[test]
