@@ -95,14 +95,23 @@ pub fn snapshot(id: &str) -> Option<VmValue> {
 }
 
 /// Open a session, or create it if missing. Returns the resolved id.
+///
+/// When the `HARN_EVENT_LOG_DIR` environment variable points at an
+/// existing (or creatable) directory, a [`JsonlEventSink`] is
+/// auto-registered against the newly-created session so the agent
+/// loop's AgentEvent stream persists to `event_log-<session_id>.jsonl`.
+/// Re-opening an existing session does not re-register — sinks are
+/// per-session, owned by the first opener.
 pub fn open_or_create(id: Option<String>) -> String {
     let resolved = id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
+    let mut was_new = false;
     SESSIONS.with(|s| {
         let mut map = s.borrow_mut();
         if let Some(state) = map.get_mut(&resolved) {
             state.last_accessed = Instant::now();
             return;
         }
+        was_new = true;
         let cap = SESSION_CAP.with(|c| c.get());
         if map.len() >= cap {
             if let Some(victim) = map
@@ -115,7 +124,27 @@ pub fn open_or_create(id: Option<String>) -> String {
         }
         map.insert(resolved.clone(), SessionState::new(resolved.clone()));
     });
+    if was_new {
+        try_register_jsonl_event_log(&resolved);
+    }
     resolved
+}
+
+/// Auto-register a [`JsonlEventSink`] for a newly-created session
+/// when `HARN_EVENT_LOG_DIR` is set. Silent no-op when the env var
+/// is missing or the file can't be opened — a broken log sink must
+/// never prevent a session from starting.
+fn try_register_jsonl_event_log(session_id: &str) {
+    let Ok(dir) = std::env::var("HARN_EVENT_LOG_DIR") else {
+        return;
+    };
+    if dir.is_empty() {
+        return;
+    }
+    let path = std::path::PathBuf::from(dir).join(format!("event_log-{session_id}.jsonl"));
+    if let Ok(sink) = crate::agent_events::JsonlEventSink::open(&path) {
+        crate::agent_events::register_sink(session_id, sink);
+    }
 }
 
 pub fn close(id: &str) {

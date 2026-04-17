@@ -42,6 +42,10 @@ thread_local! {
     // (#106). A per-session reset is handled by reset_prompt_registry.
     static PROMPT_RENDER_INDICES: RefCell<BTreeMap<String, Vec<u64>>> =
         const { RefCell::new(BTreeMap::new()) };
+    // Monotonic render ordinal driven by the prompt_mark_rendered
+    // builtin (#106). A fresh thread-local counter since the IDE
+    // correlates ordinals to event_indices at render time.
+    static PROMPT_RENDER_ORDINAL: RefCell<u64> = const { RefCell::new(0) };
 }
 
 const PROMPT_REGISTRY_CAP: usize = 64;
@@ -167,6 +171,19 @@ pub fn record_prompt_render_index(prompt_id: &str, event_index: u64) {
     });
 }
 
+/// Produce the next monotonic ordinal for a render-mark. Pipelines
+/// invoke the `prompt_mark_rendered` builtin which calls this to
+/// obtain a sequence number without having to know about per-session
+/// event counters. The IDE scrubber orders matching consumers by
+/// this ordinal when the emitted_at_ms timestamps collide.
+pub fn next_prompt_render_ordinal() -> u64 {
+    PROMPT_RENDER_ORDINAL.with(|c| {
+        let mut n = c.borrow_mut();
+        *n += 1;
+        *n
+    })
+}
+
 /// Fetch every event index where `prompt_id` was rendered. Called
 /// by the DAP adapter to populate the `eventIndices` list in the
 /// `burin/promptConsumers` response.
@@ -180,6 +197,7 @@ pub(crate) fn reset_prompt_registry() {
     PROMPT_REGISTRY.with(|reg| reg.borrow_mut().clear());
     PROMPT_SERIAL.with(|s| *s.borrow_mut() = 0);
     PROMPT_RENDER_INDICES.with(|map| map.borrow_mut().clear());
+    PROMPT_RENDER_ORDINAL.with(|c| *c.borrow_mut() = 0);
 }
 
 /// Parse-only validation for lint/preflight. Returns a human-readable error

@@ -465,4 +465,24 @@ pub(crate) fn register_string_builtins(vm: &mut Vm) {
     vm.register_builtin("render_with_provenance", |args, _out| {
         render_asset_with_provenance(args)
     });
+
+    // #106: pipelines invoke prompt_mark_rendered(prompt_id) just
+    // before passing a rendered prompt to llm_call. The builtin
+    // records (prompt_id, next_event_index) against the thread-local
+    // render-index map, which the DAP `burin/promptConsumers`
+    // response exposes so the IDE template gutter can jump-to-next-
+    // render. The `next_event_index` is a session-opaque counter —
+    // the IDE correlates it to AgentEvent.index via timestamp in the
+    // JSONL, or via the monotonic per-session render counter when
+    // scrubbing by render ordinal.
+    vm.register_builtin("prompt_mark_rendered", |args, _out| {
+        let Some(VmValue::String(prompt_id)) = args.first() else {
+            return Err(VmError::TypeError(
+                "prompt_mark_rendered: prompt_id must be a string".into(),
+            ));
+        };
+        let event_index = crate::stdlib::template::next_prompt_render_ordinal();
+        crate::stdlib::template::record_prompt_render_index(prompt_id, event_index);
+        Ok(VmValue::Int(event_index as i64))
+    });
 }

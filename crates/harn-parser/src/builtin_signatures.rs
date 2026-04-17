@@ -1039,7 +1039,11 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
     },
     BuiltinSig {
         name: "project_root",
-        return_type: Some(BuiltinReturn::Union(UNION_STRING_NIL)),
+        return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
+        name: "prompt_mark_rendered",
+        return_type: Some(BuiltinReturn::Named("int")),
     },
     BuiltinSig {
         name: "prompt_user",
