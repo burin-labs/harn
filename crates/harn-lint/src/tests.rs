@@ -1,5 +1,5 @@
 use super::*;
-use harn_lexer::Lexer;
+use harn_lexer::{FixEdit, Lexer};
 use harn_parser::Parser;
 
 fn lint_source(source: &str) -> Vec<LintDiagnostic> {
