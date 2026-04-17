@@ -86,6 +86,10 @@ pub struct Debugger {
     /// `hitCondition` expressions see a monotonic count even when the
     /// user's condition causes the breakpoint to skip.
     pub(crate) bp_hit_counts: BTreeMap<i64, u64>,
+    /// Function-name breakpoints. DAP `setFunctionBreakpoints` stores
+    /// the full list here; it's mirrored onto the VM on each launch /
+    /// edit so `Vm::function_breakpoints` stays in lockstep.
+    pub(crate) function_breakpoints: Vec<crate::protocol::FunctionBreakpoint>,
     /// Set by handle_pause; the next VM step honors it by emitting a
     /// stopped event with reason="pause" and clearing the flag.
     pub(crate) pending_pause: bool,
@@ -148,6 +152,7 @@ impl Debugger {
             running: false,
             bp_conditions: Vec::new(),
             bp_hit_counts: BTreeMap::new(),
+            function_breakpoints: Vec::new(),
             pending_pause: false,
             active_progress_id: None,
             steps_since_progress_update: 0,

@@ -101,6 +101,72 @@ impl Debugger {
         )]
     }
 
+    /// Replace the full function-breakpoint list. The DAP spec sends
+    /// the complete set on every edit, so we drop the existing list
+    /// wholesale, allocate fresh ids, mirror onto the VM, and echo back
+    /// verified=true per registered name.
+    pub(crate) fn handle_set_function_breakpoints(&mut self, msg: &DapMessage) -> Vec<DapResponse> {
+        self.function_breakpoints.clear();
+        if let Some(args) = &msg.arguments {
+            if let Some(bps) = args.get("breakpoints").and_then(|b| b.as_array()) {
+                for bp in bps {
+                    if let Some(name) = bp.get("name").and_then(|n| n.as_str()) {
+                        let id = self.next_bp_id;
+                        self.next_bp_id += 1;
+                        let condition = bp
+                            .get("condition")
+                            .and_then(|c| c.as_str())
+                            .map(|s| s.to_string())
+                            .filter(|s| !s.is_empty());
+                        let hit_condition = bp
+                            .get("hitCondition")
+                            .and_then(|c| c.as_str())
+                            .map(|s| s.to_string())
+                            .filter(|s| !s.is_empty());
+                        self.function_breakpoints.push(FunctionBreakpoint {
+                            name: name.to_string(),
+                            condition,
+                            hit_condition,
+                            id,
+                        });
+                    }
+                }
+            }
+        }
+        // Mirror onto the VM so Vm::push_closure_frame latches the hit
+        // on entry to any matching function.
+        if let Some(vm) = &mut self.vm {
+            vm.set_function_breakpoints(
+                self.function_breakpoints
+                    .iter()
+                    .map(|fb| fb.name.clone())
+                    .collect(),
+            );
+        }
+        // Hit counts from the prior set belong to now-stale ids; drop
+        // them so a fresh edit starts counting over.
+        self.bp_hit_counts.clear();
+
+        let seq = self.next_seq();
+        let verified: Vec<_> = self
+            .function_breakpoints
+            .iter()
+            .map(|fb| {
+                json!({
+                    "id": fb.id,
+                    "verified": true,
+                    "line": 0,
+                })
+            })
+            .collect();
+        vec![DapResponse::success(
+            seq,
+            msg.seq,
+            "setFunctionBreakpoints",
+            Some(json!({ "breakpoints": verified })),
+        )]
+    }
+
     pub(crate) fn handle_set_exception_breakpoints(
         &mut self,
         msg: &DapMessage,

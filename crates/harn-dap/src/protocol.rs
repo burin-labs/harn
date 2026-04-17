@@ -132,6 +132,27 @@ pub struct ExceptionBreakpointFilter {
     pub default: bool,
 }
 
+/// DAP FunctionBreakpoint — stops on entry to any function whose name
+/// matches, regardless of the call site's file or line. Useful for
+/// catching calls into `llm_call`, `host_run_pipeline`, or any user
+/// pipeline function without pinning down a specific source range.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FunctionBreakpoint {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub condition: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "hitCondition"
+    )]
+    pub hit_condition: Option<String>,
+    /// Server-assigned id; kept on the struct so hit-count bookkeeping
+    /// and response echo can key off a stable integer.
+    #[serde(default)]
+    pub id: i64,
+}
+
 /// DAP Breakpoint.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Breakpoint {

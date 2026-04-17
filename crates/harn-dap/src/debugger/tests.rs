@@ -524,6 +524,115 @@ fn test_capabilities_advertise_new_bp_features() {
 }
 
 #[test]
+fn test_set_function_breakpoints_stores_list_and_echoes_response() {
+    let mut dbg = Debugger::new();
+    let responses = dbg.handle_message(make_request(
+        1,
+        "setFunctionBreakpoints",
+        Some(json!({
+            "breakpoints": [
+                { "name": "llm_call" },
+                { "name": "host_run_pipeline", "condition": "model == \"gpt-5\"" },
+                { "name": "do_work", "hitCondition": ">=3" }
+            ]
+        })),
+    ));
+    assert_eq!(responses.len(), 1);
+    assert_eq!(
+        responses[0].command.as_deref(),
+        Some("setFunctionBreakpoints")
+    );
+    assert_eq!(dbg.function_breakpoints.len(), 3);
+    assert_eq!(dbg.function_breakpoints[0].name, "llm_call");
+    assert_eq!(
+        dbg.function_breakpoints[1].condition.as_deref(),
+        Some("model == \"gpt-5\"")
+    );
+    assert_eq!(
+        dbg.function_breakpoints[2].hit_condition.as_deref(),
+        Some(">=3")
+    );
+
+    let body = responses[0].body.as_ref().unwrap();
+    let verified = body["breakpoints"].as_array().unwrap();
+    assert_eq!(verified.len(), 3);
+    assert_eq!(verified[0]["verified"], true);
+}
+
+#[test]
+fn test_set_function_breakpoints_replaces_prior_list_and_clears_hit_counts() {
+    let mut dbg = Debugger::new();
+    dbg.handle_message(make_request(
+        1,
+        "setFunctionBreakpoints",
+        Some(json!({
+            "breakpoints": [{ "name": "alpha" }, { "name": "beta" }]
+        })),
+    ));
+    // Pretend a hit registered in the prior session.
+    if let Some(fb) = dbg.function_breakpoints.first() {
+        dbg.bp_hit_counts.insert(fb.id, 7);
+    }
+    dbg.handle_message(make_request(
+        2,
+        "setFunctionBreakpoints",
+        Some(json!({ "breakpoints": [{ "name": "gamma" }] })),
+    ));
+    assert_eq!(dbg.function_breakpoints.len(), 1);
+    assert_eq!(dbg.function_breakpoints[0].name, "gamma");
+    assert!(
+        dbg.bp_hit_counts.is_empty(),
+        "hit counts must reset on edit"
+    );
+}
+
+#[test]
+fn test_function_breakpoint_fires_on_matching_call() {
+    let mut dbg = Debugger::new();
+
+    let dir = std::env::temp_dir().join("harn_dap_fn_bp_test");
+    std::fs::create_dir_all(&dir).ok();
+    let file = dir.join("fn_bp.harn");
+    std::fs::write(
+        &file,
+        "fn helper() -> int { return 42 }\npipeline t(task) { let x = helper()\n log(x) }",
+    )
+    .unwrap();
+
+    dbg.handle_message(make_request(1, "initialize", None));
+    dbg.handle_message(make_request(
+        2,
+        "launch",
+        Some(json!({"program": file.to_string_lossy()})),
+    ));
+    dbg.handle_message(make_request(
+        3,
+        "setFunctionBreakpoints",
+        Some(json!({ "breakpoints": [{ "name": "helper" }] })),
+    ));
+    let mut responses = dbg.handle_message(make_request(4, "configurationDone", None));
+    while dbg.is_running() && responses.len() < 50 {
+        responses.extend(dbg.step_running_vm());
+    }
+
+    let stopped_on_fn = responses.iter().any(|r| {
+        r.event.as_deref() == Some("stopped")
+            && r.body
+                .as_ref()
+                .and_then(|b| b.get("reason"))
+                .and_then(|v| v.as_str())
+                == Some("function breakpoint")
+    });
+    assert!(
+        stopped_on_fn,
+        "function breakpoint on helper() must produce a stopped event"
+    );
+
+    std::fs::remove_file(&file).ok();
+    std::fs::remove_dir(&dir).ok();
+}
+
+#[test]
 fn test_set_breakpoints_accepts_hit_condition_and_log_message() {
     let mut dbg = Debugger::new();
     let responses = dbg.handle_message(make_request(

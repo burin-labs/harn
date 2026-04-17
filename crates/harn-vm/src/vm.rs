@@ -154,6 +154,17 @@ pub struct Vm {
     /// imported lib. The empty-string key is a wildcard used by callers
     /// that don't track source paths (legacy `set_breakpoints` API).
     pub(crate) breakpoints: BTreeMap<String, std::collections::BTreeSet<usize>>,
+    /// Function-name breakpoints. Any closure call whose
+    /// `CompiledFunction.name` matches an entry here raises a stop on
+    /// entry, regardless of the call site's file or line. Lets the IDE
+    /// break on `llm_call` / `host_run_pipeline` / any user pipeline
+    /// function without pinning down a source location first.
+    pub(crate) function_breakpoints: std::collections::BTreeSet<String>,
+    /// Latched on `push_closure_frame` when the callee's name matches
+    /// `function_breakpoints`; consumed by the next step so the stop is
+    /// reported with reason="function breakpoint" and the breakpoint
+    /// name available for the DAP `stopped` event.
+    pub(crate) pending_function_bp: Option<String>,
     /// Whether the VM is in step mode.
     pub(crate) step_mode: bool,
     /// The frame depth at which stepping started (for step-over).
@@ -208,6 +219,8 @@ impl Vm {
             task_counter: 0,
             deadlines: Vec::new(),
             breakpoints: BTreeMap::new(),
+            function_breakpoints: std::collections::BTreeSet::new(),
+            pending_function_bp: None,
             step_mode: false,
             step_frame_depth: 0,
             stopped: false,
@@ -263,6 +276,30 @@ impl Vm {
     /// site. Existing embedders that don't track file scoping still work.
     pub fn set_breakpoints(&mut self, lines: Vec<usize>) {
         self.set_breakpoints_for_file("", lines);
+    }
+
+    /// Replace the function-breakpoint set. Every subsequent closure
+    /// call whose name matches one of the provided strings will pause
+    /// on entry. Empty vec clears the set.
+    pub fn set_function_breakpoints(&mut self, names: Vec<String>) {
+        self.function_breakpoints = names.into_iter().collect();
+        // Clear any pending latch so a stale entry from the previous
+        // configuration doesn't fire once.
+        self.pending_function_bp = None;
+    }
+
+    /// Returns the current function-breakpoint name set. Used by the
+    /// DAP adapter to build the `setFunctionBreakpoints` response with
+    /// verified=true per registered name.
+    pub fn function_breakpoint_names(&self) -> Vec<String> {
+        self.function_breakpoints.iter().cloned().collect()
+    }
+
+    /// Drain any pending function-breakpoint name latched by the most
+    /// recent closure entry. Returns `Some(name)` exactly once per hit
+    /// so the caller can emit a single `stopped` event.
+    pub fn take_pending_function_bp(&mut self) -> Option<String> {
+        self.pending_function_bp.take()
     }
 
     /// Source file path of the currently executing frame, if known.
@@ -424,6 +461,15 @@ impl Vm {
             }
 
             if self.breakpoint_matches(current_line) {
+                self.stopped = true;
+                return Ok(Some((VmValue::Nil, true)));
+            }
+
+            // Function-breakpoint latch: set by push_closure_frame when
+            // the callee's name is in `function_breakpoints`. Stop with
+            // the same shape as a line BP so the DAP adapter's
+            // classify_breakpoint_hit emits a standard stopped event.
+            if self.pending_function_bp.is_some() {
                 self.stopped = true;
                 return Ok(Some((VmValue::Nil, true)));
             }
@@ -819,6 +865,8 @@ impl Vm {
             task_counter: 0,
             deadlines: self.deadlines.clone(),
             breakpoints: BTreeMap::new(),
+            function_breakpoints: std::collections::BTreeSet::new(),
+            pending_function_bp: None,
             step_mode: false,
             step_frame_depth: 0,
             stopped: false,
@@ -1208,6 +1256,16 @@ impl Vm {
         // args re-applied. Cheap relative to the call itself.
         let initial_env = call_env.clone();
         self.env = call_env;
+
+        // Function-name breakpoint latch: record the name so the step
+        // loop can raise a single "function breakpoint" stop on the
+        // next cycle. We latch instead of stopping inline because
+        // push_closure_frame is called from deep inside the call
+        // dispatcher — the cleanest place for the debugger to observe
+        // a consistent state is at the next line-change check.
+        if self.function_breakpoints.contains(&closure.func.name) {
+            self.pending_function_bp = Some(closure.func.name.clone());
+        }
 
         self.frames.push(CallFrame {
             chunk: closure.func.chunk.clone(),
@@ -1834,6 +1892,61 @@ mod tests {
         // then attempt restart on an out-of-range id.
         let err = vm.restart_frame(99).unwrap_err();
         assert!(err.to_string().contains("out of range"));
+    }
+
+    #[test]
+    fn test_function_breakpoint_stops_on_entry() {
+        let mut vm = Vm::new();
+        register_vm_stdlib(&mut vm);
+        vm.set_function_breakpoints(vec!["do_work".to_string()]);
+        let chunk = crate::compile_source(
+            "fn do_work(n: int) -> int { return n + 1 }\npipeline t(task) { let x = do_work(41)\nlog(x) }\n",
+        )
+        .unwrap();
+        run_until_paused(&mut vm, &chunk);
+        // The latch must identify the matching function and get
+        // drained exactly once.
+        let hit = vm.take_pending_function_bp().expect("must latch a hit");
+        assert_eq!(hit, "do_work");
+        assert!(vm.take_pending_function_bp().is_none(), "one-shot");
+
+        // The top frame should be `do_work` at entry.
+        let frames = vm.debug_stack_frames();
+        let top = frames.last().expect("callee frame on stack");
+        assert_eq!(top.0, "do_work");
+    }
+
+    #[test]
+    fn test_function_breakpoint_unknown_name_does_not_fire() {
+        let mut vm = Vm::new();
+        register_vm_stdlib(&mut vm);
+        vm.set_function_breakpoints(vec!["nonexistent".to_string()]);
+        let chunk = crate::compile_source("pipeline t(task) { let x = 1\nlog(x) }\n").unwrap();
+        // With no matching callee, the program runs to completion
+        // without latching a hit; run_until_paused would have panicked
+        // with "step budget exceeded" if the VM idled, so wrap with a
+        // finite run of step_execute until a natural terminate.
+        vm.start(&chunk);
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let local = tokio::task::LocalSet::new();
+            local
+                .run_until(async {
+                    for _ in 0..10_000 {
+                        match vm.step_execute().await {
+                            Ok(Some((_, false))) => return,
+                            Ok(_) => continue,
+                            Err(e) => panic!("step_execute failed: {e}"),
+                        }
+                    }
+                    panic!("step budget exceeded");
+                })
+                .await
+        });
+        assert!(vm.take_pending_function_bp().is_none());
     }
 
     #[test]

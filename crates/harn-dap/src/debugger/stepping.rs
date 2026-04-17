@@ -87,6 +87,14 @@ impl Debugger {
         for (key, lines) in &by_file {
             vm.set_breakpoints_for_file(key, lines.clone());
         }
+        // Mirror function breakpoints onto the freshly-built VM so they
+        // take effect on the first run without needing a re-edit.
+        vm.set_function_breakpoints(
+            self.function_breakpoints
+                .iter()
+                .map(|fb| fb.name.clone())
+                .collect(),
+        );
         *self.latest_debug_state.borrow_mut() = None;
         let latest_debug_state = Rc::clone(&self.latest_debug_state);
         vm.set_debug_hook(move |state| {
@@ -327,6 +335,76 @@ impl Debugger {
                 let state = self.current_debug_state();
                 let current_line = state.line as i64;
                 let vars = state.variables;
+                // Check for a function-breakpoint latch first. The VM
+                // sets pending_function_bp in push_closure_frame when
+                // the callee's name matches, and the step loop surfaces
+                // the stop on the next cycle. Drain the latch here so
+                // it fires exactly once per entry, and emit a stopped
+                // event with reason="function breakpoint".
+                let function_bp_name = self
+                    .vm
+                    .as_mut()
+                    .and_then(|vm| vm.take_pending_function_bp());
+                if let Some(fn_name) = function_bp_name {
+                    // Honor condition / hitCondition the same way
+                    // classify_breakpoint_hit does for line BPs.
+                    let fb_idx = self
+                        .function_breakpoints
+                        .iter()
+                        .position(|fb| fb.name == fn_name);
+                    let mut should_stop = true;
+                    if let Some(idx) = fb_idx {
+                        let fb = self.function_breakpoints[idx].clone();
+                        let counter = self.bp_hit_counts.entry(fb.id).or_insert(0);
+                        *counter += 1;
+                        let hits = *counter;
+                        if let Some(ref hc) = fb.hit_condition {
+                            if super::breakpoints::hit_condition_matches(hc, hits) == Some(false) {
+                                should_stop = false;
+                            }
+                        }
+                        if should_stop {
+                            if let Some(ref cond) = fb.condition {
+                                if let Some(vm) = self.vm.as_mut() {
+                                    let truthy = self
+                                        .runtime
+                                        .block_on(async {
+                                            let local = tokio::task::LocalSet::new();
+                                            local.run_until(vm.evaluate_in_frame(cond, 0)).await
+                                        })
+                                        .map(|v| v.is_truthy())
+                                        .unwrap_or(true);
+                                    if !truthy {
+                                        should_stop = false;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if !should_stop {
+                        return responses;
+                    }
+                    self.step_mode = StepMode::Continue;
+                    self.stopped = true;
+                    self.running = false;
+                    self.current_line = current_line;
+                    self.variables = vars;
+                    self.program_state = ProgramState::Stopped;
+                    self.flush_output_into(&mut responses);
+                    self.end_progress(&mut responses);
+                    let seq = self.next_seq();
+                    responses.push(DapResponse::event(
+                        seq,
+                        "stopped",
+                        Some(json!({
+                            "reason": "function breakpoint",
+                            "description": fn_name,
+                            "threadId": self.current_thread_id as i64,
+                            "allThreadsStopped": true,
+                        })),
+                    ));
+                    return responses;
+                }
                 // Defer the real stop decision to classify_breakpoint_hit,
                 // which evaluates hit-count → condition → logpoint in
                 // the order VS Code uses. Steps and exceptions bypass

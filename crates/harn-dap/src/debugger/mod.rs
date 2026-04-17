@@ -32,6 +32,7 @@ impl Debugger {
             "initialize" => self.handle_initialize(&msg),
             "launch" => self.handle_launch(&msg),
             "setBreakpoints" => self.handle_set_breakpoints(&msg),
+            "setFunctionBreakpoints" => self.handle_set_function_breakpoints(&msg),
             "configurationDone" => self.handle_configuration_done(&msg),
             "continue" => self.handle_continue(&msg),
             "next" => self.handle_next(&msg),
