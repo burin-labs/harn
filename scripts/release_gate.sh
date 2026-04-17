@@ -109,11 +109,26 @@ for crate_dir in crate_dirs:
 PY
 }
 
+# Wrap a command with a banner + duration. Used by the per-audit
+# substep helpers so the parallel audit log shows which sub-phase in
+# `rust-audit` / `harn-audit` / etc is the long pole.
+time_phase() {
+  local label="$1"
+  shift
+  local started
+  started="$(date +%s)"
+  printf '  -> %s ...\n' "$label"
+  "$@"
+  local rc=$?
+  printf '  <- %s (%ss)\n' "$label" "$(( $(date +%s) - started ))"
+  return "$rc"
+}
+
 run_docs_audit() {
-  ./scripts/sync_language_spec.sh
-  npx markdownlint-cli2 "**/*.md"
+  time_phase "sync_language_spec" ./scripts/sync_language_spec.sh
+  time_phase "markdownlint" npx markdownlint-cli2 "**/*.md"
   if command -v mdbook >/dev/null 2>&1; then
-    mdbook build docs
+    time_phase "mdbook build" mdbook build docs
   else
     echo "warning: mdbook not installed; skipping mdbook build"
   fi
@@ -124,53 +139,64 @@ run_grammar_audit() {
     echo "error: missing spec/HARN_SPEC.md"
     return 1
   fi
-  ./scripts/verify_release_metadata.py
-  ./scripts/sync_language_spec.sh
-  ./scripts/verify_language_spec.py
+  time_phase "verify_release_metadata" ./scripts/verify_release_metadata.py
+  time_phase "sync_language_spec" ./scripts/sync_language_spec.sh
+  time_phase "verify_language_spec" ./scripts/verify_language_spec.py
   if [[ ! -d tree-sitter-harn ]]; then
     echo "warning: tree-sitter-harn not present; skipping tree-sitter grammar audit"
     return 0
   fi
-  ./scripts/verify_tree_sitter_parse.py --strict
-  (
-    cd tree-sitter-harn
-    npm test
-  )
+  time_phase "verify_tree_sitter_parse" ./scripts/verify_tree_sitter_parse.py --strict
+  time_phase "tree-sitter npm test" bash -c "cd tree-sitter-harn && npm test"
 }
 
 run_security_audit() {
   echo "=== Security/trust boundary audit ==="
-  rg -n "OAuth|oauth|MCP|trust boundary|mutation session|worker_update|tool/pre_use|tool/post_use" \
-    README.md docs/src crates/harn-vm crates/harn-cli .github CLAUDE.md >/dev/null
+  time_phase "boundary-keyword grep" \
+    rg -n "OAuth|oauth|MCP|trust boundary|mutation session|worker_update|tool/pre_use|tool/post_use" \
+      README.md docs/src crates/harn-vm crates/harn-cli .github CLAUDE.md >/dev/null
 }
 
 run_rust_audit() {
-  make fmt-check
-  cargo clippy --workspace --all-targets -- -D warnings
-  make test
+  time_phase "cargo fmt --check" make fmt-check
+  time_phase "cargo clippy --workspace --all-targets" \
+    cargo clippy --workspace --all-targets -- -D warnings
+  time_phase "make test (nextest/cargo test)" make test
 }
 
 run_harn_audit() {
-  make conformance
-  make lint-harn
-  make fmt-harn
+  time_phase "harn conformance" make conformance
+  time_phase "harn lint" make lint-harn
+  time_phase "harn fmt --check" make fmt-harn
 }
 
 cmd_audit() {
   echo "=== Parallel release audit ==="
+  local audit_started
+  audit_started="$(date +%s)"
   local tmp
   tmp="$(mktemp -d)"
   local -a steps=()
   local -a pids=()
 
+  # Each step writes its wall-clock duration to `<name>.dur` so the
+  # parent can report per-step timings once everyone wraps. That lets
+  # the release gate call out which audit lane is the long pole
+  # (historically: `rust-audit` because `make test` rebuilds every
+  # workspace test binary).
   run_step() {
     local name="$1"
     shift
+    local started
+    started="$(date +%s)"
     (
       set -euo pipefail
       echo ">>> $name"
       "$@"
     ) >"$tmp/$name.log" 2>&1
+    local rc=$?
+    printf '%s\n' "$(( $(date +%s) - started ))" >"$tmp/$name.dur"
+    return "$rc"
   }
 
   run_step rust-audit run_rust_audit & steps+=("rust-audit") pids+=("$!")
@@ -184,10 +210,13 @@ cmd_audit() {
   for idx in "${!steps[@]}"; do
     local step="${steps[$idx]}"
     local pid="${pids[$idx]}"
+    local dur=""
     if wait "$pid"; then
-      echo "ok: $step"
+      dur="$([[ -f "$tmp/$step.dur" ]] && cat "$tmp/$step.dur" || echo '?')"
+      printf 'ok: %-15s (%ss)\n' "$step" "$dur"
     else
-      echo "fail: $step"
+      dur="$([[ -f "$tmp/$step.dur" ]] && cat "$tmp/$step.dur" || echo '?')"
+      printf 'fail: %-13s (%ss)\n' "$step" "$dur"
       failed=1
     fi
   done
@@ -207,7 +236,8 @@ cmd_audit() {
   fi
 
   rm -rf "$tmp"
-  echo "=== Audit complete ==="
+  local audit_elapsed=$(( $(date +%s) - audit_started ))
+  echo "=== Audit complete (${audit_elapsed}s) ==="
 }
 
 cmd_prepare() {

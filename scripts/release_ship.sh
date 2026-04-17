@@ -4,6 +4,58 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+# ── Timing instrumentation ──────────────────────────────────────────────
+# Every `=== step ===` banner goes through `log_step`, which stamps the
+# wall clock, elapsed since script start, and elapsed since the previous
+# step. Release steps that invoke child scripts or hooks (audit, publish,
+# pre-push `make test`) are often measured in minutes, and the delta
+# between steps answers "where is the long pole?" without needing a
+# separate profiler. Output format:
+#
+#   === audit ===  (t+00:01:23  Δ00:00:00)
+#   === publish dry-run ===  (t+00:04:07  Δ00:02:44)
+#
+# Uses nanosecond `date +%s%N` when available (Linux), falls back to
+# whole-second `date +%s` on macOS where coreutils is not installed.
+SHIP_START_NS="$(date +%s)000000000"
+LAST_STEP_NS="$SHIP_START_NS"
+
+_ship_now_ns() {
+  # `date +%s%N` is a GNU extension; BSD/macOS date truncates the `%N`.
+  # If `%N` comes through unchanged we assume whole-second precision.
+  local raw
+  raw="$(date +%s%N)"
+  case "$raw" in
+    *N) printf '%s000000000\n' "$(date +%s)" ;;
+    *)  printf '%s\n' "$raw" ;;
+  esac
+}
+
+_ship_fmt_ns() {
+  local ns="$1"
+  local total_ms=$(( ns / 1000000 ))
+  local total_s=$(( total_ms / 1000 ))
+  local ms=$(( total_ms % 1000 ))
+  local h=$(( total_s / 3600 ))
+  local m=$(( (total_s % 3600) / 60 ))
+  local s=$(( total_s % 60 ))
+  printf '%02d:%02d:%02d.%03d' "$h" "$m" "$s" "$ms"
+}
+
+log_step() {
+  local name="$1"
+  local now
+  now="$(_ship_now_ns)"
+  local elapsed=$(( now - SHIP_START_NS ))
+  local delta=$(( now - LAST_STEP_NS ))
+  LAST_STEP_NS="$now"
+  printf '=== %s === (t+%s  Δ%s  wall %s)\n' \
+    "$name" \
+    "$(_ship_fmt_ns "$elapsed")" \
+    "$(_ship_fmt_ns "$delta")" \
+    "$(date '+%H:%M:%S')"
+}
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -102,15 +154,15 @@ if [[ -z "$PREVIOUS_VERSION" ]]; then
   exit 1
 fi
 
-echo "=== Release audit ==="
+log_step "Release audit"
 ./scripts/release_gate.sh audit
 
 if [[ "$SKIP_DRY_RUN" -eq 0 ]]; then
-  echo "=== Publish dry run ==="
+  log_step "Publish dry run"
   ./scripts/release_gate.sh publish --dry-run
 fi
 
-echo "=== Version bump ==="
+log_step "Version bump"
 ./scripts/release_gate.sh prepare --bump "$BUMP"
 NEXT_VERSION="$(current_version)"
 
@@ -119,13 +171,14 @@ if [[ "$NEXT_VERSION" == "$PREVIOUS_VERSION" ]]; then
   exit 1
 fi
 
+log_step "Commit version bump"
 git add Cargo.toml Cargo.lock crates/*/Cargo.toml
 git commit -m "Bump version to $NEXT_VERSION"
 
 TAG="v$NEXT_VERSION"
 BRANCH="$(git branch --show-current)"
 
-echo "=== Tag ==="
+log_step "Tag"
 git tag "$TAG"
 
 # Push branch + tag before cargo publish so downstream consumers (e.g.
@@ -133,12 +186,12 @@ git tag "$TAG"
 # working in parallel with crates.io publication. crates.io is slower than
 # GitHub, and this ordering overlaps the two latencies.
 if [[ "$NO_PUSH" -eq 0 ]]; then
-  echo "=== Push branch + tag ==="
+  log_step "Push branch + tag"
   git push origin "$BRANCH"
   git push origin "$TAG"
 fi
 
-echo "=== Publish ==="
+log_step "Publish"
 ./scripts/release_gate.sh publish
 
 if [[ -z "$NOTES_OUTPUT" ]]; then
@@ -148,7 +201,7 @@ else
   CLEANUP_NOTES=0
 fi
 
-echo "=== Release notes ==="
+log_step "Release notes"
 ./scripts/release_gate.sh notes --version "$TAG" --output "$NOTES_OUTPUT"
 cat "$NOTES_OUTPUT"
 
@@ -158,7 +211,7 @@ cat "$NOTES_OUTPUT"
 # kicked off minutes ago.
 GH_RELEASE_URL=""
 if [[ "$NO_PUSH" -eq 0 ]] && command -v gh &>/dev/null; then
-  echo "=== GitHub release ==="
+  log_step "GitHub release"
   if gh release view "$TAG" &>/dev/null; then
     GH_RELEASE_URL="$(gh release edit "$TAG" --notes-file "$NOTES_OUTPUT" 2>&1)"
     echo "Updated existing release: $GH_RELEASE_URL"
@@ -171,6 +224,8 @@ elif [[ "$NO_PUSH" -eq 0 ]]; then
   echo "hint: run 'gh release create $TAG --title \"$TAG\" --notes-file \"$NOTES_OUTPUT\"' manually"
 fi
 
+log_step "Release shipped"
+TOTAL_NS=$(( $(_ship_now_ns) - SHIP_START_NS ))
 echo ""
 echo "Release shipped:"
 echo "  Previous version: $PREVIOUS_VERSION"
@@ -178,6 +233,7 @@ echo "  Current version:  $NEXT_VERSION"
 echo "  Branch:           $BRANCH"
 echo "  Tag:              $TAG"
 echo "  Notes file:       $NOTES_OUTPUT"
+echo "  Total wall time:  $(_ship_fmt_ns "$TOTAL_NS")"
 if [[ "$NO_PUSH" -eq 1 ]]; then
   echo "  Push status:      skipped (--no-push)"
 else
