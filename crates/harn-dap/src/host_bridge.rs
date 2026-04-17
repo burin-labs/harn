@@ -267,6 +267,31 @@ impl DapHostBridge {
     /// `await_reply` unwinds promptly instead of waiting on the 60s
     /// per-op timeout. The script sees a normal Harn exception that
     /// propagates up and ends the run cleanly.
+    /// Cancel a single pending host_call by its reverse-request seq
+    /// id. Returns `true` if a pending entry was found and signalled,
+    /// `false` otherwise. Paired with the DAP `cancel` request (#108)
+    /// so the IDE's Stop pill can tear down a runaway reverse call
+    /// without tearing down the whole session.
+    pub fn cancel_pending(&self, request_seq: i64, reason: &str) -> bool {
+        let tx = {
+            let mut guard = match self.pending.map.lock() {
+                Ok(g) => g,
+                Err(_) => return false,
+            };
+            guard.remove(&request_seq)
+        };
+        if let Some(tx) = tx {
+            let _ = tx.send(DapHostCallReply {
+                success: false,
+                body: None,
+                message: Some(format!("cancelled: {reason}")),
+            });
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn cancel_all_pending(&self, reason: &str) {
         let mut guard = match self.pending.map.lock() {
             Ok(g) => g,

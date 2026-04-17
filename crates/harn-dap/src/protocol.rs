@@ -112,7 +112,7 @@ impl Default for Capabilities {
             supports_restart_frame: true,
             supports_exception_breakpoint_filters: true,
             supports_terminate_request: true,
-            supports_cancel_request: false,
+            supports_cancel_request: true,
             supports_harn_host_call: true,
             supports_burin_prompt_provenance: true,
             exception_breakpoint_filters: vec![ExceptionBreakpointFilter {

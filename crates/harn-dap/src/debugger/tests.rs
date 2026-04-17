@@ -506,6 +506,18 @@ fn test_harn_ping_reports_state() {
 }
 
 #[test]
+fn test_cancel_handler_responds_success_even_without_match() {
+    let mut dbg = Debugger::new();
+    // No host bridge, no pending requests — cancel still succeeds so
+    // the IDE's Stop pill never flashes a red error on a
+    // tear-down race.
+    let responses = dbg.handle_message(make_request(1, "cancel", Some(json!({ "requestId": 42 }))));
+    assert_eq!(responses.len(), 1);
+    assert_eq!(responses[0].success, Some(true));
+    assert_eq!(responses[0].command.as_deref(), Some("cancel"));
+}
+
+#[test]
 fn test_capabilities_advertise_new_bp_features() {
     // Capabilities snapshot so UI writers know what's actually wired
     // — bumping a capability without flipping the default is a silent

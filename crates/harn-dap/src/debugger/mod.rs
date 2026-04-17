@@ -69,6 +69,7 @@ impl Debugger {
             "restartFrame" => self.handle_restart_frame(&msg),
             "setExceptionBreakpoints" => self.handle_set_exception_breakpoints(&msg),
             "disconnect" => self.handle_disconnect(&msg),
+            "cancel" => self.handle_cancel(&msg),
             "harnPing" => self.handle_ping(&msg),
             "burin/promptProvenance" => self.handle_prompt_provenance(&msg),
             "burin/promptConsumers" => self.handle_prompt_consumers(&msg),
@@ -335,6 +336,30 @@ impl Debugger {
             "burin/promptConsumers",
             Some(json!({ "consumers": payload })),
         )]
+    }
+
+    /// DAP `cancel` request (#108). The client supplies a
+    /// `requestId` (a prior request's seq) or `progressId`; we look
+    /// up any pending reverse host_call keyed on that seq and signal
+    /// its waiter with a "cancelled" failure reply. Long-running
+    /// llm_call round trips that block inside DapHostBridge::dispatch
+    /// unwind promptly as a normal Harn exception, without tearing
+    /// down the whole session. Missing-id / unknown-id is a no-op
+    /// that still returns success — matching VS Code's behavior so
+    /// the Stop pill never flashes an error.
+    fn handle_cancel(&mut self, msg: &DapMessage) -> Vec<DapResponse> {
+        if let Some(bridge) = &self.host_bridge {
+            let request_id = msg
+                .arguments
+                .as_ref()
+                .and_then(|a| a.get("requestId"))
+                .and_then(|v| v.as_i64());
+            if let Some(id) = request_id {
+                bridge.cancel_pending(id, "cancel");
+            }
+        }
+        let seq = self.next_seq();
+        vec![DapResponse::success(seq, msg.seq, "cancel", None)]
     }
 
     fn handle_disconnect(&mut self, msg: &DapMessage) -> Vec<DapResponse> {
