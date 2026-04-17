@@ -524,6 +524,58 @@ fn test_capabilities_advertise_new_bp_features() {
 }
 
 #[test]
+fn test_triggered_breakpoint_skipped_until_trigger_fires() {
+    use super::breakpoints::BreakpointAction;
+    use std::collections::BTreeMap;
+
+    let mut dbg = Debugger::new();
+    // Arrange two breakpoints: trigger (id=1, line 5) and dependent
+    // (id=2, line 10, triggered_by: [1]).
+    dbg.handle_message(make_request(
+        1,
+        "setBreakpoints",
+        Some(json!({
+            "source": {"path": "t.harn"},
+            "breakpoints": [
+                {"line": 5},
+                {"line": 10, "triggeredBy": [1]}
+            ]
+        })),
+    ));
+    let dep_id = dbg
+        .breakpoints
+        .iter()
+        .find(|bp| bp.line == 10)
+        .map(|bp| bp.id)
+        .expect("dep BP present");
+
+    // With no trigger fired, hitting line 10 must skip.
+    let vars: BTreeMap<String, harn_vm::VmValue> = BTreeMap::new();
+    let action = dbg.classify_breakpoint_hit(10, &vars);
+    assert!(
+        matches!(action, BreakpointAction::Skip),
+        "dep must skip pre-trigger"
+    );
+
+    // Fire the trigger (line 5). This arms id=1 in armed_breakpoints.
+    let action = dbg.classify_breakpoint_hit(5, &vars);
+    assert!(matches!(action, BreakpointAction::Stop));
+
+    // Now the dep should stop on next hit.
+    let action = dbg.classify_breakpoint_hit(10, &vars);
+    assert!(
+        matches!(action, BreakpointAction::Stop),
+        "dep must arm after trigger fires"
+    );
+
+    // And stay armed even after enter_running would reset hit counts
+    // within the same run — as long as armed_breakpoints retains its
+    // record. enter_running itself clears armed; that's by design.
+    dbg.enter_running();
+    assert!(!dbg.armed_breakpoints.contains_key(&dep_id), "reset on run");
+}
+
+#[test]
 fn test_set_function_breakpoints_stores_list_and_echoes_response() {
     let mut dbg = Debugger::new();
     let responses = dbg.handle_message(make_request(

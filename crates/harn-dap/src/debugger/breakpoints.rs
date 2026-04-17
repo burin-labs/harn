@@ -49,6 +49,11 @@ impl Debugger {
                             .and_then(|c| c.as_str())
                             .map(|s| s.to_string())
                             .filter(|s| !s.is_empty());
+                        let triggered_by = bp
+                            .get("triggeredBy")
+                            .and_then(|t| t.as_array())
+                            .map(|arr| arr.iter().filter_map(|v| v.as_i64()).collect::<Vec<_>>())
+                            .filter(|v: &Vec<i64>| !v.is_empty());
                         self.breakpoints.push(Breakpoint {
                             id,
                             verified: true,
@@ -60,6 +65,7 @@ impl Debugger {
                             condition,
                             hit_condition,
                             log_message,
+                            triggered_by,
                         });
                     }
                 }
@@ -203,6 +209,10 @@ impl Debugger {
         // Fresh run → fresh hit counts, so hitCondition and logpoint
         // counters start over for every debug session.
         self.bp_hit_counts.clear();
+        // Fresh run → triggered BPs disarm again; the chain has to
+        // re-build from scratch each session so a prior run's
+        // trigger doesn't unfairly arm this run's dependent BP.
+        self.armed_breakpoints.clear();
         self.running = self.vm.is_some();
     }
 }
@@ -370,6 +380,34 @@ impl Debugger {
         let Some(bp) = self.breakpoints.iter().find(|bp| bp.line == line).cloned() else {
             return BreakpointAction::Stop;
         };
+
+        // Stage 0: triggered-breakpoint gate (#102). When this BP has
+        // a `triggeredBy` list and none of the listed trigger ids
+        // have fired yet, skip without bumping the hit counter. Once
+        // a trigger fires, the BP is armed for the rest of the run.
+        if let Some(ref triggers) = bp.triggered_by {
+            let armed = self.armed_breakpoints.get(&bp.id).copied().unwrap_or(false);
+            if !armed {
+                // Check whether any trigger has fired since the run
+                // started. The armed_breakpoints map tracks both
+                // self-armed (after a trigger fires) and fire-history
+                // for triggers themselves — a BP's id appears in the
+                // map with `true` once it has fired at least once.
+                let any_fired = triggers
+                    .iter()
+                    .any(|tid| self.armed_breakpoints.get(tid).copied().unwrap_or(false));
+                if !any_fired {
+                    return BreakpointAction::Skip;
+                }
+                // A trigger has fired — arm this BP and fall through
+                // to the rest of the pipeline.
+                self.armed_breakpoints.insert(bp.id, true);
+            }
+        }
+
+        // Record this BP's fire so any BP that lists it in
+        // triggeredBy arms on subsequent hits.
+        self.armed_breakpoints.insert(bp.id, true);
 
         // Always bump the counter before gating. Mirrors VS Code: a
         // logpoint counts as a hit for hitCondition purposes even

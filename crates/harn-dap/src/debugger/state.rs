@@ -90,6 +90,13 @@ pub struct Debugger {
     /// the full list here; it's mirrored onto the VM on each launch /
     /// edit so `Vm::function_breakpoints` stays in lockstep.
     pub(crate) function_breakpoints: Vec<crate::protocol::FunctionBreakpoint>,
+    /// Armed state for triggered breakpoints (#102). A BP with
+    /// `triggered_by: [A, B]` stays disarmed until A or B fires at
+    /// least once; then flips to armed for the rest of the run.
+    /// Reset on enter_running / setBreakpoints edit. Entry present
+    /// (even if false) means the BP is known to be triggered; absent
+    /// means the BP has no trigger and is always armed.
+    pub(crate) armed_breakpoints: BTreeMap<i64, bool>,
     /// Set by handle_pause; the next VM step honors it by emitting a
     /// stopped event with reason="pause" and clearing the flag.
     pub(crate) pending_pause: bool,
@@ -153,6 +160,7 @@ impl Debugger {
             bp_conditions: Vec::new(),
             bp_hit_counts: BTreeMap::new(),
             function_breakpoints: Vec::new(),
+            armed_breakpoints: BTreeMap::new(),
             pending_pause: false,
             active_progress_id: None,
             steps_since_progress_update: 0,

@@ -175,6 +175,17 @@ pub struct Breakpoint {
     /// the current frame and does NOT stop execution. Matches VS Code.
     #[serde(skip_serializing_if = "Option::is_none", rename = "logMessage")]
     pub log_message: Option<String>,
+    /// Triggered-breakpoint chain (#102). The breakpoint stays
+    /// disarmed until *any* of the listed trigger ids fires at least
+    /// once. After a trigger fires the BP arms and behaves as normal
+    /// for the rest of the run (reset on enter_running / edit).
+    /// `None` or empty vec = always armed.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "triggeredBy"
+    )]
+    pub triggered_by: Option<Vec<i64>>,
 }
 
 /// DAP Source reference.
