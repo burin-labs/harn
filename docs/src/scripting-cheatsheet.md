@@ -125,6 +125,10 @@ harn run my_script.harn -- file1.md file2.md
 Inside the script:
 
 ```harn
+fn grade_file(path) {
+  println(path)
+}
+
 for path in argv {
   grade_file(path)
 }

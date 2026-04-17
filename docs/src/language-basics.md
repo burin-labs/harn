@@ -1051,6 +1051,10 @@ println(add(...nums))  // 6
 You can mix regular arguments and spread arguments:
 
 ```harn
+fn add(a, b, c) {
+  return a + b + c
+}
+
 let rest = [2, 3]
 println(add(1, ...rest))  // 6
 ```

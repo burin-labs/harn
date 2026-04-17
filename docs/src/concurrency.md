@@ -194,6 +194,9 @@ Register cleanup code that runs when the enclosing scope exits, whether
 by normal return or by a thrown error:
 
 ```harn
+fn open(path) { return path }
+fn close(f) { log("closed ${f}") }
+
 let f = open("data.txt")
 defer { close(f) }
 // ... use f ...
@@ -225,6 +228,8 @@ Negative values are treated as unlimited. The cap applies to every
 parallel mode, including the count form:
 
 ```harn
+fn process(i) { log(i) }
+
 parallel 100 with { max_concurrent: 4 } { i ->
   process(i)
 }

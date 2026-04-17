@@ -27,6 +27,8 @@ try {
 The error variable is optional:
 
 ```harn
+fn risky_operation() { throw "boom" }
+
 try {
   risky_operation()
 } catch {
@@ -328,6 +330,8 @@ without propagating them through return values.
 The two patterns can be combined:
 
 ```harn
+fn transform(data) { return data }
+
 fn safe_parse(input) {
   try {
     let data = json_parse(input)

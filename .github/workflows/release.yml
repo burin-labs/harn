@@ -42,7 +42,7 @@ jobs:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           # Scope the compile-time optimization tradeoff to release CI only.
           CARGO_PROFILE_RELEASE_LTO: thin
-        run: cargo build --release --bin harn --bin harn-dap --bin harn-lsp --target ${{ matrix.target }}
+        run: cargo build --release -p harn-cli -p harn-dap -p harn-lsp --target ${{ matrix.target }}
 
       - name: Package
         run: |
