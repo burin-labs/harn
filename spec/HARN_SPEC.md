@@ -1434,6 +1434,8 @@ add(...args)           // equivalent to add(1, 2, 3)
 Spread arguments can be mixed with regular arguments:
 
 ```harn
+fn add(a, b, c) { return a + b + c }
+
 let rest = [2, 3]
 add(1, ...rest)        // equivalent to add(1, 2, 3)
 ```
@@ -1442,6 +1444,8 @@ Multiple spreads are allowed in a single call, and they can appear in any
 position:
 
 ```harn
+fn add(a, b, c) { return a + b + c }
+
 let first = [1]
 let last = [3]
 add(...first, 2, ...last)   // equivalent to add(1, 2, 3)
