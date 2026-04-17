@@ -353,10 +353,23 @@ fn test_initialize_has_exception_breakpoint_filters() {
     let body = responses[0].body.as_ref().unwrap();
     assert_eq!(body["supportsExceptionBreakpointFilters"], true);
     let filters = body["exceptionBreakpointFilters"].as_array().unwrap();
-    assert_eq!(filters.len(), 1);
-    assert_eq!(filters[0]["filter"], "all");
-    assert_eq!(filters[0]["label"], "All Exceptions");
-    assert_eq!(filters[0]["default"], false);
+    // #111 expanded the list: "all" plus four per-kind filters.
+    assert_eq!(filters.len(), 5);
+    let filter_ids: Vec<_> = filters
+        .iter()
+        .filter_map(|f| f["filter"].as_str())
+        .collect();
+    assert!(filter_ids.contains(&"all"));
+    assert!(filter_ids.contains(&"tool_error"));
+    assert!(filter_ids.contains(&"llm_refusal"));
+    assert!(filter_ids.contains(&"budget_exceeded"));
+    assert!(filter_ids.contains(&"parse_failure"));
+    let all_filter = filters
+        .iter()
+        .find(|f| f["filter"].as_str() == Some("all"))
+        .unwrap();
+    assert_eq!(all_filter["label"], "All Exceptions");
+    assert_eq!(all_filter["default"], false);
 }
 
 #[test]
@@ -503,6 +516,104 @@ fn test_harn_ping_reports_state() {
     assert_eq!(body["state"], "not_started");
     assert_eq!(body["running"], false);
     assert_eq!(body["stopped"], false);
+}
+
+#[test]
+fn test_completions_returns_frame_scope_and_builtins() {
+    let mut dbg = Debugger::new();
+
+    let dir = std::env::temp_dir().join("harn_dap_completions_test");
+    std::fs::create_dir_all(&dir).ok();
+    let file = dir.join("completions.harn");
+    std::fs::write(
+        &file,
+        "pipeline t(task) { let local_name = 1\nlog(local_name) }",
+    )
+    .unwrap();
+    dbg.handle_message(make_request(1, "initialize", None));
+    dbg.handle_message(make_request(
+        2,
+        "launch",
+        Some(json!({"program": file.to_string_lossy()})),
+    ));
+
+    let responses = dbg.handle_message(make_request(
+        3,
+        "completions",
+        Some(json!({ "text": "", "frameId": 1 })),
+    ));
+    let body = responses[0].body.as_ref().unwrap();
+    let targets = body["targets"].as_array().unwrap();
+    assert!(
+        !targets.is_empty(),
+        "completions response must surface at least the builtin namespace"
+    );
+    // The built-in `log` is always registered; assert it's present
+    // regardless of user code.
+    let labels: Vec<_> = targets.iter().filter_map(|t| t["label"].as_str()).collect();
+    assert!(labels.contains(&"log"), "builtin log must appear");
+    std::fs::remove_file(&file).ok();
+    std::fs::remove_dir(&dir).ok();
+}
+
+#[test]
+fn test_step_in_targets_returns_targets_shape_even_without_match() {
+    let mut dbg = Debugger::new();
+    let responses = dbg.handle_message(make_request(
+        1,
+        "stepInTargets",
+        Some(json!({ "frameId": 1 })),
+    ));
+    assert_eq!(responses.len(), 1);
+    let body = responses[0].body.as_ref().unwrap();
+    let targets = body["targets"].as_array().unwrap();
+    // Without a live VM we can't derive call sites, but the response
+    // shape must still be well-formed with an empty list.
+    assert!(targets.is_empty());
+}
+
+#[test]
+fn test_exception_filters_track_per_kind_selection() {
+    let mut dbg = Debugger::new();
+    dbg.handle_message(make_request(
+        1,
+        "setExceptionBreakpoints",
+        Some(json!({
+            "filters": ["tool_error"],
+            "filterOptions": [
+                { "filterId": "llm_refusal", "condition": "kind == \"x\"" }
+            ]
+        })),
+    ));
+    assert_eq!(dbg.exception_filters.len(), 2);
+    assert!(dbg.exception_filters.contains_key("tool_error"));
+    assert_eq!(
+        dbg.exception_filters
+            .get("llm_refusal")
+            .cloned()
+            .flatten()
+            .as_deref(),
+        Some("kind == \"x\"")
+    );
+    // Replacing the set clears stale entries.
+    dbg.handle_message(make_request(
+        2,
+        "setExceptionBreakpoints",
+        Some(json!({ "filters": ["parse_failure"] })),
+    ));
+    assert_eq!(dbg.exception_filters.len(), 1);
+    assert!(dbg.exception_filters.contains_key("parse_failure"));
+}
+
+#[test]
+fn test_invalidated_event_carries_areas_and_thread_id() {
+    let mut dbg = Debugger::new();
+    let evt = dbg.invalidated_event(vec!["variables", "threads"]);
+    assert_eq!(evt.event.as_deref(), Some("invalidated"));
+    let body = evt.body.as_ref().unwrap();
+    let areas = body["areas"].as_array().unwrap();
+    assert_eq!(areas.len(), 2);
+    assert_eq!(body["threadId"], 1); // current_thread_id default
 }
 
 #[test]

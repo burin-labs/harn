@@ -400,6 +400,74 @@ impl Vm {
         }
     }
 
+    /// Call sites (name + ip) on `line` within the current frame's
+    /// chunk — drives DAP `stepInTargets` (#112). Walks the chunk's
+    /// parallel lines array, surfaces every Call / MethodCall /
+    /// CallSpread and pairs it with the name of the constant or
+    /// identifier preceding the call when we can derive it cheaply.
+    pub fn call_sites_on_line(&self, line: u32) -> Vec<(u32, String)> {
+        let Some(frame) = self.frames.last() else {
+            return Vec::new();
+        };
+        let chunk = &frame.chunk;
+        let mut out = Vec::new();
+        let code = &chunk.code;
+        let lines = &chunk.lines;
+        let mut ip: usize = 0;
+        while ip < code.len() {
+            let op = code[ip];
+            if ip < lines.len() && lines[ip] == line {
+                // 0x00 .. 0x99 covers the opcode space the compiler
+                // emits for calls. Rather than decode every op, we
+                // pattern-match on the Call-family opcodes via
+                // their numeric tag — stable because harn-vm locks
+                // opcodes with pin tests.
+                if matches!(op, 0x40..=0x44) {
+                    // Best-effort label: take the most recent
+                    // LoadConst / LoadGlobal constant value.
+                    let label = Self::label_preceding_call(chunk, ip);
+                    out.push((ip as u32, label));
+                }
+            }
+            ip += 1;
+        }
+        out
+    }
+
+    fn label_preceding_call(chunk: &crate::chunk::Chunk, call_ip: usize) -> String {
+        // Walk backwards a few instructions to find a LoadConst that
+        // resolves to a string (the callee name). Good enough for
+        // the IDE menu; deep callee resolution can land later if
+        // needed.
+        let mut back = call_ip.saturating_sub(6);
+        while back < call_ip {
+            let op = chunk.code[back];
+            // LoadConst opcodes (range covers the two-byte tag) —
+            // fall back to "call" when none found.
+            if (op == 0x01 || op == 0x02) && back + 2 < chunk.code.len() {
+                let idx = (u16::from(chunk.code[back + 1]) << 8) | u16::from(chunk.code[back + 2]);
+                if let Some(crate::chunk::Constant::String(s)) = chunk.constants.get(idx as usize) {
+                    return s.clone();
+                }
+            }
+            back += 1;
+        }
+        "call".to_string()
+    }
+
+    /// Identifiers visible at the given frame's scope — locals plus
+    /// every registered builtin + async builtin. Drives DAP
+    /// `completions` (#109) so the REPL autocomplete surfaces
+    /// everything the unified evaluator can reach.
+    pub fn identifiers_in_scope(&self, _frame_id: usize) -> Vec<String> {
+        let mut out: Vec<String> = self.env.all_variables().keys().cloned().collect();
+        out.extend(self.builtins.keys().cloned());
+        out.extend(self.async_builtins.keys().cloned());
+        out.sort();
+        out.dedup();
+        out
+    }
+
     /// Get all stack frames for the debugger.
     pub fn debug_stack_frames(&self) -> Vec<(String, usize)> {
         let mut frames = Vec::new();

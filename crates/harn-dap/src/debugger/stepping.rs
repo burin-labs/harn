@@ -13,6 +13,17 @@ use super::breakpoints::BreakpointAction;
 use super::state::{Debugger, ProgramState, StepMode};
 use crate::protocol::*;
 
+/// Parse the `kind:<name>:` prefix from a thrown exception's message.
+/// Pipelines opt into #111 per-kind filtering by prefixing their
+/// `throw` string with e.g. `kind:tool_error:disk is full`. Messages
+/// that don't start with `kind:` return None (fall back to the "all"
+/// filter behaviour for backward compat with legacy throws).
+fn extract_exception_kind(msg: &str) -> Option<String> {
+    let tail = msg.strip_prefix("kind:")?;
+    let end = tail.find(':')?;
+    Some(tail[..end].to_string())
+}
+
 impl Debugger {
     pub(crate) fn compile_program(&mut self, source: &str) -> Result<(), String> {
         let mut chunk = harn_vm::compile_source(source)?;
@@ -493,7 +504,37 @@ impl Debugger {
                 self.running = false;
                 self.end_progress(&mut responses);
                 if self.break_on_exceptions && matches!(&e, VmError::Thrown(_)) {
+                    // #111 per-kind filter gate: a VmError::Thrown
+                    // whose message starts with "kind:<name>:" lets
+                    // the exception filter narrow to a specific
+                    // AgentEvent kind. When the active filter set
+                    // doesn't select this kind (and the generic
+                    // "all" filter isn't active), skip the stop and
+                    // let the error propagate naturally. Legacy
+                    // throws with no kind tag stop under "all" only.
                     let error_msg = e.to_string();
+                    let kind = extract_exception_kind(&error_msg);
+                    let selected = match kind.as_deref() {
+                        Some(k) if self.exception_filters.contains_key(k) => {
+                            self.exception_filter_matches(k)
+                        }
+                        _ => self.exception_filters.contains_key("all"),
+                    };
+                    if !selected {
+                        let seq = self.next_seq();
+                        responses.push(DapResponse::event(
+                            seq,
+                            "output",
+                            Some(json!({
+                                "category": "stderr",
+                                "output": format!("Error: {e}\n"),
+                            })),
+                        ));
+                        self.program_state = ProgramState::Terminated;
+                        let seq = self.next_seq();
+                        responses.push(DapResponse::event(seq, "terminated", None));
+                        return responses;
+                    }
                     let state = self.current_debug_state();
                     self.stopped = true;
                     self.current_line = state.line as i64;
@@ -515,6 +556,10 @@ impl Debugger {
                         Some(json!({
                             "reason": "exception",
                             "description": error_msg,
+                            "hitBreakpointIds": kind
+                                .as_deref()
+                                .map(|k| vec![k.to_string()])
+                                .unwrap_or_default(),
                             "threadId": self.current_thread_id as i64,
                             "allThreadsStopped": true,
                         })),

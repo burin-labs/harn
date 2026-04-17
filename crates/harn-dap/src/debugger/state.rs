@@ -65,6 +65,12 @@ pub struct Debugger {
     pub(crate) next_var_ref: i64,
     /// Whether to break on thrown exceptions.
     pub(crate) break_on_exceptions: bool,
+    /// Active per-kind exception-filter set (#111). Populated by
+    /// setExceptionBreakpoints; consulted when the agent loop emits
+    /// a typed exception (tool_error, llm_refusal, budget_exceeded,
+    /// parse_failure). Optional per-filter condition lives alongside
+    /// so a filter can gate on e.g. `err.kind == "disk_full"`.
+    pub(crate) exception_filters: BTreeMap<String, Option<String>>,
     /// Latest VM debug snapshot captured through the VM debug hook.
     pub(crate) latest_debug_state: Rc<RefCell<Option<DebugState>>>,
     /// Optional bridge that round-trips unhandled `host_call` ops to the
@@ -154,6 +160,7 @@ impl Debugger {
                 .build()
                 .unwrap(),
             break_on_exceptions: false,
+            exception_filters: BTreeMap::new(),
             latest_debug_state: Rc::new(RefCell::new(None)),
             host_bridge: None,
             running: false,

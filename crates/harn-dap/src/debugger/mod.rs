@@ -70,6 +70,8 @@ impl Debugger {
             "setExceptionBreakpoints" => self.handle_set_exception_breakpoints(&msg),
             "disconnect" => self.handle_disconnect(&msg),
             "cancel" => self.handle_cancel(&msg),
+            "completions" => self.handle_completions(&msg),
+            "stepInTargets" => self.handle_step_in_targets(&msg),
             "harnPing" => self.handle_ping(&msg),
             "burin/promptProvenance" => self.handle_prompt_provenance(&msg),
             "burin/promptConsumers" => self.handle_prompt_consumers(&msg),
@@ -336,6 +338,118 @@ impl Debugger {
             "burin/promptConsumers",
             Some(json!({ "consumers": payload })),
         )]
+    }
+
+    /// DAP `completions` request (#109) — returns identifiers the
+    /// unified evaluator can reach in the current frame. Union of
+    /// the frame's scope (locals + captures + globals) and the
+    /// registered builtin/async-builtin names. Optional `text`
+    /// argument prefixes the filter so VS Code can show scoped
+    /// results as the user types.
+    fn handle_completions(&mut self, msg: &DapMessage) -> Vec<DapResponse> {
+        let text = msg
+            .arguments
+            .as_ref()
+            .and_then(|a| a.get("text"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let frame_id = msg
+            .arguments
+            .as_ref()
+            .and_then(|a| a.get("frameId"))
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as usize;
+
+        let targets: Vec<String> = self
+            .vm
+            .as_ref()
+            .map(|vm| vm.identifiers_in_scope(frame_id))
+            .unwrap_or_default();
+
+        let prefix_lower = text.to_lowercase();
+        let items: Vec<_> = targets
+            .into_iter()
+            .filter(|name| prefix_lower.is_empty() || name.to_lowercase().contains(&prefix_lower))
+            .take(200)
+            .map(|label| {
+                json!({
+                    "label": label,
+                    "type": "function",
+                })
+            })
+            .collect();
+
+        let seq = self.next_seq();
+        vec![DapResponse::success(
+            seq,
+            msg.seq,
+            "completions",
+            Some(json!({ "targets": items })),
+        )]
+    }
+
+    /// DAP `stepInTargets` request (#112) — returns every callable on
+    /// the current source line so the IDE can show a mini-menu when
+    /// Step Into hits a multi-call expression like `foo(bar(x), baz(y))`.
+    fn handle_step_in_targets(&mut self, msg: &DapMessage) -> Vec<DapResponse> {
+        let frame_id = msg
+            .arguments
+            .as_ref()
+            .and_then(|a| a.get("frameId"))
+            .and_then(|v| v.as_i64())
+            .unwrap_or(1);
+        // Map DAP frame_id (1-based, innermost=N) onto our VM frames.
+        // When we don't have a matching frame, fall back to the
+        // top frame's current line.
+        let line = self.current_line as u32;
+        let targets: Vec<_> = self
+            .vm
+            .as_ref()
+            .map(|vm| vm.call_sites_on_line(line))
+            .unwrap_or_default()
+            .into_iter()
+            .enumerate()
+            .map(|(idx, (ip, label))| {
+                json!({
+                    "id": (frame_id * 1_000_000) + (idx as i64) + 1,
+                    "label": label,
+                    "line": line as i64,
+                    "instructionPointerReference": format!("ip:{ip}"),
+                })
+            })
+            .collect();
+        let seq = self.next_seq();
+        vec![DapResponse::success(
+            seq,
+            msg.seq,
+            "stepInTargets",
+            Some(json!({ "targets": targets })),
+        )]
+    }
+
+    /// DAP `invalidated` event (#110). Emitted when state the IDE is
+    /// already showing becomes stale — feedback injection mutated a
+    /// running variable, a capability policy swapped mid-run, etc.
+    /// `areas` conventionally contains `variables` / `threads` /
+    /// `stacks` so the client can scope its refetch.
+    ///
+    /// Marked allow(dead_code) because the emission-site hook
+    /// (observing feedback-injection or capability-policy change
+    /// events) lives outside this crate; the helper is published
+    /// so host code composes cleanly without rolling its own event
+    /// JSON.
+    #[allow(dead_code)]
+    pub fn invalidated_event(&mut self, areas: Vec<&str>) -> DapResponse {
+        let seq = self.next_seq();
+        DapResponse::event(
+            seq,
+            "invalidated",
+            Some(json!({
+                "areas": areas,
+                "threadId": self.current_thread_id as i64,
+            })),
+        )
     }
 
     /// DAP `cancel` request (#108). The client supplies a

@@ -88,6 +88,13 @@ pub struct Capabilities {
     pub supports_exception_breakpoint_filters: bool,
     pub supports_terminate_request: bool,
     pub supports_cancel_request: bool,
+    #[serde(rename = "supportsCompletionsRequest")]
+    pub supports_completions_request: bool,
+    /// DAP `invalidated` event opt-in — #110 fires this when
+    /// agent_inject_feedback or capability-policy changes mutate
+    /// state the IDE is already showing (Variables, Threads…).
+    #[serde(rename = "supportsInvalidatedEvent")]
+    pub supports_invalidated_event: bool,
     pub supports_harn_host_call: bool,
     /// Custom capability: advertises the `burin/promptProvenance` and
     /// `burin/promptConsumers` reverse-response requests that power the
@@ -102,7 +109,7 @@ impl Default for Capabilities {
         Self {
             supports_configuration_done_request: true,
             supports_evaluate_for_hovers: true,
-            supports_step_in_targets_request: false,
+            supports_step_in_targets_request: true,
             supports_set_variable: true,
             supports_set_expression: true,
             supports_conditional_breakpoints: true,
@@ -113,13 +120,41 @@ impl Default for Capabilities {
             supports_exception_breakpoint_filters: true,
             supports_terminate_request: true,
             supports_cancel_request: true,
+            supports_completions_request: true,
+            supports_invalidated_event: true,
             supports_harn_host_call: true,
             supports_burin_prompt_provenance: true,
-            exception_breakpoint_filters: vec![ExceptionBreakpointFilter {
-                filter: "all".to_string(),
-                label: "All Exceptions".to_string(),
-                default: false,
-            }],
+            exception_breakpoint_filters: vec![
+                ExceptionBreakpointFilter {
+                    filter: "all".to_string(),
+                    label: "All Exceptions".to_string(),
+                    default: false,
+                },
+                // Per-kind filters (#111) so users can break on, say,
+                // only tool_error + parse_failure. Mirrors the
+                // AgentEvent kinds that the agent loop emits and the
+                // ExceptionRaised event surfaces.
+                ExceptionBreakpointFilter {
+                    filter: "tool_error".to_string(),
+                    label: "Tool errors".to_string(),
+                    default: false,
+                },
+                ExceptionBreakpointFilter {
+                    filter: "llm_refusal".to_string(),
+                    label: "LLM refusals".to_string(),
+                    default: false,
+                },
+                ExceptionBreakpointFilter {
+                    filter: "budget_exceeded".to_string(),
+                    label: "Budget exhausted / loop stuck".to_string(),
+                    default: false,
+                },
+                ExceptionBreakpointFilter {
+                    filter: "parse_failure".to_string(),
+                    label: "Parse failures".to_string(),
+                    default: false,
+                },
+            ],
         }
     }
 }

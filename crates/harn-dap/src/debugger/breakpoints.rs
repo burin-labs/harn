@@ -177,13 +177,49 @@ impl Debugger {
         &mut self,
         msg: &DapMessage,
     ) -> Vec<DapResponse> {
-        self.break_on_exceptions = msg
-            .arguments
-            .as_ref()
+        // Parse both the legacy `filters: [name]` list and the
+        // newer per-filter condition form
+        // `filterOptions: [{filterId, condition}]` (#111). The two
+        // are union-merged into `exception_filters` — the map keys
+        // decide whether a raised exception kind stops; the value
+        // carries the optional condition expression.
+        let args = msg.arguments.as_ref();
+        let simple_filters = args
             .and_then(|a| a.get("filters"))
             .and_then(|f| f.as_array())
-            .map(|filters| filters.iter().any(|f| f.as_str() == Some("all")))
-            .unwrap_or(false);
+            .cloned()
+            .unwrap_or_default();
+        let filter_options = args
+            .and_then(|a| a.get("filterOptions"))
+            .and_then(|f| f.as_array())
+            .cloned()
+            .unwrap_or_default();
+
+        let mut new_filters: BTreeMap<String, Option<String>> = BTreeMap::new();
+        for filter in &simple_filters {
+            if let Some(name) = filter.as_str() {
+                new_filters.insert(name.to_string(), None);
+            }
+        }
+        for opt in &filter_options {
+            if let Some(name) = opt.get("filterId").and_then(|v| v.as_str()) {
+                let cond = opt
+                    .get("condition")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .filter(|s| !s.is_empty());
+                new_filters.insert(name.to_string(), cond);
+            }
+        }
+
+        self.exception_filters = new_filters;
+        // Legacy single-toggle behavior: "all" still acts as break-on-
+        // anything-thrown for Harn exceptions that don't have a typed
+        // kind. Any per-kind filter also keeps break_on_exceptions live
+        // because the agent-loop throwers can surface through the same
+        // Vm::Thrown path today — the filter gate in step_running_vm
+        // then narrows to the selected kinds.
+        self.break_on_exceptions = !self.exception_filters.is_empty();
 
         let seq = self.next_seq();
         vec![DapResponse::success(
@@ -192,6 +228,32 @@ impl Debugger {
             "setExceptionBreakpoints",
             None,
         )]
+    }
+
+    /// True if the filter for `kind` is enabled and (if it has a
+    /// condition) the condition evaluates truthy. Called from the
+    /// exception-path in step_running_vm to gate a stop on the
+    /// user's selection.
+    pub(crate) fn exception_filter_matches(&mut self, kind: &str) -> bool {
+        let Some(cond) = self.exception_filters.get(kind).cloned() else {
+            return false;
+        };
+        match cond {
+            None => true,
+            Some(expr) => {
+                if let Some(vm) = self.vm.as_mut() {
+                    self.runtime
+                        .block_on(async {
+                            let local = tokio::task::LocalSet::new();
+                            local.run_until(vm.evaluate_in_frame(&expr, 0)).await
+                        })
+                        .map(|v| v.is_truthy())
+                        .unwrap_or(true)
+                } else {
+                    true
+                }
+            }
+        }
     }
 
     /// Transition idle -> running. Snapshots breakpoint conditions and
