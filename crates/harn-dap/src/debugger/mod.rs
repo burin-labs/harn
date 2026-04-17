@@ -14,6 +14,17 @@ use serde_json::json;
 use crate::protocol::*;
 use state::ProgramState;
 
+fn prompt_span_kind_label(kind: harn_vm::PromptSpanKind) -> &'static str {
+    match kind {
+        harn_vm::PromptSpanKind::Text => "text",
+        harn_vm::PromptSpanKind::Expr => "expr",
+        harn_vm::PromptSpanKind::LegacyBareInterp => "legacy_bare",
+        harn_vm::PromptSpanKind::If => "if",
+        harn_vm::PromptSpanKind::ForIteration => "for_iteration",
+        harn_vm::PromptSpanKind::Include => "include",
+    }
+}
+
 impl Debugger {
     pub fn handle_message(&mut self, msg: DapMessage) -> Vec<DapResponse> {
         let command = msg.command.as_deref().unwrap_or("");
@@ -32,9 +43,14 @@ impl Debugger {
             "scopes" => self.handle_scopes(&msg),
             "variables" => self.handle_variables(&msg),
             "evaluate" => self.handle_evaluate(&msg),
+            "setVariable" => self.handle_set_variable(&msg),
+            "setExpression" => self.handle_set_expression(&msg),
+            "restartFrame" => self.handle_restart_frame(&msg),
             "setExceptionBreakpoints" => self.handle_set_exception_breakpoints(&msg),
             "disconnect" => self.handle_disconnect(&msg),
             "harnPing" => self.handle_ping(&msg),
+            "burin/promptProvenance" => self.handle_prompt_provenance(&msg),
+            "burin/promptConsumers" => self.handle_prompt_consumers(&msg),
             _ => {
                 vec![DapResponse::success(
                     self.next_seq(),
@@ -185,6 +201,99 @@ impl Debugger {
                 "running": self.running,
                 "stopped": self.stopped,
             })),
+        )]
+    }
+
+    /// Custom `burin/promptProvenance` request — map an output byte
+    /// offset in a rendered prompt to the originating `.harn.prompt`
+    /// source span. The IDE uses this to highlight the template range
+    /// that produced the chunk the user clicked in the LLM transcript
+    /// view. See burin-code issues #93 and #94 for the UX backing.
+    fn handle_prompt_provenance(&mut self, msg: &DapMessage) -> Vec<DapResponse> {
+        let args = msg.arguments.as_ref();
+        let prompt_id = args
+            .and_then(|a| a.get("promptId"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let output_offset = args
+            .and_then(|a| a.get("outputOffset"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as usize;
+        if prompt_id.is_empty() {
+            return vec![self.dap_error(msg, "burin/promptProvenance", "missing 'promptId'")];
+        }
+        match harn_vm::lookup_prompt_span(&prompt_id, output_offset) {
+            Some((template_uri, span)) => {
+                let seq = self.next_seq();
+                vec![DapResponse::success(
+                    seq,
+                    msg.seq,
+                    "burin/promptProvenance",
+                    Some(json!({
+                        "templateUri": template_uri,
+                        "templateLine": span.template_line,
+                        "templateCol": span.template_col,
+                        "outputStart": span.output_start,
+                        "outputEnd": span.output_end,
+                        "kind": prompt_span_kind_label(span.kind),
+                        "boundValue": span.bound_value,
+                    })),
+                )]
+            }
+            None => vec![self.dap_error(
+                msg,
+                "burin/promptProvenance",
+                &format!(
+                    "no span found for promptId '{prompt_id}' at outputOffset {output_offset}"
+                ),
+            )],
+        }
+    }
+
+    /// Custom `burin/promptConsumers` request — given a template URI
+    /// and a line range, return every registered render's spans that
+    /// drew from that region. Powers the template → transcript
+    /// "which runs used this helper?" navigation.
+    fn handle_prompt_consumers(&mut self, msg: &DapMessage) -> Vec<DapResponse> {
+        let args = msg.arguments.as_ref();
+        let template_uri = args
+            .and_then(|a| a.get("templateUri"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let template_line_start = args
+            .and_then(|a| a.get("templateLineStart"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(1) as usize;
+        let template_line_end = args
+            .and_then(|a| a.get("templateLineEnd"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(usize::MAX as u64) as usize;
+        if template_uri.is_empty() {
+            return vec![self.dap_error(msg, "burin/promptConsumers", "missing 'templateUri'")];
+        }
+        let consumers =
+            harn_vm::lookup_prompt_consumers(&template_uri, template_line_start, template_line_end);
+        let payload: Vec<_> = consumers
+            .into_iter()
+            .map(|(prompt_id, span)| {
+                json!({
+                    "promptId": prompt_id,
+                    "templateLine": span.template_line,
+                    "templateCol": span.template_col,
+                    "outputStart": span.output_start,
+                    "outputEnd": span.output_end,
+                    "kind": prompt_span_kind_label(span.kind),
+                })
+            })
+            .collect();
+        let seq = self.next_seq();
+        vec![DapResponse::success(
+            seq,
+            msg.seq,
+            "burin/promptConsumers",
+            Some(json!({ "consumers": payload })),
         )]
     }
 

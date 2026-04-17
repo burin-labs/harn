@@ -101,7 +101,9 @@ fn words_to_kebab<S: AsRef<str>>(words: &[S]) -> String {
     out
 }
 
-use crate::stdlib::template::render_template_result;
+use crate::stdlib::template::{
+    render_template_result, render_template_with_provenance, PromptSourceSpan, PromptSpanKind,
+};
 
 fn render_asset(args: &[VmValue]) -> Result<VmValue, VmError> {
     let path = args.first().map(|a| a.display()).unwrap_or_default();
@@ -117,6 +119,100 @@ fn render_asset(args: &[VmValue]) -> Result<VmValue, VmError> {
     let rendered = render_template_result(&template, bindings, base, Some(&resolved))
         .map_err(VmError::from)?;
     Ok(VmValue::String(Rc::from(rendered)))
+}
+
+/// `render_with_provenance(path, bindings)` — the debugger's hook for
+/// the prompt-template source-map UX (burin-code #93/#94). Returns
+/// `{ text: string, template_uri: string, spans: list<dict> }` where
+/// each span carries the template range that produced an output byte
+/// range so the IDE can highlight the originating `.harn.prompt`
+/// section when a user clicks a chunk of the rendered prompt.
+fn render_asset_with_provenance(args: &[VmValue]) -> Result<VmValue, VmError> {
+    let path = args.first().map(|a| a.display()).unwrap_or_default();
+    let resolved = crate::stdlib::process::resolve_source_asset_path(&path);
+    let template = std::fs::read_to_string(&resolved).map_err(|e| {
+        VmError::Thrown(VmValue::String(Rc::from(format!(
+            "Failed to read template {}: {e}",
+            resolved.display()
+        ))))
+    })?;
+    let base = resolved.parent();
+    let bindings = args.get(1).and_then(|a| a.as_dict());
+    let (rendered, spans) =
+        render_template_with_provenance(&template, bindings, base, Some(&resolved), true)
+            .map_err(VmError::from)?;
+    // Register in the thread-local provenance map so the DAP adapter
+    // can answer `burin/promptProvenance` / `burin/promptConsumers`
+    // queries for this render by id — the IDE only needs the id;
+    // span payloads arrive over the DAP channel on demand.
+    let prompt_id = crate::stdlib::template::register_prompt(
+        resolved.display().to_string(),
+        rendered.clone(),
+        spans.clone(),
+    );
+    Ok(provenance_result_dict(
+        rendered,
+        resolved.display().to_string(),
+        prompt_id,
+        &spans,
+    ))
+}
+
+fn provenance_result_dict(
+    rendered: String,
+    template_uri: String,
+    prompt_id: String,
+    spans: &[PromptSourceSpan],
+) -> VmValue {
+    let spans_list: Vec<VmValue> = spans.iter().map(span_to_vm_dict).collect();
+    let mut out = std::collections::BTreeMap::new();
+    out.insert("text".to_string(), VmValue::String(Rc::from(rendered)));
+    out.insert(
+        "template_uri".to_string(),
+        VmValue::String(Rc::from(template_uri)),
+    );
+    out.insert(
+        "prompt_id".to_string(),
+        VmValue::String(Rc::from(prompt_id)),
+    );
+    out.insert("spans".to_string(), VmValue::List(Rc::new(spans_list)));
+    VmValue::Dict(Rc::new(out))
+}
+
+fn span_to_vm_dict(span: &PromptSourceSpan) -> VmValue {
+    let mut d = std::collections::BTreeMap::new();
+    d.insert(
+        "template_line".into(),
+        VmValue::Int(span.template_line as i64),
+    );
+    d.insert(
+        "template_col".into(),
+        VmValue::Int(span.template_col as i64),
+    );
+    d.insert(
+        "output_start".into(),
+        VmValue::Int(span.output_start as i64),
+    );
+    d.insert("output_end".into(), VmValue::Int(span.output_end as i64));
+    d.insert(
+        "kind".into(),
+        VmValue::String(Rc::from(span_kind_label(span.kind))),
+    );
+    if let Some(ref v) = span.bound_value {
+        d.insert("bound_value".into(), VmValue::String(Rc::from(v.as_str())));
+    }
+    VmValue::Dict(Rc::new(d))
+}
+
+fn span_kind_label(kind: PromptSpanKind) -> &'static str {
+    match kind {
+        PromptSpanKind::Text => "text",
+        PromptSpanKind::Expr => "expr",
+        PromptSpanKind::LegacyBareInterp => "legacy_bare",
+        PromptSpanKind::If => "if",
+        PromptSpanKind::ForIteration => "for_iteration",
+        PromptSpanKind::Include => "include",
+    }
 }
 
 pub(crate) fn register_string_builtins(vm: &mut Vm) {
@@ -366,4 +462,7 @@ pub(crate) fn register_string_builtins(vm: &mut Vm) {
 
     vm.register_builtin("render", |args, _out| render_asset(args));
     vm.register_builtin("render_prompt", |args, _out| render_asset(args));
+    vm.register_builtin("render_with_provenance", |args, _out| {
+        render_asset_with_provenance(args)
+    });
 }

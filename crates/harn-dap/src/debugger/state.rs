@@ -81,6 +81,11 @@ pub struct Debugger {
     /// each time we transition idle->running so condition edits between
     /// runs take effect.
     pub(crate) bp_conditions: Vec<(i64, Option<String>)>,
+    /// Per-breakpoint-id hit counter, keyed by `Breakpoint.id`. Increments
+    /// on every raw VM hit *before* condition/logpoint evaluation so
+    /// `hitCondition` expressions see a monotonic count even when the
+    /// user's condition causes the breakpoint to skip.
+    pub(crate) bp_hit_counts: BTreeMap<i64, u64>,
     /// Set by handle_pause; the next VM step honors it by emitting a
     /// stopped event with reason="pause" and clearing the flag.
     pub(crate) pending_pause: bool,
@@ -120,6 +125,7 @@ impl Debugger {
             host_bridge: None,
             running: false,
             bp_conditions: Vec::new(),
+            bp_hit_counts: BTreeMap::new(),
             pending_pause: false,
             active_progress_id: None,
             steps_since_progress_update: 0,

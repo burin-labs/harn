@@ -42,6 +42,14 @@ pub(crate) struct CallFrame {
     pub(crate) ip: usize,
     pub(crate) stack_base: usize,
     pub(crate) saved_env: VmEnv,
+    /// Env snapshot captured at call-time, *after* argument binding. Used
+    /// by the debugger's `restartFrame` to rewind this frame to its
+    /// entry state (re-binding args from the original values) without
+    /// re-entering the call site. Cheap to clone because `VmEnv` is
+    /// already cloned into `saved_env` on every call. `None` for
+    /// scratch frames (evaluate, import init) where restart isn't
+    /// meaningful.
+    pub(crate) initial_env: Option<VmEnv>,
     /// Iterator stack depth to restore when this frame unwinds.
     pub(crate) saved_iterator_depth: usize,
     /// Function name for stack traces (empty for top-level pipeline).
@@ -293,13 +301,15 @@ impl Vm {
         false
     }
 
-    /// Enable step mode (stop at next line).
+    /// Enable step mode (stop at the next source line regardless of
+    /// frame depth — i.e. step-in semantics, descending into calls).
     pub fn set_step_mode(&mut self, step: bool) {
         self.step_mode = step;
-        self.step_frame_depth = self.frames.len();
+        self.step_frame_depth = usize::MAX;
     }
 
-    /// Enable step-over mode (stop at next line at same or lower frame depth).
+    /// Enable step-over mode (stop at the next source line in the current
+    /// frame or a shallower one, skipping past any nested calls).
     pub fn set_step_over(&mut self) {
         self.step_mode = true;
         self.step_frame_depth = self.frames.len();
@@ -318,9 +328,16 @@ impl Vm {
         self.debug_hook = None;
     }
 
-    /// Enable step-out mode (stop when returning from current frame).
+    /// Enable step-out mode (stop at the next source line *after* the
+    /// current frame has returned — strictly shallower than where the
+    /// user requested the step-out).
     pub fn set_step_out(&mut self) {
         self.step_mode = true;
+        // Condition site compares `frames.len() <= step_frame_depth`, so
+        // storing N-1 makes the stop fire only after the current frame
+        // pops (frames.len() drops from N to N-1 or less). Clamp to 0 for
+        // the top frame — caller handles that via the usize::MAX sentinel
+        // if they wanted step-in semantics.
         self.step_frame_depth = self.frames.len().saturating_sub(1);
     }
 
@@ -382,8 +399,17 @@ impl Vm {
 
     /// Execute one instruction, returning whether to stop (breakpoint/step).
     /// Returns Ok(None) to continue, Ok(Some(val)) on program end, Err on error.
+    ///
+    /// Line-change detection reads the line of the instruction we're
+    /// *about to execute* (`lines[ip]`) rather than the byte before
+    /// `ip`. After a jump, `ip-1` still points into the skipped region,
+    /// which previously reported phantom stops on the tail of a
+    /// not-taken branch (e.g. `host_metadata_save()` highlighted even
+    /// though `any_stale` was false). Using `lines[ip]` — combined with
+    /// cleanup ops emitted at line 0 after branch/loop exits — keeps
+    /// the debugger aligned with what's actually going to run.
     pub async fn step_execute(&mut self) -> Result<Option<(VmValue, bool)>, VmError> {
-        let current_line = self.current_line();
+        let current_line = self.upcoming_line();
         let line_changed = current_line != self.last_line && current_line > 0;
 
         if line_changed {
@@ -402,7 +428,12 @@ impl Vm {
                 return Ok(Some((VmValue::Nil, true)));
             }
 
-            if self.step_mode && self.frames.len() <= self.step_frame_depth + 1 {
+            // step_frame_depth is the deepest frame count at which a stop
+            // is acceptable. set_step_mode uses usize::MAX (any depth,
+            // step-in), set_step_over uses N (same frame or shallower),
+            // set_step_out uses N-1 (strictly shallower than where the
+            // step-out was requested).
+            if self.step_mode && self.frames.len() <= self.step_frame_depth {
                 self.step_mode = false;
                 self.stopped = true;
                 return Ok(Some((VmValue::Nil, true)));
@@ -411,6 +442,243 @@ impl Vm {
 
         self.stopped = false;
         self.execute_one_cycle().await
+    }
+
+    /// Line of the instruction *about to execute* — used by the
+    /// debugger for line-change detection so the first cycle after a
+    /// jump doesn't report a stale line from the skipped region.
+    fn upcoming_line(&self) -> usize {
+        if let Some(frame) = self.frames.last() {
+            if frame.ip < frame.chunk.lines.len() {
+                return frame.chunk.lines[frame.ip] as usize;
+            }
+        }
+        0
+    }
+
+    /// Number of live call frames. Used by the DAP adapter to
+    /// translate stackTrace ids (1-based, innermost first) back to
+    /// the VM's 0-based outermost-first index when processing
+    /// `restartFrame`.
+    pub fn frame_count(&self) -> usize {
+        self.frames.len()
+    }
+
+    /// Rewind the given frame to its entry state so stepping resumes
+    /// from the first instruction of the function with the original
+    /// arguments re-bound. Higher frames above `frame_id` are dropped.
+    /// Returns an error if the frame has no captured `initial_env`
+    /// (scratch / evaluator frames don't) or if the id is out of range.
+    ///
+    /// Side effects already performed by the restarted frame (tool
+    /// calls, file writes, host_call round-trips) are *not* rolled
+    /// back — DAP leaves that to the adapter's discretion. The IDE
+    /// should warn on frames whose source text contains obvious
+    /// side-effectful calls before invoking restartFrame.
+    pub fn restart_frame(&mut self, frame_id: usize) -> Result<(), VmError> {
+        if frame_id >= self.frames.len() {
+            return Err(VmError::Runtime(format!(
+                "restartFrame: frame id {frame_id} out of range (have {} frames)",
+                self.frames.len()
+            )));
+        }
+        let Some(initial_env) = self.frames[frame_id].initial_env.clone() else {
+            return Err(VmError::Runtime(
+                "restartFrame: target frame was not captured for restart (scratch / evaluator frame)".into(),
+            ));
+        };
+        // Drop every frame above the target. Each pop restores its
+        // saved_iterator_depth into `self.iterators` so iterator state
+        // unwinds consistently.
+        while self.frames.len() > frame_id + 1 {
+            let popped = self.frames.pop().expect("bounds checked above");
+            self.iterators.truncate(popped.saved_iterator_depth);
+        }
+        // Rewind the target frame.
+        let frame = self
+            .frames
+            .last_mut()
+            .expect("frame_id within bounds guarantees a frame");
+        frame.ip = 0;
+        let stack_base = frame.stack_base;
+        let saved_iter_depth = frame.saved_iterator_depth;
+        self.stack.truncate(stack_base);
+        self.iterators.truncate(saved_iter_depth);
+        self.env = initial_env;
+        self.last_line = 0;
+        self.stopped = false;
+        Ok(())
+    }
+
+    /// Assign a new value to a named binding in the paused VM's env.
+    /// Returns the value that was actually stored (after coercion, if
+    /// the VM performed any) so the caller can echo it back to the
+    /// DAP client. Fails if the name does not resolve to a mutable
+    /// binding in any live scope.
+    ///
+    /// The provided `value_expr` goes through the unified evaluator so
+    /// callers can type expressions like `plan.tasks.len() + 1` in the
+    /// Locals inline-edit field, not just literals.
+    pub async fn set_variable_in_frame(
+        &mut self,
+        name: &str,
+        value_expr: &str,
+        frame_id: usize,
+    ) -> Result<VmValue, VmError> {
+        let value = self.evaluate_in_frame(value_expr, frame_id).await?;
+        // Debug-specific assign: bypasses the `let` immutability gate
+        // because the user is explicitly editing in the IDE, and
+        // almost every pipeline binding is `let`. The underlying
+        // binding's mutability flag is preserved so runtime behavior
+        // after the override is unchanged.
+        self.env
+            .assign_debug(name, value.clone())
+            .map_err(|e| match e {
+                VmError::UndefinedVariable(n) => {
+                    VmError::Runtime(format!("setVariable: '{n}' is not in the current scope"))
+                }
+                other => other,
+            })?;
+        Ok(value)
+    }
+
+    /// Evaluate a Harn expression against the currently paused frame's
+    /// scope and return its value. This is the single evaluation path
+    /// used by hover tips, watch expressions, conditional breakpoints,
+    /// logpoint interpolation, and `setVariable` / `setExpression`
+    /// before we had a unified evaluator there were four separate
+    /// mini-parsers, each with its own rough edges (see burin-code #85).
+    ///
+    /// The expression is wrapped as `let __r = (<expr>)` so arbitrary
+    /// infix chains, ternaries, and access paths parse uniformly. A
+    /// scratch `CallFrame` runs the wrapped bytecode with `saved_env`
+    /// pointing at the caller's env, so the compiled expression sees
+    /// every local in scope. When the scratch frame pops, the caller's
+    /// env is automatically restored.
+    ///
+    /// A fixed instruction budget guards against runaway expressions
+    /// (infinite loops, accidental recursion) wedging the debugger.
+    /// Side effects — including `llm_call`, `host_*`, and file mutators
+    /// — are not blocked here; callers that invoke this for read-only
+    /// surfaces (hover, watch) should reject obviously-side-effectful
+    /// expressions before calling.
+    pub async fn evaluate_in_frame(
+        &mut self,
+        expr: &str,
+        _frame_id: usize,
+    ) -> Result<VmValue, VmError> {
+        let trimmed = expr.trim();
+        if trimmed.is_empty() {
+            return Err(VmError::Runtime("evaluate: empty expression".into()));
+        }
+
+        // Wrap as a pipeline whose body *returns* the expression. The
+        // explicit `return` compiles to `push value + Op::Return`, and
+        // Op::Return's frame-exit path pushes that value onto the
+        // caller's stack — which is where we read it from below.
+        // Avoids the script-mode compile path that trails a Pop+Nil
+        // sequence after every expression statement, which would
+        // clobber the result before we could capture it.
+        let wrapped = format!("pipeline default() {{\n  return ({trimmed})\n}}\n");
+        let program = harn_parser::check_source_strict(&wrapped)
+            .map_err(|e| VmError::Runtime(format!("evaluate: parse error: {e}")))?;
+        let mut chunk = crate::compiler::Compiler::new()
+            .compile(&program)
+            .map_err(|e| VmError::Runtime(format!("evaluate: compile error: {e}")))?;
+        // Inherit the current frame's source file so any runtime error
+        // enriched with `(line N)` attributes cleanly.
+        if let Some(current) = self.frames.last() {
+            chunk.source_file = current.chunk.source_file.clone();
+        }
+
+        // Snapshot every piece of VM state the scratch frame could
+        // perturb. Evaluation MUST be transparent: step state, scope
+        // depth, iterator depth, and the line-change baseline all
+        // restore on exit so the paused session continues exactly as
+        // before the user typed an expression into the REPL.
+        let saved_stack_len = self.stack.len();
+        let saved_frame_count = self.frames.len();
+        let saved_iter_depth = self.iterators.len();
+        let saved_scope_depth = self.env.scope_depth();
+        let saved_last_line = self.last_line;
+        let saved_step_mode = self.step_mode;
+        let saved_step_frame_depth = self.step_frame_depth;
+        let saved_stopped = self.stopped;
+        let saved_env = self.env.clone();
+
+        // Disable stepping during evaluation; otherwise the debug hook
+        // would fire on every synthetic line and block the pause UI.
+        self.step_mode = false;
+        self.stopped = false;
+
+        self.frames.push(CallFrame {
+            chunk,
+            ip: 0,
+            stack_base: saved_stack_len,
+            saved_env,
+            // Scratch evaluator frames never accept restartFrame — the
+            // REPL/watch user expects read-only inspection semantics,
+            // not replay — so skip the clone.
+            initial_env: None,
+            saved_iterator_depth: saved_iter_depth,
+            fn_name: "<eval>".to_string(),
+            argc: 0,
+            saved_source_dir: self.source_dir.clone(),
+            module_functions: None,
+            module_state: None,
+        });
+
+        // Drive one op at a time with a fixed budget. A pure expression
+        // is typically < 20 instructions; 10k gives plenty of headroom
+        // for e.g. a list comprehension without letting a bad loop
+        // hang the debugger forever.
+        const MAX_EVAL_STEPS: usize = 10_000;
+        let mut err: Option<VmError> = None;
+        for _ in 0..MAX_EVAL_STEPS {
+            if self.frames.len() <= saved_frame_count {
+                break;
+            }
+            match self.execute_one_cycle().await {
+                Ok(_) => {
+                    if self.frames.len() <= saved_frame_count {
+                        break;
+                    }
+                }
+                Err(e) => {
+                    err = Some(e);
+                    break;
+                }
+            }
+        }
+
+        // Read the result before restoring the stack — frame exit
+        // pushes the last-computed value onto the caller's stack, so
+        // it sits at `saved_stack_len` if execution completed cleanly.
+        let result = if self.stack.len() > saved_stack_len {
+            Some(self.stack[saved_stack_len].clone())
+        } else {
+            None
+        };
+
+        // Unconditional cleanup so a mid-execution error doesn't leak
+        // scratch state into the live session.
+        self.frames.truncate(saved_frame_count);
+        self.stack.truncate(saved_stack_len);
+        self.iterators.truncate(saved_iter_depth);
+        self.env.truncate_scopes(saved_scope_depth);
+        self.last_line = saved_last_line;
+        self.step_mode = saved_step_mode;
+        self.step_frame_depth = saved_step_frame_depth;
+        self.stopped = saved_stopped;
+
+        if let Some(e) = err {
+            return Err(e);
+        }
+        result.ok_or_else(|| {
+            VmError::Runtime(
+                "evaluate: step budget exceeded before the expression produced a value".into(),
+            )
+        })
     }
 
     async fn execute_one_cycle(&mut self) -> Result<Option<(VmValue, bool)>, VmError> {
@@ -492,11 +760,17 @@ impl Vm {
 
     /// Initialize execution (push the initial frame).
     pub fn start(&mut self, chunk: &Chunk) {
+        let initial_env = self.env.clone();
         self.frames.push(CallFrame {
             chunk: chunk.clone(),
             ip: 0,
             stack_base: self.stack.len(),
             saved_env: self.env.clone(),
+            // The top-level pipeline frame captures env at start so
+            // restartFrame on the outermost frame rewinds to the
+            // pre-pipeline state — basically "restart session" in
+            // debugger terms.
+            initial_env: Some(initial_env),
             saved_iterator_depth: self.iterators.len(),
             fn_name: String::new(),
             argc: 0,
@@ -678,11 +952,13 @@ impl Vm {
         module_functions: Option<ModuleFunctionRegistry>,
         module_state: Option<crate::value::ModuleState>,
     ) -> Result<VmValue, VmError> {
+        let initial_env = self.env.clone();
         self.frames.push(CallFrame {
             chunk: chunk.clone(),
             ip: 0,
             stack_base: self.stack.len(),
             saved_env: self.env.clone(),
+            initial_env: Some(initial_env),
             saved_iterator_depth: self.iterators.len(),
             fn_name: String::new(),
             argc,
@@ -927,6 +1203,10 @@ impl Vm {
             }
         }
 
+        // Snapshot the env *after* argument binding so restartFrame
+        // can rewind this function to its entry state with the same
+        // args re-applied. Cheap relative to the call itself.
+        let initial_env = call_env.clone();
         self.env = call_env;
 
         self.frames.push(CallFrame {
@@ -934,6 +1214,7 @@ impl Vm {
             ip: 0,
             stack_base: self.stack.len(),
             saved_env,
+            initial_env: Some(initial_env),
             saved_iterator_depth: self.iterators.len(),
             fn_name: closure.func.name.clone(),
             argc: args.len(),
@@ -1245,6 +1526,7 @@ mod tests {
     use super::*;
     use crate::compiler::Compiler;
     use crate::stdlib::register_vm_stdlib;
+    use crate::values_equal;
     use harn_lexer::Lexer;
     use harn_parser::Parser;
 
@@ -1298,6 +1580,276 @@ mod tests {
                 })
                 .await
         })
+    }
+
+    /// Drive the VM forward from a `start()`ed chunk until it reaches
+    /// the first breakpoint (or exhausts the step budget). Returns the
+    /// VM positioned in whatever frame the breakpoint lives in. Used
+    /// by the `evaluate_in_frame` tests below so we can inspect a paused
+    /// scope without wiring a full DAP session.
+    fn run_until_paused(vm: &mut Vm, chunk: &Chunk) {
+        vm.start(chunk);
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let local = tokio::task::LocalSet::new();
+            local
+                .run_until(async {
+                    for _ in 0..10_000 {
+                        if vm.is_stopped() {
+                            return;
+                        }
+                        match vm.step_execute().await {
+                            Ok(Some((_, true))) => return,
+                            Ok(_) => continue,
+                            Err(e) => panic!("step_execute failed: {e}"),
+                        }
+                    }
+                    panic!("run_until_paused: step budget exceeded");
+                })
+                .await
+        })
+    }
+
+    /// Synchronously evaluate an expression on an already-paused VM.
+    /// Mirrors what harn-dap's `handle_evaluate` will do on the async
+    /// runtime it already owns.
+    fn eval(vm: &mut Vm, expr: &str) -> Result<VmValue, VmError> {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let local = tokio::task::LocalSet::new();
+            local.run_until(vm.evaluate_in_frame(expr, 0)).await
+        })
+    }
+
+    #[test]
+    fn test_evaluate_in_frame_literal() {
+        // Need a live frame for evaluate_in_frame, even for a pure
+        // expression, because the scratch chunk inherits source info
+        // from the top frame. Seed one by compiling & starting an empty
+        // pipeline that just waits on a breakpoint.
+        let mut vm = Vm::new();
+        register_vm_stdlib(&mut vm);
+        vm.set_breakpoints(vec![2]);
+        let chunk = crate::compile_source("let __seed__: int = 0\nlog(__seed__)\n").unwrap();
+        run_until_paused(&mut vm, &chunk);
+
+        assert!(values_equal(
+            &eval(&mut vm, "1 + 2").unwrap(),
+            &VmValue::Int(3)
+        ));
+        assert!(values_equal(
+            &eval(&mut vm, "\"hi\" + \" there\"").unwrap(),
+            &VmValue::String(Rc::from("hi there"))
+        ));
+        assert!(values_equal(
+            &eval(&mut vm, "5 > 3 && 2 < 4").unwrap(),
+            &VmValue::Bool(true)
+        ));
+    }
+
+    #[test]
+    fn test_evaluate_in_frame_sees_locals() {
+        let mut vm = Vm::new();
+        register_vm_stdlib(&mut vm);
+        vm.set_breakpoints(vec![3]);
+        let chunk = crate::compile_source(
+            "let user: string = \"alice\"\nlet count: int = 42\nlog(count)\n",
+        )
+        .unwrap();
+        run_until_paused(&mut vm, &chunk);
+
+        assert!(values_equal(
+            &eval(&mut vm, "user").unwrap(),
+            &VmValue::String(Rc::from("alice"))
+        ));
+        assert!(values_equal(
+            &eval(&mut vm, "count * 2").unwrap(),
+            &VmValue::Int(84)
+        ));
+        assert!(values_equal(
+            &eval(&mut vm, "user + \" has \" + to_string(count)").unwrap(),
+            &VmValue::String(Rc::from("alice has 42"))
+        ));
+    }
+
+    #[test]
+    fn test_evaluate_in_frame_does_not_leak_state() {
+        // Evaluation must be transparent to the live session — no
+        // scope leftovers, no stack residue, no step-mode drift.
+        let mut vm = Vm::new();
+        register_vm_stdlib(&mut vm);
+        vm.set_breakpoints(vec![2]);
+        let chunk = crate::compile_source("let x: int = 7\nlog(x)\n").unwrap();
+        run_until_paused(&mut vm, &chunk);
+
+        let pre_stack = vm.stack.len();
+        let pre_frames = vm.frames.len();
+        let pre_scope = vm.env.scope_depth();
+        let _ = eval(&mut vm, "x + 100").unwrap();
+        let _ = eval(&mut vm, "x * x").unwrap();
+        assert_eq!(vm.stack.len(), pre_stack);
+        assert_eq!(vm.frames.len(), pre_frames);
+        assert_eq!(vm.env.scope_depth(), pre_scope);
+        // The synthetic `__burin_eval_result__` binding must not linger
+        // in the paused scope.
+        assert!(vm.env.get("__burin_eval_result__").is_none());
+    }
+
+    #[test]
+    fn test_set_variable_in_frame_updates_let_binding() {
+        // Pipeline authors overwhelmingly use `let`; the debug
+        // setVariable path must bypass immutability or it's useless.
+        let mut vm = Vm::new();
+        register_vm_stdlib(&mut vm);
+        vm.set_breakpoints(vec![3]);
+        let chunk = crate::compile_source(
+            "let count: int = 7\nlet label: string = \"before\"\nlog(count)\n",
+        )
+        .unwrap();
+        run_until_paused(&mut vm, &chunk);
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let stored = rt.block_on(async {
+            let local = tokio::task::LocalSet::new();
+            local
+                .run_until(vm.set_variable_in_frame("count", "42", 0))
+                .await
+        });
+        assert!(values_equal(&stored.unwrap(), &VmValue::Int(42)));
+        assert!(values_equal(
+            &eval(&mut vm, "count").unwrap(),
+            &VmValue::Int(42)
+        ));
+
+        // Expression RHS — not just literals.
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let local = tokio::task::LocalSet::new();
+            local
+                .run_until(vm.set_variable_in_frame("label", "\"x\" + to_string(count)", 0))
+                .await
+                .unwrap()
+        });
+        assert!(values_equal(
+            &eval(&mut vm, "label").unwrap(),
+            &VmValue::String(Rc::from("x42"))
+        ));
+    }
+
+    #[test]
+    fn test_set_variable_in_frame_rejects_undefined() {
+        let mut vm = Vm::new();
+        register_vm_stdlib(&mut vm);
+        vm.set_breakpoints(vec![2]);
+        let chunk = crate::compile_source("let x: int = 1\nlog(x)\n").unwrap();
+        run_until_paused(&mut vm, &chunk);
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let err = rt
+            .block_on(async {
+                let local = tokio::task::LocalSet::new();
+                local
+                    .run_until(vm.set_variable_in_frame("ghost", "0", 0))
+                    .await
+            })
+            .unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("ghost"),
+            "expected 'ghost' in error, got {msg}"
+        );
+    }
+
+    #[test]
+    fn test_restart_frame_rewinds_ip_and_rebinds_args() {
+        // Pause inside a function, mutate a local, restart the frame
+        // — the mutation must vanish and execution must resume from
+        // the top of the function with the original args.
+        let mut vm = Vm::new();
+        register_vm_stdlib(&mut vm);
+        vm.set_breakpoints(vec![3]);
+        let chunk = crate::compile_source(
+            "fn inner(n: int) -> int { \n  let doubled: int = n * 2\n  log(doubled)\n  return doubled\n}\nlog(inner(21))\n",
+        )
+        .unwrap();
+        run_until_paused(&mut vm, &chunk);
+
+        // We're paused at line 3 inside `inner`. Mutate the local so
+        // we can assert the restart wiped it.
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let local = tokio::task::LocalSet::new();
+            local
+                .run_until(vm.set_variable_in_frame("doubled", "999", 0))
+                .await
+                .unwrap()
+        });
+        assert!(values_equal(
+            &eval(&mut vm, "doubled").unwrap(),
+            &VmValue::Int(999)
+        ));
+
+        // restart_frame(top_frame_index) rewinds `inner` to entry.
+        let top = vm.frame_count() - 1;
+        vm.restart_frame(top).unwrap();
+
+        // `doubled` no longer exists because the function's scope was
+        // blown away, but `n` should still be bound from the re-applied
+        // arg.
+        assert!(values_equal(
+            &eval(&mut vm, "n").unwrap(),
+            &VmValue::Int(21)
+        ));
+    }
+
+    #[test]
+    fn test_restart_frame_rejects_scratch_frames() {
+        let mut vm = Vm::new();
+        register_vm_stdlib(&mut vm);
+        vm.set_breakpoints(vec![2]);
+        let chunk = crate::compile_source("let x: int = 1\nlog(x)\n").unwrap();
+        run_until_paused(&mut vm, &chunk);
+        // The top-level pipeline frame has `initial_env: Some(_)` so
+        // restartFrame *is* valid there — our script has no inner
+        // function yet. Push a synthetic scratch frame via
+        // evaluate_in_frame (which leaves no live frame when done),
+        // then attempt restart on an out-of-range id.
+        let err = vm.restart_frame(99).unwrap_err();
+        assert!(err.to_string().contains("out of range"));
+    }
+
+    #[test]
+    fn test_evaluate_in_frame_parse_error_is_surfaced_standalone() {
+        let mut vm = Vm::new();
+        register_vm_stdlib(&mut vm);
+        vm.set_breakpoints(vec![1]);
+        let chunk = crate::compile_source("log(0)\n").unwrap();
+        run_until_paused(&mut vm, &chunk);
+
+        let err = eval(&mut vm, "(\"unterminated").unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("evaluate:"),
+            "expected evaluate error prefix, got: {msg}"
+        );
     }
 
     #[test]

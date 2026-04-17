@@ -1102,6 +1102,10 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("string")),
     },
     BuiltinSig {
+        name: "render_with_provenance",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
         name: "replace",
         return_type: Some(BuiltinReturn::Named("string")),
     },

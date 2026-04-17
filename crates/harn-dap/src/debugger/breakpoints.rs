@@ -39,6 +39,16 @@ impl Debugger {
                             .and_then(|c| c.as_str())
                             .map(|s| s.to_string())
                             .filter(|s| !s.is_empty());
+                        let hit_condition = bp
+                            .get("hitCondition")
+                            .and_then(|c| c.as_str())
+                            .map(|s| s.to_string())
+                            .filter(|s| !s.is_empty());
+                        let log_message = bp
+                            .get("logMessage")
+                            .and_then(|c| c.as_str())
+                            .map(|s| s.to_string())
+                            .filter(|s| !s.is_empty());
                         self.breakpoints.push(Breakpoint {
                             id,
                             verified: true,
@@ -48,11 +58,17 @@ impl Debugger {
                                 path: Some(p),
                             }),
                             condition,
+                            hit_condition,
+                            log_message,
                         });
                     }
                 }
             }
         }
+        // Breakpoints replaced for this file — hit counts from the prior
+        // set would be attached to now-stale ids, so drop them. Hit
+        // counts on breakpoints in other files survive.
+        self.bp_hit_counts.clear();
 
         if let Some(vm) = &mut self.vm {
             // Push per-file breakpoint sets so the VM can match
@@ -118,27 +134,98 @@ impl Debugger {
             .collect();
         self.var_refs.clear();
         self.next_var_ref = 100;
+        // Fresh run → fresh hit counts, so hitCondition and logpoint
+        // counters start over for every debug session.
+        self.bp_hit_counts.clear();
         self.running = self.vm.is_some();
     }
 }
 
-/// Check if a conditional breakpoint should fire.
-pub(crate) fn check_condition(
+/// Conditional-breakpoint evaluation outcome. Distinguishes "fire"
+/// from "skip" so stepping can continue silently, and surfaces
+/// expression errors separately so the IDE can render a diagnostic
+/// without silently turning the breakpoint into a no-op.
+pub(crate) enum BreakpointCondition {
+    Fire,
+    Skip,
+    /// Expression evaluator returned an error; message goes to the
+    /// Debug Console so the user can fix the typo.
+    Error(String),
+}
+
+/// How the debugger should react to a breakpoint hit after all three
+/// gating fields (`hitCondition`, `logMessage`, `condition`) are
+/// honoured. A logpoint matches VS Code behavior: emit an `output`
+/// event and continue without stopping.
+pub(crate) enum BreakpointAction {
+    /// Stop execution and emit a `stopped` event.
+    Stop,
+    /// Continue; do not notify the IDE.
+    Skip,
+    /// Do not stop, but emit the given interpolated log text as a DAP
+    /// `output` event with category `console`.
+    LogAndContinue(String),
+    /// A gating expression errored; surface the diagnostic and skip.
+    Diagnostic(String),
+}
+
+/// Parse a VS Code-style hit-condition expression.
+/// Accepts `N`, `>=N`, `>N`, `%N`, `==N` (and the obvious `=N` alias).
+/// Returns `None` on a malformed input so the caller can surface an
+/// error instead of silently never firing.
+pub(crate) fn hit_condition_matches(expr: &str, hit_count: u64) -> Option<bool> {
+    let expr = expr.trim();
+    if let Some(rest) = expr.strip_prefix(">=") {
+        return rest.trim().parse::<u64>().ok().map(|n| hit_count >= n);
+    }
+    if let Some(rest) = expr.strip_prefix("<=") {
+        return rest.trim().parse::<u64>().ok().map(|n| hit_count <= n);
+    }
+    if let Some(rest) = expr.strip_prefix("==") {
+        return rest.trim().parse::<u64>().ok().map(|n| hit_count == n);
+    }
+    if let Some(rest) = expr.strip_prefix('>') {
+        return rest.trim().parse::<u64>().ok().map(|n| hit_count > n);
+    }
+    if let Some(rest) = expr.strip_prefix('<') {
+        return rest.trim().parse::<u64>().ok().map(|n| hit_count < n);
+    }
+    if let Some(rest) = expr.strip_prefix('%') {
+        let n = rest.trim().parse::<u64>().ok()?;
+        if n == 0 {
+            return None;
+        }
+        return Some(hit_count > 0 && hit_count.is_multiple_of(n));
+    }
+    if let Some(rest) = expr.strip_prefix('=') {
+        return rest.trim().parse::<u64>().ok().map(|n| hit_count == n);
+    }
+    // Bare `N` — fire exactly on the Nth hit.
+    expr.parse::<u64>().ok().map(|n| hit_count == n)
+}
+
+/// Look up the condition attached to the breakpoint at `line`, if any.
+pub(crate) fn condition_for_line(
     bp_conditions: &[(i64, Option<String>)],
     line: i64,
-    variables: &BTreeMap<String, VmValue>,
-) -> bool {
-    let condition = bp_conditions
+) -> Option<&str> {
+    bp_conditions
         .iter()
         .find(|(l, _)| *l == line)
-        .and_then(|(_, c)| c.as_deref());
+        .and_then(|(_, c)| c.as_deref())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+}
 
-    let condition = match condition {
-        Some(c) => c.trim(),
-        None => return true,
-    };
-
-    // Minimal evaluator: `var <op> val` for comparison ops, or bare `var` for truthy.
+/// Legacy wrapper retained for the conformance suite: evaluate the
+/// condition against a pre-captured `variables` map using the minimal
+/// `var <op> literal` parser. New code should route through
+/// `Debugger::evaluate_condition` so arbitrary expressions work.
+#[allow(dead_code)]
+pub(crate) fn check_condition_literal(
+    condition: &str,
+    variables: &BTreeMap<String, VmValue>,
+) -> bool {
     for op in &["==", "!=", ">=", "<=", ">", "<"] {
         if let Some((lhs, rhs)) = condition.split_once(op) {
             let lhs = lhs.trim();
@@ -161,4 +248,171 @@ pub(crate) fn check_condition(
     }
 
     true
+}
+
+impl Debugger {
+    /// Evaluate a breakpoint's condition expression against the live
+    /// VM frame using the unified evaluator. Falls back to the legacy
+    /// literal matcher only if the VM is mysteriously absent (which
+    /// shouldn't happen when a breakpoint fires, but belt-and-braces).
+    pub(crate) fn evaluate_condition(
+        &mut self,
+        bp_conditions: &[(i64, Option<String>)],
+        line: i64,
+        variables: &BTreeMap<String, VmValue>,
+    ) -> BreakpointCondition {
+        let Some(condition) = condition_for_line(bp_conditions, line) else {
+            return BreakpointCondition::Fire;
+        };
+        let condition = condition.to_string();
+        if self.vm.is_none() {
+            return if check_condition_literal(&condition, variables) {
+                BreakpointCondition::Fire
+            } else {
+                BreakpointCondition::Skip
+            };
+        }
+        match self.evaluate_expression_in_vm(&condition) {
+            Ok(val) => {
+                if val.is_truthy() {
+                    BreakpointCondition::Fire
+                } else {
+                    BreakpointCondition::Skip
+                }
+            }
+            Err(err) => BreakpointCondition::Error(err),
+        }
+    }
+
+    /// Full breakpoint-hit decision: bumps the hit counter, checks
+    /// `hitCondition`, then honours `logMessage` (don't stop) or the
+    /// condition expression (stop if truthy). Returns the combined
+    /// action so the caller can decide whether to emit a stopped
+    /// event, a log line, or neither.
+    ///
+    /// Evaluated in order: (1) hit count → (2) log message if any →
+    /// (3) condition expression. Each stage is independent; a
+    /// breakpoint can combine all three.
+    pub(crate) fn classify_breakpoint_hit(
+        &mut self,
+        line: i64,
+        variables: &BTreeMap<String, VmValue>,
+    ) -> BreakpointAction {
+        // Find the matching breakpoint — there may be more than one on
+        // a line in theory, but setBreakpoints de-dupes per file so in
+        // practice the first match is authoritative.
+        let Some(bp) = self.breakpoints.iter().find(|bp| bp.line == line).cloned() else {
+            return BreakpointAction::Stop;
+        };
+
+        // Always bump the counter before gating. Mirrors VS Code: a
+        // logpoint counts as a hit for hitCondition purposes even
+        // though it won't stop.
+        let hits = {
+            let entry = self.bp_hit_counts.entry(bp.id).or_insert(0);
+            *entry += 1;
+            *entry
+        };
+
+        // Stage 1: hit-count gate.
+        if let Some(ref expr) = bp.hit_condition {
+            match hit_condition_matches(expr, hits) {
+                Some(false) => return BreakpointAction::Skip,
+                None => {
+                    return BreakpointAction::Diagnostic(format!(
+                        "Breakpoint hit-count expression '{expr}' at line {line} is \
+                         malformed (expected N, >=N, >N, <N, <=N, ==N, or %N)"
+                    ));
+                }
+                Some(true) => {}
+            }
+        }
+
+        // Stage 2: condition gate. Runs even when a log message is
+        // present so a conditional logpoint only fires its message
+        // when the condition holds.
+        let condition_ok =
+            match self.evaluate_condition(&self.bp_conditions.clone(), line, variables) {
+                BreakpointCondition::Fire => true,
+                BreakpointCondition::Skip => false,
+                BreakpointCondition::Error(msg) => {
+                    return BreakpointAction::Diagnostic(msg);
+                }
+            };
+        if !condition_ok {
+            return BreakpointAction::Skip;
+        }
+
+        // Stage 3: logpoint rendering. Logpoints do not stop the VM.
+        if let Some(template) = bp.log_message {
+            return match self.render_logpoint_template(&template) {
+                Ok(rendered) => BreakpointAction::LogAndContinue(rendered),
+                Err(msg) => BreakpointAction::Diagnostic(msg),
+            };
+        }
+
+        BreakpointAction::Stop
+    }
+
+    /// Expose the hit counter for a breakpoint id, for tests and the
+    /// future DAP `breakpointLocations` enhancement.
+    #[cfg(test)]
+    pub(crate) fn breakpoint_hit_count(&self, id: i64) -> u64 {
+        self.bp_hit_counts.get(&id).copied().unwrap_or(0)
+    }
+
+    /// Test-only escape hatch so the logpoint renderer unit tests can
+    /// poke the private implementation without standing up a full VM.
+    #[cfg(test)]
+    pub(crate) fn render_logpoint_template_for_tests(
+        &mut self,
+        template: &str,
+    ) -> Result<String, String> {
+        self.render_logpoint_template(template)
+    }
+
+    /// Expand `{expr}` interpolations in a logpoint template. The
+    /// template syntax matches VS Code: `{` opens an expression,
+    /// `}` closes it, and `\{` / `\}` escape literal braces. The
+    /// expression is evaluated with the unified evaluator so any
+    /// Harn syntax works.
+    fn render_logpoint_template(&mut self, template: &str) -> Result<String, String> {
+        let mut out = String::with_capacity(template.len());
+        let mut chars = template.chars().peekable();
+        while let Some(c) = chars.next() {
+            match c {
+                '\\' if matches!(chars.peek(), Some('{') | Some('}')) => {
+                    // Emit the literal escaped brace.
+                    out.push(chars.next().unwrap());
+                }
+                '{' => {
+                    let mut expr = String::new();
+                    let mut closed = false;
+                    for inner in chars.by_ref() {
+                        if inner == '}' {
+                            closed = true;
+                            break;
+                        }
+                        expr.push(inner);
+                    }
+                    if !closed {
+                        return Err(format!(
+                            "Logpoint template missing closing '}}' for expression '{{{expr}'",
+                        ));
+                    }
+                    if expr.trim().is_empty() {
+                        out.push('{');
+                        out.push('}');
+                        continue;
+                    }
+                    match self.evaluate_expression_in_vm(&expr) {
+                        Ok(val) => out.push_str(&val.display()),
+                        Err(err) => out.push_str(&format!("<{err}>")),
+                    }
+                }
+                other => out.push(other),
+            }
+        }
+        Ok(out)
+    }
 }

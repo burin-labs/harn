@@ -74,15 +74,23 @@ impl Compiler {
         self.chunk.emit(Op::Pop, self.line);
         self.compile_scoped_block(then_body)?;
         if let Some(else_body) = else_body {
-            let end_jump = self.chunk.emit_jump(Op::Jump, self.line);
+            // Cleanup jump + else-branch Pop share the synthetic line 0
+            // so the debugger doesn't report a phantom stop on the tail
+            // line of the then-body when the VM jumps past it.
+            let end_jump = self.chunk.emit_jump(Op::Jump, 0);
             self.chunk.patch_jump(else_jump);
-            self.chunk.emit(Op::Pop, self.line);
+            self.chunk.emit(Op::Pop, 0);
             self.compile_scoped_block(else_body)?;
             self.chunk.patch_jump(end_jump);
         } else {
             self.chunk.patch_jump(else_jump);
-            self.chunk.emit(Op::Pop, self.line);
-            self.chunk.emit(Op::Nil, self.line);
+            // Same rationale: the Pop/Nil cleanup emitted after the
+            // JumpIfFalse target is part of the compiler's expression
+            // scaffolding, not source code. Tagging these with line 0
+            // keeps step-over from stopping on a line that wasn't
+            // actually executed (see step_execute's upcoming_line()).
+            self.chunk.emit(Op::Pop, 0);
+            self.chunk.emit(Op::Nil, 0);
         }
         Ok(())
     }
@@ -108,12 +116,15 @@ impl Compiler {
         // Jump back to condition
         self.chunk.emit_u16(Op::Jump, loop_start as u16, self.line);
         self.chunk.patch_jump(exit_jump);
-        self.chunk.emit(Op::Pop, self.line);
+        // Loop-exit cleanup is synthetic — line 0 keeps the debugger
+        // from reporting a phantom stop on the tail body line when the
+        // loop condition finally turns false.
+        self.chunk.emit(Op::Pop, 0);
         let ctx = self.loop_stack.pop().unwrap();
         for patch_pos in ctx.break_patches {
             self.chunk.patch_jump(patch_pos);
         }
-        self.chunk.emit(Op::Nil, self.line);
+        self.chunk.emit(Op::Nil, 0);
         Ok(())
     }
 
@@ -151,7 +162,10 @@ impl Compiler {
         for patch_pos in ctx.break_patches {
             self.chunk.patch_jump(patch_pos);
         }
-        self.chunk.emit(Op::Nil, self.line);
+        // Synthetic Nil placeholder for the for-loop's expression value,
+        // emitted after the iterator exit jump — tagged line 0 so the
+        // debugger doesn't stop on it.
+        self.chunk.emit(Op::Nil, 0);
         Ok(())
     }
 

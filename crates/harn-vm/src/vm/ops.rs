@@ -561,6 +561,7 @@ impl super::Vm {
                     }
                     // else: has default, preamble will DefLet
                 }
+                let initial_env = call_env.clone();
                 self.env = call_env;
 
                 let argc = args.len();
@@ -569,6 +570,7 @@ impl super::Vm {
                     ip: 0,
                     stack_base,
                     saved_env: parent_env,
+                    initial_env: Some(initial_env),
                     saved_iterator_depth: self.iterators.len(),
                     fn_name: closure.func.name.clone(),
                     argc,

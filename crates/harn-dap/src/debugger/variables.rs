@@ -8,6 +8,18 @@ fn vm_type_name(val: &VmValue) -> &'static str {
     val.type_name()
 }
 
+/// True when `expr` is a bare Harn identifier — `[A-Za-z_][A-Za-z0-9_]*`.
+/// Used to gate `setExpression`'s fast path. Dotted/indexed lvalues
+/// fall through to an error until path-based assignment lands.
+fn is_simple_identifier(expr: &str) -> bool {
+    let mut chars = expr.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
 impl Debugger {
     pub(crate) fn alloc_var_ref(&mut self, children: Vec<(String, VmValue)>) -> i64 {
         let id = self.next_var_ref;
@@ -144,19 +156,45 @@ impl Debugger {
             .as_ref()
             .and_then(|a| a.get("expression"))
             .and_then(|e| e.as_str())
-            .unwrap_or("");
+            .unwrap_or("")
+            .to_string();
 
-        // DAP context is one of "watch", "repl", "hover", "clipboard"; we ignore it.
+        // DAP context: "watch", "repl", "hover", "clipboard". The unified
+        // evaluator (harn-vm's `evaluate_in_frame`) doesn't care, but we
+        // use it for presentation hints: hover values render in a popover,
+        // watches re-evaluate on every stop, repl results are interactive.
         let _context = msg
             .arguments
             .as_ref()
             .and_then(|a| a.get("context"))
             .and_then(|c| c.as_str())
-            .unwrap_or("watch");
+            .unwrap_or("watch")
+            .to_string();
 
-        match self.resolve_expression(expression) {
-            Some(val) => {
-                let variable = self.make_variable(expression.to_string(), &val);
+        // Try the fast-path structural resolver first for plain variable
+        // lookups and dotted paths — it returns a composite `VmValue`
+        // with child `variablesReference`s intact so expanding a dict
+        // or list in the Watches pane still works. Fall back to the
+        // full `evaluate_in_frame` for anything that contains operators,
+        // method calls, arithmetic, or function calls.
+        if let Some(val) = self.resolve_expression(&expression) {
+            let variable = self.make_variable(expression, &val);
+            let seq = self.next_seq();
+            return vec![DapResponse::success(
+                seq,
+                msg.seq,
+                "evaluate",
+                Some(json!({
+                    "result": variable.value,
+                    "type": variable.var_type,
+                    "variablesReference": variable.variables_reference,
+                })),
+            )];
+        }
+
+        match self.evaluate_expression_in_vm(&expression) {
+            Ok(val) => {
+                let variable = self.make_variable(expression, &val);
                 let seq = self.next_seq();
                 vec![DapResponse::success(
                     seq,
@@ -169,7 +207,7 @@ impl Debugger {
                     })),
                 )]
             }
-            None => {
+            Err(err) => {
                 let seq = self.next_seq();
                 vec![DapResponse {
                     seq,
@@ -177,15 +215,146 @@ impl Debugger {
                     request_seq: Some(msg.seq),
                     success: Some(false),
                     command: Some("evaluate".to_string()),
-                    message: Some(format!(
-                        "Cannot evaluate '{expression}': only variable lookups and dot-access \
-                         property paths are supported in the debugger"
-                    )),
+                    message: Some(err),
                     body: None,
                     event: None,
                 }]
             }
         }
+    }
+
+    /// Handle DAP `setVariable` — rebind a named local in the paused
+    /// scope. The request's `value` field is a *Harn expression*, not a
+    /// literal string, so `plan.count + 1` or `"x" + to_string(n)` both
+    /// work as right-hand sides. The response carries the newly-stored
+    /// value so the IDE can refresh the row without re-requesting
+    /// variables.
+    pub(crate) fn handle_set_variable(&mut self, msg: &DapMessage) -> Vec<DapResponse> {
+        let args = msg.arguments.as_ref();
+        let name = args
+            .and_then(|a| a.get("name"))
+            .and_then(|n| n.as_str())
+            .unwrap_or("")
+            .to_string();
+        let value_expr = args
+            .and_then(|a| a.get("value"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        if name.is_empty() {
+            return vec![self.dap_error(msg, "setVariable", "missing 'name' argument")];
+        }
+        match self.store_variable(&name, &value_expr) {
+            Ok(val) => {
+                let variable = self.make_variable(name, &val);
+                let seq = self.next_seq();
+                vec![DapResponse::success(
+                    seq,
+                    msg.seq,
+                    "setVariable",
+                    Some(json!({
+                        "value": variable.value,
+                        "type": variable.var_type,
+                        "variablesReference": variable.variables_reference,
+                    })),
+                )]
+            }
+            Err(err) => vec![self.dap_error(msg, "setVariable", &err)],
+        }
+    }
+
+    /// Handle DAP `setExpression` — like setVariable but the target is
+    /// an lvalue path (e.g. `plan.tasks[0].status`). We currently only
+    /// support plain names here; dotted/indexed paths fall through to
+    /// an error so the IDE shows a diagnostic instead of silently
+    /// no-opping. Full path support is tracked in burin-code #91 as a
+    /// follow-up.
+    pub(crate) fn handle_set_expression(&mut self, msg: &DapMessage) -> Vec<DapResponse> {
+        let args = msg.arguments.as_ref();
+        let expression = args
+            .and_then(|a| a.get("expression"))
+            .and_then(|n| n.as_str())
+            .unwrap_or("")
+            .to_string();
+        let value_expr = args
+            .and_then(|a| a.get("value"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        if !is_simple_identifier(&expression) {
+            return vec![self.dap_error(
+                msg,
+                "setExpression",
+                &format!(
+                    "setExpression only supports bare identifiers today \
+                     (got '{expression}'); file an issue if you need \
+                     path-based assignment"
+                ),
+            )];
+        }
+        match self.store_variable(&expression, &value_expr) {
+            Ok(val) => {
+                let variable = self.make_variable(expression, &val);
+                let seq = self.next_seq();
+                vec![DapResponse::success(
+                    seq,
+                    msg.seq,
+                    "setExpression",
+                    Some(json!({
+                        "value": variable.value,
+                        "type": variable.var_type,
+                        "variablesReference": variable.variables_reference,
+                    })),
+                )]
+            }
+            Err(err) => vec![self.dap_error(msg, "setExpression", &err)],
+        }
+    }
+
+    fn store_variable(&mut self, name: &str, value_expr: &str) -> Result<VmValue, String> {
+        let Some(vm) = self.vm.as_mut() else {
+            return Err("Cannot setVariable: no active VM session".into());
+        };
+        let name = name.to_string();
+        let value_expr = value_expr.to_string();
+        self.runtime
+            .block_on(async { vm.set_variable_in_frame(&name, &value_expr, 0).await })
+            .map_err(|e| format!("setVariable: {e}"))
+    }
+
+    pub(crate) fn dap_error(&mut self, msg: &DapMessage, command: &str, err: &str) -> DapResponse {
+        let seq = self.next_seq();
+        DapResponse {
+            seq,
+            msg_type: "response".to_string(),
+            request_seq: Some(msg.seq),
+            success: Some(false),
+            command: Some(command.to_string()),
+            message: Some(err.to_string()),
+            body: None,
+            event: None,
+        }
+    }
+
+    /// Drive the VM's unified `evaluate_in_frame` on the runtime the
+    /// debugger already owns. Used for conditional breakpoints,
+    /// logpoint interpolation, watch expressions beyond plain lookup,
+    /// and the REPL.
+    pub(crate) fn evaluate_expression_in_vm(
+        &mut self,
+        expression: &str,
+    ) -> Result<VmValue, String> {
+        let Some(vm) = self.vm.as_mut() else {
+            return Err(format!(
+                "Cannot evaluate '{expression}': no active VM session"
+            ));
+        };
+        let expression_owned = expression.to_string();
+        self.runtime
+            .block_on(async { vm.evaluate_in_frame(&expression_owned, 0).await })
+            .map_err(|e| format!("Cannot evaluate '{expression}': {e}"))
     }
 
     /// Resolve an expression string against the current variable state.

@@ -21,11 +21,138 @@
 //! (writes back the literal text on miss) — preserving the pre-v2 contract.
 //! All new constructs raise `TemplateError` on parse or evaluation failure.
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use crate::value::{values_equal, VmError, VmValue};
+
+// Thread-local registry of recent prompt renders keyed by `prompt_id`.
+// Populated by `render_with_provenance` so the DAP adapter can serve
+// `burin/promptProvenance` and `burin/promptConsumers` reverse queries
+// without forcing the pipeline author to pass the spans dict back up
+// through the bridge. Capped at 64 renders (FIFO) to bound memory.
+thread_local! {
+    static PROMPT_REGISTRY: RefCell<Vec<RegisteredPrompt>> = const { RefCell::new(Vec::new()) };
+}
+
+const PROMPT_REGISTRY_CAP: usize = 64;
+
+#[derive(Debug, Clone)]
+pub struct RegisteredPrompt {
+    pub prompt_id: String,
+    pub template_uri: String,
+    pub rendered: String,
+    pub spans: Vec<PromptSourceSpan>,
+}
+
+/// Record a provenance map in the thread-local registry and return the
+/// assigned `prompt_id`. Newest entries push to the back; when the cap
+/// is reached the oldest entry is dropped so the registry never grows
+/// unboundedly over long sessions.
+pub(crate) fn register_prompt(
+    template_uri: String,
+    rendered: String,
+    spans: Vec<PromptSourceSpan>,
+) -> String {
+    let prompt_id = format!("prompt-{}", next_prompt_serial());
+    PROMPT_REGISTRY.with(|reg| {
+        let mut reg = reg.borrow_mut();
+        if reg.len() >= PROMPT_REGISTRY_CAP {
+            reg.remove(0);
+        }
+        reg.push(RegisteredPrompt {
+            prompt_id: prompt_id.clone(),
+            template_uri,
+            rendered,
+            spans,
+        });
+    });
+    prompt_id
+}
+
+thread_local! {
+    static PROMPT_SERIAL: RefCell<u64> = const { RefCell::new(0) };
+}
+
+fn next_prompt_serial() -> u64 {
+    PROMPT_SERIAL.with(|s| {
+        let mut s = s.borrow_mut();
+        *s += 1;
+        *s
+    })
+}
+
+/// Resolve an output byte offset to its originating template span.
+/// Returns the innermost matching `Expr` / `LegacyBareInterp` span when
+/// one exists, falling back to broader structural spans (If / For /
+/// Include) so a click anywhere in a rendered loop iteration still
+/// navigates somewhere useful.
+pub fn lookup_prompt_span(
+    prompt_id: &str,
+    output_offset: usize,
+) -> Option<(String, PromptSourceSpan)> {
+    PROMPT_REGISTRY.with(|reg| {
+        let reg = reg.borrow();
+        let entry = reg.iter().find(|p| p.prompt_id == prompt_id)?;
+        let best = entry
+            .spans
+            .iter()
+            .filter(|s| {
+                output_offset >= s.output_start
+                    && output_offset < s.output_end.max(s.output_start + 1)
+            })
+            .min_by_key(|s| {
+                let width = s.output_end.saturating_sub(s.output_start);
+                let kind_weight = match s.kind {
+                    PromptSpanKind::Expr => 0,
+                    PromptSpanKind::LegacyBareInterp => 1,
+                    PromptSpanKind::Text => 2,
+                    PromptSpanKind::Include => 3,
+                    PromptSpanKind::ForIteration => 4,
+                    PromptSpanKind::If => 5,
+                };
+                (kind_weight, width)
+            })?
+            .clone();
+        Some((entry.template_uri.clone(), best))
+    })
+}
+
+/// Return every span across every registered prompt that overlaps a
+/// template range. Powers the inverse "which rendered ranges consumed
+/// this template region?" navigation.
+pub fn lookup_prompt_consumers(
+    template_uri: &str,
+    template_line_start: usize,
+    template_line_end: usize,
+) -> Vec<(String, PromptSourceSpan)> {
+    PROMPT_REGISTRY.with(|reg| {
+        let reg = reg.borrow();
+        reg.iter()
+            .filter(|p| p.template_uri == template_uri)
+            .flat_map(|p| {
+                let prompt_id = p.prompt_id.clone();
+                p.spans
+                    .iter()
+                    .filter(move |s| {
+                        let line = s.template_line;
+                        line > 0 && line >= template_line_start && line <= template_line_end
+                    })
+                    .cloned()
+                    .map(move |s| (prompt_id.clone(), s))
+            })
+            .collect()
+    })
+}
+
+/// Clear the registry. Wired into `reset_thread_local_state` so tests
+/// and serialized adapter sessions start from a clean slate.
+pub(crate) fn reset_prompt_registry() {
+    PROMPT_REGISTRY.with(|reg| reg.borrow_mut().clear());
+    PROMPT_SERIAL.with(|s| *s.borrow_mut() = 0);
+}
 
 /// Parse-only validation for lint/preflight. Returns a human-readable error
 /// message when the template body is syntactically invalid; `Ok(())` when the
@@ -44,6 +171,63 @@ pub(crate) fn render_template_result(
     base: Option<&Path>,
     source_path: Option<&Path>,
 ) -> Result<String, TemplateError> {
+    let (rendered, _spans) =
+        render_template_with_provenance(template, bindings, base, source_path, false)?;
+    Ok(rendered)
+}
+
+/// One byte-range in a rendered prompt mapped back to its source
+/// template. Foundation for the prompt-provenance UX (burin-code #93):
+/// hover a chunk of the live prompt in the debugger and jump to the
+/// `.harn.prompt` line that produced it.
+///
+/// `output_start` / `output_end` are byte offsets into the rendered
+/// string. `template_line` / `template_col` are 1-based positions in
+/// the source template. `bound_value` carries a short preview of the
+/// expression's runtime value when it's a scalar; omitted for
+/// structural nodes (if/for/include) so callers don't log a giant
+/// dict display for a single `{% for %}`.
+#[derive(Debug, Clone)]
+pub struct PromptSourceSpan {
+    pub template_line: usize,
+    pub template_col: usize,
+    pub output_start: usize,
+    pub output_end: usize,
+    pub kind: PromptSpanKind,
+    pub bound_value: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PromptSpanKind {
+    /// Literal template text between directives.
+    Text,
+    /// `{{ expr }}` interpolation — the most common kind the IDE
+    /// wants to highlight on hover.
+    Expr,
+    /// Legacy bare `{{ident}}` fallthrough, surfaced separately so the
+    /// IDE can visually distinguish resolved from pass-through.
+    LegacyBareInterp,
+    /// Conditional branch text that actually rendered (the taken branch).
+    If,
+    /// One loop iteration's rendered body.
+    ForIteration,
+    /// Rendered partial/include expansion. Child spans still carry
+    /// their own template_uri via a future extension (#96).
+    Include,
+}
+
+/// Provenance-aware rendering. Returns the rendered string plus — when
+/// `collect_provenance` is true — one `PromptSourceSpan` per node so the
+/// IDE can link rendered byte ranges back to template source offsets.
+/// When `collect_provenance` is false, this degrades to the cheap
+/// non-tracked rendering path that the legacy callers use.
+pub(crate) fn render_template_with_provenance(
+    template: &str,
+    bindings: Option<&BTreeMap<String, VmValue>>,
+    base: Option<&Path>,
+    source_path: Option<&Path>,
+    collect_provenance: bool,
+) -> Result<(String, Vec<PromptSourceSpan>), TemplateError> {
     let nodes = parse(template).map_err(|mut e| {
         if let Some(p) = source_path {
             e.path = Some(p.to_path_buf());
@@ -57,13 +241,18 @@ pub(crate) fn render_template_result(
         include_stack: Vec::new(),
         current_path: source_path.map(Path::to_path_buf),
     };
-    render_nodes(&nodes, &mut scope, &mut rc, &mut out).map_err(|mut e| {
+    let mut spans = if collect_provenance {
+        Some(Vec::new())
+    } else {
+        None
+    };
+    render_nodes(&nodes, &mut scope, &mut rc, &mut out, spans.as_mut()).map_err(|mut e| {
         if e.path.is_none() {
             e.path = source_path.map(Path::to_path_buf);
         }
         e
     })?;
-    Ok(out)
+    Ok((out, spans.unwrap_or_default()))
 }
 
 // =========================================================================
@@ -1212,9 +1401,10 @@ fn render_nodes(
     scope: &mut Scope<'_>,
     rc: &mut RenderCtx,
     out: &mut String,
+    mut spans: Option<&mut Vec<PromptSourceSpan>>,
 ) -> Result<(), TemplateError> {
     for n in nodes {
-        render_node(n, scope, rc, out)?;
+        render_node(n, scope, rc, out, spans.as_deref_mut())?;
     }
     Ok(())
 }
@@ -1224,22 +1414,65 @@ fn render_node(
     scope: &mut Scope<'_>,
     rc: &mut RenderCtx,
     out: &mut String,
+    mut spans: Option<&mut Vec<PromptSourceSpan>>,
 ) -> Result<(), TemplateError> {
+    // Capture the output cursor before the node writes so we can
+    // record the exact byte range it produced. Nodes that delegate to
+    // `render_nodes` (If / For / Include) record a span only after
+    // their children finish so the range covers everything.
+    let start = out.len();
     match node {
-        Node::Text(s) => out.push_str(s),
+        Node::Text(s) => {
+            out.push_str(s);
+            if let Some(spans) = spans.as_deref_mut() {
+                // Text nodes don't carry their own line/col in the AST;
+                // attribute them to the *start* of the next directive
+                // (line/col 0 is a sentinel meaning "unknown"). The IDE
+                // uses Text spans only to fill gaps between directive
+                // spans, so column precision here is not load-bearing.
+                spans.push(PromptSourceSpan {
+                    template_line: 0,
+                    template_col: 0,
+                    output_start: start,
+                    output_end: out.len(),
+                    kind: PromptSpanKind::Text,
+                    bound_value: None,
+                });
+            }
+        }
         Node::Expr { expr, line, col } => {
             let v = eval_expr(expr, scope, *line, *col)?;
-            out.push_str(&display_value(&v));
+            let rendered = display_value(&v);
+            out.push_str(&rendered);
+            if let Some(spans) = spans.as_deref_mut() {
+                spans.push(PromptSourceSpan {
+                    template_line: *line,
+                    template_col: *col,
+                    output_start: start,
+                    output_end: out.len(),
+                    kind: PromptSpanKind::Expr,
+                    bound_value: Some(truncate_for_preview(&rendered)),
+                });
+            }
         }
         Node::LegacyBareInterp { ident } => {
-            match scope.lookup(ident) {
-                Some(v) => out.push_str(&display_value(&v)),
-                None => {
-                    // Silent pass-through: re-emit `{{ident}}` (no whitespace since we trimmed).
-                    out.push_str("{{");
-                    out.push_str(ident);
-                    out.push_str("}}");
+            let (rendered, preview) = match scope.lookup(ident) {
+                Some(v) => {
+                    let s = display_value(&v);
+                    (s.clone(), Some(truncate_for_preview(&s)))
                 }
+                None => (format!("{{{{{ident}}}}}"), None),
+            };
+            out.push_str(&rendered);
+            if let Some(spans) = spans.as_deref_mut() {
+                spans.push(PromptSourceSpan {
+                    template_line: 0,
+                    template_col: 0,
+                    output_start: start,
+                    output_end: out.len(),
+                    kind: PromptSpanKind::LegacyBareInterp,
+                    bound_value: preview,
+                });
             }
         }
         Node::If {
@@ -1252,15 +1485,25 @@ fn render_node(
             for (cond, body) in branches {
                 let v = eval_expr(cond, scope, *line, *col)?;
                 if truthy(&v) {
-                    render_nodes(body, scope, rc, out)?;
+                    render_nodes(body, scope, rc, out, spans.as_deref_mut())?;
                     matched = true;
                     break;
                 }
             }
             if !matched {
                 if let Some(eb) = else_branch {
-                    render_nodes(eb, scope, rc, out)?;
+                    render_nodes(eb, scope, rc, out, spans.as_deref_mut())?;
                 }
+            }
+            if let Some(spans) = spans.as_deref_mut() {
+                spans.push(PromptSourceSpan {
+                    template_line: *line,
+                    template_col: *col,
+                    output_start: start,
+                    output_end: out.len(),
+                    kind: PromptSpanKind::If,
+                    bound_value: None,
+                });
             }
         }
         Node::For {
@@ -1277,7 +1520,7 @@ fn render_node(
                 iterable_items(&v).map_err(|m| TemplateError::new(*line, *col, m))?;
             if items.is_empty() {
                 if let Some(eb) = empty {
-                    render_nodes(eb, scope, rc, out)?;
+                    render_nodes(eb, scope, rc, out, spans.as_deref_mut())?;
                 }
             } else {
                 let length = items.len() as i64;
@@ -1295,9 +1538,20 @@ fn render_node(
                     loop_map.insert("length".into(), VmValue::Int(length));
                     layer.insert("loop".into(), VmValue::Dict(Rc::new(loop_map)));
                     scope.push(layer);
-                    let res = render_nodes(body, scope, rc, out);
+                    let iter_start = out.len();
+                    let res = render_nodes(body, scope, rc, out, spans.as_deref_mut());
                     scope.pop();
                     res?;
+                    if let Some(spans) = spans.as_deref_mut() {
+                        spans.push(PromptSourceSpan {
+                            template_line: *line,
+                            template_col: *col,
+                            output_start: iter_start,
+                            output_end: out.len(),
+                            kind: PromptSpanKind::ForIteration,
+                            bound_value: None,
+                        });
+                    }
                 }
             }
         }
@@ -1382,14 +1636,46 @@ fn render_node(
             rc.base = new_base;
             rc.current_path = Some(resolved.clone());
             rc.include_stack.push(canonical);
-            let res = render_nodes(&child_nodes, &mut child_scope, rc, out);
+            // NB: child-template spans are recorded under the parent's
+            // span kind for now. #96 tracks threading a `parent_span`
+            // chain so cross-template provenance navigation can follow
+            // back through includes.
+            let res = render_nodes(
+                &child_nodes,
+                &mut child_scope,
+                rc,
+                out,
+                spans.as_deref_mut(),
+            );
             rc.include_stack.pop();
             rc.base = saved_base;
             rc.current_path = saved_current;
             res?;
+            if let Some(spans) = spans.as_mut() {
+                spans.push(PromptSourceSpan {
+                    template_line: *line,
+                    template_col: *col,
+                    output_start: start,
+                    output_end: out.len(),
+                    kind: PromptSpanKind::Include,
+                    bound_value: None,
+                });
+            }
         }
     }
     Ok(())
+}
+
+/// Cap a rendered value's preview at 80 chars so span records don't
+/// carry kilobyte prompt chunks. The IDE can fetch the full text by
+/// reading the rendered string at `output_start..output_end`.
+fn truncate_for_preview(s: &str) -> String {
+    const MAX: usize = 80;
+    if s.chars().count() <= MAX {
+        return s.to_string();
+    }
+    let truncated: String = s.chars().take(MAX - 1).collect();
+    format!("{truncated}…")
 }
 
 fn eval_expr(
@@ -1949,10 +2235,115 @@ mod tests {
         render_template_result(tpl, Some(b), None, None).unwrap()
     }
 
+    fn render_with_spans(
+        tpl: &str,
+        b: &BTreeMap<String, VmValue>,
+    ) -> (String, Vec<PromptSourceSpan>) {
+        render_template_with_provenance(tpl, Some(b), None, None, true).unwrap()
+    }
+
     #[test]
     fn bare_interp() {
         let b = dict(&[("name", s("Alice"))]);
         assert_eq!(render("hi {{name}}!", &b), "hi Alice!");
+    }
+
+    #[test]
+    fn provenance_expr_span_matches_output_range() {
+        // Use dotted-path and filter forms so the parser emits
+        // `Expr` (not `LegacyBareInterp`) — different kinds carry
+        // different span types in the provenance map.
+        let mut user = BTreeMap::new();
+        user.insert("name".to_string(), s("alice"));
+        let b = dict(&[
+            ("user", VmValue::Dict(Rc::new(user))),
+            ("count", VmValue::Int(42)),
+        ]);
+        let (out, spans) =
+            render_with_spans("hello {{ user.name }} ({{ count | default: 0 }})", &b);
+        assert_eq!(out, "hello alice (42)");
+
+        let expr_spans: Vec<_> = spans
+            .iter()
+            .filter(|s| s.kind == PromptSpanKind::Expr)
+            .collect();
+        assert_eq!(expr_spans.len(), 2);
+
+        // Every expr span's output range must slice back to the
+        // rendered value it produced — the property the IDE relies on.
+        let user_span = expr_spans
+            .iter()
+            .find(|s| &out[s.output_start..s.output_end] == "alice")
+            .expect("user expr span");
+        assert!(user_span.template_line >= 1);
+        assert_eq!(user_span.bound_value.as_deref(), Some("alice"));
+
+        let count_span = expr_spans
+            .iter()
+            .find(|s| &out[s.output_start..s.output_end] == "42")
+            .expect("count expr span");
+        assert_eq!(count_span.bound_value.as_deref(), Some("42"));
+    }
+
+    #[test]
+    fn provenance_legacy_bare_interp_span_tracked() {
+        let b = dict(&[("name", s("Alice"))]);
+        let (out, spans) = render_with_spans("hi {{name}}!", &b);
+        assert_eq!(out, "hi Alice!");
+
+        let bare = spans
+            .iter()
+            .find(|s| s.kind == PromptSpanKind::LegacyBareInterp)
+            .expect("legacy bare span");
+        assert_eq!(&out[bare.output_start..bare.output_end], "Alice");
+        assert_eq!(bare.bound_value.as_deref(), Some("Alice"));
+    }
+
+    #[test]
+    fn provenance_includes_loop_iterations() {
+        let b = dict(&[(
+            "items",
+            VmValue::List(Rc::new(vec![s("a"), s("b"), s("c")])),
+        )]);
+        let tpl = "{{for x in items}}[{{x}}]{{end}}";
+        let (out, spans) = render_with_spans(tpl, &b);
+        assert_eq!(out, "[a][b][c]");
+        let iter_spans: Vec<_> = spans
+            .iter()
+            .filter(|s| s.kind == PromptSpanKind::ForIteration)
+            .collect();
+        assert_eq!(iter_spans.len(), 3);
+        // Each iteration span should slice to its bracketed item.
+        let slices: Vec<&str> = iter_spans
+            .iter()
+            .map(|s| &out[s.output_start..s.output_end])
+            .collect();
+        assert_eq!(slices, ["[a]", "[b]", "[c]"]);
+    }
+
+    #[test]
+    fn provenance_preview_is_truncated() {
+        // Long expression values shouldn't balloon the span record.
+        // Use the dotted form so it parses as Expr rather than legacy.
+        let mut wrap = BTreeMap::new();
+        wrap.insert("val".to_string(), s(&"x".repeat(500)));
+        let b = dict(&[("blob", VmValue::Dict(Rc::new(wrap)))]);
+        let (_, spans) = render_with_spans("{{blob.val}}", &b);
+        let expr = spans
+            .iter()
+            .find(|s| s.kind == PromptSpanKind::Expr)
+            .expect("expr span");
+        let preview = expr.bound_value.as_deref().unwrap();
+        assert!(preview.chars().count() <= 80, "preview too long: {preview}");
+        assert!(preview.ends_with('…'));
+    }
+
+    #[test]
+    fn provenance_off_returns_empty_spans() {
+        let b = dict(&[("x", s("y"))]);
+        let (_, spans) =
+            render_template_with_provenance("{{x}}", Some(&b), None, None, false).unwrap();
+        assert!(spans.is_empty());
     }
 
     #[test]

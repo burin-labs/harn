@@ -428,3 +428,229 @@ fn test_harn_ping_reports_state() {
     assert_eq!(body["running"], false);
     assert_eq!(body["stopped"], false);
 }
+
+#[test]
+fn test_capabilities_advertise_new_bp_features() {
+    // Capabilities snapshot so UI writers know what's actually wired
+    // — bumping a capability without flipping the default is a silent
+    // regression that breaks the IDE's breakpoint popover.
+    let mut dbg = Debugger::new();
+    let responses = dbg.handle_message(make_request(1, "initialize", None));
+    let body = responses[0].body.as_ref().unwrap();
+    assert_eq!(body["supportsConditionalBreakpoints"], true);
+    assert_eq!(body["supportsHitConditionalBreakpoints"], true);
+    assert_eq!(body["supportsLogPoints"], true);
+    assert_eq!(body["supportsFunctionBreakpoints"], true);
+    assert_eq!(body["supportsSetVariable"], true);
+    assert_eq!(body["supportsSetExpression"], true);
+    assert_eq!(body["supportsRestartFrame"], true);
+    assert_eq!(body["supportsBurinPromptProvenance"], true);
+}
+
+#[test]
+fn test_set_breakpoints_accepts_hit_condition_and_log_message() {
+    let mut dbg = Debugger::new();
+    let responses = dbg.handle_message(make_request(
+        1,
+        "setBreakpoints",
+        Some(json!({
+            "source": {"path": "test.harn"},
+            "breakpoints": [{
+                "line": 5,
+                "hitCondition": ">=3",
+                "logMessage": "iter={i} name={name}",
+                "condition": "x > 0"
+            }]
+        })),
+    ));
+    assert_eq!(responses.len(), 1);
+    assert_eq!(dbg.breakpoints.len(), 1);
+    let bp = &dbg.breakpoints[0];
+    assert_eq!(bp.line, 5);
+    assert_eq!(bp.hit_condition.as_deref(), Some(">=3"));
+    assert_eq!(bp.log_message.as_deref(), Some("iter={i} name={name}"));
+    assert_eq!(bp.condition.as_deref(), Some("x > 0"));
+}
+
+#[test]
+fn test_set_breakpoints_clears_hit_counts() {
+    // Editing a breakpoint in the gutter resets the hit counter so
+    // re-arming a `>=3` breakpoint doesn't inherit the prior run's
+    // tally and fire on the next hit.
+    let mut dbg = Debugger::new();
+    dbg.handle_message(make_request(
+        1,
+        "setBreakpoints",
+        Some(json!({
+            "source": {"path": "test.harn"},
+            "breakpoints": [{"line": 5, "hitCondition": ">=3"}],
+        })),
+    ));
+    // Poke the counter as if we'd taken two hits already.
+    let bp_id = dbg.breakpoints.first().map(|bp| bp.id).expect("bp set");
+    dbg.bp_hit_counts.insert(bp_id, 2);
+    assert_eq!(dbg.breakpoint_hit_count(bp_id), 2);
+    dbg.handle_message(make_request(
+        2,
+        "setBreakpoints",
+        Some(json!({
+            "source": {"path": "test.harn"},
+            "breakpoints": [{"line": 5, "hitCondition": ">=3"}],
+        })),
+    ));
+    assert!(
+        dbg.bp_hit_counts.is_empty(),
+        "hit counts must reset on edit"
+    );
+    assert_eq!(dbg.breakpoint_hit_count(bp_id), 0);
+}
+
+#[test]
+fn test_logpoint_template_renders_literal_braces() {
+    // Render escapes without a live VM — pure string formatting of
+    // `\{` and `\}` happens before evaluation is attempted.
+    let mut dbg = Debugger::new();
+    let rendered = dbg
+        .render_logpoint_template_for_tests("literal \\{x\\} before {missing}")
+        .unwrap();
+    // Escaped braces come through literally; the `{missing}` expression
+    // evaluates through the VM fallback path and errors — the renderer
+    // inlines the error text instead of failing the whole template.
+    assert!(rendered.starts_with("literal {x} before <"));
+    assert!(rendered.contains("no active VM session"));
+}
+
+#[test]
+fn test_logpoint_template_errors_on_unclosed_brace() {
+    let mut dbg = Debugger::new();
+    let err = dbg
+        .render_logpoint_template_for_tests("oops {still_open")
+        .unwrap_err();
+    assert!(err.contains("missing closing"));
+}
+
+#[test]
+fn test_prompt_provenance_requires_prompt_id() {
+    let mut dbg = Debugger::new();
+    let responses = dbg.handle_message(make_request(
+        1,
+        "burin/promptProvenance",
+        Some(json!({"outputOffset": 12})),
+    ));
+    assert_eq!(responses.len(), 1);
+    assert_eq!(responses[0].success, Some(false));
+    assert!(responses[0].message.as_ref().unwrap().contains("promptId"));
+}
+
+#[test]
+fn test_prompt_consumers_requires_template_uri() {
+    let mut dbg = Debugger::new();
+    let responses = dbg.handle_message(make_request(1, "burin/promptConsumers", Some(json!({}))));
+    assert_eq!(responses.len(), 1);
+    assert_eq!(responses[0].success, Some(false));
+    assert!(responses[0]
+        .message
+        .as_ref()
+        .unwrap()
+        .contains("templateUri"));
+}
+
+#[test]
+fn test_prompt_consumers_returns_empty_list_for_unknown_template() {
+    let mut dbg = Debugger::new();
+    let responses = dbg.handle_message(make_request(
+        1,
+        "burin/promptConsumers",
+        Some(json!({"templateUri": "/nope/does_not_exist.harn.prompt"})),
+    ));
+    assert_eq!(responses.len(), 1);
+    assert_eq!(responses[0].success, Some(true));
+    let body = responses[0].body.as_ref().unwrap();
+    let consumers = body["consumers"].as_array().unwrap();
+    assert!(consumers.is_empty());
+}
+
+#[test]
+fn test_set_variable_without_vm_returns_structured_error() {
+    // No VM session yet — setVariable should fail with a helpful
+    // message, not a panic. Full-VM integration is exercised via the
+    // harn-vm unit tests that drive the same code path.
+    let mut dbg = Debugger::new();
+    let responses = dbg.handle_message(make_request(
+        1,
+        "setVariable",
+        Some(json!({
+            "variablesReference": 1,
+            "name": "x",
+            "value": "42"
+        })),
+    ));
+    assert_eq!(responses.len(), 1);
+    assert_eq!(responses[0].success, Some(false));
+    let msg = responses[0].message.as_ref().unwrap();
+    assert!(msg.contains("no active VM session") || msg.contains("setVariable"));
+}
+
+#[test]
+fn test_set_variable_rejects_missing_name() {
+    let mut dbg = Debugger::new();
+    let responses = dbg.handle_message(make_request(
+        1,
+        "setVariable",
+        Some(json!({"variablesReference": 1, "value": "42"})),
+    ));
+    assert_eq!(responses.len(), 1);
+    assert_eq!(responses[0].success, Some(false));
+    let msg = responses[0].message.as_ref().unwrap();
+    assert!(msg.contains("missing"));
+}
+
+#[test]
+fn test_set_expression_rejects_non_identifier_paths() {
+    // Path-based assignment (dots, subscripts) is a follow-up; the
+    // fast path must surface a clear error instead of silently no-oping.
+    let mut dbg = Debugger::new();
+    let responses = dbg.handle_message(make_request(
+        1,
+        "setExpression",
+        Some(json!({"expression": "plan.tasks[0]", "value": "{}"})),
+    ));
+    assert_eq!(responses.len(), 1);
+    assert_eq!(responses[0].success, Some(false));
+    assert!(responses[0]
+        .message
+        .as_ref()
+        .unwrap()
+        .contains("bare identifiers"));
+}
+
+#[test]
+fn test_hit_condition_matches_parses_all_forms() {
+    use super::breakpoints::hit_condition_matches;
+
+    // Bare N → fire exactly on Nth hit.
+    assert_eq!(hit_condition_matches("3", 2), Some(false));
+    assert_eq!(hit_condition_matches("3", 3), Some(true));
+    assert_eq!(hit_condition_matches("3", 4), Some(false));
+
+    // >=N / >N / <N / <=N.
+    assert_eq!(hit_condition_matches(">=5", 4), Some(false));
+    assert_eq!(hit_condition_matches(">=5", 5), Some(true));
+    assert_eq!(hit_condition_matches(">=5", 9), Some(true));
+    assert_eq!(hit_condition_matches(">5", 5), Some(false));
+    assert_eq!(hit_condition_matches("<3", 2), Some(true));
+    assert_eq!(hit_condition_matches("<=3", 3), Some(true));
+    assert_eq!(hit_condition_matches("==7", 7), Some(true));
+    assert_eq!(hit_condition_matches("=2", 2), Some(true));
+
+    // %N — every Nth hit, with 0 rejected as malformed.
+    assert_eq!(hit_condition_matches("%4", 4), Some(true));
+    assert_eq!(hit_condition_matches("%4", 8), Some(true));
+    assert_eq!(hit_condition_matches("%4", 5), Some(false));
+    assert_eq!(hit_condition_matches("%4", 0), Some(false));
+    assert_eq!(hit_condition_matches("%0", 1), None);
+
+    // Garbage → None so the caller can surface a diagnostic.
+    assert_eq!(hit_condition_matches("hello", 1), None);
+    assert_eq!(hit_condition_matches("= =1", 1), None);
+}

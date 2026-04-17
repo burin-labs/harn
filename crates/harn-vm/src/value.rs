@@ -329,6 +329,24 @@ impl VmEnv {
         }
         Err(VmError::UndefinedVariable(name.to_string()))
     }
+
+    /// Debugger-only variant of `assign` that rebinds the name even if
+    /// the existing binding was declared with `let`. Pipeline authors
+    /// overwhelmingly use `let`, so a strict mutability check would
+    /// make the DAP `setVariable` request useless for "what-if"
+    /// iteration — which is the whole point of the feature. Preserves
+    /// the original mutability flag so the VM's runtime behavior is
+    /// unchanged after the debugger overrides.
+    pub fn assign_debug(&mut self, name: &str, value: VmValue) -> Result<(), VmError> {
+        for scope in self.scopes.iter_mut().rev() {
+            if let Some((_, mutable)) = scope.vars.get(name) {
+                let mutable = *mutable;
+                scope.vars.insert(name.to_string(), (value, mutable));
+                return Ok(());
+            }
+        }
+        Err(VmError::UndefinedVariable(name.to_string()))
+    }
 }
 
 /// Compute Levenshtein edit distance between two strings.

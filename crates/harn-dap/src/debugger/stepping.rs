@@ -9,7 +9,7 @@ use harn_vm::{
 };
 use serde_json::json;
 
-use super::breakpoints::check_condition;
+use super::breakpoints::BreakpointAction;
 use super::state::{Debugger, ProgramState, StepMode};
 use crate::protocol::*;
 
@@ -160,6 +160,68 @@ impl Debugger {
         vec![response]
     }
 
+    /// Handle DAP `restartFrame` — rewind a specific frame back to its
+    /// entry point, so stepping resumes from the first instruction of
+    /// the function with its original args re-bound. Pairs with
+    /// `setVariable` to give pipeline authors an "edit the prompt and
+    /// rerun just this function" loop. Side effects already performed
+    /// by the restarted frame (tool calls, file writes, LLM round
+    /// trips) are *not* rolled back — the IDE surfaces that caveat on
+    /// the menu item.
+    pub(crate) fn handle_restart_frame(&mut self, msg: &DapMessage) -> Vec<DapResponse> {
+        let frame_id = msg
+            .arguments
+            .as_ref()
+            .and_then(|a| a.get("frameId"))
+            .and_then(|f| f.as_i64())
+            .unwrap_or(1);
+        // DAP stackTrace IDs are 1-based in our implementation; the
+        // VM's restart_frame takes a 0-based index into `frames`,
+        // which is emitted in caller-first order. The frame at index 0
+        // is the outermost pipeline frame, and IDs count from 1 at
+        // the innermost — invert the id back to a vm index.
+        let Some(vm) = self.vm.as_mut() else {
+            return vec![self.dap_error(msg, "restartFrame", "no active VM session")];
+        };
+        let frame_count = vm.frame_count();
+        if frame_id < 1 || (frame_id as usize) > frame_count {
+            return vec![self.dap_error(
+                msg,
+                "restartFrame",
+                &format!("frameId {frame_id} out of range (have {frame_count} frames)"),
+            )];
+        }
+        let vm_index = frame_count - frame_id as usize;
+        match vm.restart_frame(vm_index) {
+            Ok(()) => {
+                self.var_refs.clear();
+                self.next_var_ref = 100;
+                // restartFrame resumes execution; match the semantics
+                // of `continue`. The IDE will request a fresh
+                // stackTrace / scopes when the next stopped event
+                // fires, so we don't need to pre-emit any state.
+                self.step_mode = StepMode::Continue;
+                self.stopped = false;
+                let seq = self.next_seq();
+                let response = DapResponse::success(seq, msg.seq, "restartFrame", None);
+                // Emit a `continued` event so the IDE clears its
+                // "paused" chrome without waiting for the next stop.
+                let evt_seq = self.next_seq();
+                let continued = DapResponse::event(
+                    evt_seq,
+                    "continued",
+                    Some(json!({
+                        "threadId": 1,
+                        "allThreadsContinued": true,
+                    })),
+                );
+                self.enter_running();
+                vec![response, continued]
+            }
+            Err(err) => vec![self.dap_error(msg, "restartFrame", &err.to_string())],
+        }
+    }
+
     pub(crate) fn handle_step_out(&mut self, msg: &DapMessage) -> Vec<DapResponse> {
         self.step_mode = StepMode::StepOut;
         if let Some(vm) = &mut self.vm {
@@ -265,9 +327,60 @@ impl Debugger {
                 let state = self.current_debug_state();
                 let current_line = state.line as i64;
                 let vars = state.variables;
-                if !check_condition(&self.bp_conditions, current_line, &vars) {
-                    return responses;
+                // Defer the real stop decision to classify_breakpoint_hit,
+                // which evaluates hit-count → condition → logpoint in
+                // the order VS Code uses. Steps and exceptions bypass
+                // this path entirely because the VM only reports
+                // stopped=true on real breakpoint hits.
+                let bp_touches_line = self.breakpoints.iter().any(|bp| bp.line == current_line);
+                if bp_touches_line {
+                    match self.classify_breakpoint_hit(current_line, &vars) {
+                        BreakpointAction::Stop => {}
+                        BreakpointAction::Skip => return responses,
+                        BreakpointAction::LogAndContinue(rendered) => {
+                            let seq = self.next_seq();
+                            responses.push(DapResponse::event(
+                                seq,
+                                "output",
+                                Some(json!({
+                                    "category": "console",
+                                    "output": format!("{rendered}\n"),
+                                })),
+                            ));
+                            return responses;
+                        }
+                        BreakpointAction::Diagnostic(msg) => {
+                            let seq = self.next_seq();
+                            responses.push(DapResponse::event(
+                                seq,
+                                "output",
+                                Some(json!({
+                                    "category": "console",
+                                    "output": format!("{msg}\n"),
+                                })),
+                            ));
+                            return responses;
+                        }
+                    }
                 }
+                // Pick a DAP stop reason that matches what actually stopped
+                // execution. Step requests complete by landing the VM on
+                // the next line while no breakpoint matches; conflating
+                // those with real breakpoint hits (all labeled "breakpoint")
+                // made the IDE status bar show "Paused on breakpoint" even
+                // after a step-out far past the last breakpoint. When a
+                // step is in flight and the current line isn't a registered
+                // breakpoint, emit reason="step" instead.
+                let step_in_flight = self.step_mode != StepMode::Continue;
+                let line_is_bp = self.breakpoints.iter().any(|bp| bp.line == current_line);
+                let reason = if step_in_flight && !line_is_bp {
+                    "step"
+                } else {
+                    "breakpoint"
+                };
+                // Stepping always completes at the next stop — reset so
+                // the following continue/breakpoint is classified cleanly.
+                self.step_mode = StepMode::Continue;
                 self.stopped = true;
                 self.running = false;
                 self.current_line = current_line;
@@ -280,7 +393,7 @@ impl Debugger {
                     seq,
                     "stopped",
                     Some(json!({
-                        "reason": "breakpoint",
+                        "reason": reason,
                         "threadId": 1,
                         "allThreadsStopped": true,
                     })),
