@@ -169,6 +169,53 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Option<String> {
     }
 }
 
+/// Fork `src_id` and truncate the destination transcript to the
+/// first `keep_first` messages (#105 — branch-replay). Pairs with the
+/// scrubber: the IDE picks an event index, rebuilds a message count,
+/// and calls this to spawn a live sibling session that resumes from
+/// the rebuilt state. Subscribers are not carried over (same as
+/// `fork`), so sibling events don't double-fan into the parent's
+/// consumers.
+///
+/// Returns the new session id on success, `None` if `src_id` doesn't
+/// exist.
+pub fn fork_at(src_id: &str, keep_first: usize, dst_id: Option<String>) -> Option<String> {
+    let new_id = fork(src_id, dst_id)?;
+    retain_first(&new_id, keep_first);
+    Some(new_id)
+}
+
+/// Truncate the session transcript to the first `keep_first`
+/// messages (opposite of `trim`, which keeps the last N). Used by
+/// `fork_at` to cut a branch at a scrubber position.
+fn retain_first(id: &str, keep_first: usize) {
+    SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        let Some(state) = map.get_mut(id) else {
+            return;
+        };
+        let Some(dict) = state.transcript.as_dict() else {
+            return;
+        };
+        let dict = dict.clone();
+        let messages: Vec<VmValue> = match dict.get("messages") {
+            Some(VmValue::List(list)) => list.iter().cloned().collect(),
+            _ => Vec::new(),
+        };
+        let retained: Vec<VmValue> = messages.into_iter().take(keep_first).collect();
+        let mut next = dict;
+        next.insert(
+            "events".to_string(),
+            VmValue::List(Rc::new(
+                crate::llm::helpers::transcript_events_from_messages(&retained),
+            )),
+        );
+        next.insert("messages".to_string(), VmValue::List(Rc::new(retained)));
+        state.transcript = VmValue::Dict(Rc::new(next));
+        state.last_accessed = Instant::now();
+    });
+}
+
 /// Retain only the last `keep_last` messages in the session transcript.
 /// Returns the kept count (<= keep_last).
 pub fn trim(id: &str, keep_last: usize) -> Option<usize> {
@@ -345,4 +392,57 @@ fn clone_transcript_with_id(transcript: &VmValue, new_id: &str) -> VmValue {
         VmValue::String(Rc::from(new_id.to_string())),
     );
     VmValue::Dict(Rc::new(next))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    fn make_msg(role: &str, content: &str) -> VmValue {
+        let mut m: BTreeMap<String, VmValue> = BTreeMap::new();
+        m.insert("role".to_string(), VmValue::String(Rc::from(role)));
+        m.insert("content".to_string(), VmValue::String(Rc::from(content)));
+        VmValue::Dict(Rc::new(m))
+    }
+
+    fn message_count(id: &str) -> usize {
+        SESSIONS.with(|s| {
+            let map = s.borrow();
+            let Some(state) = map.get(id) else { return 0 };
+            let Some(dict) = state.transcript.as_dict() else {
+                return 0;
+            };
+            match dict.get("messages") {
+                Some(VmValue::List(list)) => list.len(),
+                _ => 0,
+            }
+        })
+    }
+
+    #[test]
+    fn fork_at_truncates_destination_to_keep_first() {
+        reset_session_store();
+        let src = open_or_create(Some("src-fork-at".into()));
+        inject_message(&src, make_msg("user", "a")).unwrap();
+        inject_message(&src, make_msg("assistant", "b")).unwrap();
+        inject_message(&src, make_msg("user", "c")).unwrap();
+        inject_message(&src, make_msg("assistant", "d")).unwrap();
+        assert_eq!(message_count(&src), 4);
+
+        let dst = fork_at(&src, 2, Some("dst-fork-at".into())).expect("fork_at");
+        assert_ne!(dst, src);
+        assert_eq!(message_count(&dst), 2, "branched at message index 2");
+        // Source untouched.
+        assert_eq!(message_count(&src), 4);
+        // Subscribers not carried — forks start with a clean fanout list.
+        assert_eq!(subscriber_count(&dst), 0);
+        reset_session_store();
+    }
+
+    #[test]
+    fn fork_at_on_unknown_source_returns_none() {
+        reset_session_store();
+        assert!(fork_at("does-not-exist", 3, None).is_none());
+    }
 }
