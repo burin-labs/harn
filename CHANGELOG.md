@@ -7,6 +7,38 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## v0.7.13
+
+### Changed
+
+- **Anthropic provider: Claude Opus 4.7 compatibility.** The Anthropic
+  request builder now recognizes Claude model generations and applies
+  Opus 4.7's breaking API changes automatically:
+  - Sampling parameters (`temperature`, `top_p`, `top_k`) are stripped
+    from request bodies for Opus 4.7+ models (Anthropic returns HTTP 400
+    on non-default values). A one-time `llm.sampling` warning surfaces
+    when we drop them.
+  - `thinking: {type: "enabled", budget_tokens: N}` payloads are
+    transparently rewritten to `thinking: {type: "adaptive"}` for Opus
+    4.7+ models (extended thinking was removed from that generation).
+    Pipeline authors don't need to special-case the API change; the
+    provider layer handles it and logs once per model.
+  - The pre-existing prefill gate (deprecated in Claude 4.6) is now
+    generation-aware: it fires for every `claude-*-4.6+` model in either
+    dash (`claude-opus-4-7`) or dotted (`anthropic/claude-opus-4.7`)
+    form, replacing the previous hardcoded family-name list.
+- **Internal: `harn-parser` typechecker split into a `typechecker/`
+  module.** The 7,782-line `typechecker.rs` is now a directory of
+  focused files (`scope`, `format`, `union`, `exits`,
+  `schema_inference`, `binary_ops`, and an `inference/` sub-module split
+  by node-kind family). The public API is re-exported from
+  `typechecker/mod.rs`, so no downstream crate needed edits. Docs-snippet
+  coverage was also extended: 9 `harn` fences across `concurrency`,
+  `error-handling`, `language-basics`, `language-spec`, and
+  `scripting-cheatsheet` now include the helper stubs they reference so
+  `harn check` passes under the stricter cross-module undefined-call
+  gate added in v0.7.12.
+
 ## v0.7.12
 
 ### Added

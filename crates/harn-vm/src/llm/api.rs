@@ -2268,7 +2268,7 @@ mod tests {
     use super::{
         classify_http_error, normalize_openai_message_text, ollama_keep_alive_override,
         ollama_num_ctx_override, split_openai_thinking_blocks,
-        vm_call_llm_full_streaming_offthread, LlmCallOptions, LlmRequestPayload,
+        vm_call_llm_full_streaming_offthread, LlmCallOptions, LlmRequestPayload, ThinkingConfig,
         ThinkingStreamSplitter,
     };
     use crate::value::VmValue;
@@ -2487,6 +2487,132 @@ mod tests {
 
         let messages = body["messages"].as_array().expect("messages array");
         // User message only; prefill dropped silently.
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0]["role"].as_str(), Some("user"));
+    }
+
+    #[test]
+    fn anthropic_prefill_skipped_for_opus_4_7() {
+        use crate::llm::providers::AnthropicProvider;
+
+        let mut opts = base_opts("anthropic");
+        opts.model = "claude-opus-4-7".to_string();
+        opts.prefill = Some("<done>##DONE##</done>".to_string());
+        let payload = LlmRequestPayload::from(&opts);
+        let body = AnthropicProvider::build_request_body(&payload);
+
+        let messages = body["messages"].as_array().expect("messages array");
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0]["role"].as_str(), Some("user"));
+    }
+
+    #[test]
+    fn anthropic_sampling_params_stripped_for_opus_4_7() {
+        use crate::llm::providers::AnthropicProvider;
+
+        let mut opts = base_opts("anthropic");
+        opts.model = "claude-opus-4-7".to_string();
+        // base_opts already supplies temperature/top_p/top_k.
+        let payload = LlmRequestPayload::from(&opts);
+        let body = AnthropicProvider::build_request_body(&payload);
+
+        assert!(
+            body.get("temperature").is_none(),
+            "Opus 4.7 body must omit temperature (returns HTTP 400 otherwise)"
+        );
+        assert!(body.get("top_p").is_none(), "Opus 4.7 body must omit top_p");
+        assert!(body.get("top_k").is_none(), "Opus 4.7 body must omit top_k");
+    }
+
+    #[test]
+    fn anthropic_sampling_params_preserved_for_opus_4_6() {
+        use crate::llm::providers::AnthropicProvider;
+
+        let mut opts = base_opts("anthropic");
+        opts.model = "claude-opus-4-6".to_string();
+        let payload = LlmRequestPayload::from(&opts);
+        let body = AnthropicProvider::build_request_body(&payload);
+
+        assert_eq!(body["temperature"].as_f64(), Some(0.2));
+        assert_eq!(body["top_p"].as_f64(), Some(0.8));
+        assert_eq!(body["top_k"].as_i64(), Some(40));
+    }
+
+    #[test]
+    fn anthropic_thinking_rewritten_to_adaptive_for_opus_4_7() {
+        use crate::llm::providers::AnthropicProvider;
+
+        let mut opts = base_opts("anthropic");
+        opts.model = "claude-opus-4-7".to_string();
+        opts.thinking = Some(ThinkingConfig::Enabled);
+        let payload = LlmRequestPayload::from(&opts);
+        let body = AnthropicProvider::build_request_body(&payload);
+
+        let thinking = &body["thinking"];
+        assert_eq!(thinking["type"].as_str(), Some("adaptive"));
+        assert!(
+            thinking.get("budget_tokens").is_none(),
+            "Opus 4.7 adaptive thinking must not carry budget_tokens"
+        );
+    }
+
+    #[test]
+    fn anthropic_thinking_budget_discarded_for_opus_4_7() {
+        use crate::llm::providers::AnthropicProvider;
+
+        let mut opts = base_opts("anthropic");
+        opts.model = "claude-opus-4-7".to_string();
+        opts.thinking = Some(ThinkingConfig::WithBudget(32000));
+        let payload = LlmRequestPayload::from(&opts);
+        let body = AnthropicProvider::build_request_body(&payload);
+
+        let thinking = &body["thinking"];
+        assert_eq!(thinking["type"].as_str(), Some("adaptive"));
+        assert!(thinking.get("budget_tokens").is_none());
+    }
+
+    #[test]
+    fn anthropic_thinking_preserves_extended_for_opus_4_6() {
+        use crate::llm::providers::AnthropicProvider;
+
+        let mut opts = base_opts("anthropic");
+        opts.model = "claude-opus-4-6".to_string();
+        opts.thinking = Some(ThinkingConfig::WithBudget(16000));
+        let payload = LlmRequestPayload::from(&opts);
+        let body = AnthropicProvider::build_request_body(&payload);
+
+        let thinking = &body["thinking"];
+        assert_eq!(thinking["type"].as_str(), Some("enabled"));
+        assert_eq!(thinking["budget_tokens"].as_i64(), Some(16000));
+    }
+
+    #[test]
+    fn anthropic_prefill_preserved_for_or_opus_dotted_older_generations() {
+        use crate::llm::providers::AnthropicProvider;
+
+        // Dotted "claude-opus-4.5" style should NOT hit the 4.6 gate.
+        let mut opts = base_opts("anthropic");
+        opts.model = "anthropic/claude-opus-4.5".to_string();
+        opts.prefill = Some("<done>##DONE##</done>".to_string());
+        let payload = LlmRequestPayload::from(&opts);
+        let body = AnthropicProvider::build_request_body(&payload);
+
+        let messages = body["messages"].as_array().expect("messages array");
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages.last().unwrap()["role"].as_str(), Some("assistant"));
+    }
+
+    #[test]
+    fn anthropic_prefill_skipped_for_or_opus_4_7_dotted() {
+        use crate::llm::providers::AnthropicProvider;
+
+        let mut opts = base_opts("anthropic");
+        opts.model = "anthropic/claude-opus-4.7".to_string();
+        opts.prefill = Some("<done>##DONE##</done>".to_string());
+        let payload = LlmRequestPayload::from(&opts);
+        let body = AnthropicProvider::build_request_body(&payload);
+
+        let messages = body["messages"].as_array().expect("messages array");
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0]["role"].as_str(), Some("user"));
     }
