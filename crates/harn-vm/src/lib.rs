@@ -42,7 +42,8 @@ pub use mcp_server::{
 pub use metadata::{register_metadata_builtins, register_scan_builtins};
 pub use stdlib::host::{clear_host_call_bridge, set_host_call_bridge, HostCallBridge};
 pub use stdlib::template::{
-    lookup_prompt_consumers, lookup_prompt_span, PromptSourceSpan, PromptSpanKind,
+    lookup_prompt_consumers, lookup_prompt_span, prompt_render_indices, record_prompt_render_index,
+    PromptSourceSpan, PromptSpanKind,
 };
 pub use stdlib::{
     register_agent_stdlib, register_core_stdlib, register_io_stdlib, register_vm_stdlib,

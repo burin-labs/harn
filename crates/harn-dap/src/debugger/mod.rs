@@ -311,6 +311,12 @@ impl Debugger {
         let payload: Vec<_> = consumers
             .into_iter()
             .map(|(prompt_id, span)| {
+                // eventIndices: every AgentEvent index where this
+                // prompt_id was consumed by an LLM call (#106).
+                // Empty vec when emission sites haven't yet wired
+                // record_prompt_render_index — the IDE's jump-to-
+                // next-render falls back to no-op cleanly.
+                let event_indices = harn_vm::prompt_render_indices(&prompt_id);
                 json!({
                     "promptId": prompt_id,
                     "templateLine": span.template_line,
@@ -318,6 +324,7 @@ impl Debugger {
                     "outputStart": span.output_start,
                     "outputEnd": span.output_end,
                     "kind": prompt_span_kind_label(span.kind),
+                    "eventIndices": event_indices,
                 })
             })
             .collect();

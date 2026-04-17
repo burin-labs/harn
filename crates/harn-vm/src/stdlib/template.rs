@@ -35,6 +35,13 @@ use crate::value::{values_equal, VmError, VmValue};
 // through the bridge. Capped at 64 renders (FIFO) to bound memory.
 thread_local! {
     static PROMPT_REGISTRY: RefCell<Vec<RegisteredPrompt>> = const { RefCell::new(Vec::new()) };
+    // prompt_id -> [event_index...] where the prompt was consumed by
+    // an LLM call. Populated by emission sites once they thread the
+    // id alongside the rendered text; read by burin/promptConsumers
+    // to power the template gutter's jump-to-next-render action
+    // (#106). A per-session reset is handled by reset_prompt_registry.
+    static PROMPT_RENDER_INDICES: RefCell<BTreeMap<String, Vec<u64>>> =
+        const { RefCell::new(BTreeMap::new()) };
 }
 
 const PROMPT_REGISTRY_CAP: usize = 64;
@@ -147,11 +154,32 @@ pub fn lookup_prompt_consumers(
     })
 }
 
+/// Record a render event index against a prompt_id (#106). The
+/// scrubber's jump-to-render action walks this map to move the
+/// playhead to the AgentEvent where the template was consumed.
+/// Stored as a Vec so re-renders of the same prompt id accumulate.
+pub fn record_prompt_render_index(prompt_id: &str, event_index: u64) {
+    PROMPT_RENDER_INDICES.with(|map| {
+        map.borrow_mut()
+            .entry(prompt_id.to_string())
+            .or_default()
+            .push(event_index);
+    });
+}
+
+/// Fetch every event index where `prompt_id` was rendered. Called
+/// by the DAP adapter to populate the `eventIndices` list in the
+/// `burin/promptConsumers` response.
+pub fn prompt_render_indices(prompt_id: &str) -> Vec<u64> {
+    PROMPT_RENDER_INDICES.with(|map| map.borrow().get(prompt_id).cloned().unwrap_or_default())
+}
+
 /// Clear the registry. Wired into `reset_thread_local_state` so tests
 /// and serialized adapter sessions start from a clean slate.
 pub(crate) fn reset_prompt_registry() {
     PROMPT_REGISTRY.with(|reg| reg.borrow_mut().clear());
     PROMPT_SERIAL.with(|s| *s.borrow_mut() = 0);
+    PROMPT_RENDER_INDICES.with(|map| map.borrow_mut().clear());
 }
 
 /// Parse-only validation for lint/preflight. Returns a human-readable error
@@ -2578,6 +2606,24 @@ mod tests {
         let src = fs::read_to_string(&parent).unwrap();
         let out = render_template_result(&src, Some(&b), Some(&dir), Some(&parent)).unwrap();
         assert_eq!(out, "hello [world]!");
+    }
+
+    #[test]
+    fn prompt_render_indices_accumulate_in_order() {
+        reset_prompt_registry();
+        record_prompt_render_index("p-1", 5);
+        record_prompt_render_index("p-1", 9);
+        record_prompt_render_index("p-2", 7);
+        let p1 = prompt_render_indices("p-1");
+        assert_eq!(p1, vec![5, 9]);
+        let p2 = prompt_render_indices("p-2");
+        assert_eq!(p2, vec![7]);
+        assert!(prompt_render_indices("unknown").is_empty());
+        reset_prompt_registry();
+        assert!(
+            prompt_render_indices("p-1").is_empty(),
+            "reset clears the map"
+        );
     }
 
     #[test]
