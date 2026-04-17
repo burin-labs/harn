@@ -121,3 +121,9 @@ and GitHub release creation.
   patch/minor/major step ahead of `Cargo.toml`. Running audit on a "Prepare
   vX.Y.Z release" commit is fine even though Cargo.toml still points at the
   previous version.
+- `release_gate.sh audit` starts with a serial
+  `cargo build --workspace --all-targets` warm prebuild before spawning the
+  five parallel lanes. Cold wall-clock is typically ~6-10 min (dominated by
+  the prebuild); a warm-cache audit finishes in ~10-30 s. Any lane that
+  exceeds ~5 min after the prebuild is a real regression, not cold-cache
+  noise.

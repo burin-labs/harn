@@ -129,6 +129,21 @@ mechanics.
   `scripts/render_release_notes.py` or `./scripts/release_gate.sh notes` to
   produce the exact GitHub release body from it.
 
+## Audit wall-clock expectations
+
+`release_gate.sh audit` runs a serial `cargo build --workspace --all-targets`
+warm prebuild before spawning the 5 parallel lanes (`rust-audit`,
+`harn-audit`, `docs-audit`, `grammar-audit`, `security-audit`). The prebuild
+removes cargo-lock contention that historically made `harn-audit`'s lint
+phase stretch to ~12 min while fighting `rust-audit`'s clippy+nextest for
+`target/`. Typical wall-clock:
+
+- Cold `target/`: ~6-10 min, dominated by prebuild.
+- Warm `target/` after a recent build: ~10-30 s for the whole audit.
+- If any lane exceeds ~5 min after the prebuild, that is a regression —
+  check for a new `cargo`-shelling hotspot inside that lane rather than
+  assuming cold-cache cost.
+
 ## Useful shortcuts
 
 ```bash

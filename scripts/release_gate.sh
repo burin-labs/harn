@@ -174,6 +174,28 @@ cmd_audit() {
   echo "=== Parallel release audit ==="
   local audit_started
   audit_started="$(date +%s)"
+
+  # Serial warm prebuild before spawning the parallel lanes. The 3
+  # cargo-using lanes (rust-audit runs clippy + nextest; harn-audit
+  # runs `cargo build --bin harn` via `make lint-harn` and `cargo run`
+  # via conformance/fmt-harn; grammar-audit shells `target/debug/harn`
+  # via verify_language_spec.py) otherwise race for the same
+  # `.cargo-lock` and repeatedly invalidate each other's incremental
+  # artifacts. Historically the harn lint phase alone stretched to
+  # ~12 min cold because it was waiting on the shared target dir
+  # while rust-audit's nextest held the lock; warm-state it runs in
+  # ~1.5 s. One serial build up front lets every downstream lane hit
+  # a populated target/debug.
+  local prebuild_started prebuild_elapsed
+  prebuild_started="$(date +%s)"
+  echo ">>> warm-prebuild (cargo build --workspace --all-targets)"
+  if ! cargo build --workspace --all-targets --quiet; then
+    echo "error: warm prebuild failed; rerun without --quiet for details"
+    exit 1
+  fi
+  prebuild_elapsed=$(( $(date +%s) - prebuild_started ))
+  printf 'ok: %-15s (%ss)\n' "warm-prebuild" "$prebuild_elapsed"
+
   local tmp
   tmp="$(mktemp -d)"
   local -a steps=()
@@ -181,9 +203,10 @@ cmd_audit() {
 
   # Each step writes its wall-clock duration to `<name>.dur` so the
   # parent can report per-step timings once everyone wraps. That lets
-  # the release gate call out which audit lane is the long pole
-  # (historically: `rust-audit` because `make test` rebuilds every
-  # workspace test binary).
+  # the release gate call out which audit lane is the long pole.
+  # With the warm prebuild above, lanes should complete in parallel
+  # without fighting for the cargo lock; any lane blowing past ~5 min
+  # is a real regression worth investigating.
   run_step() {
     local name="$1"
     shift

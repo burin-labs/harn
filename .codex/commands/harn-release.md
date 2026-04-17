@@ -59,6 +59,11 @@ Rules:
 - Treat `CHANGELOG.md` as the source of truth for GitHub release notes.
 - Summarize the shipped version, the release-content commit, the bump commit,
   publish status, and the exact notes body or compare link.
+- `release_gate.sh audit` begins with a serial `cargo build --workspace
+  --all-targets` warm prebuild before spawning the five parallel lanes, so
+  the lanes don't serialize on the cargo lock. Expect ~6-10 min cold and
+  ~10-30 s with a warm target dir; lanes that exceed ~5 min after the
+  prebuild are real regressions.
 
 Useful shortcuts:
 
