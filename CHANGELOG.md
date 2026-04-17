@@ -196,6 +196,20 @@ granular archaeology.
   `qa_reply` path. An empty result now surfaces the real pipeline
   state honestly instead of masking bugs.
 
+### Deferred (separate follow-up)
+
+- **Canonical ADT surface syntax** — the planned
+  `type Action = Create { x: int } | Edit { y: int }` form, with a
+  unified internal `TypeExpr::Adt` representation behind it, is
+  intentionally *not* in this changeset. The user-visible
+  capabilities the canonical syntax was meant to deliver
+  (discriminator narrowing, exhaustiveness, distributive generic
+  instantiation, schema oneOf via the existing enum path) are all
+  in place via tagged shape unions, legacy enums, and alias
+  distribution; the surface change is additive sugar that requires
+  coordinated parser/VM/fmt/LSP/tree-sitter/VS Code work and
+  warrants its own PR.
+
 ### Fixed
 
 - **Bare function references now carry their full `fn(...)` type.**
