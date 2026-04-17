@@ -33,14 +33,23 @@ def extract_harn_fences(markdown: str) -> list[tuple[str, int, str]]:
             current_heading = re.sub(r"^#+\s*", "", line).strip() or current_heading
             continue
 
-        match = re.match(r"^```([A-Za-z0-9_-]+)?\s*$", line)
+        # CommonMark info string is everything after ``` up to end of
+        # line (no backticks). We must accept commas etc. so that
+        # `harn,ignore` — and any other-language fence like `ebnf` —
+        # is recognized as a fence boundary rather than treated as
+        # prose, which previously flipped fence state and silently
+        # dropped every ```harn block that followed.
+        match = re.match(r"^```([^`]*)$", line)
         if match:
             if not in_fence:
                 in_fence = True
-                fence_lang = (match.group(1) or "").strip().lower()
+                fence_lang = match.group(1).strip().lower()
                 fence_start = line_no + 1
                 fence_lines = []
             else:
+                # Only bare ```harn fences feed into the checker.
+                # ```harn,ignore is an intentional fragment; other
+                # languages (rust, ebnf, etc.) are never Harn code.
                 if fence_lang == "harn":
                     snippet = "\n".join(fence_lines).strip()
                     if snippet:
