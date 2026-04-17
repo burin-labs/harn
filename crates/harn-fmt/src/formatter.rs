@@ -612,6 +612,17 @@ impl Formatter {
                 for attr in attributes {
                     self.writeln(&format_attribute(attr));
                 }
+                // A doc comment may sit between the last attribute and the
+                // inner declaration (`@attr \n /** doc */ \n pub fn …`) — the
+                // lint rule `missing-harndoc` requires the doc block to sit
+                // directly above the fn, so we must preserve that position.
+                if let Some(last_attr) = attributes.last() {
+                    let from = last_attr.span.line + 1;
+                    let to = inner.span.line;
+                    if from < to {
+                        self.emit_comments_in_range(from, to);
+                    }
+                }
                 self.format_node(inner);
             }
             _ => {

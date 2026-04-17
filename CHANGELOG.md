@@ -7,6 +7,26 @@ external users before 0.6.0, so we intentionally do not preserve the full
 per-patch history of the 0.5.x and 0.4.x lines here — consult `git log` for
 granular archaeology.
 
+## v0.7.14
+
+### Fixed
+
+- **Lexer: multi-line `${…}` interpolation now tracks line numbers.**
+  Inside a single-line string, the `${…}` expression can itself span
+  multiple physical lines (e.g. `${render(\n  "a",\n  b,\n)}`). The lexer
+  consumed those inner newlines without advancing `self.line`, so every
+  token after such a string reported a line number that was too low —
+  by the number of newlines consumed inside the interpolation. Downstream
+  `missing-harndoc` lint spans pointed at the wrong declarations. Matches
+  the long-standing behavior of the multi-line (`"""…"""`) string lexer,
+  which already handled this correctly.
+- **Formatter: doc comment between `@attr` and `pub fn` is preserved.**
+  Placing `/** … */` between an attribute and its declaration (the order
+  the `missing-harndoc` rule requires when both are present) used to
+  drop the doc and re-emit it above the *next* top-level item. The
+  formatter now emits comments in the `last_attr.span.line + 1 ..
+  inner.span.line` range before recursing into the inner declaration.
+
 ## v0.7.13
 
 ### Changed

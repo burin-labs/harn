@@ -1032,6 +1032,26 @@ fn test_blank_line_between_mixed_top_level_items_idempotent() {
 }
 
 #[test]
+fn test_doc_comment_between_attribute_and_fn_is_preserved() {
+    // Regression: a `/** */` doc block placed between an attribute and the
+    // fn declaration (`@complexity(allow) \n /** */ \n pub fn ...`) used to
+    // be dropped and re-emitted above the *next* top-level item. The
+    // `missing-harndoc` lint requires the doc block to sit directly above
+    // the fn, so the formatter must preserve that position.
+    let source = "@complexity(allow)\n/** Documented. */\npub fn foo() -> int {\n  return 1\n}\n";
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("@complexity(allow)\n/** Documented. */\npub fn foo"),
+        "doc comment between attribute and fn should be preserved, got:\n{result}"
+    );
+    let result2 = format_source(&result).unwrap();
+    assert_eq!(
+        result, result2,
+        "formatter is not idempotent with doc between attribute and fn"
+    );
+}
+
+#[test]
 fn test_doc_comment_glued_to_item_blank_line_above() {
     let source =
         "fn first() -> int {\n  return 1\n}\n/// Second docs.\n/// More.\nfn second() -> int {\n  return 2\n}\n";

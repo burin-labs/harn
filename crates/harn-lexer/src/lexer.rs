@@ -316,6 +316,10 @@ impl Lexer {
                             break;
                         }
                     }
+                    if self.source[self.pos] == '\n' {
+                        self.line += 1;
+                        self.column = 0; // advance() restores column to 1
+                    }
                     expr.push(self.source[self.pos]);
                     self.advance();
                 }
@@ -915,6 +919,26 @@ mod tests {
         } else {
             panic!("Expected interpolated string");
         }
+    }
+
+    #[test]
+    fn test_interpolated_string_multiline_expression_tracks_lines() {
+        // Regression: `${...}` inside a single-line string can itself span
+        // multiple lines (e.g. `${render(\n  "x",\n  {k: v},\n)}`). The
+        // lexer used to consume those inner newlines without incrementing
+        // the line counter, so every token after the string reported a
+        // line number too low — by the number of newlines consumed inside
+        // the interpolation. Downstream lint spans pointed to wrong lines.
+        let src = "let x = \"${render(\n  \"a\",\n  b,\n)}\"\nlet y = 1\n";
+        let mut lexer = Lexer::new(src);
+        let tokens = lexer.tokenize().unwrap();
+        // `let y` is on line 5 of the source.
+        let let_y = tokens
+            .iter()
+            .skip(1) // the first `let` at line 1
+            .find(|t| matches!(t.kind, TokenKind::Let))
+            .expect("second `let`");
+        assert_eq!(let_y.span.line, 5);
     }
 
     #[test]
