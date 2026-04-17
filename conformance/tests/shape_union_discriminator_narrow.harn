@@ -6,7 +6,6 @@
 // invariants); this file exercises the *narrowed* variant types so the
 // `let pinned: <variant_shape> = v` assignments only succeed when
 // narrowing actually fires.
-
 type Msg = {kind: "ping", ttl: int} | {kind: "pong", latency_ms: int}
 
 fn handle_msg(m: Msg) -> string {

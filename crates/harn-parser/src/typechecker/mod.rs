@@ -266,6 +266,22 @@ impl TypeChecker {
         });
     }
 
+    /// Diagnostic site for non-exhaustive `match` arms. Match arms must be
+    /// exhaustive — a missing-variant `match` is a hard error. Authors who
+    /// genuinely want partial coverage opt out with a wildcard `_` arm.
+    /// Partial `if/elif/else` chains are intentionally allowed and are
+    /// instead handled by `check_unknown_exhaustiveness`, which stays a
+    /// warning so the `unreachable()` opt-in pattern continues to work.
+    pub(in crate::typechecker) fn exhaustiveness_error_at(&mut self, message: String, span: Span) {
+        self.diagnostics.push(TypeDiagnostic {
+            message,
+            severity: DiagnosticSeverity::Error,
+            span: Some(span),
+            help: None,
+            fix: None,
+        });
+    }
+
     pub(in crate::typechecker) fn warning_at(&mut self, message: String, span: Span) {
         self.diagnostics.push(TypeDiagnostic {
             message,

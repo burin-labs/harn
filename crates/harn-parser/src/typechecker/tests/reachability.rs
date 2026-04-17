@@ -82,8 +82,9 @@ nil -> { log("n") }
 }
 
 #[test]
-fn test_union_non_exhaustive_match_warning() {
-    let warns = warnings(
+fn test_union_non_exhaustive_match_errors() {
+    // Phase C: missing-variant `match` is now a hard error, not a warning.
+    let errs = errors(
         r#"pipeline t(task) {
   let x: string | int | nil = nil
   match x {
@@ -92,12 +93,12 @@ fn test_union_non_exhaustive_match_warning() {
   }
 }"#,
     );
-    let union_warns: Vec<_> = warns
+    let union_errs: Vec<_> = errs
         .iter()
-        .filter(|w| w.contains("Non-exhaustive match on union"))
+        .filter(|e| e.contains("Non-exhaustive match on union"))
         .collect();
-    assert_eq!(union_warns.len(), 1);
-    assert!(union_warns[0].contains("nil"));
+    assert_eq!(union_errs.len(), 1, "got: {:?}", errs);
+    assert!(union_errs[0].contains("nil"));
 }
 
 #[test]

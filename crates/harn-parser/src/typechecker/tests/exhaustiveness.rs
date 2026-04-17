@@ -23,8 +23,8 @@ fn test_exhaustive_match_no_warning() {
 }
 
 #[test]
-fn test_non_exhaustive_match_warning() {
-    let warns = warnings(
+fn test_non_exhaustive_match_errors() {
+    let errs = errors(
         r#"pipeline t(task) {
   enum Color { Red, Green, Blue }
   let c = Color.Red
@@ -34,17 +34,17 @@ fn test_non_exhaustive_match_warning() {
   }
 }"#,
     );
-    let exhaustive_warns: Vec<_> = warns
+    let exhaustive_errs: Vec<_> = errs
         .iter()
-        .filter(|w| w.contains("Non-exhaustive"))
+        .filter(|e| e.contains("Non-exhaustive"))
         .collect();
-    assert_eq!(exhaustive_warns.len(), 1);
-    assert!(exhaustive_warns[0].contains("Blue"));
+    assert_eq!(exhaustive_errs.len(), 1, "got: {:?}", errs);
+    assert!(exhaustive_errs[0].contains("Blue"));
 }
 
 #[test]
-fn test_non_exhaustive_multiple_missing() {
-    let warns = warnings(
+fn test_non_exhaustive_multiple_missing_errors() {
+    let errs = errors(
         r#"pipeline t(task) {
   enum Status { Active, Inactive, Pending }
   let s = Status.Active
@@ -53,13 +53,13 @@ fn test_non_exhaustive_multiple_missing() {
   }
 }"#,
     );
-    let exhaustive_warns: Vec<_> = warns
+    let exhaustive_errs: Vec<_> = errs
         .iter()
-        .filter(|w| w.contains("Non-exhaustive"))
+        .filter(|e| e.contains("Non-exhaustive"))
         .collect();
-    assert_eq!(exhaustive_warns.len(), 1);
-    assert!(exhaustive_warns[0].contains("Inactive"));
-    assert!(exhaustive_warns[0].contains("Pending"));
+    assert_eq!(exhaustive_errs.len(), 1, "got: {:?}", errs);
+    assert!(exhaustive_errs[0].contains("Inactive"));
+    assert!(exhaustive_errs[0].contains("Pending"));
 }
 
 #[test]
@@ -88,8 +88,8 @@ pipeline t(task) {
 }
 
 #[test]
-fn test_tagged_shape_union_match_missing_arm_warns() {
-    let warns = warnings(
+fn test_tagged_shape_union_match_missing_arm_errors() {
+    let errs = errors(
         r#"type Msg = {kind: "ping", ttl: int} | {kind: "pong", latency_ms: int}
 
 pipeline t(task) {
@@ -100,11 +100,11 @@ pipeline t(task) {
   }
 }"#,
     );
-    let exh: Vec<_> = warns
+    let exh: Vec<_> = errs
         .iter()
-        .filter(|w| w.contains("Non-exhaustive match on tagged shape union"))
+        .filter(|e| e.contains("Non-exhaustive match on tagged shape union"))
         .collect();
-    assert_eq!(exh.len(), 1, "got: {:?}", warns);
+    assert_eq!(exh.len(), 1, "got: {:?}", errs);
     assert!(
         exh[0].contains("\"pong\""),
         "expected missing pong, got: {}",
@@ -135,8 +135,8 @@ pipeline t(task) {
 }
 
 #[test]
-fn test_literal_union_match_missing_warns() {
-    let warns = warnings(
+fn test_literal_union_match_missing_errors() {
+    let errs = errors(
         r#"type Verdict = "pass" | "fail" | "unclear"
 
 pipeline t(task) {
@@ -148,12 +148,32 @@ pipeline t(task) {
   }
 }"#,
     );
-    let exh: Vec<_> = warns
+    let exh: Vec<_> = errs
         .iter()
-        .filter(|w| w.contains("Non-exhaustive match on literal union"))
+        .filter(|e| e.contains("Non-exhaustive match on literal union"))
         .collect();
-    assert_eq!(exh.len(), 1, "got: {:?}", warns);
+    assert_eq!(exh.len(), 1, "got: {:?}", errs);
     assert!(exh[0].contains("\"unclear\""));
+}
+
+#[test]
+fn test_non_exhaustive_match_wildcard_silences_error() {
+    // Wildcard `_` arm escapes the new exhaustiveness error.
+    let errs = errors(
+        r#"pipeline t(task) {
+  enum Color { Red, Green, Blue }
+  let c = Color.Red
+  match c.variant {
+    "Red" -> { log("r") }
+    _ -> { log("?") }
+  }
+}"#,
+    );
+    let exhaustive_errs: Vec<_> = errs
+        .iter()
+        .filter(|e| e.contains("Non-exhaustive"))
+        .collect();
+    assert!(exhaustive_errs.is_empty(), "got: {:?}", errs);
 }
 
 #[test]

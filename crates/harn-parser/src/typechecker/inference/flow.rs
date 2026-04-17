@@ -530,7 +530,7 @@ impl TypeChecker {
                 .map(|s| format!("\"{}\"", s))
                 .collect::<Vec<_>>()
                 .join(", ");
-            self.warning_at(
+            self.exhaustiveness_error_at(
                 format!(
                     "Non-exhaustive match on enum {}: missing variants {}",
                     enum_name, missing_str
@@ -598,7 +598,7 @@ impl TypeChecker {
             }
         }
         if !missing.is_empty() {
-            self.warning_at(
+            self.exhaustiveness_error_at(
                 format!(
                     "Non-exhaustive match on tagged shape union: missing variants {}",
                     missing.join(", ")
@@ -699,7 +699,7 @@ impl TypeChecker {
                 .map(|s| s.to_string())
                 .collect::<Vec<_>>()
                 .join(", ");
-            self.warning_at(
+            self.exhaustiveness_error_at(
                 format!(
                     "Non-exhaustive match on union type: missing {}",
                     missing_str
@@ -740,7 +740,7 @@ impl TypeChecker {
             }
         }
         if !missing.is_empty() {
-            self.warning_at(
+            self.exhaustiveness_error_at(
                 format!(
                     "Non-exhaustive match on literal union: missing {}",
                     missing.join(", ")

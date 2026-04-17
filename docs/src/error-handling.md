@@ -74,6 +74,7 @@ try {
   match e.variant {
     "NotFound" -> { println("Missing: ${e.fields[0]}") }
     "Unauthorized" -> { println("Access denied") }
+    "Internal" -> { println("Internal: ${e.fields[0]}") }
   }
 }
 ```

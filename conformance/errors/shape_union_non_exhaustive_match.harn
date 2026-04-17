@@ -1,0 +1,10 @@
+// Phase C: matching on a tagged shape union's discriminant must cover
+// every variant or include a wildcard arm.
+type Msg = {kind: "ping", ttl: int} | {kind: "pong", latency_ms: int}
+
+pipeline test(task) {
+  let m: Msg = {kind: "ping", ttl: 5}
+  match m.kind {
+    "ping" -> { log("ping") }
+  }
+}
