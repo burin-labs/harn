@@ -434,16 +434,75 @@ impl TypeChecker {
                     .collect(),
                 return_type: Box::new(self.resolve_alias(return_type, scope)),
             },
-            TypeExpr::Applied { name, args } => TypeExpr::Applied {
-                name: name.clone(),
-                args: args
+            TypeExpr::Applied { name, args } => {
+                let resolved_args: Vec<TypeExpr> = args
                     .iter()
                     .map(|arg| self.resolve_alias(arg, scope))
-                    .collect(),
-            },
+                    .collect();
+                // If the constructor is a `type T<...> = ...` alias (as
+                // opposed to an enum/struct/interface), expand it by
+                // substituting the declared parameters with the supplied
+                // arguments. When an argument is a closed union, the
+                // instantiation distributes over the members to produce
+                // a union of substituted bodies. This is what lets
+                // `Container<A | B>` flow as `Container<A> | Container<B>`
+                // at use sites — each element self-consistently fixes
+                // its own `T`.
+                if let Some(info) = scope.resolve_type_alias(name) {
+                    if info.type_params.len() == resolved_args.len() {
+                        let names: Vec<String> =
+                            info.type_params.iter().map(|tp| tp.name.clone()).collect();
+                        let expanded =
+                            instantiate_alias_distributive(&info.body, &names, &resolved_args);
+                        return self.resolve_alias(&expanded, scope);
+                    }
+                }
+                TypeExpr::Applied {
+                    name: name.clone(),
+                    args: resolved_args,
+                }
+            }
             TypeExpr::Never => TypeExpr::Never,
             TypeExpr::LitString(s) => TypeExpr::LitString(s.clone()),
             TypeExpr::LitInt(v) => TypeExpr::LitInt(*v),
         }
+    }
+}
+
+/// Substitute `param_names[i] := args[i]` into `body`. When an argument is
+/// a `Union`, the body is cloned per union member and each result is
+/// unioned together — the "distributive" instantiation that makes
+/// `Container<A | B>` equal `Container<A> | Container<B>`.
+fn instantiate_alias_distributive(
+    body: &TypeExpr,
+    param_names: &[String],
+    args: &[TypeExpr],
+) -> TypeExpr {
+    debug_assert_eq!(param_names.len(), args.len());
+    let mut variants: Vec<std::collections::BTreeMap<String, TypeExpr>> =
+        vec![std::collections::BTreeMap::new()];
+    for (name, arg) in param_names.iter().zip(args.iter()) {
+        let members: Vec<TypeExpr> = match arg {
+            TypeExpr::Union(items) if !items.is_empty() => items.clone(),
+            other => vec![other.clone()],
+        };
+        let mut next = Vec::with_capacity(variants.len() * members.len());
+        for base in &variants {
+            for member in &members {
+                let mut extended = base.clone();
+                extended.insert(name.clone(), member.clone());
+                next.push(extended);
+            }
+        }
+        variants = next;
+    }
+    let mut results: Vec<TypeExpr> = variants
+        .into_iter()
+        .map(|bindings| TypeChecker::apply_type_bindings(body, &bindings))
+        .collect();
+    if results.len() == 1 {
+        results.pop().unwrap()
+    } else {
+        TypeExpr::Union(results)
     }
 }

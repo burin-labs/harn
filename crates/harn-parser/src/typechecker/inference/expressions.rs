@@ -167,7 +167,29 @@ impl TypeChecker {
                 Some(TypeExpr::Named("closure".into()))
             }
 
-            Node::Identifier(name) => scope.get_var(name).cloned().flatten(),
+            Node::Identifier(name) => {
+                if let Some(ty) = scope.get_var(name).cloned().flatten() {
+                    return Some(ty);
+                }
+                // When a bare identifier names a top-level or nested function,
+                // treat the reference as an `fn(...) -> R` value. Prior to this,
+                // `Identifier` fell through to `None` for functions, which made
+                // function references in dict/list literals collapse to `nil`
+                // and silently break assignability against typed slots.
+                if let Some(sig) = scope.get_fn(name).cloned() {
+                    let params = sig
+                        .params
+                        .into_iter()
+                        .map(|(_, ty)| ty.unwrap_or_else(Self::wildcard_type))
+                        .collect();
+                    let return_type = sig.return_type.unwrap_or(TypeExpr::Named("nil".into()));
+                    return Some(TypeExpr::FnType {
+                        params,
+                        return_type: Box::new(return_type),
+                    });
+                }
+                None
+            }
 
             Node::FunctionCall { name, args } => {
                 // Struct constructor calls return the struct type
