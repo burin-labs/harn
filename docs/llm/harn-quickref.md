@@ -172,6 +172,85 @@ fn handle(v: unknown) -> string {
 `unreachable()`, and blocks that always exit infer to `never`. It's a
 subtype of every type.
 
+### Discriminated unions & distribution
+
+Three discriminated-union surface forms, all check identically once
+you've written them — pick whichever reads best at the call site.
+
+**Pure literal unions.** No discriminant, no shape: just enumerate
+the literal values. `match` covers them like an enum.
+
+```harn,ignore
+type Verdict = "pass" | "fail" | "unclear"
+
+fn classify(v: Verdict) -> string {
+  match v {
+    "pass" -> { return "ok" }
+    "fail" -> { return "no" }
+    "unclear" -> { return "?" }
+  }
+}
+```
+
+**Tagged shape unions.** Two or more dict shapes joined by `|`. The
+checker auto-detects the discriminant: a field that is non-optional
+in every variant, has a literal type, and takes a distinct literal
+value per variant. The field can be named anything — `kind`, `type`,
+`op`, whatever fits the domain — there is no privileged spelling.
+
+```harn,ignore
+type Msg =
+  {kind: "ping", ttl: int} |
+  {kind: "pong", latency_ms: int}
+
+fn handle(m: Msg) -> string {
+  match m.kind {                             // narrows m per arm
+    "ping" -> { return "ttl=" + to_string(m.ttl) }
+    "pong" -> { return to_string(m.latency_ms) + "ms" }
+  }
+}
+
+// Same narrowing works on `if`:
+if m.kind == "ping" { /* m: {kind: "ping", ttl: int} */ }
+else                { /* m: {kind: "pong", latency_ms: int} */ }
+```
+
+**Legacy `enum`.** Nominal variants with optional payload fields,
+matched on `.variant`.
+
+```harn,ignore
+enum Action { Create, Edit, Delete }
+match a.variant { "Create" -> { … } "Edit" -> { … } "Delete" -> { … } }
+```
+
+**`match` must be exhaustive.** Missing a variant is a hard error.
+Add the missing arm or end with `_ -> { … }`. `if/elif/else` chains
+stay intentionally partial; opt into exhaustiveness by ending the
+chain with `unreachable("…")`.
+
+**Generic aliases distribute over closed unions.** When you write
+`Container<A | B>`, the checker expands it to
+`Container<A> | Container<B>` so each instantiation fixes the type
+parameter independently. This is what makes the TypeScript pain
+around `(t: "create" | "edit") => void` not bite in Harn:
+
+```harn,ignore
+type Action = "create" | "edit"
+type ActionContainer<T> = {action: T, process_action: fn(T) -> nil}
+
+fn process_create(a: "create") { … }
+fn process_edit(a: "edit")     { … }
+
+let containers: list<ActionContainer<Action>> = [
+  {action: "create", process_action: process_create},
+  {action: "edit",   process_action: process_edit},
+]
+```
+
+`ActionContainer<Action>` is `ActionContainer<"create"> |
+ActionContainer<"edit">`, so the literal-tagged elements fit one
+specific branch each — no contravariance grief.
+
 ### Variance (`in T` / `out T`)
 
 User-declared generics default to **invariant**. Mark a type

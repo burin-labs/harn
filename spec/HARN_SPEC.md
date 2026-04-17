@@ -1537,8 +1537,11 @@ match s {
 }
 ```
 
-The type checker warns when a `match` on an enum is not exhaustive (i.e.,
-does not cover all variants).
+A `match` on an enum **must** be exhaustive: a missing variant is a hard
+error, not a warning. Add the missing arm or end with a wildcard
+`_ -> { … }` arm to opt out. `if/elif/else` chains stay intentionally
+partial; opt into exhaustiveness by ending the chain with
+`unreachable("…")`.
 
 ### Built-in Result enum
 
@@ -2160,6 +2163,59 @@ Literal types are assignable to their base type (`"pass"` flows into
 into `Verdict`). Runtime `schema_is` / `schema_expect` guards and the
 parameter-annotation runtime check reject values that violate the
 literal set.
+
+A `match` on a literal union must cover every literal or include a
+wildcard `_` arm — non-exhaustive `match` is a hard error.
+
+#### Tagged shape unions (discriminated unions)
+
+A union of two or more dict shapes is a *tagged shape union* when the
+shapes share a discriminant field. The discriminant is auto-detected:
+the first field of the first variant that (a) is non-optional in every
+member, (b) has a literal type (`LitString` or `LitInt`), and (c) takes
+a distinct literal value per variant qualifies. The field can be named
+anything — `kind`, `type`, `op`, `t`, etc. — there is no privileged
+spelling.
+
+```harn
+type Msg =
+  {kind: "ping", ttl: int} |
+  {kind: "pong", latency_ms: int}
+```
+
+Matching on the discriminant narrows the value to the matching variant
+inside each arm; the same narrowing fires under
+`if obj.<tag> == "value"` / `else`:
+
+```harn
+fn handle(m: Msg) -> string {
+  match m.kind {
+    "ping" -> { return "ttl=" + to_string(m.ttl) }
+    "pong" -> { return to_string(m.latency_ms) + "ms" }
+  }
+}
+```
+
+Such a `match` must cover every variant or include a wildcard `_` arm
+— non-exhaustive `match` is a hard error.
+
+#### Distributive generic instantiation
+
+Generic type aliases distribute over closed-union arguments. Writing
+`Container<A | B>` is equivalent to `Container<A> | Container<B>` so
+each instantiation independently fixes the type parameter. This is what
+keeps `processCreate: fn("create") -> nil` flowing into a `list<
+ActionContainer<Action>>` element instead of getting rejected by the
+contravariance of the function-parameter slot:
+
+```harn
+type Action = "create" | "edit"
+type ActionContainer<T> = {action: T, process_action: fn(T) -> nil}
+```
+
+`ActionContainer<Action>` resolves to `ActionContainer<"create"> |
+ActionContainer<"edit">`, and a literal-tagged shape on the right flows
+into the matching branch.
 
 ### Parameterized types
 

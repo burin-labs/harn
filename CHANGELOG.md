@@ -154,6 +154,39 @@ granular archaeology.
   `crates/harn-parser/src/typechecker/inference/subtyping.rs`. No new
   syntax or keyword required — distribution is an implementation of
   existing alias-application semantics.
+- **Discriminator narrowing on tagged shape unions.** A union of two or
+  more dict shapes that share a literal-typed, distinct-per-variant
+  field is now a *tagged shape union*. Matching on that field
+  (`match obj.<tag>`) or testing it (`if obj.<tag> == "value"` /
+  `else`) narrows `obj` to the matching variant inside each arm or
+  branch. The discriminant is auto-detected — there is no privileged
+  field name, `kind` and `type` and `op` and any other shared
+  literal-typed field all work identically. Plain literal unions
+  (`"pass" | "fail" | "unclear"`) gain the same exhaustive `match`
+  treatment as enums.
+- **Reserved keywords are now legal shape-type field names.**
+  `{type: "click", x: int, y: int}` parses in type position as well
+  as in dict-literal and property-access position. Closes a small
+  asymmetry that previously forced workarounds for `type`-tagged
+  shape unions.
+- **Conformance and quickref pin the surface contract.** New
+  conformance tests `shape_union_discriminator_forms` (parse +
+  format invariants across `kind`, `type`, and `op` discriminants
+  plus pure literal unions) and `shape_union_discriminator_narrow`
+  (end-to-end narrowing in match arms and `if` branches). The
+  `harn-scripting` skill autoloads `docs/llm/harn-quickref.md`,
+  which now ships a "Discriminated unions & distribution" block
+  with copy-paste-ready examples for all three forms.
+
+### Breaking — typechecker
+
+- **Non-exhaustive `match` is a hard error.** A `match` that omits
+  enum variants, tagged-shape-union variants, named-type union
+  members, or literal-union members must add the missing arm or
+  end with a wildcard `_ -> { … }` arm. `if/elif/else` chains stay
+  intentionally partial; opt into exhaustiveness by ending the
+  chain with `unreachable("…")`, which still flows through the
+  warning-level `check_unknown_exhaustiveness` path.
 
 ### Removed
 

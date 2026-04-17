@@ -1,0 +1,56 @@
+==================
+Tagged Shape Union With Type Field
+==================
+
+type Event = {type: "click", x: int, y: int} | {type: "scroll", dy: int}
+
+---
+
+(source_file
+  (type_declaration
+    name: (identifier)
+    type: (type_annotation
+      (type_annotation
+        (shape_type
+          (shape_field
+            name: (identifier)
+            type: (type_annotation
+              (string_literal)))
+          (shape_field
+            name: (identifier)
+            type: (type_annotation
+              (identifier)))
+          (shape_field
+            name: (identifier)
+            type: (type_annotation
+              (identifier)))))
+      (type_annotation
+        (shape_type
+          (shape_field
+            name: (identifier)
+            type: (type_annotation
+              (string_literal)))
+          (shape_field
+            name: (identifier)
+            type: (type_annotation
+              (identifier))))))))
+
+==================
+Pure Literal Union Type
+==================
+
+type Verdict = "pass" | "fail" | "unclear"
+
+---
+
+(source_file
+  (type_declaration
+    name: (identifier)
+    type: (type_annotation
+      (type_annotation
+        (type_annotation
+          (string_literal))
+        (type_annotation
+          (string_literal)))
+      (type_annotation
+        (string_literal)))))
