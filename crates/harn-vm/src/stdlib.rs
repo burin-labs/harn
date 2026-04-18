@@ -14,6 +14,8 @@ mod logging;
 mod math;
 mod path;
 pub mod process;
+mod project;
+mod project_catalog;
 mod regex;
 mod sets;
 mod shapes;
@@ -59,6 +61,7 @@ pub fn register_io_stdlib(vm: &mut Vm) {
     fs::register_fs_builtins(vm);
     process::register_process_builtins(vm);
     process::register_path_builtins(vm);
+    project::register_project_builtins(vm);
     tracing::register_tracing_builtins(vm);
 }
 

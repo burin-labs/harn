@@ -1,0 +1,40 @@
+import "std/project"
+
+pipeline test(task) {
+  mkdir("project_scan_ignored/app/src")
+  mkdir("project_scan_ignored/ignored")
+  mkdir("project_scan_ignored/node_modules/pkg/src")
+  mkdir("project_scan_ignored/target/tooling")
+
+  write_file("project_scan_ignored/.gitignore", "ignored/\n")
+
+  write_file(
+    "project_scan_ignored/app/Cargo.toml",
+    "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
+  )
+  write_file("project_scan_ignored/app/Cargo.lock", "# lock\n")
+  write_file("project_scan_ignored/app/src/main.rs", "fn main() {}\n")
+
+  write_file("project_scan_ignored/ignored/go.mod", "module ignored\n")
+  write_file("project_scan_ignored/node_modules/pkg/package.json", "{\"name\":\"pkg\"}\n")
+  write_file("project_scan_ignored/node_modules/pkg/package-lock.json", "{}\n")
+  write_file("project_scan_ignored/node_modules/pkg/src/index.js", "export const x = 1\n")
+  write_file(
+    "project_scan_ignored/target/tooling/Cargo.toml",
+    "[package]\nname = \"tooling\"\nversion = \"0.1.0\"\n",
+  )
+
+  let default_tree = project_scan_tree("project_scan_ignored", {tiers: ["ambient"], depth: 4})
+  let expanded_tree = project_scan_tree(
+    "project_scan_ignored",
+    {tiers: ["ambient"], depth: 4, respect_gitignore: false, include_vendor: true},
+  )
+
+  println(default_tree.app.languages[0] == "rust")
+  println(!contains(keys(default_tree), "ignored"))
+  println(!contains(keys(default_tree), "node_modules/pkg"))
+  println(!contains(keys(default_tree), "target/tooling"))
+  println(expanded_tree.ignored.languages[0] == "go")
+  println(expanded_tree["node_modules/pkg"].languages[0] == "javascript")
+  println(expanded_tree["target/tooling"].languages[0] == "rust")
+}

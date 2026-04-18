@@ -260,7 +260,7 @@ Generic host/runtime helpers that are useful across many hosts:
 
 ### std/project
 
-Project metadata and scanner helpers built on `metadata_*`, `project_root()`, and `scan_directory(...)`:
+Project metadata helpers plus deterministic project evidence scanning:
 
 | Function | Description |
 |---|---|
@@ -268,8 +268,10 @@ Project metadata and scanner helpers built on `metadata_*`, `project_root()`, an
 | `metadata_local_namespace(dir, namespace)` | Read only the namespace data stored directly on a directory |
 | `project_inventory(namespace?)` | Return `{entries, status}` for metadata-backed project state |
 | `project_root_package()` | Infer the repository's root package/module name from common manifests |
-| `project_scan(path, options?)` | Scan files/directories with the runtime scanner options |
-| `project_scan_paths(path, options?)` | Return only the scanned paths |
+| `project_scan(path, options?)` | Scan a directory for deterministic L0/L1 evidence |
+| `project_scan_tree(path, options?)` | Walk subdirectories and return a `{rel_path: evidence}` map |
+| `project_catalog()` | Return the built-in anchor/lockfile catalog used by `project_scan(...)` |
+| `project_scan_paths(path, options?)` | Return only the keys from `project_scan_tree(...)` |
 | `project_stale(namespace?)` | Return the stale summary from `metadata_status(...)` |
 | `project_stale_dirs(namespace?)` | Return the tier1+tier2 stale directory list |
 | `project_requires_refresh(namespace?)` | Return `true` when stale or missing hashes require refresh |
