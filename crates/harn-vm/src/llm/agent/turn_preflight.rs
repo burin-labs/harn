@@ -43,6 +43,10 @@ pub(super) struct PreflightContext<'a> {
     pub base_system: Option<&'a str>,
     pub tool_contract_prompt: Option<&'a str>,
     pub persistent_system_prompt: Option<&'a str>,
+    /// Skill-scoped tool registry for this turn, when skill activation
+    /// narrowed `tools_val`. `None` when the full registry is in
+    /// effect — the preflight then uses the baked-in `tool_contract_prompt`.
+    pub scoped_tools_val: Option<&'a crate::value::VmValue>,
 }
 
 pub(super) async fn run_turn_preflight(
@@ -81,11 +85,36 @@ pub(super) async fn run_turn_preflight(
     // tools) would be reused for turn N, and the model wouldn't see
     // the schemas the search tool just surfaced.
     let dynamic_contract_prompt = state.rebuild_tool_contract_prompt(opts);
-    let tool_prompt_override = dynamic_contract_prompt.as_deref();
-    let tool_prompt_slot = tool_prompt_override.or(ctx.tool_contract_prompt);
+    // Skill-scoped tool prompt: when an active skill narrows the tool
+    // surface, rebuild the contract prompt against the scoped view so
+    // the model's schema list matches the dispatch allowlist. Takes
+    // priority over the baked-in snapshot but not over the dynamic
+    // tool_search prompt.
+    let scoped_contract_prompt = ctx
+        .scoped_tools_val
+        .filter(|_| dynamic_contract_prompt.is_none() && state.has_tools)
+        .map(|tv| {
+            crate::llm::tools::build_tool_calling_contract_prompt(
+                Some(tv),
+                opts.native_tools.as_deref(),
+                &state.tool_format,
+                state
+                    .config
+                    .turn_policy
+                    .as_ref()
+                    .is_some_and(|policy| policy.require_action_or_yield),
+                state.config.tool_examples.as_deref(),
+            )
+        });
+    let tool_prompt_slot = dynamic_contract_prompt
+        .as_deref()
+        .or(scoped_contract_prompt.as_deref())
+        .or(ctx.tool_contract_prompt);
 
+    let skill_prompt = render_active_skill_prompt(&state.active_skills);
+    let base_with_skill = merge_optional(ctx.base_system, skill_prompt.as_deref());
     let default_system = build_agent_system_prompt(
-        ctx.base_system,
+        base_with_skill.as_deref(),
         tool_prompt_slot,
         ctx.persistent_system_prompt,
     );
@@ -140,7 +169,62 @@ pub(super) async fn run_turn_preflight(
         &call_messages,
     );
 
+    // Rebuild opts.native_tools from the baseline snapshot and apply
+    // the active skill's allowed_tools whitelist. Idempotent across
+    // turns — activation narrows, deactivation restores. Works whether
+    // or not a scoped view currently applies (the helper handles both
+    // paths).
+    state.rebuild_scoped_native_tools(opts);
+
     opts.messages = call_messages;
     opts.system = call_system;
     Ok(())
+}
+
+/// Render the active-skill block that gets appended to the base system
+/// prompt. Each skill contributes its description (always) and body
+/// prompt (when non-empty) under a `## Active skill: <name>` heading.
+/// Returns `None` when no skills are active — callers fall back to the
+/// unmodified base prompt.
+fn render_active_skill_prompt(active: &[super::state::ActiveSkill]) -> Option<String> {
+    if active.is_empty() {
+        return None;
+    }
+    let mut out = String::from("\n\n## Active skills\n");
+    for skill in active {
+        out.push_str(&format!("\n### {}\n", skill.name));
+        if !skill.description.is_empty() {
+            out.push_str(&format!("{}\n", skill.description.trim()));
+        }
+        if !skill.when_to_use.is_empty() {
+            out.push_str(&format!("When to use: {}\n", skill.when_to_use.trim()));
+        }
+        if !skill.allowed_tools.is_empty() {
+            out.push_str(&format!(
+                "Scoped tools: {}\n",
+                skill.allowed_tools.join(", ")
+            ));
+        }
+        if let Some(prompt) = skill.prompt.as_deref() {
+            let trimmed = prompt.trim();
+            if !trimmed.is_empty() {
+                out.push('\n');
+                out.push_str(trimmed);
+                out.push('\n');
+            }
+        }
+    }
+    Some(out)
+}
+
+fn merge_optional(base: Option<&str>, extra: Option<&str>) -> Option<String> {
+    match (base, extra) {
+        (Some(b), Some(e)) => {
+            let trimmed_b = b.trim_end();
+            Some(format!("{trimmed_b}{e}"))
+        }
+        (Some(b), None) => Some(b.to_string()),
+        (None, Some(e)) => Some(e.trim_start().to_string()),
+        (None, None) => None,
+    }
 }

@@ -630,6 +630,8 @@ pub fn register_llm_builtins(vm: &mut Vm) {
         let break_unless_phase = opt_str(&options, "break_unless_phase");
         let exit_when_verified = opt_bool(&options, "exit_when_verified");
         let daemon_config = parse_daemon_loop_config(options.as_ref());
+        let (skill_registry, skill_match, working_files) =
+            crate::llm::agent::parse_skill_config(&options);
         let mut opts = extract_llm_options(&args)?;
         let result = run_agent_loop_internal(
             &mut opts,
@@ -666,6 +668,9 @@ pub fn register_llm_builtins(vm: &mut Vm) {
                     .and_then(|o| o.get("post_turn_callback"))
                     .filter(|v| matches!(v, crate::value::VmValue::Closure(_)))
                     .cloned(),
+                skill_registry,
+                skill_match,
+                working_files,
             },
         )
         .await?;

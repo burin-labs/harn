@@ -1,0 +1,52 @@
+// Skills & Tool Vault phase 3 (harn#74): `paths:` auto-trigger.
+//
+// When the user prompt contains no keyword overlap with any skill,
+// the `working_files:` option feeds the path-glob matcher — and a
+// path hit alone is enough to activate.
+pipeline test(task) {
+  llm_mock_clear()
+  skill infra_touch {
+    description "Infrastructure work"
+    paths ["infra/**", "Dockerfile"]
+    prompt "Keep changes minimal and reviewable."
+  }
+  skill docs_touch {
+    description "Documentation polish"
+    paths ["docs/**/*.md"]
+  }
+  let registry = skill_define(infra_touch, "docs_touch", skill_find(docs_touch, "docs_touch"))
+  llm_mock({text: "All done."})
+  let result = agent_loop(
+    "fix the edge case",
+    nil,
+    {
+    provider: "mock",
+    max_iterations: 1,
+    skills: registry,
+    working_files: ["infra/terraform/cluster.tf", "README.md"],
+  },
+  )
+  assert(result?.status == "done", "loop completes on path-only match")
+  // Exactly one skill should have activated — the infra one.
+  let events = transcript_events(result?.transcript)
+  var infra_activated = false
+  var docs_activated = false
+  for ev in events {
+    if ev.kind == "skill_activated" {
+      if ev.metadata?.name == "infra_touch" {
+        infra_activated = true
+      }
+      if ev.metadata?.name == "docs_touch" {
+        docs_activated = true
+      }
+    }
+  }
+  assert(infra_activated, "path-match alone activates infra_touch")
+  assert(!docs_activated, "non-matching skill stays inactive")
+  let calls = llm_mock_calls()
+  assert(
+    contains(calls[0].system, "infra_touch"),
+    "infra_touch prompt body weaves into system prompt",
+  )
+  log("skill_lifecycle_paths tests passed")
+}

@@ -200,3 +200,77 @@ skill catalog; the CLI re-runs layered discovery (including another
 `skills/list` call) on the next iteration boundary — for `harn watch`,
 between file changes; for long-running agents, between turns. A VM
 without an active bridge simply ignores the notification.
+
+## Host-delegated skill matching
+
+Harn agents that opt into
+`skill_match: { strategy: "host" }` (or the alias `"embedding"`)
+delegate skill ranking to the host via a single JSON-RPC request. The
+host response is purely advisory — unknown skill names are ignored,
+and an RPC error falls back to the in-VM metadata ranker with a
+warning logged against `agent.skill_match`.
+
+### `skill/match`
+
+Request payload (harn-issued, host response required):
+
+```json
+{
+  "strategy": "host",
+  "prompt": "Ship the new release to production",
+  "working_files": ["infra/terraform/cluster.tf"],
+  "candidates": [
+    {
+      "name": "ship",
+      "description": "Ship a production release",
+      "when_to_use": "User says ship/release/deploy",
+      "paths": ["infra/**", "Dockerfile"]
+    },
+    {
+      "name": "review",
+      "description": "Review existing code for correctness",
+      "when_to_use": "User asks to review/audit",
+      "paths": []
+    }
+  ]
+}
+```
+
+Response payload (host-issued):
+
+```json
+{
+  "matches": [
+    {"name": "ship", "score": 0.92, "reason": "matched by embedding similarity"}
+  ]
+}
+```
+
+- `matches[*].name` (required): the candidate's skill name. Names
+  absent from the original `candidates` list are ignored.
+- `matches[*].score` (optional): non-negative float; higher scores
+  rank earlier. Defaults to `1.0` when omitted.
+- `matches[*].reason` (optional): short diagnostic stored on the
+  `skill_matched` / `skill_activated` transcript events. Defaults
+  to `"host match"`.
+
+Alternative shapes accepted for host convenience:
+
+- Top-level array: `[{"name": ..., "score": ...}, ...]`
+- `{"skills": [...]}` wrapping
+- `{"result": {"matches": [...]}}` ACP envelope
+
+### Skill lifecycle session updates
+
+Agents emit ACP `session/update` notifications for skill lifecycle
+transitions so hosts can surface active-skill state in real time.
+`harn-cli`'s ACP server translates the canonical `AgentEvent`
+variants into:
+
+- `sessionUpdate: "skill_activated"` — `{skillName, iteration, reason}`
+- `sessionUpdate: "skill_deactivated"` — `{skillName, iteration}`
+- `sessionUpdate: "skill_scope_tools"` — `{skillName, allowedTools}`
+
+`skill_matched` stays internal to the VM transcript — the candidate
+list can be large and host UIs typically only care about activation
+transitions, not every ranking pass.

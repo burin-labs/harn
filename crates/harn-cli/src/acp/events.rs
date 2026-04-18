@@ -138,6 +138,50 @@ impl AgentEventSink for AcpAgentEventSink {
                     },
                 }));
             }
+            AgentEvent::SkillActivated {
+                session_id,
+                skill_name,
+                iteration,
+                reason,
+            } => {
+                self.write_notification(serde_json::json!({
+                    "sessionId": session_id,
+                    "update": {
+                        "sessionUpdate": "skill_activated",
+                        "skillName": skill_name,
+                        "iteration": iteration,
+                        "reason": reason,
+                    },
+                }));
+            }
+            AgentEvent::SkillDeactivated {
+                session_id,
+                skill_name,
+                iteration,
+            } => {
+                self.write_notification(serde_json::json!({
+                    "sessionId": session_id,
+                    "update": {
+                        "sessionUpdate": "skill_deactivated",
+                        "skillName": skill_name,
+                        "iteration": iteration,
+                    },
+                }));
+            }
+            AgentEvent::SkillScopeTools {
+                session_id,
+                skill_name,
+                allowed_tools,
+            } => {
+                self.write_notification(serde_json::json!({
+                    "sessionId": session_id,
+                    "update": {
+                        "sessionUpdate": "skill_scope_tools",
+                        "skillName": skill_name,
+                        "allowedTools": allowed_tools,
+                    },
+                }));
+            }
             // Pipeline-loop milestones with no canonical ACP session/update
             // mapping; deliberately not forwarded.
             AgentEvent::TurnStart { .. }

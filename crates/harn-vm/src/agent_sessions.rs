@@ -34,6 +34,12 @@ pub struct SessionState {
     pub subscribers: Vec<VmValue>,
     pub created_at: Instant,
     pub last_accessed: Instant,
+    /// Names of skills that were active at the end of the most recent
+    /// `agent_loop` run on this session. Empty when no skills were
+    /// matched, when the skill system wasn't used, or when the
+    /// deactivation phase cleared them. Re-entering the session
+    /// restores these as the initial active set before matching runs.
+    pub active_skills: Vec<String>,
 }
 
 impl SessionState {
@@ -46,6 +52,7 @@ impl SessionState {
             subscribers: Vec::new(),
             created_at: now,
             last_accessed: now,
+            active_skills: Vec::new(),
         }
     }
 }
@@ -403,6 +410,30 @@ pub fn subscriber_count(id: &str) -> usize {
             .get(id)
             .map(|state| state.subscribers.len())
             .unwrap_or(0)
+    })
+}
+
+/// Persist the set of active skill names for session resume. Called at
+/// the end of an agent_loop run; the next `open_or_create` for this id
+/// reads them back via [`active_skills`].
+pub fn set_active_skills(id: &str, skills: Vec<String>) {
+    SESSIONS.with(|s| {
+        if let Some(state) = s.borrow_mut().get_mut(id) {
+            state.active_skills = skills;
+            state.last_accessed = Instant::now();
+        }
+    });
+}
+
+/// Skills that were active at the end of the previous agent_loop run
+/// against this session. Returns an empty vec when the session doesn't
+/// exist or nothing was persisted.
+pub fn active_skills(id: &str) -> Vec<String> {
+    SESSIONS.with(|s| {
+        s.borrow()
+            .get(id)
+            .map(|state| state.active_skills.clone())
+            .unwrap_or_default()
     })
 }
 
