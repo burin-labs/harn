@@ -1322,6 +1322,7 @@ These builtins expose Harn's typed orchestration runtime.
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `spawn_agent(config)` | config: dict | dict | Start a worker from a workflow graph or delegated stage config |
+| `sub_agent_run(task, options?)` | task: string, options: dict | dict | Run an isolated child agent loop and return a clean envelope `{summary, artifacts, evidence_added, tokens_used, budget_exceeded, ...}` without leaking the child transcript into the parent |
 | `send_input(handle, task)` | handle, task | dict | Re-run a completed worker with a new task, carrying forward worker state where applicable |
 | `resume_agent(id_or_snapshot_path)` | id or path | dict | Restore a persisted worker snapshot into the current runtime |
 | `wait_agent(handle_or_list)` | handle or list | dict or list | Wait for one worker or a list of workers to finish |
@@ -1356,6 +1357,24 @@ Workers return handle dicts with an `id`, lifecycle timestamps, `status`,
 snapshot/child-run paths, and `audit` mutation-session metadata when available.
 When a worker-scoped policy denies a tool call, the agent receives a structured
 tool result payload: `{error: "permission_denied", tool: "...", reason: "..."}`.
+
+`sub_agent_run(task, options?)` is the lighter-weight context-firewall primitive.
+It starts a child session, runs a full `agent_loop`, and returns only a single
+typed envelope to the parent:
+
+- `summary`, `artifacts`, `evidence_added`, `tokens_used`, `budget_exceeded`,
+  `session_id`, and optional `data`
+- `ok: false` plus `error: {category, message, tool?}` when the child fails or
+  hits a capability denial
+- `background: true` returns a normal worker handle whose `mode` is `sub_agent`
+
+Options mirror `agent_loop` where relevant (`provider`, `model`, `tools`,
+`tool_format`, `max_iterations`, `token_budget`, `policy`, `approval_policy`,
+`session_id`, `system`) and also accept:
+
+- `allowed_tools: ["name", ...]` to narrow the child tool registry and
+  capability ceiling
+- `returns: {schema: ...}` to validate the child summary as structured output
 
 ### Artifacts and context
 

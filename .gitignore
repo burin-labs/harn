@@ -23,3 +23,11 @@ tree-sitter-harn/*.dll
 meta_scratch/
 .remember/
 .serena/
+# Codex worktree environment files are per-worktree local state.
+.codex/environments/
+# Test artifacts from conformance tests that create fixtures in CWD
+# (project_scan_* and polyglot_tree tests in conformance/tests/stdlib/).
+/polyglot_tree/
+/project_scan_catalog/
+/project_scan_ignored/
+/project_scan_single/

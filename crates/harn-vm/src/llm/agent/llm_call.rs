@@ -71,6 +71,8 @@ pub(super) struct LlmCallResult {
     pub canonical_history: Option<String>,
     pub prose_too_long: bool,
     pub sentinel_hit: bool,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
 }
 
 pub(super) async fn run_llm_call(
@@ -495,5 +497,7 @@ pub(super) async fn run_llm_call(
         canonical_history,
         prose_too_long,
         sentinel_hit,
+        input_tokens: result.input_tokens,
+        output_tokens: result.output_tokens,
     })
 }

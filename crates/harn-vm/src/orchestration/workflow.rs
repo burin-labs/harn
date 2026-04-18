@@ -979,6 +979,7 @@ pub async fn execute_stage_node(
                     daemon_config: Default::default(),
                     llm_retries: 2,
                     llm_backoff_ms: 2000,
+                    token_budget: None,
                     exit_when_verified: node.exit_when_verified,
                     loop_detect_warn: 2,
                     loop_detect_block: 3,

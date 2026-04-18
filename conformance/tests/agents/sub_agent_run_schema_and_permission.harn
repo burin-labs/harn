@@ -1,0 +1,47 @@
+fn write_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "write_note",
+    "Write a note",
+    {
+    handler: { args -> "wrote " + args.path },
+    parameters: {path: {type: "string"}},
+    returns: {type: "string"},
+  },
+  )
+  return tools
+}
+
+pipeline main() {
+  llm_mock({text: "{\"callers\":[\"crate::parse_config\",\"cli::parse_config\"]}"})
+  let typed = sub_agent_run(
+    "Find all callers of parse_config.",
+    {
+    provider: "mock",
+    returns: {
+    schema: {
+    type: "object",
+    properties: {callers: {type: "array", items: {type: "string"}}},
+    required: ["callers"],
+  },
+  },
+  },
+  )
+  println(typed?.ok)
+  println(len(typed?.data?.callers ?? []) == 2)
+  llm_mock({tool_calls: [{id: "deny_1", name: "write_note", arguments: {path: "notes.txt"}}]})
+  let denied = sub_agent_run(
+    "Try to write a note.",
+    {
+    provider: "mock",
+    tools: write_tools(),
+    allowed_tools: ["read"],
+    tool_format: "native",
+    max_iterations: 1,
+  },
+  )
+  println(!denied?.ok)
+  println(denied?.error?.category == "permission_denied")
+  println(denied?.error?.tool == "write_note")
+}

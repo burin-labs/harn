@@ -1,0 +1,44 @@
+fn search_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "search",
+    "Search the repo",
+    {
+    handler: { args -> "found " + args.query },
+    parameters: {query: {type: "string"}},
+    returns: {type: "string"},
+  },
+  )
+  return tools
+}
+
+pipeline main() {
+  llm_mock(
+    {
+    tool_calls: [{id: "budget_1", name: "search", arguments: {query: "token budget"}}],
+    input_tokens: 20,
+    output_tokens: 12,
+  },
+  )
+  let budgeted = sub_agent_run(
+    "Investigate under a tiny budget.",
+    {
+    provider: "mock",
+    tools: search_tools(),
+    allowed_tools: ["search"],
+    tool_format: "native",
+    max_iterations: 3,
+    token_budget: 8,
+  },
+  )
+  println(budgeted?.budget_exceeded)
+  println(budgeted?.tokens_used >= 32)
+  llm_mock({text: "background summary"})
+  let handle = sub_agent_run("Summarize in the background.", {provider: "mock", background: true})
+  println(handle?.mode == "sub_agent")
+  let done = wait_agent(handle)
+  println(done?.status == "completed")
+  println(done?.result?.ok)
+  println(contains(done?.result?.summary ?? "", "background summary"))
+}

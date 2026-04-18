@@ -1054,8 +1054,20 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
         return_type: Some(BuiltinReturn::Named("nil")),
     },
     BuiltinSig {
+        name: "project_catalog_native",
+        return_type: Some(BuiltinReturn::Named("list")),
+    },
+    BuiltinSig {
         name: "project_root",
         return_type: Some(BuiltinReturn::Named("string")),
+    },
+    BuiltinSig {
+        name: "project_scan_native",
+        return_type: Some(BuiltinReturn::Named("dict")),
+    },
+    BuiltinSig {
+        name: "project_scan_tree_native",
+        return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
         name: "prompt_mark_rendered",
@@ -1444,6 +1456,10 @@ pub(crate) const BUILTIN_SIGNATURES: &[BuiltinSig] = &[
     BuiltinSig {
         name: "store_set",
         return_type: None,
+    },
+    BuiltinSig {
+        name: "sub_agent_run",
+        return_type: Some(BuiltinReturn::Named("dict")),
     },
     BuiltinSig {
         name: "substring",

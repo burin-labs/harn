@@ -114,6 +114,9 @@ enforcement.
   the current execution ceiling by default and can narrow it further with a
   `policy` dict or `tools: ["name", ...]` shorthand, with permission denials
   returned as structured tool results instead of opaque failures.
+- `sub_agent_run(task, options?)` for isolated child agent loops that preserve a
+  clean parent transcript while returning a typed summary envelope or a
+  background worker handle.
 - Explicit continuation policy for delegated workers: artifact carryover,
   transcript fork/reset/compaction, workflow resume control, and normalized
   `worker_result` artifacts.
