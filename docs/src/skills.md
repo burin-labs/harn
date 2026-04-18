@@ -198,3 +198,126 @@ Hosts expose their own managed skill store through three RPCs:
   cached catalog. The CLI re-runs discovery on the next boundary.
 
 See [Bridge protocol](./bridge-protocol.md) for wire-format details.
+
+## Managing skills
+
+The `harn skills` CLI manages and inspects skills without running a
+pipeline. Each subcommand resolves the layered catalog the same way
+`harn run` does (`--skill-dir`, `HARN_SKILLS_PATH`, project, manifest,
+user, packages, system, host), so what you see here is exactly what
+pipelines see.
+
+### `harn skills list`
+
+Prints every resolved skill with the layer it came from. Pass
+`--all` to include shadowed entries; pass `--json` for machine output.
+
+```text
+$ harn skills list
+Resolved skills (3):
+  deploy         [cli]       Deploy to production with rollback support
+  review         [project]   Review a pull request
+  helpers/utils  [package]   Shared helpers from the acme/ops package
+
+Shadowed skills (1):
+  deploy   winner=[cli] hidden=[user] origin=/home/me/.harn/skills/deploy
+```
+
+### `harn skills inspect <name>`
+
+Dumps the resolved SKILL.md — frontmatter, bundled files under the
+skill directory, and the full body — for a specific skill. Accepts
+bare `<name>` or fully-qualified `<namespace>/<name>`:
+
+```text
+$ harn skills inspect deploy
+id:          deploy
+name:        deploy
+layer:       cli
+description: Deploy to production with rollback support
+skill_dir:   /repo/.harn/skills/deploy
+
+Bundled files:
+  files/runbook.md
+  files/rollback.sh
+
+---- SKILL.md body ----
+Run the deploy. Confirm replicas and then flip traffic.
+```
+
+### `harn skills match "<query>"`
+
+Runs the built-in metadata matcher (same scorer the agent loop uses)
+against a prompt and prints the ranked candidates with their scores.
+Supports `--working-file` to simulate path-glob matches:
+
+```text
+$ harn skills match "deploy the staging service" --top-n 3
+Match results for: deploy the staging service
+   1. deploy              score=2.400  [cli]       prompt mentions 'deploy'; 1 keyword hit(s)
+   2. review              score=0.400  [project]   1 keyword hit(s)
+```
+
+Useful when authoring a SKILL.md to confirm its `description:` and
+`when_to_use:` frontmatter actually attracts the right prompts.
+
+### `harn skills install <spec>`
+
+Materializes a git ref or local path into `.harn/skills-cache/` so
+the filesystem package walker picks it up on the next run. The
+`.harn/skills-cache/` layout mirrors `.harn/packages/`:
+
+```text
+$ harn skills install acme/harn-skills --tag v1.2.0
+installing acme/harn-skills to .harn/skills-cache/harn-skills
+installed — layer=package, path=.harn/skills-cache/harn-skills
+```
+
+`<spec>` accepts:
+
+- A full git URL: `https://github.com/acme/harn-skills.git`
+- `owner/repo` shorthand (expands to GitHub): `acme/harn-skills`
+- A local filesystem path: `../shared/skills/deploy`
+
+Pass `--namespace <ns>` to shelf the install under a subdirectory so
+it shows up in the resolver as `<ns>/<skill>`. Pass `--tag <ref>` to
+pin a git branch or tag. Every install rewrites
+`.harn/skills-cache/skills.lock` with the resolved source + commit.
+
+### `harn skills new <name>`
+
+Scaffolds a new SKILL.md and `files/` directory under `.harn/skills/`:
+
+```text
+$ harn skills new deploy --description "Deploy to production"
+Scaffolded skill 'deploy' at .harn/skills/deploy
+  SKILL.md
+  files/README.md
+
+Edit the SKILL.md frontmatter and body, then run `harn skills list`
+to verify it's picked up.
+```
+
+Pass `--dir <path>` to target a different destination (for example
+`~/.harn/skills/deploy` to scaffold under the user layer instead of
+the project layer), or `--force` to overwrite an existing directory.
+
+## Portal observability
+
+The Harn portal (`harn portal`) surfaces two skill-focused panels on
+every run detail page:
+
+- **Skill timeline** — horizontal bars showing which skills activated
+  on which agent-loop iteration and when they deactivated. Hover a
+  bar for the matcher score and the reason the skill was promoted.
+- **Tool-load waterfall** — one row per `tool_search_query` event,
+  pairing each query with its `tool_search_result` so you can see
+  which deferred tools entered the LLM's context in each turn.
+- **Matcher decisions** — per-iteration expansions showing every
+  candidate the matcher considered, its score, and the working-file
+  snapshot it scored against.
+
+The runs index page takes a `skill=<name>` filter so you can narrow
+evals to runs where a specific skill was active. The same
+`skill=<name>` query parameter works from a URL, making it easy to
+link to "every run that used `deploy`".

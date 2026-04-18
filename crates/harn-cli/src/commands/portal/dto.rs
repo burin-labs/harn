@@ -30,6 +30,9 @@ pub(super) struct PortalRunSummary {
     pub(super) output_tokens: i64,
     pub(super) models: Vec<String>,
     pub(super) updated_at_ms: u128,
+    /// Skill names that were activated at any point during this run.
+    /// Used by the portal list filter `skill=<name>`.
+    pub(super) skills: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -224,6 +227,58 @@ pub(super) struct PortalChildRun {
     pub(super) task: String,
 }
 
+/// One skill activation/deactivation interval, pre-processed so the
+/// portal can render a horizontal timeline without re-parsing transcript
+/// events on the client. `activated_iteration` and `deactivated_iteration`
+/// reference the 0-based agent-loop iteration when the skill came in /
+/// went out; `deactivated_iteration: None` means the skill stayed active
+/// through the end of the run.
+#[derive(Debug, Clone, Serialize)]
+pub(super) struct PortalSkillTimelineEntry {
+    pub(super) name: String,
+    pub(super) description: String,
+    pub(super) activated_iteration: i64,
+    pub(super) deactivated_iteration: Option<i64>,
+    pub(super) score: Option<f64>,
+    pub(super) reason: String,
+    pub(super) allowed_tools: Vec<String>,
+    pub(super) scope: String,
+}
+
+/// One rank of the matcher from a `skill_matched` event.
+#[derive(Debug, Clone, Serialize)]
+pub(super) struct PortalSkillMatchEvent {
+    pub(super) iteration: i64,
+    pub(super) strategy: String,
+    pub(super) reassess: bool,
+    pub(super) working_files: Vec<String>,
+    pub(super) candidates: Vec<PortalSkillMatchCandidate>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(super) struct PortalSkillMatchCandidate {
+    pub(super) name: String,
+    pub(super) score: f64,
+    pub(super) reason: String,
+    pub(super) activated: bool,
+}
+
+/// One tool-search invocation extracted from transcript events. Each
+/// entry pairs a `tool_search_query` with its matching
+/// `tool_search_result` so the portal can render a waterfall of "which
+/// tools entered context in which turn, via which query".
+#[derive(Debug, Clone, Serialize)]
+pub(super) struct PortalToolLoadEvent {
+    pub(super) query: String,
+    pub(super) strategy: String,
+    pub(super) mode: String,
+    pub(super) tool_use_id: Option<String>,
+    pub(super) promoted: Vec<String>,
+    pub(super) references: Vec<String>,
+    pub(super) iteration: Option<i64>,
+    pub(super) scope: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub(super) struct PortalRunDetail {
     pub(super) summary: PortalRunSummary,
@@ -245,6 +300,10 @@ pub(super) struct PortalRunDetail {
     pub(super) transcript_steps: Vec<PortalTranscriptStep>,
     pub(super) story: Vec<PortalStorySection>,
     pub(super) child_runs: Vec<PortalChildRun>,
+    pub(super) skill_timeline: Vec<PortalSkillTimelineEntry>,
+    pub(super) skill_match_events: Vec<PortalSkillMatchEvent>,
+    pub(super) tool_load_events: Vec<PortalToolLoadEvent>,
+    pub(super) active_skills: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

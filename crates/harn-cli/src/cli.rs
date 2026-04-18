@@ -91,6 +91,8 @@ SCRIPTING
     Add(AddArgs),
     /// Print resolved metadata for a model alias or model id as JSON.
     ModelInfo(ModelInfoArgs),
+    /// Manage and inspect Harn skills (list, inspect, match, install, new).
+    Skills(SkillsArgs),
     /// Print the decorated version banner.
     Version,
     /// Regenerate docs/theme/harn-keywords.js from the live lexer + stdlib sets.
@@ -496,9 +498,112 @@ pub(crate) struct ModelInfoArgs {
     pub model: String,
 }
 
+#[derive(Debug, Args)]
+pub(crate) struct SkillsArgs {
+    #[command(subcommand)]
+    pub command: SkillsCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum SkillsCommand {
+    /// Show resolved skills in priority order, with collision warnings.
+    List(SkillsListArgs),
+    /// Dump the resolved SKILL.md plus bundled files and metadata for one skill.
+    Inspect(SkillsInspectArgs),
+    /// Run the metadata matcher against a prompt and show ranked candidates.
+    #[command(name = "match")]
+    Match(SkillsMatchArgs),
+    /// Resolve a git ref or local path into `.harn/skills-cache/` so the layered resolver picks it up.
+    Install(SkillsInstallArgs),
+    /// Scaffold a new SKILL.md bundle under `.harn/skills/<name>/`.
+    New(SkillsNewArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct SkillsListArgs {
+    /// Emit newline-delimited JSON (one record per skill) instead of a table.
+    #[arg(long)]
+    pub json: bool,
+    /// Optional path used to anchor manifest and project discovery (defaults to cwd).
+    #[arg(long = "from", value_name = "PATH")]
+    pub from: Option<String>,
+    /// Extra skill-discovery roots (repeatable). Same as `harn run --skill-dir`.
+    #[arg(long = "skill-dir", value_name = "PATH")]
+    pub skill_dir: Vec<String>,
+    /// Include shadowed (lower-priority) entries as well as the winners.
+    #[arg(long)]
+    pub all: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct SkillsInspectArgs {
+    /// Skill id to inspect (e.g. `deploy` or `acme/ops/deploy`).
+    pub name: String,
+    /// Emit JSON instead of a human-readable dump.
+    #[arg(long)]
+    pub json: bool,
+    /// Optional path used to anchor manifest and project discovery (defaults to cwd).
+    #[arg(long = "from", value_name = "PATH")]
+    pub from: Option<String>,
+    /// Extra skill-discovery roots (repeatable).
+    #[arg(long = "skill-dir", value_name = "PATH")]
+    pub skill_dir: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct SkillsMatchArgs {
+    /// Prompt text to score every discovered skill against.
+    pub query: String,
+    /// Top-N matches to display. Default 5.
+    #[arg(long, default_value_t = 5)]
+    pub top_n: usize,
+    /// Emit JSON instead of a ranked table.
+    #[arg(long)]
+    pub json: bool,
+    /// Simulate working-file path globs (repeatable).
+    #[arg(long = "working-file", value_name = "PATH")]
+    pub working_files: Vec<String>,
+    /// Optional path used to anchor manifest and project discovery.
+    #[arg(long = "from", value_name = "PATH")]
+    pub from: Option<String>,
+    /// Extra skill-discovery roots (repeatable).
+    #[arg(long = "skill-dir", value_name = "PATH")]
+    pub skill_dir: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct SkillsInstallArgs {
+    /// Spec: a git URL, `owner/repo`, or a local filesystem path.
+    pub spec: String,
+    /// Optional human name / directory label for the cached install.
+    #[arg(long)]
+    pub name: Option<String>,
+    /// Git tag or branch to pin (only applies to git specs).
+    #[arg(long)]
+    pub tag: Option<String>,
+    /// Optional namespace prefix registered with the installed skills.
+    #[arg(long)]
+    pub namespace: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct SkillsNewArgs {
+    /// Skill identifier (used as the directory name and default `name:`).
+    pub name: String,
+    /// One-line description for the SKILL.md frontmatter.
+    #[arg(long)]
+    pub description: Option<String>,
+    /// Override the destination directory. Defaults to `.harn/skills/<name>/`.
+    #[arg(long = "dir", value_name = "PATH")]
+    pub dir: Option<String>,
+    /// Overwrite any existing files at the destination.
+    #[arg(long)]
+    pub force: bool,
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Cli, Command, McpCommand, ProjectTemplate, RunsCommand};
+    use super::{Cli, Command, McpCommand, ProjectTemplate, RunsCommand, SkillsCommand};
     use clap::Parser;
 
     #[test]
@@ -638,6 +743,65 @@ mod tests {
         };
         assert_eq!(args.file, "main.harn");
         assert_eq!(args.iterations, 25);
+    }
+
+    #[test]
+    fn test_parses_skills_subcommands() {
+        let cli = Cli::parse_from(["harn", "skills", "list", "--json", "--all"]);
+        let Command::Skills(args) = cli.command.unwrap() else {
+            panic!("expected skills command");
+        };
+        let SkillsCommand::List(list) = args.command else {
+            panic!("expected skills list");
+        };
+        assert!(list.json);
+        assert!(list.all);
+
+        let cli = Cli::parse_from(["harn", "skills", "match", "deploy the app", "--top-n", "3"]);
+        let Command::Skills(args) = cli.command.unwrap() else {
+            panic!("expected skills command");
+        };
+        let SkillsCommand::Match(matcher) = args.command else {
+            panic!("expected skills match");
+        };
+        assert_eq!(matcher.query, "deploy the app");
+        assert_eq!(matcher.top_n, 3);
+
+        let cli = Cli::parse_from([
+            "harn",
+            "skills",
+            "install",
+            "https://example.com/acme/harn-skills.git",
+            "--tag",
+            "v1.0",
+            "--namespace",
+            "acme",
+        ]);
+        let Command::Skills(args) = cli.command.unwrap() else {
+            panic!("expected skills command");
+        };
+        let SkillsCommand::Install(install) = args.command else {
+            panic!("expected skills install");
+        };
+        assert_eq!(install.tag.as_deref(), Some("v1.0"));
+        assert_eq!(install.namespace.as_deref(), Some("acme"));
+
+        let cli = Cli::parse_from([
+            "harn",
+            "skills",
+            "new",
+            "deploy",
+            "--description",
+            "Ship things",
+        ]);
+        let Command::Skills(args) = cli.command.unwrap() else {
+            panic!("expected skills command");
+        };
+        let SkillsCommand::New(new_args) = args.command else {
+            panic!("expected skills new");
+        };
+        assert_eq!(new_args.name, "deploy");
+        assert_eq!(new_args.description.as_deref(), Some("Ship things"));
     }
 
     #[test]

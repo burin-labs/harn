@@ -872,3 +872,90 @@ pre {
     align-items: flex-start;
   }
 }
+
+.skill-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.skill-timeline-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) 3fr auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.skill-timeline-label strong {
+  display: block;
+}
+
+.skill-timeline-track {
+  position: relative;
+  height: 24px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.skill-timeline-bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: linear-gradient(90deg, #5fc4ff, #7a8dff);
+  color: #051028;
+  font-size: 11px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  white-space: nowrap;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.skill-timeline-meta {
+  min-width: 64px;
+  text-align: right;
+}
+
+.tool-waterfall {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tool-waterfall-row {
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.match-expand {
+  background: transparent;
+  border: none;
+  color: inherit;
+  width: 100%;
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+.match-detail {
+  margin-top: 8px;
+}
+
+.match-candidates {
+  margin: 4px 0 0;
+  padding-left: 16px;
+  list-style: disc;
+}
+
+.match-candidates li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0;
+}

@@ -35,6 +35,7 @@ export function fetchRuns(params?: {
   sort?: string
   page?: number
   pageSize?: number
+  skill?: string
 }): Promise<PortalListResponse> {
   const search = new URLSearchParams()
   if (params?.q) {
@@ -54,6 +55,9 @@ export function fetchRuns(params?: {
   }
   if (params?.pageSize) {
     search.set("page_size", String(params.pageSize))
+  }
+  if (params?.skill) {
+    search.set("skill", params.skill)
   }
   const suffix = search.toString()
   return fetchJson<PortalListResponse>(`/api/runs${suffix ? `?${suffix}` : ""}`)

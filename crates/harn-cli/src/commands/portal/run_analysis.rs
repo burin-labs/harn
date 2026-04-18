@@ -14,6 +14,7 @@ use super::dto::{
 };
 use super::errors::{bad_request_error, internal_error};
 use super::query::{ErrorResponse, ListRunsQuery};
+use super::skill_events::{extract as extract_skill_events, ExtractedEvents};
 use super::transcript::{build_story, discover_transcript_steps};
 use super::util::{
     compact_json, compact_metadata, date_ms, format_duration, humanize_kind, is_completed_status,
@@ -67,6 +68,12 @@ pub(super) fn filter_and_sort_runs(
         .map(str::to_string);
     let status = query.status.as_deref().unwrap_or("all");
     let sort = query.sort.as_deref().unwrap_or("newest");
+    let skill_filter = query
+        .skill
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
 
     let mut filtered = runs
         .into_iter()
@@ -75,6 +82,10 @@ pub(super) fn filter_and_sort_runs(
             None => true,
         })
         .filter(|run| matches_run_status(run, status))
+        .filter(|run| match skill_filter.as_deref() {
+            Some(skill) => run.skills.iter().any(|s| s == skill),
+            None => true,
+        })
         .filter(|run| match search.as_deref() {
             Some(needle) => matches_run_search(run, needle),
             None => true,
@@ -203,6 +214,7 @@ pub(super) fn build_run_summary(
 ) -> PortalRunSummary {
     let usage = run.usage.clone().unwrap_or_default();
     let (last_stage_node_id, failure_summary) = latest_stage_summary(run);
+    let extracted = extract_skill_events(run);
     PortalRunSummary {
         path: path.to_string(),
         id: run.id.clone(),
@@ -223,6 +235,7 @@ pub(super) fn build_run_summary(
         output_tokens: usage.output_tokens,
         models: usage.models,
         updated_at_ms,
+        skills: extracted.active_skills,
     }
 }
 
@@ -315,6 +328,12 @@ pub(super) fn build_run_detail(
         })
         .collect::<Vec<_>>();
     let insights = build_insights(run, &summary, &stages, &spans, &story, &transcript_steps);
+    let ExtractedEvents {
+        skill_timeline,
+        skill_matches,
+        tool_loads,
+        active_skills,
+    } = extract_skill_events(run);
 
     PortalRunDetail {
         summary,
@@ -336,6 +355,10 @@ pub(super) fn build_run_detail(
         transcript_steps,
         story,
         child_runs,
+        skill_timeline,
+        skill_match_events: skill_matches,
+        tool_load_events: tool_loads,
+        active_skills,
     }
 }
 

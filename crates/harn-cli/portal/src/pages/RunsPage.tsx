@@ -17,6 +17,11 @@ const messages = defineMessages({
   sortBy: { id: "portal.runsPage.sortBy", defaultMessage: "Sort by" },
   pageSize: { id: "portal.runsPage.pageSize", defaultMessage: "Rows" },
   filterPlaceholder: { id: "portal.runsPage.filterPlaceholder", defaultMessage: "workflow, model, status..." },
+  skillFilter: { id: "portal.runsPage.skillFilter", defaultMessage: "Skill" },
+  skillPlaceholder: {
+    id: "portal.runsPage.skillPlaceholder",
+    defaultMessage: "e.g. deploy",
+  },
   allStatuses: { id: "portal.runsPage.allStatuses", defaultMessage: "All statuses" },
   activeOnly: { id: "portal.runsPage.activeOnly", defaultMessage: "Active only" },
   completedOnly: { id: "portal.runsPage.completedOnly", defaultMessage: "Completed only" },
@@ -54,12 +59,14 @@ export function RunsPage() {
   const sort = (searchParams.get("sort") as RunSortOrder | null) ?? "newest"
   const page = readNumber(searchParams.get("page"), 1)
   const pageSize = readNumber(searchParams.get("page_size"), 25)
+  const skill = searchParams.get("skill") ?? ""
   const { runs, filteredCount, pagination, loading, lastError, lastRefreshAt, loadRuns } = useRunsData({
     q,
     status,
     sort,
     page,
     pageSize,
+    skill: skill || undefined,
     poll: true,
   })
 
@@ -118,6 +125,15 @@ export function RunsPage() {
               <option value="oldest">{intl.formatMessage(messages.oldestFirst)}</option>
               <option value="duration">{intl.formatMessage(messages.longestDuration)}</option>
             </select>
+          </label>
+          <label className="search">
+            <span>{intl.formatMessage(messages.skillFilter)}</span>
+            <input
+              type="search"
+              value={skill}
+              placeholder={intl.formatMessage(messages.skillPlaceholder)}
+              onChange={(event) => updateParams({ skill: event.target.value, page: 1 })}
+            />
           </label>
           <label className="search">
             <span>{intl.formatMessage(messages.pageSize)}</span>

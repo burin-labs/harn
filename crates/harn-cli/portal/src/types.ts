@@ -15,6 +15,7 @@ export type RunSummary = {
   output_tokens: number
   models: string[]
   updated_at_ms: number
+  skills: string[]
 }
 
 export type PortalStats = {
@@ -248,6 +249,43 @@ export type PortalExecutionSummary = {
   adapter: string | null
 }
 
+export type PortalSkillTimelineEntry = {
+  name: string
+  description: string
+  activated_iteration: number
+  deactivated_iteration: number | null
+  score: number | null
+  reason: string
+  allowed_tools: string[]
+  scope: string
+}
+
+export type PortalSkillMatchCandidate = {
+  name: string
+  score: number
+  reason: string
+  activated: boolean
+}
+
+export type PortalSkillMatchEvent = {
+  iteration: number
+  strategy: string
+  reassess: boolean
+  working_files: string[]
+  candidates: PortalSkillMatchCandidate[]
+}
+
+export type PortalToolLoadEvent = {
+  query: string
+  strategy: string
+  mode: string
+  tool_use_id: string | null
+  promoted: string[]
+  references: string[]
+  iteration: number | null
+  scope: string
+}
+
 export type PortalRunDetail = {
   summary: RunSummary
   task: string
@@ -268,6 +306,10 @@ export type PortalRunDetail = {
   transcript_steps: PortalTranscriptStep[]
   story: PortalStorySection[]
   child_runs: PortalChildRun[]
+  skill_timeline: PortalSkillTimelineEntry[]
+  skill_match_events: PortalSkillMatchEvent[]
+  tool_load_events: PortalToolLoadEvent[]
+  active_skills: string[]
 }
 
 export type PortalRunDiff = {

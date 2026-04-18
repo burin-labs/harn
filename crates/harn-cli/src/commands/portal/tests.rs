@@ -265,6 +265,7 @@ fn filter_and_sort_runs_applies_search_status_and_ordering() {
             output_tokens: 5,
             models: vec!["gpt-4o".to_string()],
             updated_at_ms: 1,
+            skills: Vec::new(),
         },
         PortalRunSummary {
             path: "beta.json".to_string(),
@@ -283,6 +284,7 @@ fn filter_and_sort_runs_applies_search_status_and_ordering() {
             output_tokens: 10,
             models: vec!["qwen".to_string()],
             updated_at_ms: 2,
+            skills: Vec::new(),
         },
     ];
 
@@ -293,6 +295,7 @@ fn filter_and_sort_runs_applies_search_status_and_ordering() {
         sort: Some("duration".to_string()),
         page: Some(1),
         page_size: Some(25),
+        skill: None,
     };
 
     let filtered = filter_and_sort_runs(runs, &query);

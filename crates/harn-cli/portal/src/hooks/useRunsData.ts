@@ -14,6 +14,7 @@ type UseRunsDataArgs = {
   page: number
   pageSize: number
   poll?: boolean
+  skill?: string
 }
 
 const DEFAULT_PAGINATION: PortalPagination = {
@@ -44,6 +45,7 @@ export function useRunsData(args: UseRunsDataArgs) {
         sort: args.sort,
         page: args.page,
         pageSize: args.pageSize,
+        skill: args.skill,
       })
       setStats(data.stats)
       setRuns(data.runs)
@@ -56,7 +58,7 @@ export function useRunsData(args: UseRunsDataArgs) {
     } finally {
       setLoading(false)
     }
-  }, [args.page, args.pageSize, args.q, args.sort, args.status, args.workflow])
+  }, [args.page, args.pageSize, args.q, args.sort, args.status, args.workflow, args.skill])
 
   useEffect(() => {
     void loadRuns()

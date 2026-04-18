@@ -195,3 +195,24 @@ notifications with:
 
 Those can power a future streaming view without inventing a second provenance
 system alongside run records.
+
+## Skill observability
+
+Each run detail page renders three skill-focused panels above the
+replay/eval section:
+
+- **Skill timeline** — horizontal bars showing which skills activated
+  on which agent-loop iteration and when they deactivated. Hover a
+  bar for the matcher score and the reason the skill was promoted.
+- **Tool-load waterfall** — one row per `tool_search_query` event,
+  pairing each query with the `tool_search_result` that followed so
+  you can see which deferred tools entered the LLM's context in each
+  turn.
+- **Matcher decisions** — per-iteration expansions showing every
+  candidate the matcher considered, its score, and the working-file
+  snapshot it scored against.
+
+The runs index also accepts a `skill=<name>` query parameter (and
+exposes it as a filter input on the runs page), so you can narrow
+evals to runs where a specific skill was active — useful when
+validating that a new skill attracts the right prompts.

@@ -11,6 +11,45 @@ granular archaeology.
 
 ### Added
 
+- **Skills CLI + portal observability (harn#76).** `harn skills` now
+  ships five subcommands for managing and inspecting the layered skill
+  catalog without running a pipeline:
+
+  - `harn skills list` — shows every resolved skill in priority order
+    with the layer it came from; `--all` includes shadowed entries,
+    `--json` emits newline-delimited JSON for piping.
+  - `harn skills inspect <name>` — dumps frontmatter, bundled files,
+    and the full SKILL.md body for one skill. Accepts bare `<name>`
+    or fully-qualified `<namespace>/<name>`.
+  - `harn skills match "<query>"` — runs the agent-loop metadata
+    matcher against a prompt and prints ranked candidates with their
+    scores + reasons. Useful when tuning a SKILL.md's `description:` /
+    `when_to_use:` frontmatter.
+  - `harn skills install <spec>` — materializes a git URL, `owner/repo`
+    shorthand, or local path into `.harn/skills-cache/` so the
+    filesystem package walker picks it up on the next run. Supports
+    `--tag`, `--namespace`, and rewrites `.harn/skills-cache/skills.lock`.
+  - `harn skills new <name>` — scaffolds a SKILL.md + `files/` bundle
+    under `.harn/skills/<name>/` with sensible frontmatter defaults.
+
+  The portal's run detail page gains three observability panels
+  derived from the persisted transcript events:
+
+  - **Skill timeline** — horizontal bars showing which skills
+    activated on which agent-loop iteration and when they
+    deactivated, with matcher score and reason on hover.
+  - **Tool-load waterfall** — one row per `tool_search_query`
+    transcript event, paired with its `tool_search_result` so you can
+    see which deferred tools entered the LLM's context in each turn.
+  - **Matcher decisions** — per-iteration expansions showing every
+    candidate the matcher considered, with scores and working-file
+    snapshots.
+
+  The runs index page also accepts a `skill=<name>` filter (both via
+  the URL and a new input on the runs page) for selecting evals where
+  a specific skill was active. `docs/src/skills.md` gains a
+  "Managing skills" section covering the new commands.
+
 - **Tool Vault phase 4: data-driven provider capabilities (harn#77).**
   The per-provider / per-model capability gates used by the tool-search
   and defer-loading paths (hard-coded Rust `match` blocks added in

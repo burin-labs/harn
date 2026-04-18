@@ -8,6 +8,7 @@ mod llm;
 mod query;
 mod router;
 mod run_analysis;
+mod skill_events;
 mod state;
 mod transcript;
 mod util;

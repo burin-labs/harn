@@ -11,7 +11,7 @@ use clap::{error::ErrorKind, CommandFactory, Parser as ClapParser};
 use std::path::{Path, PathBuf};
 use std::{env, fs, process};
 
-use cli::{Cli, Command, RunsCommand};
+use cli::{Cli, Command, RunsCommand, SkillsCommand};
 use harn_lexer::Lexer;
 use harn_parser::{DiagnosticSeverity, Parser, TypeChecker};
 
@@ -349,6 +349,13 @@ async fn main() {
             args.path.as_deref(),
         ),
         Command::ModelInfo(args) => print_model_info(&args.model).await,
+        Command::Skills(args) => match args.command {
+            SkillsCommand::List(list) => commands::skills::run_list(&list),
+            SkillsCommand::Inspect(inspect) => commands::skills::run_inspect(&inspect),
+            SkillsCommand::Match(matcher) => commands::skills::run_match(&matcher),
+            SkillsCommand::Install(install) => commands::skills::run_install(&install),
+            SkillsCommand::New(new_args) => commands::skills::run_new(&new_args),
+        },
         Command::DumpHighlightKeywords(args) => {
             commands::dump_highlight_keywords::run(&args.output, args.check);
         }

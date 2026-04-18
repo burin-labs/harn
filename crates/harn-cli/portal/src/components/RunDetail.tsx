@@ -4,6 +4,7 @@ import { defineMessages, useIntl } from "react-intl"
 import { fetchRunCompare } from "../lib/api"
 import { formatDuration, formatNumber, pct, statusClass } from "../lib/format"
 import type { PortalRunDetail, PortalRunDiff, RunSummary } from "../types"
+import { SkillObservability } from "./SkillObservability"
 
 const messages = defineMessages({
   noRunSelectedTitle: {
@@ -439,6 +440,12 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
           </div>
         </div>
       </section>
+
+      <SkillObservability
+        timeline={detail.skill_timeline}
+        matches={detail.skill_match_events}
+        toolLoads={detail.tool_load_events}
+      />
 
       <section className="panel">
         <div className="panel-header">

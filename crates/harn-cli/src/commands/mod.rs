@@ -8,6 +8,7 @@ pub(crate) mod mcp;
 pub(crate) mod portal;
 pub(crate) mod repl;
 pub(crate) mod run;
+pub(crate) mod skills;
 pub(crate) mod test;
 pub(crate) mod viz;
 
