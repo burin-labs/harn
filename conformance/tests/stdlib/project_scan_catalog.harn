@@ -2,14 +2,11 @@ import "std/project"
 
 pipeline test(task) {
   mkdir("project_scan_catalog")
-
   write_file("project_scan_catalog/go.mod", "module github.com/acme/catalog-go\n")
   write_file("project_scan_catalog/go.sum", "example v0.0.0 h1:abc\n")
-
   let ev = project_scan("project_scan_catalog", {tiers: ["ambient"]})
   let catalog = project_catalog()
   let go_entry = catalog.filter({ entry -> entry.id == "go" })[0]
-
   println(ev.languages[0] == "go")
   println(ev.confidence.go >= 0.95)
   println(go_entry.anchors[0] == "go.mod")

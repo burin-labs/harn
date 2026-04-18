@@ -2,18 +2,15 @@ import "std/project"
 
 pipeline test(task) {
   mkdir("project_scan_single/src")
-
   write_file(
     "project_scan_single/Cargo.toml",
     "[package]\nname = \"scan-single\"\nversion = \"0.1.0\"\n",
   )
   write_file("project_scan_single/Cargo.lock", "# lock\n")
   write_file("project_scan_single/src/lib.rs", "pub fn greet() -> &'static str { \"hi\" }\n")
-
   let ev = project_scan("project_scan_single", {tiers: ["ambient", "config"]})
   let catalog = project_catalog()
   let rust_entry = catalog.filter({ entry -> entry.id == "rust" })[0]
-
   println(ev.path.ends_with("/project_scan_single"))
   println(ev.languages[0] == "rust")
   println(ev.build_systems[0] == "cargo")

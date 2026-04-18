@@ -3,22 +3,18 @@ import "std/project"
 pipeline test(task) {
   mkdir("polyglot_tree/frontend/src")
   mkdir("polyglot_tree/backend/src")
-
   write_file("polyglot_tree/frontend/package.json", "{\"name\":\"frontend\"}\n")
   write_file("polyglot_tree/frontend/package-lock.json", "{}\n")
   write_file("polyglot_tree/frontend/tsconfig.json", "{ }\n")
   write_file("polyglot_tree/frontend/src/app.tsx", "export const App = () => null\n")
-
   write_file(
     "polyglot_tree/backend/Cargo.toml",
     "[package]\nname = \"backend\"\nversion = \"0.1.0\"\n",
   )
   write_file("polyglot_tree/backend/Cargo.lock", "# lock\n")
   write_file("polyglot_tree/backend/src/main.rs", "fn main() {}\n")
-
   let tree = project_scan_tree("polyglot_tree", {tiers: ["ambient"], depth: 3})
   let tree_keys = keys(tree)
-
   println(tree_keys[0] == ".")
   println(tree_keys[1] == "backend")
   println(tree_keys[2] == "frontend")
